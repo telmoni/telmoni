@@ -1,0 +1,44 @@
+[package]
+name        = "telmoni-agent"
+description = "The console agent: read-only answers over a project's docs, audit log, activity and deliveries, retrieved by hybrid search under the asker's own tenancy and cited."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+publish                = false
+
+# A library: the `telmoni` binary links it beside auth and notifications.
+[lib]
+name = "telmoni_agent"
+path = "src/lib.rs"
+
+[dependencies]
+telmoni-shared = { path = "../shared" }
+# For the feed's and the delivery log's retention windows, which the index
+# keeps its copies of those rows to, so the two cannot drift.
+
+axum        = { workspace = true }
+tokio       = { workspace = true }
+tracing     = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+anyhow      = { workspace = true }
+sqlx        = { workspace = true }
+chrono      = { workspace = true }
+uuid        = { workspace = true }
+async-trait = { workspace = true }
+sha2        = { workspace = true }
+# The model, embedding and rerank endpoints, over plain HTTP: no vendor SDK.
+# Streaming responses are read chunk by chunk and their event lines parsed
+# by hand.
+reqwest     = { workspace = true }
+# The one thing axum's SSE response needs that tokio does not provide: a
+# `Stream` of events, built from the turn's channel.
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+tower          = { workspace = true, features = ["util"] }
+http-body-util = "0.1"
+wiremock       = "0.6"
+
+[lints]
+workspace = true

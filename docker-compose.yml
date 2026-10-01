@@ -1,0 +1,93 @@
+# Local development services for Telmoni.
+#
+#   make docker-up       # start postgres + redis
+#   make web-local       # Next.js dev server
+#   make up              # the whole stack: these, then the server and the console
+#   make down            # stop containers (volumes survive)
+
+# ⚠ Pinned, not derived from the directory: renaming the checkout would orphan
+# the running containers and volumes under the old project label, and `up`
+# would then collide with them over `container_name`.
+name: telmoni
+
+services:
+  postgres:
+    # Postgres 17 with pgvector, which the agent's search needs.
+    image: pgvector/pgvector:pg17
+    container_name: telmoni-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: telmoni
+      POSTGRES_PASSWORD: telmoni_dev
+      POSTGRES_DB: telmoni
+    command: ["postgres", "-c", "max_connections=300"]
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Run once, when the volume is first created: the `vector` extension,
+      # the four login roles, then the hardening a tier applies, so the
+      # server runs here under the same grants and row-level security it
+      # runs under there. `make db-reset` recreates the volume, which is what
+      # applies an edit to any of them.
+      - ./crates/migrator/sql/dev_extensions.sql:/docker-entrypoint-initdb.d/05-extensions.sql:ro
+      - ./crates/migrator/sql/dev_roles.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro
+      - ./crates/migrator/sql/role_hardening.sql:/docker-entrypoint-initdb.d/20-role-hardening.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telmoni -d telmoni"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: telmoni-redis
+    restart: unless-stopped
+    # No RDB snapshot: this holds only the BFF's rate-limit windows, every key
+    # carries a PEXPIRE, and state surviving a restart is state the limiter is
+    # required to ignore.
+    command: redis-server --save "" --loglevel warning
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  # Catches every mail auth sends (`SMTP_URL=smtp://localhost:1025` in .env)
+  # and shows it at http://localhost:8025: the sign-up confirmation, a reset
+  # link, an invitation. Nothing leaves the machine.
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: telmoni-mailpit
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+
+  # Local embeddings for the agent, when .env points EMBEDDINGS_URL at
+  # http://localhost:11434/v1 rather than the Gemini the template names, and
+  # a chat model too if you point AGENT_MODEL_URL at it.
+  # `scripts/up.sh` pulls `nomic-embed-text` into the volume once. On a Mac
+  # this runs on the CPU; Ollama installed natively uses the GPU.
+  #
+  # Opt-in (COMPOSE_PROFILES=ollama in .env), because a native Ollama holds
+  # the same port and `docker compose up` fails outright on the clash.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: telmoni-ollama
+    profiles: ["ollama"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+
+volumes:
+  postgres_data:
+    name: telmoni-postgres-data
+  ollama_models:
+    name: telmoni-ollama-models

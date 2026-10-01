@@ -1,0 +1,44 @@
+[package]
+name        = "telmoni"
+description = "The Telmoni server: auth, notifications and the agent as modules of one process, with the migrator and the sweeps as subcommands of the same binary."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+publish                = false
+
+# The library is the composition — what links the modules and wires the
+# seams between them — so a binary built for another deployment can reuse
+# it with its own identity provider, transport and modules. The binary is
+# the command line over it.
+[lib]
+name = "telmoni"
+path = "src/lib.rs"
+
+[[bin]]
+name = "telmoni"
+path = "src/main.rs"
+
+[dependencies]
+telmoni-shared        = { path = "../shared" }
+telmoni-auth          = { path = "../auth" }
+telmoni-notifications = { path = "../notifications" }
+telmoni-agent         = { path = "../agent" }
+telmoni-migrator      = { path = "../migrator" }
+
+anyhow     = { workspace = true }
+async-trait = { workspace = true }
+axum       = { workspace = true }
+dotenvy    = { workspace = true }
+mimalloc   = { workspace = true }
+serde_json = { workspace = true }
+sqlx       = { workspace = true }
+tokio      = { workspace = true }
+tracing    = { workspace = true }
+
+
+[dev-dependencies]
+# Drive the composed router in-process (`ServiceExt::oneshot`).
+tower = { workspace = true, features = ["util"] }
+
+[lints]
+workspace = true

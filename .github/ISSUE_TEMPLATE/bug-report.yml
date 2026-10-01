@@ -1,0 +1,96 @@
+name: Bug Report
+description: Report an issue with the Telmoni platform, web console, or backend services
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing an issue! If you suspect a security vulnerability, please see [SECURITY.md](https://github.com/telmoni/telmoni/blob/main/SECURITY.md) to report it privately instead of opening a public issue.
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Exact steps to reproduce the issue.
+      placeholder: |
+        1. Start the platform with 'make local'
+        2. Navigate to '...'
+        3. Observe error '...'
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen instead?
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Telmoni Version / Commit
+      description: Commit SHA (`git rev-parse HEAD`), image tag, or release version.
+      placeholder: main (commit abc1234)
+    validations:
+      required: false
+  - type: dropdown
+    id: deployment-type
+    attributes:
+      label: Deployment Environment
+      options:
+        - Local Development (`make local` / Docker Compose)
+        - Kubernetes via Helm chart
+        - Standalone Docker containers
+        - Bare-metal / systemd
+        - Telmoni Cloud
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os-arch
+    attributes:
+      label: Operating System & Architecture
+      description: Host OS / architecture (`uname -srm`, e.g. `Darwin 24.3.0 arm64` or `Linux 6.12.1 x86_64`) and browser (if UI-related).
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface does this bug affect?
+      options:
+        - Web Console (web/)
+        - Server & REST API (crates/telmoni)
+        - Authentication & RBAC (crates/auth)
+        - AI Agent & Embeddings (crates/agent)
+        - Notifications & Webhooks (crates/notifications)
+        - Database & Migrations (crates/migrator)
+        - Helm Chart & Kubernetes (deploy/charts/telmoni)
+        - Docker Compose (deploy/compose)
+        - Developer tooling & Makefile
+      multiple: true
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs / Terminal Output
+      description: Please paste any server logs, browser console errors, or terminal outputs (ensure any passwords, tokens, or private secrets are redacted).
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: Acknowledgements
+      options:
+        - label: I have searched existing issues and discussions to verify this is not a duplicate.
+          required: true

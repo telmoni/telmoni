@@ -1,0 +1,207 @@
+# CI — the full quality gate: format, clippy (workspace deny lints), typos,
+# cargo-deny (advisories/licenses/bans/sources), web typecheck/lint/knip/test/
+# build, and the Rust test suite against a fully migrated Postgres.
+# `make ci` runs this same set locally — that is the contract, and the two
+# halves are checked against each other whenever either changes.
+# Intentionally absent: benchmarks, fuzzing, OS matrix, browser e2e, and any
+# deploy — this repository builds the platform and deploys it nowhere, so no
+# job holds a cloud credential. `ci-status` is the one required check.
+#
+# Every third-party action is pinned to a MAJOR TAG, not a commit SHA — see
+# .github/dependabot.yml for the rationale. Checkouts run with
+# persist-credentials: false so the GITHUB_TOKEN never lingers in .git/config for
+# a later step to read.
+name: CI
+
+on:
+  push:
+    # `dev` (the local working branch) runs CI too, so failures surface before
+    # merging to main. No branch triggers a deploy: there is no CD workflow.
+    branches: [main, dev]
+  pull_request:
+  merge_group:
+
+# Cancel superseded runs for the same ref so only one is active at a time.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  # Rust format check. The workspace has no optional git dependency and no
+  # KVM/nightly requirement, so every cargo job runs in CI unconditionally.
+  rustfmt:
+    name: rustfmt
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: cargo fmt --all -- --check
+
+  # Clippy with the workspace deny lints (no-unwrap/expect/panic, etc.), all targets.
+  clippy:
+    name: clippy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # Rustdoc as a gate. A doc comment that links a deleted item is a broken
+  # intra-doc link and nothing else here sees one — three post-cut sweeps left
+  # a sweep's module doc pointing at a deleted `saga` module and auth's
+  # provider trait claiming a `verify_jwt` that no longer exists.
+  # `--document-private-items` because most docs in this tree are on private ones.
+  rustdoc:
+    name: rustdoc
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --workspace --no-deps --document-private-items
+
+  # Full Rust workspace suite against a real Postgres. Every migration set runs
+  # first, then the dev-role search_path pin (mirrors `make db-dev-setup`) so
+  # sqlx::test pools resolve unqualified table names. Thread count bounded for
+  # the same reason as the Makefile: unbounded sqlx::test DBs exhaust the
+  # connection cap.
+  test-rust:
+    name: Rust tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      DATABASE_URL: postgresql://telmoni:telmoni_dev@localhost:5432/telmoni
+      AUTH_DATABASE_URL: postgresql://telmoni:telmoni_dev@localhost:5432/telmoni
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: telmoni
+          POSTGRES_PASSWORD: telmoni_dev
+          POSTGRES_DB: telmoni
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U telmoni -d telmoni"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@v2
+      # EVERY set, in one run of the same command `make db-migrate` and a
+      # tier's Job run. `tenancy_boundary` enumerates every tenant-keyed table
+      # across every app schema and asserts each is FORCE'd + isolated —
+      # against a database carrying only audit/auth it found the tables that
+      # existed, passed, and said nothing about the rest; the runner refuses a
+      # list without the core sets, and the list itself is the Makefile's
+      # `MIGRATION_SETS`, read through `make -s migration-sets`, so this job
+      # restates nothing that can go stale (a copy kept here once named a
+      # crate after it moved and died on "No such file or directory" before a
+      # single test ran).
+      #
+      # CI has one database and one superuser, so the migrator's DSN is the
+      # tests'. The per-module roles do not exist here, so the grants are
+      # skipped; the suites that need the role topology build it themselves.
+      - name: Run migrations (every schema, as make db-migrate runs them)
+        run: MIGRATOR_DATABASE_URL="$DATABASE_URL" MIGRATION_SETS="$(make -s migration-sets)" cargo run -p telmoni -- migrate
+      - name: Pin dev-role search_path (mirrors make db-dev-setup)
+        run: psql "$DATABASE_URL" -c "ALTER ROLE telmoni SET search_path = auth, notifications, audit, public;"
+      - name: cargo test
+        run: cargo test --workspace --no-fail-fast -- --test-threads=4
+
+  # Supply-chain gate: advisories, licenses, bans, sources (deny.toml). The
+  # advisory half also runs daily on a schedule (audit.yml), since a new advisory
+  # can land against the pinned lock with no push to trigger this.
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
+  # Source spell-check (crate-ci/typos), configured by typos.toml. Tiny + fast.
+  typos:
+    name: Typos
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: crate-ci/typos@v1
+
+  # Web: TypeScript type-check + ESLint + vitest.
+  web:
+    name: Web (typecheck + lint + knip + test + build)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # Keep Next's build telemetry out of the logs.
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run typecheck
+        working-directory: web
+      - run: npm run lint
+        working-directory: web
+      # Dead-code / unused-dependency gate (`AGENTS.md`: "keep knip clean").
+      - run: npm run knip
+        working-directory: web
+      - run: npm run test
+        working-directory: web
+      # The production build. Catches what typecheck/lint/test can't: prerender/static-generation errors (a bad MDX
+      # expression, a server/client boundary slip), route collection, and
+      # bundling. Runs last (slowest) so a fast check fails first.
+      - run: npm run build
+        working-directory: web
+
+  # Single required status check — branch protection points at this one job.
+  # It passes only if every job above succeeded (and none were cancelled).
+  ci-status:
+    name: CI status
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: [rustfmt, clippy, rustdoc, typos, test-rust, deny, web]
+    if: always()
+    steps:
+      # `skipped` counts as a failure: a required check that goes green because
+      # a job never ran is the one outcome branch protection must not allow.
+      # Nothing above carries an `if:`, so nothing can skip today — which is
+      # exactly when this is free to add.
+      - name: Succeed if all checks passed
+        if: ${{ !(contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')) }}
+        run: exit 0
+      - name: Fail if any check failed
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}
+        run: exit 1

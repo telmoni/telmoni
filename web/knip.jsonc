@@ -1,0 +1,30 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "ignoreExportsUsedInFile": true,
+  // The surface a console built on this one imports. Nothing in this tree
+  // does, so without the entry knip reports both files unused.
+  "entry": ["lib/extension/*.ts"],
+  "ignore": [
+    // shadcn primitives are vendored by `npx shadcn add`, not hand-written, and
+    // one may legitimately sit unused between the command that adds it and the
+    // call site that follows.
+    "components/ui/**"
+  ],
+  // Every entry needs a written reason: an unexplained exemption is an unknown
+  // hole (AGENTS.md § Testing). This file uses JSONC to allow documenting
+  // the rationale for each exemption.
+  "ignoreDependencies": [
+    // Referenced only by the `@type {import('postcss-load-config').Config}`
+    // JSDoc in `postcss.config.mjs`. A type-only reference in a comment, so it
+    // is not a runtime dependency and does not belong in `package.json` — but
+    // knip reads the annotation and reports it unlisted. Removing this entry
+    // turns `make web-gate` red.
+    "postcss-load-config",
+    // A real devDependency consumed by the Next/Tailwind build through
+    // `postcss.config.mjs`, which knip does not trace into.
+    "postcss",
+    // Development-only pretty printer for pino, loaded by name at runtime
+    // (`transport: { target: "pino-pretty" }`) rather than imported.
+    "pino-pretty"
+  ]
+}

@@ -1,0 +1,138 @@
+global:
+  imageRegistry: ""
+  imageTag: "latest"
+  imagePullPolicy: IfNotPresent
+
+config:
+  environment: "dev"
+  logLevel: "info"
+  appUrl: "http://localhost:3000"
+  authUrl: "http://localhost:3000"
+  oidcRedirectUri: "http://localhost:3000/auth/callback"
+  # The login form is on unless disableLoginForm, which needs the OpenID
+  # Connect provider in `server-secrets`. Sign-ups are closed unless
+  # allowSignUp: the first account comes from ADMIN_EMAIL and ADMIN_PASSWORD
+  # in `server-secrets`, and invites the rest. verifyEmail has a new account
+  # confirm its address from a mail first, which needs SMTP_URL.
+  allowSignUp: false
+  verifyEmail: false
+  disableLoginForm: false
+  # What the sign-in page calls the OpenID Connect provider ("Continue with
+  # …"); whether a person it names for the first time becomes an account
+  # here; and whether one whose address an account here already holds is
+  # taken to be that account, which trusts the provider to have proved it.
+  oidcName: ""
+  oidcAllowSignUp: true
+  oidcAllowInsecureEmailLookup: false
+  # The identity provider's origins, space separated, which the console's
+  # Content Security Policy lets the browser be redirected to at sign-in and
+  # sign-out. Empty allows only the console itself.
+  authProviderOrigins: ""
+  # Who runs this deployment: the company on the console's copyright line,
+  # the address the console and auth's mail offer, and the base under which
+  # the operator publishes `privacy-policy` and `terms-of-service`. Empty
+  # names nobody and offers no document.
+  companyName: ""
+  supportEmail: ""
+  legalUrl: ""
+  mailFrom: "Telmoni <no-reply@localhost>"
+  connectorKek: "local:dev_key"
+  # The console agent. Off while modelProvider is empty; on, it needs
+  # `AGENT_DATABASE_URL` in `server-secrets` (the `agent` role's DSN), and
+  # `AGENT_MODEL_API_KEY` there for a hosted model. modelProvider is the
+  # protocol: `anthropic` (model defaults to claude-sonnet-5) or `openai`
+  # (Chat Completions: OpenAI, Gemini's compatible endpoint, vLLM, …; name
+  # the model, and the URL is the `/v1` base). embeddingsUrl empty with
+  # `embeddings.enabled` is the chart's own Ollama; a hosted endpoint takes
+  # `EMBEDDINGS_API_KEY` in `server-secrets`, and embeddingsRequestDimensions
+  # for a model wider than 768 by default. The server refuses to start with
+  # an embedding model of another width.
+  agent:
+    modelProvider: ""
+    modelUrl: ""
+    model: ""
+    embeddingsUrl: ""
+    embeddingsModel: "nomic-embed-text"
+    embeddingsRequestDimensions: false
+    # A rerank endpoint over the top 30 results; its key is `RERANK_API_KEY`.
+    rerankUrl: ""
+    rerankModel: ""
+    # Empty is https://docs.telmoni.com/llms-full.txt; `off` indexes no docs.
+    docsCorpusUrl: ""
+    messagesPerHour: 60
+
+# An Ollama serving the agent's embedding model inside the cluster, for a
+# tier that keeps embeddings off a vendor. It pulls the model at start into
+# an emptyDir, so a new pod downloads it again; the server reaches it at
+# http://embeddings:11434/v1.
+embeddings:
+  enabled: false
+  image: "ollama/ollama:latest"
+  model: "nomic-embed-text"
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      memory: 2Gi
+
+# `extraEnv` is appended to the container's `env`, for a deployment that
+# needs a variable the chart does not name.
+web:
+  enabled: true
+  image: "web"
+  replicas: 1
+  extraEnv: []
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+# The server: auth, notifications and the agent in one process, with the
+# deletion, retention and audit sweeps on its own timers (`RUN_SWEEPS=false`
+# in `extraEnv` leaves them to jobs of your own). It reads its secrets from a
+# Secret named `server-secrets` the operator creates beside the chart:
+# `AUTH_DATABASE_URL`, `NOTIFICATIONS_DATABASE_URL` and, for the agent,
+# `AGENT_DATABASE_URL` (one DSN per module, each as its own role), the
+# agent's `AGENT_MODEL_API_KEY`, `EMBEDDINGS_API_KEY` and `RERANK_API_KEY`
+# when its endpoints need them, `SERVICE_SECRET`, `ADMIN_EMAIL` and `ADMIN_PASSWORD`
+# for the first account, `OIDC_ISSUER`, `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` for an
+# OpenID Connect provider beside the login form, `SMTP_URL`
+# (`smtps://user:password@host:465`) for the mail it sends — without it every
+# mail is logged rather than sent — the `SLACK_*` and `DISCORD_*` apps, and
+# `DATABASE_CA_CERT`.
+server:
+  enabled: true
+  image: "server"
+  replicas: 1
+  extraEnv: []
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+# The migration Job and the partition-rotation CronJob run the server's image
+# as the migrator role, from a Secret named `migrator-secrets` holding
+# `MIGRATOR_DATABASE_URL` and `DATABASE_CA_CERT`.
+migrator:
+  enabled: true
+  hook:
+    enabled: true
+  rotateSchedule: "0 2 * * *"
+
+highAvailability:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 3
+  targetCpuUtilization: 70
+
+ingress:
+  enabled: false
+  gatewayClassName: "gke-l7-global-external-managed"
+  staticAddressName: "telmoni-web"
+  annotations:
+    networking.gke.io/certmap: "telmoni-web"

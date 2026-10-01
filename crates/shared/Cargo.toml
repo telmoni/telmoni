@@ -1,0 +1,71 @@
+[package]
+name = "telmoni-shared"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+publish                = false
+
+[dependencies]
+axum        = { workspace = true }
+# The request-id and trace layers every service mounts (`middleware::http`).
+tower       = { workspace = true }
+tower-http  = { workspace = true }
+chrono      = { workspace = true }
+
+sqlx        = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+tracing     = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid        = { workspace = true }
+subtle      = { workspace = true }
+# RS256 verification of the person's bearer (`person_token`) against the
+# provider's published keys, and the test issuer that signs fixtures. Already
+# the workspace's signature implementation, so this adds a manifest line
+# rather than a dependency.
+ring        = { workspace = true }
+tokio       = { workspace = true }
+# Zeroize-on-drop for the `Redacted` config-secret newtype: a credential is
+# wiped when it leaves scope rather than lingering in freed memory.
+zeroize     = { workspace = true }
+
+# `sha2` backs the tamper-evident audit-chain row hash
+# (crates/shared/src/db/audit_hash.rs).
+#
+# `reqwest` is used by `net_guard`'s `GuardedResolver`, the signed-webhook
+# connector, and `oidc`'s discovery and key-set cache. `net_guard` also uses
+# `reqwest::Url`, which is the `url` crate's type re-exported — the same
+# parser the client dials with, so the validator and the connector cannot
+# disagree about what a host is.
+# `async-trait` is used with `mail::MailSender`: a native `async fn` in a
+# trait is not dyn-compatible, and the transport is held as `Arc<dyn …>`.
+sha2        = { workspace = true }
+# `base64` decodes the bearer's segments and the key set's `n` and `e`
+# (`person_token`), and the test issuer's PKCS#8 fixture.
+base64      = { workspace = true }
+reqwest     = { workspace = true }
+async-trait = { workspace = true }
+
+anyhow      = { workspace = true }
+
+[dev-dependencies]
+# End-to-end `require_service_secret` rotation-window test drives the real
+# middleware over HTTP via `ServiceExt::oneshot` (the repo's router-test idiom).
+tower = { workspace = true }
+# `error_catalog` reads every error-variant declaration out of the sources to
+# check the catalogue against them.
+regex = "1"
+# The provider stubs: a key-set endpoint and a discovery document
+# (`person_token`, `oidc`), so the verifier's fetch, refresh and refusal
+# paths run against a real HTTP answer.
+wiremock = "0.6"
+# `openapi_contract` generates `contract/openapi.json` from the serving
+# service's own route table. A dev-dependency cycle (it depends on this crate),
+# which Cargo permits: it exists only for the test target, so nothing links it
+# into a service binary. The alternative — a third crate holding the list —
+# would put a service's public API somewhere other than the service.
+telmoni-auth = { path = "../auth" }
+
+[lints]
+workspace = true

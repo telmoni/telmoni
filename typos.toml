@@ -1,0 +1,50 @@
+# Configuration for crate-ci/typos.
+# Add false-positive words to [default.extend-words] (correct → correct).
+# Add path patterns to [files.extend-exclude] to skip whole files/dirs.
+
+[files]
+extend-exclude = [
+  "Cargo.lock",
+  "*.lock",
+  "package-lock.json",
+  "web/.next/**",
+  ".sqlx/**",
+]
+
+[default]
+extend-ignore-re = [
+  # Hex IDs (commit shas, action pins, KMS keys) often trip the dictionary.
+  "\\b[0-9a-f]{7,40}\\b",
+  # Plural all-caps SQL keywords ("SELECTs", "INSERTs", "CHECKs", …): typos
+  # splits the uppercase run and flags the truncated head (SELEC, CHEC, …).
+  "\\b(SELECT|INSERT|UPDATE|DELETE|UNIQUE|CHECK)s\\b",
+  # External CamelCase product name — typos splits it and flags "Strat" ≠ "Start".
+  "OptionStrat",
+  # A maintainer's own words, quoted verbatim in three places (AGENTS.md, the
+  # `analytics_opt_in` column comment, and analytics_preference.rs). They
+  # misspell "analysis", and the misspelling STAYS: the line is attributed and
+  # dated, and correcting somebody's quote falsifies the record of a decision.
+  # One of the three sits in an APPLIED migration, whose file sqlx checksums —
+  # editing even a comment there breaks migration validation on every database
+  # that has already run it.
+  #
+  # Scoped to the quote's own wording rather than added to extend-words below,
+  # so a genuine `anaylsis` written anywhere else still fails the build.
+  "anaylsis needs",
+]
+
+[default.extend-words]
+# Project-specific spellings the dictionary doesn't know.
+# Acronyms / external names the dictionary trips on.
+RTO         = "RTO"          # Recovery Time Objective (DR docs, paired with RPO)
+fo          = "fo"           # DMARC failure-reporting-options tag, e.g. `fo=1`
+HELO        = "HELO"         # the SMTP greeting (RFC 5321), beside EHLO
+Hashi       = "Hashi"        # HashiCorp (CamelCase-split into "Hashi" + "Corp")
+# Intentional house style (deliberate variants — not misspellings).
+mis         = "mis"          # the "mis-" prefix (mis-score, mis-configured, mis-set)
+unparseable = "unparseable"  # variant of "unparsable"
+clonable    = "clonable"     # variant of "cloneable"
+writeable   = "writeable"    # variant of "writable"
+# An identifier cannot carry an apostrophe, so a possessive loses one.
+anothers    = "anothers"     # "another's", in a test fn name
+optin       = "optin"        # "opt-in" — this product's own `analytics_opt_in`

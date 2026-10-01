@@ -1,0 +1,577 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.625rem;
+
+  --background: oklch(0.9762 0.0011 286);
+  --foreground: oklch(0.245 0.005 260);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.245 0.005 260);
+
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.245 0.005 260);
+
+  --primary: oklch(0.2 0 0);
+  --primary-foreground: oklch(0.99 0 0);
+
+  --secondary: oklch(0.955 0.002 286);
+  --secondary-foreground: oklch(0.3 0.005 260);
+
+  --muted: oklch(0.955 0.002 286);
+  --muted-foreground: oklch(0.44 0.008 260);
+
+  --accent: oklch(0.94 0.002 286);
+  --accent-foreground: oklch(0.245 0.005 260);
+
+  --destructive: oklch(0.55 0.22 25);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  --border: oklch(0.912 0.002 286);
+  --input: oklch(0.9 0.004 250);
+  /* ⚠ **The focused BORDER colour, and nothing else now.** Every ring shadow
+     and outline that used to spend this token is suppressed by the unlayered
+     `*:focus` rule below, so `--ring` reaches the screen through exactly one
+     thing: `focus-visible:border-ring` on input, select, switch, badge and
+     button.
+     It sits under `--input` (0.9) on purpose: a field keeps one light grey
+     outline whether or not it holds the caret, and focus reads as a small
+     darkening rather than a second, heavier frame. 0.2 drew a black box,
+     0.65 was still a mid grey, and 0.88 was indistinguishable from the
+     resting border. */
+  --ring: oklch(0.8 0 0);
+
+  --brand-positive: oklch(0.56 0.17 145);
+  --brand-negative: oklch(0.55 0.22 25);
+
+  --sidebar: var(--background);
+  --sidebar-foreground: oklch(0.27 0.01 250);
+  --sidebar-primary: oklch(0.13 0.01 250);
+  --sidebar-primary-foreground: oklch(0.98 0 0);
+  --sidebar-accent: oklch(0.92 0.005 250);
+  --sidebar-accent-foreground: oklch(0.13 0.01 250);
+  --sidebar-border: oklch(0.91 0.01 240);
+  --sidebar-ring: oklch(0.65 0 0);
+}
+
+.dark {
+  --background: oklch(0.1448 0.0033 285);
+  --foreground: oklch(0.93 0.003 250);
+
+  --card: oklch(0.2352 0.0045 285);
+  --card-foreground: oklch(0.93 0.003 250);
+
+  --popover: oklch(0.2352 0.0045 285);
+  --popover-foreground: oklch(0.93 0.003 250);
+
+  --primary: oklch(0.92 0 0);
+  --primary-foreground: oklch(0.2 0 0);
+
+  --secondary: oklch(0.262 0.004 285);
+  --secondary-foreground: oklch(0.93 0.003 250);
+
+  --muted: oklch(0.262 0.004 285);
+  --muted-foreground: oklch(0.7 0.006 250);
+
+  --accent: oklch(0.29 0.004 285);
+  --accent-foreground: oklch(0.93 0.003 250);
+
+  --destructive: oklch(0.65 0.22 25);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  --border: oklch(0.278 0.004 285);
+  --input: oklch(0.278 0.004 285);
+  --ring: oklch(0.92 0 0);
+
+  --brand-positive: oklch(0.65 0.17 145);
+  --brand-negative: oklch(0.65 0.22 25);
+
+  --sidebar: var(--background);
+  --sidebar-foreground: oklch(0.96 0.005 250);
+  --sidebar-primary: oklch(0.92 0 0);
+  --sidebar-primary-foreground: oklch(0.15 0 0);
+  --sidebar-accent: oklch(0.17 0.008 250);
+  --sidebar-accent-foreground: oklch(0.96 0.005 250);
+  --sidebar-border: oklch(0.17 0.008 250);
+  --sidebar-ring: oklch(0.65 0 0);
+}
+
+.theme-paper {
+  color-scheme: light;
+
+  --background: oklch(0.985 0.002 250);
+  --foreground: oklch(0.245 0.005 260);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.245 0.005 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.245 0.005 260);
+
+  --primary: oklch(0.2 0 0);
+  --primary-foreground: oklch(0.99 0 0);
+
+  --secondary: oklch(0.958 0.003 250);
+  --secondary-foreground: oklch(0.3 0.005 260);
+
+  --muted: oklch(0.958 0.003 250);
+  --muted-foreground: oklch(
+    0.44 0.008 260
+  );
+
+  --accent: oklch(0.945 0.004 250);
+  --accent-foreground: oklch(0.245 0.005 260);
+
+  --destructive: oklch(0.55 0.21 27);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  --border: oklch(0.9 0.004 250);
+  --input: oklch(0.9 0.004 250);
+  --ring: oklch(0.8 0 0);
+
+  --brand-positive: oklch(0.52 0.15 150);
+  --brand-negative: oklch(0.55 0.21 27);
+
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+.dark .theme-paper {
+  color-scheme: dark;
+
+  --background: oklch(0.22 0.002 260);
+  --foreground: oklch(0.93 0.003 250);
+
+  --card: oklch(0.275 0.005 260);
+  --card-foreground: oklch(0.93 0.003 250);
+  --popover: oklch(0.275 0.005 260);
+  --popover-foreground: oklch(0.93 0.003 250);
+
+  --primary: oklch(0.92 0 0);
+  --primary-foreground: oklch(0.2 0 0);
+
+  --secondary: oklch(0.31 0.005 260);
+  --secondary-foreground: oklch(0.93 0.003 250);
+
+  --muted: oklch(0.31 0.005 260);
+  --muted-foreground: oklch(0.7 0.006 250);
+
+  --accent: oklch(0.34 0.005 260);
+  --accent-foreground: oklch(0.93 0.003 250);
+
+  --destructive: oklch(0.65 0.2 27);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  --border: oklch(0.35 0.005 260);
+  --input: oklch(0.35 0.005 260);
+  --ring: oklch(0.88 0.004 260);
+
+  --brand-positive: oklch(0.68 0.14 150);
+  --brand-negative: oklch(0.65 0.2 27);
+
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+.theme-console {
+
+  --radius: 0.625rem;
+
+  --background: oklch(0.9603 0.0015 286);
+  --foreground: oklch(0.245 0.005 260);
+
+  --console-surface: var(--card);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.245 0.005 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.245 0.005 260);
+
+  --primary: oklch(0.2 0 0);
+  --primary-foreground: oklch(0.99 0 0);
+  --console-accent-strong: oklch(0.2 0 0);
+  --console-accent-tint: oklch(
+    0.9043 0 0
+  );
+  --console-field: oklch(0.9363 0.0015 286);
+
+  --secondary: oklch(0.955 0.002 286);
+  --secondary-foreground: oklch(0.3 0.005 260);
+
+  --muted: oklch(0.955 0.002 286);
+  --muted-foreground: oklch(
+    0.44 0.008 260
+  );
+
+  --accent: oklch(0.94 0.002 286);
+  --accent-foreground: oklch(0.245 0.005 260);
+
+  --destructive: oklch(0.55 0.21 27);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  --border: oklch(0.912 0.002 286);
+  --input: oklch(0.9 0.004 250);
+  --ring: oklch(0.8 0 0);
+
+  --brand-positive: oklch(0.52 0.15 150);
+  --brand-negative: oklch(0.55 0.21 27);
+
+  --sidebar: var(--background);
+  --sidebar-foreground: oklch(0.33 0.005 260);
+  --sidebar-primary: oklch(0.32 0.01 260);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.9243 0.002 286);
+  --sidebar-accent-foreground: oklch(0.245 0.005 260);
+  --sidebar-border: oklch(0.898 0.002 286);
+  --sidebar-ring: oklch(0.32 0.01 260);
+
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+.dark .theme-console {
+  --background: oklch(0.1448 0.0033 285);
+  --foreground: oklch(0.93 0.003 250);
+
+  --console-surface: var(--card);
+  --card: oklch(0.2352 0.0045 285);
+  --card-foreground: oklch(0.93 0.003 250);
+  --popover: oklch(0.2352 0.0045 285);
+  --popover-foreground: oklch(0.93 0.003 250);
+
+  --primary: oklch(0.92 0 0);
+  --primary-foreground: oklch(0.2 0 0);
+  --console-accent-strong: oklch(0.92 0 0);
+  --console-accent-tint: oklch(0.245 0 0);
+  --console-field: oklch(0.2652 0.0045 285);
+
+  --secondary: oklch(0.262 0.004 285);
+  --secondary-foreground: oklch(0.93 0.003 250);
+
+  --muted: oklch(0.262 0.004 285);
+  --muted-foreground: oklch(0.7 0.006 250);
+
+  --accent: oklch(0.29 0.004 285);
+  --accent-foreground: oklch(0.93 0.003 250);
+
+  --destructive: oklch(0.65 0.2 27);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  --border: oklch(0.278 0.004 285);
+  --input: oklch(0.278 0.004 285);
+  --ring: oklch(0.92 0 0);
+
+  --brand-positive: oklch(0.68 0.14 150);
+  --brand-negative: oklch(0.65 0.2 27);
+
+  --sidebar: var(--background);
+  --sidebar-foreground: oklch(0.93 0.003 250);
+  --sidebar-primary: oklch(0.92 0 0);
+  --sidebar-primary-foreground: oklch(0.2 0 0);
+  --sidebar-accent: oklch(0.2352 0.0045 285);
+  --sidebar-accent-foreground: oklch(0.93 0.003 250);
+  --sidebar-border: oklch(0.278 0.004 285);
+  --sidebar-ring: oklch(0.92 0 0);
+
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+.theme-console [data-slot="scroll-area-viewport"] > div {
+  display: block !important;
+  min-width: 0 !important;
+}
+
+.theme-console aside nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ⚠ **NOTHING MARKS FOCUS, ANYWHERE — an accessibility cost taken on purpose.**
+   A keyboard user has no way to see where they are. WCAG 2.1 AA §2.4.7 asks
+   for an indicator, and `e2e/accessibility.spec.ts` will not catch its absence
+   because axe has no automated rule for focus visibility. To restore one, put
+   `outline: 2px solid var(--color-ring)` back below — components need no
+   change, because none of their rings ever reach the screen through this.
+
+   ⚠ **UNLAYERED ON PURPOSE, and that is the only reason it works.** Tailwind's
+   utilities live in `@layer utilities`, which beats anything in `@layer base`
+   whatever its specificity — so a base rule cannot cancel the
+   `focus-visible:ring-[3px]` that button, input, select, switch, badge and
+   scroll-area each carry. An unlayered rule beats every layer, so one block
+   covers all six, and the next component too, without editing shadcn
+   primitives that regenerate.
+
+   This also retires the rail's own indicator: `#console-sidebar` is
+   `overflow-hidden` for the drawer slide, so a ring drawn inside it was shaved
+   flat at both ends and an inset outline was the workaround. With nothing
+   drawn there is nothing left to clip. */
+/* ── The sharp corner theme (`lib/corners.ts`) ────────────────────────────────
+   ⚠ **A utility override, not a token override, and that is forced.** The
+   radius tokens cannot carry this:
+     · `@theme inline` bakes `rounded-menu` to a literal `.75rem` and
+       `rounded-full` to a constant, so no custom property reaches either;
+     · the six-step scale is `calc(var(--radius) ± n)`, and no single
+       `--radius` zeroes all six — `0` yields -6px, -4px and -2px, which are
+       invalid declarations that fall back to ROUNDED.
+
+   ⚠ Unlayered, for the same reason as the focus rule below: Tailwind's
+   utilities sit in `@layer utilities` and beat any layered rule whatever its
+   specificity.
+
+   The attribute selector is what makes this survive — a component added
+   tomorrow is covered without anyone remembering this file exists. */
+.theme-sharp [class*="rounded"] {
+  border-radius: 0;
+}
+.theme-sharp ::-webkit-scrollbar-thumb,
+.theme-sharp ::-webkit-scrollbar {
+  border-radius: 0;
+}
+/* Sonner draws its own radii from its stylesheet — the toast from
+   `--border-radius`, which `ui/sonner.tsx` points at `--radius`, its action
+   buttons at a fixed 4px and its close button at 50% — on elements that carry
+   no `rounded` class, so the attribute rule above never reaches a toast, and
+   a sharp console showed a rounded one. The buttons take the toast's own
+   radius here, and the sharp theme squares all of it. Specificity, never
+   `!important`: a `!rounded-*` on a toast class would outrank the sharp rule,
+   so `ui/sonner.tsx` spends none. */
+.toaster [data-sonner-toast][data-styled='true'] [data-button] {
+  border-radius: var(--radius);
+}
+.theme-sharp .toaster [data-sonner-toast],
+.theme-sharp .toaster [data-sonner-toast] [data-button],
+.theme-sharp .toaster [data-sonner-toast] [data-close-button],
+.theme-sharp .toaster .sonner-loading-bar {
+  border-radius: 0;
+}
+
+*:focus,
+*:focus-visible {
+  outline: none;
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-ring-offset-shadow: 0 0 #0000;
+}
+
+.theme-console
+  [data-slot="card"]
+  table
+  :is(thead, tbody > tr:not(:last-child)) {
+  border-bottom: 1px solid var(--border);
+}
+
+.theme-console [data-slot="card"] table thead {
+  @apply text-xs text-muted-foreground;
+  line-height: inherit;
+}
+
+.theme-console #console-main {
+  width: 100%;
+}
+
+.theme-console [data-slot="card"]:has(table) {
+  overflow-x: auto;
+}
+
+.theme-console [data-slot="card"] table {
+  min-width: max-content;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-brand-positive: var(--brand-positive);
+  --color-brand-negative: var(--brand-negative);
+  --color-console-accent-strong: var(--console-accent-strong);
+  --color-console-accent-tint: var(--console-accent-tint);
+  --color-console-surface: var(--console-surface);
+  --color-console-field: var(--console-field);
+
+  /* ⚠ **Vendor marks — the one set of colours that must NOT follow a theme.**
+     These are third parties' brands on the connectors page. Somebody
+     recognises Slack by those four hues and Discord by Blurple, so a value
+     that shifted with light/dark, or with a skin, would stop naming the
+     product it is there to name. Literals, and unlike every token above they
+     are not restated per theme.
+
+     They live here rather than inline in the component because the hex ban in
+     `eslint.config.mjs` is what keeps every other colour reachable through
+     this file, and one exception spelled in a component is how that stops
+     being true. */
+  --color-vendor-slack-crimson: #e01e5a;
+  --color-vendor-slack-blue: #36c5f0;
+  --color-vendor-slack-green: #2eb67d;
+  --color-vendor-slack-yellow: #ecb22e;
+  --color-vendor-discord-blurple: #5865f2;
+
+  /* ⚠ **Six steps, one number.** Every card, button, input, dialog and badge
+     spends a step on this scale, and each step is derived from `--radius`
+     rather than written out — so the ramp stays proportional and a theme can
+     move all six by moving one. `.theme-console` sets its own.
+     The eslint rule on `rounded-[…]` is what keeps it a scale: a literal is a
+     seventh step nothing else can reach, and a skin gains its curves one
+     component at a time exactly that way. */
+  --radius-xs: calc(var(--radius) - 6px);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+
+  /* ⚠ **Two surfaces sit BETWEEN the steps above, and are literals for that
+     reason.** Neither 16px nor 12px is on the ramp, and widening a step to
+     reach one would drag every card, button and input along with it. Being
+     literals also means they hold still when `--radius` moves — which is the
+     point for these two: both are large panels whose curve is a deliberate
+     shape rather than a softened corner, and the pixel that suits a 40px
+     button says nothing about either.
+
+     There is no third token for the rows INSIDE a menu. There was, at
+     `0.5rem`, until the scale stopped being zero and `--radius-md` turned out
+     to be the same 8px — a second name for one value, which is how two things
+     that must agree quietly stop agreeing.
+
+     The content pane is lifted off the canvas at its top edge — the two
+     corners where it meets the header. It runs to the bottom of the viewport,
+     so there is no bottom half to match. */
+  --radius-console-surface: 1rem;
+
+  /* The two dropdowns — the resource selector and the account menu. Smaller
+     than the content pane at `1rem`, because these are 256-320px wide against
+     its full column, and a radius that reads as a soft edge at that width
+     reads as a lozenge at this one.
+
+     ⚠ **It is the ROW radius too — in the menus and in the rail.** Every row
+     was `rounded-full`, and a pill is a shape rather than a softened corner:
+     it competed with the panel around it instead of sitting inside it. One
+     number now covers every row a person can press, and it is the same curve
+     the footer rows already show where the panel clips them. The `p-1` inset
+     is what keeps the panel's corner and a row's from meeting. */
+  --radius-menu: 0.75rem;
+
+  --tracking-label: 0.4em;
+
+  --font-sans:
+    var(--font-inter), Inter, ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono:
+    var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Consolas,
+    monospace;
+
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-sidebar-border: var(--sidebar-border);
+
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+
+  --color-sidebar-accent: var(--sidebar-accent);
+
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+
+  --color-sidebar-primary: var(--sidebar-primary);
+
+  --color-sidebar-foreground: var(--sidebar-foreground);
+
+  --color-sidebar: var(--sidebar);
+}
+
+@utility text-2xs {
+  font-size: 0.625rem;
+  line-height: 1rem;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  @media (pointer: coarse) {
+    button,
+    [role="button"],
+    input,
+    select,
+    textarea {
+      min-height: 44px;
+    }
+  }
+
+  html {
+    @apply min-w-[320px] max-w-full overflow-x-hidden;
+    scrollbar-gutter: stable;
+    /* macOS and iOS rubber-band the document scroller past its ends, and the
+       gap paints the canvas, which is `body` resolved in the ROOT theme while
+       every surface above it resolves in `theme-paper`. Two different darks,
+       so the bounce read as a black band. `none` over `contain` because the
+       bounce itself is what has to go; it also drops pull-to-refresh, which
+       is no loss on a console. */
+    overscroll-behavior: none;
+  }
+  html:has(.theme-console) {
+    overflow: hidden;
+    scrollbar-gutter: auto;
+  }
+  body[data-scroll-locked] {
+    margin-right: 0 !important;
+  }
+  body {
+    @apply bg-background text-foreground flex flex-col;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  a,
+  p {
+    @apply m-0 p-0;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-normal;
+  }
+  a {
+    @apply text-inherit no-underline;
+  }
+
+  ::-webkit-scrollbar {
+    @apply w-2 h-2;
+  }
+  /* At `w-2` the browser clamps the radius to half the width, so any step at
+     or above 4px renders as a capsule here — which is what matches the Radix
+     thumb in `scroll-area.tsx`, the other scrollbar in the console and the one
+     people see inside the menus. This read "the same step a menu row spends",
+     which stopped being true when rows moved to `rounded-menu`; the clamp is
+     the reason it looks right, not the step. It was `rounded-none`: the last
+     thing in the stylesheet still asking to be square. */
+  ::-webkit-scrollbar-thumb {
+    @apply bg-muted-foreground/40 rounded-md;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/70;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-muted;
+  }
+}

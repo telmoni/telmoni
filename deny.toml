@@ -1,0 +1,71 @@
+# cargo-deny configuration
+# https://embarkstudios.github.io/cargo-deny/
+
+[advisories]
+# Fail on any unignored security advisory. Add entries to `ignore` ONLY for an
+# advisory that is (a) NOT an exploitable vulnerability, (b) in a TRANSITIVE dep
+# we don't pull directly, with (c) no available fix short of a major upstream
+# bump — and always with the reason + removal condition inline.
+#
+# The list is empty, and an entry that stops matching any crate is a warning
+# cargo-deny prints — read it as the removal condition having been met.
+ignore = []
+
+[bans]
+# Warn on duplicate versions of the same crate — multiple versions of a dep
+# usually indicate a missed dedup opportunity in the Cargo workspace.
+#
+# 28 duplicates today, and nobody has traced the chains. Left as `warn`,
+# because a count nobody has explained is not grounds for failing a build. The
+# next person to care runs `cargo deny check bans` and writes down what the
+# chains actually are.
+multiple-versions = "warn"
+# Deny wildcard dependencies (e.g. foo = "*") — they break reproducibility.
+# Cargo workspace `path` deps carry no version by design; they resolve to
+# this repo's checkout, so reproducibility isn't at stake for them.
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[licenses]
+# Confidence threshold below which a detected license is treated as unknown.
+confidence-threshold = 0.8
+
+# The telmoni-* Cargo workspace crates are proprietary and unpublished
+# (`publish = false`); skip license checks on them instead of forcing a
+# parseable SPDX expression onto private code.
+private = { ignore = true }
+
+# Approved SPDX identifiers. Add here when a new dep introduces a new license
+# that has been reviewed and approved.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "CC0-1.0",
+    "OpenSSL",
+    # webpki-roots — the Mozilla CA bundle the rustls stack embeds. A
+    # permissive data license (attribution + share-alike for the *data*);
+    # reviewed 2026-07-08.
+    "CDLA-Permissive-2.0",
+    # quoted_printable — lettre's MIME encoder. The BSD Zero Clause license:
+    # ISC with the attribution requirement removed, so nothing to carry;
+    # reviewed 2026-09-29.
+    "0BSD",
+]
+
+[sources]
+# Deny crates from unknown registries or arbitrary git sources.
+unknown-registry = "deny"
+unknown-git      = "deny"
+allow-registry   = ["https://github.com/rust-lang/crates.io-index"]
+# Empty, and it must stay that way without a decision. `make deny` passes
+# --all-features on purpose: an OPTIONAL git dependency resolves out of a
+# default-feature graph, so a plain `cargo deny check` would report "sources
+# ok" while checking nothing about it. Keep the flag.
+allow-git        = []

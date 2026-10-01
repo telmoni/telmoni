@@ -1,0 +1,74 @@
+# Build context for the server image (context = repo root; the web image
+# builds from web/ with its own web/.dockerignore). crates/telmoni/Dockerfile
+# COPYs only `Cargo.toml Cargo.lock` + `crates/`, but the whole context is
+# uploaded to the daemon minus what's excluded here — so keep the heavy,
+# never-needed trees out (target/ alone can be tens of GB locally).
+
+# ── Rust build output — the big one; nothing here belongs in the context ──────
+target/
+.sqlx/
+
+# ── Trees the server image never needs ────────────────────────────────────────
+web/
+deploy/
+sdk/
+mobile/
+.github/
+
+# ── Git ───────────────────────────────────────────────────────────────────────
+.git/
+.gitignore
+.gitattributes
+
+# ── Secrets and credentials ───────────────────────────────────────────────────
+# Every real value reaches a container through its environment at run time;
+# nothing should be baked in.
+.env
+.env.*
+*.pem
+*.key
+*.cert
+*.p12
+*.pfx
+*.crt
+application_default_credentials.json
+
+# ── Build artifacts ───────────────────────────────────────────────────────────
+**/node_modules
+**/dist
+**/.next
+**/build
+**/coverage
+
+# ── Test artifacts ────────────────────────────────────────────────────────────
+**/__tests__/
+**/*.test.ts
+**/*.spec.ts
+**/test-results/
+**/playwright-report/
+**/blob-report/
+
+# ── CI / tooling (not needed at runtime) ──────────────────────────────────────
+Makefile
+docker-compose.yml
+.pre-commit-config.yaml
+ENGINE_VERSION
+
+# ── Documentation ─────────────────────────────────────────────────────────────
+*.md
+docs/
+
+# ── Editor / OS ───────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+**/*.log
+npm-debug.log*
+
+# ── TypeScript ────────────────────────────────────────────────────────────────
+**/*.tsbuildinfo

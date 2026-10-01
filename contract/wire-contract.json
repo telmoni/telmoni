@@ -1,0 +1,42 @@
+{
+  "$generated": "by `make contract` from crates/shared/src/types — do not edit by hand",
+  "enums": {
+    "Flag": [
+      "connectors",
+      "public_api",
+      "api_tokens",
+      "members",
+      "signup",
+      "beta_access"
+    ],
+    "NotificationKind": [
+      "organization_alert",
+      "member_added",
+      "connector_connected",
+      "connector_disconnected"
+    ],
+    "OrganizationStatus": [
+      "active",
+      "pending_deletion",
+      "deleted"
+    ],
+    "Role": [
+      "owner",
+      "admin",
+      "member"
+    ]
+  },
+  "flags": {
+    "global_only": [
+      "signup"
+    ],
+    "off_detail": {
+      "api_tokens": "API keys are switched off right now.",
+      "beta_access": "This organization is not in the beta yet.",
+      "connectors": "Connectors are switched off right now.",
+      "members": "Adding a member is switched off right now.",
+      "public_api": "The API is switched off right now.",
+      "signup": "Sign-ups are closed right now."
+    }
+  }
+}

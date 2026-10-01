@@ -1,0 +1,27 @@
+[package]
+name = "telmoni-migrator"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+publish                = false
+
+# A library: `telmoni migrate` and `telmoni rotate`
+# (`crates/telmoni`) run it, as a Job before the server rolls. This crate
+# still owns the `audit` schema (`migrations/`) and the grants (`sql/`).
+[lib]
+name = "telmoni_migrator"
+path = "src/lib.rs"
+
+[dependencies]
+telmoni-shared = { path = "../shared" }
+sqlx    = { workspace = true }
+tracing = { workspace = true }
+anyhow  = { workspace = true }
+# Partition-rotation mode — `Utc::now()` for the create-ahead / drop window.
+chrono  = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

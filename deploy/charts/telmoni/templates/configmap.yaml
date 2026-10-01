@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: telmoni-tier
+  labels:
+    app.kubernetes.io/component: config
+    {{- include "telmoni.labels" . | nindent 4 }}
+  {{- if and .Values.migrator.enabled .Values.migrator.hook.enabled }}
+  {{- include "telmoni.migrateHookPrereq" . | nindent 2 }}
+  {{- end }}
+data:
+  ENVIRONMENT: {{ .Values.config.environment | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  APP_URL: {{ .Values.config.appUrl | quote }}
+  AUTH_URL: {{ .Values.config.authUrl | quote }}
+  OIDC_REDIRECT_URI: {{ .Values.config.oidcRedirectUri | quote }}
+  ALLOW_SIGN_UP: {{ .Values.config.allowSignUp | quote }}
+  VERIFY_EMAIL: {{ .Values.config.verifyEmail | quote }}
+  DISABLE_LOGIN_FORM: {{ .Values.config.disableLoginForm | quote }}
+  OIDC_NAME: {{ .Values.config.oidcName | quote }}
+  OIDC_ALLOW_SIGN_UP: {{ .Values.config.oidcAllowSignUp | quote }}
+  OIDC_ALLOW_INSECURE_EMAIL_LOOKUP: {{ .Values.config.oidcAllowInsecureEmailLookup | quote }}
+  AUTH_PROVIDER_ORIGINS: {{ .Values.config.authProviderOrigins | quote }}
+  COMPANY_NAME: {{ .Values.config.companyName | quote }}
+  SUPPORT_EMAIL: {{ .Values.config.supportEmail | quote }}
+  LEGAL_URL: {{ .Values.config.legalUrl | quote }}
+  MAIL_FROM: {{ .Values.config.mailFrom | quote }}
+  CONNECTOR_KEK: {{ .Values.config.connectorKek | quote }}
+  {{- with .Values.config.agent }}
+  AGENT_MODEL_PROVIDER: {{ .modelProvider | quote }}
+  AGENT_MODEL_URL: {{ .modelUrl | quote }}
+  AGENT_MODEL: {{ .model | quote }}
+  EMBEDDINGS_URL: {{ .embeddingsUrl | default (ternary "http://embeddings:11434/v1" "" $.Values.embeddings.enabled) | quote }}
+  EMBEDDINGS_MODEL: {{ .embeddingsModel | quote }}
+  EMBEDDINGS_REQUEST_DIMENSIONS: {{ .embeddingsRequestDimensions | quote }}
+  RERANK_URL: {{ .rerankUrl | quote }}
+  RERANK_MODEL: {{ .rerankModel | quote }}
+  DOCS_CORPUS_URL: {{ .docsCorpusUrl | quote }}
+  AGENT_MESSAGES_PER_HOUR: {{ .messagesPerHour | quote }}
+  {{- end }}

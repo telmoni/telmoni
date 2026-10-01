@@ -1,0 +1,126 @@
+{{- if .Values.migrator.enabled }}
+# The server image, run once as the migrator role: every schema's DDL and the
+# object grants, before the server rolls.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "telmoni.fullname" . }}-migrate
+  labels:
+    app.kubernetes.io/name: migrator
+    {{- include "telmoni.labels" . | nindent 4 }}
+  {{- if .Values.migrator.hook.enabled }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  {{- end }}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: migrator
+        {{- include "telmoni.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: migrator
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: "{{ if .Values.global.imageRegistry }}{{ .Values.global.imageRegistry }}/{{ end }}{{ .Values.server.image }}:{{ .Values.global.imageTag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args: ["migrate"]
+          envFrom:
+            - configMapRef:
+                name: telmoni-tier
+            - secretRef:
+                name: migrator-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+---
+# The audit partitions: create the months ahead, drop the expired. DDL as the
+# migrator role, so a Job of its own rather than a task of the server's.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: rotate
+  labels:
+    app.kubernetes.io/name: migrator
+    app.kubernetes.io/component: rotate
+    {{- include "telmoni.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.migrator.rotateSchedule | quote }}
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      labels:
+        app.kubernetes.io/name: migrator
+        app.kubernetes.io/component: rotate
+        {{- include "telmoni.labels" . | nindent 8 }}
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 300
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: migrator
+            app.kubernetes.io/component: rotate
+            {{- include "telmoni.labels" . | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: migrator
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: rotate
+              image: "{{ if .Values.global.imageRegistry }}{{ .Values.global.imageRegistry }}/{{ end }}{{ .Values.server.image }}:{{ .Values.global.imageTag }}"
+              imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+              args: ["rotate"]
+              envFrom:
+                - configMapRef:
+                    name: telmoni-tier
+                - secretRef:
+                    name: migrator-secrets
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+{{- end }}

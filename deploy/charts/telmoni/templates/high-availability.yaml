@@ -1,0 +1,41 @@
+{{- if .Values.highAvailability.enabled }}
+{{- range $svc := list "web" "server" }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $svc }}
+  labels:
+    app.kubernetes.io/name: {{ $svc }}
+    app.kubernetes.io/component: server
+    {{- include "telmoni.labels" $ | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $svc }}
+  minReplicas: {{ $.Values.highAvailability.minReplicas | default 2 }}
+  maxReplicas: {{ $.Values.highAvailability.maxReplicas | default 3 }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $.Values.highAvailability.targetCpuUtilization | default 70 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $svc }}
+  labels:
+    app.kubernetes.io/name: {{ $svc }}
+    app.kubernetes.io/component: server
+    {{- include "telmoni.labels" $ | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $svc }}
+---
+{{- end }}
+{{- end }}

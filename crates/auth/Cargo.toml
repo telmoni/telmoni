@@ -1,0 +1,61 @@
+[package]
+name = "telmoni-auth"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+publish                = false
+
+# A library: the `telmoni` binary
+# (`crates/telmoni`) links it beside notifications, and a binary built for
+# another deployment links it with its own identity provider and transport.
+[lib]
+name = "telmoni_auth"
+path = "src/lib.rs"
+
+[dependencies]
+telmoni-shared = { path = "../shared" }
+axum       = { workspace = true }
+sqlx       = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+tokio      = { workspace = true }
+tracing    = { workspace = true }
+uuid       = { workspace = true }
+chrono     = { workspace = true }
+anyhow     = { workspace = true }
+
+reqwest      = { workspace = true }
+async-trait  = { workspace = true }
+
+# Token hashing, and reading a claim out of a token this service was handed
+# (`token_claims`).
+base64 = "0.22"
+#
+# No identity-provider SDK: `oidc` speaks the standards over `reqwest`, and a
+# vendor's SDK belongs to the binary that chooses that vendor.
+
+# The built-in provider's password hashes (`password::hashing`): Argon2id at
+# the crate's defaults, which are OWASP's (19 MiB, two passes, one lane).
+argon2 = "0.6"
+# Outbound mail over SMTP (`smtp`), the one transport every mail service
+# accepts. rustls over `ring`, the TLS stack reqwest already builds, and no
+# OpenSSL: the image is a static musl build.
+lettre = { version = "0.11", default-features = false, features = [
+    "builder",
+    "hostname",
+    "pool",
+    "smtp-transport",
+    "tokio1-rustls-tls",
+] }
+
+[dev-dependencies]
+tokio = { workspace = true }
+# Local HTTP mock for the OpenID Connect provider tests (`oidc`) and the
+# integration tests that stand a provider, the purge hook or notifications up.
+wiremock = "0.6"
+# Drive the real router in-process (`ServiceExt::oneshot`) + read bodies.
+tower          = { workspace = true, features = ["util"] }
+http-body-util = "0.1"
+
+[lints]
+workspace = true

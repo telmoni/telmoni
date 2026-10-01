@@ -1,0 +1,71 @@
+# ── Environment ───────────────────────────────────────────────────────────────
+.env
+# Every copy of it too: a backup like `.env.before-x` holds the same secrets.
+.env.*
+!.env.example
+!.env.local.example
+
+# ── Secrets that could land in the tree ───────────────────────────────────────
+# A deploy to GKE (deploy/charts) uses a kubeconfig and maybe a service
+# account key; a stray `--kubeconfig ./…` or a copied file must never ship.
+kubeconfig
+*.kubeconfig
+.kube/
+service-account-*.json
+*-sa-key.json
+application_default_credentials.json
+*.pem
+*.key
+*.p12
+# crates.io credentials belong in ~/.cargo, and a per-machine cargo override
+# (a path to a local checkout) points everyone else at a directory not there.
+.cargo/credentials.toml
+.cargo/credentials
+.cargo/config.toml
+
+# ── AI / tooling state ────────────────────────────────────────────────────────
+.claude/
+.aider*
+.cursor/
+
+# ── Rust ──────────────────────────────────────────────────────────────────────
+# Cargo.lock is committed for reproducible builds.
+target/
+*.rs.bk
+
+# ── Node / Next.js (web/) ─────────────────────────────────────────────────────
+node_modules/
+.next/
+*.tsbuildinfo
+next-env.d.ts
+.eslintcache
+npm-debug.log*
+
+# ── Test artifacts ────────────────────────────────────────────────────────────
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# ── Local ─────────────────────────────────────────────────────────────────────
+# The maintainer's own notes, never repo docs.
+scratch/
+docker-compose.override.yml
+*.pid
+# Root-anchored: a bare `logs/` would also hide a console route named logs.
+*.log
+/logs/
+
+# ── Editor / OS ───────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.zed/
+*.swp
+*.swo
+*.orig
+*.rej
+*.bak
+.DS_Store
+._*
+Thumbs.db

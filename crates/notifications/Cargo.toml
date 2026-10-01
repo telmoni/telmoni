@@ -1,0 +1,52 @@
+[package]
+name        = "telmoni-notifications"
+description = "Notifications service — the in-app feed, and the connectors that repeat it (Slack, Discord, signed webhooks), with durable at-least-once delivery on a Postgres-native leased-row loop."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+publish                = false
+
+# A library: the `telmoni` binary
+# (`crates/telmoni`) links it beside auth.
+[lib]
+name = "telmoni_notifications"
+path = "src/lib.rs"
+
+[dependencies]
+# The Telmoni chassis crate. `telmoni-chat` was a second dependency here, for a
+# payload builder that embedded an AI diagnostic summary into every alert. That
+# crate is deleted and so is the builder.
+telmoni-shared = { path = "../shared" }
+
+axum       = { workspace = true }
+tokio      = { workspace = true }
+tracing    = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+anyhow     = { workspace = true }
+sqlx       = { workspace = true }
+chrono     = { workspace = true }
+uuid       = { workspace = true }
+# The platform hops (KMS, the metadata server, the flag read) on a plain
+# client; everything that leaves the platform goes through the guarded
+# `telmoni_shared::net_guard::Egress` built on the same crate. Redirects are
+# never followed — see `main.rs`.
+reqwest    = { workspace = true }
+# Slack signs its events with HMAC-SHA256 over `v0:{ts}:{body}`, verified by
+# hand rather than through a vendor SDK. The signed webhook GENERATES the same
+# kind of MAC over `{t}.{body}`.
+hmac = "0.12"
+sha2 = { workspace = true }
+hex  = "0.4"
+# The OS randomness behind the OAuth `state`. The AES-256-GCM over the grants
+# at rest is `telmoni_shared::envelope`, which owns the cipher and the KMS hop.
+ring        = { workspace = true }
+async-trait = { workspace = true }
+
+[dev-dependencies]
+tower          = { version = "0.5", features = ["util"] }
+wiremock       = "0.6"
+http-body-util = "0.1"
+
+[lints]
+workspace = true

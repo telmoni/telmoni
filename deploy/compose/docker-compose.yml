@@ -1,0 +1,183 @@
+# Telmoni self-hosted, with Docker Compose: the server, the console, Postgres
+# and Redis — four containers, plus the one-shot migration that runs first.
+#
+# Quickstart:
+#   1. Copy env: cp .env.example .env (and adjust credentials). Two values
+#      have no default and the stack does not start without them:
+#      SERVICE_SECRET (any random string; both processes get the same one)
+#      and AUTH_SECRET (the console's cookie seal, 32 bytes or more):
+#        openssl rand -hex 32
+#   2. Run: docker compose -f deploy/compose/docker-compose.yml up -d
+#
+# The server runs its own sweeps on a timer (the deletion saga, retention, the
+# nightly audit walk), so nothing here schedules them. The audit partitions
+# are rotated by hand, or from your own cron:
+#   docker compose -f deploy/compose/docker-compose.yml run --rm migrate rotate
+#
+# The console's agent is off until AGENT_MODEL_PROVIDER is set. Its
+# embeddings come from the `ollama` service, started with the `agent`
+# profile, which needs its model pulled once:
+#   docker compose -f deploy/compose/docker-compose.yml --profile agent up -d
+#   docker compose -f deploy/compose/docker-compose.yml exec ollama ollama pull nomic-embed-text
+
+name: telmoni-selfhost
+
+networks:
+  telmoni-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  ollama_models:
+
+x-database-url: &database_url
+  postgres://${POSTGRES_USER:-telmoni}:${POSTGRES_PASSWORD:-telmoni_dev}@postgres:5432/${POSTGRES_DB:-telmoni}
+
+services:
+  postgres:
+    # Postgres 17 with pgvector, which the agent's search needs; the
+    # extension is installed once, when the volume is first created.
+    image: pgvector/pgvector:pg17
+    container_name: telmoni-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-telmoni}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-telmoni_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-telmoni}
+    command: ["postgres", "-c", "max_connections=300"]
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../../crates/migrator/sql/dev_extensions.sql:/docker-entrypoint-initdb.d/05-extensions.sql:ro
+    networks:
+      - telmoni-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-telmoni} -d ${POSTGRES_DB:-telmoni}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    container_name: telmoni-redis
+    restart: unless-stopped
+    command: redis-server --save "" --loglevel warning
+    ports:
+      - "127.0.0.1:6379:6379"
+    networks:
+      - telmoni-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  # The same image as the server, run once with `migrate`: every schema's
+  # DDL before the server starts. This quickstart runs everything as the one
+  # database user, which owns every table and needs no grant; a deployment
+  # that gives each module its own role (`role_hardening.sql`) gets the
+  # object grants from the same run.
+  migrate:
+    image: ${TELMONI_IMAGE_SERVER:-ghcr.io/telmoni/server:latest}
+    command: ["migrate"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - telmoni-net
+    environment:
+      MIGRATOR_DATABASE_URL: *database_url
+
+  server:
+    image: ${TELMONI_IMAGE_SERVER:-ghcr.io/telmoni/server:latest}
+    command: ["serve"]
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    networks:
+      - telmoni-net
+    environment:
+      PORT: "8082"
+      # One database, one role per module; a deployment that separates the
+      # roles gives each module its own DSN.
+      AUTH_DATABASE_URL: *database_url
+      NOTIFICATIONS_DATABASE_URL: *database_url
+      AGENT_DATABASE_URL: *database_url
+      SERVICE_SECRET: ${SERVICE_SECRET}
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      # The login form is on unless DISABLE_LOGIN_FORM, sign-ups are closed
+      # unless ALLOW_SIGN_UP, ADMIN_EMAIL and ADMIN_PASSWORD seed the first
+      # account, and an OpenID Connect provider sits beside the form when
+      # OIDC_ISSUER names one.
+      ALLOW_SIGN_UP: ${ALLOW_SIGN_UP:-false}
+      VERIFY_EMAIL: ${VERIFY_EMAIL:-false}
+      DISABLE_LOGIN_FORM: ${DISABLE_LOGIN_FORM:-false}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_NAME: ${OIDC_NAME:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-http://localhost:3000/auth/callback}
+      OIDC_ALLOW_SIGN_UP: ${OIDC_ALLOW_SIGN_UP:-true}
+      OIDC_ALLOW_INSECURE_EMAIL_LOOKUP: ${OIDC_ALLOW_INSECURE_EMAIL_LOOKUP:-false}
+      # Where mail leaves by; unset, every mail is logged rather than sent.
+      SMTP_URL: ${SMTP_URL:-}
+      MAIL_FROM: ${MAIL_FROM:-Telmoni <no-reply@localhost>}
+      SUPPORT_EMAIL: ${SUPPORT_EMAIL:-}
+      # The connectors: a vendor app each, and the key that seals every
+      # grant at rest. `local:` is for a machine you control.
+      SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-}
+      SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
+      CONNECTOR_KEK: ${CONNECTOR_KEK:-local:0000000000000000000000000000000000000000000000000000000000000000}
+      # The agent: `anthropic` or `openai` (the protocol), the model and its
+      # key, and the embeddings the `ollama` service serves.
+      AGENT_MODEL_PROVIDER: ${AGENT_MODEL_PROVIDER:-}
+      AGENT_MODEL_URL: ${AGENT_MODEL_URL:-}
+      AGENT_MODEL: ${AGENT_MODEL:-}
+      AGENT_MODEL_API_KEY: ${AGENT_MODEL_API_KEY:-}
+      EMBEDDINGS_URL: ${EMBEDDINGS_URL:-http://ollama:11434/v1}
+      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-nomic-embed-text}
+      EMBEDDINGS_API_KEY: ${EMBEDDINGS_API_KEY:-}
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["agent"]
+    restart: unless-stopped
+    networks:
+      - telmoni-net
+    volumes:
+      - ollama_models:/root/.ollama
+
+  web:
+    image: ${TELMONI_IMAGE_WEB:-ghcr.io/telmoni/web:latest}
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      server:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - telmoni-net
+    environment:
+      PORT: "3000"
+      NODE_ENV: production
+      AUTH_URL: ${AUTH_URL:-http://localhost:3000}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      AUTH_SECRET: ${AUTH_SECRET}
+      SERVICE_SECRET: ${SERVICE_SECRET}
+      SERVER_URL: http://server:8082
+      REDIS_URL: redis://redis:6379

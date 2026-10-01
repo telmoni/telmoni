@@ -1,0 +1,168 @@
+{{- if .Values.embeddings.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: embeddings
+  labels:
+    app.kubernetes.io/name: embeddings
+    {{- include "telmoni.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: embeddings
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: embeddings
+        {{- include "telmoni.labels" . | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ollama
+          image: {{ .Values.embeddings.image | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          # Serve, pull the model into the emptyDir, then stay on the server:
+          # the pod is Ready only once the model answers, so the server's
+          # width probe never meets an Ollama without it.
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              ollama serve &
+              until ollama list >/dev/null 2>&1; do sleep 1; done
+              ollama pull "$EMBEDDINGS_MODEL" || exit 1
+              touch /data/ready
+              wait
+          env:
+            - name: HOME
+              value: /data
+            - name: OLLAMA_MODELS
+              value: /data/models
+            - name: OLLAMA_HOST
+              value: "0.0.0.0:11434"
+            - name: EMBEDDINGS_MODEL
+              value: {{ .Values.embeddings.model | quote }}
+          ports:
+            - name: http
+              containerPort: 11434
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.embeddings.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/data/ready"]
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: embeddings
+  labels:
+    app.kubernetes.io/name: embeddings
+    {{- include "telmoni.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: embeddings
+  ports:
+    - name: http
+      port: 11434
+      targetPort: http
+---
+# The server is the embeddings' one caller.
+kind: NetworkPolicy
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: allow-embeddings-ingress
+  labels:
+    app.kubernetes.io/name: embeddings
+    {{- include "telmoni.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: embeddings
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: server
+      ports:
+        - protocol: TCP
+          port: 11434
+---
+# Out to the model registry for the pull at start, and nowhere else.
+kind: NetworkPolicy
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: allow-embeddings-egress
+  labels:
+    app.kubernetes.io/name: embeddings
+    {{- include "telmoni.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: embeddings
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+---
+# The server to the embeddings, named: an `ipBlock` is for addresses outside
+# the cluster, and a pod's is not one a policy may be relied on to match.
+kind: NetworkPolicy
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: allow-server-to-embeddings
+  labels:
+    app.kubernetes.io/name: server
+    {{- include "telmoni.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: server
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: embeddings
+      ports:
+        - protocol: TCP
+          port: 11434
+{{- end }}

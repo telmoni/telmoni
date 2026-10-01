@@ -1,0 +1,140 @@
+{
+  "components": {
+    "schemas": {
+      "Problem": {
+        "additionalProperties": true,
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "instance": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "description": "The stable category URI. Switch on this, never on `title`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "description": "A `telmoni_` API token, minted on the Keys page. The token IS the organization; there is no second credential and no scope below the organization.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "The API a `telmoni_` token opens. Every response that is not a success is an RFC 9457 problem document, and a client switches on its `type` rather than on its prose.",
+    "title": "Telmoni API",
+    "version": "1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1/members": {
+      "get": {
+        "description": "Everyone in the organization, the owner first, with the role each holds. The same body the console reads, so a token and a browser cannot be told two different member lists.",
+        "responses": {
+          "200": {
+            "description": "The members: the owner, then everyone else newest first."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No live `telmoni_` token was presented. A revoked, expired or unknown token answers the same way."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too many requests. The front door meters by source and by token before the request reaches a service, and says when to come back in `Retry-After`."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The lane is switched off, or something it needs did not answer. `Retry-After` says when to try again."
+          }
+        },
+        "summary": "Who is in the organization"
+      }
+    },
+    "/v1/organization": {
+      "get": {
+        "description": "The organization the token belongs to — its id, its name and its owner's address and name. A token IS an organization, so this answers for the caller and for nobody else.",
+        "responses": {
+          "200": {
+            "description": "The organization."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No live `telmoni_` token was presented. A revoked, expired or unknown token answers the same way."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too many requests. The front door meters by source and by token before the request reaches a service, and says when to come back in `Retry-After`."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The lane is switched off, or something it needs did not answer. `Retry-After` says when to try again."
+          }
+        },
+        "summary": "Who this token is"
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "servers": [
+    {
+      "url": "https://telmoni.com"
+    }
+  ]
+}

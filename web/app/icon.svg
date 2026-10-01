@@ -1,0 +1,14 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>Telmoni</title>
+  <!-- Full-bleed, unlike the desktop's copy of this mark
+       (`crates/app/icon/telmoni.svg`), which insets the tile to 824 so it does
+       not stand taller than its Dock neighbours. A tab favicon renders at
+       16-32px against browser chrome, where an inset only spends pixels. -->
+  <rect width="1024" height="1024" fill="#09090b"/>
+  <g transform="translate(212 212) scale(6)">
+    <path d="M10 44 V90 H90 V44" fill="none" stroke="#fafafa" stroke-width="8"/>
+    <rect x="38" y="58" width="24" height="24" fill="#fafafa"/>
+    <rect x="44" y="8" width="12" height="12" fill="#fafafa"/>
+    <rect x="44" y="26" width="12" height="12" fill="#fafafa"/>
+  </g>
+</svg>

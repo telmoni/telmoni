@@ -1,0 +1,3 @@
+# actionlint configuration for GitHub Actions workflows.
+self-hosted-runner:
+  labels: []

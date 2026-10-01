@@ -1,0 +1,180 @@
+[workspace]
+resolver = "3"
+members  = ["crates/*"]
+
+[workspace.package]
+# Pre-release. `v0.1.0` is the finish line — the first release, cut only when every
+# roadmap phase is green. Everything until then is a `0.0.x` pre-release.
+version = "0.0.0"
+edition = "2024"
+# Rust 1.98.1. resolver "3" needs >=1.84. `rust-toolchain.toml` pins this exact
+# compiler so the workspace builds the same everywhere; rustup auto-installs it
+# on first cargo invocation. Nothing in the tree requires this exact floor —
+# it is the pinned compiler. Bump deliberately, in step with the pin.
+rust-version = "1.98.1"
+license      = "Apache-2.0"
+publish      = false
+
+# Release builds tuned for one small, fast binary (`crates/telmoni`, the
+# distroless/musl image). panic stays the default "unwind" so tokio isolates a
+# panicking task instead of aborting the whole process.
+[profile.release]
+lto           = "thin"
+codegen-units = 1
+strip         = "symbols"
+
+# Dev/test builds (test inherits this profile) each STATICALLY LINK an enormous
+# dependency graph — aws-lc + ring, google-cloud, sqlx —
+# into every one of the many test binaries. With full debuginfo those objects +
+# binaries are huge (target/debug alone runs to many GB), which exhausts a CI
+# runner's ~14 GB disk and SIGBUSes the linker (lld) mid-link. `line-tables-only`
+# keeps file:line in panic backtraces — a failing test stays debuggable — while
+# dropping the bulk (variable/type) debuginfo. This is the fix for the CI linker
+# crash, and it shrinks local `target/` + speeds links too; not a debuggability tax.
+[profile.dev]
+debug = "line-tables-only"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Web
+axum = { version = "0.8", features = ["macros", "multipart"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "request-id"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "macros", "migrate"] }
+
+# Utilities
+uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+# The subscriber, and the reason the services are not silent. `env-filter`
+# carries the per-target directives (`telmoni_auth::handler::tokens=debug`),
+# `json` is the shape a log collector parses, and the `reload` layer is what
+# lets `PUT /internal/log-level` change verbosity on a running pod without a
+# restart. See `crates/shared/src/logging.rs`.
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls", "multipart"], default-features = false }
+dotenvy = "0.15"
+base64  = "0.22"
+ring    = "0.17"
+async-trait = "0.1"
+subtle = "2"
+sha2 = "0.10"
+# `zeroize` wipes key material on drop — `telmoni-shared` uses it for the types
+# that carry a service credential.
+zeroize  = { version = "1", features = ["zeroize_derive"] }
+
+# Allocator — the binary's `#[global_allocator]`. The image is a static musl
+# build, and musl's own malloc serializes allocating threads on one lock.
+mimalloc = "0.1"
+
+# **A `[workspace.dependencies]` entry no member opts into compiles nothing**,
+# so it costs no build time — what it costs is a reader believing this Cargo
+# workspace has a surface it does not. Delete an entry with its last member.
+
+# ── Workspace lint policy ──────────────────────────────────────────────────────
+#
+# `unsafe_code = "deny"` is workspace-wide: zero `unsafe` blocks today and any
+# future one needs an explicit `#[allow(unsafe_code)]` with a rationale.
+# Every crate opts in via a `[lints] workspace = true` block in its Cargo.toml,
+# so these levels actually apply (without that opt-in, a crate gets clippy's
+# defaults and the denies below are silently skipped).
+#
+# The no-panic discipline (AGENTS.md): `unwrap`/`expect`/`panic!` are denied in
+# non-test code. `clippy.toml` re-allows them in tests; the few fail-fast startup
+# sites (`main()` wiring) carry a targeted `#[allow(clippy::expect_used)]` with a
+# rationale. Propagate everywhere else with `?` + `TelmoniError`.
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+# A `pub` item nothing outside the crate can name. In a `bin` crate that is
+# EVERY `pub` item — there is no downstream to name any of them — so the marker
+# says "part of an API" about something that has no API. `migrator`'s `rotate`
+# was the one hit when this landed, and the cost of the marker is not cosmetic:
+# a `pub fn` is invisible to the compiler's own dead-code pass, so an unreached
+# `pub` helper in a binary is a function nothing will ever report. `pub(crate)`
+# puts it back under that pass.
+#
+# An item a `tests/` integration crate calls is REACHABLE (those are separate
+# crates linking the lib), so this does not fight the test-only `pub` surfaces
+# in `crates/auth/src/lib.rs`.
+unreachable_pub = "deny"
+
+[workspace.lints.clippy]
+# `all` is a group → lower priority so the specific lints below override it.
+all = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+# `s[..n]` and `v[i]` panic exactly like `unwrap`, and the three denies above
+# said nothing about them. `clippy.toml` has carried
+# `allow-indexing-slicing-in-tests` since the no-panic rule landed — an
+# exemption for a lint no build ever enabled, so the config line was dead and
+# the discipline had a hole the size of every slice in the tree. Enabling them
+# closes it. A test file that scans source text indexes on purpose and says so
+# with a file-level `#![expect]`: a panicking helper there is a failing test,
+# which is the outcome you want.
+indexing_slicing = "deny"
+string_slice = "deny"
+# ── Idiom ────────────────────────────────────────────────────────────────────
+#
+# Each of these was fixed everywhere before it was turned on, so the level is
+# what holds the tree there rather than a backlog. `match_same_arms`,
+# `single_match_else`, `items_after_statements` and `needless_pass_by_value`
+# were considered and REFUSED: each fires on code that is deliberately written
+# the longer way — an enumerated `(Option, Option)` truth table, a `#[derive]`
+# next to its one use — and a lint that argues with intent gets suppressed
+# rather than obeyed. `redundant_pub_crate` is refused for a harder reason: it
+# wants the `pub(crate)` that `unreachable_pub` above just asked for.
+use_self = "warn"
+manual_let_else = "warn"
+unnested_or_patterns = "warn"
+ignored_unit_patterns = "warn"
+semicolon_if_nothing_returned = "warn"
+elidable_lifetime_names = "warn"
+needless_raw_string_hashes = "warn"
+map_unwrap_or = "warn"
+unused_async = "warn"
+useless_let_if_seq = "warn"
+unnecessary_wraps = "warn"
+# A `_ =>` over an enum silently absorbs the next variant. Wire enums are this
+# repo's spine, and `IncidentKind`'s wildcard was already labelling a
+# hypothetical third kind "has not reported".
+match_wildcard_for_single_variants = "warn"
+# `as` between numeric types truncates, wraps or rounds without a word. Every
+# site in the tree was a seconds count on its way into `make_interval`, cast to
+# `f64` because the SQL said `double precision`; casting in the SQL instead
+# keeps the Rust side an integer end to end.
+cast_possible_truncation = "warn"
+cast_precision_loss = "warn"
+cast_sign_loss = "warn"
+cast_possible_wrap = "warn"
+cast_lossless = "warn"
+todo = "warn"
+unimplemented = "warn"
+dbg_macro = "warn"
+# A suppression has to say WHY it is there. Suppressing a lint is a judgement
+# call, and the next reader can only tell a deliberate exemption from a
+# forgotten one if the reason is written down. Clippy runs with `-D warnings`,
+# so this is enforced, not advisory.
+allow_attributes_without_reason = "warn"
+# ...and it has to still be DOING something. `#[expect]` is `#[allow]` that
+# fails when the lint it names stops firing, so a suppression announces its own
+# death instead of sitting there absorbing the next real warning silently.
+#
+# `#[expect]` prevents suppressions from hiding inside live multi-lint blocks
+# where an obsolete lint attribute would otherwise remain undetected.
+#
+# The cost is a red build on a toolchain bump when a lint's behaviour changes.
+# That build is telling you a suppression is obsolete, which is the message you
+# want; `rust-toolchain.toml` pins the compiler, so it arrives deliberately.
+allow_attributes = "warn"

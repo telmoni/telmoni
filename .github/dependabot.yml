@@ -1,0 +1,91 @@
+# Dependabot keeps our third-party references current: the GitHub Actions and the
+# Docker base images. It only PROPOSES — nothing lands without a human merge.
+#
+# The Actions are on MAJOR tags (`uses: actions/checkout@v7`), not commit SHAs.
+# A SHA cannot be repointed and a tag can, so this trades that guarantee for
+# maintainer attention: major tags receive patches automatically without
+# opening PRs, and Dependabot opens a PR only for a major bump. Restoring SHA
+# pins would require accepting the review burden to keep them current.
+#
+# The Docker `FROM` lines stay DIGEST-pinned, because a base image is a whole
+# filesystem rather than one action's code, and a rebuilt tag changes what ships
+# without changing what the Dockerfile says.
+#
+# Deliberately NOT here — the language deps, which are LOCKS, not pins, and move on
+# purpose as a reviewed human change:
+#   - Cargo — advisories/licenses/bans/sources gate on every push (`cargo deny`, `make deny`) and
+#     the pinned Cargo.lock is re-checked daily against RustSec by `.github/workflows/audit.yml`.
+#   - npm (web/) — the lock is committed and `npm ci` builds it deterministically in CI.
+# Adding those would just churn PRs against locks we move deliberately.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    # Pinned to a day and hour rather than bare `weekly`, so the PR arrives when someone is
+    # looking instead of at whatever hour Dependabot picked.
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Chicago"
+    # No release is taken on the day it ships. A compromised or yanked version is usually caught
+    # within days, so waiting a week costs nothing here and is most of what a commit-SHA pin would
+    # have bought, without the review that keeps one honest.
+    cooldown:
+      default-days: 7
+    # `ci(deps): bump ...` rather than Dependabot's default `Bump ...`, so its PR lands as a
+    # Conventional Commit like every other commit in this tree.
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  # The service Dockerfiles (crates/<svc>/Dockerfile) + the web image (web/Dockerfile).
+  # Bumps the digest-pinned `FROM` lines (rust, node, distroless). These stay
+  # digest-pinned, so this is the one grouped PR a week that still needs a look.
+  #
+  # ⚠ Dependabot never renames an image, and a distroless name carries its Debian
+  # release (`static-debian13`, `nodejs24-debian13`). A release distroless drops
+  # from its README stops updating, so its digest never moves and no PR comes.
+  # Move the `-debianNN` suffix by hand when distroless moves on.
+  - package-ecosystem: "docker"
+    directories:
+      - "/crates/*"
+      - "/web"
+    # Pinned to a day and hour rather than bare `weekly`, so the PR arrives when someone is
+    # looking instead of at whatever hour Dependabot picked.
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Chicago"
+    # No release is taken on the day it ships. A compromised or yanked version is usually caught
+    # within days, so waiting a week costs nothing here and is most of what a commit-SHA pin would
+    # have bought, without the review that keeps one honest.
+    cooldown:
+      default-days: 7
+    # `ci(deps): bump ...` rather than Dependabot's default `Bump ...`, so its PR lands as a
+    # Conventional Commit like every other commit in this tree.
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    groups:
+      docker-base-images:
+        patterns:
+          - "*"
+    # ⚠ The web build stage must share a MAJOR with its distroless runtime, and
+    # the runtime carries its major in its name (`nodejs24-debian13`), which
+    # Dependabot never renames. A major bump of `node` moves both lines by hand;
+    # this ignore ensures Dependabot does not propose a mismatched major.
+    #
+    # The Rust images build with the compiler `rust-toolchain.toml` pins, a file
+    # Dependabot does not read, so a `rust` version bump here alone would ship
+    # binaries from a compiler CI never ran. The version moves with that file.
+    ignore:
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "rust"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
