@@ -1,8 +1,22 @@
+const EXCLUDED_ROOTS = new Set([
+  'api',
+  'auth',
+  'invite',
+  'connect',
+  'cli',
+  'console',
+  'account',
+  'legal',
+  '_next',
+  'favicon.ico',
+]);
+
 import { unsealData } from 'iron-session';
 import { type NextProxy, type NextRequest, NextResponse } from 'next/server';
 
 import { logger } from '@/lib/logger';
 import { isPublic } from '@/lib/proxy/public-paths';
+import { RESERVED_SLUGS, isValidSlug } from '@/lib/slug';
 
 async function isLoggedIn(request: NextRequest): Promise<boolean> {
   const value = request.cookies.get('telmoni_session')?.value;
@@ -75,25 +89,51 @@ export function legalRedirect(pathname: string): string | null {
   return `${base}/${LEGAL_ALIASES[name] ?? name}/`;
 }
 
+function applySecurityHeaders(
+  response: NextResponse,
+  csp?: string,
+): NextResponse {
+  if (csp) {
+    response.headers.set('content-security-policy', csp);
+  }
+  response.headers.set('x-frame-options', 'DENY');
+  response.headers.set('x-content-type-options', 'nosniff');
+  response.headers.set('referrer-policy', 'strict-origin-when-cross-origin');
+  response.headers.set(
+    'permissions-policy',
+    'camera=(), microphone=(), geolocation=()',
+  );
+  return response;
+}
+
 export const proxy: NextProxy = async (request) => {
   const { pathname } = request.nextUrl;
 
   if (pathname === '/legal' || pathname.startsWith('/legal/')) {
     const target = legalRedirect(pathname);
-    if (target) return NextResponse.redirect(target, 308);
+    if (target) return applySecurityHeaders(NextResponse.redirect(target, 308));
   }
 
   const loggedIn     = await isLoggedIn(request);
   const isProtected  = !isPublic(pathname);
 
+  if (pathname === '/organization' || pathname.startsWith('/organization/')) {
+    const activeOrg = request.cookies.get('telmoni-active-organization')?.value;
+    if (activeOrg && activeOrg !== 'organization' && (isValidSlug(activeOrg.toLowerCase()) || /^org_[0-9A-Za-z]+$/.test(activeOrg))) {
+      const rest = pathname.slice('/organization'.length);
+      const target = `/${activeOrg}${rest || ''}${request.nextUrl.search}`;
+      return applySecurityHeaders(NextResponse.redirect(new URL(target, request.url), 307));
+    }
+  }
+
   if (isProtected && !loggedIn) {
     if (pathname.startsWith('/api/')) {
-      return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
+      return applySecurityHeaders(NextResponse.json({ error: 'unauthenticated' }, { status: 401 }));
     }
     const entry = '/auth/login';
     const url = new URL(entry, request.url);
     url.searchParams.set('returnTo', pathname + request.nextUrl.search);
-    return NextResponse.redirect(url);
+    return applySecurityHeaders(NextResponse.redirect(url));
   }
 
   const nonce = btoa(crypto.randomUUID());
@@ -102,9 +142,37 @@ export const proxy: NextProxy = async (request) => {
   requestHeaders.set('x-nonce', nonce);
   requestHeaders.set('content-security-policy', csp);
 
+  const parts = pathname.split('/').filter(Boolean);
+  const first = parts[0];
+  let orgToSync: string | null = null;
+  if (first && !EXCLUDED_ROOTS.has(first.toLowerCase()) && !RESERVED_SLUGS.has(first.toLowerCase())) {
+    const isInternalOrgId = /^org_[0-9A-Za-z]+$/.test(first);
+    const isSlug = isValidSlug(first.toLowerCase());
+    if (isInternalOrgId || isSlug) {
+      const canonical = isInternalOrgId ? first : first.toLowerCase();
+      requestHeaders.set('x-telmoni-organization-id', canonical);
+      requestHeaders.set('x-telmoni-org-id', canonical);
+      orgToSync = canonical;
+    }
+  }
+
   const response = NextResponse.next({ request: { headers: requestHeaders } });
-  response.headers.set('content-security-policy', csp);
-  return response;
+  
+
+  if (orgToSync) {
+    const currentCookie = request.cookies.get('telmoni-active-organization')?.value;
+    if (currentCookie !== orgToSync) {
+      response.cookies.set('telmoni-active-organization', orgToSync, {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: 60 * 60 * 24 * 30,
+      });
+    }
+  }
+
+  return applySecurityHeaders(response, csp);
 };
 
 export const config = {

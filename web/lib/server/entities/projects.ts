@@ -5,6 +5,7 @@ import { fetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { compareProjects, compareProjectsByOrganization } from "@/lib/projects";
+import { projectMatches } from "@/lib/slug";
 import { asRole, type Role } from "@/lib/types/enums";
 
 import { organizationHeaders, identityContext } from "./identity-context";
@@ -12,10 +13,11 @@ import { organizationHeaders, identityContext } from "./identity-context";
 const ProjectSchema = z.object({
   id: z.string(),
   name: z.string(),
+  slug: z.string().nullable().optional(),
   role: z.string(),
 });
 
-export type Project = { id: string; name: string; role: Role | null };
+export type Project = { id: string; name: string; slug?: string | null; role: Role | null };
 
 export type ProjectListing =
   | { kind: "ok"; projects: Project[] }
@@ -58,7 +60,7 @@ export const fetchProjects = cache(async (): Promise<Project[]> => {
 export const fetchProject = cache(
   async (projectId: string): Promise<Project | null> => {
     const list = await fetchProjects();
-    return list.find((t) => t.id === projectId) ?? null;
+    return list.find((t) => projectMatches(t, projectId)) ?? null;
   },
 );
 

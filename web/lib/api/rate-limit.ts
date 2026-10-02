@@ -154,6 +154,8 @@ export function clientKeyFromHeaders(headers: Headers, scope: string): string {
 }
 
 function trustedClientIp(headers: Headers): string {
+  const cf = headers.get("cf-connecting-ip")?.trim();
+  if (cf) return cf;
   const parts = headers
     .get("x-forwarded-for")
     ?.split(",")
@@ -161,7 +163,7 @@ function trustedClientIp(headers: Headers): string {
     .filter(Boolean);
   if (parts && parts.length >= 2) return parts[parts.length - 2]!;
   if (parts && parts.length === 1) return parts[0]!;
-  return headers.get("x-real-ip") || "unknown";
+  return headers.get("x-real-ip")?.trim() || "unknown";
 }
 
 const SLIDING_WINDOW_LUA = `

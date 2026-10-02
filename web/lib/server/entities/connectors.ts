@@ -87,7 +87,7 @@ export const fetchConnectors = cache(
     if (!ctx || !project) return null;
     try {
       const res = await fetchWithTimeout(`${base}/internal/connectors`, {
-        headers: projectHeaders(ctx, projectId),
+        headers: projectHeaders(ctx, project.id),
         cache: "no-store",
       });
       if (!res.ok) {

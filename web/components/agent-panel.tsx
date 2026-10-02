@@ -20,7 +20,7 @@ import {
   initialAgentState,
   isAgentDisabled,
 } from "@/lib/agent/stream";
-import { isOrganizationSegment, rootSegment } from "@/lib/console-nav";
+import { projectMatches } from "@/lib/slug";
 import { AGENT_MODIFIER_KEY } from "@/lib/keys";
 import { useProjects } from "@/lib/store";
 import { AGENT_MESSAGE_MAX, type AgentStatus } from "@/lib/types/agent";
@@ -35,13 +35,10 @@ export function AgentPanel() {
   const { projectId: routeProjectId } = useParams<{ projectId?: string }>();
   const projects = useProjects();
   const rawProjectId = typeof routeProjectId === "string" ? routeProjectId : null;
-  // An organization segment is not a project; the agent requires a project.
-  const projectId =
-    rawProjectId &&
-    !isOrganizationSegment(rootSegment(rawProjectId)) &&
-    projects.some((p) => p.id === rawProjectId)
-      ? rawProjectId
-      : null;
+  const activeProject = rawProjectId
+    ? projects.find((p) => projectMatches(p, rawProjectId))
+    : null;
+  const projectId = activeProject?.id ?? null;
 
   const [status, setStatus] = useState<{ projectId: string; status: AgentStatus } | null>(null);
   const [view, setView] = useState<View>("conversation");

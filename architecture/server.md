@@ -274,8 +274,8 @@ The sweeps, `terminate` and `restore` are run by hand, or by an operator's own j
 | `sweep audit-verify` | Walks every audit chain and logs any break. It never repairs. |
 | `sweep retention` | Auth's retention, once |
 | `sweep agent-reindex` | Re-embeds every passage a different embedding model made |
-| `terminate <org>` | Marks an organization for deletion, as the operator, audited as the operator |
-| `restore <org>` | Restores a deletion the owner or an operator asked for, for as long as the row stands, even past the window. It refuses an organization taken by an account deletion. |
+| `terminate <organization>` | Marks an organization for deletion, as the operator, audited as the operator |
+| `restore <organization>` | Restores a deletion the owner or an operator asked for, for as long as the row stands, even past the window. It refuses an organization taken by an account deletion. |
 
 ## The wire contract
 

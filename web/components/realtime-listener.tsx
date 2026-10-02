@@ -7,17 +7,47 @@ import {
   useActiveOrganizationId,
   useIncomingInvites,
   useOrganizations,
+  useProjects,
   useAddIncomingInvite,
   useRemoveIncomingInvite,
 } from "@/lib/store";
+import { organizationMatches, projectMatches } from "@/lib/slug";
 import { RealtimeEventDataSchema } from "@/lib/events/types";
 
 const RETRY_MS = 30_000;
 
-const ROSTER_PAGES = /^\/[^/]+\/(members|audit-log)$/;
+const ROSTER_PAGES = /^\/[^/]+(?:\/[^/]+)?\/(members|audit-log)$/;
 
-function matchesProject(pathname: string, projectId: string): boolean {
-  return pathname === `/${projectId}` || pathname.startsWith(`/${projectId}/`);
+function matchesProject(
+  pathname: string,
+  projectId: string,
+  organizationId?: string,
+  projects: readonly { id: string; slug?: string | null }[] = [],
+  organizations: readonly { organizationId: string; slug?: string | null }[] = [],
+): boolean {
+  if (pathname === `/${projectId}` || pathname.startsWith(`/${projectId}/`)) {
+    return true;
+  }
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts.length >= 2) {
+    const rawOrg = parts[0];
+    const rawPrj = parts[1];
+    const orgMatches =
+      !organizationId ||
+      rawOrg === organizationId ||
+      organizations.some((o) => o.organizationId === organizationId && organizationMatches(o, rawOrg));
+    const prjMatches =
+      rawPrj === projectId ||
+      projects.some((p) => p.id === projectId && projectMatches(p, rawPrj));
+    if (orgMatches && prjMatches) return true;
+  }
+  if (parts.length >= 1) {
+    const rawPrj = parts[0];
+    if (projects.some((p) => p.id === projectId && projectMatches(p, rawPrj))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function payload<K extends keyof typeof RealtimeEventDataSchema>(
@@ -43,16 +73,21 @@ export function RealtimeListener() {
   const removeInvite = useRemoveIncomingInvite();
   const memberships = useOrganizations();
   const incomingInvites = useIncomingInvites();
+  const projects = useProjects();
   const activeOrganizationId = useActiveOrganizationId();
   const esRef = useRef<EventSource | null>(null);
 
   const pathnameRef = useRef(pathname);
   const invitesRef = useRef(incomingInvites);
   const activeOrgIdRef = useRef(activeOrganizationId);
+  const projectsRef = useRef(projects);
+  const membershipsRef = useRef(memberships);
   useEffect(() => {
     pathnameRef.current = pathname;
     invitesRef.current = incomingInvites;
     activeOrgIdRef.current = activeOrganizationId;
+    projectsRef.current = projects;
+    membershipsRef.current = memberships;
   });
 
   const membershipKey = memberships
@@ -130,11 +165,25 @@ export function RealtimeListener() {
 
         const isAccountPage = pathnameRef.current.startsWith("/account");
         const isCurrentProject = Boolean(
-          data.projectId && matchesProject(pathnameRef.current, data.projectId),
+          data.projectId &&
+            matchesProject(
+              pathnameRef.current,
+              data.projectId,
+              data.organizationId,
+              projectsRef.current,
+              membershipsRef.current,
+            ),
         );
         const isCurrentOrg = Boolean(
           !data.projectId &&
-            data.organizationId === activeOrgIdRef.current &&
+            (data.organizationId === activeOrgIdRef.current ||
+              pathnameRef.current.startsWith(`/${data.organizationId}`) ||
+              membershipsRef.current.some(
+                (o) =>
+                  o.organizationId === data.organizationId &&
+                  (pathnameRef.current === `/${o.slug}` ||
+                    pathnameRef.current.startsWith(`/${o.slug}/`)),
+              )) &&
             !isAccountPage,
         );
 
@@ -160,28 +209,15 @@ export function RealtimeListener() {
 
     connect();
 
-    const handleVisibilityOrOnline = () => {
-      if (document.visibilityState === "visible" && active) {
-        if (!esRef.current || esRef.current.readyState === EventSource.CLOSED) {
-          connect();
-        }
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityOrOnline);
-    window.addEventListener("online", handleVisibilityOrOnline);
-
     return () => {
       active = false;
       if (retryTimer) clearTimeout(retryTimer);
-      document.removeEventListener("visibilitychange", handleVisibilityOrOnline);
-      window.removeEventListener("online", handleVisibilityOrOnline);
       if (esRef.current) {
         esRef.current.close();
         esRef.current = null;
       }
     };
-  }, [addInvite, removeInvite, router, membershipKey]);
+  }, [router, addInvite, removeInvite, membershipKey]);
 
   return null;
 }

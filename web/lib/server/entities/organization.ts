@@ -32,6 +32,7 @@ export type Person = z.infer<typeof PersonSchema>;
 const OrganizationEntrySchema = z.object({
   organizationId:          z.string(),
   name:                    z.string().nullable().optional(),
+  slug:                    z.string().nullable().optional(),
   ownerEmail:              z.string().nullable().optional(),
   ownerDisplayName:        z.string().nullable().optional(),
   role:                    z.enum(["owner", "admin", "member"]),
@@ -124,9 +125,14 @@ async function userAgent(): Promise<string | null> {
   }
 }
 
-/// The organization the cookie asks to act in, if one is set. A request, not a
+/// The organization the cookie or path asks to act in, if one is set. A request, not a
 /// claim: auth answers with it only when the person is in it.
 async function requestedOrganization(): Promise<string | null> {
+  try {
+    const h = await headers();
+    const fromHeader = h.get("x-telmoni-organization-id") || h.get("x-telmoni-org-id");
+    if (fromHeader) return fromHeader;
+  } catch {}
   try {
     return (await cookies()).get(ACTIVE_ORGANIZATION_COOKIE)?.value ?? null;
   } catch {

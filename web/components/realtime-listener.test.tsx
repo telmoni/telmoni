@@ -20,6 +20,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/store", () => ({
   useIncomingInvites: () => [],
   useOrganizations: () => [{ organizationId: "org_1" }],
+  useProjects: () => [{ id: "project_1", slug: "my-project" }],
   useActiveOrganizationId: () => mockActiveOrgId,
   useAddIncomingInvite: () => vi.fn(),
   useRemoveIncomingInvite: () => vi.fn(),

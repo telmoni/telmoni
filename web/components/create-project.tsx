@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/select";
 import { createProjectAction } from "@/app/(app)/actions";
 import { organizationLabel } from "@/lib/identity";
+import { organizationMatches, organizationSegment, projectSegment } from "@/lib/slug";
 import { useAddProject, useOrganizations, useRoles } from "@/lib/store";
 import { Role } from "@/lib/types/enums";
 
@@ -80,6 +81,7 @@ export function CreateProjectDialog({
 }) {
   const router = useRouter();
   const addProject = useAddProject();
+  const organizations = useOrganizations();
   const targets = useCreateProjectTargets();
   const [name, setName] = useState("");
   const [target, setTarget] = useState(
@@ -104,7 +106,10 @@ export function CreateProjectDialog({
         toast.success("Project created.");
         if (res.project) {
           addProject(res.project);
-          router.push(`/${res.project.id}`);
+          const targetOrg = organizations.find((o) => organizationMatches(o, target));
+          const targetOrgSeg = targetOrg ? organizationSegment(targetOrg) : target;
+          const prjSeg = projectSegment(res.project);
+          router.push(`/${targetOrgSeg}/${prjSeg}`);
         } else {
           router.refresh();
         }

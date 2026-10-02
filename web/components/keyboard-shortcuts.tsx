@@ -3,7 +3,7 @@
 import { useConsoleUi } from "@/components/console-ui-context";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter, useSelectedLayoutSegment } from "next/navigation";
+import { usePathname, useRouter, useSelectedLayoutSegment } from "next/navigation";
 
 import {
   Dialog,
@@ -53,10 +53,7 @@ function setSingleKeysDisabled(next: boolean) {
 
 export function KeyboardShortcuts() {
   const router = useRouter();
-  // Where you are, from the router: the segment right under the console layout
-  // is a project id, `organization` or `account`. Not a split of the pathname —
-  // that is a copy of the URL scheme, which has one home in `rootSegment`, and
-  // a component asks the router.
+  const pathname = usePathname();
   const root = useSelectedLayoutSegment();
   const pageAction = usePagePrimaryAction();
   const isMac = useIsMac();
@@ -79,19 +76,13 @@ export function KeyboardShortcuts() {
     }
   }, []);
 
-  // The keydown handler needs the page's primary action, which changes as you
-  // navigate. Reading it from a ref lets the listener below bind once; naming
-  // it as a dependency would re-add a document-level listener on every render.
-  // Ref-sync effect with no dependency array, as in realtime-listener.tsx.
   const pageActionRef = useRef(pageAction);
-  // Six of the eight sequences are project-relative, so where you ARE decides
-  // where `g k` goes. Through a ref for the same reason as the page action:
-  // naming the segment as a dependency re-binds a document listener on every
-  // navigation, and this one has to survive them.
   const rootRef = useRef(root);
+  const pathRef = useRef(pathname);
   useEffect(() => {
     pageActionRef.current = pageAction;
     rootRef.current = root;
+    pathRef.current = pathname;
   });
 
   useEffect(() => {
@@ -119,7 +110,7 @@ export function KeyboardShortcuts() {
 
       if (pendingG.current) {
         clearPending();
-        const href = resolveSequence(k, rootRef.current);
+        const href = resolveSequence(k, pathRef.current || rootRef.current);
         if (href) {
           e.preventDefault();
           router.push(href);
@@ -150,32 +141,13 @@ export function KeyboardShortcuts() {
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [router, openSheet, clearPending, openSearch]);
+  }, [openSearch, openSheet, clearPending, router]);
 
-
-  const q = filter.trim().toLowerCase();
-  const modifier = isMac ? "\u2318" : "Ctrl";
-  // ⚠ **The same missing argument as the handler, and here it silently
-  // widened the sheet instead of breaking a key.** This filter is meant to
-  // hide the sequences that have no destination from where you stand; with no
-  // root every one of them resolved to something, so it hid nothing and the
-  // sheet promised `g k` on the organization pages, where it does not go.
-  // Straight from the segment rather than the ref: the sheet re-renders.
-  const rows = GO_SEQUENCES.filter(
+  const visibleSequences = GO_SEQUENCES.filter(
     (s) =>
-      resolveSequence(s.key, root) !== null &&
-      s.label.toLowerCase().includes(q),
+      s.label.toLowerCase().includes(filter.toLowerCase()) ||
+      s.key.toLowerCase().includes(filter.toLowerCase()),
   );
-  const extras = [
-    ...(pageAction
-      ? [{ label: pageAction.label, keys: [PAGE_ACTION_KEY.toUpperCase()] }]
-      : []),
-    { label: "Search", keys: [modifier, "K"] },
-    { label: "Search", keys: [SEARCH_KEY] },
-    { label: "Ask the agent", keys: [modifier, AGENT_MODIFIER_KEY.toUpperCase()] },
-    { label: "Open the organization menu", keys: [modifier, "Shift", "K"] },
-    { label: "This sheet", keys: ["?"] },
-  ].filter((c) => c.label.toLowerCase().includes(q));
 
   return (
     <Dialog
@@ -185,70 +157,93 @@ export function KeyboardShortcuts() {
         if (!next) setFilter("");
       }}
     >
-      <DialogContent className="max-w-md">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Keyboard shortcuts</DialogTitle>
-        </DialogHeader>
-        {/* A column rather than the body's own scroll, so the filter holds
-            still at the top and only the list under it scrolls. */}
-        <DialogBody className="flex flex-col overflow-hidden">
           <DialogDescription>
-            Go anywhere without the mouse. Everything here is also a link or
-            a button in the console.
+            Press these keys while not typing in an input field.
           </DialogDescription>
+        </DialogHeader>
+
+        <DialogBody className="space-y-4">
           <Input
-            aria-label="Filter shortcuts"
-            placeholder="Filter shortcuts…"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter shortcuts…"
+            aria-label="Filter shortcuts"
+            className="h-8"
           />
-          <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
-            {rows.map((s) => (
-              <div
-                key={s.key}
-                className="flex h-8 items-center justify-between text-sm"
-              >
-                <span>{s.label}</span>
-                <KbdGroup>
-                  <Kbd>G</Kbd>
-                  <Kbd>{/^[A-Z]$/.test(s.key) ? `⇧ ${s.key}` : s.key.toUpperCase()}</Kbd>
-                </KbdGroup>
+
+          <div className="space-y-4 text-xs">
+            <div>
+              <div className="mb-2 font-medium text-muted-foreground">
+                Navigation (press g, then key)
               </div>
-            ))}
-            {extras.map((c) => (
-              <div
-                // The label alone repeats: Search is listed under both of
-                // its keys.
-                key={`${c.label}:${c.keys.join("+")}`}
-                className="flex h-8 items-center justify-between text-sm"
-              >
-                <span>{c.label}</span>
-                <KbdGroup>
-                  {c.keys.map((k) => (
-                    <Kbd key={k}>{k}</Kbd>
-                  ))}
-                </KbdGroup>
+              <div className="space-y-1">
+                {visibleSequences.map((s) => (
+                  <div
+                    key={s.key}
+                    className="flex items-center justify-between py-1"
+                  >
+                    <span>{s.label}</span>
+                    <KbdGroup>
+                      <Kbd>g</Kbd>
+                      <Kbd>{s.key}</Kbd>
+                    </KbdGroup>
+                  </div>
+                ))}
               </div>
-            ))}
-            {rows.length === 0 && extras.length === 0 && (
-              <p className="py-2 text-sm text-muted-foreground">
-                No shortcut matches.
-              </p>
-            )}
+            </div>
+
+            <div>
+              <div className="mb-2 font-medium text-muted-foreground">
+                Actions
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between py-1">
+                  <span>Open search</span>
+                  <KbdGroup>
+                    <Kbd>{isMac ? "⌘" : "Ctrl"}</Kbd>
+                    <Kbd>K</Kbd>
+                  </KbdGroup>
+                </div>
+                <div className="flex items-center justify-between py-1">
+                  <span>Open search (alternate)</span>
+                  <Kbd>/</Kbd>
+                </div>
+                <div className="flex items-center justify-between py-1">
+                  <span>Toggle assistant</span>
+                  <KbdGroup>
+                    <Kbd>{isMac ? "⌘" : "Ctrl"}</Kbd>
+                    <Kbd>{AGENT_MODIFIER_KEY.toUpperCase()}</Kbd>
+                  </KbdGroup>
+                </div>
+                <div className="flex items-center justify-between py-1">
+                  <span>Primary page action</span>
+                  <Kbd>{PAGE_ACTION_KEY}</Kbd>
+                </div>
+                <div className="flex items-center justify-between py-1">
+                  <span>This sheet</span>
+                  <Kbd>?</Kbd>
+                </div>
+              </div>
+            </div>
           </div>
         </DialogBody>
-        {/* The sheet's one control is its footer, where every modal keeps
-            what it lets you act on. */}
-        <DialogFooter className="justify-between">
-          <Label htmlFor="single-key-shortcuts" className="font-normal">
-            Single-key shortcuts
+
+        <DialogFooter className="flex-row items-center justify-between sm:justify-between border-t pt-3">
+          <Label
+            htmlFor="single-keys-toggle"
+            className="text-xs text-muted-foreground cursor-pointer"
+          >
+            Enable single-key shortcuts
           </Label>
           <Switch
-            id="single-key-shortcuts"
+            id="single-keys-toggle"
             checked={!disabled}
-            onCheckedChange={(on) => {
-              setDisabled(!on);
-              setSingleKeysDisabled(!on);
+            onCheckedChange={(enabled) => {
+              setDisabled(!enabled);
+              setSingleKeysDisabled(!enabled);
             }}
           />
         </DialogFooter>

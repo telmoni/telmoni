@@ -4,6 +4,7 @@ import {
   ACCOUNT_SEGMENT,
   isAccountPath,
   isOrganizationSegment,
+  parseConsolePath,
   rootSegment,
 } from "@/lib/console-nav";
 
@@ -65,6 +66,21 @@ export function isReturnablePath(path: string): path is ReturnablePath {
   return path !== "/console";
 }
 
+export function trailResource(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length === 1) {
+    return parts[0] === "organization" ? "organization" : parts[0];
+  }
+  const parsed = parseConsolePath(path);
+  if (parsed.mode === "project" && parsed.projectId) {
+    return parsed.projectId;
+  }
+  if (parsed.mode === "organization") {
+    return parsed.organizationId ?? parsed.orgId ?? "organization";
+  }
+  return rootSegment(path);
+}
+
 /**
  * The trail after arriving at `path`. Same reference back when nothing would
  * change — the path is refused, or it is already the head — and that is a
@@ -73,8 +89,8 @@ export function isReturnablePath(path: string): path is ReturnablePath {
  */
 export function pushPath(trail: ConsoleTrail, path: string): ConsoleTrail {
   if (!isReturnablePath(path) || trail[0] === path) return trail;
-  const resource = rootSegment(path);
-  return [path, ...trail.filter((p) => rootSegment(p) !== resource)].slice(
+  const resource = trailResource(path);
+  return [path, ...trail.filter((p) => trailResource(p) !== resource)].slice(
     0,
     TRAIL_LIMIT,
   );
@@ -101,7 +117,7 @@ export function parseTrail(raw: string | null): ConsoleTrail {
   const trail: ReturnablePath[] = [];
   for (const path of parsed.data) {
     if (!isReturnablePath(path)) continue;
-    const resource = rootSegment(path);
+    const resource = trailResource(path);
     if (seen.has(resource)) continue;
     seen.add(resource);
     trail.push(path);
@@ -110,8 +126,19 @@ export function parseTrail(raw: string | null): ConsoleTrail {
   return trail.length === 0 ? EMPTY_TRAIL : trail;
 }
 
-function isLiveResource(resource: string, projectIds: readonly string[]): boolean {
-  return isOrganizationSegment(resource) || projectIds.includes(resource);
+function isLiveResource(path: string, projectIds: readonly string[]): boolean {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length === 1) {
+    const root = parts[0];
+    return isOrganizationSegment(root) || projectIds.includes(root);
+  }
+  const parsed = parseConsolePath(path);
+  if (parsed.mode === "organization") return true;
+  if (parsed.mode === "project" && parsed.projectId) {
+    return projectIds.includes(parsed.projectId);
+  }
+  const root = rootSegment(path);
+  return isOrganizationSegment(root) || projectIds.includes(root);
 }
 
 /**
@@ -133,9 +160,7 @@ export function resolveReturnUrl(
   projectIds: readonly string[],
   fallback: string,
 ): string {
-  return (
-    trail.find((p) => isLiveResource(rootSegment(p), projectIds)) ?? fallback
-  );
+  return trail.find((p) => isLiveResource(p, projectIds)) ?? fallback;
 }
 
 /**
@@ -160,7 +185,9 @@ export function standingResource(
 ): string {
   if (segment !== ACCOUNT_SEGMENT) return segment;
   const first = projectIds[0];
-  return rootSegment(resolveReturnUrl(trail, projectIds, first ? `/${first}` : ""));
+  const returnUrl = resolveReturnUrl(trail, projectIds, first ? `/${first}` : "");
+  if (!returnUrl) return "";
+  return trailResource(returnUrl);
 }
 
 /**
@@ -170,6 +197,28 @@ export function standingResource(
  * The resource is one the selector is already drawing, so it needs no liveness
  * check — the list IS the check.
  */
-export function resourceUrl(trail: ConsoleTrail, resource: string): string {
-  return trail.find((p) => rootSegment(p) === resource) ?? `/${resource}`;
+export function resourceUrl(
+  trail: ConsoleTrail,
+  resource: string,
+  organizationId?: string | null,
+): string {
+  if (resource === "organization" || isOrganizationSegment(resource)) {
+    const match = trail.find((p) => {
+      const parsed = parseConsolePath(p);
+      return (
+        parsed.mode === "organization" &&
+        (!organizationId || parsed.organizationId === organizationId)
+      );
+    });
+    if (match) return match;
+    return organizationId ? `/${organizationId}` : "/organization";
+  }
+  const match = trail.find((p) => {
+    const parts = p.split("/").filter(Boolean);
+    if (parts.length === 1 && parts[0] === resource) return true;
+    const parsed = parseConsolePath(p);
+    return parsed.mode === "project" && parsed.projectId === resource;
+  });
+  if (match) return match;
+  return organizationId ? `/${organizationId}/${resource}` : `/${resource}`;
 }

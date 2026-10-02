@@ -8,13 +8,13 @@ import { ArrowLeft } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   buildConsoleNav,
-  isOrganizationSegment,
-  rootSegment,
+  parseConsolePath,
   type ConsoleNavItem,
 } from "@/lib/console-nav";
 import { resolveReturnUrl } from "@/lib/console-trail";
 import { PRODUCT_NAME } from "@/lib/site";
-import { useFlags, useProjects } from "@/lib/store";
+import { organizationSegment, projectSegment } from "@/lib/slug";
+import { useActiveOrganizationId, useFlags, useOrganizations, useProjects } from "@/lib/store";
 import { useConsoleTrail } from "@/lib/use-console-trail";
 import { cn } from "@/lib/utils";
 import { useSidebar } from "./sidebar-context";
@@ -121,12 +121,21 @@ export function ConsoleSidebar() {
   const groups = buildConsoleNav(pathname, segment, flags);
   const steppedIn = groups[0]?.title === "Account";
   const returnProject = projects.find((p) => p.id !== "organization" && p.id !== "org") ?? projects[0];
+  const activeOrgId = useActiveOrganizationId();
+  const organizations = useOrganizations();
+  const activeOrg = organizations.find((o) => o.organizationId === activeOrgId);
+  const activeOrgSegment = activeOrg ? organizationSegment(activeOrg) : (activeOrgId ?? undefined);
+  const returnProjectSegment = returnProject ? projectSegment(returnProject) : undefined;
+  const fallbackUrl = returnProjectSegment
+    ? (activeOrgSegment ? `/${activeOrgSegment}/${returnProjectSegment}` : `/${returnProjectSegment}`)
+    : (activeOrgSegment ? `/${activeOrgSegment}` : "/console");
   const returnUrl = resolveReturnUrl(
     trail,
-    projects.map((t) => t.id),
-    returnProject ? `/${returnProject.id}` : "/console",
+    projects.flatMap((t) => [t.id, ...(t.slug ? [t.slug] : [])]),
+    fallbackUrl,
   );
-  const returnLabel = isOrganizationSegment(rootSegment(returnUrl))
+  const returnParsed = parseConsolePath(returnUrl);
+  const returnLabel = returnParsed.mode === "organization"
     ? "Back to organization"
     : "Back to project";
 

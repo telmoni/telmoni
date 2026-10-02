@@ -198,3 +198,20 @@ describe("which resource the chrome names", () => {
     expect(standingResource("account", EMPTY_TRAIL, [])).toBe("");
   });
 });
+
+describe("hierarchical slug trails", () => {
+  it("tracks organization and project pages by slug resource", () => {
+    const trail = walk("/acme/web-app", "/acme/projects");
+    expect(trail).toEqual(["/acme/projects", "/acme/web-app"]);
+  });
+
+  it("replaces trail entry when navigating within the same project by slug", () => {
+    const trail = walk("/acme/web-app", "/acme/web-app/connectors");
+    expect(trail).toEqual(["/acme/web-app/connectors"]);
+  });
+
+  it("replaces trail entry when navigating within the same organization by slug", () => {
+    const trail = walk("/acme/projects", "/acme/billing");
+    expect(trail).toEqual(["/acme/billing"]);
+  });
+});

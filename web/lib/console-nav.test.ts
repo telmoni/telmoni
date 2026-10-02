@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { FileText, Settings, Users } from "lucide-react";
 
-import { buildConsoleNav, isAccountPath, rootSegment, withExtraItems } from "./console-nav";
+import { buildConsoleNav, isAccountPath, parseConsolePath, rootSegment, withExtraItems } from "./console-nav";
 import { Flag } from "./types/enums";
 
 describe("buildConsoleNav", () => {
@@ -323,5 +323,70 @@ describe("withExtraItems", () => {
   it("adds a row only to the group it names", () => {
     const row = { group: "Project" as const, title: "Reports", path: "/reports", icon: FileText };
     expect(titles(withExtraItems(core, [row]))).toEqual(["Members", "Settings"]);
+  });
+});
+
+describe("parseConsolePath", () => {
+  it("parses organization routes with actions including billing", () => {
+    expect(parseConsolePath("/acme/billing")).toEqual({
+      organizationId: "acme",
+      orgId: "acme",
+      projectId: null,
+      mode: "organization",
+    });
+    expect(parseConsolePath("/acme/projects")).toEqual({
+      organizationId: "acme",
+      orgId: "acme",
+      projectId: null,
+      mode: "organization",
+    });
+    expect(parseConsolePath("/acme/settings")).toEqual({
+      organizationId: "acme",
+      orgId: "acme",
+      projectId: null,
+      mode: "organization",
+    });
+    expect(parseConsolePath("/acme/members")).toEqual({
+      organizationId: "acme",
+      orgId: "acme",
+      projectId: null,
+      mode: "organization",
+    });
+  });
+
+  it("parses nested project routes and project subpages under organization", () => {
+    expect(parseConsolePath("/acme/web-app")).toEqual({
+      organizationId: "acme",
+      orgId: "acme",
+      projectId: "web-app",
+      mode: "project",
+    });
+    expect(parseConsolePath("/acme/web-app/connectors")).toEqual({
+      organizationId: "acme",
+      orgId: "acme",
+      projectId: "web-app",
+      mode: "project",
+    });
+    expect(parseConsolePath("/acme/web-app/api-keys")).toEqual({
+      organizationId: "acme",
+      orgId: "acme",
+      projectId: "web-app",
+      mode: "project",
+    });
+  });
+
+  it("handles account, console, and bare organization paths", () => {
+    expect(parseConsolePath("/account/settings")).toEqual({
+      organizationId: null,
+      orgId: null,
+      projectId: null,
+      mode: "account",
+    });
+    expect(parseConsolePath("/organization")).toEqual({
+      organizationId: "organization",
+      orgId: "organization",
+      projectId: null,
+      mode: "organization",
+    });
   });
 });

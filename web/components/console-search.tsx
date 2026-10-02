@@ -27,8 +27,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-import { rootSegment } from "@/lib/console-nav";
-import { useProjects } from "@/lib/store";
+import { parseConsolePath, rootSegment } from "@/lib/console-nav";
+import { projectMatches } from "@/lib/slug";
+import { useActiveOrganizationId, useOrganizations, useProjects } from "@/lib/store";
+import { organizationSegment, projectSegment } from "@/lib/slug";
 import { SEARCH_MODIFIER_KEY } from "@/lib/keys";
 import {
   GROUP_LABELS,
@@ -54,11 +56,17 @@ export function ConsoleSearch() {
   const router = useRouter();
   const { projectId } = useParams<{ projectId?: string }>();
   const projects = useProjects();
+  const organizations = useOrganizations();
+  const activeOrgId = useActiveOrganizationId();
+  const activeOrg = organizations.find((o) => o.organizationId === activeOrgId);
+  const activeOrgSeg = activeOrg ? organizationSegment(activeOrg) : activeOrgId;
+  const activeProject = projects.find((p) => projectMatches(p, projectId ?? ""));
+  const resolvedProjectId = activeProject?.id ?? projectId;
 
   const { searchOpen: open, setSearchOpen: setOpen } = useConsoleUi();
   const [query, setQuery] = useState("");
   const [recent, setRecent] = useState<RecentVisit[]>([]);
-  const { index, indexError, loading } = useSearchIndex(open, projectId);
+  const { index, indexError, loading } = useSearchIndex(open, resolvedProjectId);
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -98,9 +106,10 @@ export function ConsoleSearch() {
 
   const placeOf = useCallback(
     (href: string) => {
-      const segment = rootSegment(href);
-      if (segment === "organization") return "Organization";
-      return projects.find((t) => t.id === segment)?.name;
+      const parsed = parseConsolePath(href);
+      if (parsed.mode === "organization") return "Organization";
+      const id = parsed.projectId ?? rootSegment(href);
+      return projects.find((t) => t.id === id)?.name;
     },
     [projects],
   );
@@ -117,12 +126,13 @@ export function ConsoleSearch() {
       });
     }
     for (const project of projects) {
+      const prjSeg = projectSegment(project);
       out.push({
         id: `project:${project.id}`,
         kind: "project",
         label: project.name,
         hint: project.id,
-        href: `/${project.id}`,
+        href: activeOrgSeg ? `/${activeOrgSeg}/${prjSeg}` : `/${prjSeg}`,
       });
     }
     if (index) {
@@ -131,7 +141,7 @@ export function ConsoleSearch() {
       }
     }
     return out;
-  }, [recent, projects, index, placeOf]);
+  }, [recent, projects, activeOrgSeg, index, placeOf]);
 
   const docsItem = useMemo<SearchItem>(() => {
     const typed = query.trim();

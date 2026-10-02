@@ -117,7 +117,7 @@ describe("acceptInviteAction", () => {
       "bfev:organization:org_owner",
       { type: "invite:resolved", data: { inviteId: "inv_123" } },
     );
-    expect(vi.mocked(revalidatePath)).toHaveBeenCalledWith("/organization/projects");
+    expect(vi.mocked(revalidatePath)).toHaveBeenCalledWith("/", "layout");
   });
 
   it("tells each stakeholder once when the inviter is the accepting person's own address", async () => {

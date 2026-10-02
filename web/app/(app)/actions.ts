@@ -17,6 +17,7 @@ import { getServerContext } from "@/lib/server/entities/organization";
 import type { Project } from "@/lib/server/entities/projects";
 import { getServerSession } from "@/lib/server/session";
 import { asRole } from "@/lib/types/enums";
+import { isValidSlug, organizationMatches, organizationSegment } from "@/lib/slug";
 
 const PROJECT_ID = /^project_[0-9A-Za-z]{16}$/;
 
@@ -33,30 +34,21 @@ export async function switchActiveOrganizationAction(
   // Every organization the person is in is an entry, their own included; a
   // cookie naming anything else would be ignored by auth anyway, and a switch
   // that silently does nothing looks like it worked.
-  if (!ctx.organizations.some((o) => o.organizationId === targetOrganizationId)) {
+  const targetOrg = ctx.organizations.find((o) => organizationMatches(o, targetOrganizationId));
+  if (!targetOrg) {
     throw new Error("Unauthorized organization switch");
   }
 
-  await setActiveOrganizationCookie(targetOrganizationId);
+  await setActiveOrganizationCookie(targetOrg.organizationId);
 
-  // ⚠ **An ORGANIZATION row lands on the organization.** This was `/console`,
-  // which resolves the caller's project listing and redirects to the FIRST project —
-  // the right landing for a sign-in, and the wrong one here. Somebody who
-  // picked an organization out of the switcher was dropped inside one of its
-  // projects and had to reopen the switcher to reach the thing they had just
-  // clicked. One rule for every row: an organization row goes to the
-  // organization, a project row goes to the project.
-  //
-  // ⚠ **No trail here, unlike the rows for the ACTIVE organization.** Those
-  // return you to the page you were last on in a resource, and that is a
-  // per-tab client value (`use-console-trail.ts`) this server action cannot
-  // see. Switching organizations is also the one navigation that changes what
-  // you are allowed to read, so the overview is the honest landing.
-  //
-  // A malformed `projectId` lands here too. It is a caller-supplied value that
-  // failed `PROJECT_ID`, so there is no project to honour — and the organization is
-  // what the caller picked either way.
-  redirect(projectId && PROJECT_ID.test(projectId) ? `/${projectId}` : "/organization");
+  const orgSeg = organizationSegment(targetOrg);
+  const validProject = projectId && (PROJECT_ID.test(projectId) || isValidSlug(projectId));
+
+  redirect(
+    validProject
+      ? `/${orgSeg}/${projectId}`
+      : `/${orgSeg}`,
+  );
 }
 
 const MAX_PROJECT_NAME = 100;
@@ -65,6 +57,7 @@ const CreatedProjectSchema = z.object({
   id: z.string(),
   name: z.string(),
   role: z.string(),
+  slug: z.string().optional(),
 });
 
 export interface CreateProjectResult {
@@ -78,6 +71,7 @@ export async function createProjectAction(
 ): Promise<CreateProjectResult> {
   const session = await getServerSession();
   if (!session) return { error: "Your session expired — sign in again." };
+
   const limited = await rateLimit(sessionKey(session, "project:create"), {
     limit: 10,
     windowMs: 60_000,
@@ -107,15 +101,13 @@ export async function createProjectAction(
   let target = ctx.organizationId;
   if (organizationId && organizationId !== ctx.organizationId) {
     const gate = await getServerContext();
+    const matched = gate?.organizations.find((o) => organizationMatches(o, organizationId));
     const administers =
-      gate?.organizations.some(
-        (o) =>
-          o.organizationId === organizationId && (o.role === "owner" || o.role === "admin"),
-      ) ?? false;
+      matched && (matched.role === "owner" || matched.role === "admin");
     if (!administers) {
       return { error: "You cannot create a project in that organization." };
     }
-    target = organizationId;
+    target = matched.organizationId;
   }
 
   const res = await tryFetchWithTimeout(
@@ -141,7 +133,7 @@ export async function createProjectAction(
   // The project is created in `target`, but the active-organization cookie still
   // points at wherever they were standing, and `[projectId]/layout.tsx` resolves
   // the listing for THAT organization — so the project they just made is not in
-  // it and `router.push(\`/${project.id}\`)` opens "Not found". The gate above is
+  // it and `router.push(`/${project.id}`)` opens "Not found". The gate above is
   // what makes this safe to write; the read side re-checks membership anyway.
   if (target !== ctx.organizationId) {
     await setActiveOrganizationCookie(target);
@@ -164,6 +156,7 @@ export async function createProjectAction(
       id: parsed.data.id,
       name: parsed.data.name,
       role: asRole(parsed.data.role),
+      slug: parsed.data.slug,
     },
   };
 }

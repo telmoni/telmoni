@@ -17,6 +17,7 @@ It has **no database access and no business logic**. Every rule, query and permi
 - [Logging](#logging)
 - [Tests and image](#tests-and-image)
 - [Where it lives](#where-it-lives)
+- [URL Structure and Slug Resolution](#url-structure-and-slug-resolution)
 
 ## Shape
 
@@ -35,7 +36,7 @@ flowchart LR
 
 | Path | What |
 |---|---|
-| `(app)/` | The console shell: `[projectId]/…` (overview, API keys, audit log, connectors, members, settings), `organization/…`, `account/…` |
+| `(app)/` | The console shell: `[organizationId]/…` (overview, projects, members, audit log, settings, billing), `[organizationId]/[projectId]/…` (project overview, API keys, audit log, connectors, members, settings), `account/…` |
 | `(auth)/auth/` | Sign-in, sign-up, forgot, reset, verify and device pages, and the sign-in route handlers (`login`, `login/external`, `signup`, `callback`, `logout`) |
 | `console/` | Redirects to the right first page |
 | `invite/[token]` | A public invitation page |
@@ -113,7 +114,7 @@ flowchart LR
    - Public paths are listed in `web/lib/proxy/public-paths.ts`, plus whatever a console built on this one adds (see [extension slots](#extension-slots)).
 3. **Content Security Policy, with a nonce per request.** It is set on the request and the response. The root layout hands the nonce to its inline boot script.
    - Scripts are `'self'` and the nonce only.
-   - Frames are refused.
+   - Frames are refused (`frame-ancestors 'none'`).
    - `connect-src` is `'self'`.
    - `form-action` adds the identity providers' origins (`AUTH_PROVIDER_ORIGINS`). ⚠ Sign-in and sign-out leave the site through redirects that this directive governs.
 4. **Static security headers**, from `next.config.mjs`'s `headers()`, not the proxy: HSTS with preload, `X-Frame-Options: DENY`, `nosniff`, a referrer policy and a permissions policy.
@@ -150,7 +151,7 @@ Why the code is shaped this way:
   - ⚠ A keepalive, because the VPC firewall drops idle connections, which would leave the subscriber silently deaf.
   - ⚠ A command timeout, because a node that is connected but silent would hang the inline limiter.
   - ⚠ Reconnecting on `READONLY` after a high-availability failover.
-- **The client address** used by the limiter is the second-to-last `X-Forwarded-For` entry (`trustedClientIp`). Google's load balancer appends the address it saw the client at, then its own, so earlier entries, which the client can write, are ignored.
+- **The client address** used by the limiter prioritizes edge-authenticated `cf-connecting-ip` from trusted ingress, falling back to the second-to-last `X-Forwarded-For` entry (`trustedClientIp`). Google's load balancer appends the address it saw the client at, then its own, so earlier entries, which the client can write, are ignored.
 
 ## Live events
 
@@ -245,3 +246,28 @@ All logging goes through `@/lib/logger` (pino), never `console.*`:
 | Environment | `web/lib/env.ts`, `web/.env.local.example` |
 | Logging | `web/lib/logger.ts`, `web/instrumentation.ts` |
 | Image | `web/Dockerfile` |
+
+
+## URL Structure and Slug Resolution
+
+The console implements hierarchical human-friendly vanity slugs (following Vercel/GitHub/Linear design conventions) with dual resolution for internal IDs:
+
+- **Organization pages**: `/:organizationSlug` or `/:organizationId`
+  - Projects: `/:organizationSlug/projects`
+  - Members: `/:organizationSlug/members`
+  - Settings: `/:organizationSlug/settings`
+  - Audit Log: `/:organizationSlug/audit-log`
+  - Billing: `/:organizationSlug/billing`
+- **Project pages**: `/:organizationSlug/:projectSlug` or `/:organizationId/:projectId`
+  - Project Overview: `/:organizationSlug/:projectSlug`
+  - API Keys: `/:organizationSlug/:projectSlug/api-keys`
+  - Connectors: `/:organizationSlug/:projectSlug/connectors`
+  - Members: `/:organizationSlug/:projectSlug/members`
+  - Settings: `/:organizationSlug/:projectSlug/settings`
+  - Audit Log: `/:organizationSlug/:projectSlug/audit-log`
+- **Slug Normalization & Safety**:
+  - Valid slugs contain lowercase alphanumerics and single hyphens (`^[a-z0-9]+(?:-[a-z0-9]+)*$`), 2 to 48 characters.
+  - Reserved top-level keywords (`api`, `auth`, `account`, `console`, `billing`, `settings`, `_next`, `security.txt`, `manifest.json`, `null`, `undefined`, `root`, `system`) are prohibited and automatically qualified with `-organization` or `-app`.
+  - Non-ASCII/diacritics are normalized via NFKD, and consecutive hyphens are collapsed.
+  - Dual resolution allows deep linking and API usage via immutable external IDs (`org_...`, `project_...`) without breaking.
+  - Case normalization in `proxy.ts` safely maps vanity slugs to lowercase while preserving case-sensitive base62 IDs (`org_...`).

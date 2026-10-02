@@ -38,7 +38,12 @@ export function connectStartPath(provider: OAuthProvider, projectId: string): st
   return `/connect/${provider}/start?project=${encodeURIComponent(projectId)}`;
 }
 
-export function connectorsPath(projectId: string, query?: Record<string, string>): string {
+export function connectorsPath(
+  projectId: string,
+  query?: Record<string, string>,
+  organizationId?: string,
+): string {
   const q = new URLSearchParams(query).toString();
-  return `/${projectId}/connectors${q ? `?${q}` : ""}`;
+  const prefix = organizationId ? `/${organizationId}/${projectId}` : `/${projectId}`;
+  return `${prefix}/connectors${q ? `?${q}` : ""}`;
 }

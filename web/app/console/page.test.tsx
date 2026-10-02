@@ -61,7 +61,7 @@ describe("ConsoleEntry", () => {
   it("calls getServerContext for fallback provisioning and redirects to first project", async () => {
     await ConsoleEntry();
     expect(mockContextCalls).toBe(1);
-    expect(mockRedirect).toHaveBeenCalledWith("/project_1234567890abcdef");
+    expect(mockRedirect).toHaveBeenCalledWith("/org_1/personal-project");
   });
 
   it("renders ServiceUnavailable when the listing could not be read", async () => {
@@ -83,7 +83,7 @@ describe("ConsoleEntry", () => {
   it("sends an owner whose organization lists nothing to its projects page", async () => {
     mockListing = { kind: "ok", projects: [] };
     await ConsoleEntry();
-    expect(mockRedirect).toHaveBeenCalledWith("/organization/projects");
+    expect(mockRedirect).toHaveBeenCalledWith("/org_1/projects");
   });
 
   // The projects page refuses a member, so this was an ACCESS DENIED landing
@@ -95,7 +95,7 @@ describe("ConsoleEntry", () => {
       organizations: [{ organizationId: "org_1", role: "member" }],
     };
     await ConsoleEntry();
-    expect(mockRedirect).toHaveBeenCalledWith("/organization");
-    expect(mockRedirect).not.toHaveBeenCalledWith("/organization/projects");
+    expect(mockRedirect).toHaveBeenCalledWith("/org_1");
+    expect(mockRedirect).not.toHaveBeenCalledWith("/org_1/projects");
   });
 });

@@ -60,6 +60,6 @@ export async function acceptInviteAction(
     { type: "invite:resolved", data: { inviteId: data?.inviteId || "" } },
   );
 
-  revalidatePath("/organization/projects");
+  revalidatePath("/", "layout");
   return { error: null };
 }

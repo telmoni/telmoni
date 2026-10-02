@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useSelectedLayoutSegment } from "next/navigation";
+import { usePathname, useSelectedLayoutSegment } from "next/navigation";
 import { Building2, Check, ChevronsUpDown, Plus, SquareStack } from "lucide-react";
 
 import { switchActiveOrganizationAction } from "@/app/(app)/actions";
@@ -18,7 +18,7 @@ import {
 import { Kbd } from "@/components/ui/kbd";
 import { CreateProjectDialog, useCreateProjectTargets } from "@/components/create-project";
 import { RoleBadge } from "@/components/role-badge";
-import { isOrganizationSegment } from "@/lib/console-nav";
+import { isOrganizationSegment, parseConsolePath, ACCOUNT_SEGMENT } from "@/lib/console-nav";
 import { resourceUrl, standingResource } from "@/lib/console-trail";
 import { organizationLabel } from "@/lib/identity";
 import { resolveActiveOrganization } from "@/lib/organization-label";
@@ -31,6 +31,7 @@ import {
   useProjectsElsewhere,
 } from "@/lib/store";
 import { useConsoleTrail } from "@/lib/use-console-trail";
+import { organizationSegment, projectSegment, projectMatches } from "@/lib/slug";
 import { cn } from "@/lib/utils";
 
 function firstRow(e: React.KeyboardEvent<HTMLElement>): HTMLElement | null {
@@ -71,10 +72,19 @@ export function ResourceSelector() {
   const resourceSegment = standingResource(
     segment,
     trail,
-    projects.map((p) => p.id),
+    projects.flatMap((p) => [p.id, p.slug, projectSegment(p)].filter(Boolean) as string[]),
   );
-  const activeProject = projects.find((p) => p.id === resourceSegment);
-  const atOrganization = isOrganizationSegment(resourceSegment);
+  const pathname = usePathname();
+  const parsed = parseConsolePath(pathname, segment);
+  const activeProject =
+    projects.find((p) => projectMatches(p, resourceSegment)) ??
+    (parsed.mode === "project" && parsed.projectId
+      ? projects.find((p) => projectMatches(p, parsed.projectId!))
+      : undefined);
+  const atOrganization =
+    isOrganizationSegment(resourceSegment) ||
+    resourceSegment === "organization" ||
+    (parsed.mode === "organization" && segment !== ACCOUNT_SEGMENT);
 
   const { active, label: activeOrganizationName } = resolveActiveOrganization({
     activeOrganizationId,
@@ -83,6 +93,7 @@ export function ResourceSelector() {
   // Every organization row shows your role in it, which is how yours are told
   // apart from ones you were invited into.
   const activeOrganizationRole: OrganizationRole | null = active?.role ?? null;
+  const activeOrgSegment = active ? organizationSegment(active) : (activeOrganizationId ?? undefined);
 
   const seen = new Set<string>();
   const otherOrganizations: OtherOrganization[] = [];
@@ -218,7 +229,7 @@ export function ResourceSelector() {
             <DropdownMenuGroup className="p-1">
               <DropdownMenuItem asChild className="h-8 gap-2 px-2 cursor-pointer">
                 <Link
-                  href={resourceUrl(trail, "organization")}
+                  href={resourceUrl(trail, "organization", activeOrgSegment)}
                   data-resource-row="organization"
                   data-context={activeOrganizationIsContext || undefined}
                 >
@@ -241,7 +252,7 @@ export function ResourceSelector() {
               </DropdownMenuItem>
               {matches.map((project) => (
                 <DropdownMenuItem key={project.id} asChild className="h-8 gap-2 px-2 pl-8 cursor-pointer">
-                  <Link href={resourceUrl(trail, project.id)} data-resource-row="project">
+                  <Link href={resourceUrl(trail, projectSegment(project), activeOrgSegment)} data-resource-row="project">
                     <div className="flex size-6 items-center justify-center rounded-sm border shrink-0">
                       <SquareStack className="size-3" />
                     </div>
@@ -251,7 +262,7 @@ export function ResourceSelector() {
                       role={project.role}
                       testId="resource-selector-item-badge"
                     />
-                    {project.id === resourceSegment && <Check className="size-4 shrink-0" />}
+                    {projectMatches(project, resourceSegment) && <Check className="size-4 shrink-0" />}
                   </Link>
                 </DropdownMenuItem>
               ))}

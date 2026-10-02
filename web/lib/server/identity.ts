@@ -1,4 +1,6 @@
 import { identityContext } from "@/lib/server/entities/identity-context";
+import { fetchProjects } from "@/lib/server/data";
+import { projectMatches } from "@/lib/slug";
 
 /// What an action that changes an organization answers when the organization
 /// its page rendered is no longer the one the session stands in.
@@ -28,5 +30,13 @@ export async function activeProjectForMutation(projectId: string): Promise<
   if (!ident) {
     return { error: "Couldn't resolve your organization right now. Try again in a moment." };
   }
-  return { organizationId: ident.organizationId, projectId, error: null };
+  let resolvedId = projectId;
+  if (!projectId.startsWith("project_")) {
+    const projects = await fetchProjects();
+    const matched = projects.find((p) => projectMatches(p, projectId));
+    if (matched) {
+      resolvedId = matched.id;
+    }
+  }
+  return { organizationId: ident.organizationId, projectId: resolvedId, error: null };
 }

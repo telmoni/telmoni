@@ -70,7 +70,7 @@ export async function GET(
     {
       method: "POST",
       headers: {
-        ...projectHeaders(ctx, pending.projectId),
+        ...projectHeaders(ctx, project.id),
         "content-type": "application/json",
       },
       body: JSON.stringify({ code, state }),

@@ -32,10 +32,15 @@ flowchart TD
   P -->|"project_members: a seat, admin / member"| PR2
 ```
 
-**Ids are newtypes that cannot be mixed up** (`crates/shared/src/types/tenant_id.rs`):
-- `OrganizationId` must start with `org_`, and a `UserId` must not.
-- A minted id is a prefix plus random base62 characters.
-- Each id type is its own type, so a project id cannot be passed where an organization id is expected.
+**Ids and Slugs:**
+- **Ids are newtypes that cannot be mixed up** (`crates/shared/src/types/tenant_id.rs`):
+  - `OrganizationId` must start with `org_`, and a `UserId` must not.
+  - A minted id is a prefix plus random base62 characters.
+  - Each id type is its own type, so a project id cannot be passed where an organization id is expected.
+- **Slugs provide canonical vanity URLs** (`/:organizationSlug/:projectSlug`):
+  - Both `auth.organizations` and `auth.projects` persist an indexed `slug` column (2–48 characters, lowercase alphanumeric with hyphens).
+  - Uniqueness is enforced at the database level (`lower(slug)` for organizations; `(organization_id, lower(slug))` for projects).
+  - Dual resolution allows routes, the CLI, and server actions to accept either immutable IDs or slugs transparently.
 
 **Nobody creates an organization.**
 - A person's first organization is provisioned the first time `/me` finds them in none (`provision_first_organization`, `crates/auth/src/handler/me.rs`). It writes the organization, its owner row, a first project, and their audit rows.

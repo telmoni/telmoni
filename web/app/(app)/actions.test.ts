@@ -106,7 +106,7 @@ describe("switchActiveOrganizationAction", () => {
   // destination somebody asked for.
   it("switches to an organization the caller is on the roster of", async () => {
     await expect(switchActiveOrganizationAction("org_x")).rejects.toThrow(
-      "REDIRECT:/organization",
+      "REDIRECT:/org_x",
     );
     expect(mockSet).toHaveBeenCalledWith(
       "telmoni-active-organization",
@@ -117,7 +117,7 @@ describe("switchActiveOrganizationAction", () => {
 
   it("switches back to an organization the caller owns", async () => {
     await expect(switchActiveOrganizationAction("org_mine")).rejects.toThrow(
-      "REDIRECT:/organization",
+      "REDIRECT:/org_mine",
     );
     expect(mockSet).toHaveBeenCalledWith("telmoni-active-organization", "org_mine", expect.anything());
   });
@@ -132,10 +132,31 @@ describe("switchActiveOrganizationAction", () => {
     expect(mockRedirect).not.toHaveBeenCalled();
   });
 
+  it("redirects to canonical slug when organization has a slug", async () => {
+    const orgWithSlug: OrganizationEntry = {
+      organizationId: "org_slugged",
+      slug: "acme-corp",
+      ownerEmail: "me@example.test",
+      role: "owner",
+    };
+    vi.mocked(getServerContext).mockResolvedValue(
+      me([orgWithSlug], "org_slugged"),
+    );
+
+    await expect(
+      switchActiveOrganizationAction("acme-corp", "my-web-app"),
+    ).rejects.toThrow("REDIRECT:/acme-corp/my-web-app");
+    expect(mockSet).toHaveBeenCalledWith(
+      "telmoni-active-organization",
+      "org_slugged",
+      expect.anything(),
+    );
+  });
+
   it("lands on the project named, in the organization switched to", async () => {
     await expect(
       switchActiveOrganizationAction("org_x", "project_7bQx2mNv9BcK4dLp"),
-    ).rejects.toThrow("REDIRECT:/project_7bQx2mNv9BcK4dLp");
+    ).rejects.toThrow("REDIRECT:/org_x/project_7bQx2mNv9BcK4dLp");
     expect(mockSet).toHaveBeenCalledWith("telmoni-active-organization", "org_x", expect.anything());
   });
 
@@ -147,7 +168,7 @@ describe("switchActiveOrganizationAction", () => {
     "project_7bQx2mNv9BcK4dLp/../../auth/logout",
   ])("ignores a destination that is not a project id: %s", async (bad) => {
     await expect(switchActiveOrganizationAction("org_x", bad)).rejects.toThrow(
-      "REDIRECT:/organization",
+      "REDIRECT:/org_x",
     );
     expect(mockSet).toHaveBeenCalledWith("telmoni-active-organization", "org_x", expect.anything());
   });
@@ -157,11 +178,11 @@ describe("switchActiveOrganizationAction", () => {
   // inside it. Pinned side by side so neither can drift onto the other.
   it("takes an organization row to the organization and a project row to the project", async () => {
     await expect(switchActiveOrganizationAction("org_x")).rejects.toThrow(
-      "REDIRECT:/organization",
+      "REDIRECT:/org_x",
     );
     await expect(
       switchActiveOrganizationAction("org_x", "project_7bQx2mNv9BcK4dLp"),
-    ).rejects.toThrow("REDIRECT:/project_7bQx2mNv9BcK4dLp");
+    ).rejects.toThrow("REDIRECT:/org_x/project_7bQx2mNv9BcK4dLp");
   });
 
   it("refuses an organization the caller is not on, and sets nothing", async () => {

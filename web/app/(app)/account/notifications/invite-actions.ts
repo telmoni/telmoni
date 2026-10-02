@@ -85,6 +85,7 @@ export async function acceptIncomingInviteAction(
   });
 
   revalidatePath("/organization/projects");
+  revalidatePath("/", "layout");
   return { error: null };
 }
 

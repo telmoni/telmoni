@@ -1,8 +1,10 @@
 "use server";
 
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
-import { fetchMembers, fetchProject, fetchTokens } from "@/lib/server/data";
+import { activeOrganization, fetchMembers, fetchProject, fetchTokens, getServerContext, identityContext } from "@/lib/server/data";
+import { organizationSegment } from "@/lib/slug";
 import { getServerSession } from "@/lib/server/session";
+import { isValidSlug, projectSegment } from "@/lib/slug";
 import type { SearchItem } from "@/lib/search";
 
 export interface SearchSection {
@@ -38,15 +40,24 @@ export async function searchIndexAction(
   });
   if (limited) return { error: "Too many requests — slow down a moment." };
 
-  if (!PROJECT_ID_RE.test(projectId)) return { error: "Unknown project." };
+  if (!PROJECT_ID_RE.test(projectId) && !isValidSlug(projectId)) return { error: "Unknown project." };
 
-  const project = await fetchProject(projectId);
+  const [ctx, project, serverCtx] = await Promise.all([
+    identityContext(),
+    fetchProject(projectId),
+    getServerContext(),
+  ]);
   if (!project) return { error: "Unknown project." };
 
   const [tokens, members] = await Promise.all([
-    fetchTokens(projectId),
-    fetchMembers(projectId),
+    fetchTokens(project.id),
+    fetchMembers(project.id),
   ]);
+
+  const activeOrg = serverCtx ? activeOrganization(serverCtx) : null;
+  const orgSeg = activeOrg ? organizationSegment(activeOrg) : ctx?.organizationId;
+  const orgPrefix = orgSeg ? `/${orgSeg}` : "";
+  const projectTarget = projectSegment(project);
 
   return {
     keys:
@@ -57,7 +68,7 @@ export async function searchIndexAction(
               kind: "key" as const,
               label: t.name,
               hint: "API key",
-              href: `/${projectId}/api-keys`,
+              href: `${orgPrefix}/${projectTarget}/api-keys`,
             })),
           )
         : tokens.kind === "forbidden"
@@ -72,7 +83,7 @@ export async function searchIndexAction(
               kind: "member" as const,
               label: m.email,
               hint: m.display_name ?? undefined,
-              href: `/${projectId}/members`,
+              href: `${orgPrefix}/${projectTarget}/members`,
             })),
           )
         : members.kind === "forbidden"
@@ -80,4 +91,3 @@ export async function searchIndexAction(
           : BROKEN,
   };
 }
-

@@ -1,3 +1,4 @@
+import { parseConsolePath } from "./console-nav";
 
 export const SHORTCUTS_DISABLED_KEY = "telmoni-shortcuts-disabled";
 
@@ -54,29 +55,59 @@ const ORGANIZATION_PAGES = new Set(["", "/members", "/audit-log", "/settings"]);
 // project-relative sequence has no destination from either.
 // `console` is here too: it is a redirector, and it is where a sign-in lands
 // before the project listing resolves.
-const NON_PROJECT_ROOTS = new Set(["organization", "account", "console"]);
-
 // `root` is what `useSelectedLayoutSegment()` returns under the console layout
-// — a project id, "organization" or "account" — and not `useParams().projectId`: the
-// latter two are literal segments with no `[projectId]` to read, and the
-// organization has its own spellings of Members, Audit log and Settings.
-// `null` is the layout with nothing selected under it.
-//
-// ⚠ **Returning a bare `seq.href` when the root is unknown was a 404
-// generator.** `/api-keys`, `/connectors`, `/members`, `/audit-log` and `/settings`
-// are all project-relative; unprefixed they match `[projectId]` with the page name
-// AS the project id, and `[projectId]/layout.tsx` answers `notFound()`. A shortcut
-// with nowhere to go must do nothing instead.
+// — a project id, "organization" or "account" — or the current pathname, or an
+// explicit `{ orgId, projectId }` object.
 export function resolveSequence(
   key: string,
-  root?: string | null,
+  root?: string | { organizationId?: string | null; orgId?: string | null; projectId?: string | null } | null,
 ): string | null {
   const seq = GO_SEQUENCES.find((s) => s.key === key);
   if (seq === undefined) return null;
-  if (seq.absolute) return seq.href;
-  if (root === "organization") {
-    return ORGANIZATION_PAGES.has(seq.href) ? `/organization${seq.href}` : null;
+
+  let orgId: string | null = null;
+  let projectId: string | null = null;
+  let mode: "account" | "organization" | "project" | "unknown" = "unknown";
+
+  if (typeof root === "string") {
+    if (root.startsWith("/")) {
+      const parsed = parseConsolePath(root);
+      orgId = parsed.orgId;
+      projectId = parsed.projectId;
+      mode = parsed.mode;
+    } else if (root === "organization" || root.startsWith("org_") || root === "org") {
+      orgId = root;
+      mode = "organization";
+    } else if (root === "account" || root === "console") {
+      mode = "account";
+    } else if (root) {
+      projectId = root;
+      mode = "project";
+    }
+  } else if (root) {
+    orgId = root.organizationId ?? root.orgId ?? null;
+    projectId = root.projectId ?? null;
+    mode = projectId ? "project" : orgId ? "organization" : "unknown";
   }
-  if (!root || NON_PROJECT_ROOTS.has(root)) return null;
-  return `/${root}${seq.href}`;
+
+  if (seq.key === "O") {
+    return orgId && orgId !== "organization" ? `/${orgId}` : "/organization";
+  }
+  if (seq.absolute) return seq.href;
+
+  if (mode === "organization") {
+    if (ORGANIZATION_PAGES.has(seq.href)) {
+      return orgId && orgId !== "organization"
+        ? `/${orgId}${seq.href}`
+        : `/organization${seq.href}`;
+    }
+    return null;
+  }
+
+  if (mode === "project") {
+    if (!projectId) return null;
+    return orgId ? `/${orgId}/${projectId}${seq.href}` : `/${projectId}${seq.href}`;
+  }
+
+  return null;
 }
