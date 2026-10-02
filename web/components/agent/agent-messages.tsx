@@ -2,6 +2,7 @@
 
 import { Empty } from "@/components/agent/agent-history-list";
 import { Reply, Sources } from "@/components/agent/agent-reply";
+import { AgentThinking } from "@/components/agent/agent-thinking";
 import { toolStatus, type AgentProblem } from "@/lib/agent/stream";
 import type { AgentMessage } from "@/lib/types/agent";
 
@@ -36,7 +37,7 @@ export function Conversation({
           <div key={m.id} className="grid gap-3">
             {m.content !== "" && <Reply content={m.content} citations={m.citations} />}
             {m.content === "" && streaming && i === messages.length - 1 && !tool && (
-              <Empty>Thinking…</Empty>
+              <AgentThinking />
             )}
             {m.citations.length > 0 && <Sources citations={m.citations} />}
           </div>
