@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useReducer, useRef, useState, useTransition } from "react";
-import { useParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { CornerDownLeft, HistoryIcon, MessageSquare, SquarePen, X as XIcon } from "lucide-react";
 
 import {
@@ -20,9 +20,9 @@ import {
   initialAgentState,
   isAgentDisabled,
 } from "@/lib/agent/stream";
-import { projectMatches } from "@/lib/slug";
+import { projectAt } from "@/lib/console-nav";
 import { AGENT_MODIFIER_KEY } from "@/lib/keys";
-import { useProjects } from "@/lib/store";
+import { useActiveOrganization, useProjects } from "@/lib/store";
 import { AGENT_MESSAGE_MAX, type AgentStatus } from "@/lib/types/agent";
 import { cn } from "@/lib/utils";
 
@@ -32,13 +32,10 @@ const PANEL_ID = "agent-panel";
 
 export function AgentPanel() {
   const { agentOpen, closeAgent, toggleAgent } = useConsoleUi();
-  const { projectId: routeProjectId } = useParams<{ projectId?: string }>();
   const projects = useProjects();
-  const rawProjectId = typeof routeProjectId === "string" ? routeProjectId : null;
-  const activeProject = rawProjectId
-    ? projects.find((p) => projectMatches(p, rawProjectId))
-    : null;
-  const projectId = activeProject?.id ?? null;
+  const organization = useActiveOrganization()?.slug ?? null;
+  // The agent requires a project: none on the organization's own pages.
+  const projectId = projectAt(usePathname(), organization, projects)?.id ?? null;
 
   const [status, setStatus] = useState<{ projectId: string; status: AgentStatus } | null>(null);
   const [view, setView] = useState<View>("conversation");

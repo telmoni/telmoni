@@ -14,26 +14,18 @@ import {
 
 import { EXTRA_NAV_ITEMS, type ExtraNavItem } from "@/lib/extension/nav";
 import { Flag, type FlagSet, allOff } from "@/lib/flags";
+import {
+  ORGANIZATION_PAGES,
+  isOrganizationSlug,
+  organizationPath,
+  projectPath,
+} from "@/lib/slug";
 
 export const NAV_COLLAPSED_COOKIE = "telmoni-nav-collapsed";
 
 export const ACCOUNT_SEGMENT = "account";
 
 export const NOTIFICATIONS_HREF = "/account/notifications";
-
-const PROJECT_ACTIONS = new Set(["api-keys", "connectors"]);
-const COMMON_ACTIONS = new Set(["members", "audit-log", "settings"]);
-const ORG_ACTIONS = new Set(["projects", "billing"]);
-
-const ORG_SUBPAGES = new Set([
-  "",
-  ...ORG_ACTIONS,
-  ...COMMON_ACTIONS,
-]);
-
-export function isOrganizationSegment(segment: string): boolean {
-  return segment === "organization" || segment.startsWith("org_") || segment === "org";
-}
 
 export function rootSegment(pathname: string): string {
   return pathname.split("/")[1] ?? "";
@@ -43,69 +35,75 @@ export function isAccountPath(pathname: string): boolean {
   return rootSegment(pathname) === ACCOUNT_SEGMENT;
 }
 
-export interface ParsedConsolePath {
-  organizationId: string | null;
-  orgId: string | null;
-  projectId: string | null;
-  mode: "account" | "organization" | "project" | "unknown";
+/**
+ * Where a console path stands, read off its segments alone (`lib/slug.ts` has
+ * the scheme). `null` for a path that names no organization: `/console`, an
+ * `/api` route, the site's own pages.
+ */
+export type ConsolePlace =
+  | { kind: "account" }
+  | { kind: "organization"; organization: string }
+  | { kind: "project"; organization: string; project: string };
+
+export function consolePlace(pathname: string): ConsolePlace | null {
+  const [organization = "", second = ""] = pathname.split("/").slice(1);
+  if (organization === ACCOUNT_SEGMENT) return { kind: "account" };
+  if (!isOrganizationSlug(organization)) return null;
+  if (second === "" || second === ORGANIZATION_PAGES) {
+    return { kind: "organization", organization };
+  }
+  return { kind: "project", organization, project: second };
 }
 
-function parsedResult(
-  mode: ParsedConsolePath["mode"],
-  organizationId: string | null = null,
-  projectId: string | null = null,
-): ParsedConsolePath {
-  return { mode, organizationId, orgId: organizationId, projectId };
-}
-
-export function parseConsolePath(
+/**
+ * The project `pathname` names, out of `projects`: the listing of the
+ * organization that goes by `organization`. `null` off a project's pages, and
+ * while the listing is another organization's than the path names.
+ */
+export function projectAt<P extends { slug: string }>(
   pathname: string,
-  explicitSegment?: string,
-): ParsedConsolePath {
-  const parts = pathname.split("/").filter(Boolean);
-  if (parts.length === 0) {
-    return parsedResult("unknown");
-  }
+  organization: string | null,
+  projects: readonly P[],
+): P | null {
+  const place = consolePlace(pathname);
+  if (place?.kind !== "project" || place.organization !== organization) return null;
+  return projects.find((p) => p.slug === place.project) ?? null;
+}
 
-  const [first, second] = parts;
-  if (first === ACCOUNT_SEGMENT || explicitSegment === ACCOUNT_SEGMENT) {
-    return parsedResult("account");
-  }
-  if (first === "console" || first === "invite" || first === "auth") {
-    return parsedResult("unknown");
-  }
+/**
+ * The organization `pathname` names when the console's shell was rendered for
+ * another one, `rendered`; `null` when the two agree, or the path names none.
+ *
+ * Only an organization the person is in counts: auth answers a path that names
+ * any other with one of theirs, and asking again would get the same answer.
+ */
+export function staleShellOrganization(
+  pathname: string,
+  rendered: string | null,
+  organizations: readonly { slug: string }[],
+): string | null {
+  const place = consolePlace(pathname);
+  if (place === null || place.kind === "account") return null;
+  const named = place.organization;
+  if (named === rendered || !organizations.some((o) => o.slug === named)) return null;
+  return named;
+}
 
-  // 3+ segments, e.g. /org-1/prj-123/connectors OR /prj-123/api-keys/abc:
-  if (parts.length >= 3) {
-    const isProjectActionPath = PROJECT_ACTIONS.has(second) || COMMON_ACTIONS.has(second);
-    return isProjectActionPath
-      ? parsedResult("project", null, first)
-      : parsedResult("project", first, second);
-  }
-
-  // 2 segments: e.g. /organization/settings, /org-1/billing, /org-1/prj-123, or /prj-123/connectors:
-  if (parts.length === 2) {
-    if (first === "organization") {
-      return parsedResult("organization", "organization");
-    }
-    if (explicitSegment && explicitSegment === first && explicitSegment !== "organization") {
-      return parsedResult("project", null, first);
-    }
-    if (PROJECT_ACTIONS.has(second)) {
-      return parsedResult("project", null, first);
-    }
-    if (ORG_SUBPAGES.has(second)) {
-      return parsedResult("organization", first);
-    }
-    // E.g. /org-1/prj-123 (project overview under org)
-    return parsedResult("project", first, second);
-  }
-
-  // 1 segment: e.g. /organization or /org-1 or /prj-123:
-  if (explicitSegment && explicitSegment !== "organization" && explicitSegment !== first) {
-    return parsedResult("project", first, explicitSegment);
-  }
-  return parsedResult("organization", first);
+/**
+ * The id of the organization to remember for the paths that name none (the
+ * cookie in `lib/proxy/organization.ts`): the one `pathname` names, when the
+ * person is in it; off an organization's path, the one the console stands in,
+ * `active`. `null` when there is none to remember — a path that names
+ * somebody else's.
+ */
+export function organizationToRemember(
+  pathname: string,
+  organizations: readonly { organizationId: string; slug: string }[],
+  active: string | null,
+): string | null {
+  const place = consolePlace(pathname);
+  if (place === null || place.kind === "account") return active;
+  return organizations.find((o) => o.slug === place.organization)?.organizationId ?? null;
 }
 
 export interface ConsoleNavItem {
@@ -122,7 +120,6 @@ export interface ConsoleNavGroup {
 
 interface GroupSpec {
   title: string;
-  segment?: string;
   items: {
     title: string;
     path: string;
@@ -145,7 +142,6 @@ const CORE_GROUPS: GroupSpec[] = [
   },
   {
     title: "Organization",
-    segment: "organization",
     items: [
       { title: "Overview", path: "", icon: Activity },
       { title: "Projects", path: "/projects", icon: SquareStack },
@@ -156,7 +152,6 @@ const CORE_GROUPS: GroupSpec[] = [
   },
   {
     title: "Account",
-    segment: "account",
     items: [
       { title: "Settings", path: "/settings", icon: User },
       { title: "Notifications", path: "/notifications", icon: Bell },
@@ -187,67 +182,44 @@ export function withExtraItems(
 
 const GROUPS = withExtraItems(CORE_GROUPS, EXTRA_NAV_ITEMS);
 
-export function buildConsoleNav(
-  pathname: string,
-  projectIdOrSegment?: string,
-  flags: FlagSet = {},
-): ConsoleNavGroup[] {
-  const parsed = parseConsolePath(pathname, projectIdOrSegment);
+const GROUP_OF: Record<ConsolePlace["kind"], string> = {
+  account: "Account",
+  organization: "Organization",
+  project: "Project",
+};
 
-  const wanted =
-    parsed.mode === "account"
-      ? "Account"
-      : parsed.mode === "organization"
-        ? "Organization"
-        : "Project";
+/** The rail for where `pathname` stands; none off the console's own paths. */
+export function buildConsoleNav(pathname: string, flags: FlagSet = {}): ConsoleNavGroup[] {
+  const place = consolePlace(pathname);
+  if (!place) return [];
+  const group = GROUPS.find((g) => g.title === GROUP_OF[place.kind]);
+  if (!group) return [];
 
-  const activeGroup = GROUPS.find((g) => g.title === wanted);
-  if (!activeGroup) return [];
+  const href = (page: string) =>
+    place.kind === "account"
+      ? `/${ACCOUNT_SEGMENT}${page}`
+      : place.kind === "organization"
+        ? organizationPath(place.organization, page)
+        : projectPath(place.organization, place.project, page);
+  const overview = href("");
 
-  const groups = [
+  return [
     {
-      ...activeGroup,
-      items: activeGroup.items.filter((s) => !allOff(flags, s.flags ?? [])),
+      title: group.title,
+      items: group.items
+        .filter((s) => !allOff(flags, s.flags ?? []))
+        .map((s) => {
+          const url = href(s.path);
+          return {
+            title: s.title,
+            url,
+            icon: s.icon,
+            isActive:
+              s.path === ""
+                ? pathname === overview || pathname === `${overview}/`
+                : pathname === url || pathname.startsWith(`${url}/`),
+          };
+        }),
     },
   ];
-
-  return build(groups, pathname, parsed);
-}
-
-function build(
-  groups: GroupSpec[],
-  pathname: string,
-  parsed: ParsedConsolePath,
-): ConsoleNavGroup[] {
-  const isCurrent = (url: string) =>
-    pathname === url || pathname.startsWith(`${url}/`);
-
-  return groups.map((group) => ({
-    title: group.title,
-    items: group.items.map((s) => {
-      let root = "";
-      if (group.title === "Account") {
-        root = "account";
-      } else if (group.title === "Organization") {
-        root = parsed.organizationId ?? parsed.orgId ?? "organization";
-      } else {
-        const org = parsed.organizationId ?? parsed.orgId;
-        if (org && parsed.projectId) {
-          root = `${org}/${parsed.projectId}`;
-        } else {
-          root = parsed.projectId ?? org ?? "";
-        }
-      }
-      const url = `/${root}${s.path}`;
-      return {
-        title: s.title,
-        url,
-        icon: s.icon,
-        isActive:
-          s.path === ""
-            ? pathname === `/${root}` || pathname === `/${root}/`
-            : isCurrent(url),
-      };
-    }),
-  }));
 }

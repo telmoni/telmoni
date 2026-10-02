@@ -40,6 +40,11 @@ export const useOrganizations = () => useStore((s) => s.organizations);
 export const useIncomingInvites = () => useStore((s) => s.incomingInvites);
 export const useProjectOffers = () => useStore((s) => s.projectOffers);
 export const useActiveOrganizationId = () => useStore((s) => s.activeOrganizationId);
+/** The entry for the organization the console stands in. */
+export const useActiveOrganization = () =>
+  useStore(
+    (s) => s.organizations.find((o) => o.organizationId === s.activeOrganizationId) ?? null,
+  );
 export const useFlags = () => useStore((s) => s.flags);
 export const useRoles = () => useStore((s) => s.roles);
 export const useProjects = () => useStore((s) => s.projects);

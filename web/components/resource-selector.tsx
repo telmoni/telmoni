@@ -1,11 +1,10 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname, useSelectedLayoutSegment } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { Building2, Check, ChevronsUpDown, Plus, SquareStack } from "lucide-react";
 
-import { switchActiveOrganizationAction } from "@/app/(app)/actions";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -18,7 +17,6 @@ import {
 import { Kbd } from "@/components/ui/kbd";
 import { CreateProjectDialog, useCreateProjectTargets } from "@/components/create-project";
 import { RoleBadge } from "@/components/role-badge";
-import { isOrganizationSegment, parseConsolePath, ACCOUNT_SEGMENT } from "@/lib/console-nav";
 import { resourceUrl, standingResource } from "@/lib/console-trail";
 import { organizationLabel } from "@/lib/identity";
 import { resolveActiveOrganization } from "@/lib/organization-label";
@@ -30,8 +28,8 @@ import {
   useProjects,
   useProjectsElsewhere,
 } from "@/lib/store";
-import { useConsoleTrail } from "@/lib/use-console-trail";
-import { organizationSegment, projectSegment, projectMatches } from "@/lib/slug";
+import { organizationPath, projectPath } from "@/lib/slug";
+import { useConsoleTrail, useLiveResources } from "@/lib/use-console-trail";
 import { cn } from "@/lib/utils";
 
 function firstRow(e: React.KeyboardEvent<HTMLElement>): HTMLElement | null {
@@ -45,6 +43,7 @@ function firstRow(e: React.KeyboardEvent<HTMLElement>): HTMLElement | null {
 
 type OtherOrganization = {
   id: string;
+  slug: string;
   label: string;
   // `null` when reached through a project alone, with no organization
   // membership to show.
@@ -64,27 +63,12 @@ export function ResourceSelector() {
   const canCreate = useCreateProjectTargets().length > 0;
   const organizations = useOrganizations();
   const activeOrganizationId = useActiveOrganizationId();
-  const segment = useSelectedLayoutSegment() ?? "";
   // A row returns to the page you last had open in that resource.
   const trail = useConsoleTrail();
+  const { live, fallback } = useLiveResources();
   // Account pages name no resource, so the trigger keeps naming the one the
   // sidebar's back row points at.
-  const resourceSegment = standingResource(
-    segment,
-    trail,
-    projects.flatMap((p) => [p.id, p.slug, projectSegment(p)].filter(Boolean) as string[]),
-  );
-  const pathname = usePathname();
-  const parsed = parseConsolePath(pathname, segment);
-  const activeProject =
-    projects.find((p) => projectMatches(p, resourceSegment)) ??
-    (parsed.mode === "project" && parsed.projectId
-      ? projects.find((p) => projectMatches(p, parsed.projectId!))
-      : undefined);
-  const atOrganization =
-    isOrganizationSegment(resourceSegment) ||
-    resourceSegment === "organization" ||
-    (parsed.mode === "organization" && segment !== ACCOUNT_SEGMENT);
+  const standing = standingResource(usePathname(), trail, live, fallback);
 
   const { active, label: activeOrganizationName } = resolveActiveOrganization({
     activeOrganizationId,
@@ -93,66 +77,56 @@ export function ResourceSelector() {
   // Every organization row shows your role in it, which is how yours are told
   // apart from ones you were invited into.
   const activeOrganizationRole: OrganizationRole | null = active?.role ?? null;
-  const activeOrgSegment = active ? organizationSegment(active) : (activeOrganizationId ?? undefined);
 
-  const otherOrganizations = useMemo(() => {
-    const seen = new Set<string>();
-    const list: OtherOrganization[] = [];
-    const add = (id: string, label: string, role: OrganizationRole | null) => {
-      if (!id || id === activeOrganizationId || seen.has(id)) return;
-      seen.add(id);
-      list.push({
-        id,
-        label,
-        role,
-        projects: elsewhere.filter((t) => t.organizationId === id),
-      });
-    };
-    for (const o of organizations) {
-      add(o.organizationId, organizationLabel(o), o.role);
-    }
-    for (const t of elsewhere) {
-      add(
-        t.organizationId,
-        organizationLabel({ name: t.organizationName, ownerEmail: t.organizationOwnerEmail }),
-        null,
-      );
-    }
-    return list;
-  }, [organizations, elsewhere, activeOrganizationId]);
+  // `projects` is the listing of the organization the console stands in, so
+  // a resource is named from it only when it is in that organization.
+  const here = active && standing?.organization === active.slug ? standing : null;
+  const activeProject =
+    here?.kind === "project" ? projects.find((p) => p.slug === here.project) : undefined;
+  const atOrganization = here?.kind === "organization";
 
-  const {
-    matches,
-    showActiveOrganization,
-    activeOrganizationIsContext,
-    otherMatches,
-    nothingMatches,
-  } = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    const has = (s: string) => s.toLowerCase().includes(needle);
-    const organizationSelfMatches = !needle || has(activeOrganizationName);
-    const filteredProjects = organizationSelfMatches ? projects : projects.filter((t) => has(t.name));
-    const showActive = organizationSelfMatches || filteredProjects.length > 0;
-    const isContext = !organizationSelfMatches;
-    const filteredOthers = otherOrganizations
-      .map((org) => {
-        const self = !needle || has(org.label);
-        return {
-          ...org,
-          projects: self ? org.projects : org.projects.filter((t) => has(t.name)),
-          context: !self,
-        };
-      })
-      .filter((org) => !org.context || org.projects.length > 0);
+  const seen = new Set<string>();
+  const otherOrganizations: OtherOrganization[] = [];
+  const add = (id: string, slug: string, label: string, role: OrganizationRole | null) => {
+    if (!id || id === activeOrganizationId || seen.has(id)) return;
+    seen.add(id);
+    otherOrganizations.push({
+      id,
+      slug,
+      label,
+      role,
+      projects: elsewhere.filter((t) => t.organizationId === id),
+    });
+  };
+  for (const o of organizations) {
+    add(o.organizationId, o.slug, organizationLabel(o), o.role);
+  }
+  for (const t of elsewhere) {
+    add(
+      t.organizationId,
+      t.organizationSlug,
+      organizationLabel({ name: t.organizationName, ownerEmail: t.organizationOwnerEmail }),
+      null,
+    );
+  }
 
-    return {
-      matches: filteredProjects,
-      showActiveOrganization: showActive,
-      activeOrganizationIsContext: isContext,
-      otherMatches: filteredOthers,
-      nothingMatches: !showActive && filteredOthers.length === 0,
-    };
-  }, [query, activeOrganizationName, projects, otherOrganizations]);
+  const needle = query.trim().toLowerCase();
+  const has = (s: string) => s.toLowerCase().includes(needle);
+  const organizationSelfMatches = !needle || has(activeOrganizationName);
+  const matches = organizationSelfMatches ? projects : projects.filter((t) => has(t.name));
+  const showActiveOrganization = organizationSelfMatches || matches.length > 0;
+  const activeOrganizationIsContext = !organizationSelfMatches;
+  const otherMatches = otherOrganizations
+    .map((org) => {
+      const self = !needle || has(org.label);
+      return {
+        ...org,
+        projects: self ? org.projects : org.projects.filter((t) => has(t.name)),
+        context: !self,
+      };
+    })
+    .filter((org) => !org.context || org.projects.length > 0);
+  const nothingMatches = !showActiveOrganization && otherMatches.length === 0;
 
   useEffect(() => {
     if (open) inputRef.current?.focus({ preventScroll: true });
@@ -247,7 +221,11 @@ export function ResourceSelector() {
             <DropdownMenuGroup className="p-1">
               <DropdownMenuItem asChild className="h-8 gap-2 px-2 cursor-pointer">
                 <Link
-                  href={resourceUrl(trail, "organization", activeOrgSegment)}
+                  href={
+                    active
+                      ? resourceUrl(trail, { kind: "organization", organization: active.slug })
+                      : "/console"
+                  }
                   data-resource-row="organization"
                   data-context={activeOrganizationIsContext || undefined}
                 >
@@ -270,7 +248,18 @@ export function ResourceSelector() {
               </DropdownMenuItem>
               {matches.map((project) => (
                 <DropdownMenuItem key={project.id} asChild className="h-8 gap-2 px-2 pl-8 cursor-pointer">
-                  <Link href={resourceUrl(trail, projectSegment(project), activeOrgSegment)} data-resource-row="project">
+                  <Link
+                    href={
+                      active
+                        ? resourceUrl(trail, {
+                            kind: "project",
+                            organization: active.slug,
+                            project: project.slug,
+                          })
+                        : "/console"
+                    }
+                    data-resource-row="project"
+                  >
                     <div className="flex size-6 items-center justify-center rounded-sm border shrink-0">
                       <SquareStack className="size-3" />
                     </div>
@@ -280,7 +269,7 @@ export function ResourceSelector() {
                       role={project.role}
                       testId="resource-selector-item-badge"
                     />
-                    {projectMatches(project, resourceSegment) && <Check className="size-4 shrink-0" />}
+                    {project.id === activeProject?.id && <Check className="size-4 shrink-0" />}
                   </Link>
                 </DropdownMenuItem>
               ))}
@@ -295,49 +284,55 @@ export function ResourceSelector() {
               <DropdownMenuLabel className="px-2 py-1.5 text-xs font-normal text-muted-foreground">
                 Other organizations
               </DropdownMenuLabel>
+              {/* ⚠ **No trail here, unlike the rows for the ACTIVE organization.**
+                  Moving into another organization changes what you are
+                  allowed to read, so its overview is the honest landing: an
+                  organization row goes to the organization, a project row to
+                  the project. The path names the organization, so these are
+                  links like any other. */}
               {otherMatches.map((org) => (
                 <Fragment key={org.id}>
-                  <DropdownMenuItem
-                    data-resource-row="organization"
-                    data-context={org.context || undefined}
-                    className="h-8 gap-2 px-2 cursor-pointer"
-                    onSelect={() => switchActiveOrganizationAction(org.id)}
-                  >
-                    <div className="flex size-6 items-center justify-center rounded-sm border shrink-0">
-                      <Building2 className="size-3" />
-                    </div>
-                    <span className="truncate font-medium flex-1 min-w-0">
-                      {org.label}
-                    </span>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      Organization
-                    </span>
-                    <RoleBadge
-                      className="h-4 px-1"
-                      role={org.role}
-                      testId="resource-selector-organization-badge"
-                    />
+                  <DropdownMenuItem asChild className="h-8 gap-2 px-2 cursor-pointer">
+                    <Link
+                      href={organizationPath(org.slug)}
+                      data-resource-row="organization"
+                      data-context={org.context || undefined}
+                    >
+                      <div className="flex size-6 items-center justify-center rounded-sm border shrink-0">
+                        <Building2 className="size-3" />
+                      </div>
+                      <span className="truncate font-medium flex-1 min-w-0">
+                        {org.label}
+                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        Organization
+                      </span>
+                      <RoleBadge
+                        className="h-4 px-1"
+                        role={org.role}
+                        testId="resource-selector-organization-badge"
+                      />
+                    </Link>
                   </DropdownMenuItem>
                   {org.projects.map((project) => (
                     <DropdownMenuItem
                       key={project.id}
-                      data-resource-row="project"
+                      asChild
                       className="h-8 gap-2 px-2 pl-8 cursor-pointer"
-                      onSelect={() =>
-                        switchActiveOrganizationAction(org.id, project.id)
-                      }
                     >
-                      <div className="flex size-6 items-center justify-center rounded-sm border shrink-0">
-                        <SquareStack className="size-3" />
-                      </div>
-                      <span className="truncate font-medium flex-1 min-w-0">
-                        {project.name}
-                      </span>
-                      <RoleBadge
-                        className="h-4 px-1"
-                        role={project.role}
-                        testId="resource-selector-item-badge"
-                      />
+                      <Link href={projectPath(org.slug, project.slug)} data-resource-row="project">
+                        <div className="flex size-6 items-center justify-center rounded-sm border shrink-0">
+                          <SquareStack className="size-3" />
+                        </div>
+                        <span className="truncate font-medium flex-1 min-w-0">
+                          {project.name}
+                        </span>
+                        <RoleBadge
+                          className="h-4 px-1"
+                          role={project.role}
+                          testId="resource-selector-item-badge"
+                        />
+                      </Link>
                     </DropdownMenuItem>
                   ))}
                 </Fragment>
@@ -351,7 +346,7 @@ export function ResourceSelector() {
             No resource matches &ldquo;{query.trim()}&rdquo;.
           </p>
         ) : (
-          !query.trim() &&
+          !needle &&
           projects.length + elsewhere.length <= 1 &&
           otherOrganizations.length === 0 && (
             <div className="flex flex-col items-center gap-3 px-6 py-8 text-center">

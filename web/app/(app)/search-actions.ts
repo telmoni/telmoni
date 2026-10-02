@@ -1,10 +1,15 @@
 "use server";
 
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
-import { activeOrganization, fetchMembers, fetchProject, fetchTokens, getServerContext, identityContext } from "@/lib/server/data";
-import { organizationSegment } from "@/lib/slug";
+import {
+  activeOrganization,
+  fetchMembers,
+  fetchProject,
+  fetchTokens,
+  getServerContext,
+} from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
-import { isValidSlug, projectSegment } from "@/lib/slug";
+import { projectPath } from "@/lib/slug";
 import type { SearchItem } from "@/lib/search";
 
 export interface SearchSection {
@@ -40,24 +45,17 @@ export async function searchIndexAction(
   });
   if (limited) return { error: "Too many requests — slow down a moment." };
 
-  if (!PROJECT_ID_RE.test(projectId) && !isValidSlug(projectId)) return { error: "Unknown project." };
+  if (!PROJECT_ID_RE.test(projectId)) return { error: "Unknown project." };
 
-  const [ctx, project, serverCtx] = await Promise.all([
-    identityContext(),
-    fetchProject(projectId),
-    getServerContext(),
-  ]);
-  if (!project) return { error: "Unknown project." };
+  const [project, gate] = await Promise.all([fetchProject(projectId), getServerContext()]);
+  const organization = gate ? activeOrganization(gate) : null;
+  if (!project || !organization) return { error: "Unknown project." };
+  const page = (path: string) => projectPath(organization.slug, project.slug, path);
 
   const [tokens, members] = await Promise.all([
-    fetchTokens(project.id),
-    fetchMembers(project.id),
+    fetchTokens(projectId),
+    fetchMembers(projectId),
   ]);
-
-  const activeOrg = serverCtx ? activeOrganization(serverCtx) : null;
-  const orgSeg = activeOrg ? organizationSegment(activeOrg) : ctx?.organizationId;
-  const orgPrefix = orgSeg ? `/${orgSeg}` : "";
-  const projectTarget = projectSegment(project);
 
   return {
     keys:
@@ -68,7 +66,7 @@ export async function searchIndexAction(
               kind: "key" as const,
               label: t.name,
               hint: "API key",
-              href: `${orgPrefix}/${projectTarget}/api-keys`,
+              href: page("/api-keys"),
             })),
           )
         : tokens.kind === "forbidden"
@@ -83,7 +81,7 @@ export async function searchIndexAction(
               kind: "member" as const,
               label: m.email,
               hint: m.display_name ?? undefined,
-              href: `${orgPrefix}/${projectTarget}/members`,
+              href: page("/members"),
             })),
           )
         : members.kind === "forbidden"
@@ -91,3 +89,4 @@ export async function searchIndexAction(
           : BROKEN,
   };
 }
+

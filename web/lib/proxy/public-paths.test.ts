@@ -25,7 +25,6 @@ describe("isPublic", () => {
   });
 
   it.each([
-    "/organization",
     // The operator's pages left this repository; nothing here serves them.
     "/about",
     "/security",
@@ -35,9 +34,9 @@ describe("isPublic", () => {
     "/api/project/slug",
     "/api/projects/switch",
     "/acme",
-    "/acme/api-keys",
-    "/acme/settings",
-    "/acme/organization",
+    "/acme/web",
+    "/acme/web/api-keys",
+    "/acme/~/settings",
     "/v1x",
     "/v1-internal",
     "/client",
@@ -47,7 +46,7 @@ describe("isPublic", () => {
   });
 
   it("does not let a public-prefix substring leak into protected paths", () => {
-    expect(isPublic("/organization/auth")).toBe(false);
+    expect(isPublic("/acme/auth")).toBe(false);
   });
 
   it.each(["/authsecrets", "/authfoo"])(

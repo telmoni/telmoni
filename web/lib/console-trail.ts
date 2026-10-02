@@ -1,12 +1,7 @@
 import { z } from "zod";
 
-import {
-  ACCOUNT_SEGMENT,
-  isAccountPath,
-  isOrganizationSegment,
-  parseConsolePath,
-  rootSegment,
-} from "@/lib/console-nav";
+import { type ConsolePlace, consolePlace } from "@/lib/console-nav";
+import { organizationPath, projectPath } from "@/lib/slug";
 
 /**
  * Where the console sends you back to.
@@ -47,7 +42,8 @@ export const EMPTY_TRAIL: ConsoleTrail = [];
 const TrailSchema = z.array(z.string());
 
 /**
- * A path the console may be sent back to. Everything here is a refusal:
+ * A path the console may be sent back to: a page of an organization or of one
+ * of its projects. Everything else is a refusal:
  *
  * - Anything that is not an absolute in-app path, because these end up in an
  *   `href` and storage is writable by anything else on the origin. `//` is
@@ -62,23 +58,31 @@ const TrailSchema = z.array(z.string());
 export function isReturnablePath(path: string): path is ReturnablePath {
   if (!path.startsWith("/") || path.startsWith("//")) return false;
   if (path.includes("\\")) return false;
-  if (isAccountPath(path)) return false;
-  return path !== "/console";
+  const place = consolePlace(path);
+  return place !== null && place.kind !== "account";
 }
 
+/** A resource the console stands in: an organization, or one of its projects. */
+export type Resource = Exclude<ConsolePlace, { kind: "account" }>;
+
+/** The resource's overview, which is also what the trail keys it by. */
+export function resourceRoot(resource: Resource): ReturnablePath {
+  return (
+    resource.kind === "organization"
+      ? organizationPath(resource.organization)
+      : projectPath(resource.organization, resource.project)
+  ) as ReturnablePath;
+}
+
+function resourceOf(path: string): Resource | null {
+  const place = consolePlace(path);
+  return place === null || place.kind === "account" ? null : place;
+}
+
+/** The resource `path` is a page of, as its root; `""` for a path of none. */
 export function trailResource(path: string): string {
-  const parts = path.split("/").filter(Boolean);
-  if (parts.length === 1) {
-    return parts[0] === "organization" ? "organization" : parts[0];
-  }
-  const parsed = parseConsolePath(path);
-  if (parsed.mode === "project" && parsed.projectId) {
-    return parsed.projectId;
-  }
-  if (parsed.mode === "organization") {
-    return parsed.organizationId ?? parsed.orgId ?? "organization";
-  }
-  return rootSegment(path);
+  const resource = resourceOf(path);
+  return resource ? resourceRoot(resource) : "";
 }
 
 /**
@@ -126,51 +130,52 @@ export function parseTrail(raw: string | null): ConsoleTrail {
   return trail.length === 0 ? EMPTY_TRAIL : trail;
 }
 
-function isLiveResource(path: string, projectIds: readonly string[]): boolean {
-  const parts = path.split("/").filter(Boolean);
-  if (parts.length === 1) {
-    const root = parts[0];
-    return isOrganizationSegment(root) || projectIds.includes(root);
-  }
-  const parsed = parseConsolePath(path);
-  if (parsed.mode === "organization") return true;
-  if (parsed.mode === "project" && parsed.projectId) {
-    return projectIds.includes(parsed.projectId);
-  }
-  const root = rootSegment(path);
-  return isOrganizationSegment(root) || projectIds.includes(root);
+/**
+ * The roots of every resource the console is drawing: each organization the
+ * person is in, and each project they can open, in the organization the
+ * console stands in and in the others.
+ */
+export function liveResources(
+  organizations: readonly { slug: string }[],
+  projects: readonly { slug: string; organizationSlug: string }[],
+): ReadonlySet<string> {
+  return new Set([
+    ...organizations.map((o) => organizationPath(o.slug)),
+    ...projects.map((p) => projectPath(p.organizationSlug, p.slug)),
+  ]);
 }
 
 /**
  * Where the rail's back arrow points: the last page you stood on before
  * stepping into Account.
  *
- * ⚠ **Each entry is checked against the rail's own project list, not trusted.**
- * You can leave a project, or lose your role in it, from inside Account —
- * `/{project}/connectors` is then a 404 with a back arrow aimed at it. The walk
- * carries on to the next resource rather than giving up, so somebody who left
- * one project still gets the page they were on in another.
+ * ⚠ **Each entry is checked against the resources the console is drawing, not
+ * trusted.** You can leave a project, or lose your role in it, from inside
+ * Account — its connectors page is then a 404 with a back arrow aimed at it —
+ * and a rename moves a slug out from under the path that was recorded. The
+ * walk carries on to the next resource rather than giving up, so somebody who
+ * left one project still gets the page they were on in another.
  *
- * Only the project is checked, never the role a page needs: the rail does not know
- * which rows a project grants, and a page you can reach but not read already
- * renders its own refusal.
+ * Only the resource is checked, never the role a page needs: the rail does not
+ * know which rows a project grants, and a page you can reach but not read
+ * already renders its own refusal.
  */
 export function resolveReturnUrl(
   trail: ConsoleTrail,
-  projectIds: readonly string[],
+  live: ReadonlySet<string>,
   fallback: string,
 ): string {
-  return trail.find((p) => isLiveResource(p, projectIds)) ?? fallback;
+  return trail.find((p) => live.has(trailResource(p))) ?? fallback;
 }
 
 /**
  * Which resource the console's chrome should NAME, as opposed to which page it
  * is on.
  *
- * Every segment but `account` names its own resource. Account names none — it
+ * Every path but Account's names its own resource. Account names none — it
  * is a mode you step INTO, not a resource you switch to — so chrome that has
  * to keep naming one reads the resource you stepped in FROM, by the same walk
- * the rail's back arrow takes.
+ * the rail's back arrow takes, and `fallback` when the trail has none.
  *
  * ⚠ **Both callers go through here so they cannot name two different places.**
  * The selector said "Project" the moment you opened Account, having nothing in
@@ -179,15 +184,14 @@ export function resolveReturnUrl(
  * had not.
  */
 export function standingResource(
-  segment: string,
+  pathname: string,
   trail: ConsoleTrail,
-  projectIds: readonly string[],
-): string {
-  if (segment !== ACCOUNT_SEGMENT) return segment;
-  const first = projectIds[0];
-  const returnUrl = resolveReturnUrl(trail, projectIds, first ? `/${first}` : "");
-  if (!returnUrl) return "";
-  return trailResource(returnUrl);
+  live: ReadonlySet<string>,
+  fallback: string,
+): Resource | null {
+  const place = consolePlace(pathname);
+  if (place !== null && place.kind !== "account") return place;
+  return resourceOf(resolveReturnUrl(trail, live, fallback));
 }
 
 /**
@@ -197,28 +201,7 @@ export function standingResource(
  * The resource is one the selector is already drawing, so it needs no liveness
  * check — the list IS the check.
  */
-export function resourceUrl(
-  trail: ConsoleTrail,
-  resource: string,
-  organizationId?: string | null,
-): string {
-  if (resource === "organization" || isOrganizationSegment(resource)) {
-    const match = trail.find((p) => {
-      const parsed = parseConsolePath(p);
-      return (
-        parsed.mode === "organization" &&
-        (!organizationId || parsed.organizationId === organizationId)
-      );
-    });
-    if (match) return match;
-    return organizationId ? `/${organizationId}` : "/organization";
-  }
-  const match = trail.find((p) => {
-    const parts = p.split("/").filter(Boolean);
-    if (parts.length === 1 && parts[0] === resource) return true;
-    const parsed = parseConsolePath(p);
-    return parsed.mode === "project" && parsed.projectId === resource;
-  });
-  if (match) return match;
-  return organizationId ? `/${organizationId}/${resource}` : `/${resource}`;
+export function resourceUrl(trail: ConsoleTrail, resource: Resource): string {
+  const root = resourceRoot(resource);
+  return trail.find((p) => trailResource(p) === root) ?? root;
 }

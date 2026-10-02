@@ -2,70 +2,98 @@ import { describe, expect, it } from "vitest";
 
 import { FileText, Settings, Users } from "lucide-react";
 
-import { buildConsoleNav, isAccountPath, parseConsolePath, rootSegment, withExtraItems } from "./console-nav";
+import {
+  buildConsoleNav,
+  consolePlace,
+  isAccountPath,
+  organizationToRemember,
+  projectAt,
+  rootSegment,
+  staleShellOrganization,
+  withExtraItems,
+} from "./console-nav";
 import { Flag } from "./types/enums";
 
 describe("buildConsoleNav", () => {
   it("gives every destination a project-scoped address", () => {
-    for (const group of buildConsoleNav("/prj-123/api-keys", "prj-123")) {
+    for (const group of buildConsoleNav("/acme/web/api-keys")) {
       for (const item of group.items) {
-        expect(item.url.startsWith("/prj-123")).toBe(true);
+        expect(item.url.startsWith("/acme/web")).toBe(true);
       }
     }
   });
 
   it("returns exactly one run, whichever rail the address is on", () => {
-    expect(buildConsoleNav("/prj-123/api-keys", "prj-123").map((g) => g.title)).toEqual(["Project"]);
-    expect(buildConsoleNav("/organization/projects", "organization").map((g) => g.title)).toEqual([
-      "Organization",
-    ]);
-    expect(buildConsoleNav("/account/settings", "account").map((g) => g.title)).toEqual([
-      "Account",
-    ]);
+    expect(buildConsoleNav("/acme/web/api-keys").map((g) => g.title)).toEqual(["Project"]);
+    expect(buildConsoleNav("/acme/~/projects").map((g) => g.title)).toEqual(["Organization"]);
+    expect(buildConsoleNav("/acme").map((g) => g.title)).toEqual(["Organization"]);
+    expect(buildConsoleNav("/account/settings").map((g) => g.title)).toEqual(["Account"]);
   });
 
   it("builds each run against its own segment", () => {
-    const [account] = buildConsoleNav("/account/settings", "account");
+    const [account] = buildConsoleNav("/account/settings");
     expect(account?.items.map((i) => i.url)).toEqual([
       "/account/settings",
       "/account/notifications",
       "/account/privacy",
     ]);
-    const [organization] = buildConsoleNav("/organization", "organization");
-    expect(organization?.items.every((i) => i.url.startsWith("/organization"))).toBe(true);
+    const [organization] = buildConsoleNav("/acme");
+    expect(
+      organization?.items.every((i) => i.url === "/acme" || i.url.startsWith("/acme/~/")),
+    ).toBe(true);
   });
 
   it("keeps the person's rail out of the organization's, and the reverse", () => {
-    const account = buildConsoleNav("/account/notifications", "account");
+    const account = buildConsoleNav("/account/notifications");
     expect(account.map((g) => g.title)).toEqual(["Account"]);
-    expect(account.flatMap((g) => g.items.map((i) => i.url))).not.toContain(
-      "/organization/settings",
-    );
+    expect(account.flatMap((g) => g.items.map((i) => i.url))).not.toContain("/acme/~/settings");
 
-    const organization = buildConsoleNav("/organization/settings", "organization");
+    const organization = buildConsoleNav("/acme/~/settings");
     expect(organization.flatMap((g) => g.items.map((i) => i.url))).not.toContain(
       "/account/settings",
     );
   });
 
-  it("reads an organization path under a project segment as the project's", () => {
-    expect(
-      buildConsoleNav("/prj-123/organization", "prj-123").map((g) => g.title),
-    ).toEqual(["Project"]);
+  // ⚠ **The bug this scheme exists to end.** `/acme/members` was read as a
+  // page of a PROJECT called `acme`, so every organization page drew the
+  // project rail, with links into a project that did not exist. An
+  // organization's own pages sit under `~`, which is no project's slug; any
+  // other second segment is a project, whatever it is called.
+  it("draws the organization's rail on every one of its own pages", () => {
+    for (const page of ["projects", "members", "audit-log", "settings", "billing"]) {
+      const [group] = buildConsoleNav(`/acme/~/${page}`);
+      expect(group?.title, page).toBe("Organization");
+      expect(group?.items[0]?.url, page).toBe("/acme");
+    }
+  });
+
+  it("reads a project named like an organization page as the project", () => {
+    for (const pathname of ["/acme/settings", "/acme/members/members", "/acme/projects"]) {
+      expect(buildConsoleNav(pathname).map((g) => g.title), pathname).toEqual(["Project"]);
+    }
+    expect(buildConsoleNav("/acme/settings")[0]?.items.map((i) => i.url)).toContain(
+      "/acme/settings/settings",
+    );
+  });
+
+  it("draws no rail off the console's own paths", () => {
+    for (const pathname of ["/", "/console", "/api/health", "/org_7bQx2mNv9BcK4dLp/web"]) {
+      expect(buildConsoleNav(pathname), pathname).toEqual([]);
+    }
   });
 
   it("draws the organization's rail on the pairing page", () => {
   });
 
   it("leads the project run with Overview, then the organization's objects, and Settings last", () => {
-    const [project] = buildConsoleNav("/prj-123/api-keys", "prj-123");
+    const [project] = buildConsoleNav("/acme/web/api-keys");
     expect(project?.items.map((i) => i.url)).toEqual([
-      "/prj-123",
-      "/prj-123/api-keys",
-      "/prj-123/connectors",
-      "/prj-123/members",
-      "/prj-123/audit-log",
-      "/prj-123/settings",
+      "/acme/web",
+      "/acme/web/api-keys",
+      "/acme/web/connectors",
+      "/acme/web/members",
+      "/acme/web/audit-log",
+      "/acme/web/settings",
     ]);
   });
 
@@ -76,46 +104,39 @@ describe("buildConsoleNav", () => {
   // naming what the role lacks and the owner to ask (`RoleRestricted`,
   // `AccessDenied`), which a missing row could never say.
   it("draws every organization destination, whoever is looking", () => {
-    const org = buildConsoleNav("/organization", "organization").find(
-      (g) => g.title === "Organization",
-    );
+    const org = buildConsoleNav("/acme").find((g) => g.title === "Organization");
     expect(org?.items.map((i) => i.url)).toEqual([
-      "/organization",
-      "/organization/projects",
-      "/organization/members",
-      "/organization/audit-log",
-      "/organization/settings",
+      "/acme",
+      "/acme/~/projects",
+      "/acme/~/members",
+      "/acme/~/audit-log",
+      "/acme/~/settings",
     ]);
 
-    const orgMode = buildConsoleNav("/organization/settings", "organization").find(
-      (g) => g.title === "Organization",
-    );
+    const orgMode = buildConsoleNav("/acme/~/settings").find((g) => g.title === "Organization");
     expect(orgMode?.items.find((i) => i.title === "Settings")?.isActive).toBe(true);
+    expect(orgMode?.items.find((i) => i.title === "Overview")?.isActive).toBe(false);
   });
 
   it("offers no row for a page this build does not have", () => {
-    const urls = buildConsoleNav("/prj-123/api-keys", "prj-123").flatMap((g) =>
+    const urls = buildConsoleNav("/acme/web/api-keys").flatMap((g) =>
       g.items.map((i) => i.url),
     );
     for (const gone of [
-      "/prj-123/projects",
-      "/prj-123/projects",
-      "/prj-123/project",
-      "/prj-123/invites",
-      "/prj-123/overview",
-      "/prj-123/notifications",
+      "/acme/web/projects",
+      "/acme/web/project",
+      "/acme/web/invites",
+      "/acme/web/overview",
+      "/acme/web/notifications",
     ]) {
       expect(urls).not.toContain(gone);
     }
   });
 
   it("offers no Notifications row at either level", () => {
-    for (const [pathname, segment] of [
-      ["/prj-123/api-keys", "prj-123"],
-      ["/organization", "organization"],
-    ] as const) {
-      const items = buildConsoleNav(pathname, segment).flatMap((g) => g.items);
-      expect(items.map((i) => i.url)).not.toContain(`/${segment}/notifications`);
+    for (const pathname of ["/acme/web/api-keys", "/acme"]) {
+      const items = buildConsoleNav(pathname).flatMap((g) => g.items);
+      expect(items.some((i) => i.url.endsWith("/notifications"))).toBe(false);
       expect(items.map((i) => i.title)).not.toContain("Notifications");
     }
   });
@@ -126,80 +147,83 @@ describe("buildConsoleNav", () => {
   // Organization carry the same row names, and Account is headed the same way
   // so the three rails read as one kind of list.
   it("heads every run with the level's own name", () => {
-    for (const [pathname, segment, title] of [
-      ["/prj-123/api-keys", "prj-123", "Project"],
-      ["/organization/projects", "organization", "Organization"],
-      ["/account/settings", "account", "Account"],
+    for (const [pathname, title] of [
+      ["/acme/web/api-keys", "Project"],
+      ["/acme/~/projects", "Organization"],
+      ["/account/settings", "Account"],
     ] as const) {
-      const [group] = buildConsoleNav(pathname, segment);
+      const [group] = buildConsoleNav(pathname);
       expect(group?.title).toBe(title);
     }
   });
 
   it("marks exactly the current destination active, by subtree", () => {
     const active = (pathname: string) =>
-      buildConsoleNav(pathname, "prj-123")
+      buildConsoleNav(pathname)
         .flatMap((g) => g.items)
         .filter((i) => i.isActive)
         .map((i) => i.url);
 
-    expect(active("/prj-123/api-keys")).toEqual(["/prj-123/api-keys"]);
-    expect(active("/prj-123/api-keys/abc")).toEqual(["/prj-123/api-keys"]);
-    expect(active("/prj-123/connectors")).toEqual(["/prj-123/connectors"]);
+    expect(active("/acme/web")).toEqual(["/acme/web"]);
+    expect(active("/acme/web/api-keys")).toEqual(["/acme/web/api-keys"]);
+    expect(active("/acme/web/api-keys/abc")).toEqual(["/acme/web/api-keys"]);
+    expect(active("/acme/web/connectors")).toEqual(["/acme/web/connectors"]);
+    expect(active("/acme")).toEqual(["/acme"]);
+    expect(active("/acme/~/members")).toEqual(["/acme/~/members"]);
 
     // A sibling that merely BEGINS with a row's path is not under it. No such
     // route exists yet, which is the point: the day one is added, the rail
     // must not light two rows because one name is a prefix of another.
-    expect(active("/prj-123/api-keys-archive"), "a sibling of /api-keys").toEqual([]);
-    expect(active("/prj-123/settings-v2"), "a sibling of /settings").toEqual([]);
+    expect(active("/acme/web/api-keys-archive"), "a sibling of /api-keys").toEqual([]);
+    expect(active("/acme/web/settings-v2"), "a sibling of /settings").toEqual([]);
   });
 
   // The rows a role cannot open stay on both rails: the audit log, which a
   // project member and an organization admin are refused, and the
   // organization's settings, which a member is. The page says so.
   it("draws the rows a role cannot open, and leaves the refusal to the page", () => {
-    const project = buildConsoleNav("/prj-123/api-keys", "prj-123").flatMap((g) =>
+    const project = buildConsoleNav("/acme/web/api-keys").flatMap((g) =>
       g.items.map((i) => i.url),
     );
     expect(project).toEqual([
-      "/prj-123",
-      "/prj-123/api-keys",
-      "/prj-123/connectors",
-      "/prj-123/members",
-      "/prj-123/audit-log",
-      "/prj-123/settings",
+      "/acme/web",
+      "/acme/web/api-keys",
+      "/acme/web/connectors",
+      "/acme/web/members",
+      "/acme/web/audit-log",
+      "/acme/web/settings",
     ]);
 
-    const organization = buildConsoleNav("/organization/settings", "organization").flatMap(
-      (g) => g.items.map((i) => i.url),
+    const organization = buildConsoleNav("/acme/~/settings").flatMap((g) =>
+      g.items.map((i) => i.url),
     );
-    expect(organization).toContain("/organization/audit-log");
-    expect(organization).toContain("/organization/settings");
+    expect(organization).toContain("/acme/~/audit-log");
+    expect(organization).toContain("/acme/~/settings");
   });
 
   it("drops a row whose every flag is off, and keeps one with a flag still on", () => {
-    const off = buildConsoleNav("/prj-123/api-keys", "prj-123", {
+    const off = buildConsoleNav("/acme/web/api-keys", {
       [Flag.ApiTokens]: false,
       [Flag.PublicApi]: false,
     });
-    expect(off.flatMap((g) => g.items).map((i) => i.url)).toContain("/prj-123/api-keys");
-    expect(off.flatMap((g) => g.items).map((i) => i.url)).toContain("/prj-123/connectors");
+    expect(off.flatMap((g) => g.items).map((i) => i.url)).toContain("/acme/web/api-keys");
+    expect(off.flatMap((g) => g.items).map((i) => i.url)).toContain("/acme/web/connectors");
   });
 });
 
 describe("the retired rows", () => {
   it("draws no observability row", () => {
     const urls = [
-      ...buildConsoleNav("/prj-123/api-keys", "prj-123"),
-      ...buildConsoleNav("/organization/settings", "organization"),
+      ...buildConsoleNav("/acme/web/api-keys"),
+      ...buildConsoleNav("/acme/~/settings"),
     ].flatMap((g) => g.items.map((i) => i.url));
     for (const gone of [
-      "/prj-123/services",
-      "/prj-123/slos",
-      "/prj-123/alerts",
-      "/prj-123/metrics",
-      "/prj-123/logs",
-      "/prj-123/traces",
+      "/acme/web/services",
+      "/acme/web/slos",
+      "/acme/web/alerts",
+      "/acme/web/metrics",
+      "/acme/web/logs",
+      "/acme/web/traces",
     ]) {
       expect(urls).not.toContain(gone);
     }
@@ -207,10 +231,10 @@ describe("the retired rows", () => {
 
   it("draws no Heartbeats row", () => {
     const urls = [
-      ...buildConsoleNav("/prj-123/api-keys", "prj-123"),
-      ...buildConsoleNav("/organization/settings", "organization"),
+      ...buildConsoleNav("/acme/web/api-keys"),
+      ...buildConsoleNav("/acme/~/settings"),
     ].flatMap((g) => g.items.map((i) => i.url));
-    expect(urls).not.toContain("/prj-123/heartbeats");
+    expect(urls).not.toContain("/acme/web/heartbeats");
     expect(urls.some((u) => u.includes("heartbeat"))).toBe(false);
   });
 });
@@ -219,22 +243,22 @@ describe("the whole destination set", () => {
   it("is exactly these destinations, in this order", () => {
     expect(
       [
-        ...buildConsoleNav("/prj-123/api-keys", "prj-123"),
-        ...buildConsoleNav("/organization/settings", "organization"),
-        ...buildConsoleNav("/account/settings", "account"),
+        ...buildConsoleNav("/acme/web/api-keys"),
+        ...buildConsoleNav("/acme/~/settings"),
+        ...buildConsoleNav("/account/settings"),
       ].flatMap((g) => g.items.map((i) => i.url)),
     ).toEqual([
-      "/prj-123",
-      "/prj-123/api-keys",
-      "/prj-123/connectors",
-      "/prj-123/members",
-      "/prj-123/audit-log",
-      "/prj-123/settings",
-      "/organization",
-      "/organization/projects",
-      "/organization/members",
-      "/organization/audit-log",
-      "/organization/settings",
+      "/acme/web",
+      "/acme/web/api-keys",
+      "/acme/web/connectors",
+      "/acme/web/members",
+      "/acme/web/audit-log",
+      "/acme/web/settings",
+      "/acme",
+      "/acme/~/projects",
+      "/acme/~/members",
+      "/acme/~/audit-log",
+      "/acme/~/settings",
       "/account/settings",
       "/account/notifications",
       "/account/privacy",
@@ -244,9 +268,9 @@ describe("the whole destination set", () => {
 
 describe("rootSegment", () => {
   it("reads the first segment of a console path", () => {
-    expect(rootSegment("/prj-123/api-keys")).toBe("prj-123");
-    expect(rootSegment("/prj-123")).toBe("prj-123");
-    expect(rootSegment("/organization/members")).toBe("organization");
+    expect(rootSegment("/acme/web/api-keys")).toBe("acme");
+    expect(rootSegment("/acme")).toBe("acme");
+    expect(rootSegment("/acme/~/members")).toBe("acme");
     expect(rootSegment("/account/settings")).toBe("account");
   });
 
@@ -259,11 +283,11 @@ describe("rootSegment", () => {
   // root it was written from.
   it("inverts every url the rail builds", () => {
     for (const [pathname, root] of [
-      ["/prj-123/api-keys", "prj-123"],
-      ["/organization/settings", "organization"],
+      ["/acme/web/api-keys", "acme"],
+      ["/acme/~/settings", "acme"],
       ["/account/settings", "account"],
     ] as const) {
-      for (const group of buildConsoleNav(pathname, root)) {
+      for (const group of buildConsoleNav(pathname)) {
         for (const item of group.items) {
           expect(rootSegment(item.url)).toBe(root);
         }
@@ -282,7 +306,7 @@ describe("isAccountPath", () => {
   // A sibling whose name begins with the word is a different place.
   it("does not claim a path that merely starts with the word", () => {
     expect(isAccountPath("/accounting")).toBe(false);
-    expect(isAccountPath("/prj-123/account")).toBe(false);
+    expect(isAccountPath("/acme/account")).toBe(false);
     expect(isAccountPath("/")).toBe(false);
   });
 });
@@ -291,7 +315,6 @@ describe("withExtraItems", () => {
   const core = [
     {
       title: "Organization",
-      segment: "organization",
       items: [
         { title: "Members", path: "/members", icon: Users },
         { title: "Settings", path: "/settings", icon: Settings },
@@ -326,67 +349,131 @@ describe("withExtraItems", () => {
   });
 });
 
-describe("parseConsolePath", () => {
-  it("parses organization routes with actions including billing", () => {
-    expect(parseConsolePath("/acme/billing")).toEqual({
-      organizationId: "acme",
-      orgId: "acme",
-      projectId: null,
-      mode: "organization",
-    });
-    expect(parseConsolePath("/acme/projects")).toEqual({
-      organizationId: "acme",
-      orgId: "acme",
-      projectId: null,
-      mode: "organization",
-    });
-    expect(parseConsolePath("/acme/settings")).toEqual({
-      organizationId: "acme",
-      orgId: "acme",
-      projectId: null,
-      mode: "organization",
-    });
-    expect(parseConsolePath("/acme/members")).toEqual({
-      organizationId: "acme",
-      orgId: "acme",
-      projectId: null,
-      mode: "organization",
-    });
+describe("consolePlace", () => {
+  it("reads an organization off its overview and its own pages", () => {
+    const organization = { kind: "organization", organization: "acme" };
+    for (const pathname of ["/acme", "/acme/", "/acme/~", "/acme/~/settings", "/acme/~/billing"]) {
+      expect(consolePlace(pathname), pathname).toEqual(organization);
+    }
   });
 
-  it("parses nested project routes and project subpages under organization", () => {
-    expect(parseConsolePath("/acme/web-app")).toEqual({
-      organizationId: "acme",
-      orgId: "acme",
-      projectId: "web-app",
-      mode: "project",
+  it("reads any other second segment as a project, whatever it is called", () => {
+    expect(consolePlace("/acme/web-app")).toEqual({
+      kind: "project",
+      organization: "acme",
+      project: "web-app",
     });
-    expect(parseConsolePath("/acme/web-app/connectors")).toEqual({
-      organizationId: "acme",
-      orgId: "acme",
-      projectId: "web-app",
-      mode: "project",
+    expect(consolePlace("/acme/web-app/connectors")).toEqual({
+      kind: "project",
+      organization: "acme",
+      project: "web-app",
     });
-    expect(parseConsolePath("/acme/web-app/api-keys")).toEqual({
-      organizationId: "acme",
-      orgId: "acme",
-      projectId: "web-app",
-      mode: "project",
-    });
+    for (const named of ["settings", "members", "projects", "billing", "account"]) {
+      expect(consolePlace(`/acme/${named}`), named).toEqual({
+        kind: "project",
+        organization: "acme",
+        project: named,
+      });
+    }
   });
 
-  it("handles account, console, and bare organization paths", () => {
-    expect(parseConsolePath("/account/settings")).toEqual({
-      organizationId: null,
-      orgId: null,
-      projectId: null,
-      mode: "account",
-    });
-    expect(parseConsolePath("/organization")).toEqual({
-      organizationId: "organization",
-      orgId: "organization",
-      projectId: null,
-      mode: "organization",
-    });
+  it("reads Account as a place of its own, and nothing off the console's paths", () => {
+    expect(consolePlace("/account/settings")).toEqual({ kind: "account" });
+    expect(consolePlace("/account")).toEqual({ kind: "account" });
+    for (const pathname of [
+      "/",
+      "",
+      "/console",
+      "/api/events",
+      "/auth/login",
+      "/invite/abc",
+      // An id is redirected to its slug before anything is drawn for it.
+      "/org_7bQx2mNv9BcK4dLp",
+      "/org_7bQx2mNv9BcK4dLp/project_7bQx2mNv9BcK4dLp",
+      "/Acme/web",
+    ]) {
+      expect(consolePlace(pathname), pathname).toBeNull();
+    }
+  });
+});
+
+describe("projectAt", () => {
+  const projects = [
+    { id: "project_1", slug: "web" },
+    { id: "project_2", slug: "settings" },
+  ];
+
+  it("finds the project the path names in the organization's listing", () => {
+    expect(projectAt("/acme/web", "acme", projects)?.id).toBe("project_1");
+    expect(projectAt("/acme/web/api-keys", "acme", projects)?.id).toBe("project_1");
+    expect(projectAt("/acme/settings/settings", "acme", projects)?.id).toBe("project_2");
+  });
+
+  it("finds none off a project's pages", () => {
+    expect(projectAt("/acme", "acme", projects)).toBeNull();
+    expect(projectAt("/acme/~/settings", "acme", projects)).toBeNull();
+    expect(projectAt("/account/settings", "acme", projects)).toBeNull();
+    expect(projectAt("/acme/gone", "acme", projects)).toBeNull();
+  });
+
+  // Two organizations may each hold a project called `web`. While the store
+  // still lists the one just left, the path's project is not in it.
+  it("finds none while the listing is another organization's", () => {
+    expect(projectAt("/globex/web", "acme", projects)).toBeNull();
+    expect(projectAt("/acme/web", null, projects)).toBeNull();
+  });
+});
+
+describe("staleShellOrganization", () => {
+  const organizations = [{ slug: "acme" }, { slug: "globex" }];
+
+  it("names the organization the path moved into", () => {
+    expect(staleShellOrganization("/globex/web", "acme", organizations)).toBe("globex");
+    expect(staleShellOrganization("/globex/~/members", "acme", organizations)).toBe("globex");
+    expect(staleShellOrganization("/globex", null, organizations)).toBe("globex");
+  });
+
+  it("is quiet while the shell and the path agree", () => {
+    expect(staleShellOrganization("/acme/web", "acme", organizations)).toBeNull();
+    expect(staleShellOrganization("/acme", "acme", organizations)).toBeNull();
+  });
+
+  it("is quiet on a path that names no organization", () => {
+    expect(staleShellOrganization("/account/settings", "acme", organizations)).toBeNull();
+    expect(staleShellOrganization("/console", "acme", organizations)).toBeNull();
+  });
+
+  // Auth answers such a path with one of the person's own organizations, so
+  // asking again would get the same answer, again and again.
+  it("is quiet for an organization the person is not in", () => {
+    expect(staleShellOrganization("/initech/web", "acme", organizations)).toBeNull();
+    expect(staleShellOrganization("/initech/web", "acme", [])).toBeNull();
+  });
+});
+
+describe("organizationToRemember", () => {
+  const organizations = [
+    { organizationId: "org_acme", slug: "acme" },
+    { organizationId: "org_globex", slug: "globex" },
+  ];
+
+  // By id: the cookie outlives the page, and a rename moves a slug.
+  it("remembers the organization of the page on screen, by its id", () => {
+    expect(organizationToRemember("/globex/web", organizations, "org_acme")).toBe("org_globex");
+    expect(organizationToRemember("/globex/~/members", organizations, null)).toBe("org_globex");
+    expect(organizationToRemember("/acme", organizations, "org_acme")).toBe("org_acme");
+  });
+
+  // Account names none, so the cookie keeps following the organization this
+  // tab stands in — and not the one another tab moved it to since.
+  it("remembers the one the console stands in on a path that names none", () => {
+    expect(organizationToRemember("/account/settings", organizations, "org_acme")).toBe("org_acme");
+    expect(organizationToRemember("/account/settings", organizations, null)).toBeNull();
+  });
+
+  // A path that answers 404 opened nothing.
+  it("remembers nothing for an organization the person is not in", () => {
+    expect(organizationToRemember("/initech/web", organizations, "org_acme")).toBeNull();
+    expect(organizationToRemember("/acme/web", [], "org_acme")).toBeNull();
   });
 });

@@ -55,9 +55,9 @@ export const createIdentitySlice = (
       ...seed,
       serverSeed: seed,
 
-      renameProject: (id, name) =>
+      renameProject: (id, name, slug) =>
         set((s) => ({
-          projects: s.projects.map((p) => (p.id === id ? { ...p, name } : p)),
+          projects: s.projects.map((p) => (p.id === id ? { ...p, name, slug } : p)),
         })),
 
       addProject: (project) =>

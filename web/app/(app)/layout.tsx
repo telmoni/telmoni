@@ -13,20 +13,19 @@ import { SidebarProvider } from "@/components/sidebar-context";
 import { ProjectBanner } from "@/components/project-banner";
 import { ExtensionBanner } from "@/components/extension/banner";
 import { InviteToastNotifier } from "@/components/invite-toast-notifier";
+import { OrganizationSync } from "@/components/organization-sync";
 import { RealtimeListener } from "@/components/realtime-listener";
 import { PageHeaderProvider } from "@/components/page-header-context";
 import {
+  activeOrganization,
   fetchActiveSessions,
   getServerContext,
-  fetchProjects,
-  fetchProjectsEverywhere,
   fetchProjectAnnouncement,
-  identityContext,
 } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
+import { storeSeed } from "@/lib/server/store-seed";
 import { Flag, flagOn } from "@/lib/flags";
 import { StoreProvider } from "@/lib/store/provider";
-import { Role } from "@/lib/types/enums";
 import { accountOnlyReason } from "@/lib/account-only";
 import { ownedOrganizationLabels } from "@/lib/identity";
 import { SessionHeartbeat } from "@/components/session-heartbeat";
@@ -36,23 +35,14 @@ import { ConsoleSearch } from "@/components/console-search";
 import { AccountOnly } from "./_account-only";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const [session, ctx, ident, projects, everywhere, projectAnnouncement] = await Promise.all([
+  const [session, ctx, seed, projectAnnouncement] = await Promise.all([
     getServerSession(),
     getServerContext(),
-    identityContext(),
-    fetchProjects(),
-    fetchProjectsEverywhere(),
+    storeSeed(),
     fetchProjectAnnouncement(),
   ]);
 
-  if (!session) redirect("/auth/logout");
-
-  const user = {
-    id: session.userId,
-    email: session.email,
-    firstName: session.firstName,
-    lastName: session.lastName,
-  };
+  if (!session || !seed) redirect("/auth/logout");
 
   // Every route under (app) answers this way while a gate is up, so no page
   // below renders for somebody with no organization to render it in.
@@ -63,7 +53,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     const sessions = await fetchActiveSessions();
     return (
       <StoreProvider
-        user={user}
+        user={seed.user}
         organizations={ctx.organizations}
         incomingInvites={ctx.incomingInvites}
         projectOffers={ctx.projectOffers}
@@ -95,27 +85,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     );
   }
 
-  const roles: Record<string, Role> = Object.fromEntries(
-    projects
-      .filter((p): p is typeof p & { role: Role } => p.role !== null)
-      .map((p) => [p.id, p.role]),
-  );
-  const organizationRole = ident?.role ?? null;
-  if (organizationRole) {
-    roles.organization = {
-      owner: Role.Owner,
-      admin: Role.Admin,
-      member: Role.Member,
-    }[organizationRole];
-  }
-
   const jar = await cookies();
   const initialCollapsed = jar.get(NAV_COLLAPSED_COOKIE)?.value === "1";
-  const activeOrganizationId = ident?.organizationId ?? null;
-  const projectsElsewhere =
-    everywhere.kind === "ok" && activeOrganizationId
-      ? everywhere.projects.filter((p) => p.organizationId !== activeOrganizationId)
-      : [];
 
   return (
     <div className="theme-console flex h-svh flex-col">
@@ -124,17 +95,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         needsReseal={session.needsReseal}
       />
       <ConsoleTrailRecorder />
-      <StoreProvider
-        user={user}
-        organizations={ctx?.organizations ?? []}
-        incomingInvites={ctx?.incomingInvites ?? []}
-        projectOffers={ctx?.projectOffers ?? []}
-        activeOrganizationId={activeOrganizationId}
-        flags={ctx?.flags ?? {}}
-        roles={roles}
-        projects={projects}
-        projectsElsewhere={projectsElsewhere}
-      >
+      <StoreProvider {...seed}>
+        <OrganizationSync rendered={(ctx && activeOrganization(ctx)?.slug) ?? null} />
         <RealtimeListener />
         <InviteToastNotifier />
         <ConsoleUiProvider>

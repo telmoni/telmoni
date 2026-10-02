@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button";
 export function AccessDenied({
   what,
   owner = null,
-  backHref = "/organization",
+  backHref,
   backLabel = "Back to overview",
 }: {
   what: string;
@@ -25,7 +25,8 @@ export function AccessDenied({
   /// `null` when `/me` did not carry them. The owner, and not "an admin": at
   /// the organization level only the owner changes a role.
   owner?: string | null;
-  backHref?: string;
+  /// The overview of the organization or project the page belongs to.
+  backHref: string;
   backLabel?: string;
 }) {
   return (

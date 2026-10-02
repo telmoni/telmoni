@@ -60,7 +60,12 @@ describe("sealPkce / unsealPkce", () => {
 });
 
 describe("sealConnect / unsealConnect", () => {
-  const pending = { state: "st8", projectId: "project_abc", provider: "slack" as const };
+  const pending = {
+    state: "st8",
+    organizationId: "org_abc",
+    projectId: "project_abc",
+    provider: "slack" as const,
+  };
 
   it("round-trips the handshake through seal/unseal", async () => {
     const sealed = await sealConnect(pending);

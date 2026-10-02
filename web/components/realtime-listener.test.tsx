@@ -6,8 +6,18 @@ import { RealtimeListener } from "./realtime-listener";
 
 const mockReplace = vi.fn();
 const mockRefresh = vi.fn();
-let mockPathname = "/project_1/members";
+let mockPathname = "/acme/web/members";
 let mockActiveOrgId: string | null = "org_1";
+// The listing of the organization the console stands in. Events name a
+// project by id; the path names it by its slug in that organization.
+let mockProjects = [
+  { id: "project_1", slug: "web" },
+  { id: "project_10", slug: "web-2" },
+];
+const ORGANIZATIONS = [
+  { organizationId: "org_1", slug: "acme" },
+  { organizationId: "org_2", slug: "globex" },
+];
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
@@ -19,9 +29,11 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/store", () => ({
   useIncomingInvites: () => [],
-  useOrganizations: () => [{ organizationId: "org_1" }],
-  useProjects: () => [{ id: "project_1", slug: "my-project" }],
+  useOrganizations: () => ORGANIZATIONS,
+  useProjects: () => mockProjects,
   useActiveOrganizationId: () => mockActiveOrgId,
+  useActiveOrganization: () =>
+    ORGANIZATIONS.find((o) => o.organizationId === mockActiveOrgId) ?? null,
   useAddIncomingInvite: () => vi.fn(),
   useRemoveIncomingInvite: () => vi.fn(),
 }));
@@ -71,10 +83,14 @@ describe("RealtimeListener - membership:removed edge cases", () => {
     vi.clearAllMocks();
     MockEventSource.instances = [];
     mockActiveOrgId = "org_1";
+    mockProjects = [
+      { id: "project_1", slug: "web" },
+      { id: "project_10", slug: "web-2" },
+    ];
   });
 
   it("ejects the user to /console when removed from their active project subpath", () => {
-    mockPathname = "/project_1/members";
+    mockPathname = "/acme/web/members";
     render(<RealtimeListener />);
 
     const es = MockEventSource.instances[0];
@@ -87,8 +103,8 @@ describe("RealtimeListener - membership:removed edge cases", () => {
     expect(mockRefresh).not.toHaveBeenCalled();
   });
 
-  it("ejects the user to /console when removed from their active project root (/project_1)", () => {
-    mockPathname = "/project_1";
+  it("ejects the user to /console when removed from their active project root (/acme/web)", () => {
+    mockPathname = "/acme/web";
     render(<RealtimeListener />);
 
     const es = MockEventSource.instances[0];
@@ -101,8 +117,8 @@ describe("RealtimeListener - membership:removed edge cases", () => {
     expect(mockRefresh).not.toHaveBeenCalled();
   });
 
-  it("does not false-positive match project ID prefix (/project_10 when removed from project_1)", () => {
-    mockPathname = "/project_10/members";
+  it("does not false-positive match a slug prefix (/acme/web-2 when removed from web)", () => {
+    mockPathname = "/acme/web-2/members";
     render(<RealtimeListener />);
 
     const es = MockEventSource.instances[0];
@@ -115,8 +131,26 @@ describe("RealtimeListener - membership:removed edge cases", () => {
     expect(mockRefresh).toHaveBeenCalled();
   });
 
-  it("does not eject from /organization when only removed from a project in that org", () => {
-    mockPathname = "/organization/projects";
+  // Every organization starts with a project of the same name: the slug alone
+  // says nothing about which project the path is on.
+  it("does not eject from a same-named project of another organization", () => {
+    mockPathname = "/globex/web";
+    mockActiveOrgId = "org_2";
+    mockProjects = [{ id: "project_9", slug: "web" }];
+    render(<RealtimeListener />);
+
+    const es = MockEventSource.instances[0];
+    es.emit("membership:removed", {
+      organizationId: "org_1",
+      projectId: "project_1",
+    });
+
+    expect(mockReplace).not.toHaveBeenCalled();
+    expect(mockRefresh).toHaveBeenCalled();
+  });
+
+  it("does not eject from the organization's own pages when only removed from a project in it", () => {
+    mockPathname = "/acme/~/projects";
     render(<RealtimeListener />);
 
     const es = MockEventSource.instances[0];
@@ -130,7 +164,7 @@ describe("RealtimeListener - membership:removed edge cases", () => {
   });
 
   it("ejects the user to /console when removed from the active organization", () => {
-    mockPathname = "/organization/members";
+    mockPathname = "/acme/~/members";
     render(<RealtimeListener />);
 
     const es = MockEventSource.instances[0];
@@ -156,7 +190,7 @@ describe("RealtimeListener - membership:removed edge cases", () => {
   });
 
   it("does not eject when removed from an organization that is not currently active", () => {
-    mockPathname = "/organization/members";
+    mockPathname = "/globex/~/members";
     mockActiveOrgId = "org_2";
     render(<RealtimeListener />);
 
@@ -170,7 +204,7 @@ describe("RealtimeListener - membership:removed edge cases", () => {
   });
 
   it("safely ignores malformed JSON or unparseable event data", () => {
-    mockPathname = "/project_1/members";
+    mockPathname = "/acme/web/members";
     render(<RealtimeListener />);
 
     const es = MockEventSource.instances[0];
@@ -178,5 +212,60 @@ describe("RealtimeListener - membership:removed edge cases", () => {
 
     expect(mockReplace).not.toHaveBeenCalled();
     expect(mockRefresh).not.toHaveBeenCalled();
+  });
+});
+
+// A project handed to another organization leaves the path it was open on
+// naming nothing. The event names where it went, by id.
+describe("RealtimeListener - ownership:changed", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    MockEventSource.instances = [];
+    mockActiveOrgId = "org_1";
+    mockProjects = [
+      { id: "project_1", slug: "web" },
+      { id: "project_10", slug: "web-2" },
+    ];
+  });
+
+  it("follows the project on screen into the organization it was handed to", () => {
+    mockPathname = "/acme/web/members";
+    render(<RealtimeListener />);
+
+    MockEventSource.instances[0].emit("ownership:changed", {
+      organizationId: "org_2",
+      projectId: "project_1",
+    });
+
+    // By id: the console redirects it to the slugs the project goes by there.
+    expect(mockReplace).toHaveBeenCalledWith("/org_2/project_1");
+    expect(mockRefresh).not.toHaveBeenCalled();
+  });
+
+  // An offer made, withdrawn or declined names the organization the project
+  // is still in: every role on the page may have moved, and nothing else.
+  it("refreshes in place when the project on screen stays where it is", () => {
+    mockPathname = "/acme/web/members";
+    render(<RealtimeListener />);
+
+    MockEventSource.instances[0].emit("ownership:changed", {
+      organizationId: "org_1",
+      projectId: "project_1",
+    });
+
+    expect(mockReplace).not.toHaveBeenCalled();
+    expect(mockRefresh).toHaveBeenCalled();
+  });
+
+  it("refreshes in place when another project moved, or the organization changed hands", () => {
+    mockPathname = "/acme/web-2";
+    render(<RealtimeListener />);
+
+    const es = MockEventSource.instances[0];
+    es.emit("ownership:changed", { organizationId: "org_2", projectId: "project_1" });
+    es.emit("ownership:changed", { organizationId: "org_2" });
+
+    expect(mockReplace).not.toHaveBeenCalled();
+    expect(mockRefresh).toHaveBeenCalledTimes(2);
   });
 });

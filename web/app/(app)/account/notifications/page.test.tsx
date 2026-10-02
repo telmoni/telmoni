@@ -69,6 +69,7 @@ import AccountNotificationsPage from "./page";
 
 const OWN: OrganizationEntry = {
   organizationId: "org_own",
+  slug: "own",
   name: null,
   ownerEmail: "admin@example.test",
   role: "owner",
@@ -76,6 +77,7 @@ const OWN: OrganizationEntry = {
 
 const OFFERED: OrganizationEntry = {
   organizationId: "org_offered",
+  slug: "analytical-engines",
   name: "Analytical Engines",
   ownerEmail: "charles@example.test",
   ownerDisplayName: "Charles Babbage",
@@ -85,6 +87,7 @@ const OFFERED: OrganizationEntry = {
 
 const NOT_OFFERED: OrganizationEntry = {
   organizationId: "org_other",
+  slug: "other",
   name: "Difference Engine",
   ownerEmail: "ada@example.test",
   role: "admin",
@@ -233,6 +236,7 @@ describe("AccountNotificationsPage: project offers", () => {
   it("asks which organization when the caller owns several", async () => {
     const second: OrganizationEntry = {
       organizationId: "org_second",
+      slug: "second",
       name: "Second",
       ownerEmail: "admin@example.test",
       role: "owner",

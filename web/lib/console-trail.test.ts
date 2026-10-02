@@ -4,22 +4,35 @@ import {
   EMPTY_TRAIL,
   TRAIL_LIMIT,
   isReturnablePath,
+  liveResources,
   parseTrail,
   pushPath,
   resolveReturnUrl,
+  resourceRoot,
   resourceUrl,
   standingResource,
+  trailResource,
   type ConsoleTrail,
+  type Resource,
 } from "./console-trail";
-import { rootSegment } from "./console-nav";
 
-const PROJECT = "project_abc";
-const OTHER = "project_def";
-const PROJECTS = [PROJECT, OTHER];
-const CONNECTORS = `/${PROJECT}/connectors`;
-const KEYS = `/${PROJECT}/api-keys`;
-const OVERVIEW = `/${PROJECT}`;
-const ORG_MEMBERS = "/organization/members";
+const ORGANIZATION: Resource = { kind: "organization", organization: "acme" };
+const PROJECT: Resource = { kind: "project", organization: "acme", project: "web" };
+const OTHER: Resource = { kind: "project", organization: "acme", project: "api" };
+const OVERVIEW = "/acme/web";
+const CONNECTORS = `${OVERVIEW}/connectors`;
+const KEYS = `${OVERVIEW}/api-keys`;
+const ORG_MEMBERS = "/acme/~/members";
+const ACCOUNT = "/account/settings";
+
+// What the console is drawing: one organization and its two projects.
+const LIVE = liveResources(
+  [{ slug: "acme" }],
+  [
+    { slug: "web", organizationSlug: "acme" },
+    { slug: "api", organizationSlug: "acme" },
+  ],
+);
 
 /** Walk the console the way the recorder does: one push per navigation. */
 function walk(...paths: string[]): ConsoleTrail {
@@ -31,6 +44,14 @@ describe("which paths the console may be sent back to", () => {
     expect(isReturnablePath(CONNECTORS)).toBe(true);
     expect(isReturnablePath(OVERVIEW)).toBe(true);
     expect(isReturnablePath(ORG_MEMBERS)).toBe(true);
+    expect(isReturnablePath("/acme")).toBe(true);
+  });
+
+  // An id is redirected to its slug, and the trail records where that lands.
+  it("refuses a path that names no organization", () => {
+    expect(isReturnablePath("/")).toBe(false);
+    expect(isReturnablePath("/api/events")).toBe(false);
+    expect(isReturnablePath("/org_7bQx2mNv9BcK4dLp/project_7bQx2mNv9BcK4dLp")).toBe(false);
   });
 
   it("refuses the mode the back arrow leaves", () => {
@@ -48,7 +69,7 @@ describe("which paths the console may be sent back to", () => {
     expect(isReturnablePath("//evil.example.com")).toBe(false);
     expect(isReturnablePath("https://evil.example.com")).toBe(false);
     expect(isReturnablePath("/\\evil.example.com")).toBe(false);
-    expect(isReturnablePath(`${PROJECT}/connectors`)).toBe(false);
+    expect(isReturnablePath("acme/web/connectors")).toBe(false);
   });
 });
 
@@ -69,10 +90,25 @@ describe("arriving somewhere", () => {
 
   it("drops the oldest resource past the cap", () => {
     const trail = walk(
-      ...Array.from({ length: TRAIL_LIMIT + 1 }, (_, i) => `/project_${i}/api-keys`),
+      ...Array.from({ length: TRAIL_LIMIT + 1 }, (_, i) => `/acme/project-${i}/api-keys`),
     );
     expect(trail).toHaveLength(TRAIL_LIMIT);
-    expect(trail).not.toContain("/project_0/api-keys");
+    expect(trail).not.toContain("/acme/project-0/api-keys");
+  });
+
+  it("counts an organization's overview and its own pages as one resource", () => {
+    expect(walk("/acme", "/acme/~/projects", "/acme/~/billing")).toEqual(["/acme/~/billing"]);
+  });
+
+  // Every organization starts with a project of the same name.
+  it("keeps same-named projects of two organizations apart", () => {
+    expect(walk("/acme/web/connectors", "/globex/web")).toEqual([
+      "/globex/web",
+      "/acme/web/connectors",
+    ]);
+    expect(trailResource("/acme/web/connectors")).toBe("/acme/web");
+    expect(trailResource("/acme/~/members")).toBe("/acme");
+    expect(trailResource("/account/settings")).toBe("");
   });
 
   // The store compares snapshots by identity, so an unchanged trail has to be
@@ -113,62 +149,87 @@ describe("a trail read back out of storage", () => {
       KEYS,
       ORG_MEMBERS,
     ]);
-    const long = Array.from({ length: TRAIL_LIMIT + 3 }, (_, i) => `/project_${i}`);
+    const long = Array.from({ length: TRAIL_LIMIT + 3 }, (_, i) => `/acme/project-${i}`);
     expect(parseTrail(JSON.stringify(long))).toHaveLength(TRAIL_LIMIT);
   });
 });
 
 describe("where the rail's back arrow points", () => {
   it("falls back when nothing was recorded", () => {
-    expect(resolveReturnUrl(EMPTY_TRAIL, PROJECTS, OVERVIEW)).toBe(OVERVIEW);
+    expect(resolveReturnUrl(EMPTY_TRAIL, LIVE, OVERVIEW)).toBe(OVERVIEW);
   });
 
   it("returns the page you stepped in from", () => {
-    expect(resolveReturnUrl(walk(CONNECTORS), PROJECTS, OVERVIEW)).toBe(CONNECTORS);
+    expect(resolveReturnUrl(walk(CONNECTORS), LIVE, OVERVIEW)).toBe(CONNECTORS);
   });
 
   it("returns an organization page as readily as a project one", () => {
-    expect(resolveReturnUrl(walk(CONNECTORS, ORG_MEMBERS), PROJECTS, OVERVIEW)).toBe(
-      ORG_MEMBERS,
+    expect(resolveReturnUrl(walk(CONNECTORS, ORG_MEMBERS), LIVE, OVERVIEW)).toBe(ORG_MEMBERS);
+  });
+
+  // You can leave a project, or lose your role in it, from inside Account —
+  // and a rename moves its slug out from under the path that was recorded.
+  it("walks past a project that is no longer listed", () => {
+    expect(resolveReturnUrl(walk(CONNECTORS, "/acme/gone/api-keys"), LIVE, OVERVIEW)).toBe(
+      CONNECTORS,
     );
   });
 
-  // You can leave a project, or lose your role in it, from inside Account.
-  it("walks past a project that is no longer listed", () => {
-    expect(
-      resolveReturnUrl(walk(CONNECTORS, "/project_gone/api-keys"), PROJECTS, OVERVIEW),
-    ).toBe(CONNECTORS);
+  it("walks past an organization you are no longer in", () => {
+    expect(resolveReturnUrl(walk(CONNECTORS, "/globex/~/members"), LIVE, OVERVIEW)).toBe(
+      CONNECTORS,
+    );
+    expect(resolveReturnUrl(walk(CONNECTORS, "/globex/web"), LIVE, OVERVIEW)).toBe(CONNECTORS);
   });
 
   it("falls back when no resource in the trail is still yours", () => {
-    expect(resolveReturnUrl(walk("/project_gone/api-keys"), PROJECTS, OVERVIEW)).toBe(
-      OVERVIEW,
+    expect(resolveReturnUrl(walk("/acme/gone/api-keys"), LIVE, OVERVIEW)).toBe(OVERVIEW);
+  });
+});
+
+describe("the resources the console is drawing", () => {
+  it("lists every organization and every project by its root", () => {
+    const live = liveResources(
+      [{ slug: "acme" }, { slug: "globex" }],
+      [
+        { slug: "web", organizationSlug: "acme" },
+        { slug: "web", organizationSlug: "globex" },
+      ],
     );
+    expect([...live].sort()).toEqual(["/acme", "/acme/web", "/globex", "/globex/web"]);
   });
 });
 
 describe("where a resource selector row points", () => {
   it("offers the overview for a resource never opened", () => {
-    expect(resourceUrl(EMPTY_TRAIL, OTHER)).toBe(`/${OTHER}`);
-    expect(resourceUrl(EMPTY_TRAIL, "organization")).toBe("/organization");
+    expect(resourceUrl(EMPTY_TRAIL, OTHER)).toBe("/acme/api");
+    expect(resourceUrl(EMPTY_TRAIL, ORGANIZATION)).toBe("/acme");
   });
 
   it("returns you to the page you were reading in that resource", () => {
     const trail = walk(CONNECTORS, ORG_MEMBERS);
     expect(resourceUrl(trail, PROJECT)).toBe(CONNECTORS);
-    expect(resourceUrl(trail, "organization")).toBe(ORG_MEMBERS);
+    expect(resourceUrl(trail, ORGANIZATION)).toBe(ORG_MEMBERS);
   });
 
   it("does not offer one resource's page for another", () => {
-    expect(resourceUrl(walk(CONNECTORS), OTHER)).toBe(`/${OTHER}`);
+    expect(resourceUrl(walk(CONNECTORS), OTHER)).toBe("/acme/api");
+    expect(resourceUrl(walk("/globex/web/connectors"), PROJECT)).toBe(OVERVIEW);
+    expect(resourceUrl(walk(CONNECTORS), ORGANIZATION)).toBe("/acme");
   });
 });
 
 describe("which resource the chrome names", () => {
   it("names the one in the URL on every page that has one", () => {
-    expect(standingResource(PROJECT, EMPTY_TRAIL, PROJECTS)).toBe(PROJECT);
-    expect(standingResource("organization", EMPTY_TRAIL, PROJECTS)).toBe(
-      "organization",
+    expect(standingResource(CONNECTORS, EMPTY_TRAIL, LIVE, OVERVIEW)).toEqual(PROJECT);
+    expect(standingResource(ORG_MEMBERS, EMPTY_TRAIL, LIVE, OVERVIEW)).toEqual(ORGANIZATION);
+    expect(standingResource("/acme", EMPTY_TRAIL, LIVE, OVERVIEW)).toEqual(ORGANIZATION);
+  });
+
+  // The path wins over the trail: it names where you ARE.
+  it("names the one in the URL whatever the trail holds", () => {
+    expect(standingResource(ORG_MEMBERS, walk(CONNECTORS), LIVE, OVERVIEW)).toEqual(
+      ORGANIZATION,
     );
   });
 
@@ -176,42 +237,26 @@ describe("which resource the chrome names", () => {
   // an empty segment and fell back to a placeholder while the rail's back
   // arrow still pointed at the project.
   it("keeps naming the project you stepped into Account from", () => {
-    expect(standingResource("account", walk(CONNECTORS), PROJECTS)).toBe(PROJECT);
+    expect(standingResource(ACCOUNT, walk(CONNECTORS), LIVE, OVERVIEW)).toEqual(PROJECT);
   });
 
   it("names the organization when that is where you stepped in from", () => {
-    expect(standingResource("account", walk(CONNECTORS, ORG_MEMBERS), PROJECTS)).toBe(
-      "organization",
+    expect(standingResource(ACCOUNT, walk(CONNECTORS, ORG_MEMBERS), LIVE, OVERVIEW)).toEqual(
+      ORGANIZATION,
     );
   });
 
   it("agrees with the back arrow, which is the point of sharing the walk", () => {
-    const trail = walk(CONNECTORS, "/project_gone/api-keys");
-    expect(standingResource("account", trail, PROJECTS)).toBe(
-      rootSegment(resolveReturnUrl(trail, PROJECTS, OVERVIEW)),
+    const trail = walk(CONNECTORS, "/acme/gone/api-keys");
+    const standing = standingResource(ACCOUNT, trail, LIVE, OVERVIEW);
+    expect(standing && resourceRoot(standing)).toBe(
+      trailResource(resolveReturnUrl(trail, LIVE, OVERVIEW)),
     );
   });
 
   // A tab opened straight onto an account page has no trail to read.
   it("falls back to the first project, and to nothing without one", () => {
-    expect(standingResource("account", EMPTY_TRAIL, PROJECTS)).toBe(PROJECT);
-    expect(standingResource("account", EMPTY_TRAIL, [])).toBe("");
-  });
-});
-
-describe("hierarchical slug trails", () => {
-  it("tracks organization and project pages by slug resource", () => {
-    const trail = walk("/acme/web-app", "/acme/projects");
-    expect(trail).toEqual(["/acme/projects", "/acme/web-app"]);
-  });
-
-  it("replaces trail entry when navigating within the same project by slug", () => {
-    const trail = walk("/acme/web-app", "/acme/web-app/connectors");
-    expect(trail).toEqual(["/acme/web-app/connectors"]);
-  });
-
-  it("replaces trail entry when navigating within the same organization by slug", () => {
-    const trail = walk("/acme/projects", "/acme/billing");
-    expect(trail).toEqual(["/acme/billing"]);
+    expect(standingResource(ACCOUNT, EMPTY_TRAIL, LIVE, OVERVIEW)).toEqual(PROJECT);
+    expect(standingResource(ACCOUNT, EMPTY_TRAIL, liveResources([], []), "/console")).toBeNull();
   });
 });

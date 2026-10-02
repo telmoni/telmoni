@@ -7,9 +7,9 @@ import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
 import { organizationChannel, publishEvent, publishToAll } from "@/lib/events/publisher";
-import { setActiveOrganizationCookie } from "@/lib/server/cookies";
 import { personHeaders, sessionHeaders } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
+import { projectPath } from "@/lib/slug";
 
 // Answering an ownership offer. The organization is the OFFER's, named
 // explicitly, not the one the console is standing in: an offer is answered
@@ -116,7 +116,9 @@ async function answerProjectOffer(
   if (!res.ok) return { error: (await extractProblem(res)).message };
 
   const body = (await res.json().catch(() => null)) as {
+    slug?: unknown;
     organizationId?: unknown;
+    organizationSlug?: unknown;
     previousOrganizationId?: unknown;
     ownerOrganizationId?: unknown;
   } | null;
@@ -145,12 +147,14 @@ async function answerProjectOffer(
     ],
     { type: "ownership:changed", data: { organizationId: destination ?? source ?? "", projectId } },
   );
-  // ⚠ **The console has to FOLLOW the project, or the caller lands on a 404.**
-  // It is in the destination now, and `[projectId]/layout.tsx` resolves the
-  // listing for whatever organization the cookie names.
-  if (destination) await setActiveOrganizationCookie(destination);
   revalidatePath("/", "layout");
-  return { error: null, href: `/${projectId}` };
+  // The project is in the destination now, under the slug it landed with.
+  const organization = id(body?.organizationSlug);
+  const project = id(body?.slug);
+  return {
+    error: null,
+    href: organization && project ? projectPath(organization, project) : undefined,
+  };
 }
 
 export async function acceptProjectOfferAction(

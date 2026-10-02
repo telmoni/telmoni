@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useEffect } from "react";
 
-import { StoreProvider } from "./provider";
+import { StoreProvider, StoreSeed } from "./provider";
 import {
   useActiveOrganizationId,
   useOrganizations,
@@ -22,6 +22,7 @@ import type { Project, ProjectEverywhere } from "@/lib/server/entities/projects"
 function organization(who: string): OrganizationEntry {
   return {
     organizationId: `org_${who}`,
+    slug: who,
     name: null,
     ownerEmail: `${who}@example.test`,
     ownerDisplayName: null,
@@ -39,7 +40,7 @@ function ActiveOrganization() {
 }
 
 function project(id: string, name: string): Project {
-  return { id, name, role: "owner" } as Project;
+  return { id, slug: name.toLowerCase(), name, role: "owner" };
 }
 
 function ProjectNames() {
@@ -52,7 +53,7 @@ function ProjectNames() {
 function RenameButton({ id, to }: { id: string; to: string }) {
   const rename = useRenameProject();
   return (
-    <button type="button" onClick={() => rename(id, to)}>
+    <button type="button" onClick={() => rename(id, to, to.toLowerCase())}>
       rename
     </button>
   );
@@ -288,9 +289,11 @@ describe("StoreProvider: projects elsewhere", () => {
   function elsewhere(id: string, name: string, organization: string): ProjectEverywhere {
     return {
       id,
+      slug: name.toLowerCase(),
       name,
       role: "admin",
       organizationId: organization,
+      organizationSlug: organization.replace(/^org_/, ""),
       organizationName: null,
       organizationOwnerEmail: `${organization}@example.test`,
     };
@@ -417,6 +420,43 @@ describe("StoreProvider: the organization you are standing in", () => {
     view.rerender(at("new@example.test"));
 
     expect(screen.getByTestId("email").textContent).toBe("new@example.test");
+  });
+
+  // ⚠ A move from one organization's pages to another's re-renders the
+  // `[organization]` layout and not the `(app)` one above it, whose provider
+  // goes on holding the seed of the organization just left. The seed the lower
+  // layout draws is the one the store has to follow.
+  it("follows the organization's own layout while the provider's seed stands still", () => {
+    const seeded = (inner: React.ReactNode) => (
+      <StoreProvider
+        organizations={[organization("alpha"), organization("acme")]}
+        user={null}
+        flags={{}}
+        roles={{}}
+        projects={[project("project_a", "Mine")]}
+        activeOrganizationId="org_alpha"
+      >
+        {inner}
+        <Standing />
+      </StoreProvider>
+    );
+    const view = render(seeded(null));
+    expect(screen.getByTestId("standing").textContent).toBe("org_alpha | Mine");
+
+    view.rerender(
+      seeded(
+        <StoreSeed
+          organizations={[organization("alpha"), organization("acme")]}
+          user={null}
+          flags={{}}
+          roles={{}}
+          projects={[project("project_b", "Theirs")]}
+          activeOrganizationId="org_acme"
+        />,
+      ),
+    );
+
+    expect(screen.getByTestId("standing").textContent).toBe("org_acme | Theirs");
   });
 
   // `null` is the layout saying `/me` answered nothing. Holding on to the last

@@ -40,8 +40,6 @@ const nextConfig = {
 
   async redirects() {
     return [
-      { source: "/org", destination: "/organization", permanent: true },
-      { source: "/org/:path*", destination: "/organization/:path*", permanent: true },
       { source: "/cookbook", destination: "https://docs.telmoni.com", permanent: false },
       { source: "/blueprints", destination: "https://docs.telmoni.com", permanent: false },
       { source: "/docs/cookbook", destination: "https://docs.telmoni.com", permanent: false },

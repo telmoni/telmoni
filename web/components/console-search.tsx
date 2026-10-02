@@ -15,7 +15,7 @@ import {
   Users,
   type LucideIcon,
 } from "lucide-react";
-import { useParams, useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import {
   Dialog,
@@ -27,10 +27,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-import { parseConsolePath, rootSegment } from "@/lib/console-nav";
-import { projectMatches } from "@/lib/slug";
-import { useActiveOrganizationId, useOrganizations, useProjects } from "@/lib/store";
-import { organizationSegment, projectSegment } from "@/lib/slug";
+import { consolePlace, projectAt } from "@/lib/console-nav";
+import { projectPath } from "@/lib/slug";
+import { useActiveOrganization, useProjects } from "@/lib/store";
 import { SEARCH_MODIFIER_KEY } from "@/lib/keys";
 import {
   GROUP_LABELS,
@@ -54,19 +53,15 @@ import { cn } from "@/lib/utils";
  */
 export function ConsoleSearch() {
   const router = useRouter();
-  const { projectId } = useParams<{ projectId?: string }>();
   const projects = useProjects();
-  const organizations = useOrganizations();
-  const activeOrgId = useActiveOrganizationId();
-  const activeOrg = organizations.find((o) => o.organizationId === activeOrgId);
-  const activeOrgSeg = activeOrg ? organizationSegment(activeOrg) : activeOrgId;
-  const activeProject = projects.find((p) => projectMatches(p, projectId ?? ""));
-  const resolvedProjectId = activeProject?.id ?? projectId;
+  // The slug of the organization those are the projects of.
+  const organization = useActiveOrganization()?.slug ?? null;
+  const projectId = projectAt(usePathname(), organization, projects)?.id;
 
   const { searchOpen: open, setSearchOpen: setOpen } = useConsoleUi();
   const [query, setQuery] = useState("");
   const [recent, setRecent] = useState<RecentVisit[]>([]);
-  const { index, indexError, loading } = useSearchIndex(open, resolvedProjectId);
+  const { index, indexError, loading } = useSearchIndex(open, projectId);
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -106,12 +101,10 @@ export function ConsoleSearch() {
 
   const placeOf = useCallback(
     (href: string) => {
-      const parsed = parseConsolePath(href);
-      if (parsed.mode === "organization") return "Organization";
-      const id = parsed.projectId ?? rootSegment(href);
-      return projects.find((t) => t.id === id)?.name;
+      if (consolePlace(href)?.kind === "organization") return "Organization";
+      return projectAt(href, organization, projects)?.name;
     },
-    [projects],
+    [organization, projects],
   );
 
   const items = useMemo<SearchItem[]>(() => {
@@ -125,15 +118,16 @@ export function ConsoleSearch() {
         href: visit.href,
       });
     }
-    for (const project of projects) {
-      const prjSeg = projectSegment(project);
-      out.push({
-        id: `project:${project.id}`,
-        kind: "project",
-        label: project.name,
-        hint: project.id,
-        href: activeOrgSeg ? `/${activeOrgSeg}/${prjSeg}` : `/${prjSeg}`,
-      });
+    if (organization) {
+      for (const project of projects) {
+        out.push({
+          id: `project:${project.id}`,
+          kind: "project",
+          label: project.name,
+          hint: project.id,
+          href: projectPath(organization, project.slug),
+        });
+      }
     }
     if (index) {
       for (const section of [index.keys, index.members]) {
@@ -141,7 +135,7 @@ export function ConsoleSearch() {
       }
     }
     return out;
-  }, [recent, projects, activeOrgSeg, index, placeOf]);
+  }, [recent, organization, projects, index, placeOf]);
 
   const docsItem = useMemo<SearchItem>(() => {
     const typed = query.trim();

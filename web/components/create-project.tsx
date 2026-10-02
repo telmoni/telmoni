@@ -27,8 +27,13 @@ import {
 } from "@/components/ui/select";
 import { createProjectAction } from "@/app/(app)/actions";
 import { organizationLabel } from "@/lib/identity";
-import { organizationMatches, organizationSegment, projectSegment } from "@/lib/slug";
-import { useAddProject, useOrganizations, useRoles } from "@/lib/store";
+import { projectPath } from "@/lib/slug";
+import {
+  useActiveOrganizationId,
+  useAddProject,
+  useOrganizations,
+  useRoles,
+} from "@/lib/store";
 import { Role } from "@/lib/types/enums";
 
 const MAX_PROJECT_NAME = 100;
@@ -82,6 +87,7 @@ export function CreateProjectDialog({
   const router = useRouter();
   const addProject = useAddProject();
   const organizations = useOrganizations();
+  const activeOrganizationId = useActiveOrganizationId();
   const targets = useCreateProjectTargets();
   const [name, setName] = useState("");
   const [target, setTarget] = useState(
@@ -104,12 +110,12 @@ export function CreateProjectDialog({
         }
         onOpenChange(false);
         toast.success("Project created.");
-        if (res.project) {
-          addProject(res.project);
-          const targetOrg = organizations.find((o) => organizationMatches(o, target));
-          const targetOrgSeg = targetOrg ? organizationSegment(targetOrg) : target;
-          const prjSeg = projectSegment(res.project);
-          router.push(`/${targetOrgSeg}/${prjSeg}`);
+        const landed = organizations.find((o) => o.organizationId === target);
+        if (res.project && landed) {
+          // Only the organization the console stands in is listed in the
+          // store; a project made in another arrives with its own seed.
+          if (target === activeOrganizationId) addProject(res.project);
+          router.push(projectPath(landed.slug, res.project.slug));
         } else {
           router.refresh();
         }

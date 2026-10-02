@@ -6,6 +6,8 @@
 // is a webhook the owner connects with a URL, in a dialog, and it never
 // reaches the handshake routes — which is why they are two lists.
 
+import { projectPath } from "@/lib/slug";
+
 export const OAUTH_PROVIDERS = ["slack", "discord"] as const;
 export type OAuthProvider = (typeof OAUTH_PROVIDERS)[number];
 
@@ -38,12 +40,13 @@ export function connectStartPath(provider: OAuthProvider, projectId: string): st
   return `/connect/${provider}/start?project=${encodeURIComponent(projectId)}`;
 }
 
+// A project's Connectors page. By slug, or by id where the handshake has
+// nothing else at hand: the console redirects an id to the slug it goes by.
 export function connectorsPath(
-  projectId: string,
+  organization: string,
+  project: string,
   query?: Record<string, string>,
-  organizationId?: string,
 ): string {
   const q = new URLSearchParams(query).toString();
-  const prefix = organizationId ? `/${organizationId}/${projectId}` : `/${projectId}`;
-  return `${prefix}/connectors${q ? `?${q}` : ""}`;
+  return `${projectPath(organization, project, "/connectors")}${q ? `?${q}` : ""}`;
 }

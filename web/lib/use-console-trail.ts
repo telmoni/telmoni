@@ -1,14 +1,22 @@
 "use client";
 
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 
 import {
   CONSOLE_TRAIL_KEY,
   EMPTY_TRAIL,
+  liveResources,
   parseTrail,
   pushPath,
   type ConsoleTrail,
 } from "@/lib/console-trail";
+import { projectPath } from "@/lib/slug";
+import {
+  useActiveOrganization,
+  useOrganizations,
+  useProjects,
+  useProjectsElsewhere,
+} from "@/lib/store";
 
 // ⚠ **Per tab, and deliberately not `localStorage`.** Two windows of the
 // console are two places you are standing; where you left the other window is
@@ -103,4 +111,29 @@ export function useRecordConsolePath(pathname: string): void {
 /** Test seam: the module-level cache outlives a `window.sessionStorage.clear()`. */
 export function clearTrailForTest(): void {
   cache = null;
+}
+
+/**
+ * What the trail is read against: the resources the console is drawing, and
+ * where to go when none of its entries is one of them — the first project of
+ * the organization it stands in, else `/console`, which finds somewhere.
+ *
+ * One hook for the rail's back arrow and the resource selector, so the two
+ * walk the trail over the same list.
+ */
+export function useLiveResources(): { live: ReadonlySet<string>; fallback: string } {
+  const organizations = useOrganizations();
+  const active = useActiveOrganization();
+  const projects = useProjects();
+  const elsewhere = useProjectsElsewhere();
+  return useMemo(() => {
+    const here = active
+      ? projects.map((p) => ({ slug: p.slug, organizationSlug: active.slug }))
+      : [];
+    const [first] = here;
+    return {
+      live: liveResources(organizations, [...here, ...elsewhere]),
+      fallback: first ? projectPath(first.organizationSlug, first.slug) : "/console",
+    };
+  }, [organizations, active, projects, elsewhere]);
 }

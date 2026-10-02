@@ -8,7 +8,7 @@ import { env } from "@/lib/env";
 import { getLogoutUrl, refreshTokens, revokeSession } from "@/lib/auth/oidc";
 import { blacklistSession, isSessionBlacklisted } from "@/lib/auth/session-blacklist";
 import { sessionEndKey } from "@/lib/auth/session-end-key";
-import { ACTIVE_ORGANIZATION_COOKIE } from "@/lib/server/cookies";
+import { ACTIVE_ORGANIZATION_COOKIE } from "@/lib/proxy/organization";
 
 export interface SessionData {
   userId: string;
@@ -238,6 +238,7 @@ export async function unsealPkce(value: string): Promise<PkceData | null> {
 
 const ConnectData = z.object({
   state: z.string().min(1),
+  organizationId: z.string().min(1),
   projectId: z.string().min(1),
   provider: z.enum(["slack", "discord"]),
 });

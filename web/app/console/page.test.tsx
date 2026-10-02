@@ -13,12 +13,15 @@ vi.mock("@/components/service-unavailable", () => ({
 
 let mockSession: { userId: string } | null;
 let mockListing:
-  | { kind: "ok"; projects: Array<{ id: string; name: string; role: string | null }> }
+  | {
+      kind: "ok";
+      projects: Array<{ id: string; slug: string; name: string; role: string | null }>;
+    }
   | { kind: "unavailable" };
 let mockContextCalls: number;
 let mockContext: {
   activeOrganizationId: string | null;
-  organizations: Array<{ organizationId: string; role: string }>;
+  organizations: Array<{ organizationId: string; slug: string; role: string }>;
 } | null;
 
 vi.mock("@/lib/server/session", () => ({
@@ -42,12 +45,19 @@ beforeEach(() => {
   mockSession = { userId: "user_test" };
   mockListing = {
     kind: "ok",
-    projects: [{ id: "project_1234567890abcdef", name: "Personal project", role: "owner" }],
+    projects: [
+      {
+        id: "project_1234567890abcdef",
+        slug: "personal-project",
+        name: "Personal project",
+        role: "owner",
+      },
+    ],
   };
   mockContextCalls = 0;
   mockContext = {
     activeOrganizationId: "org_1",
-    organizations: [{ organizationId: "org_1", role: "owner" }],
+    organizations: [{ organizationId: "org_1", slug: "acme", role: "owner" }],
   };
 });
 
@@ -61,7 +71,8 @@ describe("ConsoleEntry", () => {
   it("calls getServerContext for fallback provisioning and redirects to first project", async () => {
     await ConsoleEntry();
     expect(mockContextCalls).toBe(1);
-    expect(mockRedirect).toHaveBeenCalledWith("/org_1/personal-project");
+    // By the slugs, the project's under its organization's: the path names both.
+    expect(mockRedirect).toHaveBeenCalledWith("/acme/personal-project");
   });
 
   it("renders ServiceUnavailable when the listing could not be read", async () => {
@@ -83,7 +94,7 @@ describe("ConsoleEntry", () => {
   it("sends an owner whose organization lists nothing to its projects page", async () => {
     mockListing = { kind: "ok", projects: [] };
     await ConsoleEntry();
-    expect(mockRedirect).toHaveBeenCalledWith("/org_1/projects");
+    expect(mockRedirect).toHaveBeenCalledWith("/acme/~/projects");
   });
 
   // The projects page refuses a member, so this was an ACCESS DENIED landing
@@ -92,10 +103,10 @@ describe("ConsoleEntry", () => {
     mockListing = { kind: "ok", projects: [] };
     mockContext = {
       activeOrganizationId: "org_1",
-      organizations: [{ organizationId: "org_1", role: "member" }],
+      organizations: [{ organizationId: "org_1", slug: "acme", role: "member" }],
     };
     await ConsoleEntry();
-    expect(mockRedirect).toHaveBeenCalledWith("/org_1");
-    expect(mockRedirect).not.toHaveBeenCalledWith("/org_1/projects");
+    expect(mockRedirect).toHaveBeenCalledWith("/acme");
+    expect(mockRedirect).not.toHaveBeenCalledWith("/acme/~/projects");
   });
 });

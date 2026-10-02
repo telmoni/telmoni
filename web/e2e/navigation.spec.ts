@@ -16,9 +16,9 @@ test.describe("Unauthenticated navigation", () => {
   test("a protected route redirects to login and keeps the destination", async ({
     page,
   }) => {
-    const location = await gateFor(page, "/organization/settings");
+    const location = await gateFor(page, "/acme/~/settings");
     expect(location).toContain("/auth/login");
-    expect(location).toContain("returnTo=%2Forganization%2Fsettings");
+    expect(location).toContain("returnTo=%2Facme%2F%7E%2Fsettings");
   });
 
   test("/install.sh redirects to the release asset, not to login", async ({
@@ -36,7 +36,7 @@ test.describe("Unauthenticated navigation", () => {
   });
 
   test("console pages are protected by default", async ({ page }) => {
-    const location = await gateFor(page, "/some-project/api-keys");
+    const location = await gateFor(page, "/acme/some-project/api-keys");
     expect(location).toContain("/auth/login");
   });
 });

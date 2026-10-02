@@ -48,10 +48,23 @@ function me(activeOrganizationId: string): ServerContext {
     },
     deletedOrganizations: [],
     organizations: [
-      { organizationId: "org_mine", name: null, ownerEmail: "me@example.test", role: "owner" },
-      { organizationId: "org_x", name: "Org X", ownerEmail: "x@example.test", role: "member" },
+      {
+        organizationId: "org_mine",
+        slug: "org-4k2j9x0q1z",
+        name: null,
+        ownerEmail: "me@example.test",
+        role: "owner",
+      },
+      {
+        organizationId: "org_x",
+        slug: "org-x",
+        name: "Org X",
+        ownerEmail: "x@example.test",
+        role: "member",
+      },
     ],
     activeOrganizationId,
+    organizationNotFound: false,
     memberships: [],
     incomingInvites: [],
     projectOffers: [],
@@ -101,6 +114,18 @@ describe("identityContext", () => {
 
   it("is null when auth's answer names an organization its own list does not hold", async () => {
     vi.mocked(getServerContext).mockResolvedValue(me("org_gone"));
+    expect(await identityContext()).toBeNull();
+  });
+
+  // ⚠ The page is `/acme/…`, Acme has been renamed or the caller removed, and
+  // auth fell back to the organization they own. Every lane and every action
+  // builds its headers from here: answering `org_mine` would aim them at an
+  // organization the address does not name.
+  it("is null when the path names an organization auth did not answer with", async () => {
+    vi.mocked(getServerContext).mockResolvedValue({
+      ...me("org_mine"),
+      organizationNotFound: true,
+    });
     expect(await identityContext()).toBeNull();
   });
 

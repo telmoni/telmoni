@@ -1,238 +1,117 @@
 import { describe, expect, it } from "vitest";
+
 import {
-  RESERVED_SLUGS,
-  isValidSlug,
-  organizationMatches,
-  organizationSegment,
-  projectMatches,
-  projectSegment,
-  slugify,
+  ORGANIZATION_PAGES,
+  RESERVED_ORGANIZATION_SLUGS,
+  SLUG_MAX_LENGTH,
+  isOrganizationSlug,
+  isSlug,
+  organizationPath,
+  projectPath,
+  withLeadingSegments,
 } from "./slug";
 
-describe("slug utilities", () => {
-  describe("RESERVED_SLUGS", () => {
-    it("contains core reserved paths and sensitive keywords", () => {
-      expect(RESERVED_SLUGS.has("api")).toBe(true);
-      expect(RESERVED_SLUGS.has("auth")).toBe(true);
-      expect(RESERVED_SLUGS.has("account")).toBe(true);
-      expect(RESERVED_SLUGS.has("console")).toBe(true);
-      expect(RESERVED_SLUGS.has("billing")).toBe(true);
-      expect(RESERVED_SLUGS.has("settings")).toBe(true);
-      expect(RESERVED_SLUGS.has("organization")).toBe(true);
-      expect(RESERVED_SLUGS.has("projects")).toBe(true);
-      expect(RESERVED_SLUGS.has("_next")).toBe(true);
-    });
+describe("isSlug", () => {
+  it.each(["acme", "a", "web-app-2", "org-4k2j9x0q1z", "a".repeat(SLUG_MAX_LENGTH)])(
+    "takes %s",
+    (slug) => {
+      expect(isSlug(slug)).toBe(true);
+    },
+  );
+
+  // Each of these is something a path could otherwise misread: an id, the
+  // organization's own-pages segment, a capital the server never mints.
+  it.each([
+    "",
+    "Acme",
+    "-acme",
+    "acme-",
+    "web--app",
+    "org_7bQx2mNv9BcK4dLp",
+    "project_7bQx2mNv9BcK4dLp",
+    "a.b",
+    "a b",
+    "a/b",
+    ORGANIZATION_PAGES,
+    "a".repeat(SLUG_MAX_LENGTH + 1),
+  ])("refuses %j", (segment) => {
+    expect(isSlug(segment)).toBe(false);
+  });
+});
+
+describe("isOrganizationSlug", () => {
+  it("takes a slug none of the console's own paths claims", () => {
+    expect(isOrganizationSlug("acme")).toBe(true);
+    expect(isOrganizationSlug("account-2")).toBe(true);
   });
 
-  describe("isValidSlug", () => {
-    it("accepts valid alphanumeric slugs with single hyphens", () => {
-      expect(isValidSlug("acme")).toBe(true);
-      expect(isValidSlug("acme-corp")).toBe(true);
-      expect(isValidSlug("team-42-infra")).toBe(true);
-      expect(isValidSlug("a-b")).toBe(true);
-    });
+  // The console's own first segments: an organization going by one would
+  // shadow the page, or be shadowed by it.
+  it.each(["account", "api", "auth", "console", "connect", "invite", "cli", "v1", "plans"])(
+    "refuses %s",
+    (word) => {
+      expect(RESERVED_ORGANIZATION_SLUGS.has(word)).toBe(true);
+      expect(isOrganizationSlug(word)).toBe(false);
+    },
+  );
 
-    it("rejects reserved keywords", () => {
-      expect(isValidSlug("api")).toBe(false);
-      expect(isValidSlug("auth")).toBe(false);
-      expect(isValidSlug("console")).toBe(false);
-      expect(isValidSlug("billing")).toBe(false);
-      expect(isValidSlug("CONSOLE")).toBe(false);
-    });
-
-    it("rejects malformed slugs", () => {
-      expect(isValidSlug("")).toBe(false);
-      expect(isValidSlug("a")).toBe(false); // too short
-      expect(isValidSlug("-acme")).toBe(false); // leading hyphen
-      expect(isValidSlug("acme-")).toBe(false); // trailing hyphen
-      expect(isValidSlug("acme--corp")).toBe(false); // consecutive hyphens
-      expect(isValidSlug("acme_corp")).toBe(false); // underscore
-      expect(isValidSlug("acme.corp")).toBe(false); // dot
-      expect(isValidSlug("acme corp")).toBe(false); // space
-      expect(isValidSlug("a".repeat(49))).toBe(false); // over 48 chars
-    });
+  it("refuses what is no slug at all", () => {
+    expect(isOrganizationSlug("org_7bQx2mNv9BcK4dLp")).toBe(false);
+    expect(isOrganizationSlug("")).toBe(false);
   });
 
-  describe("slugify", () => {
-    it("converts spaces and special characters to hyphens", () => {
-      expect(slugify("Acme Corporation, Inc.")).toBe("acme-corporation-inc");
-      expect(slugify("Frontend & API Gateway")).toBe("frontend-api-gateway");
-      expect(slugify("  My First Project  ")).toBe("my-first-project");
-    });
+  it("reserves only words an organization could otherwise take", () => {
+    for (const word of RESERVED_ORGANIZATION_SLUGS) {
+      expect(isSlug(word), word).toBe(true);
+    }
+  });
+});
 
-    it("handles diacritics and unicode characters", () => {
-      expect(slugify("Café & Résumé")).toBe("cafe-resume");
-      expect(slugify("München Über")).toBe("munchen-uber");
-    });
-
-    it("handles strings with numbers and multiple hyphens", () => {
-      expect(slugify("Team 42 - Core Infra")).toBe("team-42-core-infra");
-      expect(slugify("---leading-and-trailing---")).toBe("leading-and-trailing");
-      expect(slugify("foo----bar")).toBe("foo-bar");
-    });
-
-    it("truncates at 48 characters without a trailing hyphen", () => {
-      const longName = "This is an extremely long organization name that exceeds 48 characters";
-      const slug = slugify(longName);
-      expect(slug.length).toBeLessThanOrEqual(48);
-      expect(slug.endsWith("-")).toBe(false);
-      expect(isValidSlug(slug)).toBe(true);
-    });
-
-    it("safely escapes reserved keywords with a qualifier", () => {
-      expect(slugify("console", "org")).toBe("console-org");
-      expect(slugify("api", "app")).toBe("api-app");
-      expect(slugify("auth", "project")).toBe("auth-project");
-      expect(isValidSlug(slugify("settings", "org"))).toBe(true);
-    });
-
-    it("returns empty string for inputs with fewer than 2 valid characters", () => {
-      expect(slugify("")).toBe("");
-      expect(slugify("?")).toBe("");
-      expect(slugify("x")).toBe("");
-    });
+describe("paths", () => {
+  it("puts an organization's own pages under the segment no slug can be", () => {
+    expect(organizationPath("acme")).toBe("/acme");
+    expect(organizationPath("acme", "/settings")).toBe("/acme/~/settings");
+    expect(organizationPath("acme", "/members")).toBe("/acme/~/members");
   });
 
-  describe("organizationMatches", () => {
-    const org = {
-      organizationId: "org_01H123456789",
-      slug: "acme-corp",
-      name: "Acme Corp",
-    };
-
-    it("matches exact organizationId case-insensitively", () => {
-      expect(organizationMatches(org, "org_01H123456789")).toBe(true);
-      expect(organizationMatches(org, "ORG_01H123456789")).toBe(true);
-    });
-
-    it("matches explicit slug case-insensitively", () => {
-      expect(organizationMatches(org, "acme-corp")).toBe(true);
-      expect(organizationMatches(org, "ACME-CORP")).toBe(true);
-    });
-
-    it("matches slugified name when slug is absent", () => {
-      const orgWithoutSlug = {
-        organizationId: "org_01H123456789",
-        name: "Acme Corp",
-      };
-      expect(organizationMatches(orgWithoutSlug, "acme-corp")).toBe(true);
-      expect(organizationMatches(orgWithoutSlug, "ACME-CORP")).toBe(true);
-    });
-
-    it("rejects non-matching segments", () => {
-      expect(organizationMatches(org, "other-corp")).toBe(false);
-      expect(organizationMatches(org, "")).toBe(false);
-    });
+  it("puts a project directly under its organization", () => {
+    expect(projectPath("acme", "web")).toBe("/acme/web");
+    expect(projectPath("acme", "web", "/api-keys")).toBe("/acme/web/api-keys");
   });
 
-  describe("projectMatches", () => {
-    const project = {
-      id: "project_01H123456789",
-      slug: "web-dashboard",
-      name: "Web Dashboard",
-    };
+  // The reason for `~`: a project may take any slug, the name of one of its
+  // organization's pages included, and the two paths stay apart.
+  it("keeps a project called settings off the organization's settings", () => {
+    expect(projectPath("acme", "settings")).not.toBe(organizationPath("acme", "/settings"));
+    expect(projectPath("acme", "members", "/members")).toBe("/acme/members/members");
+  });
+});
 
-    it("matches exact project ID case-insensitively", () => {
-      expect(projectMatches(project, "project_01H123456789")).toBe(true);
-      expect(projectMatches(project, "PROJECT_01H123456789")).toBe(true);
-    });
-
-    it("matches explicit slug case-insensitively", () => {
-      expect(projectMatches(project, "web-dashboard")).toBe(true);
-      expect(projectMatches(project, "WEB-DASHBOARD")).toBe(true);
-    });
-
-    it("matches slugified name when slug is absent", () => {
-      const projectWithoutSlug = {
-        id: "project_01H123456789",
-        name: "Web Dashboard",
-      };
-      expect(projectMatches(projectWithoutSlug, "web-dashboard")).toBe(true);
-    });
-
-    it("rejects non-matching segments", () => {
-      expect(projectMatches(project, "mobile-app")).toBe(false);
-      expect(projectMatches(project, "")).toBe(false);
-    });
+describe("withLeadingSegments", () => {
+  it("replaces an organization's id and keeps the rest", () => {
+    expect(withLeadingSegments("/org_7bQx2mNv9BcK4dLp/~/billing", ["acme"])).toBe(
+      "/acme/~/billing",
+    );
+    expect(withLeadingSegments("/Acme", ["acme"])).toBe("/acme");
   });
 
-  describe("organizationSegment", () => {
-    it("prefers explicit slug if available and valid", () => {
-      expect(
-        organizationSegment({
-          organizationId: "org_123",
-          slug: "my-org",
-          name: "Company Name",
-        }),
-      ).toBe("my-org");
-    });
-
-    it("ignores invalid or reserved explicit slug", () => {
-      expect(
-        organizationSegment({
-          organizationId: "org_123",
-          slug: "console", // reserved!
-          name: "Company Name",
-        }),
-      ).toBe("company-name");
-    });
-
-    it("falls back to slugified name if no explicit slug", () => {
-      expect(
-        organizationSegment({
-          organizationId: "org_123",
-          name: "Company Name",
-        }),
-      ).toBe("company-name");
-    });
-
-    it("falls back to organizationId if unnamed", () => {
-      expect(
-        organizationSegment({
-          organizationId: "org_123",
-          name: null,
-        }),
-      ).toBe("org_123");
-    });
+  it("replaces both segments of a project's path", () => {
+    expect(
+      withLeadingSegments("/acme/project_7bQx2mNv9BcK4dLp/audit-log", ["globex", "payments"]),
+    ).toBe("/globex/payments/audit-log");
+    expect(withLeadingSegments("/acme/project_7bQx2mNv9BcK4dLp", ["acme", "web"])).toBe(
+      "/acme/web",
+    );
   });
 
-  describe("projectSegment", () => {
-    it("prefers explicit slug if available and valid", () => {
-      expect(
-        projectSegment({
-          id: "project_123",
-          slug: "my-project",
-          name: "Project Name",
-        }),
-      ).toBe("my-project");
-    });
+  it("keeps the query", () => {
+    expect(
+      withLeadingSegments("/org_1/project_1/connectors?connected=slack", ["acme", "web"]),
+    ).toBe("/acme/web/connectors?connected=slack");
+  });
 
-    it("ignores reserved explicit slug and qualifies name", () => {
-      expect(
-        projectSegment({
-          id: "project_123",
-          slug: "billing", // reserved
-          name: "Billing Service",
-        }),
-      ).toBe("billing-service");
-    });
-
-    it("falls back to slugified name if no explicit slug", () => {
-      expect(
-        projectSegment({
-          id: "project_123",
-          name: "Project Name",
-        }),
-      ).toBe("project-name");
-    });
-
-    it("falls back to id if unnamed or too short", () => {
-      expect(
-        projectSegment({
-          id: "project_123",
-          name: "",
-        }),
-      ).toBe("project_123");
-    });
+  it("spells the bare path when there is nothing to keep", () => {
+    expect(withLeadingSegments("/", ["acme"])).toBe("/acme");
+    expect(withLeadingSegments("/", ["acme", "web"])).toBe("/acme/web");
   });
 });

@@ -1,24 +1,25 @@
 import { identityContext } from "@/lib/server/entities/identity-context";
-import { fetchProjects } from "@/lib/server/data";
-import { projectMatches } from "@/lib/slug";
 
 /// What an action that changes an organization answers when the organization
-/// its page rendered is no longer the one the session stands in.
+/// its page rendered is not the one the action resolves.
 ///
-/// ⚠ **An action resolves the active organization when it is CALLED, from a
-/// cookie every tab shares — and another tab can have switched it since this
-/// page rendered.** Acting on that resolution aims the click at an organization
-/// the page is not showing: "Send confirmation code" on A's settings mints a
-/// code bound to B, and typing it deletes B while the page still says A. So
-/// each of these actions takes the id its page rendered, and refuses before it
-/// asks any service anything when the two differ.
+/// ⚠ **An action acts in the organization its request resolves, which is the
+/// page's only while the page is current.** On an organization's own path the
+/// slug decides, and an organization renamed since the page rendered goes by a
+/// new one: the old path names nobody, and auth falls back to another the
+/// person is in. Off it — Account, a console built on this one's own pages —
+/// the cookie decides, and another tab moves that. Either way the click would
+/// land on an organization the page is not showing: "Send confirmation code"
+/// on A's settings mints a code bound to B, and typing it deletes B while the
+/// page still says A. So each of these actions takes the id its page rendered,
+/// and refuses before it asks any service anything when the two differ.
 export const SWITCHED_ORGANIZATION =
-  "You switched organizations in another tab. Reload this page to act on the one you're viewing.";
+  "This page is out of date. Reload it to act on the organization you're viewing.";
 
 /// The project a key lane acts on, with the organization the session stands
-/// in. The project is the one its page rendered, and auth takes its
-/// organization from the project itself, so a switch in another tab cannot
-/// aim a key at a project the page is not showing.
+/// in. The project is the one its page rendered, by id, and auth takes its
+/// organization from the project itself, so a stale page cannot aim a key at
+/// a project it is not showing.
 export async function activeProjectForMutation(projectId: string): Promise<
   | { organizationId: string; projectId: string; error: null }
   | { organizationId?: undefined; projectId?: undefined; error: string }
@@ -30,13 +31,5 @@ export async function activeProjectForMutation(projectId: string): Promise<
   if (!ident) {
     return { error: "Couldn't resolve your organization right now. Try again in a moment." };
   }
-  let resolvedId = projectId;
-  if (!projectId.startsWith("project_")) {
-    const projects = await fetchProjects();
-    const matched = projects.find((p) => projectMatches(p, projectId));
-    if (matched) {
-      resolvedId = matched.id;
-    }
-  }
-  return { organizationId: ident.organizationId, projectId: resolvedId, error: null };
+  return { organizationId: ident.organizationId, projectId, error: null };
 }

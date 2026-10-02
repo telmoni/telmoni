@@ -30,17 +30,13 @@ test.describe("Accessibility Audit (WCAG 2.1 AA)", () => {
     await expect(
       page.getByRole("heading", { name: "Overview", level: 1 }),
     ).toBeVisible();
-    const projectId = new URL(page.url()).pathname.slice(1);
-    expect(projectId, "the door lands on a project").toMatch(/^project_[A-Za-z0-9]{16}$/);
+    const landing = new URL(page.url()).pathname;
+    expect(landing, "the door lands on a project").toMatch(/^\/[a-z0-9-]+\/[a-z0-9-]+$/);
+    const [, organization] = landing.split("/");
 
-    const rows = (pathname: string, segment: string) =>
-      buildConsoleNav(pathname, segment).flatMap((group) =>
-        group.items.map((item) => item.url),
-      );
-    const routesToAudit = [
-      ...rows(`/${projectId}`, projectId),
-      ...rows("/organization", "organization"),
-    ];
+    const rows = (pathname: string) =>
+      buildConsoleNav(pathname).flatMap((group) => group.items.map((item) => item.url));
+    const routesToAudit = [...rows(landing), ...rows(`/${organization}`)];
     expect(routesToAudit.length, "the rail is the list").toBeGreaterThan(4);
 
     for (const route of routesToAudit) {

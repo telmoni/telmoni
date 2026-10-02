@@ -77,7 +77,7 @@ beforeEach(() => {
   mockContext = {
     person: { analyticsOptIn: false },
     organizations: [
-      { organizationId: "org_1", name: null, ownerEmail: "k@example.com", role: "owner" },
+      { organizationId: "org_1", slug: "one", name: null, ownerEmail: "k@example.com", role: "owner" },
     ],
   };
 });
@@ -164,10 +164,10 @@ describe("AccountPrivacyPage", () => {
     mockContext = {
       person: { analyticsOptIn: false },
       organizations: [
-        { organizationId: "org_1", name: "Acme", ownerEmail: "k@example.com", role: "owner" },
-        { organizationId: "org_2", name: null, ownerEmail: "k@example.com", role: "owner" },
-        { organizationId: "org_3", name: "Theirs", ownerEmail: "t@example.com", role: "admin" },
-        { organizationId: "org_4", name: null, ownerEmail: "m@example.com", role: "member" },
+        { organizationId: "org_1", slug: "acme", name: "Acme", ownerEmail: "k@example.com", role: "owner" },
+        { organizationId: "org_2", slug: "two", name: null, ownerEmail: "k@example.com", role: "owner" },
+        { organizationId: "org_3", slug: "theirs", name: "Theirs", ownerEmail: "t@example.com", role: "admin" },
+        { organizationId: "org_4", slug: "four", name: null, ownerEmail: "m@example.com", role: "member" },
       ],
     };
     render(await AccountPrivacyPage());
@@ -184,9 +184,9 @@ describe("AccountPrivacyPage", () => {
     mockContext = {
       person: { analyticsOptIn: false },
       organizations: [
-        { organizationId: "org_1", name: null, ownerEmail: "k@example.com", role: "owner" },
-        { organizationId: "org_2", name: "Acme", ownerEmail: "k@example.com", role: "owner" },
-        { organizationId: "org_3", name: null, ownerEmail: "k@example.com", role: "owner" },
+        { organizationId: "org_1", slug: "one", name: null, ownerEmail: "k@example.com", role: "owner" },
+        { organizationId: "org_2", slug: "acme", name: "Acme", ownerEmail: "k@example.com", role: "owner" },
+        { organizationId: "org_3", slug: "three", name: null, ownerEmail: "k@example.com", role: "owner" },
       ],
     };
     render(await AccountPrivacyPage());

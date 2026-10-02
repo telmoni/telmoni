@@ -1,16 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockSet = vi.fn();
-vi.mock("next/headers", () => ({
-  cookies: async () => ({ set: mockSet }),
-}));
-const mockRedirect = vi.fn();
-vi.mock("next/navigation", () => ({
-  redirect: (url: string) => {
-    mockRedirect(url);
-    throw new Error(`REDIRECT:${url}`);
-  },
-}));
 vi.mock("@/lib/server/session", () => ({ getServerSession: vi.fn() }));
 vi.mock("@/lib/server/entities/organization", () => ({ getServerContext: vi.fn() }));
 // `createProjectAction` now chooses which organization to NAME, so the rest of
@@ -45,7 +34,7 @@ import {
 } from "@/lib/server/entities/organization";
 import { getServerSession } from "@/lib/server/session";
 
-import { createProjectAction, switchActiveOrganizationAction } from "./actions";
+import { createProjectAction } from "./actions";
 
 // Every organization the caller is in, their own among them: an organization is
 // an entry with a role in it, never an id that happens to be theirs.
@@ -55,6 +44,7 @@ function me(organizations: OrganizationEntry[], activeOrganizationId: string): S
     organizations,
     deletedOrganizations: [],
     activeOrganizationId,
+    organizationNotFound: false,
     memberships: [],
     incomingInvites: [],
     projectOffers: [],
@@ -64,134 +54,16 @@ function me(organizations: OrganizationEntry[], activeOrganizationId: string): S
 
 const owned = (organizationId: string): OrganizationEntry => ({
   organizationId,
+  slug: organizationId.replace("org_", ""),
   ownerEmail: "me@example.test",
   role: "owner",
 });
 
 const joined = (organizationId: string, role: "admin" | "member"): OrganizationEntry => ({
   organizationId,
+  slug: organizationId.replace("org_", ""),
   ownerEmail: "someone@example.test",
   role,
-});
-
-describe("switchActiveOrganizationAction", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.mocked(getServerSession).mockResolvedValue({
-      userId: "user_me",
-      email: "me@example.test",
-    } as never);
-    vi.mocked(getServerContext).mockResolvedValue(
-      me([owned("org_mine"), joined("org_x", "member")], "org_mine"),
-    );
-  });
-
-  it("sends a signed-out caller to login and sets nothing", async () => {
-    vi.mocked(getServerSession).mockResolvedValue(null);
-    await expect(switchActiveOrganizationAction("org_x")).rejects.toThrow("REDIRECT:/auth/login");
-    expect(mockSet).not.toHaveBeenCalled();
-  });
-
-  it("sets nothing when auth could not say which organizations the caller is on", async () => {
-    vi.mocked(getServerContext).mockResolvedValue(null);
-    await expect(switchActiveOrganizationAction("org_x")).rejects.toThrow("REDIRECT:/console");
-    expect(mockSet).not.toHaveBeenCalled();
-  });
-
-  // ⚠ These three asserted `/console`, which resolves the caller's project
-  // listing and redirects to the FIRST project — so picking an organization out
-  // of the switcher dropped you inside one of its projects and you had to reopen
-  // the switcher to reach the organization you had just clicked. The error
-  // paths above still land on `/console`; that is a safe landing, not a
-  // destination somebody asked for.
-  it("switches to an organization the caller is on the roster of", async () => {
-    await expect(switchActiveOrganizationAction("org_x")).rejects.toThrow(
-      "REDIRECT:/org_x",
-    );
-    expect(mockSet).toHaveBeenCalledWith(
-      "telmoni-active-organization",
-      "org_x",
-      expect.objectContaining({ httpOnly: true, sameSite: "lax", path: "/" }),
-    );
-  });
-
-  it("switches back to an organization the caller owns", async () => {
-    await expect(switchActiveOrganizationAction("org_mine")).rejects.toThrow(
-      "REDIRECT:/org_mine",
-    );
-    expect(mockSet).toHaveBeenCalledWith("telmoni-active-organization", "org_mine", expect.anything());
-  });
-
-  // ⚠ The caller's user id names no organization, and a cookie holding it
-  // would be ignored by auth — a switch must name an actual organization.
-  it("refuses the caller's own user id, which names no organization", async () => {
-    await expect(switchActiveOrganizationAction("user_me")).rejects.toThrow(
-      "Unauthorized organization switch",
-    );
-    expect(mockSet).not.toHaveBeenCalled();
-    expect(mockRedirect).not.toHaveBeenCalled();
-  });
-
-  it("redirects to canonical slug when organization has a slug", async () => {
-    const orgWithSlug: OrganizationEntry = {
-      organizationId: "org_slugged",
-      slug: "acme-corp",
-      ownerEmail: "me@example.test",
-      role: "owner",
-    };
-    vi.mocked(getServerContext).mockResolvedValue(
-      me([orgWithSlug], "org_slugged"),
-    );
-
-    await expect(
-      switchActiveOrganizationAction("acme-corp", "my-web-app"),
-    ).rejects.toThrow("REDIRECT:/acme-corp/my-web-app");
-    expect(mockSet).toHaveBeenCalledWith(
-      "telmoni-active-organization",
-      "org_slugged",
-      expect.anything(),
-    );
-  });
-
-  it("lands on the project named, in the organization switched to", async () => {
-    await expect(
-      switchActiveOrganizationAction("org_x", "project_7bQx2mNv9BcK4dLp"),
-    ).rejects.toThrow("REDIRECT:/org_x/project_7bQx2mNv9BcK4dLp");
-    expect(mockSet).toHaveBeenCalledWith("telmoni-active-organization", "org_x", expect.anything());
-  });
-
-  it.each([
-    "//evil.example",
-    "organization/settings",
-    "project_short",
-    "/project_7bQx2mNv9BcK4dLp",
-    "project_7bQx2mNv9BcK4dLp/../../auth/logout",
-  ])("ignores a destination that is not a project id: %s", async (bad) => {
-    await expect(switchActiveOrganizationAction("org_x", bad)).rejects.toThrow(
-      "REDIRECT:/org_x",
-    );
-    expect(mockSet).toHaveBeenCalledWith("telmoni-active-organization", "org_x", expect.anything());
-  });
-
-  // The two rows in the switcher are two destinations, and the difference is
-  // the whole bug: one takes you to the organization, the other to a project
-  // inside it. Pinned side by side so neither can drift onto the other.
-  it("takes an organization row to the organization and a project row to the project", async () => {
-    await expect(switchActiveOrganizationAction("org_x")).rejects.toThrow(
-      "REDIRECT:/org_x",
-    );
-    await expect(
-      switchActiveOrganizationAction("org_x", "project_7bQx2mNv9BcK4dLp"),
-    ).rejects.toThrow("REDIRECT:/org_x/project_7bQx2mNv9BcK4dLp");
-  });
-
-  it("refuses an organization the caller is not on, and sets nothing", async () => {
-    await expect(switchActiveOrganizationAction("org_stranger")).rejects.toThrow(
-      "Unauthorized organization switch",
-    );
-    expect(mockSet).not.toHaveBeenCalled();
-    expect(mockRedirect).not.toHaveBeenCalled();
-  });
 });
 
 // Standing in an organization the caller is only a MEMBER of, while owning one,
@@ -219,7 +91,7 @@ describe("createProjectAction — which organization the project lands in", () =
     vi.mocked(getServerContext).mockResolvedValue(me(STANDING, "org_seat"));
     mockFetch.mockResolvedValue({
       ok: true,
-      json: async () => ({ id: "project_1", name: "Platform", role: "owner" }),
+      json: async () => ({ id: "project_1", slug: "platform", name: "Platform", role: "owner" }),
     });
   });
 
@@ -282,10 +154,9 @@ describe("createProjectAction — which organization the project lands in", () =
 });
 
 // ⚠ **The project is created over there; the console has to go over there too.**
-// The dialog pushes `/${project.id}` on success, and `[projectId]/layout.tsx`
-// resolves the project listing for whatever the active-organization cookie says —
-// so without this the caller lands on "Not found" holding a project that exists.
-describe("createProjectAction — where the console is left standing", () => {
+// The path names the organization, so the dialog follows by opening the
+// project's own path — which it can only spell with the slug auth gave it.
+describe("createProjectAction — what the dialog is handed to follow the project", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getServerSession).mockResolvedValue({
@@ -301,40 +172,33 @@ describe("createProjectAction — where the console is left standing", () => {
     vi.mocked(getServerContext).mockResolvedValue(me(STANDING, "org_seat"));
     mockFetch.mockResolvedValue({
       ok: true,
-      json: async () => ({ id: "project_1", name: "Platform", role: "owner" }),
+      json: async () => ({ id: "project_1", slug: "platform-2", name: "Platform", role: "owner" }),
     });
   });
 
-  const switchedTo = () =>
-    mockSet.mock.calls.find(
-      ([name]) => name === "telmoni-active-organization",
-    )?.[1];
-
-  it("follows the project into an organization the caller owns", async () => {
-    await createProjectAction("Platform", "org_mine");
-    expect(switchedTo()).toBe("org_mine");
+  // Auth picks the slug: a name another project already reads as takes the
+  // next number, and only auth knows which.
+  it("answers the project with the slug auth minted for it", async () => {
+    const r = await createProjectAction("Platform", "org_admin");
+    expect(r).toEqual({
+      error: null,
+      project: { id: "project_1", slug: "platform-2", name: "Platform", role: "owner" },
+    });
   });
 
-  it("follows the project into an organization the caller administers", async () => {
-    await createProjectAction("Platform", "org_admin");
-    expect(switchedTo()).toBe("org_admin");
+  it("answers no project to follow when auth's answer cannot be read", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: "project_1", name: "Platform", role: "owner" }),
+    });
+    const r = await createProjectAction("Platform", "org_admin");
+    expect(r).toEqual({ error: null });
   });
 
-  it("leaves the cookie alone when the project lands where they already are", async () => {
-    await createProjectAction("Platform", "org_seat");
-    expect(mockSet).not.toHaveBeenCalled();
-  });
-
-  it("does not switch to an organization it refused to sign for", async () => {
-    const r = await createProjectAction("Platform", "org_seat_other");
-    expect(r.error).toMatch(/cannot create a project/i);
-    expect(mockSet).not.toHaveBeenCalled();
-  });
-
-  it("does not switch when the project was not created", async () => {
+  it("answers no project when it was not created", async () => {
     mockFetch.mockResolvedValue({ ok: false });
     const r = await createProjectAction("Platform", "org_admin");
     expect(r.error).toBe("problem");
-    expect(mockSet).not.toHaveBeenCalled();
+    expect(r.project).toBeUndefined();
   });
 });

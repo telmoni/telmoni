@@ -7,14 +7,14 @@ const {
   isSessionBlacklisted,
   rateLimit,
   identityContext,
-  fetchProject,
+  fetchProjectAnywhere,
 } = vi.hoisted(() => ({
   fetchWithTimeout: vi.fn(),
   getSession: vi.fn(),
   isSessionBlacklisted: vi.fn(async () => false),
   rateLimit: vi.fn(async (): Promise<Response | null> => null),
   identityContext: vi.fn(),
-  fetchProject: vi.fn(),
+  fetchProjectAnywhere: vi.fn(),
 }));
 
 vi.mock("@/lib/api/fetch", () => ({ fetchWithTimeout }));
@@ -33,7 +33,7 @@ vi.mock("@/lib/server/entities/identity-context", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/server/entities/identity-context")>()),
   identityContext,
 }));
-vi.mock("@/lib/server/entities/projects", () => ({ fetchProject }));
+vi.mock("@/lib/server/entities/projects", () => ({ fetchProjectAnywhere }));
 
 import { NextRequest } from "next/server";
 
@@ -76,13 +76,15 @@ beforeEach(() => {
   getSession.mockReset().mockResolvedValue({ userId: "user_1", sessionRowId: "sess_1" });
   isSessionBlacklisted.mockReset().mockResolvedValue(false);
   rateLimit.mockReset().mockResolvedValue(null);
+  // This route's path names no organization, so the request stands wherever
+  // the cookie last pointed: `org_elsewhere`. The project is `org_1`'s.
   identityContext.mockReset().mockResolvedValue({
     userId: "user_1",
-    organizationId: "org_1",
+    organizationId: "org_elsewhere",
     role: "member",
     accessToken: "at_person",
   });
-  fetchProject.mockReset().mockResolvedValue({ id: PROJECT });
+  fetchProjectAnywhere.mockReset().mockResolvedValue({ id: PROJECT, organizationId: "org_1" });
 });
 
 describe("POST /api/agent/turns", () => {
@@ -121,7 +123,7 @@ describe("POST /api/agent/turns", () => {
   });
 
   it("refuses a project the person does not have", async () => {
-    fetchProject.mockResolvedValue(null);
+    fetchProjectAnywhere.mockResolvedValue(null);
     const res = await turn({ projectId: PROJECT, message: "hi" });
     expect(res.status).toBe(404);
     expect(fetchWithTimeout).not.toHaveBeenCalled();

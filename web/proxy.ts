@@ -1,22 +1,14 @@
-const EXCLUDED_ROOTS = new Set([
-  'api',
-  'auth',
-  'invite',
-  'connect',
-  'cli',
-  'console',
-  'account',
-  'legal',
-  '_next',
-  'favicon.ico',
-]);
-
 import { unsealData } from 'iron-session';
 import { type NextProxy, type NextRequest, NextResponse } from 'next/server';
 
 import { logger } from '@/lib/logger';
+import {
+  ORGANIZATION_HEADER,
+  PATH_HEADER,
+  namedOrganization,
+  unescapedPath,
+} from '@/lib/proxy/organization';
 import { isPublic } from '@/lib/proxy/public-paths';
-import { RESERVED_SLUGS, isValidSlug } from '@/lib/slug';
 
 async function isLoggedIn(request: NextRequest): Promise<boolean> {
   const value = request.cookies.get('telmoni_session')?.value;
@@ -97,17 +89,14 @@ export const proxy: NextProxy = async (request) => {
     if (target) return NextResponse.redirect(target, 308);
   }
 
+  const unescaped = unescapedPath(pathname);
+  if (unescaped) {
+    const url = new URL(unescaped + request.nextUrl.search, request.url);
+    return NextResponse.redirect(url, 308);
+  }
+
   const loggedIn     = await isLoggedIn(request);
   const isProtected  = !isPublic(pathname);
-
-  if (pathname === '/organization' || pathname.startsWith('/organization/')) {
-    const activeOrg = request.cookies.get('telmoni-active-organization')?.value;
-    if (activeOrg && activeOrg !== 'organization' && (isValidSlug(activeOrg.toLowerCase()) || /^org_[0-9A-Za-z]+$/.test(activeOrg))) {
-      const rest = pathname.slice('/organization'.length);
-      const target = `/${activeOrg}${rest || ''}${request.nextUrl.search}`;
-      return NextResponse.redirect(new URL(target, request.url), 307);
-    }
-  }
 
   if (isProtected && !loggedIn) {
     if (pathname.startsWith('/api/')) {
@@ -125,36 +114,16 @@ export const proxy: NextProxy = async (request) => {
   requestHeaders.set('x-nonce', nonce);
   requestHeaders.set('content-security-policy', csp);
 
-  const parts = pathname.split('/').filter(Boolean);
-  const first = parts[0];
-  let orgToSync: string | null = null;
-  if (first && !EXCLUDED_ROOTS.has(first.toLowerCase()) && !RESERVED_SLUGS.has(first.toLowerCase())) {
-    const isInternalOrgId = /^org_[0-9A-Za-z]+$/.test(first);
-    const isSlug = isValidSlug(first.toLowerCase());
-    if (isInternalOrgId || isSlug) {
-      const canonical = isInternalOrgId ? first : first.toLowerCase();
-      requestHeaders.set('x-telmoni-organization-id', canonical);
-      requestHeaders.set('x-telmoni-org-id', canonical);
-      orgToSync = canonical;
-    }
-  }
+  // The path names the organization the request acts in (`lib/slug.ts`), so
+  // a page and the actions posted from it can never act in another one. The
+  // path itself goes too: a layout redirects from it, and is handed only its
+  // params. Next has already taken its own query parameters off it.
+  requestHeaders.delete(ORGANIZATION_HEADER);
+  requestHeaders.set(PATH_HEADER, pathname + request.nextUrl.search);
+  const organization = namedOrganization(pathname);
+  if (organization) requestHeaders.set(ORGANIZATION_HEADER, organization);
 
   const response = NextResponse.next({ request: { headers: requestHeaders } });
-  
-
-  if (orgToSync) {
-    const currentCookie = request.cookies.get('telmoni-active-organization')?.value;
-    if (currentCookie !== orgToSync) {
-      response.cookies.set('telmoni-active-organization', orgToSync, {
-        httpOnly: true,
-        sameSite: 'lax',
-        path: '/',
-        secure: process.env.NODE_ENV === 'production',
-        maxAge: 60 * 60 * 24 * 30,
-      });
-    }
-  }
-
   response.headers.set('content-security-policy', csp);
   return response;
 };

@@ -45,16 +45,17 @@ test.describe("Authentication", () => {
     await expect(
       page.getByRole("heading", { name: "Overview", level: 1 }),
     ).toBeVisible();
-    expect(new URL(page.url()).pathname).toMatch(/^\/project_[A-Za-z0-9]{16}$/);
+    // A project's overview: its slug under its organization's.
+    expect(new URL(page.url()).pathname).toMatch(/^\/[a-z0-9-]+\/[a-z0-9-]+$/);
   });
 
   test("the intended destination survives the login round-trip", async ({ page }, testInfo) => {
-    const location = await gateFor(page, "/organization/settings");
+    const location = await gateFor(page, "/acme/~/settings");
     expect(location).toContain("/auth/login");
-    expect(location).toContain("returnTo=%2Forganization%2Fsettings");
+    expect(location).toContain("returnTo=%2Facme%2F%7E%2Fsettings");
 
     await injectSession(page, testUser(testInfo.project.name));
-    await page.goto("/organization/settings");
+    await page.goto("/acme/~/settings");
     await expect(page).not.toHaveURL(/\/auth\/login/);
   });
 

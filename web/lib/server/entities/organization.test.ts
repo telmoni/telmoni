@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { fetchWithTimeout, cookieNamed } = vi.hoisted(() => ({
+const { fetchWithTimeout, cookieNamed, requestHeaders } = vi.hoisted(() => ({
   fetchWithTimeout: vi.fn(),
   cookieNamed: vi.fn(),
+  requestHeaders: vi.fn(),
 }));
 
 vi.mock("@/lib/env", () => ({
@@ -10,7 +11,7 @@ vi.mock("@/lib/env", () => ({
 }));
 vi.mock("@/lib/api/fetch", () => ({ fetchWithTimeout }));
 vi.mock("next/headers", () => ({
-  headers: async () => new Headers({ "user-agent": "Mozilla/5.0 (test)" }),
+  headers: async () => new Headers({ "user-agent": "Mozilla/5.0 (test)", ...requestHeaders() }),
   cookies: async () => ({ get: cookieNamed }),
 }));
 vi.mock("../session", () => ({
@@ -38,6 +39,7 @@ const PERSON = {
 
 const OWNED = {
   organizationId: "org_1",
+  slug: "org-4k2j9x0q1z",
   name: null,
   ownerEmail: "ada@example.test",
   ownerDisplayName: "Ada Lovelace",
@@ -46,6 +48,7 @@ const OWNED = {
 
 const JOINED = {
   organizationId: "org_2",
+  slug: "analytical-engines",
   name: "Analytical Engines",
   ownerEmail: "charles@example.test",
   ownerDisplayName: "Charles Babbage",
@@ -73,6 +76,7 @@ function sentHeaders(): Record<string, string> {
 beforeEach(() => {
   fetchWithTimeout.mockReset();
   cookieNamed.mockReset();
+  requestHeaders.mockReset();
 });
 
 describe("what getServerContext asks /me to resolve", () => {
@@ -91,20 +95,80 @@ describe("what getServerContext asks /me to resolve", () => {
 
   // A request, not a claim: auth answers with that organization only when the
   // person is in it, and says which one it chose either way.
-  it("asks for the organization the active-organization cookie names", async () => {
+  it("asks for the organization the path names, as the proxy hands it on", async () => {
+    requestHeaders.mockReturnValue({ "x-telmoni-organization": "analytical-engines" });
+    meAnswers(me());
+    await getServerContext();
+    expect(sentHeaders()["x-organization-slug"]).toBe("analytical-engines");
+    expect(sentHeaders()).not.toHaveProperty("x-organization-id");
+  });
+
+  // ⚠ The path wins. The cookie is whichever organization any tab opened
+  // last; a page, and every action posted from it, acts in the one it shows.
+  // The cookie's id is not sent beside it: auth reads an id ahead of a slug.
+  it("asks for the path's organization over the cookie's", async () => {
+    requestHeaders.mockReturnValue({ "x-telmoni-organization": "analytical-engines" });
     cookieNamed.mockImplementation((name: string) =>
-      name === "telmoni-active-organization" ? { value: "org_2" } : undefined,
+      name === "telmoni-organization" ? { value: "org_1" } : undefined,
+    );
+    meAnswers(me());
+    await getServerContext();
+    expect(sentHeaders()["x-organization-slug"]).toBe("analytical-engines");
+    expect(sentHeaders()).not.toHaveProperty("x-organization-id");
+  });
+
+  // Account, `/console` and the route handlers name none in their path. By
+  // id: the cookie outlives the page that wrote it, and a rename moves a slug.
+  it("asks for the organization the cookie remembers on a path that names none", async () => {
+    cookieNamed.mockImplementation((name: string) =>
+      name === "telmoni-organization" ? { value: "org_2" } : undefined,
     );
     meAnswers(me());
     await getServerContext();
     expect(sentHeaders()["x-organization-id"]).toBe("org_2");
+    expect(sentHeaders()).not.toHaveProperty("x-organization-slug");
   });
 
-  // ⚠ Without a cookie the console names no organization. Auth picks one they
+  // ⚠ Auth answers a slug the person is in nowhere with one of their own
+  // organizations, which is right for a stale cookie. For a path it is the
+  // bug this guards: a page of `/acme` showing, and its actions acting in, an
+  // organization that is not Acme. Nobody is active, and the page is not found.
+  it("answers nobody when the path names an organization auth did not answer with", async () => {
+    requestHeaders.mockReturnValue({ "x-telmoni-organization": "renamed-away" });
+    meAnswers(me());
+    const ctx = await getServerContext();
+    expect(ctx?.organizationNotFound).toBe(true);
+    expect(ctx && activeOrganization(ctx)).toBeNull();
+    // What auth fell back to stays readable: the shell's gates turn on it.
+    expect(ctx?.activeOrganizationId).toBe("org_1");
+  });
+
+  it("answers the organization the path names when auth answered with it", async () => {
+    requestHeaders.mockReturnValue({ "x-telmoni-organization": "analytical-engines" });
+    meAnswers(me({ activeOrganizationId: "org_2" }));
+    const ctx = await getServerContext();
+    expect(ctx?.organizationNotFound).toBe(false);
+    expect(ctx && activeOrganization(ctx)).toEqual(JOINED);
+  });
+
+  // A cookie is a memory, not an address: one that names an organization the
+  // person has left since falls back, as it always has.
+  it("falls back, rather than refuse, for a stale cookie", async () => {
+    cookieNamed.mockImplementation((name: string) =>
+      name === "telmoni-organization" ? { value: "org_left_long_ago" } : undefined,
+    );
+    meAnswers(me());
+    const ctx = await getServerContext();
+    expect(ctx?.organizationNotFound).toBe(false);
+    expect(ctx && activeOrganization(ctx)).toEqual(OWNED);
+  });
+
+  // ⚠ With neither, the console names no organization. Auth picks one they
   // own, else one they belong to.
-  it("names no organization when no cookie asks for one", async () => {
+  it("names no organization when neither the path nor a cookie asks for one", async () => {
     meAnswers(me());
     await getServerContext();
+    expect(sentHeaders()).not.toHaveProperty("x-organization-slug");
     expect(sentHeaders()).not.toHaveProperty("x-organization-id");
     expect(Object.values(sentHeaders())).not.toContain("user_1");
   });
@@ -216,6 +280,7 @@ describe("activeOrganization", () => {
       organizations: [OWNED, JOINED],
       deletedOrganizations: [],
       activeOrganizationId,
+      organizationNotFound: false,
       memberships: [],
       incomingInvites: [],
       projectOffers: [],
@@ -229,5 +294,9 @@ describe("activeOrganization", () => {
 
   it("is null when auth names an organization its own list does not hold", () => {
     expect(activeOrganization(ctx("org_gone"))).toBeNull();
+  });
+
+  it("is nobody when the path names an organization auth did not answer with", () => {
+    expect(activeOrganization({ ...ctx("org_1"), organizationNotFound: true })).toBeNull();
   });
 });

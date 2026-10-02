@@ -7,7 +7,7 @@ import { CONNECT_COOKIE, cookieOpts, getSession, sealConnect } from "@/lib/auth/
 import { connectorsPath, isOAuthProvider, isProjectId } from "@/lib/connect";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import { fetchProject, identityContext, projectHeaders } from "@/lib/server/data";
+import { fetchProjectAnywhere, identityContext, projectHeaders } from "@/lib/server/data";
 import { FeatureOffProblemSchema } from "@/lib/server/flags";
 
 export const dynamic = "force-dynamic";
@@ -47,9 +47,6 @@ export async function GET(
     return NextResponse.redirect(login);
   }
 
-  const back = (error: string) =>
-    NextResponse.redirect(new URL(connectorsPath(projectId, { error }), env.AUTH_URL));
-
   const retryAfter = await rateLimitRetryAfter(
     clientKey(request, "connect:start"),
     CONNECT_START_CEILING,
@@ -67,15 +64,25 @@ export async function GET(
 
   const base = env.SERVER_URL;
 
-  const [ctx, project] = await Promise.all([identityContext(), fetchProject(projectId)]);
-  if (!ctx || !project) return back("project");
+  // The project's own organization, not the one this request stands in: the
+  // path names none, and the cookie follows whichever tab opened a page last.
+  const [ctx, project] = await Promise.all([identityContext(), fetchProjectAnywhere(projectId)]);
+  if (!ctx || !project) return NextResponse.redirect(new URL("/console", env.AUTH_URL));
+
+  const back = (error: string) =>
+    NextResponse.redirect(
+      new URL(connectorsPath(project.organizationSlug, project.slug, { error }), env.AUTH_URL),
+    );
 
   // The service decides: a non-owner is refused there, and so is a
   // switched-off flag. This route only relays the bearer and the project;
   // the role is auth's to derive, and nothing here asserts it.
   const res = await tryFetchWithTimeout(
     `${base}/internal/connectors/${provider}/authorize`,
-    { method: "POST", headers: projectHeaders(ctx, projectId) },
+    {
+      method: "POST",
+      headers: projectHeaders({ ...ctx, organizationId: project.organizationId }, projectId),
+    },
   );
   if (!res) return back("unavailable");
   if (res.status === 403) return back("forbidden");
@@ -88,7 +95,12 @@ export async function GET(
   const parsed = Authorized.safeParse(await res.json().catch(() => null));
   if (!parsed.success) return back("authorize");
 
-  const sealed = await sealConnect({ state: parsed.data.state, projectId, provider });
+  const sealed = await sealConnect({
+    state: parsed.data.state,
+    organizationId: project.organizationId,
+    projectId,
+    provider,
+  });
   const response = NextResponse.redirect(parsed.data.url);
   response.headers.set("cache-control", "no-store, max-age=0");
   response.cookies.set({

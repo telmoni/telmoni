@@ -6,7 +6,7 @@ const {
   getSession,
   sealConnect,
   identityContext,
-  fetchProject,
+  fetchProjectAnywhere,
   projectHeaders,
   rateLimitRetryAfter,
 } =
@@ -16,7 +16,7 @@ const {
     rateLimitRetryAfter: vi.fn(async (): Promise<number | null> => null),
     sealConnect: vi.fn(async (v: unknown) => `sealed:${JSON.stringify(v)}`),
     identityContext: vi.fn(),
-    fetchProject: vi.fn(),
+    fetchProjectAnywhere: vi.fn(),
     projectHeaders: vi.fn((_ctx: unknown, projectId: string) => ({
       authorization: "Bearer at_1",
       "x-project-id": projectId,
@@ -34,7 +34,7 @@ vi.mock("@/lib/auth/session", () => ({
   getSession,
   sealConnect,
 }));
-vi.mock("@/lib/server/data", () => ({ identityContext, fetchProject, projectHeaders }));
+vi.mock("@/lib/server/data", () => ({ identityContext, fetchProjectAnywhere, projectHeaders }));
 vi.mock("@/lib/env", () => ({
   env: {
     AUTH_URL: "https://app.example",
@@ -47,6 +47,8 @@ import { NextRequest } from "next/server";
 import { GET } from "./route";
 
 const PROJECT = "project_abc";
+// The project's Connectors page, by the slugs its path is spelled with.
+const CONNECTORS = "https://app.example/acme/platform/connectors";
 
 function start(provider = "slack", query = `?project=${PROJECT}`) {
   return GET(new NextRequest(`https://app.example/connect/${provider}/start${query}`), {
@@ -60,10 +62,19 @@ beforeEach(() => {
   projectHeaders.mockClear();
   rateLimitRetryAfter.mockReset().mockResolvedValue(null);
   getSession.mockReset().mockResolvedValue({ userId: "usr_1" });
+  // The request stands in `org_elsewhere` — whichever organization a tab
+  // opened last — while the project is `org_home`'s.
   identityContext
     .mockReset()
-    .mockResolvedValue({ userId: "usr_1", organizationId: "org_1", accessToken: "at_1" });
-  fetchProject.mockReset().mockResolvedValue({ id: PROJECT, name: "Project", role: "owner" });
+    .mockResolvedValue({ userId: "usr_1", organizationId: "org_elsewhere", accessToken: "at_1" });
+  fetchProjectAnywhere.mockReset().mockResolvedValue({
+    id: PROJECT,
+    slug: "platform",
+    name: "Platform",
+    role: "owner",
+    organizationId: "org_home",
+    organizationSlug: "acme",
+  });
   tryFetchWithTimeout.mockResolvedValue(
     new Response(
       JSON.stringify({ url: "https://slack.com/oauth/v2/authorize?state=st8", state: "st8" }),
@@ -85,12 +96,29 @@ describe("GET /connect/[provider]/start", () => {
         headers: expect.objectContaining({ "x-project-id": PROJECT, authorization: "Bearer at_1" }),
       }),
     );
-    // The cookie carries the project and the state the callback will check.
-    expect(sealConnect).toHaveBeenCalledWith({ state: "st8", projectId: PROJECT, provider: "slack" });
+    // The cookie carries the project, its organization and the state the
+    // callback will check: ids, which a rename in the meantime does not move.
+    expect(sealConnect).toHaveBeenCalledWith({
+      state: "st8",
+      organizationId: "org_home",
+      projectId: PROJECT,
+      provider: "slack",
+    });
     expect(res.cookies.get("telmoni_connect")?.value).toBe(
-      'sealed:{"state":"st8","projectId":"project_abc","provider":"slack"}',
+      'sealed:{"state":"st8","organizationId":"org_home","projectId":"project_abc","provider":"slack"}',
     );
     expect(res.cookies.get("telmoni_connect")?.httpOnly).toBe(true);
+  });
+
+  // ⚠ This path names no organization, so the request stands wherever the
+  // cookie last pointed. The project's own organization is the one to name.
+  it("acts in the project's organization, not the one the request stands in", async () => {
+    await start();
+    expect(fetchProjectAnywhere).toHaveBeenCalledWith(PROJECT);
+    expect(projectHeaders).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: "org_home", accessToken: "at_1" }),
+      PROJECT,
+    );
   });
 
   it("sends a signed-out visitor through login with this URL as the return target", async () => {
@@ -141,9 +169,7 @@ describe("GET /connect/[provider]/start", () => {
   ])("lands a %i from the service back on the page as ?error=%s", async (status, error) => {
     tryFetchWithTimeout.mockResolvedValue(new Response("{}", { status }));
     const res = await start();
-    expect(res.headers.get("location")).toBe(
-      `https://app.example/${PROJECT}/connectors?error=${error}`,
-    );
+    expect(res.headers.get("location")).toBe(`${CONNECTORS}?error=${error}`);
     expect(sealConnect).not.toHaveBeenCalled();
   });
 
@@ -155,30 +181,29 @@ describe("GET /connect/[provider]/start", () => {
       ),
     );
     const res = await start();
-    expect(res.headers.get("location")).toBe(`https://app.example/${PROJECT}/connectors?error=off`);
+    expect(res.headers.get("location")).toBe(`${CONNECTORS}?error=off`);
   });
 
   it("lands an unreachable service back on the page", async () => {
     tryFetchWithTimeout.mockResolvedValue(null);
     const res = await start();
-    expect(res.headers.get("location")).toBe(
-      `https://app.example/${PROJECT}/connectors?error=unavailable`,
-    );
+    expect(res.headers.get("location")).toBe(`${CONNECTORS}?error=unavailable`);
   });
 
-  it("lands a project the caller cannot read back on the page without asking the service", async () => {
-    fetchProject.mockResolvedValue(null);
+  // There is no page to land back on: its path is spelled with slugs only a
+  // project the caller can read gives.
+  it("sends a project the caller cannot read to the console's door without asking the service", async () => {
+    fetchProjectAnywhere.mockResolvedValue(null);
     const res = await start();
-    expect(res.headers.get("location")).toBe(`https://app.example/${PROJECT}/connectors?error=project`);
+    expect(res.headers.get("location")).toBe("https://app.example/console");
     expect(tryFetchWithTimeout).not.toHaveBeenCalled();
+    expect(sealConnect).not.toHaveBeenCalled();
   });
 
   it("refuses a service answer that is not a URL and a state", async () => {
     tryFetchWithTimeout.mockResolvedValue(new Response(JSON.stringify({ url: "nope" }), { status: 200 }));
     const res = await start();
-    expect(res.headers.get("location")).toBe(
-      `https://app.example/${PROJECT}/connectors?error=authorize`,
-    );
+    expect(res.headers.get("location")).toBe(`${CONNECTORS}?error=authorize`);
     expect(sealConnect).not.toHaveBeenCalled();
   });
 });

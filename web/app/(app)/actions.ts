@@ -1,6 +1,5 @@
 "use server";
 
-import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -8,7 +7,6 @@ import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import { setActiveOrganizationCookie } from "@/lib/server/cookies";
 import {
   identityContext,
   organizationHeaders,
@@ -17,47 +15,14 @@ import { getServerContext } from "@/lib/server/entities/organization";
 import type { Project } from "@/lib/server/entities/projects";
 import { getServerSession } from "@/lib/server/session";
 import { asRole } from "@/lib/types/enums";
-import { isValidSlug, organizationMatches, organizationSegment } from "@/lib/slug";
-
-const PROJECT_ID = /^project_[0-9A-Za-z]{16}$/;
-
-export async function switchActiveOrganizationAction(
-  targetOrganizationId: string,
-  projectId?: string,
-): Promise<void> {
-  const session = await getServerSession();
-  if (!session) redirect("/auth/login");
-
-  const ctx = await getServerContext();
-  if (!ctx) redirect("/console");
-
-  // Every organization the person is in is an entry, their own included; a
-  // cookie naming anything else would be ignored by auth anyway, and a switch
-  // that silently does nothing looks like it worked.
-  const targetOrg = ctx.organizations.find((o) => organizationMatches(o, targetOrganizationId));
-  if (!targetOrg) {
-    throw new Error("Unauthorized organization switch");
-  }
-
-  await setActiveOrganizationCookie(targetOrg.organizationId);
-
-  const orgSeg = organizationSegment(targetOrg);
-  const validProject = projectId && (PROJECT_ID.test(projectId) || isValidSlug(projectId));
-
-  redirect(
-    validProject
-      ? `/${orgSeg}/${projectId}`
-      : `/${orgSeg}`,
-  );
-}
 
 const MAX_PROJECT_NAME = 100;
 
 const CreatedProjectSchema = z.object({
   id: z.string(),
+  slug: z.string(),
   name: z.string(),
   role: z.string(),
-  slug: z.string().optional(),
 });
 
 export interface CreateProjectResult {
@@ -71,7 +36,6 @@ export async function createProjectAction(
 ): Promise<CreateProjectResult> {
   const session = await getServerSession();
   if (!session) return { error: "Your session expired — sign in again." };
-
   const limited = await rateLimit(sessionKey(session, "project:create"), {
     limit: 10,
     windowMs: 60_000,
@@ -101,13 +65,15 @@ export async function createProjectAction(
   let target = ctx.organizationId;
   if (organizationId && organizationId !== ctx.organizationId) {
     const gate = await getServerContext();
-    const matched = gate?.organizations.find((o) => organizationMatches(o, organizationId));
     const administers =
-      matched && (matched.role === "owner" || matched.role === "admin");
+      gate?.organizations.some(
+        (o) =>
+          o.organizationId === organizationId && (o.role === "owner" || o.role === "admin"),
+      ) ?? false;
     if (!administers) {
       return { error: "You cannot create a project in that organization." };
     }
-    target = matched.organizationId;
+    target = organizationId;
   }
 
   const res = await tryFetchWithTimeout(
@@ -129,16 +95,6 @@ export async function createProjectAction(
     return { error };
   }
 
-  // ⚠ **The console has to FOLLOW the project, or the caller lands on a 404.**
-  // The project is created in `target`, but the active-organization cookie still
-  // points at wherever they were standing, and `[projectId]/layout.tsx` resolves
-  // the listing for THAT organization — so the project they just made is not in
-  // it and `router.push(`/${project.id}`)` opens "Not found". The gate above is
-  // what makes this safe to write; the read side re-checks membership anyway.
-  if (target !== ctx.organizationId) {
-    await setActiveOrganizationCookie(target);
-  }
-
   revalidatePath("/", "layout");
 
   const parsed = CreatedProjectSchema.safeParse(await res.json().catch(() => null));
@@ -154,9 +110,9 @@ export async function createProjectAction(
     error: null,
     project: {
       id: parsed.data.id,
+      slug: parsed.data.slug,
       name: parsed.data.name,
       role: asRole(parsed.data.role),
-      slug: parsed.data.slug,
     },
   };
 }

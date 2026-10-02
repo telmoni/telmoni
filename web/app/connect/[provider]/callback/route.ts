@@ -5,7 +5,7 @@ import { CONNECT_COOKIE, getSession, unsealConnect } from "@/lib/auth/session";
 import { connectorsPath, isOAuthProvider } from "@/lib/connect";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import { fetchProject, identityContext, projectHeaders } from "@/lib/server/data";
+import { fetchProjectAnywhere, identityContext, projectHeaders } from "@/lib/server/data";
 
 export const dynamic = "force-dynamic";
 
@@ -31,9 +31,11 @@ export async function GET(
     return NextResponse.redirect(new URL("/console", env.AUTH_URL));
   }
 
+  // Back to the project's Connectors page, by id: the cookie was sealed up to
+  // ten minutes ago, and a rename since has moved the slugs.
   const done = (query: Record<string, string>) => {
     const response = NextResponse.redirect(
-      new URL(connectorsPath(pending.projectId, query), env.AUTH_URL),
+      new URL(connectorsPath(pending.organizationId, pending.projectId, query), env.AUTH_URL),
     );
     response.cookies.delete(CONNECT_COOKIE);
     return response;
@@ -62,7 +64,10 @@ export async function GET(
 
   const base = env.SERVER_URL;
 
-  const [ctx, project] = await Promise.all([identityContext(), fetchProject(pending.projectId)]);
+  const [ctx, project] = await Promise.all([
+    identityContext(),
+    fetchProjectAnywhere(pending.projectId),
+  ]);
   if (!ctx || !project) return done({ error: "project" });
 
   const res = await tryFetchWithTimeout(
@@ -70,7 +75,7 @@ export async function GET(
     {
       method: "POST",
       headers: {
-        ...projectHeaders(ctx, project.id),
+        ...projectHeaders({ ...ctx, organizationId: project.organizationId }, project.id),
         "content-type": "application/json",
       },
       body: JSON.stringify({ code, state }),

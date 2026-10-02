@@ -1,13 +1,20 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { tryFetchWithTimeout, getSession, unsealConnect, identityContext, fetchProject, projectHeaders } =
+const {
+  tryFetchWithTimeout,
+  getSession,
+  unsealConnect,
+  identityContext,
+  fetchProjectAnywhere,
+  projectHeaders,
+} =
   vi.hoisted(() => ({
     tryFetchWithTimeout: vi.fn(),
     getSession: vi.fn(),
     unsealConnect: vi.fn(),
     identityContext: vi.fn(),
-    fetchProject: vi.fn(),
+    fetchProjectAnywhere: vi.fn(),
     projectHeaders: vi.fn((_ctx: unknown, projectId: string) => ({
       authorization: "Bearer at_1",
       "x-project-id": projectId,
@@ -20,7 +27,7 @@ vi.mock("@/lib/auth/session", () => ({
   getSession,
   unsealConnect,
 }));
-vi.mock("@/lib/server/data", () => ({ identityContext, fetchProject, projectHeaders }));
+vi.mock("@/lib/server/data", () => ({ identityContext, fetchProjectAnywhere, projectHeaders }));
 vi.mock("@/lib/env", () => ({
   env: {
     AUTH_URL: "https://app.example",
@@ -33,7 +40,10 @@ import { NextRequest } from "next/server";
 import { GET } from "./route";
 
 const PROJECT = "project_abc";
-const PAGE = `https://app.example/${PROJECT}/connectors`;
+const ORGANIZATION = "org_home";
+// By id, as the cookie sealed them: the console redirects it to the slugs the
+// project and its organization go by now.
+const PAGE = `https://app.example/${ORGANIZATION}/${PROJECT}/connectors`;
 
 function callback(query = "?code=c0de&state=st8", provider = "slack", cookie = "sealed") {
   return GET(
@@ -48,11 +58,25 @@ beforeEach(() => {
   tryFetchWithTimeout.mockReset();
   projectHeaders.mockClear();
   getSession.mockReset().mockResolvedValue({ userId: "usr_1" });
-  unsealConnect.mockReset().mockResolvedValue({ state: "st8", projectId: PROJECT, provider: "slack" });
+  unsealConnect.mockReset().mockResolvedValue({
+    state: "st8",
+    organizationId: ORGANIZATION,
+    projectId: PROJECT,
+    provider: "slack",
+  });
+  // The request stands in `org_elsewhere` — whichever organization a tab
+  // opened last — while the project is `org_home`'s.
   identityContext
     .mockReset()
-    .mockResolvedValue({ userId: "usr_1", organizationId: "org_1", accessToken: "at_1" });
-  fetchProject.mockReset().mockResolvedValue({ id: PROJECT, name: "Project", role: "owner" });
+    .mockResolvedValue({ userId: "usr_1", organizationId: "org_elsewhere", accessToken: "at_1" });
+  fetchProjectAnywhere.mockReset().mockResolvedValue({
+    id: PROJECT,
+    slug: "platform",
+    name: "Platform",
+    role: "owner",
+    organizationId: ORGANIZATION,
+    organizationSlug: "acme",
+  });
   tryFetchWithTimeout.mockResolvedValue(new Response("{}", { status: 201 }));
 });
 
@@ -74,8 +98,25 @@ describe("GET /connect/[provider]/callback", () => {
       }),
     );
     // The project came from the COOKIE — the query names none.
-    expect(fetchProject).toHaveBeenCalledWith(PROJECT);
+    expect(fetchProjectAnywhere).toHaveBeenCalledWith(PROJECT);
     expect(res.cookies.get("telmoni_connect")?.value).toBe("");
+  });
+
+  // ⚠ This path names no organization, so the request stands wherever the
+  // cookie last pointed. The project's own organization is the one to name.
+  it("acts in the project's organization, not the one the request stands in", async () => {
+    await callback();
+    expect(projectHeaders).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: ORGANIZATION, accessToken: "at_1" }),
+      PROJECT,
+    );
+  });
+
+  it("lands a project the caller can no longer read back on the page, and asks the service nothing", async () => {
+    fetchProjectAnywhere.mockResolvedValue(null);
+    const res = await callback();
+    expect(res.headers.get("location")).toBe(`${PAGE}?error=project`);
+    expect(tryFetchWithTimeout).not.toHaveBeenCalled();
   });
 
   // ⚠ The edge CSRF check: a state that is not the cookie's is refused

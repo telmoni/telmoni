@@ -11,6 +11,7 @@ import {
   OrganizationStatus,
   Role,
 } from "./enums";
+import { RESERVED_ORGANIZATION_SLUGS, SLUG_MAX_LENGTH } from "../slug";
 
 const contract = JSON.parse(
   readFileSync(
@@ -20,6 +21,7 @@ const contract = JSON.parse(
 ) as {
   enums: Record<string, string[]>;
   flags: { off_detail: Record<string, string> };
+  slugs: { max_length: number; reserved: string[] };
 };
 
 // Every enum the server publishes, and the console's copy of it. A new one
@@ -42,6 +44,14 @@ describe("wire contract", () => {
 
   it("each switched-off feature says what the server says", () => {
     expect(FlagOffDetail).toEqual(contract.flags.off_detail);
+  });
+
+  // The proxy reads a path's first segment as an organization unless it is
+  // one of these; a word auth reserves and the console does not would be a
+  // page of its own that the proxy took for an organization.
+  it("the console reserves exactly the words the server refuses an organization", () => {
+    expect([...RESERVED_ORGANIZATION_SLUGS].sort()).toEqual([...contract.slugs.reserved].sort());
+    expect(SLUG_MAX_LENGTH).toBe(contract.slugs.max_length);
   });
 
   it("the role coercion takes the three roles and nothing else", () => {

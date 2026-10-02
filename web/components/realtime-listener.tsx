@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { z } from "zod";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  useActiveOrganization,
   useActiveOrganizationId,
   useIncomingInvites,
   useOrganizations,
@@ -11,91 +12,14 @@ import {
   useAddIncomingInvite,
   useRemoveIncomingInvite,
 } from "@/lib/store";
-import { organizationMatches, projectMatches } from "@/lib/slug";
+import { projectAt } from "@/lib/console-nav";
 import { RealtimeEventDataSchema } from "@/lib/events/types";
+import { projectPath } from "@/lib/slug";
 
 const RETRY_MS = 30_000;
 
-const ROSTER_PAGES = /^\/[^/]+(?:\/[^/]+)?\/(members|audit-log)$/;
-
-type ProjectScope = { id: string; slug?: string | null };
-type OrganizationScope = { organizationId: string; slug?: string | null };
-
-function isViewingProject(
-  pathname: string,
-  projectId: string,
-  organizationId?: string,
-  projects: readonly ProjectScope[] = [],
-  organizations: readonly OrganizationScope[] = [],
-): boolean {
-  if (pathname === `/${projectId}` || pathname.startsWith(`/${projectId}/`)) {
-    return true;
-  }
-  const parts = pathname.split("/").filter(Boolean);
-  if (parts.length >= 2) {
-    const [rawOrg, rawPrj] = parts;
-    const orgMatches =
-      !organizationId ||
-      rawOrg === organizationId ||
-      organizations.some((o) => o.organizationId === organizationId && organizationMatches(o, rawOrg));
-    const prjMatches =
-      rawPrj === projectId ||
-      projects.some((p) => p.id === projectId && projectMatches(p, rawPrj));
-    if (orgMatches && prjMatches) return true;
-  }
-  if (parts.length >= 1) {
-    const rawPrj = parts[0];
-    if (projects.some((p) => p.id === projectId && projectMatches(p, rawPrj))) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function isViewingOrganization(
-  pathname: string,
-  organizationId: string,
-  activeOrgId: string | null,
-  organizations: readonly OrganizationScope[] = [],
-): boolean {
-  if (pathname.startsWith("/account")) {
-    return false;
-  }
-  if (organizationId === activeOrgId || pathname.startsWith(`/${organizationId}`)) {
-    return true;
-  }
-  return organizations.some(
-    (o) =>
-      o.organizationId === organizationId &&
-      o.slug &&
-      (pathname === `/${o.slug}` || pathname.startsWith(`/${o.slug}/`)),
-  );
-}
-
-function shouldEjectFromScope(params: {
-  pathname: string;
-  removed: { projectId?: string | null; organizationId: string };
-  activeOrgId: string | null;
-  projects: readonly ProjectScope[];
-  organizations: readonly OrganizationScope[];
-}): boolean {
-  const { pathname, removed, activeOrgId, projects, organizations } = params;
-  if (removed.projectId) {
-    return isViewingProject(
-      pathname,
-      removed.projectId,
-      removed.organizationId,
-      projects,
-      organizations,
-    );
-  }
-  return isViewingOrganization(
-    pathname,
-    removed.organizationId,
-    activeOrgId,
-    organizations,
-  );
-}
+// A roster or an audit log: a project's, or the organization's under `~`.
+const ROSTER_PAGES = /^\/[^/]+\/[^/]+\/(members|audit-log)$/;
 
 function payload<K extends keyof typeof RealtimeEventDataSchema>(
   e: MessageEvent,
@@ -120,21 +44,23 @@ export function RealtimeListener() {
   const removeInvite = useRemoveIncomingInvite();
   const memberships = useOrganizations();
   const incomingInvites = useIncomingInvites();
-  const projects = useProjects();
   const activeOrganizationId = useActiveOrganizationId();
+  // Events name a project by id and the path names it by slug: the id of the
+  // one on screen, out of the listing of the organization the console stands in.
+  const organization = useActiveOrganization()?.slug ?? null;
+  const projects = useProjects();
+  const projectId = projectAt(pathname, organization, projects)?.id ?? null;
   const esRef = useRef<EventSource | null>(null);
 
   const pathnameRef = useRef(pathname);
   const invitesRef = useRef(incomingInvites);
   const activeOrgIdRef = useRef(activeOrganizationId);
-  const projectsRef = useRef(projects);
-  const membershipsRef = useRef(memberships);
+  const projectIdRef = useRef(projectId);
   useEffect(() => {
     pathnameRef.current = pathname;
     invitesRef.current = incomingInvites;
     activeOrgIdRef.current = activeOrganizationId;
-    projectsRef.current = projects;
-    membershipsRef.current = memberships;
+    projectIdRef.current = projectId;
   });
 
   const membershipKey = memberships
@@ -200,7 +126,19 @@ export function RealtimeListener() {
 
       // An offer made to you, withdrawn, declined, or an organization you are
       // in changing hands: every role on the page may have moved.
-      es.addEventListener("ownership:changed", () => {
+      es.addEventListener("ownership:changed", (e: MessageEvent) => {
+        const data = payload(e, "ownership:changed");
+        // The project on screen was handed to another organization, and this
+        // path no longer names it: on to where it is now, by id, which the
+        // console redirects to the slugs it goes by there.
+        if (
+          data?.projectId &&
+          data.projectId === projectIdRef.current &&
+          data.organizationId !== activeOrgIdRef.current
+        ) {
+          router.replace(projectPath(data.organizationId, data.projectId));
+          return;
+        }
         router.refresh();
       });
 
@@ -210,15 +148,17 @@ export function RealtimeListener() {
         const data = payload(e, "membership:removed");
         if (!data) return;
 
-        const shouldEject = shouldEjectFromScope({
-          pathname: pathnameRef.current,
-          removed: data,
-          activeOrgId: activeOrgIdRef.current,
-          projects: projectsRef.current,
-          organizations: membershipsRef.current,
-        });
+        const isAccountPage = pathnameRef.current.startsWith("/account");
+        const isCurrentProject = Boolean(
+          data.projectId && data.projectId === projectIdRef.current,
+        );
+        const isCurrentOrg = Boolean(
+          !data.projectId &&
+            data.organizationId === activeOrgIdRef.current &&
+            !isAccountPage,
+        );
 
-        if (shouldEject) {
+        if (isCurrentProject || isCurrentOrg) {
           router.replace("/console");
         } else {
           router.refresh();
@@ -240,15 +180,28 @@ export function RealtimeListener() {
 
     connect();
 
+    const handleVisibilityOrOnline = () => {
+      if (document.visibilityState === "visible" && active) {
+        if (!esRef.current || esRef.current.readyState === EventSource.CLOSED) {
+          connect();
+        }
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityOrOnline);
+    window.addEventListener("online", handleVisibilityOrOnline);
+
     return () => {
       active = false;
       if (retryTimer) clearTimeout(retryTimer);
+      document.removeEventListener("visibilitychange", handleVisibilityOrOnline);
+      window.removeEventListener("online", handleVisibilityOrOnline);
       if (esRef.current) {
         esRef.current.close();
         esRef.current = null;
       }
     };
-  }, [router, addInvite, removeInvite, membershipKey]);
+  }, [addInvite, removeInvite, router, membershipKey]);
 
   return null;
 }

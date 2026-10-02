@@ -23,6 +23,8 @@ export type { IdentityContext } from "./entities/identity-context";
 export {
   fetchProjects,
   fetchProject,
+  fetchProjectAnywhere,
+  fetchProjectBySlug,
   fetchProjectListing,
   fetchProjectsEverywhere,
 } from "./entities/projects";

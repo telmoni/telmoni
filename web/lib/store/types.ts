@@ -37,7 +37,8 @@ export interface IdentitySlice extends Seed {
   /// which a local edit has already moved. No hook exposes it.
   serverSeed: Seed;
 
-  renameProject: (id: string, name: string) => void;
+  /// A rename moves the slug with the name; both are the server's answer.
+  renameProject: (id: string, name: string, slug: string) => void;
 
   addProject: (project: Project) => void;
 

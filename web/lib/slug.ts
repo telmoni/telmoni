@@ -1,200 +1,148 @@
 /**
- * Utilities for URL slug generation and resolution across Organizations and Projects.
+ * The console's paths, and the slugs that spell them:
  *
- * Modeled after industry standards (Vercel, GitHub, Linear):
- * - Organizations and Projects have immutable internal IDs (e.g. `org_...`, `project_...`).
- * - They also carry human-friendly, URL-safe slugs (e.g. `acme`, `web-app`).
- * - Top-level reserved keywords (e.g. `api`, `auth`, `account`, `console`) are strictly prevented from colliding.
- * - Route segments accept both slugs and IDs, resolving seamlessly without breaking existing links or bookmarks.
+ *   /{organization}                   the organization's overview
+ *   /{organization}/~/{page}          the organization's own pages
+ *   /{organization}/{project}         a project's overview
+ *   /{organization}/{project}/{page}  a project's pages
+ *
+ * `~` is no slug's shape, so a project can go by any slug at all without
+ * landing on one of its organization's pages, and a console built on this one
+ * can add an organization page without reserving its name.
+ *
+ * ⚠ **Auth mints every slug; nothing here derives one.** A slug follows its
+ * row's name, so a rename moves the URL: build every path from the slug the
+ * server last answered, never from a name. Something kept longer than a page
+ * names the row by its id, and the layouts redirect an id to its slug.
  */
 
+/** The segment an organization's own pages sit under. */
+export const ORGANIZATION_PAGES = "~";
+
+/** The longest a slug may be: `telmoni_shared::slug::MAX_LEN`. */
+export const SLUG_MAX_LENGTH = 48;
+
 /**
- * Reserved words that cannot be used as an organization or project slug.
- * Mirrors top-level routes and standard SaaS reserved namespaces.
+ * Words no organization goes by: the console's own top-level paths, the ones
+ * a console built on it serves or may yet, and the ones Next answers itself.
+ * Auth's list (`telmoni_shared::slug::RESERVED`), pinned by `contract.test.ts`.
  */
-export const RESERVED_SLUGS = new Set([
-  // Core routes
-  "api",
-  "auth",
-  "account",
-  "console",
-  "legal",
-  "invite",
-  "connect",
-  "cli",
-  "v1",
-  "v2",
-  "_next",
-  "public",
-  "static",
-  "assets",
-  "favicon.ico",
-  "robots.txt",
-  "sitemap.xml",
-  "security.txt",
-  "manifest.json",
-  "root",
-  "system",
-  "null",
-  "undefined",
-  "true",
-  "false",
-  // Common entity and action words
-  "organization",
-  "organizations",
-  "org",
-  "project",
-  "projects",
-  "admin",
-  "dashboard",
-  "settings",
-  "billing",
-  "plans",
+export const RESERVED_ORGANIZATION_SLUGS: ReadonlySet<string> = new Set([
+  "404",
+  "500",
   "about",
-  "support",
-  "help",
+  "account",
+  "accounts",
+  "admin",
+  "api",
+  "app",
+  "apple-icon",
+  "apps",
+  "assets",
+  "auth",
+  "billing",
+  "blog",
+  "blueprints",
+  "careers",
+  "changelog",
+  "cli",
+  "community",
+  "connect",
+  "console",
+  "contact",
+  "cookbook",
+  "dashboard",
+  "developers",
+  "device",
   "docs",
-  "documentation",
-  "status",
+  "download",
+  "enterprise",
+  "favicon",
   "health",
-  "metrics",
+  "help",
+  "home",
+  "icon",
+  "index",
+  "install",
   "internal",
+  "invite",
+  "invites",
+  "legal",
   "login",
   "logout",
+  "manifest",
+  "metrics",
+  "new",
+  "null",
+  "oauth",
+  "opengraph-image",
+  "org",
+  "organization",
+  "organizations",
+  "plans",
+  "pricing",
+  "privacy",
+  "project",
+  "projects",
+  "robots",
+  "security",
+  "settings",
+  "sign-in",
+  "sign-out",
+  "sign-up",
   "signin",
   "signout",
   "signup",
-  "register",
-  "pricing",
-  "features",
+  "sitemap",
+  "sso",
+  "static",
+  "status",
+  "support",
   "team",
   "teams",
+  "terms",
+  "twitter-image",
+  "undefined",
   "user",
   "users",
-  "new",
-  "create",
-  "webhook",
-  "webhooks",
-  "oauth",
-  "well-known",
-  ".well-known",
+  "v1",
+  "v2",
+  "www",
 ]);
 
-/**
- * Checks if a string is a valid slug according to standard SaaS slug rules:
- * - 2 to 48 characters
- * - lowercase alphanumeric and single hyphens
- * - does not start or end with a hyphen
- * - not a reserved keyword
- */
-export function isValidSlug(slug: string): boolean {
-  if (!slug || slug.length < 2 || slug.length > 48) return false;
-  if (RESERVED_SLUGS.has(slug.toLowerCase())) return false;
-  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug);
+const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** Whether `segment` has a slug's shape: lowercase words joined by single hyphens. */
+export function isSlug(segment: string): boolean {
+  return segment.length <= SLUG_MAX_LENGTH && SLUG.test(segment);
 }
 
 /**
- * Converts arbitrary text into a URL-friendly, safe slug:
- * - Lowercase
- * - Strips non-alphanumeric characters (except spaces and hyphens)
- * - Collapses consecutive spaces/hyphens/underscores to a single hyphen
- * - Trims leading/trailing hyphens
- * - Limits length to 48 chars without cutting off in a dangling hyphen
- * - Guarantees the slug does not collide with reserved words by appending a qualifier
+ * Whether a path's first segment can name an organization: a slug that none
+ * of the console's own paths claims.
  */
-export function slugify(text: string, qualifier = "app"): string {
-  let slug = text
-    .toLowerCase()
-    .trim()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "") // strip diacritics
-    .replace(/[^a-z0-9\s-]/g, "")
-    .replace(/[\s_]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
+export function isOrganizationSlug(segment: string): boolean {
+  return isSlug(segment) && !RESERVED_ORGANIZATION_SLUGS.has(segment);
+}
 
-  if (slug.length > 48) {
-    slug = slug.slice(0, 48).replace(/-+$/, "");
-  }
+/** `/{organization}`, or one of its own pages: `("acme", "/settings")` is `/acme/~/settings`. */
+export function organizationPath(organization: string, page = ""): string {
+  return page ? `/${organization}/${ORGANIZATION_PAGES}${page}` : `/${organization}`;
+}
 
-  if (slug.length < 2) {
-    return "";
-  }
-
-  if (RESERVED_SLUGS.has(slug)) {
-    slug = `${slug}-${qualifier}`;
-    if (slug.length > 48) {
-      slug = slug.slice(0, 48).replace(/-+$/, "");
-    }
-  }
-
-  return slug;
+/** `/{organization}/{project}`, or one of the project's pages. */
+export function projectPath(organization: string, project: string, page = ""): string {
+  return `/${organization}/${project}${page}`;
 }
 
 /**
- * Checks whether a requested URL segment matches an organization by slug, id, or slugified name.
+ * `path` with its leading segments replaced by `segments`, the rest and the
+ * query kept: where a layout redirects a path spelled with an id, or a stray
+ * capital, to the slugs the rows go by.
  */
-export function organizationMatches(
-  org: { organizationId: string; slug?: string | null; name?: string | null },
-  segment: string,
-): boolean {
-  if (!segment) return false;
-  const seg = segment.toLowerCase();
-  if (org.organizationId.toLowerCase() === seg) return true;
-  if (org.slug && org.slug.toLowerCase() === seg) return true;
-  if (org.name) {
-    const derived = slugify(org.name, "org");
-    if (derived && derived === seg) return true;
-  }
-  return false;
-}
-
-/**
- * Checks whether a requested URL segment matches a project by slug, id, or slugified name.
- */
-export function projectMatches(
-  project: { id: string; slug?: string | null; name?: string | null },
-  segment: string,
-): boolean {
-  if (!segment) return false;
-  const seg = segment.toLowerCase();
-  if (project.id.toLowerCase() === seg) return true;
-  if (project.slug && project.slug.toLowerCase() === seg) return true;
-  if (project.name) {
-    const derived = slugify(project.name, "project");
-    if (derived && derived === seg) return true;
-  }
-  return false;
-}
-
-/**
- * Returns the preferred URL segment for an organization (slug > slugified name > organizationId).
- */
-export function organizationSegment(org: {
-  organizationId: string;
-  slug?: string | null;
-  name?: string | null;
-}): string {
-  if (org.slug && isValidSlug(org.slug)) return org.slug;
-  if (org.name) {
-    const s = slugify(org.name, "org");
-    if (s.length >= 2 && isValidSlug(s)) return s;
-  }
-  return org.organizationId;
-}
-
-/**
- * Returns the preferred URL segment for a project (slug > slugified name > id).
- */
-export function projectSegment(project: {
-  id: string;
-  slug?: string | null;
-  name?: string | null;
-}): string {
-  if (project.slug && isValidSlug(project.slug)) return project.slug;
-  if (project.name) {
-    const s = slugify(project.name, "project");
-    if (s.length >= 2 && isValidSlug(s)) return s;
-  }
-  return project.id;
+export function withLeadingSegments(path: string, segments: readonly string[]): string {
+  const at = path.search(/[?#]/);
+  const pathname = at === -1 ? path : path.slice(0, at);
+  const rest = pathname.split("/").slice(1 + segments.length);
+  return `/${[...segments, ...rest].join("/")}${at === -1 ? "" : path.slice(at)}`;
 }

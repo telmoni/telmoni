@@ -49,10 +49,6 @@ vi.mock("@/lib/events/publisher", () => ({
   },
   organizationChannel: (organizationId: string) => `bfev:organization:${organizationId}`,
 }));
-const mockSetCookie = vi.fn();
-vi.mock("@/lib/server/cookies", () => ({
-  setActiveOrganizationCookie: (...a: unknown[]) => mockSetCookie(...a),
-}));
 
 import { tryFetchWithTimeout } from "@/lib/api/fetch";
 import { getServerSession } from "@/lib/server/session";
@@ -159,17 +155,21 @@ describe("answering the offer of a project", () => {
       new Response(
         JSON.stringify({
           projectId: "project_offered",
+          slug: "payments-2",
           organizationId: "org_own",
+          organizationSlug: "own",
           previousOrganizationId: "org_from",
           previousOwner: "user_2",
-          name: "Payments",
+          name: "Payments 2",
         }),
         { status: 200 },
       ),
     );
+    // The path names the organization the project landed in, and the slug it
+    // landed under — which is auth's to say: a name taken there is numbered.
     expect(await acceptProjectOfferAction("project_offered", "org_own")).toEqual({
       error: null,
-      href: "/project_offered",
+      href: "/own/payments-2",
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -194,8 +194,19 @@ describe("answering the offer of a project", () => {
     expect(mockPublishEvent).toHaveBeenCalledTimes(2);
     expect(mockPublishEvent).toHaveBeenCalledWith("bfev:organization:org_own", changed);
     expect(mockPublishEvent).toHaveBeenCalledWith("bfev:organization:org_from", changed);
-    expect(mockSetCookie).toHaveBeenCalledWith("org_own");
     expect(mockRevalidate).toHaveBeenCalledWith("/", "layout");
+  });
+
+  it("answers nowhere to go when auth does not say where the project landed", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({ projectId: "project_offered", organizationId: "org_own" }),
+        { status: 200 },
+      ),
+    );
+    expect(await acceptProjectOfferAction("project_offered", "org_own")).toEqual({
+      error: null,
+    });
   });
 
   it("declines, and tells the organization the project stays in", async () => {
@@ -212,7 +223,6 @@ describe("answering the offer of a project", () => {
       type: "ownership:changed",
       data: { organizationId: "org_from", projectId: "project_offered" },
     });
-    expect(mockSetCookie).not.toHaveBeenCalled();
   });
 
   it("reports an unreachable service and a refusal distinctly, and moves nothing", async () => {
@@ -227,7 +237,6 @@ describe("answering the offer of a project", () => {
     });
 
     expect(mockPublishEvent).not.toHaveBeenCalled();
-    expect(mockSetCookie).not.toHaveBeenCalled();
     expect(mockRevalidate).not.toHaveBeenCalled();
   });
 

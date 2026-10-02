@@ -1,4 +1,5 @@
-import { parseConsolePath } from "./console-nav";
+import { consolePlace } from "./console-nav";
+import { organizationPath, projectPath } from "./slug";
 
 export const SHORTCUTS_DISABLED_KEY = "telmoni-shortcuts-disabled";
 
@@ -29,7 +30,8 @@ interface GoSequence {
   key: string;
   label: string;
   href: string;
-  absolute?: boolean;
+  // Goes to the organization's overview, whatever the path stands in.
+  organization?: boolean;
 }
 
 export const GO_SEQUENCES: GoSequence[] = [
@@ -44,70 +46,39 @@ export const GO_SEQUENCES: GoSequence[] = [
   { key: "l", label: "Audit log", href: "/audit-log" },
   { key: "p", label: "Project settings", href: "/settings" },
   { key: "o", label: "Overview", href: "" },
-  { key: "O", label: "Organization", href: "/organization", absolute: true },
+  { key: "O", label: "Organization", href: "", organization: true },
 ];
 
 const ORGANIZATION_PAGES = new Set(["", "/members", "/audit-log", "/settings"]);
 
-// Every first path segment under `app/(app)` that is NOT a project id. The rail
-// makes the same split — `buildConsoleNav` draws the Organization run for the
-// first and the Account run for the second, never a project's — and a
-// project-relative sequence has no destination from either.
-// `console` is here too: it is a redirector, and it is where a sign-in lands
-// before the project listing resolves.
-// `root` is what `useSelectedLayoutSegment()` returns under the console layout
-// — a project id, "organization" or "account" — or the current pathname, or an
-// explicit `{ orgId, projectId }` object.
+// Where a sequence goes from `pathname`. All but `g O` are relative to the
+// resource the path stands in: a project has every one of them, the
+// organization has its own spellings of Overview, Members, Audit log and
+// Settings, and Account has none. `organization` is the slug of the
+// organization the console stands in, for `g O` from a path that names none.
+//
+// ⚠ **Returning a bare `seq.href` with nowhere to stand was a 404 generator.**
+// `/api-keys` unprefixed reads as an organization of that name, and its layout
+// answers `notFound()`. A shortcut with nowhere to go must do nothing instead.
 export function resolveSequence(
   key: string,
-  root?: string | { organizationId?: string | null; orgId?: string | null; projectId?: string | null } | null,
+  pathname: string,
+  organization?: string | null,
 ): string | null {
   const seq = GO_SEQUENCES.find((s) => s.key === key);
   if (seq === undefined) return null;
 
-  let orgId: string | null = null;
-  let projectId: string | null = null;
-  let mode: "account" | "organization" | "project" | "unknown" = "unknown";
-
-  if (typeof root === "string") {
-    if (root.startsWith("/")) {
-      const parsed = parseConsolePath(root);
-      orgId = parsed.orgId;
-      projectId = parsed.projectId;
-      mode = parsed.mode;
-    } else if (root === "organization" || root.startsWith("org_") || root === "org") {
-      orgId = root;
-      mode = "organization";
-    } else if (root === "account" || root === "console") {
-      mode = "account";
-    } else if (root) {
-      projectId = root;
-      mode = "project";
-    }
-  } else if (root) {
-    orgId = root.organizationId ?? root.orgId ?? null;
-    projectId = root.projectId ?? null;
-    mode = projectId ? "project" : orgId ? "organization" : "unknown";
+  const place = consolePlace(pathname);
+  const standing = place !== null && place.kind !== "account" ? place : null;
+  if (seq.organization) {
+    const slug = standing?.organization ?? organization;
+    return slug ? organizationPath(slug) : null;
   }
-
-  if (seq.key === "O") {
-    return orgId && orgId !== "organization" ? `/${orgId}` : "/organization";
+  if (standing === null) return null;
+  if (standing.kind === "organization") {
+    return ORGANIZATION_PAGES.has(seq.href)
+      ? organizationPath(standing.organization, seq.href)
+      : null;
   }
-  if (seq.absolute) return seq.href;
-
-  if (mode === "organization") {
-    if (ORGANIZATION_PAGES.has(seq.href)) {
-      return orgId && orgId !== "organization"
-        ? `/${orgId}${seq.href}`
-        : `/organization${seq.href}`;
-    }
-    return null;
-  }
-
-  if (mode === "project") {
-    if (!projectId) return null;
-    return orgId ? `/${orgId}/${projectId}${seq.href}` : `/${projectId}${seq.href}`;
-  }
-
-  return null;
+  return projectPath(standing.organization, standing.project, seq.href);
 }

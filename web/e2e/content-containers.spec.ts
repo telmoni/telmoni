@@ -68,10 +68,16 @@ async function organizationOf(request: APIRequestContext, user: TestUser): Promi
 // page then lists is recorded by the next console visit's `/me` — which is why
 // the caller injects a fresh session afterwards: this ends the browser's own.
 // The seed acts under a session `/me` never saw, so no row it revokes is its own.
-async function seed(request: APIRequestContext, user: TestUser, projectId: string) {
+async function seed(request: APIRequestContext, user: TestUser, projectSlug: string) {
   const organizationId = await organizationOf(request, user);
   const bearer = await bearerFor(request, user);
   const own = internalHeaders(bearer, organizationId);
+  // The page's path names the project by slug; its lanes key on the id.
+  const listing = await request.get(`${SERVER}/internal/projects`, { headers: own });
+  expect(listing.ok(), await listing.text()).toBeTruthy();
+  const { projects } = (await listing.json()) as { projects: { id: string; slug: string }[] };
+  const projectId = projects.find((p) => p.slug === projectSlug)?.id;
+  expect(projectId, `no project goes by ${projectSlug}`).toMatch(/^project_[A-Za-z0-9]{16}$/);
   const project = internalHeaders(bearer, organizationId, projectId);
 
   const tokens = await request.get(`${SERVER}/internal/tokens`, { headers: project });
@@ -188,22 +194,21 @@ test.describe("Console content containers", () => {
 
     await page.goto("/console");
     await expect(page.getByRole("heading", { name: "Overview", level: 1 })).toBeVisible();
-    const projectId = new URL(page.url()).pathname.slice(1);
-    expect(projectId).toMatch(/^project_[A-Za-z0-9]{16}$/);
-    await seed(page.request, user, projectId);
+    const landing = new URL(page.url()).pathname;
+    expect(landing, "the door lands on a project").toMatch(/^\/[a-z0-9-]+\/[a-z0-9-]+$/);
+    const [, organization, projectSlug] = landing.split("/");
+    await seed(page.request, user, projectSlug!);
     // `seed` revoked every session, this browser's included. A fresh one, and
     // the `/me` its first visit makes, is the single row the privacy page lists.
     await injectSession(page, user);
     await page.goto("/console");
     await expect(page.getByRole("heading", { name: "Overview", level: 1 })).toBeVisible();
 
-    const rows = (pathname: string, segment: string) =>
-      buildConsoleNav(pathname, segment).flatMap((group) =>
-        group.items.map((item) => item.url),
-      );
+    const rows = (pathname: string) =>
+      buildConsoleNav(pathname).flatMap((group) => group.items.map((item) => item.url));
     const routes = [
-      ...rows(`/${projectId}`, projectId),
-      ...rows("/organization", "organization"),
+      ...rows(landing),
+      ...rows(`/${organization}`),
       // Not in the rail — it hangs off the account menu — but it is where the
       // active-sessions table lives, which is what this spec seeds a session for.
       "/account/privacy",
@@ -267,25 +272,25 @@ test.describe("Console content containers", () => {
       expect(s.pane.scrollWidth, at("the page scrolls sideways")).toBe(s.pane.clientWidth);
     }
 
-    const keys = seen.get(`/${projectId}/api-keys`)!;
+    const keys = seen.get(`${landing}/api-keys`)!;
     expect(keys.tables.map((t) => t.rows), "API keys: the seeded key").toEqual([1]);
-    const audit = seen.get(`/${projectId}/audit-log`)!;
+    const audit = seen.get(`${landing}/audit-log`)!;
     expect(audit.tables.length, "audit: one table").toBe(1);
     expect(audit.tables[0]!.rows, "audit: the mint on the project's page").toBeGreaterThanOrEqual(1);
-    const organizationAudit = seen.get("/organization/audit-log")!;
+    const organizationAudit = seen.get(`/${organization}/~/audit-log`)!;
     expect(organizationAudit.tables.length, "organization audit: one table").toBe(1);
     expect(
       organizationAudit.tables[0]!.rows,
       "organization audit: the mint and the pairing",
     ).toBeGreaterThanOrEqual(2);
-    const settings = seen.get("/organization/settings")!;
+    const settings = seen.get(`/${organization}/~/settings`)!;
     expect(
       settings.tables.length,
       "organization settings: no table, just the rename and the danger zone",
     ).toBe(0);
     const privacy = seen.get("/account/privacy")!;
     expect(privacy.tables.map((t) => t.rows), "privacy: the recorded session").toEqual([1]);
-    const members = seen.get(`/${projectId}/members`)!;
+    const members = seen.get(`${landing}/members`)!;
     expect(members.tables.map((t) => t.rows), "members: the roster, with its owner on it").toEqual([1]);
 
     if (mobile) {

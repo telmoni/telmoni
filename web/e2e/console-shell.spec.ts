@@ -16,6 +16,15 @@ function testUser(project: string): Partial<SessionData> {
   };
 }
 
+// The members page of the organization the door lands in: its path is
+// spelled with the organization's slug, which only the landing gives.
+async function gotoOrganizationMembers(page: Page) {
+  await page.goto("/console");
+  await page.waitForURL((url) => /^\/[a-z0-9-]+\/[a-z0-9-]+$/.test(url.pathname));
+  const [, organization] = new URL(page.url()).pathname.split("/");
+  await page.goto(`/${organization}/~/members`);
+}
+
 async function rightEdge(locator: Locator): Promise<number> {
   const box = await locator.boundingBox();
   expect(box, "the element is laid out").not.toBeNull();
@@ -27,7 +36,7 @@ test.describe("Console page title row", () => {
     page,
   }, testInfo) => {
     await injectSession(page, testUser(testInfo.project.name));
-    await page.goto("/organization/members");
+    await gotoOrganizationMembers(page);
     await expect(
       page.getByRole("heading", { name: "Members", level: 1 }),
     ).toBeVisible();
@@ -64,7 +73,7 @@ test.describe("Console chrome row", () => {
       "the wordmark is drawn above the cut only",
     );
     await injectSession(page, testUser(testInfo.project.name));
-    await page.goto("/organization/members");
+    await gotoOrganizationMembers(page);
 
     const mark = page.getByRole("banner").getByText("Telmoni", { exact: true });
     await expect(mark).toBeVisible();

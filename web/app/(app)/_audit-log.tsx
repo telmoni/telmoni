@@ -8,7 +8,6 @@ import type { AuditAccess } from "@/lib/server/entities/audit";
 export function AuditLog({
   access,
   what,
-  scope = "project",
   owner = null,
   description,
   empty,
@@ -17,13 +16,11 @@ export function AuditLog({
 }: {
   access: AuditAccess;
   what: string;
-  /// Which level's log this is, for the refusal to name.
-  scope?: "project" | "organization";
   /// Whom the refusal tells the caller to ask (`ownerContact`).
   owner?: string | null;
   description: string;
   empty: string;
-  backHref?: string;
+  backHref: string;
   backLabel?: string;
 }) {
   if (access.kind === "unavailable") return <ServiceUnavailable />;
@@ -32,7 +29,7 @@ export function AuditLog({
       <AccessDenied
         what={what}
         owner={owner}
-        backHref={backHref ?? (scope === "organization" ? "/organization" : undefined)}
+        backHref={backHref}
         backLabel={backLabel}
       />
     );

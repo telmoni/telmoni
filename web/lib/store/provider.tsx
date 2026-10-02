@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useContext, useEffect, useState, type ReactNode } from "react";
 import { StoreContext, createStore } from "./index";
 import type { StoreInitial } from "./index";
 
@@ -8,8 +8,24 @@ interface Props extends StoreInitial {
   children: ReactNode;
 }
 
-export function StoreProvider({
-  children,
+export function StoreProvider({ children, ...seed }: Props) {
+  const [store] = useState(() => createStore(seed));
+
+  return (
+    <StoreContext.Provider value={store}>
+      <StoreSeed {...seed} />
+      {children}
+    </StoreContext.Provider>
+  );
+}
+
+/**
+ * Writes a server render's seed into the store. Drawn by the provider, for the
+ * `(app)` layout's seed, and by the `[organization]` layout, for the seed of
+ * the organization a navigation arrived in: the router keeps the `(app)`
+ * layout across that move, so its own seed still names the one left.
+ */
+export function StoreSeed({
   user,
   organizations,
   incomingInvites,
@@ -19,26 +35,14 @@ export function StoreProvider({
   roles,
   projects,
   projectsElsewhere,
-}: Props) {
-  const [store] = useState(() =>
-    createStore({
-      user,
-      organizations,
-      incomingInvites,
-      projectOffers,
-      activeOrganizationId,
-      flags,
-      roles,
-      projects,
-      projectsElsewhere,
-    }),
-  );
+}: StoreInitial) {
+  const store = useContext(StoreContext);
 
-  // ⚠ **EVERY prop app/(app)/layout.tsx hands over is written back here, and
-  // the list being partial was a bug.** `createStore` runs once per MOUNT, and
-  // every navigation inside `app/(app)` is a client-side one — the layout
-  // re-renders on the server and this component does not remount. Anything
-  // left out is one server render's answer drawn beside another's.
+  // ⚠ **EVERY field a layout hands over is written back here, and the list
+  // being partial was a bug.** `createStore` runs once per MOUNT, and every
+  // navigation inside `app/(app)` is a client-side one — the layout re-renders
+  // on the server and the provider does not remount. Anything left out is one
+  // server render's answer drawn beside another's.
   //
   // `activeOrganizationId` was the one that showed. Switching organizations
   // reseeded `projects` from the organization you moved into while the id stayed
@@ -52,7 +56,7 @@ export function StoreProvider({
   // anything new is `setSeed`'s question, not this component's: it compares
   // against the last seed and writes only what moved.
   useEffect(() => {
-    store.getState().setSeed({
+    store?.getState().setSeed({
       user,
       organizations,
       incomingInvites,
@@ -76,9 +80,5 @@ export function StoreProvider({
     activeOrganizationId,
   ]);
 
-  return (
-    <StoreContext.Provider value={store}>
-      {children}
-    </StoreContext.Provider>
-  );
+  return null;
 }

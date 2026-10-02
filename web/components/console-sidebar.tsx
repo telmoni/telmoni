@@ -2,20 +2,15 @@
 
 import { type KeyboardEvent } from "react";
 import Link from "next/link";
-import { usePathname, useSelectedLayoutSegment } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  buildConsoleNav,
-  parseConsolePath,
-  type ConsoleNavItem,
-} from "@/lib/console-nav";
+import { buildConsoleNav, consolePlace, type ConsoleNavItem } from "@/lib/console-nav";
 import { resolveReturnUrl } from "@/lib/console-trail";
 import { PRODUCT_NAME } from "@/lib/site";
-import { organizationSegment, projectSegment } from "@/lib/slug";
-import { useActiveOrganizationId, useFlags, useOrganizations, useProjects } from "@/lib/store";
-import { useConsoleTrail } from "@/lib/use-console-trail";
+import { useFlags } from "@/lib/store";
+import { useConsoleTrail, useLiveResources } from "@/lib/use-console-trail";
 import { cn } from "@/lib/utils";
 import { useSidebar } from "./sidebar-context";
 
@@ -116,28 +111,14 @@ export function ConsoleSidebar() {
   const trail = useConsoleTrail();
 
   const flags = useFlags();
-  const projects = useProjects();
-  const segment = useSelectedLayoutSegment() ?? "";
-  const groups = buildConsoleNav(pathname, segment, flags);
+  const groups = buildConsoleNav(pathname, flags);
   const steppedIn = groups[0]?.title === "Account";
-  const returnProject = projects.find((p) => p.id !== "organization" && p.id !== "org") ?? projects[0];
-  const activeOrgId = useActiveOrganizationId();
-  const organizations = useOrganizations();
-  const activeOrg = organizations.find((o) => o.organizationId === activeOrgId);
-  const activeOrgSegment = activeOrg ? organizationSegment(activeOrg) : (activeOrgId ?? undefined);
-  const returnProjectSegment = returnProject ? projectSegment(returnProject) : undefined;
-  const fallbackUrl = returnProjectSegment
-    ? (activeOrgSegment ? `/${activeOrgSegment}/${returnProjectSegment}` : `/${returnProjectSegment}`)
-    : (activeOrgSegment ? `/${activeOrgSegment}` : "/console");
-  const returnUrl = resolveReturnUrl(
-    trail,
-    projects.flatMap((t) => [t.id, ...(t.slug ? [t.slug] : [])]),
-    fallbackUrl,
-  );
-  const returnParsed = parseConsolePath(returnUrl);
-  const returnLabel = returnParsed.mode === "organization"
-    ? "Back to organization"
-    : "Back to project";
+  const { live, fallback } = useLiveResources();
+  const returnUrl = resolveReturnUrl(trail, live, fallback);
+  const returnLabel =
+    consolePlace(returnUrl)?.kind === "organization"
+      ? "Back to organization"
+      : "Back to project";
 
   return (
     <aside

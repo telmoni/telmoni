@@ -4,7 +4,7 @@ import { ServiceUnavailable } from "@/components/service-unavailable";
 import { administersOrganization } from "@/lib/organization-role";
 import { activeOrganization, fetchProjectListing, getServerContext } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
-import { organizationSegment, projectSegment } from "@/lib/slug";
+import { organizationPath, projectPath } from "@/lib/slug";
 
 export default async function ConsoleEntry() {
   const session = await getServerSession();
@@ -35,11 +35,16 @@ export default async function ConsoleEntry() {
   // organization — someone whose project was handed away — was sent straight
   // to ACCESS DENIED; they get the overview, open to everyone in it.
   const [first] = listing.projects;
-  const activeOrg = ctx ? activeOrganization(ctx) : null;
-  const role = activeOrg?.role ?? null;
-  const activeOrgSegment = activeOrg ? organizationSegment(activeOrg) : (ctx?.activeOrganizationId ?? null);
-  const orgPrefix = activeOrgSegment ? `/${activeOrgSegment}` : "/organization";
-  const empty = administersOrganization(role) ? `${orgPrefix}/projects` : orgPrefix;
-  const projectSlug = first ? projectSegment(first) : null;
-  redirect(first ? (activeOrgSegment ? `/${activeOrgSegment}/${projectSlug}` : `/${first.id}`) : empty);
+  // A listing answered, so `/me` did, and named the organization it is for.
+  const organization = ctx ? activeOrganization(ctx) : null;
+  redirect(
+    !organization
+      ? "/account/notifications"
+      : first
+        ? projectPath(organization.slug, first.slug)
+        : organizationPath(
+            organization.slug,
+            administersOrganization(organization.role) ? "/projects" : "",
+          ),
+  );
 }

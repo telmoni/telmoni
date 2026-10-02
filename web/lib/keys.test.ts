@@ -5,23 +5,23 @@ import { GO_SEQUENCES, PAGE_ACTION_KEY, resolveSequence } from "./keys";
 
 describe("the go-sequence registry", () => {
   it("gives every rail destination a sequence", () => {
-    for (const item of buildConsoleNav("/prj-123/api-keys", "prj-123").flatMap((g) => g.items)) {
+    for (const item of buildConsoleNav("/acme/web/api-keys").flatMap((g) => g.items)) {
       expect(
-        GO_SEQUENCES.some((s) => resolveSequence(s.key, "prj-123") === item.url),
+        GO_SEQUENCES.some((s) => resolveSequence(s.key, "/acme/web/api-keys") === item.url),
         `no sequence reaches ${item.title} (${item.url})`,
       ).toBe(true);
     }
   });
 
   it("resolves every sequence to a live destination", () => {
-    const OFF_RAIL = new Set(["/organization", "/prj-123/audit-log"]);
+    const OFF_RAIL = new Set(["/acme"]);
     const urls = new Set(
-      buildConsoleNav("/prj-123/api-keys", "prj-123")
+      buildConsoleNav("/acme/web/api-keys")
         .flatMap((g) => g.items)
         .map((i) => i.url),
     );
     for (const s of GO_SEQUENCES) {
-      const href = resolveSequence(s.key, "prj-123");
+      const href = resolveSequence(s.key, "/acme/web/api-keys");
       expect(
         href !== null && (urls.has(href) || OFF_RAIL.has(href)),
         `g ${s.key} resolves nowhere: ${href}`,
@@ -30,13 +30,20 @@ describe("the go-sequence registry", () => {
   });
 
   it("reaches every page from anywhere", () => {
-    expect(resolveSequence("k", "prj-123")).toBe("/prj-123/api-keys");
-    expect(resolveSequence("c", "prj-123")).toBe("/prj-123/connectors");
-    expect(resolveSequence("u", "prj-123")).toBeNull();
-    expect(resolveSequence("u")).toBeNull();
-    expect(resolveSequence("O", "prj-123")).toBe("/organization");
-    expect(resolveSequence("O", "organization")).toBe("/organization");
-    expect(resolveSequence("O")).toBe("/organization");
+    expect(resolveSequence("k", "/acme/web")).toBe("/acme/web/api-keys");
+    expect(resolveSequence("c", "/acme/web/members")).toBe("/acme/web/connectors");
+    expect(resolveSequence("u", "/acme/web")).toBeNull();
+    expect(resolveSequence("u", "/")).toBeNull();
+    expect(resolveSequence("O", "/acme/web")).toBe("/acme");
+    expect(resolveSequence("O", "/acme/~/settings")).toBe("/acme");
+    expect(resolveSequence("O", "/account/settings", "acme")).toBe("/acme");
+  });
+
+  // The path names the organization, and wins over the one handed in: that is
+  // only for a path that names none.
+  it("goes to the organization the path names", () => {
+    expect(resolveSequence("O", "/globex/web", "acme")).toBe("/globex");
+    expect(resolveSequence("m", "/globex/~/settings", "acme")).toBe("/globex/~/members");
   });
 
   it("keeps every key single, unique, and off the reserved starters", () => {
@@ -47,41 +54,43 @@ describe("the go-sequence registry", () => {
     expect(["g", "?"].includes(PAGE_ACTION_KEY)).toBe(false);
   });
 
-  // ⚠ The untested corner that shipped a 404. With no root the function used
-  // to hand back the bare project-relative href — `/api-keys`, `/members` — and those
-  // match `[projectId]` with the page name as the project id.
+  // ⚠ The untested corner that shipped a 404. With nowhere to stand the
+  // function used to hand back the bare project-relative href — `/api-keys`,
+  // `/members` — and those read as an organization of that name.
   it.each(["k", "c", "m", "l", "p", "o"])(
-    "refuses the project-relative %s when there is no project root",
+    "refuses the project-relative %s when the path stands nowhere",
     (k) => {
-      expect(resolveSequence(k)).toBeNull();
+      expect(resolveSequence(k, "/")).toBeNull();
+      expect(resolveSequence(k, "/", "acme")).toBeNull();
     },
   );
 
-  it.each(["account", "console"])(
-    "refuses a project-relative sequence under the non-project root %s",
-    (root) => {
-      expect(resolveSequence("k", root)).toBeNull();
-      expect(resolveSequence("o", root)).toBeNull();
-      expect(resolveSequence("O", root)).toBe("/organization");
+  it.each(["/account/settings", "/console"])(
+    "refuses a project-relative sequence on %s",
+    (pathname) => {
+      expect(resolveSequence("k", pathname, "acme")).toBeNull();
+      expect(resolveSequence("o", pathname, "acme")).toBeNull();
+      expect(resolveSequence("O", pathname, "acme")).toBe("/acme");
     },
   );
 
-  it("does nothing with no root at all", () => {
-    expect(resolveSequence("k", null)).toBeNull();
-    expect(resolveSequence("k", undefined)).toBeNull();
+  it("does nothing with no organization to go to", () => {
+    expect(resolveSequence("O", "/account/settings")).toBeNull();
+    expect(resolveSequence("O", "/account/settings", null)).toBeNull();
+    expect(resolveSequence("k", "/account/settings", null)).toBeNull();
   });
 
   it("no-ops an unknown second key", () => {
-    expect(resolveSequence("z", "prj-123")).toBeNull();
-    expect(resolveSequence("x", "prj-123")).toBeNull();
-    expect(resolveSequence("X", "prj-123")).toBeNull();
-    expect(resolveSequence("O", "prj-123")).toBe("/organization");
-    expect(resolveSequence("k", "organization")).toBeNull();
-    expect(resolveSequence("c", "organization")).toBeNull();
-    expect(resolveSequence("u", "organization")).toBeNull();
-    expect(resolveSequence("m", "organization")).toBe("/organization/members");
-    expect(resolveSequence("l", "organization")).toBe("/organization/audit-log");
-    expect(resolveSequence("p", "organization")).toBe("/organization/settings");
-    expect(resolveSequence("o", "organization")).toBe("/organization");
+    expect(resolveSequence("z", "/acme/web")).toBeNull();
+    expect(resolveSequence("x", "/acme/web")).toBeNull();
+    expect(resolveSequence("X", "/acme/web")).toBeNull();
+    expect(resolveSequence("O", "/acme/web")).toBe("/acme");
+    expect(resolveSequence("k", "/acme/~/members")).toBeNull();
+    expect(resolveSequence("c", "/acme")).toBeNull();
+    expect(resolveSequence("u", "/acme")).toBeNull();
+    expect(resolveSequence("m", "/acme")).toBe("/acme/~/members");
+    expect(resolveSequence("l", "/acme/~/members")).toBe("/acme/~/audit-log");
+    expect(resolveSequence("p", "/acme")).toBe("/acme/~/settings");
+    expect(resolveSequence("o", "/acme/~/settings")).toBe("/acme");
   });
 });

@@ -2,7 +2,13 @@
 import { renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { CONSOLE_TRAIL_KEY, resolveReturnUrl, resourceUrl } from "./console-trail";
+import {
+  CONSOLE_TRAIL_KEY,
+  liveResources,
+  resolveReturnUrl,
+  resourceUrl,
+  type Resource,
+} from "./console-trail";
 import {
   clearTrailForTest,
   readTrail,
@@ -11,11 +17,18 @@ import {
   useRecordConsolePath,
 } from "./use-console-trail";
 
-const PROJECT = "project_abc";
-const PROJECTS = [PROJECT, "project_def"];
-const CONNECTORS = `/${PROJECT}/connectors`;
-const OVERVIEW = `/${PROJECT}`;
-const ORG_MEMBERS = "/organization/members";
+const ORGANIZATION: Resource = { kind: "organization", organization: "acme" };
+const PROJECT: Resource = { kind: "project", organization: "acme", project: "web" };
+const LIVE = liveResources(
+  [{ slug: "acme" }],
+  [
+    { slug: "web", organizationSlug: "acme" },
+    { slug: "api", organizationSlug: "acme" },
+  ],
+);
+const OVERVIEW = "/acme/web";
+const CONNECTORS = `${OVERVIEW}/connectors`;
+const ORG_MEMBERS = "/acme/~/members";
 
 beforeEach(() => {
   window.sessionStorage.clear();
@@ -83,16 +96,14 @@ describe("the console across a visit", () => {
   it("records where you stood, then hands it to the back arrow", () => {
     standAt(CONNECTORS).unmount();
     const trail = standAt("/account/settings").result.current;
-    expect(resolveReturnUrl(trail, PROJECTS, OVERVIEW)).toBe(CONNECTORS);
+    expect(resolveReturnUrl(trail, LIVE, OVERVIEW)).toBe(CONNECTORS);
   });
 
   it("holds the page while you move around Account", () => {
     standAt(CONNECTORS).unmount();
     const account = standAt("/account/settings");
     account.rerender();
-    expect(resolveReturnUrl(account.result.current, PROJECTS, OVERVIEW)).toBe(
-      CONNECTORS,
-    );
+    expect(resolveReturnUrl(account.result.current, LIVE, OVERVIEW)).toBe(CONNECTORS);
   });
 
   // Connectors, off to the organization, and back through the selector.
@@ -102,12 +113,12 @@ describe("the console across a visit", () => {
     expect(resourceUrl(org.result.current, PROJECT)).toBe(CONNECTORS);
     org.unmount();
     const back = standAt(CONNECTORS);
-    expect(resourceUrl(back.result.current, "organization")).toBe(ORG_MEMBERS);
+    expect(resourceUrl(back.result.current, ORGANIZATION)).toBe(ORG_MEMBERS);
   });
 
   it("offers the fallback to a tab that opened on an account page", () => {
     const trail = standAt("/account/notifications").result.current;
-    expect(resolveReturnUrl(trail, PROJECTS, OVERVIEW)).toBe(OVERVIEW);
+    expect(resolveReturnUrl(trail, LIVE, OVERVIEW)).toBe(OVERVIEW);
   });
 
   // No frame on the fallback: the trail is read on the first render rather
@@ -116,7 +127,7 @@ describe("the console across a visit", () => {
     recordPath(CONNECTORS);
     const seen: string[] = [];
     renderHook(() => {
-      seen.push(resolveReturnUrl(useConsoleTrail(), PROJECTS, OVERVIEW));
+      seen.push(resolveReturnUrl(useConsoleTrail(), LIVE, OVERVIEW));
     });
     expect(seen[0]).toBe(CONNECTORS);
   });

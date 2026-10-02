@@ -7,6 +7,7 @@ import { same } from "./identity";
 function organization(who: string): NonNullable<StoreInitial["organizations"]>[number] {
   return {
     organizationId: `org_${who}`,
+    slug: who,
     name: null,
     ownerEmail: `${who}@example.test`,
     ownerDisplayName: null,
@@ -15,7 +16,7 @@ function organization(who: string): NonNullable<StoreInitial["organizations"]>[n
 }
 
 const project = (id: string, name: string) =>
-  ({ id, name, role: "owner" }) as StoreInitial["projects"][number];
+  ({ id, slug: name.toLowerCase(), name, role: "owner" }) as StoreInitial["projects"][number];
 
 function payload(over: Partial<StoreInitial> = {}): StoreInitial {
   return {
@@ -87,11 +88,14 @@ describe("setSeed", () => {
   // were against the live state rather than against the last seed.
   it("keeps an optimistic rename through an unrelated payload", () => {
     const { store, seed } = open();
-    store.getState().renameProject("t-1", "Renamed");
+    store.getState().renameProject("t-1", "Renamed", "renamed");
 
     seed(payload({ flags: { beta_access: false } }));
 
     expect(store.getState().projects[0]?.name).toBe("Renamed");
+    // The slug moves with the name, or every link to the project would still
+    // be spelled with the one it no longer goes by.
+    expect(store.getState().projects[0]?.slug).toBe("renamed");
   });
 
   // The other half of the same rule: when the server does speak about a field,
@@ -99,7 +103,7 @@ describe("setSeed", () => {
   // that nothing could ever correct.
   it("takes the server's word when the payload moves that field", () => {
     const { store, seed } = open();
-    store.getState().renameProject("t-1", "Renamed");
+    store.getState().renameProject("t-1", "Renamed", "renamed");
 
     seed(payload({ projects: [project("t-1", "Alpha"), project("t-2", "Beta")] }));
 

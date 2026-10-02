@@ -12,7 +12,7 @@ import {
 } from "@/lib/types/agent";
 
 import { identityContext, projectHeaders } from "./identity-context";
-import { fetchProject } from "./projects";
+import { fetchProjectAnywhere } from "./projects";
 
 // How long one turn may stream. `fetchWithTimeout` bounds the whole exchange,
 // body included, so this is the ceiling on a reply, not on its first byte: a
@@ -55,10 +55,11 @@ const ConversationSchema = z.object({
 // The headers for an agent lane, or `null` when the person or the project
 // cannot be resolved. The project is checked against the person's own list
 // first so a stale id costs no round trip; the server decides again anyway.
+// Its own organization is the one named: the turns route's path names none.
 export async function agentHeaders(projectId: string): Promise<Record<string, string> | null> {
-  const [ctx, project] = await Promise.all([identityContext(), fetchProject(projectId)]);
+  const [ctx, project] = await Promise.all([identityContext(), fetchProjectAnywhere(projectId)]);
   if (!ctx || !project) return null;
-  return projectHeaders(ctx, projectId);
+  return projectHeaders({ ...ctx, organizationId: project.organizationId }, projectId);
 }
 
 export async function agentStatus(projectId: string): Promise<AgentStatus> {
