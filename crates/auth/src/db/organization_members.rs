@@ -88,6 +88,8 @@ pub struct LiveOrganizationInvite {
 #[serde(rename_all = "camelCase")]
 pub struct OrganizationMembership {
     pub organization_id: OrganizationId,
+    /// Where its paths begin in the console: `/{slug}`.
+    pub slug: String,
     /// What the owner called it; `None` means never named.
     pub name: Option<String>,
     /// The owner's address and name: what an unnamed organization is labelled
@@ -671,7 +673,7 @@ pub async fn organizations_of(
     user_id: &UserId,
 ) -> sqlx::Result<Vec<OrganizationMembership>> {
     sqlx::query_as::<_, OrganizationMembership>(&format!(
-        "SELECT m.organization_id, o.name,
+        "SELECT m.organization_id, o.slug, o.name,
                 owner_identity.email AS owner_email,
                 owner_identity.display_name AS owner_display_name,
                 m.role,

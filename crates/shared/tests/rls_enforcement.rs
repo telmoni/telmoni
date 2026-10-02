@@ -471,14 +471,17 @@ async fn maintenance_membership_alone_does_not_widen_a_project_scope() {
 /// organization's id as its own, which a project id may), and the person —
 /// seeded as the owner, which bypasses RLS.
 async fn seed_membership(pool: &PgPool, organization: &str, member: &str) {
-    sqlx::query("INSERT INTO auth.organizations (external_id) VALUES ($1)")
-        .bind(organization)
-        .execute(pool)
-        .await
-        .expect("seed organization");
+    sqlx::query(
+        "INSERT INTO auth.organizations (external_id, slug) VALUES ($1, 'org-' || md5($1))",
+    )
+    .bind(organization)
+    .execute(pool)
+    .await
+    .expect("seed organization");
     seed_person(pool, member).await;
     sqlx::query(
-        "INSERT INTO auth.projects (external_id, organization_id, name) VALUES ($1, $1, 'Test Project')",
+        "INSERT INTO auth.projects (external_id, organization_id, name, slug)
+         VALUES ($1, $1, 'Test Project', 'test-project')",
     )
     .bind(organization)
     .execute(pool)
@@ -637,11 +640,13 @@ async fn a_person_reads_only_their_own_rows_and_a_roster_only_its_people() {
     };
     let (organization, _) = tenant_ids();
     let (member, outsider) = person_ids();
-    sqlx::query("INSERT INTO auth.organizations (external_id) VALUES ($1)")
-        .bind(&organization)
-        .execute(&pool)
-        .await
-        .expect("seed organization");
+    sqlx::query(
+        "INSERT INTO auth.organizations (external_id, slug) VALUES ($1, 'org-' || md5($1))",
+    )
+    .bind(&organization)
+    .execute(&pool)
+    .await
+    .expect("seed organization");
     for person in [&member, &outsider] {
         seed_person(&pool, person).await;
         sqlx::query("INSERT INTO auth.sessions (user_id, provider_sid) VALUES ($1, $1)")
@@ -801,11 +806,13 @@ async fn the_tenant_root_is_seen_only_by_its_own_scopes() {
         .execute(&pool)
         .await
         .expect("seed roster row");
-    sqlx::query("INSERT INTO auth.organizations (external_id) VALUES ($1)")
-        .bind(&org_b)
-        .execute(&pool)
-        .await
-        .expect("seed the sibling organization");
+    sqlx::query(
+        "INSERT INTO auth.organizations (external_id, slug) VALUES ($1, 'org-' || md5($1))",
+    )
+    .bind(&org_b)
+    .execute(&pool)
+    .await
+    .expect("seed the sibling organization");
     seed_person(&pool, &stranger).await;
     let both = vec![org_a.clone(), org_b.clone()];
 
@@ -883,11 +890,13 @@ async fn the_tenant_root_is_seen_only_by_its_own_scopes() {
         visible(&mut tx, &both).await.is_empty(),
         "unset GUCs see nothing"
     );
-    let denied = sqlx::query("INSERT INTO auth.organizations (external_id) VALUES ($1)")
-        .bind(format!("{org_b}_x"))
-        .execute(&mut *tx)
-        .await
-        .expect_err("an organization created outside its own scope must violate WITH CHECK");
+    let denied = sqlx::query(
+        "INSERT INTO auth.organizations (external_id, slug) VALUES ($1, 'org-' || md5($1))",
+    )
+    .bind(format!("{org_b}_x"))
+    .execute(&mut *tx)
+    .await
+    .expect_err("an organization created outside its own scope must violate WITH CHECK");
     assert!(
         denied.to_string().contains("row-level security"),
         "{denied}"
@@ -916,11 +925,13 @@ async fn the_tenant_root_is_seen_only_by_its_own_scopes() {
 /// role. The global catalog has no tenant column; `organization_flags` carries RLS.
 async fn seed_flags(pool: &PgPool, org_a: &str, org_b: &str) {
     for org in [org_a, org_b] {
-        sqlx::query("INSERT INTO auth.organizations (external_id) VALUES ($1)")
-            .bind(org)
-            .execute(pool)
-            .await
-            .expect("seed organization for flag");
+        sqlx::query(
+            "INSERT INTO auth.organizations (external_id, slug) VALUES ($1, 'org-' || md5($1))",
+        )
+        .bind(org)
+        .execute(pool)
+        .await
+        .expect("seed organization for flag");
     }
 
     for org in [org_a, org_b] {

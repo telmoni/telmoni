@@ -789,15 +789,17 @@ pub async fn accept(
     let name = projects::first_free_name(&mut tx, &destination, &candidates)
         .await?
         .unwrap_or_else(|| standing.name.clone());
-    let moved = projects::move_to_organization(&mut tx, &project_id, &source, &destination, &name)
-        .await
-        .map_err(|e| name_taken_in(e, &name))?;
-    if !moved {
+    let Some(slug) =
+        projects::move_to_organization(&mut tx, &project_id, &source, &destination, &name)
+            .await
+            .map_err(|e| name_taken_in(e, &name))?
+    else {
         return Err(AuthError::Conflict(
             "the project is no longer where it was offered from".into(),
         )
         .into());
-    }
+    };
+    let organization_slug = organizations::slug_of(&mut tx, &destination).await?;
     // The seats that stay, read before the previous owner's is added so
     // theirs is recorded under its own kind: the new owner's is folded already.
     let staying = members::seats_on(&mut tx, &project_id).await?;
@@ -879,7 +881,9 @@ pub async fn accept(
     );
     Ok(Json(json!({
         "projectId": project_id,
+        "slug": slug,
         "organizationId": destination,
+        "organizationSlug": organization_slug,
         "previousOrganizationId": source,
         "previousOwner": previous,
         "name": name,

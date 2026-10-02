@@ -406,13 +406,16 @@ async fn sign_ups_closed_admit_the_invited_alone(pool: PgPool) {
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     assert!(outbox.all().is_empty());
 
-    sqlx::query("INSERT INTO auth.organizations (id, external_id, shard_key) VALUES ($1, $2, $3)")
-        .bind(uuid::Uuid::now_v7())
-        .bind("org_invites_1")
-        .bind(uuid::Uuid::new_v4())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "INSERT INTO auth.organizations (id, external_id, slug, shard_key)
+         VALUES ($1, $2, 'org-' || md5($2), $3)",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind("org_invites_1")
+    .bind(uuid::Uuid::new_v4())
+    .execute(&pool)
+    .await
+    .unwrap();
     sqlx::query(
         "INSERT INTO auth.organization_invites
              (id, organization_id, email, role, token_hash, invited_by, expires_at, shard_key)

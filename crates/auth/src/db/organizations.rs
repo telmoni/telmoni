@@ -11,11 +11,11 @@ use telmoni_shared::db::tenant_session::{
     self, Binding, HasOrganization, Maintenance, PersonAndOrganization, ProjectAndOrganization,
     Scoped,
 };
-use telmoni_shared::{OrganizationId, OrganizationStatus, derive_shard_key};
+use telmoni_shared::{OrganizationId, OrganizationStatus, derive_shard_key, slug};
 
 /// Every column `Organization` reads, in `FromRow` order. Written once because a
 /// hand-copied list is how one query starts selecting something else.
-const ORGANIZATION_COLUMNS: &str = "id, external_id, name, status, deletion_requested_at, \
+const ORGANIZATION_COLUMNS: &str = "id, external_id, slug, name, status, deletion_requested_at, \
      erase_after, deletion_kind, hook_purged_at, created_at";
 
 /// One organization by its id.
@@ -35,45 +35,87 @@ pub async fn get<B: Binding>(
 /// bytes, so a non-Latin name is not refused at a third of an ASCII one's length.
 pub const MAX_ORGANIZATION_NAME: usize = 80;
 
-/// Write a new organization. `external_id` is freshly minted by the caller.
+/// Write a new organization. `external_id` is freshly minted by the caller;
+/// the slug is a placeholder until the owner names it.
 ///
 /// ⚠ **`name` IS LEFT NULL, AND THAT IS THE DEFAULT WORKING.** A new
 /// organization shows its owner's address, derived at read time. Seeding a
 /// copy was the bug: an address moves and the copy does not. NULL means the
-/// owner has not named it.
+/// owner has not named it. Nor does the slug borrow the address: it is in
+/// every path, and a path is logged.
 pub async fn create<B: HasOrganization>(
     tx: &mut Scoped<'_, B>,
     external_id: &OrganizationId,
 ) -> sqlx::Result<Organization> {
+    let slug = slug::placeholder(slug::Scope::Organization);
     sqlx::query_as::<_, Organization>(&format!(
         "INSERT INTO auth.organizations
-             (id, external_id, shard_key, created_at, updated_at)
-         VALUES ($1, $2, $3, now(), now())
+             (id, external_id, slug, shard_key, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, now(), now())
          RETURNING {ORGANIZATION_COLUMNS}"
     ))
     .bind(Uuid::now_v7())
     .bind(external_id)
+    .bind(&slug)
     .bind(derive_shard_key(external_id))
     .fetch_one(tx.conn())
     .await
 }
 
-/// Rename the organization.
+/// The first of `candidates` no OTHER organization goes by, in any status.
+/// The lane's read, since an organization's own binding sees no other's row;
+/// the write that follows is the caller's, and `organizations_slug_key` judges
+/// a race between the two.
+pub async fn first_free_slug(
+    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+    external_id: &OrganizationId,
+    candidates: &[String],
+) -> sqlx::Result<Option<String>> {
+    sqlx::query_scalar(
+        "SELECT c.slug FROM unnest($2::text[]) WITH ORDINALITY AS c(slug, position)
+          WHERE NOT EXISTS (SELECT 1 FROM auth.organizations o
+                             WHERE o.slug = c.slug AND o.external_id <> $1)
+          ORDER BY c.position
+          LIMIT 1",
+    )
+    .bind(external_id)
+    .bind(candidates)
+    .fetch_optional(tx.conn())
+    .await
+}
+
+/// The organization's slug; `None` when the binding sees no such row.
+pub async fn slug_of<B: Binding>(
+    tx: &mut Scoped<'_, B>,
+    external_id: &OrganizationId,
+) -> sqlx::Result<Option<String>> {
+    sqlx::query_scalar("SELECT slug FROM auth.organizations WHERE external_id = $1")
+        .bind(external_id)
+        .fetch_optional(tx.conn())
+        .await
+}
+
+/// Rename the organization, moving its slug with the name when `slug` is
+/// given, and answer the slug it goes by now; `None` when it is not active.
+/// A slug another organization took since it was found free fails on
+/// `organizations_slug_key`, which the caller names.
 pub async fn rename(
     tx: &mut Scoped<'_, tenant_session::Organization>,
     external_id: &OrganizationId,
     name: &str,
-) -> sqlx::Result<bool> {
-    let done = sqlx::query(
+    slug: Option<&str>,
+) -> sqlx::Result<Option<String>> {
+    sqlx::query_scalar(
         "UPDATE auth.organizations
-            SET name = $2, updated_at = now()
-          WHERE external_id = $1 AND status = 'active'",
+            SET name = $2, slug = COALESCE($3, slug), updated_at = now()
+          WHERE external_id = $1 AND status = 'active'
+      RETURNING slug",
     )
     .bind(external_id)
     .bind(name)
-    .execute(tx.conn())
-    .await?;
-    Ok(done.rows_affected() == 1)
+    .bind(slug)
+    .fetch_optional(tx.conn())
+    .await
 }
 
 /// Flip an active organization into `pending_deletion` — the saga's durable

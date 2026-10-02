@@ -537,8 +537,8 @@ async fn seed_person(pool: &PgPool, user: &str) {
 async fn seed_organization(pool: &PgPool, id: &str, owner: &str, status: &str) {
     sqlx::query(
         "INSERT INTO auth.organizations
-             (external_id, status, deletion_requested_at, erase_after, deletion_kind)
-         VALUES ($1, $2,
+             (external_id, slug, status, deletion_requested_at, erase_after, deletion_kind)
+         VALUES ($1, 'org-' || md5($1), $2,
                  CASE WHEN $2 = 'pending_deletion' THEN now() END,
                  CASE WHEN $2 = 'pending_deletion' THEN now() + interval '14 days' END,
                  CASE WHEN $2 = 'pending_deletion' THEN 'owner' END)",
@@ -560,8 +560,9 @@ async fn seed_organization(pool: &PgPool, id: &str, owner: &str, status: &str) {
     .unwrap();
 
     sqlx::query(
-        "INSERT INTO auth.projects (external_id, organization_id, name, status, deletion_requested_at)
-         VALUES ($1, $2, $3, $4,
+        "INSERT INTO auth.projects
+             (external_id, organization_id, name, slug, status, deletion_requested_at)
+         VALUES ($1, $2, $3, 'project-' || md5($1), $4,
                  CASE WHEN $4 = 'pending_deletion' THEN now() END)",
     )
     .bind(project_of(id))
@@ -895,7 +896,8 @@ fn code_in(text: &str) -> String {
 async fn seed_keys(pool: &PgPool) -> [&'static str; 3] {
     let second_project = format!("{}_second", project_of(ORGANIZATION));
     sqlx::query(
-        "INSERT INTO auth.projects (external_id, organization_id, name) VALUES ($1, $2, 'Second')",
+        "INSERT INTO auth.projects (external_id, organization_id, name, slug)
+         VALUES ($1, $2, 'Second', 'second')",
     )
     .bind(&second_project)
     .bind(ORGANIZATION)

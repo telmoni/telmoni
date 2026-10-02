@@ -492,11 +492,13 @@ async fn a_foreign_row_is_invisible_even_by_exact_id() {
         format!("org_boundary_b_{run}"),
     );
     for org in [&org_a, &org_b] {
-        sqlx::query("INSERT INTO auth.organizations (external_id) VALUES ($1)")
-            .bind(org)
-            .execute(&pool)
-            .await
-            .expect("seed an organization");
+        sqlx::query(
+            "INSERT INTO auth.organizations (external_id, slug) VALUES ($1, 'org-' || md5($1))",
+        )
+        .bind(org)
+        .execute(&pool)
+        .await
+        .expect("seed an organization");
     }
 
     let b_id: uuid::Uuid = sqlx::query_scalar(

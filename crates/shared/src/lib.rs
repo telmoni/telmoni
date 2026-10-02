@@ -28,6 +28,7 @@ pub mod rbac;
 pub mod seam;
 pub mod sharding;
 pub mod shutdown;
+pub mod slug;
 pub mod test_util;
 pub mod text;
 pub mod types;

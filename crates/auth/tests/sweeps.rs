@@ -81,10 +81,10 @@ fn state(
 async fn seed_pending(pool: &PgPool, id: &str, owner: &str, wait: &str, hook_purged: bool) {
     sqlx::query(
         "INSERT INTO auth.organizations
-             (external_id, status, deletion_requested_at, erase_after, deletion_kind,
+             (external_id, slug, status, deletion_requested_at, erase_after, deletion_kind,
               hook_purged_at)
-         VALUES ($1, 'pending_deletion', now(), now() + $2::interval, 'owner',
-                 CASE WHEN $3 THEN now() END)",
+         VALUES ($1, 'org-' || md5($1), 'pending_deletion', now(), now() + $2::interval,
+                 'owner', CASE WHEN $3 THEN now() END)",
     )
     .bind(id)
     .bind(wait)

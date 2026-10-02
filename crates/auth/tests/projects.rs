@@ -746,6 +746,73 @@ async fn a_name_already_taken_in_the_organization_is_a_409(pool: PgPool) {
     );
 }
 
+/// A project's slug follows its name and is unique within its organization: a
+/// name that reads as another's takes the next number, a rename moves it, and
+/// another organization holding the same slug is no collision.
+#[sqlx::test]
+async fn the_slug_follows_the_name_within_the_organization(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+
+    let owner = "usr_projects_owner_slug";
+    let organization = sign_in(&pool, owner, "projects-owner-slug@example.test").await;
+    let create = |caller: &'static str, organization: String, name: &'static str| {
+        let pool = pool.clone();
+        async move {
+            let (status, body) = call(
+                &pool,
+                "POST",
+                "/internal/projects",
+                caller,
+                &organization,
+                Some(json!({ "name": name })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CREATED, "{name}: {body}");
+            body
+        }
+    };
+
+    let first = create(owner, organization.clone(), "Web App").await;
+    assert_eq!(first["slug"], "web-app");
+    let second = create(owner, organization.clone(), "web-app").await;
+    assert_eq!(second["slug"], "web-app-2");
+
+    let (status, renamed) = rename(
+        &pool,
+        owner,
+        second["id"].as_str().unwrap(),
+        "Marketing Site",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{renamed}");
+    assert_eq!(renamed["slug"], "marketing-site");
+
+    let (_, listed) = call(
+        &pool,
+        "GET",
+        "/internal/projects",
+        owner,
+        &organization,
+        None,
+    )
+    .await;
+    let slugs: Vec<&str> = listed["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["slug"].as_str().unwrap())
+        .collect();
+    assert_eq!(slugs, ["default-project", "marketing-site", "web-app"]);
+
+    let other = "usr_projects_other_slug";
+    let others = sign_in(&pool, other, "projects-other-slug@example.test").await;
+    let theirs = create(other, others, "Web App").await;
+    assert_eq!(
+        theirs["slug"], "web-app",
+        "another organization's slug collided"
+    );
+}
+
 /// Renaming INTO a taken name collides; renaming to its own name does not.
 #[sqlx::test]
 async fn renaming_into_a_taken_name_is_a_409(pool: PgPool) {

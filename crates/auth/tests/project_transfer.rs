@@ -767,7 +767,7 @@ async fn the_destination_is_one_the_acceptor_owns(pool: PgPool) {
     set_pending(&pool, &h.admins, false).await;
 
     let second = OrganizationId::new();
-    sqlx::query("INSERT INTO auth.organizations (external_id, name) VALUES ($1, 'Second')")
+    sqlx::query("INSERT INTO auth.organizations (external_id, slug, name) VALUES ($1, 'org-' || md5($1), 'Second')")
         .bind(second.as_str())
         .execute(&pool)
         .await

@@ -98,7 +98,11 @@ GRANT SELECT ON auth.accounts TO auth_maintenance;
 CREATE TABLE auth.organizations (
     id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     external_id           TEXT        NOT NULL UNIQUE,
-    slug                  TEXT,
+    -- The first segment of the console's paths, derived from `name` by auth
+    -- (`telmoni_shared::slug`), a placeholder while there is none. Unique
+    -- across every status: a pending organization keeps its slug, so a
+    -- restore never finds it taken.
+    slug                  TEXT        NOT NULL,
     name                  TEXT,
     status                TEXT        NOT NULL DEFAULT 'active',
     deletion_requested_at TIMESTAMPTZ,
@@ -108,6 +112,9 @@ CREATE TABLE auth.organizations (
     shard_key             UUID        NOT NULL DEFAULT gen_random_uuid(),
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT organizations_slug_key UNIQUE (slug),
+    CONSTRAINT organizations_slug_check
+        CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND length(slug) <= 48),
     CONSTRAINT organizations_status_check CHECK (status IN ('active', 'pending_deletion', 'deleted')),
     CONSTRAINT organizations_deletion_kind_check
         CHECK (deletion_kind IS NULL OR deletion_kind IN ('owner', 'account', 'operator')),
@@ -119,9 +126,6 @@ CREATE TABLE auth.organizations (
 );
 
 CREATE INDEX organizations_shard_key_idx ON auth.organizations (shard_key);
-CREATE UNIQUE INDEX organizations_slug_lower_active_idx
-    ON auth.organizations (lower(slug))
-    WHERE status = 'active';
 CREATE INDEX organizations_pending_deletion_idx ON auth.organizations (erase_after)
     WHERE status = 'pending_deletion';
 
@@ -236,7 +240,9 @@ GRANT SELECT, UPDATE, DELETE ON auth.organization_invites TO auth_maintenance;
 CREATE TABLE auth.projects (
     id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     external_id           TEXT        NOT NULL UNIQUE,
-    slug                  TEXT,
+    -- The second segment of the console's paths, derived from `name` by auth
+    -- and unique within the organization.
+    slug                  TEXT        NOT NULL,
     organization_id       TEXT        NOT NULL REFERENCES auth.organizations (external_id) ON DELETE CASCADE,
     name                  TEXT        NOT NULL,
     status                TEXT        NOT NULL DEFAULT 'active',
@@ -245,14 +251,14 @@ CREATE TABLE auth.projects (
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT projects_status_check CHECK (status IN ('active', 'pending_deletion', 'deleted')),
-    CONSTRAINT projects_organization_project_key UNIQUE (organization_id, external_id)
+    CONSTRAINT projects_organization_project_key UNIQUE (organization_id, external_id),
+    CONSTRAINT projects_organization_slug_key UNIQUE (organization_id, slug),
+    CONSTRAINT projects_slug_check
+        CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND length(slug) <= 48)
 );
 
 CREATE INDEX projects_shard_key_idx ON auth.projects (shard_key);
 CREATE UNIQUE INDEX projects_organization_name_key ON auth.projects (organization_id, lower(name));
-CREATE UNIQUE INDEX projects_organization_slug_lower_active_idx
-    ON auth.projects (organization_id, lower(slug))
-    WHERE status = 'active';
 
 ALTER TABLE auth.projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE auth.projects FORCE ROW LEVEL SECURITY;

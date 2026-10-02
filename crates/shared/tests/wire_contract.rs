@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 use serde_json::{Value, json};
-use telmoni_shared::{Flag, NotificationKind, OrganizationStatus, Role};
+use telmoni_shared::{Flag, NotificationKind, OrganizationStatus, Role, slug};
 
 /// Serialize each variant to its wire string, per the enum's `#[serde(rename_all)]`.
 fn wire<T: Serialize>(variants: &[T]) -> Vec<String> {
@@ -41,7 +41,7 @@ macro_rules! all_variants {
 /// The contract as the live enums define it.
 fn generated_contract() -> Value {
     json!({
-        "$generated": "by `make contract` from crates/shared/src/types — do not edit by hand",
+        "$generated": "by `make contract` from crates/shared/src/types and slug.rs — do not edit by hand",
         "enums": {
             "Role": wire(&all_variants!(Role; Owner, Admin, Member)),
             "OrganizationStatus": wire(&all_variants!(OrganizationStatus; Active, PendingDeletion, Deleted)),
@@ -55,6 +55,10 @@ fn generated_contract() -> Value {
             "off_detail": Flag::all().iter()
                 .map(|f| (f.as_str().to_owned(), json!(f.off_detail())))
                 .collect::<serde_json::Map<_, _>>(),
+        },
+        "slugs": {
+            "max_length": slug::MAX_LEN,
+            "reserved": slug::RESERVED,
         },
     })
 }

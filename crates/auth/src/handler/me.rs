@@ -25,7 +25,7 @@ use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::{
     AuditAction, AuthError, AuthzError, Flag, FlagSet, OrganizationId, OrganizationRole, ProjectId,
-    TelmoniError, TelmoniResourceKind, UserId,
+    TelmoniError, TelmoniResourceKind, UserId, slug,
 };
 
 use crate::{
@@ -255,17 +255,41 @@ pub async fn me(
     }))
 }
 
-/// The organization the console asked to act in. Unparseable is the same as
-/// absent — a stale cookie must never cost somebody the console — and a
-/// well-formed id the person does not belong to is ignored by
-/// [`choose_active`].
-fn requested_organization(headers: &HeaderMap) -> Option<OrganizationId> {
-    headers
-        .get("x-organization-id")
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
+/// The organization a caller asked to act in: by id, as the CLI names one, or
+/// by slug, as the console reads one off the path it is rendering.
+enum Requested {
+    Id(OrganizationId),
+    Slug(String),
+}
+
+impl Requested {
+    fn names(&self, organization: &organization_members::OrganizationMembership) -> bool {
+        match self {
+            Self::Id(id) => &organization.organization_id == id,
+            Self::Slug(slug) => &organization.slug == slug,
+        }
+    }
+}
+
+/// `x-organization-id`, else `x-organization-slug`. Unparseable is the same as
+/// absent — a stale cookie must never cost somebody the console — and one the
+/// person does not belong to is ignored by [`choose_active`].
+fn requested_organization(headers: &HeaderMap) -> Option<Requested> {
+    let header = |name: &str| {
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+    };
+    header("x-organization-id")
         .and_then(|v| OrganizationId::try_new(v).ok())
+        .map(Requested::Id)
+        .or_else(|| {
+            header("x-organization-slug")
+                .filter(|v| slug::is_slug(v))
+                .map(|v| Requested::Slug(v.to_owned()))
+        })
 }
 
 /// The requested organization when the person belongs to it, else the oldest
@@ -273,11 +297,11 @@ fn requested_organization(headers: &HeaderMap) -> Option<OrganizationId> {
 /// membership order, oldest first.
 fn choose_active(
     organizations: &[organization_members::OrganizationMembership],
-    requested: Option<&OrganizationId>,
+    requested: Option<&Requested>,
 ) -> Option<OrganizationId> {
     requested
-        .filter(|r| organizations.iter().any(|o| &o.organization_id == *r))
-        .cloned()
+        .and_then(|r| organizations.iter().find(|o| r.names(o)))
+        .map(|o| o.organization_id.clone())
         .or_else(|| {
             organizations
                 .iter()

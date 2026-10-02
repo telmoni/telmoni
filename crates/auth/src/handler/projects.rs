@@ -121,12 +121,12 @@ pub async fn create_project(
     // takes it to pick a free name.
     crate::db::locks::lock_organization(&mut acting.tx, &organization_id).await?;
     let project_id = telmoni_shared::ProjectId::new();
-    let inserted = projects::create(&mut acting.tx, &project_id, &organization_id, name)
+    let Some(slug) = projects::create(&mut acting.tx, &project_id, &organization_id, name)
         .await
-        .map_err(|e| name_taken(e, name))?;
-    if !inserted {
+        .map_err(|e| name_taken(e, name))?
+    else {
         return Err(AuthError::Conflict("project id collision — retry".into()).into());
-    }
+    };
 
     emit_audit(
         &mut acting.tx,
@@ -154,7 +154,7 @@ pub async fn create_project(
     };
     Ok((
         StatusCode::CREATED,
-        Json(json!({ "id": project_id, "name": name, "role": role })),
+        Json(json!({ "id": project_id, "slug": slug, "name": name, "role": role })),
     ))
 }
 
@@ -230,7 +230,8 @@ pub struct UpdateProjectRequest {
     pub name: String,
 }
 
-/// `PATCH /internal/projects/{project_id}` — update a project's settings (e.g. name).
+/// `PATCH /internal/projects/{project_id}` — rename a project. Its slug moves
+/// with the name, so the answer carries both and the console follows it.
 pub async fn update_project(
     State(state): State<Arc<AppState>>,
     axum::extract::Path(project_id): axum::extract::Path<String>,
@@ -250,14 +251,19 @@ pub async fn update_project(
 
     let organization_id = acting.organization.clone();
     let mut acting = acting.enter_owner_scope().await?;
-    let updated = projects::update_name(&mut acting.tx, &organization_id, &project_id, trimmed)
+    // On the organization's lock, as a create takes it: the new name's slug is
+    // picked against the organization's other projects.
+    crate::db::locks::lock_organization(&mut acting.tx, &organization_id).await?;
+    let slug = projects::update_name(&mut acting.tx, &organization_id, &project_id, trimmed)
         .await
         .map_err(|e| name_taken(e, trimmed))?;
     let acting = acting.leave_owner_scope().await?;
-    if !updated {
+    let Some(slug) = slug else {
         return Err(AuthError::NotFound("project not found".into()).into());
-    }
+    };
 
     acting.tx.commit().await?;
-    Ok(Json(json!({ "status": "ok", "name": trimmed })))
+    Ok(Json(
+        json!({ "status": "ok", "name": trimmed, "slug": slug }),
+    ))
 }

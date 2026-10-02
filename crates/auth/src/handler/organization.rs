@@ -22,6 +22,7 @@ use telmoni_shared::{AuthError, OrganizationRole, OrganizationStatus, TelmoniErr
 use crate::{
     AppState,
     db::{
+        AuthLane,
         confirmation_codes::{self, Act, Purpose},
         identities, locks, organization_members, organizations,
     },
@@ -31,10 +32,10 @@ use crate::{
     },
     model::DeletionKind,
 };
-use telmoni_shared::AuthzError;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
-use telmoni_shared::db::tenant_session::{organization_scope, person_scope};
+use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope, person_scope};
 use telmoni_shared::{AuditAction, TelmoniResourceKind};
+use telmoni_shared::{AuthzError, slug};
 
 /// The longest name worth storing: a real company with a qualifier, still
 /// whole in a rail row rather than an ellipsis.
@@ -324,7 +325,8 @@ pub struct RenameOrganizationRequest {
     pub name: String,
 }
 
-/// `PUT /internal/organization/name` — name the organization.
+/// `PUT /internal/organization/name` — name the organization. Its slug moves
+/// with the name, so the answer carries both and the console follows it.
 pub async fn rename_organization(
     State(state): State<Arc<AppState>>,
     principal: Principal,
@@ -356,10 +358,25 @@ pub async fn rename_organization(
         .into());
     }
 
-    if !organizations::rename(&mut tx, &organization, &name).await? {
+    // Whether a slug is free is the lane's to read: the organization's own
+    // binding sees no other organization's row. A name that gives none keeps
+    // the slug it had.
+    let candidates = slug::candidates(slug::Scope::Organization, &name);
+    let free = if candidates.is_empty() {
+        None
+    } else {
+        let mut lane = maintenance_scope(&state.db, AuthLane).await?;
+        let free = organizations::first_free_slug(&mut lane, &organization, &candidates).await?;
+        lane.commit().await?;
+        free
+    };
+    let Some(slug) = organizations::rename(&mut tx, &organization, &name, free.as_deref())
+        .await
+        .map_err(slug_taken)?
+    else {
         tx.commit().await?;
         return Err(AuthError::NotFound("organization not found".into()).into());
-    }
+    };
 
     emit_audit(
         &mut tx,
@@ -373,12 +390,26 @@ pub async fn rename_organization(
             request_id: None,
             ip_address: None,
             user_agent: None,
-            metadata: Some(json!({ "name": name })),
+            metadata: Some(json!({ "name": name, "slug": slug })),
         },
     )
     .await?;
 
     tx.commit().await?;
     tracing::info!(organization_id = %organization, "organization renamed");
-    Ok((StatusCode::NO_CONTENT, ()))
+    Ok(Json(json!({ "name": name, "slug": slug })))
+}
+
+/// The slug another organization took between [`organizations::first_free_slug`]
+/// and the rename's write, as a 409 to try again rather than a 500.
+fn slug_taken(e: sqlx::Error) -> TelmoniError {
+    match e {
+        sqlx::Error::Database(ref db) if db.constraint() == Some("organizations_slug_key") => {
+            AuthError::Conflict(
+                "another organization took this name's URL a moment ago — try again".into(),
+            )
+            .into()
+        }
+        other => other.into(),
+    }
 }

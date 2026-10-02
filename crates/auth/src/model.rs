@@ -74,6 +74,8 @@ pub struct Organization {
     pub id: Uuid,
     #[serde(rename = "organization_id")]
     pub external_id: OrganizationId,
+    /// The organization's segment in console paths (`telmoni_shared::slug`).
+    pub slug: String,
     /// What the OWNER called the organization; `None` means never named, and
     /// a page labels it by the owner's address instead.
     pub name: Option<String>,

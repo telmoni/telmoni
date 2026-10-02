@@ -243,11 +243,7 @@ async fn name(pool: &PgPool, organization: &str, name: &str) {
         Some(json!({ "name": name })),
     )
     .await;
-    assert_eq!(
-        status,
-        StatusCode::NO_CONTENT,
-        "naming {organization}: {body}"
-    );
+    assert_eq!(status, StatusCode::OK, "naming {organization}: {body}");
 }
 
 /// The owner's organization, named Acme, with an admin and a member on it.

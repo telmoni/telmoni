@@ -8,7 +8,8 @@ use telmoni_shared::db::tenant_session::{
     ProjectAndPerson, Scoped,
 };
 use telmoni_shared::{
-    OrganizationId, OrganizationRole, OrganizationStatus, ProjectId, Role, UserId, derive_shard_key,
+    OrganizationId, OrganizationRole, OrganizationStatus, ProjectId, Role, UserId,
+    derive_shard_key, slug,
 };
 
 use crate::db::AuthLane;
@@ -19,36 +20,62 @@ pub trait ProjectCreate: Binding {}
 impl ProjectCreate for Organization {}
 impl ProjectCreate for PersonAndOrganization {}
 
-/// Create an organization's project.
+/// The first of `slugs` no other project in `organization` goes by, the
+/// project itself excepted; each argument names the placeholder that carries
+/// it. Every write of a project's slug picks it here, in the same statement,
+/// under the organization's lock, so no two writes can pick the same one.
+fn first_free_slug(project: &str, organization: &str, slugs: &str) -> String {
+    format!(
+        "SELECT c.slug FROM unnest({slugs}::text[]) WITH ORDINALITY AS c(slug, position)
+          WHERE NOT EXISTS (SELECT 1 FROM auth.projects p
+                             WHERE p.organization_id = {organization} AND p.slug = c.slug
+                               AND p.external_id <> {project})
+          ORDER BY c.position
+          LIMIT 1"
+    )
+}
+
+/// The slugs a project called `name` may take, with a placeholder last for a
+/// write that must find one.
+fn slugs_for(name: &str) -> Vec<String> {
+    let mut slugs = slug::candidates(slug::Scope::Project, name);
+    slugs.push(slug::placeholder(slug::Scope::Project));
+    slugs
+}
+
+/// Create an organization's project, answering the slug it took; `None` when
+/// the id was already taken. The caller holds the organization's lock.
 pub async fn create<B: ProjectCreate>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
     owner: &OrganizationId,
     name: &str,
-) -> sqlx::Result<bool> {
-    let rows_affected = sqlx::query(
+) -> sqlx::Result<Option<String>> {
+    sqlx::query_scalar(&format!(
         "INSERT INTO auth.projects
-             (id, external_id, organization_id, name, shard_key)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (external_id) DO NOTHING",
-    )
+             (id, external_id, organization_id, name, slug, shard_key)
+         VALUES ($1, $2, $3, $4, ({}), $6)
+         ON CONFLICT (external_id) DO NOTHING
+         RETURNING slug",
+        first_free_slug("$2", "$3", "$5"),
+    ))
     .bind(uuid::Uuid::now_v7())
     .bind(project_id)
     .bind(owner)
     .bind(name)
+    .bind(slugs_for(name))
     .bind(derive_shard_key(project_id))
-    .execute(tx.conn())
-    .await?
-    .rows_affected();
-    Ok(rows_affected > 0)
+    .fetch_optional(tx.conn())
+    .await
 }
 
 /// One project as the console's switcher lists it.
 #[derive(Debug, Serialize, FromRow, Clone)]
 pub struct ProjectSummary {
-    /// The project's `external_id` — the console URL segment and the value
-    /// the services key on.
+    /// The project's `external_id` — the value the services key on.
     pub id: ProjectId,
+    /// The project's segment in console paths, under its organization's.
+    pub slug: String,
     pub name: String,
     /// The caller's role on it, as `telmoni_shared::rbac::project_role`
     /// decides it.
@@ -74,7 +101,7 @@ pub async fn list_for_organization_user(
     user_id: &UserId,
 ) -> sqlx::Result<Vec<ProjectSummary>> {
     sqlx::query_as::<_, ProjectSummary>(&format!(
-        "SELECT t.external_id AS id, t.name, {ROLE_ON_PROJECT} AS role
+        "SELECT t.external_id AS id, t.slug, t.name, {ROLE_ON_PROJECT} AS role
            FROM auth.projects t
            JOIN auth.organizations o
              ON o.external_id = t.organization_id AND o.status = 'active'
@@ -230,13 +257,14 @@ pub async fn first_free_name(
     .await
 }
 
-/// Hand a project from one organization to another, under `name`: the ONE
-/// cross-tenant write in the schema, which is why it runs in the lane —
-/// `tenant_isolation` on `auth.projects` would refuse the new row under either
-/// organization's binding. Its API keys follow through
-/// `api_tokens_project_fkey`'s `ON UPDATE CASCADE`; its seats and invitations
-/// are keyed on the project and need no move. `false` when the project is not
-/// `from`'s. A name already taken in `to` fails on
+/// Hand a project from one organization to another, under `name` and the
+/// first slug it gives that is free in `to`: the ONE cross-tenant write in the
+/// schema, which is why it runs in the lane — `tenant_isolation` on
+/// `auth.projects` would refuse the new row under either organization's
+/// binding. Its API keys follow through `api_tokens_project_fkey`'s
+/// `ON UPDATE CASCADE`; its seats and invitations are keyed on the project and
+/// need no move. Answers the slug it lands under; `None` when the project is
+/// not `from`'s. A name already taken in `to` fails on
 /// `projects_organization_name_key`, which the caller names.
 pub async fn move_to_organization(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
@@ -244,40 +272,47 @@ pub async fn move_to_organization(
     from: &OrganizationId,
     to: &OrganizationId,
     name: &str,
-) -> sqlx::Result<bool> {
-    let rows_affected = sqlx::query(
-        "UPDATE auth.projects SET organization_id = $3, name = $4, updated_at = now()
-          WHERE external_id = $1 AND organization_id = $2",
-    )
+) -> sqlx::Result<Option<String>> {
+    sqlx::query_scalar(&format!(
+        "UPDATE auth.projects
+            SET organization_id = $3, name = $4, slug = ({}), updated_at = now()
+          WHERE external_id = $1 AND organization_id = $2
+      RETURNING slug",
+        first_free_slug("$1", "$3", "$5"),
+    ))
     .bind(project_id)
     .bind(from)
     .bind(to)
     .bind(name)
-    .execute(tx.conn())
-    .await?
-    .rows_affected();
-    Ok(rows_affected > 0)
+    .bind(slugs_for(name))
+    .fetch_optional(tx.conn())
+    .await
 }
 
-/// Update a project's name. Keyed on the organization as well as the project:
-/// the policy is the floor, the predicate says what the statement means.
+/// Update a project's name, moving its slug with the name, and answer the
+/// slug it goes by now; `None` when there is no such project. A name that
+/// gives no free slug keeps the one it had. Keyed on the organization as well
+/// as the project: the policy is the floor, the predicate says what the
+/// statement means. The caller holds the organization's lock.
 pub async fn update_name(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     organization_id: &OrganizationId,
     project_id: &ProjectId,
     name: &str,
-) -> sqlx::Result<bool> {
-    let rows_affected = sqlx::query(
-        "UPDATE auth.projects SET name = $1, updated_at = now()
-          WHERE external_id = $2 AND organization_id = $3",
-    )
-    .bind(name)
+) -> sqlx::Result<Option<String>> {
+    sqlx::query_scalar(&format!(
+        "UPDATE auth.projects
+            SET name = $3, slug = COALESCE(({}), slug), updated_at = now()
+          WHERE external_id = $1 AND organization_id = $2
+      RETURNING slug",
+        first_free_slug("$1", "$2", "$4"),
+    ))
     .bind(project_id)
     .bind(organization_id)
-    .execute(tx.conn())
-    .await?
-    .rows_affected();
-    Ok(rows_affected > 0)
+    .bind(name)
+    .bind(slug::candidates(slug::Scope::Project, name))
+    .fetch_optional(tx.conn())
+    .await
 }
 
 /// Destroy a project, answering its name for the audit row; `None` when
@@ -304,9 +339,12 @@ pub async fn delete(
 #[serde(rename_all = "camelCase")]
 pub struct ProjectEverywhere {
     pub id: ProjectId,
+    pub slug: String,
     pub name: String,
     pub role: Role,
     pub organization_id: OrganizationId,
+    /// Where the organization's paths begin, so a link names both segments.
+    pub organization_slug: String,
     /// What the organization's owner called it; `None` means never named.
     pub organization_name: Option<String>,
     /// The organization's owner's address — what a page shows when it has no
@@ -333,8 +371,9 @@ pub async fn list_everywhere_for_user(
              UNION
             SELECT tm.project_id FROM auth.project_members tm WHERE tm.user_id = $1
          )
-         SELECT t.external_id AS id, t.name, {ROLE_ON_PROJECT} AS role,
+         SELECT t.external_id AS id, t.slug, t.name, {ROLE_ON_PROJECT} AS role,
                 t.organization_id,
+                a.slug AS organization_slug,
                 a.name AS organization_name,
                 owner_identity.email AS organization_owner_email
            FROM reachable r

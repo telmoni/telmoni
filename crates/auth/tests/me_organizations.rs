@@ -232,6 +232,70 @@ async fn the_active_organization_is_the_requested_one_only_when_the_person_is_in
     }
 }
 
+/// The console names the organization it is rendering by the slug in its
+/// path; the CLI names one by id, and the id wins when both are sent. A slug
+/// the person is in nowhere falls back like an id does.
+#[sqlx::test]
+async fn the_console_names_the_organization_by_its_slug(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let own = sign_in(&pool, "user_me_slug").await;
+    let other = sign_in(&pool, "user_me_slug_owner").await;
+    join(&pool, &other, "user_me_slug_owner", "user_me_slug").await;
+
+    let (_, body) = me(&pool, "user_me_slug", None).await;
+    let slug_of = |id: &str| -> String {
+        body["organizations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o["organizationId"] == id)
+            .and_then(|o| o["slug"].as_str())
+            .unwrap()
+            .to_owned()
+    };
+    let (own_slug, other_slug) = (slug_of(&own), slug_of(&other));
+
+    let body = me_by_slug(&pool, "user_me_slug", &other_slug, None).await;
+    assert_eq!(body["activeOrganizationId"], other.as_str(), "{body}");
+
+    let body = me_by_slug(&pool, "user_me_slug", &other_slug, Some(&own)).await;
+    assert_eq!(
+        body["activeOrganizationId"],
+        own.as_str(),
+        "the id lost to the slug"
+    );
+
+    for requested in ["org-nobody-holds-this", "Not A Slug", own_slug.as_str()] {
+        let body = me_by_slug(&pool, "user_me_slug", requested, None).await;
+        assert_eq!(
+            body["activeOrganizationId"],
+            own.as_str(),
+            "{requested}: {body}"
+        );
+    }
+}
+
+/// `POST /me` as `user` with the console's `x-organization-slug`, and the
+/// CLI's `x-organization-id` beside it when given.
+async fn me_by_slug(pool: &PgPool, user: &str, slug: &str, id: Option<&str>) -> Value {
+    let mut req = Request::builder()
+        .method("POST")
+        .uri("/me")
+        .header("x-service-secret", SERVICE_SECRET)
+        .header("content-type", "application/json")
+        .header("x-organization-slug", slug);
+    if let Some(id) = id {
+        req = req.header("x-organization-id", id);
+    }
+    let req = as_person(req, pool, user)
+        .await
+        .body(Body::from(json!({}).to_string()))
+        .unwrap();
+    let resp = app(pool.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    json_body(resp).await
+}
+
 /// A person who owns nothing active lands in the organization they joined,
 /// and is NOT given a new one while they belong somewhere.
 #[sqlx::test]

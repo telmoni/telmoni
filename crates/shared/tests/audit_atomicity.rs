@@ -70,11 +70,13 @@ fn organization(tag: &str) -> (OrganizationId, OrganizationId) {
 
 /// The organization a flag row names, as the owner, which bypasses RLS.
 async fn seed_organization(pool: &PgPool, organization: &OrganizationId) {
-    sqlx::query("INSERT INTO auth.organizations (external_id) VALUES ($1)")
-        .bind(organization.as_str())
-        .execute(pool)
-        .await
-        .expect("seed the organization");
+    sqlx::query(
+        "INSERT INTO auth.organizations (external_id, slug) VALUES ($1, 'org-' || md5($1))",
+    )
+    .bind(organization.as_str())
+    .execute(pool)
+    .await
+    .expect("seed the organization");
 }
 
 /// The organization and every flag row on it, as the owner.
