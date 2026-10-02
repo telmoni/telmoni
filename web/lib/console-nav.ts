@@ -50,52 +50,62 @@ export interface ParsedConsolePath {
   mode: "account" | "organization" | "project" | "unknown";
 }
 
+function parsedResult(
+  mode: ParsedConsolePath["mode"],
+  organizationId: string | null = null,
+  projectId: string | null = null,
+): ParsedConsolePath {
+  return { mode, organizationId, orgId: organizationId, projectId };
+}
+
 export function parseConsolePath(
   pathname: string,
   explicitSegment?: string,
 ): ParsedConsolePath {
   const parts = pathname.split("/").filter(Boolean);
   if (parts.length === 0) {
-    return { organizationId: null, orgId: null, projectId: null, mode: "unknown" };
-  }
-  if (parts[0] === ACCOUNT_SEGMENT || explicitSegment === ACCOUNT_SEGMENT) {
-    return { organizationId: null, orgId: null, projectId: null, mode: "account" };
-  }
-  if (parts[0] === "console" || parts[0] === "invite" || parts[0] === "auth") {
-    return { organizationId: null, orgId: null, projectId: null, mode: "unknown" };
+    return parsedResult("unknown");
   }
 
-  // If 3+ segments, e.g. /org-1/prj-123/connectors OR /prj-123/api-keys/abc:
+  const [first, second] = parts;
+  if (first === ACCOUNT_SEGMENT || explicitSegment === ACCOUNT_SEGMENT) {
+    return parsedResult("account");
+  }
+  if (first === "console" || first === "invite" || first === "auth") {
+    return parsedResult("unknown");
+  }
+
+  // 3+ segments, e.g. /org-1/prj-123/connectors OR /prj-123/api-keys/abc:
   if (parts.length >= 3) {
-    if (PROJECT_ACTIONS.has(parts[1]) || COMMON_ACTIONS.has(parts[1])) {
-      return { organizationId: null, orgId: null, projectId: parts[0], mode: "project" };
-    }
-    return { organizationId: parts[0], orgId: parts[0], projectId: parts[1], mode: "project" };
+    const isProjectActionPath = PROJECT_ACTIONS.has(second) || COMMON_ACTIONS.has(second);
+    return isProjectActionPath
+      ? parsedResult("project", null, first)
+      : parsedResult("project", first, second);
   }
 
-  // If 2 segments:
+  // 2 segments: e.g. /organization/settings, /org-1/billing, /org-1/prj-123, or /prj-123/connectors:
   if (parts.length === 2) {
-    if (parts[0] === "organization") {
-      return { organizationId: "organization", orgId: "organization", projectId: null, mode: "organization" };
+    if (first === "organization") {
+      return parsedResult("organization", "organization");
     }
-    if (explicitSegment && explicitSegment === parts[0] && explicitSegment !== "organization") {
-      return { organizationId: null, orgId: null, projectId: parts[0], mode: "project" };
+    if (explicitSegment && explicitSegment === first && explicitSegment !== "organization") {
+      return parsedResult("project", null, first);
     }
-    if (PROJECT_ACTIONS.has(parts[1])) {
-      return { organizationId: null, orgId: null, projectId: parts[0], mode: "project" };
+    if (PROJECT_ACTIONS.has(second)) {
+      return parsedResult("project", null, first);
     }
-    if (ORG_SUBPAGES.has(parts[1])) {
-      return { organizationId: parts[0], orgId: parts[0], projectId: null, mode: "organization" };
+    if (ORG_SUBPAGES.has(second)) {
+      return parsedResult("organization", first);
     }
     // E.g. /org-1/prj-123 (project overview under org)
-    return { organizationId: parts[0], orgId: parts[0], projectId: parts[1], mode: "project" };
+    return parsedResult("project", first, second);
   }
 
-  // 1 segment: e.g. /organization or /org-1 or /prj-123
-  if (explicitSegment && explicitSegment !== "organization" && explicitSegment !== parts[0]) {
-    return { organizationId: parts[0], orgId: parts[0], projectId: explicitSegment, mode: "project" };
+  // 1 segment: e.g. /organization or /org-1 or /prj-123:
+  if (explicitSegment && explicitSegment !== "organization" && explicitSegment !== first) {
+    return parsedResult("project", first, explicitSegment);
   }
-  return { organizationId: parts[0], orgId: parts[0], projectId: null, mode: "organization" };
+  return parsedResult("organization", first);
 }
 
 export interface ConsoleNavItem {

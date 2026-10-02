@@ -18,20 +18,22 @@ const RETRY_MS = 30_000;
 
 const ROSTER_PAGES = /^\/[^/]+(?:\/[^/]+)?\/(members|audit-log)$/;
 
-function matchesProject(
+type ProjectScope = { id: string; slug?: string | null };
+type OrganizationScope = { organizationId: string; slug?: string | null };
+
+function isViewingProject(
   pathname: string,
   projectId: string,
   organizationId?: string,
-  projects: readonly { id: string; slug?: string | null }[] = [],
-  organizations: readonly { organizationId: string; slug?: string | null }[] = [],
+  projects: readonly ProjectScope[] = [],
+  organizations: readonly OrganizationScope[] = [],
 ): boolean {
   if (pathname === `/${projectId}` || pathname.startsWith(`/${projectId}/`)) {
     return true;
   }
   const parts = pathname.split("/").filter(Boolean);
   if (parts.length >= 2) {
-    const rawOrg = parts[0];
-    const rawPrj = parts[1];
+    const [rawOrg, rawPrj] = parts;
     const orgMatches =
       !organizationId ||
       rawOrg === organizationId ||
@@ -48,6 +50,51 @@ function matchesProject(
     }
   }
   return false;
+}
+
+function isViewingOrganization(
+  pathname: string,
+  organizationId: string,
+  activeOrgId: string | null,
+  organizations: readonly OrganizationScope[] = [],
+): boolean {
+  if (pathname.startsWith("/account")) {
+    return false;
+  }
+  if (organizationId === activeOrgId || pathname.startsWith(`/${organizationId}`)) {
+    return true;
+  }
+  return organizations.some(
+    (o) =>
+      o.organizationId === organizationId &&
+      o.slug &&
+      (pathname === `/${o.slug}` || pathname.startsWith(`/${o.slug}/`)),
+  );
+}
+
+function shouldEjectFromScope(params: {
+  pathname: string;
+  removed: { projectId?: string | null; organizationId: string };
+  activeOrgId: string | null;
+  projects: readonly ProjectScope[];
+  organizations: readonly OrganizationScope[];
+}): boolean {
+  const { pathname, removed, activeOrgId, projects, organizations } = params;
+  if (removed.projectId) {
+    return isViewingProject(
+      pathname,
+      removed.projectId,
+      removed.organizationId,
+      projects,
+      organizations,
+    );
+  }
+  return isViewingOrganization(
+    pathname,
+    removed.organizationId,
+    activeOrgId,
+    organizations,
+  );
 }
 
 function payload<K extends keyof typeof RealtimeEventDataSchema>(
@@ -163,31 +210,15 @@ export function RealtimeListener() {
         const data = payload(e, "membership:removed");
         if (!data) return;
 
-        const isAccountPage = pathnameRef.current.startsWith("/account");
-        const isCurrentProject = Boolean(
-          data.projectId &&
-            matchesProject(
-              pathnameRef.current,
-              data.projectId,
-              data.organizationId,
-              projectsRef.current,
-              membershipsRef.current,
-            ),
-        );
-        const isCurrentOrg = Boolean(
-          !data.projectId &&
-            (data.organizationId === activeOrgIdRef.current ||
-              pathnameRef.current.startsWith(`/${data.organizationId}`) ||
-              membershipsRef.current.some(
-                (o) =>
-                  o.organizationId === data.organizationId &&
-                  (pathnameRef.current === `/${o.slug}` ||
-                    pathnameRef.current.startsWith(`/${o.slug}/`)),
-              )) &&
-            !isAccountPage,
-        );
+        const shouldEject = shouldEjectFromScope({
+          pathname: pathnameRef.current,
+          removed: data,
+          activeOrgId: activeOrgIdRef.current,
+          projects: projectsRef.current,
+          organizations: membershipsRef.current,
+        });
 
-        if (isCurrentProject || isCurrentOrg) {
+        if (shouldEject) {
           router.replace("/console");
         } else {
           router.refresh();

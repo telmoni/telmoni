@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useSelectedLayoutSegment } from "next/navigation";
 import { Building2, Check, ChevronsUpDown, Plus, SquareStack } from "lucide-react";
@@ -95,46 +95,64 @@ export function ResourceSelector() {
   const activeOrganizationRole: OrganizationRole | null = active?.role ?? null;
   const activeOrgSegment = active ? organizationSegment(active) : (activeOrganizationId ?? undefined);
 
-  const seen = new Set<string>();
-  const otherOrganizations: OtherOrganization[] = [];
-  const add = (id: string, label: string, role: OrganizationRole | null) => {
-    if (!id || id === activeOrganizationId || seen.has(id)) return;
-    seen.add(id);
-    otherOrganizations.push({
-      id,
-      label,
-      role,
-      projects: elsewhere.filter((t) => t.organizationId === id),
-    });
-  };
-  for (const o of organizations) {
-    add(o.organizationId, organizationLabel(o), o.role);
-  }
-  for (const t of elsewhere) {
-    add(
-      t.organizationId,
-      organizationLabel({ name: t.organizationName, ownerEmail: t.organizationOwnerEmail }),
-      null,
-    );
-  }
+  const otherOrganizations = useMemo(() => {
+    const seen = new Set<string>();
+    const list: OtherOrganization[] = [];
+    const add = (id: string, label: string, role: OrganizationRole | null) => {
+      if (!id || id === activeOrganizationId || seen.has(id)) return;
+      seen.add(id);
+      list.push({
+        id,
+        label,
+        role,
+        projects: elsewhere.filter((t) => t.organizationId === id),
+      });
+    };
+    for (const o of organizations) {
+      add(o.organizationId, organizationLabel(o), o.role);
+    }
+    for (const t of elsewhere) {
+      add(
+        t.organizationId,
+        organizationLabel({ name: t.organizationName, ownerEmail: t.organizationOwnerEmail }),
+        null,
+      );
+    }
+    return list;
+  }, [organizations, elsewhere, activeOrganizationId]);
 
-  const needle = query.trim().toLowerCase();
-  const has = (s: string) => s.toLowerCase().includes(needle);
-  const organizationSelfMatches = !needle || has(activeOrganizationName);
-  const matches = organizationSelfMatches ? projects : projects.filter((t) => has(t.name));
-  const showActiveOrganization = organizationSelfMatches || matches.length > 0;
-  const activeOrganizationIsContext = !organizationSelfMatches;
-  const otherMatches = otherOrganizations
-    .map((org) => {
-      const self = !needle || has(org.label);
-      return {
-        ...org,
-        projects: self ? org.projects : org.projects.filter((t) => has(t.name)),
-        context: !self,
-      };
-    })
-    .filter((org) => !org.context || org.projects.length > 0);
-  const nothingMatches = !showActiveOrganization && otherMatches.length === 0;
+  const {
+    matches,
+    showActiveOrganization,
+    activeOrganizationIsContext,
+    otherMatches,
+    nothingMatches,
+  } = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    const has = (s: string) => s.toLowerCase().includes(needle);
+    const organizationSelfMatches = !needle || has(activeOrganizationName);
+    const filteredProjects = organizationSelfMatches ? projects : projects.filter((t) => has(t.name));
+    const showActive = organizationSelfMatches || filteredProjects.length > 0;
+    const isContext = !organizationSelfMatches;
+    const filteredOthers = otherOrganizations
+      .map((org) => {
+        const self = !needle || has(org.label);
+        return {
+          ...org,
+          projects: self ? org.projects : org.projects.filter((t) => has(t.name)),
+          context: !self,
+        };
+      })
+      .filter((org) => !org.context || org.projects.length > 0);
+
+    return {
+      matches: filteredProjects,
+      showActiveOrganization: showActive,
+      activeOrganizationIsContext: isContext,
+      otherMatches: filteredOthers,
+      nothingMatches: !showActive && filteredOthers.length === 0,
+    };
+  }, [query, activeOrganizationName, projects, otherOrganizations]);
 
   useEffect(() => {
     if (open) inputRef.current?.focus({ preventScroll: true });
@@ -333,7 +351,7 @@ export function ResourceSelector() {
             No resource matches &ldquo;{query.trim()}&rdquo;.
           </p>
         ) : (
-          !needle &&
+          !query.trim() &&
           projects.length + elsewhere.length <= 1 &&
           otherOrganizations.length === 0 && (
             <div className="flex flex-col items-center gap-3 px-6 py-8 text-center">
