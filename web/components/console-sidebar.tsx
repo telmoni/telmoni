@@ -18,10 +18,12 @@ function NavRow({
   item,
   showLabel,
   step = false,
+  className,
 }: {
   item: ConsoleNavItem;
   showLabel: boolean;
   step?: boolean;
+  className?: string;
 }) {
   const onClick = () => {
     if (item.title && !step) {
@@ -44,6 +46,7 @@ function NavRow({
           item.isActive
             ? "bg-console-accent-tint text-console-accent-strong"
             : "text-muted-foreground hover:bg-sidebar-accent",
+          className,
         )}
       >
         <item.icon className="size-4" />
@@ -55,6 +58,7 @@ function NavRow({
     item.isActive
       ? "bg-console-accent-tint font-medium text-console-accent-strong"
       : "text-foreground hover:bg-sidebar-accent",
+    className,
   );
   const icon = (
     <span className="flex w-11 shrink-0 justify-center">
@@ -85,9 +89,11 @@ function NavRow({
 function onNavKeyDown(e: KeyboardEvent<HTMLElement>) {
   if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
   if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+  // Only the rows on screen: the ones the not-found mark hides are still in
+  // the document, and an arrow key must not land on one.
   const rows = Array.from(
     e.currentTarget.querySelectorAll<HTMLElement>("a[href]"),
-  );
+  ).filter((row) => row.getClientRects().length > 0);
   const from = (e.target as HTMLElement).closest<HTMLElement>("a[href]");
   const at = from ? rows.indexOf(from) : -1;
   if (at === -1) return;
@@ -120,6 +126,14 @@ export function ConsoleSidebar() {
       ? "Back to organization"
       : "Back to project";
 
+  // ⚠ **A page that is not found has no rail of its own.** The rail is spelled
+  // from the path, and a path that names nothing spells a rail of links to
+  // more "not found". `(app)/not-found.tsx` marks itself, and every row here
+  // answers the mark in CSS: the address's rows go, and the way back, which
+  // Account draws anyway, comes. In CSS because only the page knows — an
+  // outage draws the same empty store a dead address does — and the page
+  // renders after the rail: a class is right in the server's HTML, where
+  // state would correct itself once the console had hydrated.
   return (
     <aside
       id="console-sidebar"
@@ -152,7 +166,7 @@ export function ConsoleSidebar() {
               className={cn(expanded && i > 0 && "mt-4")}
             >
               {expanded ? (
-                <div className="flex pb-1 pl-3.5 text-xs font-medium text-muted-foreground">
+                <div className="flex pb-1 pl-3.5 text-xs font-medium text-muted-foreground group-has-[[data-console-not-found]]/console:hidden">
                   <span className="whitespace-nowrap">{group.title}</span>
                 </div>
               ) : (
@@ -163,15 +177,19 @@ export function ConsoleSidebar() {
                   key={item.title}
                   item={item}
                   showLabel={expanded}
+                  className="group-has-[[data-console-not-found]]/console:hidden"
                 />
               ))}
-              {steppedIn && (
-                <NavRow
-                  item={{ title: returnLabel, url: returnUrl, icon: ArrowLeft, isActive: false }}
-                  showLabel={expanded}
-                  step
-                />
-              )}
+              <NavRow
+                item={{ title: returnLabel, url: returnUrl, icon: ArrowLeft, isActive: false }}
+                showLabel={expanded}
+                step
+                className={
+                  steppedIn
+                    ? undefined
+                    : "hidden group-has-[[data-console-not-found]]/console:flex"
+                }
+              />
             </div>
           ))}
         </nav>

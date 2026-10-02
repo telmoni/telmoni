@@ -89,7 +89,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const initialCollapsed = jar.get(NAV_COLLAPSED_COOKIE)?.value === "1";
 
   return (
-    <div className="theme-console flex h-svh flex-col">
+    <div className="group/console theme-console flex h-svh flex-col">
       <SessionHeartbeat
         expiresAt={session.expiresAt}
         needsReseal={session.needsReseal}

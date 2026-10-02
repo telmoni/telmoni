@@ -116,3 +116,35 @@ test.describe("Console chrome row", () => {
     expect(Math.abs((await mark.boundingBox())!.x - before)).toBeLessThanOrEqual(1);
   });
 });
+
+test.describe("Console rail on a dead address", () => {
+  // The rail is spelled from the path, and a path that names nothing would
+  // spell a rail of links to more "not found". From the server's HTML: the
+  // page is loaded, not navigated to.
+  test("draws the way back, and none of the dead address's rows", async ({
+    page,
+  }, testInfo) => {
+    await injectSession(page, testUser(testInfo.project.name));
+    await page.goto("/console");
+    await page.waitForURL((url) => /^\/[a-z0-9-]+\/[a-z0-9-]+$/.test(url.pathname));
+    const [, organization] = new URL(page.url()).pathname.split("/");
+    const rail = page.locator("#console-sidebar");
+
+    // A project's page: its own rows, and no way back to step out by.
+    await expect(rail.getByRole("link", { name: "API keys" })).toBeAttached();
+    await expect(rail.getByRole("link", { name: /^Back to / })).toHaveCount(0);
+
+    for (const dead of [
+      `/${organization}/no-such-project/settings`,
+      "/no-such-organization/~/settings",
+    ]) {
+      await page.goto(dead);
+      await expect(
+        page.getByRole("heading", { name: "Not found.", level: 1 }),
+        dead,
+      ).toBeVisible();
+      await expect(rail.getByRole("link", { name: "Settings" }), dead).toHaveCount(0);
+      await expect(rail.getByRole("link", { name: /^Back to / }), dead).toHaveCount(1);
+    }
+  });
+});

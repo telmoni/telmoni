@@ -1,8 +1,10 @@
 import Link from "next/link";
 
+// `data-console-not-found` is what the rail reads (`console-sidebar.tsx`): the
+// rows it would draw for this address all lead back here.
 export default function ConsoleNotFound() {
   return (
-    <div className="flex flex-col gap-4 max-w-md py-8">
+    <div data-console-not-found className="flex flex-col gap-4 max-w-md py-8">
       <p className="text-xs tracking-label text-muted-foreground uppercase">404</p>
       <h1 className="text-xl font-light tracking-tight">Not found.</h1>
       <p className="text-sm text-muted-foreground leading-relaxed">
