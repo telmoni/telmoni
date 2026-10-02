@@ -324,42 +324,29 @@ export function AgentPanel() {
       // exactly over the page's surface (the shell's `px-3.5`), never past its
       // edge.
       className={cn(
-        "flex min-h-0 min-w-0 flex-col overflow-hidden outline-none",
+        "flex min-h-0 min-w-0 flex-col gap-3 px-4 pt-4 pb-0 outline-none overflow-hidden",
         "rounded-t-console-surface bg-console-surface",
         "max-lg:absolute max-lg:inset-y-0 max-lg:inset-x-3.5 max-lg:z-10",
         "lg:flex-1",
       )}
     >
-      <div className="flex min-h-14 shrink-0 items-center gap-3 px-4 py-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold">Telmoni Agent</span>
-            <span
-              className={cn(
-                "inline-block size-2 rounded-full",
-                effectiveStatus === "enabled"
-                  ? "bg-brand-positive"
-                  : effectiveStatus === null
-                    ? "bg-muted-foreground/40"
-                    : "bg-muted-foreground",
-              )}
-              aria-hidden
-            />
-          </div>
-          <p className="truncate text-xs text-muted-foreground">
-            {!projectId
-              ? "Select a project to start"
-              : effectiveStatus === "enabled"
-                ? "Answers questions about this project"
-                : effectiveStatus === "disabled"
-                  ? "Agent is disabled"
-                  : effectiveStatus === "unavailable"
-                    ? "Agent unavailable"
-                    : "Connecting…"}
-          </p>
+      <div className="flex min-h-8 shrink-0 items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-base font-medium">Telmoni Agent</span>
+          <span
+            className={cn(
+              "inline-block size-2 rounded-full",
+              effectiveStatus === "enabled"
+                ? "bg-brand-positive"
+                : effectiveStatus === null
+                  ? "bg-muted-foreground/40"
+                  : "bg-muted-foreground",
+            )}
+            aria-hidden
+          />
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-3">
           <button
             type="button"
             aria-label={view === "history" ? "Back to conversation" : "Conversation history"}
@@ -396,7 +383,7 @@ export function AgentPanel() {
         </div>
       </div>
 
-      <div ref={bodyRef} className="grid min-h-0 flex-1 content-start gap-4 overflow-y-auto p-4">
+      <div ref={bodyRef} className="grid min-h-0 flex-1 content-start gap-4 overflow-y-auto">
         {notice && (
           <p role="alert" className="text-sm text-destructive">
             {notice}
@@ -431,44 +418,49 @@ export function AgentPanel() {
       </div>
 
       <form
-        className="flex min-h-14 shrink-0 items-center justify-end gap-2 px-4 py-2.5"
+        className="flex shrink-0 flex-col"
         onSubmit={(e) => {
           e.preventDefault();
           void send();
         }}
       >
-        <textarea
-          ref={inputRef}
-          rows={1}
-          value={draft}
-          maxLength={AGENT_MESSAGE_MAX}
-          disabled={!canSend}
-          aria-label="Ask the agent"
-          placeholder={
-            !projectId
-              ? "Open a project first"
-              : effectiveStatus === "enabled"
-                ? "Ask about this project…"
-                : "Agent is unavailable"
-          }
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={onInputKeyDown}
-          className={cn(
-            "min-h-8 max-h-32 min-w-0 flex-1 resize-none rounded-menu border border-input",
-            "bg-transparent px-3 py-1.5 text-sm outline-none placeholder:text-muted-foreground",
-            "focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
-          )}
-        />
-        <Button
-          type="submit"
-          size="icon"
-          className="h-8 w-11"
-          aria-label="Send"
-          title="Send"
-          disabled={!canSend || draft.trim() === ""}
-        >
-          <ArrowUp />
-        </Button>
+        <div className="flex items-center gap-2">
+          <textarea
+            ref={inputRef}
+            rows={1}
+            value={draft}
+            maxLength={AGENT_MESSAGE_MAX}
+            disabled={!canSend}
+            aria-label="Ask the agent"
+            placeholder={
+              !projectId
+                ? "Open a project first"
+                : effectiveStatus === "enabled"
+                  ? "Ask about this project…"
+                  : "Agent is unavailable"
+            }
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={onInputKeyDown}
+            className={cn(
+              "min-h-8 max-h-32 min-w-0 flex-1 resize-none rounded-menu border border-input",
+              "bg-transparent px-3 py-1.5 text-sm outline-none placeholder:text-muted-foreground",
+              "focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+            )}
+          />
+          <Button
+            type="submit"
+            size="icon"
+            className="h-8 w-11 shrink-0"
+            aria-label="Send"
+            title="Send"
+            disabled={!canSend || draft.trim() === ""}
+          >
+            <ArrowUp />
+          </Button>
+        </div>
+        <p className="text-center text-[11px] text-muted-foreground py-3">
+          Telmoni Agent is AI and can make mistakes.
+        </p>
       </form>
     </aside>
   );

@@ -34,15 +34,15 @@ export function HistoryList({
     return <Empty>No conversations in this project yet.</Empty>;
   }
   return (
-    <ul aria-label="Your conversations" className="-mx-4 grid">
+    <ul aria-label="Your conversations" className="grid gap-1">
       {history.conversations.map((c) => (
-        <li key={c.id} className="flex items-center gap-1 pr-4">
+        <li key={c.id} className="flex items-center justify-between gap-3">
           <button
             type="button"
             onClick={() => onOpen(c.id)}
             aria-current={c.id === activeId ? "true" : undefined}
             className={cn(
-              "flex min-w-0 flex-1 cursor-pointer items-center rounded-menu gap-2.5 px-4 py-2 text-left hover:bg-accent",
+              "flex min-w-0 flex-1 cursor-pointer items-center rounded-menu gap-2.5 px-3 py-2 text-left hover:bg-accent",
               c.id === activeId && "bg-accent",
             )}
           >
