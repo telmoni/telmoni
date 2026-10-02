@@ -123,6 +123,13 @@ impl OrganizationRole {
     pub const fn can_view_org_members(&self) -> bool {
         matches!(self, Self::Owner | Self::Admin)
     }
+
+    /// Whether this role can take the organization's export: its roster,
+    /// invitations, key metadata and audit chain, which both already read.
+    #[must_use]
+    pub const fn can_export_organization(&self) -> bool {
+        matches!(self, Self::Owner | Self::Admin)
+    }
 }
 
 #[cfg(test)]
@@ -158,6 +165,7 @@ mod tests {
         assert!(OrganizationRole::Owner.can_view_rolled_up_audit());
         assert!(OrganizationRole::Owner.can_manage_org_members());
         assert!(OrganizationRole::Owner.can_view_org_members());
+        assert!(OrganizationRole::Owner.can_export_organization());
 
         assert!(OrganizationRole::Admin.can_create_projects());
         assert!(!OrganizationRole::Admin.can_delete_projects());
@@ -165,6 +173,7 @@ mod tests {
         assert!(OrganizationRole::Admin.can_view_rolled_up_audit());
         assert!(OrganizationRole::Admin.can_manage_org_members());
         assert!(OrganizationRole::Admin.can_view_org_members());
+        assert!(OrganizationRole::Admin.can_export_organization());
 
         assert!(!OrganizationRole::Member.can_create_projects());
         assert!(!OrganizationRole::Member.can_delete_projects());
@@ -172,5 +181,6 @@ mod tests {
         assert!(!OrganizationRole::Member.can_view_rolled_up_audit());
         assert!(!OrganizationRole::Member.can_manage_org_members());
         assert!(!OrganizationRole::Member.can_view_org_members());
+        assert!(!OrganizationRole::Member.can_export_organization());
     }
 }

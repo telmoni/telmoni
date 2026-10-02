@@ -121,11 +121,12 @@ impl Notifications for Notifier {
 const DELIVERIES_TOOL_MAX: i64 = 20;
 
 /// A notice as the agent indexes it. A project's is read by everyone on the
-/// project; the organization's own feed is its owner's, as the bell shows it.
+/// project; the organization's own feed is its owner's and admins', as the
+/// feed lane gives it (`require_organization_admin`).
 fn feed_document(item: db::IndexedFeedItem) -> SourceDocument {
     let (audience, url) = match &item.project_id {
         Some(project) => (Audience::Everyone, format!("/{project}")),
-        None => (Audience::Owner, "/organization".to_owned()),
+        None => (Audience::OrganizationAdmin, "/organization".to_owned()),
     };
     SourceDocument {
         source_id: item.id.to_string(),

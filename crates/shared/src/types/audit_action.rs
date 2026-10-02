@@ -19,9 +19,10 @@ pub enum AuditAction {
     /// Resource removed (DELETE).
     Deleted,
     /// A copy of the resource's data left the platform. ⚠ **The one READ this
-    /// vocabulary spells**: reads are not audited as a rule, but a person's
-    /// whole record leaving the building is exactly what a leak investigation
-    /// must find. The row records that it happened, never what was in it.
+    /// vocabulary spells**: reads are not audited as a rule, but an
+    /// organization's whole record leaving the building is exactly what a leak
+    /// investigation must find. The row records that it happened, never what
+    /// was in it.
     Exported,
 }
 

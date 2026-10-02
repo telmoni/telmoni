@@ -16,9 +16,10 @@ import { AGENT_MESSAGE_MAX } from "@/lib/types/agent";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-// Four bytes a character at the message ceiling, and room for the ids and the
-// JSON around them. Anything past it is not a turn this lane would forward.
-const BODY_CAP_BYTES = 20 * 1024;
+// Six bytes a character at the message ceiling — what JSON makes of a control
+// character (`\u0001`) — and room for the ids around them. Anything past it
+// is not a turn this lane would forward.
+const BODY_CAP_BYTES = 32 * 1024;
 
 // A turn holds a stream and a model call open for up to two minutes, so it is
 // ceilinged here before it costs the server anything. The server keeps its own

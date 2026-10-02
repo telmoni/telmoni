@@ -3,55 +3,14 @@ import Link from "next/link";
 import { CornersToggle } from "@/components/corners-toggle";
 import { ThemeToggle } from "@/components/theme-toggle";
 
+import { footerColumns } from "@/lib/footer";
 import { branding } from "@/lib/server/branding";
-import {
-  DISCUSSIONS_URL,
-  DOCS_URL,
-  REPO_URL,
-  STATUS_URL,
-  TWITTER_URL,
-} from "@/lib/site";
-
-type FooterLink = { label: string; href: string; newTab?: boolean };
-type FooterColumn = { title: string; links: FooterLink[] };
-
-// A column with nothing in it is not drawn: the legal and contact columns
-// exist only where the deployment configured a legal base or an address, so
-// a self-hosted console offers no document it does not have.
-function columns(): FooterColumn[] {
-  const legal = branding.LEGAL_URL;
-  const support = branding.SUPPORT_EMAIL;
-  return [
-    {
-      title: "Resources",
-      links: [
-        { label: "Docs", href: DOCS_URL, newTab: true },
-        ...(STATUS_URL ? [{ label: "Status", href: STATUS_URL, newTab: true }] : []),
-      ],
-    },
-    {
-      title: "Legal",
-      links: legal
-        ? [
-            { label: "Privacy Policy", href: `${legal}/privacy-policy`, newTab: true },
-            { label: "Terms of Service", href: `${legal}/terms-of-service`, newTab: true },
-          ]
-        : [],
-    },
-    {
-      title: "Contact",
-      links: [
-        ...(support ? [{ label: "Email", href: `mailto:${support}` }] : []),
-        ...(REPO_URL ? [{ label: "GitHub", href: REPO_URL }] : []),
-        ...(TWITTER_URL ? [{ label: "Twitter", href: TWITTER_URL }] : []),
-        ...(DISCUSSIONS_URL ? [{ label: "Discussions", href: DISCUSSIONS_URL }] : []),
-      ],
-    },
-  ].filter((column) => column.links.length > 0);
-}
 
 export function SiteFooter() {
-  const drawn = columns();
+  const drawn = footerColumns({
+    legalUrl: branding.LEGAL_URL,
+    supportEmail: branding.SUPPORT_EMAIL,
+  });
   return (
     <footer className="border-t bg-muted/30">
       <div className="grid w-full grid-cols-2 gap-10 px-3.5 py-12 sm:grid-cols-4">

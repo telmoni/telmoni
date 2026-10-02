@@ -71,6 +71,27 @@ pub async fn resolve(
     .await
 }
 
+/// Whether the person's session `sid` has been ended here, or the person has
+/// asked to be deleted: what [`resolve`] refuses a bearer for, asked of a
+/// request resolved a while ago without the bearer.
+pub async fn session_refused(
+    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+    user_id: &UserId,
+    sid: &str,
+) -> sqlx::Result<bool> {
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM auth.sessions s
+                         WHERE s.provider_sid = $2 AND s.user_id = $1
+                           AND s.revoked_at IS NOT NULL)
+             OR EXISTS (SELECT 1 FROM auth.accounts a
+                         WHERE a.user_id = $1 AND a.deletion_requested_at IS NOT NULL)",
+    )
+    .bind(user_id)
+    .bind(sid)
+    .fetch_one(tx.conn())
+    .await
+}
+
 /// End a session's bearers: sign-out, a revoke from the sessions page, and
 /// a refresh token presented twice.
 pub async fn delete_for_sid(

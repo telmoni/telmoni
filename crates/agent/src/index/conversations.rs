@@ -3,6 +3,7 @@
 //! own searches find it (`author_access`), and it goes with the
 //! conversation, the person, the project or the organization.
 
+use chrono::{DateTime, Utc};
 use telmoni_shared::TelmoniError;
 use telmoni_shared::acting::Acting;
 use telmoni_shared::db::tenant_session::person_scope;
@@ -16,18 +17,32 @@ use crate::embed::literal;
 
 const VISIBILITY: Visibility = Visibility::Author;
 
+/// One answered question, as it was saved.
+pub struct Exchange<'a> {
+    pub conversation_id: Uuid,
+    pub message_id: Uuid,
+    pub question: &'a str,
+    pub answer: &'a str,
+    /// When the question was written, in the database's time.
+    pub asked_at: DateTime<Utc>,
+}
+
 /// Index one answered question, under the asker's own scope.
 pub async fn remember(
     state: &AppState,
     acting: &Acting,
-    conversation_id: Uuid,
-    message_id: Uuid,
-    question: &str,
-    answer: &str,
+    exchange: Exchange<'_>,
 ) -> Result<(), TelmoniError> {
     let Some(project) = acting.project.as_ref() else {
         return Ok(());
     };
+    let Exchange {
+        conversation_id,
+        message_id,
+        question,
+        answer,
+        asked_at,
+    } = exchange;
     let embedder = state.embedder()?;
     let title: String = format!("Earlier question: {question}")
         .chars()
@@ -49,6 +64,16 @@ pub async fn remember(
 
     let tx = person_scope(&state.db, &acting.user_id).await?;
     let mut tx = tx.bind_organization(&acting.organization_id).await?;
+    // Reached by an erasure since the question was asked, whose scrub cannot
+    // see this passage: not remembered. Or deleted while the exchange was
+    // being embedded: nothing to remember. The erasure lock first, as an
+    // answer's save takes it before it touches the conversation's row.
+    if db::erased_during(&mut tx, &acting.organization_id, asked_at).await?
+        || !db::hold_conversation(&mut tx, conversation_id).await?
+    {
+        tx.commit().await?;
+        return Ok(());
+    }
     db::upsert_chunk(
         &mut tx,
         &NewChunk {

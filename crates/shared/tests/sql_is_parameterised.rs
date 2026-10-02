@@ -45,7 +45,7 @@ const VALIDATED: &[(&str, &str, &str)] = &[
     (
         "crates/auth/src/handler/export.rs",
         "sql",
-        "every caller in the file passes a literal, or a format! of constants this test also scans",
+        "every caller in the file passes a literal, or a format! of the file's own constants",
     ),
 ];
 

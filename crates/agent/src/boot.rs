@@ -73,6 +73,10 @@ pub fn state(
     })
 }
 
+/// How long boot waits on the width probe. The chart's liveness probe gives a
+/// pod about 30 seconds before it restarts it.
+const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// What the width probe learned.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Probe {
@@ -92,10 +96,32 @@ pub enum Probe {
 /// the moment a pod starts would otherwise crash-loop the whole server over
 /// a feature it can run without. That comes back as [`Probe::Unanswered`];
 /// the caller decides whether to go on.
+///
+/// ⚠ **Bounded well inside the liveness probe.** The probe runs before the
+/// port is bound, and an endpoint that hangs rather than refuses (a cold
+/// Ollama loading its model, a blackholed host) would otherwise hold boot
+/// for the embedder's whole batch timeout, past the point Kubernetes kills
+/// the pod — every module crash-looping over one it can run without.
 pub async fn probe_width(embedder: &dyn Embedder) -> anyhow::Result<Probe> {
-    let vectors = match embedder.embed(&["telmoni width probe".to_owned()]).await {
-        Ok(vectors) => vectors,
-        Err(e) => {
+    probe_width_within(embedder, PROBE_TIMEOUT).await
+}
+
+async fn probe_width_within(
+    embedder: &dyn Embedder,
+    timeout: std::time::Duration,
+) -> anyhow::Result<Probe> {
+    let text = ["telmoni width probe".to_owned()];
+    let vectors = match tokio::time::timeout(timeout, embedder.embed(&text)).await {
+        Ok(Ok(vectors)) => vectors,
+        Err(_) => {
+            tracing::warn!(
+                model = embedder.model(),
+                timeout_secs = timeout.as_secs(),
+                "the embeddings endpoint did not answer the width probe in time"
+            );
+            return Ok(Probe::Unanswered);
+        }
+        Ok(Err(e)) => {
             tracing::warn!(
                 model = embedder.model(),
                 error = %e,
@@ -163,5 +189,27 @@ mod tests {
     #[tokio::test]
     async fn an_endpoint_that_does_not_answer_is_not_a_wrong_model() {
         assert_eq!(probe_width(&Down).await.unwrap(), Probe::Unanswered);
+    }
+
+    struct Hangs;
+
+    #[async_trait]
+    impl Embedder for Hangs {
+        fn model(&self) -> &str {
+            "probe-model"
+        }
+
+        async fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>, TelmoniError> {
+            std::future::pending().await
+        }
+    }
+
+    #[tokio::test]
+    async fn an_endpoint_that_hangs_is_given_up_on_not_waited_for() {
+        let within = std::time::Duration::from_millis(20);
+        assert_eq!(
+            probe_width_within(&Hangs, within).await.unwrap(),
+            Probe::Unanswered
+        );
     }
 }

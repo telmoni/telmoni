@@ -166,6 +166,20 @@ pub async fn standing<B: Binding>(
     .await
 }
 
+/// The organization holding each of `projects`, for those that exist.
+/// Across every tenant, so the lane.
+pub async fn homes(
+    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+    projects: &[ProjectId],
+) -> sqlx::Result<Vec<(ProjectId, OrganizationId)>> {
+    sqlx::query_as(
+        "SELECT external_id, organization_id FROM auth.projects WHERE external_id = ANY($1)",
+    )
+    .bind(projects)
+    .fetch_all(tx.conn())
+    .await
+}
+
 /// How many projects an organization holds.
 pub async fn count_in(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,

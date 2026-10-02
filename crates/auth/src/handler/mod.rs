@@ -205,16 +205,21 @@ pub(crate) async fn acting_person_in<'a>(
 
 /// The record of a person's act on themselves when [`acting_person_in`] let it
 /// through with no organization: no organization's audit log is theirs to
-/// write, so the structured log is the only record.
+/// write, so the structured log is the only record. Without the address an
+/// email change's details carry: a log holds ids, never an address.
 pub(crate) fn log_act_outside_every_organization(
     user_id: &telmoni_shared::UserId,
     act: &str,
     metadata: &serde_json::Value,
 ) {
+    let mut logged = metadata.clone();
+    if let Some(details) = logged.as_object_mut() {
+        details.remove("email");
+    }
     tracing::info!(
         user_id = %user_id,
         act,
-        metadata = %metadata,
+        metadata = %logged,
         "person act by somebody in no organization; recorded in the log alone"
     );
 }

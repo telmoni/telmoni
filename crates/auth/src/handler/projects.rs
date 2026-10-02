@@ -217,8 +217,8 @@ pub async fn delete_project(
 
     acting.tx.commit().await?;
 
-    if let Err(e) = super::deletion::purge_project_in_siblings(&state, &project_id).await {
-        tracing::warn!(project_id = %project_id, error = %e, "the siblings' project purge failed after the delete");
+    if let Err(e) = super::deletion::purge_project_connectors(&state, &project_id).await {
+        tracing::warn!(project_id = %project_id, error = %e, "the connectors' project purge failed after the delete");
     }
     Ok(Json(json!({ "status": "deleted", "id": project_id })))
 }

@@ -150,6 +150,9 @@ services:
       EMBEDDINGS_URL: ${EMBEDDINGS_URL:-http://ollama:11434/v1}
       EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-nomic-embed-text}
       EMBEDDINGS_API_KEY: ${EMBEDDINGS_API_KEY:-}
+      # The docs corpus the agent searches; `off` for a network that cannot
+      # reach docs.telmoni.com, or your own corpus's URL.
+      DOCS_CORPUS_URL: ${DOCS_CORPUS_URL:-}
 
   ollama:
     image: ollama/ollama:latest

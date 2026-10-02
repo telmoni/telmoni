@@ -60,8 +60,8 @@ pub struct Project;
 pub struct Person;
 
 /// The person and an organization: a person's act recorded on that
-/// organization's chain, the owner's export, first-sign-in provisioning, and
-/// account deletion walking what they own.
+/// organization's chain, the organization's export, first-sign-in
+/// provisioning, and account deletion walking what they own.
 #[derive(Debug)]
 pub struct PersonAndOrganization;
 
@@ -75,8 +75,8 @@ pub struct ProjectAndOrganization;
 #[derive(Debug)]
 pub struct ProjectAndPerson;
 
-/// All three: the owner's export walking each project, and an ownership
-/// acceptance folding the new owner's seats.
+/// All three: the organization's export walking each project, and an
+/// ownership acceptance folding the new owner's seats.
 #[derive(Debug)]
 pub struct PersonOrganizationProject;
 

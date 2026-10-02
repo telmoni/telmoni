@@ -22,11 +22,14 @@ pub fn split(markdown: &str) -> Vec<Passage> {
     let mut sections: Vec<Passage> = Vec::new();
     let mut heading: Option<String> = None;
     let mut body = String::new();
+    let mut fence = Fence::default();
     for line in markdown.lines() {
         let trimmed = line.trim_start();
-        if let Some(title) = trimmed
-            .strip_prefix("### ")
-            .or_else(|| trimmed.strip_prefix("## "))
+        let in_code = fence.read(line);
+        if !in_code
+            && let Some(title) = trimmed
+                .strip_prefix("### ")
+                .or_else(|| trimmed.strip_prefix("## "))
         {
             flush(&mut sections, heading.take(), &mut body);
             heading = Some(title.trim().to_owned());
@@ -37,6 +40,36 @@ pub fn split(markdown: &str) -> Vec<Passage> {
     }
     flush(&mut sections, heading, &mut body);
     sections
+}
+
+/// Whether a line of Markdown is code: inside a ``` or ~~~ fence, or the
+/// fence line itself. A `# comment` in a shell block is not a heading.
+#[derive(Debug, Default)]
+pub struct Fence {
+    open: Option<(char, usize)>,
+}
+
+impl Fence {
+    /// Read the next line; answers whether it is code.
+    pub fn read(&mut self, line: &str) -> bool {
+        let trimmed = line.trim_start();
+        let marker = trimmed.chars().next().filter(|c| *c == '`' || *c == '~');
+        let run = marker.map_or(0, |m| trimmed.chars().take_while(|c| *c == m).count());
+        match (self.open, marker) {
+            (None, Some(m)) if run >= 3 => {
+                self.open = Some((m, run));
+                true
+            }
+            (Some((m, len)), Some(c))
+                if c == m && run >= len && trimmed.trim_start_matches(c).trim().is_empty() =>
+            {
+                self.open = None;
+                true
+            }
+            (Some(_), _) => true,
+            (None, _) => false,
+        }
+    }
 }
 
 fn flush(out: &mut Vec<Passage>, heading: Option<String>, body: &mut String) {
@@ -121,6 +154,28 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn a_heading_inside_a_code_fence_is_code() {
+        let passages = split("## Install\n```bash\n## not a heading\n# nor this\n```\nDone.\n");
+        assert_eq!(passages.len(), 1);
+        assert_eq!(passages[0].heading.as_deref(), Some("Install"));
+        assert!(passages[0].text.contains("## not a heading"));
+    }
+
+    #[test]
+    fn a_fence_closes_only_on_its_own_marker() {
+        let mut fence = Fence::default();
+        assert!(!fence.read("text"));
+        assert!(fence.read("````md"));
+        assert!(
+            fence.read("```"),
+            "a shorter run does not close a longer fence"
+        );
+        assert!(fence.read("~~~"), "another marker does not close it");
+        assert!(fence.read("````"));
+        assert!(!fence.read("## after"));
     }
 
     #[test]

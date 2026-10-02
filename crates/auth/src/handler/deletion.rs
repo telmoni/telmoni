@@ -14,13 +14,13 @@
 //!   terminated it, and the FINALIZE GRACE, [`FINALIZE_GRACE_SECONDS`], when
 //!   the owner's account deletion took it. Its members' memberships go with
 //!   it; no person is touched.
-//! - **A person's**: the identity provider's user → their memberships
-//!   elsewhere, each removed and audited on that organization, and the
-//!   invitations they accepted, which held their address → the notices
-//!   that named them, rewritten by notifications → their conversations with
-//!   the agent and its copies of those notices → the identity (sessions and
-//!   codes cascade). It waits for every organization they owned to be gone
-//!   first; their owner row would block it.
+//! - **A person's**: the identity provider's user → the notices that named
+//!   them, rewritten by notifications → their conversations with the agent,
+//!   and its copies of what named them → their memberships elsewhere, each
+//!   removed and audited on that organization, and the invitations they
+//!   accepted, which held their address → the notices and the agent once
+//!   more → the identity (sessions and codes cascade). It waits for every
+//!   organization they owned to be gone first; their owner row would block it.
 //!
 //! ⚠ **Why the row waits, whoever asked.** The mark closes the organization to
 //! every lane (`organization_role_or_forbidden`), but a request that had its
@@ -163,32 +163,33 @@ pub(crate) async fn purge_organization_siblings(
     Ok(())
 }
 
-/// The longest the project purge may take. The transfer's accept calls it
-/// inside its transaction, holding two organizations' locks, so it cannot be
-/// allowed the console's whole ten seconds.
+/// The longest notifications' project purge may take. The transfer's accept
+/// calls it inside its transaction, holding two organizations' locks, so it
+/// cannot be allowed the console's whole ten seconds.
 const PROJECT_PURGE_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// The siblings' teardown for one project — in notifications its
-/// connectors, their deliveries, its feed and any handshake in flight; in
-/// the agent its conversations and its index — before the project is handed
-/// to another organization, and after one is deleted. A module not linked
-/// is nothing to purge; a refusal or a purge over budget is an `Err`, which
-/// the transfer treats as a refusal to move.
-pub(crate) async fn purge_project_in_siblings(
+/// Notifications' teardown for one project — its connectors, their
+/// deliveries, its feed and any handshake in flight — before it is handed
+/// to another organization, whose events must never post into the old
+/// one's channels, and after one is deleted. No notifications module is
+/// nothing to purge; a refusal or a purge over budget is an `Err`, which the
+/// transfer treats as a refusal to move. The agent needs no call: it finds
+/// what it holds of a project under an organization that no longer has it,
+/// and removes it, itself.
+pub(crate) async fn purge_project_connectors(
     state: &AppState,
     project_id: &ProjectId,
 ) -> Result<(), TelmoniError> {
-    let purges = async {
-        if let Some(notifications) = state.siblings.notifications.as_ref() {
-            notifications.purge_project(project_id).await?;
-        }
-        if let Some(agent) = state.siblings.agent.as_ref() {
-            agent.purge_project(project_id).await?;
-        }
-        Ok::<(), TelmoniError>(())
+    let Some(notifications) = state.siblings.notifications.as_ref() else {
+        return Ok(());
     };
-    match tokio::time::timeout(PROJECT_PURGE_BUDGET, purges).await {
-        Ok(done) => done,
+    match tokio::time::timeout(
+        PROJECT_PURGE_BUDGET,
+        notifications.purge_project(project_id),
+    )
+    .await
+    {
+        Ok(done) => done.map(|_| ()),
         Err(_) => Err(TelmoniError::Internal("the project purge timed out".into())),
     }
 }
@@ -365,11 +366,35 @@ async fn redact_person_notices(state: &AppState, user_id: &UserId) -> Result<(),
     Ok(())
 }
 
+/// What the agent holds of a person: their conversations, and their address
+/// and name where other people's answers quoted them, in `organizations`.
+/// No agent is nothing to erase.
+async fn erase_in_agent(
+    state: &AppState,
+    user_id: &UserId,
+    person: &identities::Person,
+    organizations: &[OrganizationId],
+) -> Result<(), TelmoniError> {
+    let Some(agent) = state.siblings.agent.as_ref() else {
+        return Ok(());
+    };
+    agent
+        .erase_person(
+            user_id,
+            &person.email,
+            person.display_name.as_deref(),
+            organizations,
+        )
+        .await?;
+    Ok(())
+}
+
 /// Erase a person whose account deletion was confirmed: the identity
 /// provider's user FIRST (never wipe local rows for a person who still exists
-/// upstream), then every membership they hold, each audited on that
-/// organization's chain, then the notices that named them, then the identity.
-/// Shared by the inline tail and the sweep, so the two cannot drift.
+/// upstream), then the notices that named them, then what the agent holds
+/// of them, then every membership they hold, each audited on that
+/// organization's chain, then the notices and the agent once more, then the
+/// identity. Shared by the inline tail and the sweep, so the two cannot drift.
 ///
 /// ⚠ **Refuses a person who has not asked to go** — the sweep reaches it for
 /// anybody its listing names, and a bug there must not erase a live person —
@@ -427,6 +452,18 @@ pub async fn erase_person(
         .await?
         .delete_user(user_id)
         .await?;
+
+    // The notices that named them, first: the agent's index reads the feed
+    // again after its erase below, and must find them already rewritten.
+    redact_person_notices(state, user_id).await?;
+    // ⚠ **The agent before the memberships go**: the organizations they are
+    // in are where their name is scrubbed, and the agent keeps them, so the
+    // erase after the removals below, or a retry, still knows them.
+    let mut organizations: Vec<OrganizationId> = held
+        .iter()
+        .map(|(organization, _)| organization.clone())
+        .collect();
+    erase_in_agent(state, user_id, &person, &organizations).await?;
 
     let mut mtx = maintenance_scope(&state.db, AuthLane).await?;
     locks::lock_person(&mut mtx, user_id).await?;
@@ -495,15 +532,26 @@ pub async fn erase_person(
     mtx.commit().await?;
     tracing::info!(user_id = %user_id, invitations = forgotten, "accepted invitations deleted");
 
-    // The feeds that announced them, before the identity: a retry after a
-    // failure here finds the memberships gone and the identity still pending,
-    // and takes it from this step.
+    // Again, before the identity: a notice that named them since the first
+    // pass, while they were still a member, is rewritten too (the pass is
+    // idempotent). A retry after a failure here finds the memberships gone
+    // and the identity still pending, and takes it from this step.
     redact_person_notices(state, user_id).await?;
-    // Their conversations with the agent, and what its index copied of the
-    // notices that named them, which the redaction above cannot reach.
-    if let Some(agent) = state.siblings.agent.as_ref() {
-        agent.erase_person(user_id).await?;
+    // And the agent again, now that nothing it reads can name them: a turn
+    // that read them from the roster before it changed, still answering when
+    // the first erase ran, has its answer scrubbed here or withheld when it
+    // lands, and a notice indexed between the two passes goes too. Every
+    // organization a seat was removed from counts, a stray one's included.
+    let reached = held
+        .iter()
+        .map(|(organization, _)| organization)
+        .chain(removed.iter().map(|(organization, _, _)| organization));
+    for organization in reached {
+        if !organizations.contains(organization) {
+            organizations.push(organization.clone());
+        }
     }
+    erase_in_agent(state, user_id, &person, &organizations).await?;
 
     // The identity last. Sessions and codes cascade; a membership that landed
     // since the removals above makes this fail (RESTRICT), and the sweep

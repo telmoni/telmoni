@@ -84,9 +84,10 @@ pub struct Siblings {
     /// Notifications: the notices auth raises, and what it purges of an
     /// organization, a project or a person before their rows go.
     pub notifications: Option<Arc<dyn telmoni_shared::seam::Notifications>>,
-    /// The agent: the conversations and the index it holds of a person, an
-    /// organization or a project, forgotten when they go, and a person's
-    /// conversations in their export.
+    /// The agent: the conversations and the index it holds of a person or an
+    /// organization, forgotten when they go. A project that moves or goes
+    /// needs no call: the agent finds what it held of it and removes that
+    /// itself.
     pub agent: Option<Arc<dyn telmoni_shared::seam::Agent>>,
     /// The deployment's own module that holds something of an organization's
     /// outside this database — a subscription, say — run when a deletion is

@@ -42,8 +42,8 @@ describe("the copy a search engine quotes", () => {
 });
 
 describe("the GitHub links", () => {
-  it("are off while this repo is private", () => {
-    expect(REPO_URL).toBeNull();
+  it("point at the public repository, with discussions off until they are enabled", () => {
+    expect(REPO_URL).toBe("https://github.com/telmoni/telmoni");
     expect(DISCUSSIONS_URL).toBeNull();
   });
 

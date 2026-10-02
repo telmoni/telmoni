@@ -206,6 +206,17 @@ describe("agentReducer", () => {
     expect(after).toBe(s);
   });
 
+  // A turn cancelled by a reset (another project, a new conversation) can
+  // still fail on its way out; that must not land on what replaced it.
+  it("ignores a failure when no turn is streaming", () => {
+    const reset = agentReducer(sent(), { type: "reset" });
+    const after = agentReducer(reset, {
+      type: "fail",
+      problem: { title: "late", detail: null },
+    });
+    expect(after).toBe(reset);
+  });
+
   it("loads a conversation and resets to empty", () => {
     const loaded = agentReducer(sent(), {
       type: "load",

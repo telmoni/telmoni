@@ -12,8 +12,9 @@
 //! admin — the mirror of the organization handover, where the previous owner
 //! stays on as an admin. Its connectors do
 //! not come with it: they are the old organization's vendor grants and webhook
-//! secrets, purged in notifications before the move commits, and the agent's
-//! conversations and index of it go with them. The audit chains
+//! secrets, purged in notifications before the move commits; the agent finds
+//! what it holds of the project under the old organization and removes it
+//! within the hour. The audit chains
 //! stay where they are — the old organization's keeps the project's history
 //! and the new one's starts with its arrival — because a chain cannot be
 //! spliced. A withdrawal, a replacement and an answer are mailed to whoever
@@ -851,7 +852,7 @@ pub async fn accept(
     let previous_contact = identities::get(&mut tx, &previous).await?;
     let new_owner = crate::identity::display_for(person.display_name.as_deref(), &person.email);
 
-    crate::handler::deletion::purge_project_in_siblings(&state, &project_id).await?;
+    crate::handler::deletion::purge_project_connectors(&state, &project_id).await?;
     tx.commit().await?;
 
     if let Some(previous_contact) = previous_contact

@@ -101,7 +101,9 @@ const OPERATOR_ONLY: &[&str] = &["auth.feature_flags", "auth.organization_flags"
 /// and nothing a project-scoped request does may add to, rewrite or remove a
 /// row. The delivery log is the record of what a project told the outside
 /// world; its rows go with their delivery by cascade, which needs no grant.
-const LANE_WRITTEN: &[&str] = &["notifications.delivery_attempts"];
+/// An erasure's fence is read by every answer's save, and lifted or forged
+/// by nothing a request does.
+const LANE_WRITTEN: &[&str] = &["notifications.delivery_attempts", "agent.erasures"];
 
 /// The runtime roles that write audit rows: every module's, since each
 /// audits its own writes on the organization's chain.
@@ -447,14 +449,24 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             &["SELECT", "INSERT", "UPDATE", "DELETE"],
         ),
         // Retention and the purges delete a conversation; its person writes it.
+        // (An erasure rewrites its `title` alone: a column grant, not this.)
         (
             "agent_maintenance",
             "agent.conversations",
             &["SELECT", "DELETE"],
         ),
         // Messages go with their conversation by cascade, which needs no grant.
+        // (An erasure reads and rewrites `content` and `citations` alone:
+        // column grants.)
         ("agent_maintenance", "agent.messages", &[]),
         ("agent_maintenance", "agent.cursors", &["SELECT", "UPDATE"]),
+        // An erasure fences each organization it reaches, and retention
+        // forgets the fence.
+        (
+            "agent_maintenance",
+            "agent.erasures",
+            &["SELECT", "INSERT", "UPDATE", "DELETE"],
+        ),
     ];
     for (lane, table, allowed) in NARROWED {
         for verb in ["SELECT", "INSERT", "UPDATE", "DELETE"] {

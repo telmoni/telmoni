@@ -31,7 +31,9 @@ use telmoni_shared::acting::Acting;
 use telmoni_shared::config::env_parse;
 use telmoni_shared::middleware::service_auth::{ServiceSecrets, require_service_secret};
 use telmoni_shared::seam::{AuditEventsQuery, Auth, DocumentCursor, PurgeHook, SourceDocument};
-use telmoni_shared::{AuthError, FlagSet, OrganizationId, OrganizationStatus, TelmoniError};
+use telmoni_shared::{
+    AuthError, FlagSet, OrganizationId, OrganizationStatus, ProjectId, TelmoniError,
+};
 
 use cli::{Command, Sweep};
 
@@ -112,6 +114,17 @@ impl LateAuth {
 impl Auth for LateAuth {
     async fn resolve(&self, headers: &HeaderMap) -> Result<Acting, TelmoniError> {
         self.get()?.resolve(headers).await
+    }
+
+    async fn resolve_again(&self, acting: &Acting) -> Result<Acting, TelmoniError> {
+        self.get()?.resolve_again(acting).await
+    }
+
+    async fn project_homes(
+        &self,
+        projects: &[ProjectId],
+    ) -> Result<Vec<(ProjectId, OrganizationId)>, TelmoniError> {
+        self.get()?.project_homes(projects).await
     }
 
     async fn global_flags(&self) -> Result<FlagSet, TelmoniError> {

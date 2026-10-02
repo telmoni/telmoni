@@ -18,12 +18,12 @@ use telmoni_shared::rbac::{Resource, Verb, can};
 use telmoni_shared::seam::{Audience, AuditEventsQuery, Auth, DocumentCursor, SourceDocument};
 use telmoni_shared::{
     AuthError, AuthzError, FlagSet, OrganizationId, OrganizationRole, OrganizationStatus,
-    TelmoniError,
+    ProjectId, TelmoniError, UserId,
 };
 
 use crate::AppState;
 use crate::db::audit::{self, AuditQuery};
-use crate::db::{AuthLane, flags, members, organizations};
+use crate::db::{AuthLane, access_tokens, flags, members, organizations, projects};
 use crate::handler::{
     acting_organization, acting_project, authorize, parse_organization_id, parse_project_id,
 };
@@ -46,22 +46,14 @@ impl Auth for AppState {
 
         if let Some(project_id) = header(headers, "x-project-id") {
             let project_id = parse_project_id(project_id)?;
-            let acting = acting_project(self, &project_id, &user_id).await?;
-            let organization = acting.organization.clone();
-            let role = acting.role;
-            // The caller's row in the owning organization's roster, which
-            // `acting_project` has already read — the owner's included, so a
-            // module's `require_owner` follows a transfer.
-            let organization_role: Option<OrganizationRole> = acting.organization_role;
-            acting.tx.rollback().await?;
-            return Ok(Acting {
-                user_id,
-                organization_id: organization,
-                organization_role,
-                project: Some(ActingProject { project_id, role }),
-                session_id: Some(principal.session_id),
-                expires_at: principal.expires_at,
-            });
+            return self
+                .on_project(
+                    user_id,
+                    project_id,
+                    Some(principal.session_id),
+                    principal.expires_at,
+                )
+                .await;
         }
 
         let organization_id = parse_organization_id(organization_id)?;
@@ -76,6 +68,37 @@ impl Auth for AppState {
             session_id: Some(principal.session_id),
             expires_at: principal.expires_at,
         })
+    }
+
+    async fn resolve_again(&self, acting: &Acting) -> Result<Acting, TelmoniError> {
+        let project_id = acting.project_or_bad_request()?.project_id.clone();
+        // The session too, as the bearer's lookup would have it: a sign-out
+        // everywhere, or a deletion asked for, ends the request's reach now.
+        if let Some(sid) = acting.session_id.as_deref() {
+            let mut tx = maintenance_scope(&self.db, AuthLane).await?;
+            let refused = access_tokens::session_refused(&mut tx, &acting.user_id, sid).await?;
+            tx.commit().await?;
+            if refused {
+                return Err(AuthError::Unauthenticated.into());
+            }
+        }
+        self.on_project(
+            acting.user_id.clone(),
+            project_id,
+            acting.session_id.clone(),
+            acting.expires_at,
+        )
+        .await
+    }
+
+    async fn project_homes(
+        &self,
+        projects: &[ProjectId],
+    ) -> Result<Vec<(ProjectId, OrganizationId)>, TelmoniError> {
+        let mut tx = maintenance_scope(&self.db, AuthLane).await?;
+        let homes = projects::homes(&mut tx, projects).await?;
+        tx.commit().await?;
+        Ok(homes)
     }
 
     async fn global_flags(&self) -> Result<FlagSet, TelmoniError> {
@@ -135,7 +158,9 @@ impl Auth for AppState {
         let current = acting_project(self, project_id, &acting.user_id).await?;
         // Read from the tables again rather than trusted from `acting`: the
         // model's tool call can come a minute after the turn was resolved.
-        let whole_chain = current.organization_role == Some(OrganizationRole::Owner);
+        let whole_chain = current
+            .organization_role
+            .is_some_and(|role| role.can_view_rolled_up_audit());
         if !whole_chain && !can(current.role, Verb::Read, Resource::Audit) {
             current.tx.commit().await?;
             return Err(AuthzError::Forbidden(format!(
@@ -162,6 +187,10 @@ impl Auth for AppState {
         )
         .await?;
         tx.commit().await?;
+        // Without the addresses an invitation's or an email change's details
+        // hold: what the model reads it can quote into an answer, kept past
+        // an erasure of the person the address is. The console's audit log
+        // page still shows them.
         let events: Vec<serde_json::Value> = events
             .into_iter()
             .map(|e| {
@@ -173,7 +202,7 @@ impl Auth for AppState {
                     "resource_kind": e.resource_kind,
                     "resource_id": e.resource_id,
                     "in_project": e.in_project,
-                    "metadata": e.metadata,
+                    "metadata": without_address(e.metadata),
                 })
             })
             .collect();
@@ -184,13 +213,56 @@ impl Auth for AppState {
     }
 }
 
+impl AppState {
+    /// The person acting on a project, from the tables: their role on it,
+    /// and their row on the roster of the organization that owns it now —
+    /// the owner's included, so a module's `require_owner` follows a transfer.
+    async fn on_project(
+        &self,
+        user_id: UserId,
+        project_id: ProjectId,
+        session_id: Option<String>,
+        expires_at: i64,
+    ) -> Result<Acting, TelmoniError> {
+        let acting = acting_project(self, &project_id, &user_id).await?;
+        let organization_id = acting.organization.clone();
+        let role = acting.role;
+        let organization_role: Option<OrganizationRole> = acting.organization_role;
+        acting.tx.rollback().await?;
+        Ok(Acting {
+            user_id,
+            organization_id,
+            organization_role,
+            project: Some(ActingProject { project_id, role }),
+            session_id,
+            expires_at,
+        })
+    }
+}
+
 /// The most events one audit tool call returns.
 const AUDIT_TOOL_MAX: i64 = 50;
+
+/// An event's details without the address an invitation or an email change
+/// records: every one of them is a top-level `email`.
+fn without_address(metadata: Option<serde_json::Value>) -> Option<serde_json::Value> {
+    metadata.map(|mut details| {
+        if let Some(fields) = details.as_object_mut() {
+            fields.remove("email");
+        }
+        details
+    })
+}
 
 /// An event as the agent indexes it: who did what to which resource, where
 /// and when, and the details the audit log page shows. A project's events
 /// are read by the roles that read the audit log there; the organization's
-/// own by its owner, the only person who reads its whole chain.
+/// own by its owner and admins, who read its whole chain.
+///
+/// ⚠ **No address reaches the index.** An invitation's or an email change's
+/// details hold one, and the chain keeps it as long as it keeps the event;
+/// the index's copy, read again whenever an erasure ends a page's lease,
+/// would put an erased person's address back after the agent scrubbed it.
 fn audit_document(e: audit::IndexedEvent) -> SourceDocument {
     let target = match &e.resource_id {
         Some(id) => format!("{} {id}", e.resource_kind),
@@ -206,13 +278,16 @@ fn audit_document(e: audit::IndexedEvent) -> SourceDocument {
         actor = e.actor_id,
         at = e.created_at.to_rfc3339(),
     );
-    if let Some(metadata) = e.metadata.as_ref().filter(|m| !m.is_null()) {
+    if let Some(metadata) = without_address(e.metadata).filter(|m| !m.is_null()) {
         body.push_str("\nDetails: ");
         body.push_str(&metadata.to_string());
     }
     let (audience, url) = match &e.in_project {
         Some(project) => (Audience::Audit, format!("/{project}/audit-log")),
-        None => (Audience::Owner, "/organization/audit-log".to_owned()),
+        None => (
+            Audience::OrganizationAdmin,
+            "/organization/audit-log".to_owned(),
+        ),
     };
     SourceDocument {
         source_id: e.id.to_string(),

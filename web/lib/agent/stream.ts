@@ -238,6 +238,10 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
         error: null,
       };
     case "fail":
+      // Only a turn in progress can fail. One already reset away (another
+      // project, a new conversation) can still fail on its way out, and that
+      // must not land on what replaced it.
+      if (!state.streaming) return state;
       return {
         ...state,
         messages: dropEmptyReply(state.messages),

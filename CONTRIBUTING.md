@@ -2,7 +2,7 @@
 
 Thanks for your interest in contributing to Telmoni! Telmoni is an open-source multi-tenant foundation: organizations and projects, members and roles, API tokens, notifications, an audit log and a console agent.
 
-All contributors are expected to adhere to our [Code of Conduct](CODE_OF_CONDUCT.md). For security vulnerabilities, please refer to our [Security Policy](SECURITY.md). For detailed architectural overview, authentication flows, and development workflows, see [DEVELOPMENT.md](DEVELOPMENT.md).
+All contributors are expected to adhere to our [Code of Conduct](CODE_OF_CONDUCT.md). For security vulnerabilities, please refer to our [Security Policy](SECURITY.md). For how Telmoni is built, see [architecture/](architecture/README.md); for setting up and running the stack, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ---
 

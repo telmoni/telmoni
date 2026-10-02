@@ -15,7 +15,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -24,10 +24,10 @@ use uuid::Uuid;
 use telmoni_shared::acting::Acting;
 use telmoni_shared::db::tenant_session::{PersonAndOrganization, Scoped, person_scope};
 use telmoni_shared::extract::Json;
-use telmoni_shared::{AuthError, ProblemDetails, ProjectId, TelmoniError};
+use telmoni_shared::{AuthError, AuthzError, ProblemDetails, ProjectId, TelmoniError};
 
 use crate::AppState;
-use crate::db::{self, MessageRole};
+use crate::db::{self, MessageRole, StoredMessage};
 use crate::index::conversations;
 use crate::model::{Message, Model, ToolCall, ToolResult};
 use crate::prompt;
@@ -43,6 +43,14 @@ const TITLE_CHARS: usize = 80;
 
 /// What the person reads when the model wrote nothing at all.
 const EMPTY_ANSWER: &str = "I could not put an answer together. Try asking again.";
+
+/// What is kept, and said, in place of an answer an erasure fenced while it
+/// was written: it may quote the person erased.
+const WITHHELD: &str = "This answer was not kept: something it may have quoted was deleted \
+                        while it was being written. Ask again.";
+
+/// How long the check for an asker gone, before an answer is saved, may take.
+pub(crate) const FINAL_RECHECK: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// How much of a conversation the model rereads each turn.
 const HISTORY: i64 = 20;
@@ -117,7 +125,7 @@ pub async fn post_turn(
     }
     let (conversation_id, history) = match body.conversation_id {
         Some(id) => {
-            if !db::touch_conversation(&mut tx, &acting.user_id, id).await? {
+            if !db::touch_conversation(&mut tx, &acting.user_id, &project_id, id).await? {
                 return Err(not_found());
             }
             (id, db::messages(&mut tx, id, HISTORY).await?)
@@ -146,25 +154,15 @@ pub async fn post_turn(
         &json!([]),
     )
     .await?;
+    let asked_at = db::now(&mut tx).await?;
     tx.commit().await?;
 
-    let mut transcript: Vec<Message> = history
-        .into_iter()
-        .map(|m| match m.role {
-            MessageRole::User => Message::User(m.content),
-            MessageRole::Assistant => Message::Assistant {
-                text: m.content,
-                tool_calls: Vec::new(),
-                raw: None,
-            },
-        })
-        .collect();
-    transcript.push(Message::User(message.clone()));
+    let transcript = alternating(history, &message);
 
     let (sender, receiver) = mpsc::unbounded_channel::<Event>();
     tokio::spawn(run_turn(
         state.clone(),
-        acting,
+        Asker { acting, asked_at },
         model,
         conversation_id,
         transcript,
@@ -242,23 +240,87 @@ impl Events {
     }
 }
 
+/// Who asked a turn, as it began.
+struct Asker {
+    acting: Acting,
+    /// When the question was written, in the database's time.
+    asked_at: DateTime<Utc>,
+}
+
 /// The live tools, reporting each call to the stream as it starts.
 struct LiveRunner<'a> {
     state: &'a AppState,
-    acting: &'a Acting,
+    asker: &'a Asker,
     citations: Citations,
     events: &'a Events,
+    /// Why the turn ends before its answer: the asker is no longer who began it.
+    ended: Option<TelmoniError>,
 }
 
 #[async_trait]
 impl Runner for LiveRunner<'_> {
     async fn run(&mut self, call: &ToolCall) -> ToolResult {
-        self.events.send(TurnEvent::Tool(&call.name));
-        tools::run(self.state, self.acting, call, &mut self.citations).await
+        let asker = self.asker_now().await;
+        if !self.cancelled() {
+            self.events.send(TurnEvent::Tool(&call.name));
+        }
+        match asker {
+            Ok(acting) => tools::run(self.state, &acting, call, &mut self.citations).await,
+            Err(e) => tools::refusal(call, e),
+        }
+    }
+
+    async fn recheck(&mut self) {
+        // Auth failing to answer just now ends nothing; only an asker gone does.
+        let _ = self.asker_now().await;
     }
 
     fn cancelled(&self) -> bool {
-        self.events.is_closed()
+        self.events.is_closed() || self.ended.is_some()
+    }
+}
+
+impl LiveRunner<'_> {
+    /// ⚠ **Who is asking, read again.** A call can come a minute and a half
+    /// into the turn, and a role taken away, a seat removed or a project
+    /// moved to another organization since it began holds for it, as it
+    /// would for the console's next page. Read by the person and project,
+    /// not the bearer, which may lapse mid-turn.
+    ///
+    /// One no longer who began the turn ends it ([`Self::ended`]), with
+    /// nothing more written to the stream or saved: a sign-out everywhere is
+    /// how a person stops a session they lost, and that session's open
+    /// stream is one. A role that changed only narrows the lookups that
+    /// follow; auth failing to answer refuses just the one.
+    async fn asker_now(&mut self) -> Result<Acting, TelmoniError> {
+        match self.state.auth.resolve_again(&self.asker.acting).await {
+            Ok(acting) if acting.organization_id == self.asker.acting.organization_id => Ok(acting),
+            Ok(_) => Err(self.end(
+                AuthzError::Forbidden("this project has moved to another organization".into())
+                    .into(),
+            )),
+            Err(e) if no_longer_the_asker(&e) => Err(self.end(e)),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// End the turn; the loop stops before the model writes again. Answers
+    /// an error for the lookup that found it out, which goes no further.
+    fn end(&mut self, why: TelmoniError) -> TelmoniError {
+        self.ended = Some(why);
+        AuthzError::Forbidden("the turn has ended".into()).into()
+    }
+}
+
+/// Whether auth's refusal to read who is asking again says they are no
+/// longer who began the turn — signed out everywhere, their account on its
+/// way out, off the project, or the project gone — rather than that auth
+/// could not answer just now, which refuses only the one lookup.
+const fn no_longer_the_asker(e: &TelmoniError) -> bool {
+    match e {
+        TelmoniError::Auth(AuthError::IdentityUnavailable) => false,
+        TelmoniError::Auth(_) | TelmoniError::Authz(_) => true,
+        _ => false,
     }
 }
 
@@ -266,20 +328,22 @@ impl Runner for LiveRunner<'_> {
 /// only when it finished; a failure is an `error` event and a log line.
 async fn run_turn(
     state: Arc<AppState>,
-    acting: Acting,
+    asker: Asker,
     model: Arc<dyn Model>,
     conversation_id: Uuid,
     mut transcript: Vec<Message>,
     question: String,
     events: Events,
 ) {
-    let system = prompt::system(&acting, &Utc::now().format("%Y-%m-%d").to_string());
+    let acting = &asker.acting;
+    let system = prompt::system(acting, &Utc::now().format("%Y-%m-%d").to_string());
     let specs = tools::specs();
     let mut runner = LiveRunner {
         state: &state,
-        acting: &acting,
+        asker: &asker,
         citations: Citations::default(),
         events: &events,
+        ended: None,
     };
     let sink = |text: &str| events.send(TurnEvent::Text(text));
     let outcome = turn::converse(
@@ -292,7 +356,19 @@ async fn run_turn(
         tokio::time::Instant::now() + turn::TURN_BUDGET,
     )
     .await;
+    // Once more before anything is saved: the asker may have gone since the
+    // last check. Bounded, as an auth slow to answer must not eat the time
+    // left to save and say `done`; one that does not answer ends nothing.
+    if outcome
+        .as_ref()
+        .is_ok_and(|outcome| outcome.ending != Ending::Cancelled)
+    {
+        let _ = tokio::time::timeout(FINAL_RECHECK, runner.recheck()).await;
+    }
     let citations = runner.citations;
+    if let Some(why) = runner.ended {
+        return failed(&events, acting, conversation_id, &why);
+    }
 
     let outcome = match outcome {
         Ok(outcome) if outcome.ending == Ending::Cancelled => {
@@ -300,7 +376,7 @@ async fn run_turn(
             return;
         }
         Ok(outcome) => outcome,
-        Err(e) => return failed(&events, &acting, conversation_id, &e),
+        Err(e) => return failed(&events, acting, conversation_id, &e),
     };
     let mut answer = outcome.text;
     if let Some(note) = outcome.ending.note() {
@@ -315,22 +391,31 @@ async fn run_turn(
     for citation in &cited {
         events.send(TurnEvent::Citation(citation));
     }
-    let message_id = match save_answer(&state, &acting, conversation_id, &answer, &cited).await {
-        Ok(id) => id,
-        Err(e) => return failed(&events, &acting, conversation_id, &e),
+    let saved = match save_answer(&state, &asker, conversation_id, &answer, &cited).await {
+        Ok(saved) => saved,
+        Err(e) => return failed(&events, acting, conversation_id, &e),
     };
+    if saved.withheld {
+        sink(&format!("\n\n{WITHHELD}"));
+    }
     events.send(TurnEvent::Done {
         conversation_id,
-        message_id,
+        message_id: saved.id,
     });
     drop(events);
+    if saved.withheld {
+        return;
+    }
     if let Err(e) = conversations::remember(
         &state,
-        &acting,
-        conversation_id,
-        message_id,
-        &question,
-        &answer,
+        acting,
+        conversations::Exchange {
+            conversation_id,
+            message_id: saved.id,
+            question: &question,
+            answer: &answer,
+            asked_at: asker.asked_at,
+        },
     )
     .await
     {
@@ -355,15 +440,32 @@ fn failed(events: &Events, acting: &Acting, conversation_id: Uuid, e: &TelmoniEr
     });
 }
 
+/// An answer as it was saved.
+struct Saved {
+    id: Uuid,
+    /// [`WITHHELD`] was kept in its place.
+    withheld: bool,
+}
+
+/// Save the answer — or, when an erasure reached its organization while the
+/// turn ran, [`WITHHELD`] in its place: the turn may have read the person it
+/// erased before the scrub took them, and the scrub cannot see this message.
 async fn save_answer(
     state: &AppState,
-    acting: &Acting,
+    asker: &Asker,
     conversation_id: Uuid,
     answer: &str,
     citations: &[Citation],
-) -> Result<Uuid, TelmoniError> {
+) -> Result<Saved, TelmoniError> {
+    let acting = &asker.acting;
     let project = acting.project_or_bad_request()?;
     let mut tx = author_scope(state, acting).await?;
+    let withheld = db::erased_during(&mut tx, &acting.organization_id, asker.asked_at).await?;
+    let (content, citations) = if withheld {
+        (WITHHELD, json!([]))
+    } else {
+        (answer, json!(citations))
+    };
     let id = db::insert_message(
         &mut tx,
         conversation_id,
@@ -371,12 +473,12 @@ async fn save_answer(
         &project.project_id,
         &acting.user_id,
         MessageRole::Assistant,
-        answer,
-        &json!(citations),
+        content,
+        &citations,
     )
     .await?;
     tx.commit().await?;
-    Ok(id)
+    Ok(Saved { id, withheld })
 }
 
 /// `GET /internal/agent/conversations` — the person's own, asked from this
@@ -399,9 +501,10 @@ pub async fn get_conversation(
     headers: HeaderMap,
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let (acting, _) = asker(&state, &headers).await?;
+    let (acting, project_id) = asker(&state, &headers).await?;
     let mut tx = author_scope(&state, &acting).await?;
-    let Some(conversation) = db::conversation(&mut tx, &acting.user_id, id).await? else {
+    let Some(conversation) = db::conversation(&mut tx, &acting.user_id, &project_id, id).await?
+    else {
         return Err(not_found());
     };
     let messages = db::messages(&mut tx, id, OPEN_LIMIT).await?;
@@ -441,4 +544,85 @@ pub async fn absent_status() -> impl IntoResponse {
 /// Every other lane, when the deployment has no agent at all.
 pub async fn absent() -> TelmoniError {
     TelmoniError::AgentDisabled
+}
+
+/// The history and the new question as a transcript every provider reads:
+/// it opens on a question and alternates. The window is the last messages,
+/// and a turn that failed or was stopped left its question unanswered, so
+/// the window can open on an answer or hold two questions in a row — which
+/// a strict chat template refuses on every turn of the conversation after.
+/// An unanswered question is dropped; the one asked now stands.
+fn alternating(history: Vec<StoredMessage>, question: &str) -> Vec<Message> {
+    let mut out: Vec<Message> = Vec::with_capacity(history.len() + 1);
+    for m in history {
+        match m.role {
+            MessageRole::User => {
+                if matches!(out.last(), Some(Message::User(_))) {
+                    out.pop();
+                }
+                out.push(Message::User(m.content));
+            }
+            MessageRole::Assistant => {
+                if matches!(out.last(), Some(Message::User(_))) {
+                    out.push(Message::Assistant {
+                        text: m.content,
+                        tool_calls: Vec::new(),
+                        raw: None,
+                    });
+                }
+            }
+        }
+    }
+    if matches!(out.last(), Some(Message::User(_))) {
+        out.pop();
+    }
+    out.push(Message::User(question.to_owned()));
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stored(role: MessageRole, content: &str) -> StoredMessage {
+        StoredMessage {
+            id: Uuid::nil(),
+            role,
+            content: content.to_owned(),
+            citations: json!([]),
+            created_at: Utc::now(),
+        }
+    }
+
+    fn roles(transcript: &[Message]) -> Vec<&'static str> {
+        transcript
+            .iter()
+            .map(|m| match m {
+                Message::User(_) => "user",
+                Message::Assistant { .. } => "assistant",
+                Message::ToolResults(_) => "tools",
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_transcript_opens_on_a_question_and_alternates() {
+        use MessageRole::{Assistant, User};
+        let history = vec![
+            stored(Assistant, "an answer whose question fell out of the window"),
+            stored(User, "q1"),
+            stored(Assistant, "a1"),
+            stored(User, "q2, never answered"),
+            stored(User, "q3"),
+            stored(Assistant, "a3"),
+            stored(User, "q4, stopped"),
+        ];
+        let transcript = alternating(history, "q5");
+        assert_eq!(
+            roles(&transcript),
+            ["user", "assistant", "user", "assistant", "user"]
+        );
+        assert!(matches!(transcript.last(), Some(Message::User(q)) if q == "q5"));
+        assert!(matches!(transcript.get(2), Some(Message::User(q)) if q == "q3"));
+    }
 }

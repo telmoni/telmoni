@@ -6,9 +6,11 @@
 //!
 //! Each sweep takes a transaction-scoped advisory lock first, so replicas
 //! running the same timer cannot both sweep one tick, and a crashed leader
-//! never wedges the next. Every step is idempotent: a failure stops that
-//! organization's tail, or that person's erasure, until the next tick, and
-//! never the rest of the sweep.
+//! never wedges the next: the lock's transaction is pinged while the tick
+//! runs, and a leader that stops pinging loses it to the role's idle
+//! cut-off. Every step is idempotent: a failure stops that organization's
+//! tail, or that person's erasure, until the next tick, and never the rest
+//! of the sweep.
 //!
 //! **Deletion.** The `pending_deletion` mark is the durable queue. An
 //! organization past `erase_after` is **finalized** (every sibling's purge,
@@ -25,6 +27,8 @@
 //! **Audit verify.** Every organization's tamper-evident chain, walked and
 //! recomputed. A break is logged at `error!` and fails the run; it is never
 //! auto-repaired, because a forked chain is a finding.
+
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use serde_json::json;
@@ -77,6 +81,19 @@ struct Tally {
     failed: u32,
 }
 
+/// How often a leader's lock transaction is pinged: well inside the role's
+/// two-minute `idle_in_transaction_session_timeout`, which ends the session,
+/// and the lock with it, under a tick left idle that long.
+const LEADER_HEARTBEAT: Duration = Duration::from_secs(30);
+
+/// The longest one deletion tick runs before it stops where it is; the next
+/// tick, ten minutes on, carries on from the listing.
+const DELETION_TICK_BUDGET: Duration = Duration::from_mins(30);
+
+/// The longest one audit-verify walk runs: far past a walk of every chain,
+/// short of the next day's.
+const AUDIT_VERIFY_BUDGET: Duration = Duration::from_hours(12);
+
 /// Take the leader lock for one tick on a transaction of its own. `None`
 /// when another replica holds it: the loser skips the tick entirely.
 async fn leader_of(
@@ -91,16 +108,60 @@ async fn leader_of(
     Ok(is_leader.then_some(leader_tx))
 }
 
+/// Run one tick's `work` as the leader, pinging the lock's transaction while
+/// it runs. ⚠ **Unpinged, a tick past the idle cut-off lost its lock
+/// halfway** and another replica's tick ran beside the rest of it. A leader
+/// that dies stops pinging, and the cut-off frees its lock two minutes later.
+/// A ping that fails may mean the lock is gone, so the tick stops there; and
+/// so does a tick past its `budget`, since a step hung on an outside call
+/// would otherwise keep the lock pinged and stop every replica's sweep.
+async fn as_leader<T>(
+    mut leader: sqlx::Transaction<'_, sqlx::Postgres>,
+    budget: Duration,
+    work: impl std::future::Future<Output = Result<T, TelmoniError>>,
+) -> Result<T, TelmoniError> {
+    let mut work = std::pin::pin!(tokio::time::timeout(budget, work));
+    let mut beat = tokio::time::interval(LEADER_HEARTBEAT);
+    beat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // The first tick is immediate; the lock was taken just now.
+    beat.tick().await;
+    let out = loop {
+        tokio::select! {
+            out = &mut work => break out.unwrap_or_else(|_| {
+                Err(TelmoniError::Internal(format!(
+                    "the tick ran past its {} minutes and stopped; the next one carries on",
+                    budget.as_secs() / 60
+                )))
+            }),
+            _ = beat.tick() => {
+                sqlx::query("SELECT 1")
+                    .execute(&mut *leader)
+                    .await
+                    .map_err(|e| TelmoniError::internal("the sweep's leader lock was lost", e))?;
+            }
+        }
+    };
+    // The tick's outcome stands either way: a rollback that fails means the
+    // connection is gone, and the lock went with it.
+    if let Err(e) = leader.rollback().await {
+        tracing::warn!(error = %e, "the sweep's leader transaction did not roll back cleanly");
+    }
+    out
+}
+
 /// One leadered deletion tick: every due organization's step, then every
 /// pending person's erasure.
 pub async fn deletion(state: &AppState) -> Result<DeletionSwept, TelmoniError> {
-    let Some(leader_tx) = leader_of(state, LOCK_ID_DELETION_SWEEP).await? else {
+    let Some(leader) = leader_of(state, LOCK_ID_DELETION_SWEEP).await? else {
         return Ok(DeletionSwept::default());
     };
 
-    let organizations = sweep_organizations(state).await?;
-    let people = sweep_people(state).await?;
-    leader_tx.rollback().await?;
+    let (organizations, people) = as_leader(leader, DELETION_TICK_BUDGET, async {
+        let organizations = sweep_organizations(state).await?;
+        let people = sweep_people(state).await?;
+        Ok((organizations, people))
+    })
+    .await?;
 
     let mut failed = Vec::new();
     if organizations.failed > 0 {
@@ -265,36 +326,40 @@ pub async fn retention(state: &AppState) -> Result<RetentionSwept, TelmoniError>
 /// verify each, report. A break logs at `error!` and fails the run after the
 /// walk, so every other chain is still checked; nothing is repaired.
 pub async fn audit_verify(state: &AppState) -> Result<(), TelmoniError> {
-    let Some(leader_tx) = leader_of(state, LOCK_ID_AUDIT_VERIFY).await? else {
+    let Some(leader) = leader_of(state, LOCK_ID_AUDIT_VERIFY).await? else {
         return Ok(());
     };
 
-    let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-    let organization_ids = audit::distinct_organizations(&mut tx).await?;
-    tx.commit().await?;
+    let (verified, broken, unreadable) = as_leader(leader, AUDIT_VERIFY_BUDGET, async {
+        let mut tx = maintenance_scope(&state.db, AuthLane).await?;
+        let organization_ids = audit::distinct_organizations(&mut tx).await?;
+        tx.commit().await?;
 
-    let (mut verified, mut broken, mut unreadable) = (0u64, 0u64, 0u64);
-    for organization_id in &organization_ids {
-        let report = match verify_one_chain(state, organization_id).await {
-            Ok(report) => report,
-            Err(e) => {
-                unreadable += 1;
-                tracing::error!(organization_id = %organization_id, error = %e,
-                    "audit chain could not be verified — this chain is UNCHECKED, not intact");
-                continue;
+        let (mut verified, mut broken, mut unreadable) = (0u64, 0u64, 0u64);
+        for organization_id in &organization_ids {
+            let report = match verify_one_chain(state, organization_id).await {
+                Ok(report) => report,
+                Err(e) => {
+                    unreadable += 1;
+                    tracing::error!(organization_id = %organization_id, error = %e,
+                        "audit chain could not be verified — this chain is UNCHECKED, not intact");
+                    continue;
+                }
+            };
+            verified += 1;
+            if let Some(first_break) = &report.first_break {
+                broken += 1;
+                tracing::error!(
+                    organization_id = %organization_id,
+                    rows = report.rows,
+                    first_break = %json!(first_break),
+                    "AUDIT CHAIN BREAK — the tamper-evident log failed verification"
+                );
             }
-        };
-        verified += 1;
-        if let Some(first_break) = &report.first_break {
-            broken += 1;
-            tracing::error!(
-                organization_id = %organization_id,
-                rows = report.rows,
-                first_break = %json!(first_break),
-                "AUDIT CHAIN BREAK — the tamper-evident log failed verification"
-            );
         }
-    }
+        Ok((verified, broken, unreadable))
+    })
+    .await?;
     tracing::info!(
         organizations = verified,
         broken,
@@ -302,7 +367,6 @@ pub async fn audit_verify(state: &AppState) -> Result<(), TelmoniError> {
         "audit-chain verify sweep complete"
     );
 
-    leader_tx.rollback().await?;
     if broken > 0 || unreadable > 0 {
         return Err(TelmoniError::Internal(format!(
             "{broken} of {verified} audit chains failed verification; \

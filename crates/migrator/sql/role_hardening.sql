@@ -50,9 +50,11 @@ ALTER ROLE agent         SET statement_timeout = '5s';
 ALTER ROLE agent         SET lock_timeout      = '2s';
 
 -- A leaked transaction would hold its row and advisory locks (an organization's
--- audit chain among them) until the pool recycled it. The deletion sweep's
--- leader lock is a transaction of its own that only waits, never queries, so
--- two minutes bounds a tick's leadership as well.
+-- audit chain among them) until the pool recycled it. Auth's sweeps hold their
+-- leader lock on a transaction of its own, pinged every 30 seconds while the
+-- tick runs: a leader that crashes frees it at once, one cut off from the
+-- database two minutes after its last ping, and a tick stuck on an outside
+-- call when its time budget runs out (crates/auth/src/sweep.rs).
 ALTER ROLE auth          SET idle_in_transaction_session_timeout = '2min';
 ALTER ROLE notifications SET idle_in_transaction_session_timeout = '2min';
 ALTER ROLE agent         SET idle_in_transaction_session_timeout = '2min';

@@ -21,7 +21,8 @@ A multi-tenant foundation: organizations and projects, members and roles, API to
 
 ```console
 make first-run     # once: scaffold env files, dependencies, PostgreSQL, and migrations
-make up            # launch PostgreSQL, Redis, Mailpit, Ollama, the server and console
+make up            # launch PostgreSQL, Redis, Mailpit, the server and console
+                   # (and Ollama, with COMPOSE_PROFILES=ollama in .env)
 ```
 
 `make first-run` creates `.env` (the server) and `web/.env.local` (the console) from their examples and mints a shared `SERVICE_SECRET`.
@@ -38,6 +39,7 @@ Sign-in requires no third-party provider locally: `auth` holds accounts and mint
 ## Repository Layout
 
 ```text
+architecture/     How Telmoni is built, and why: one page per area.
 crates/
   telmoni/        The binary: links modules, wires seams, serves on :8082,
                   runs loops and operational jobs (`migrate`, `rotate`, `sweep`).
@@ -57,12 +59,24 @@ scripts/          Dev automation, webhook receivers, and tunneling helpers.
 
 ## Architecture & Data Flow
 
-Telmoni runs as one process, `telmoni serve`, constructed from modular library crates:
+Telmoni runs as one process, `telmoni serve`, built from library crates. [`architecture/`](architecture/README.md) describes how it is built and why, one page per area:
+- the server and its seams;
+- identity;
+- tenancy;
+- data;
+- background work;
+- deletion;
+- notifications;
+- the agent;
+- the console;
+- deployment.
 
-- **Isolated Database Roles:** Modules do not access each other's tables directly. Each opens its own database pool with a distinct role (`auth`, `notifications`, `agent`) enforcing row-level security within the single PostgreSQL instance.
-- **Seam Traits:** Communication across module boundaries is strictly mediated through traits defined in `crates/shared/src/seam.rs`.
-- **Console as Thin Proxy:** The Next.js web console relays bearer tokens and the shared `SERVICE_SECRET` on every request; the server validates both.
-- **Single Migration per Module:** Before `v0.1.0`, schema modifications edit the single migration file under each crate's `migrations/` directory.
+In brief:
+
+- **Separate modules in one process:** Modules never read each other's tables. They ask through traits in `crates/shared/src/seam.rs`.
+- **A database role per module:** Each module opens its own pool as its own role (`auth`, `notifications`, `agent`), so row-level security and grants hold inside one process. The self-host compose quickstart connects every module as one superuser, which bypasses both (see [architecture/tenancy.md](architecture/tenancy.md#when-everything-connects-as-a-superuser)).
+- **Console as a thin proxy:** The console holds the session and relays requests. Person lanes carry the bearer and the shared `SERVICE_SECRET`. Lanes that run before sign-in carry the secret alone. Every rule lives in Rust.
+- **Single migration per module:** Before `v0.1.0`, schema changes edit the single migration file under each crate's `migrations/` directory.
 
 ---
 
@@ -83,7 +97,7 @@ Deployments are supported via:
 Deployments requiring custom integrations can compile a custom binary using the same crates:
 - `telmoni::App::assemble` accepts custom identity providers, mail transports, and `telmoni_shared::seam::PurgeHook` implementations.
 - Modules implementing `telmoni::Module` can be mounted directly onto the server listener.
-- Console UI extensions overlay `web/` using `lib/extension/` hooks (`nav.ts`, `site-nav.ts`, `public-paths.ts`, and `banner.tsx`).
+- Console UI extensions overlay `web/` by replacing the slot files `lib/extension/nav.ts`, `lib/extension/site-nav.ts`, `lib/extension/public-paths.ts` and `components/extension/banner.tsx`. Overlays import only from `lib/extension/ui.ts` and `lib/extension/server.ts`.
 
 ---
 
@@ -103,7 +117,7 @@ make test TEST_THREADS=2   # Integration tests against local PostgreSQL
 make fmt                   # Format Rust and TypeScript codebase
 ```
 
-For a comprehensive guide to architecture, authentication, and workflows, see [DEVELOPMENT.md](DEVELOPMENT.md).
+For setting up and working on the stack, see [DEVELOPMENT.md](DEVELOPMENT.md); for how it is built, see [architecture/](architecture/README.md).
 
 ---
 
@@ -117,6 +131,7 @@ Please report vulnerabilities following our [Security Policy](SECURITY.md). Do n
 
 - [Contributing](CONTRIBUTING.md) — DCO requirements, code standards, and PR workflows.
 - [Code of Conduct](CODE_OF_CONDUCT.md) — Contributor Covenant v2.1.
-- [Development Guide](DEVELOPMENT.md) — In-depth architectural and developer documentation.
+- [Architecture](architecture/README.md) — How Telmoni is built, and why.
+- [Development Guide](DEVELOPMENT.md) — Setting up, running and checking the stack.
 - [Security Policy](SECURITY.md) — Vulnerability reporting channels and safe harbor.
 - [License](LICENSE) — Licensed under the Apache License, Version 2.0.

@@ -17,10 +17,12 @@ import { Button } from "@/components/ui/button";
 import {
   agentEvents,
   agentReducer,
+  describeRefusal,
   initialAgentState,
-  type AgentProblem,
+  isAgentDisabled,
 } from "@/lib/agent/stream";
 import { isOrganizationSegment, rootSegment } from "@/lib/console-nav";
+import { AGENT_MODIFIER_KEY } from "@/lib/keys";
 import { useProjects } from "@/lib/store";
 import { AGENT_MESSAGE_MAX, type AgentStatus } from "@/lib/types/agent";
 import { cn } from "@/lib/utils";
@@ -30,7 +32,7 @@ type View = "conversation" | "history";
 const PANEL_ID = "agent-panel";
 
 export function AgentPanel() {
-  const { agentOpen, closeAgent } = useConsoleUi();
+  const { agentOpen, closeAgent, toggleAgent } = useConsoleUi();
   const { projectId: routeProjectId } = useParams<{ projectId?: string }>();
   const projects = useProjects();
   const rawProjectId = typeof routeProjectId === "string" ? routeProjectId : null;
@@ -42,7 +44,7 @@ export function AgentPanel() {
       ? rawProjectId
       : null;
 
-  const [status, setStatus] = useState<AgentStatus | null>(null);
+  const [status, setStatus] = useState<{ projectId: string; status: AgentStatus } | null>(null);
   const [view, setView] = useState<View>("conversation");
   const [state, dispatch] = useReducer(agentReducer, initialAgentState);
   const [history, setHistory] = useState<HistoryState>({ kind: "loading" });
@@ -53,27 +55,62 @@ export function AgentPanel() {
   const panelRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  // The turn streaming now. ⚠ **Every way out of a turn aborts it**: a new
+  // conversation, another one opened, another project, the panel closed.
+  // Left running, its events landed in the next turn's reply, and its `done`
+  // handed the next question to the old conversation.
+  const turnRef = useRef<AbortController | null>(null);
 
-  // Track status per project so navigating between enabled and disabled
-  // projects updates the badge and form controls.
+  const cancelTurn = useCallback(() => {
+    turnRef.current?.abort();
+    turnRef.current = null;
+  }, []);
+
+  // Asked each time the panel opens on a project, so a check that failed
+  // once is not the answer for good, and a closed panel asks nothing.
   useEffect(() => {
-    if (!projectId) return;
+    if (!agentOpen || !projectId) return;
     let cancelled = false;
     void agentStatusAction(projectId).then((res) => {
       if (!cancelled) {
-        if ("error" in res) {
-          setStatus("unavailable");
-        } else {
-          setStatus(res.status);
-        }
+        setStatus({ projectId, status: "error" in res ? "unavailable" : res.status });
       }
     });
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [agentOpen, projectId]);
 
-  // Focus trap / escape handling.
+  // A conversation belongs to the project it was asked in; another project
+  // starts clean rather than sending its questions into this one's. Reset
+  // while rendering, as React has state follow a prop; the turn in flight is
+  // aborted by the effect below.
+  const [shownProjectId, setShownProjectId] = useState(projectId);
+  if (shownProjectId !== projectId) {
+    setShownProjectId(projectId);
+    dispatch({ type: "reset" });
+    setView("conversation");
+    setHistory({ kind: "loading" });
+    setNotice(null);
+  }
+  useEffect(() => cancelTurn, [projectId, cancelTurn]);
+
+  // ⌘J opens and closes the panel. The chord lives with the thing it opens,
+  // as ⌘K does in `console-search.tsx`.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== AGENT_MODIFIER_KEY) return;
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.defaultPrevented || e.altKey || e.shiftKey) return;
+      e.preventDefault();
+      toggleAgent();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [toggleAgent]);
+
+  // Focus on open, and Escape from inside the panel closes it. Only from
+  // inside: Escape in a dialog or the search palette closes that alone.
   useEffect(() => {
     if (!agentOpen) return;
     const previous = document.activeElement as HTMLElement | null;
@@ -83,10 +120,10 @@ export function AgentPanel() {
     }, 50);
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        closeAgent();
-      }
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (!panelRef.current?.contains(document.activeElement)) return;
+      e.preventDefault();
+      closeAgent();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => {
@@ -95,6 +132,16 @@ export function AgentPanel() {
       previous?.focus();
     };
   }, [agentOpen, closeAgent]);
+
+  // Closing stops the turn, and the model call behind it.
+  useEffect(() => {
+    if (agentOpen || !turnRef.current) return;
+    cancelTurn();
+    dispatch({
+      type: "fail",
+      problem: { title: "Stopped when the agent was closed.", detail: null },
+    });
+  }, [agentOpen, cancelTurn]);
 
   // Auto-scroll on new messages / tokens.
   useEffect(() => {
@@ -123,11 +170,12 @@ export function AgentPanel() {
         setNotice(res.error);
         return;
       }
+      cancelTurn();
       dispatch({ type: "load", conversation: res.conversation });
       setView("conversation");
       inputRef.current?.focus();
     },
-    [projectId],
+    [projectId, cancelTurn],
   );
 
   const deleteConversation = useCallback(
@@ -139,19 +187,21 @@ export function AgentPanel() {
         return;
       }
       if (state.conversationId === conversationId) {
+        cancelTurn();
         dispatch({ type: "reset" });
       }
       void loadHistory(projectId);
     },
-    [projectId, state.conversationId, loadHistory],
+    [projectId, state.conversationId, loadHistory, cancelTurn],
   );
 
   const newConversation = useCallback(() => {
+    cancelTurn();
     dispatch({ type: "reset" });
     setView("conversation");
     setNotice(null);
     inputRef.current?.focus();
-  }, []);
+  }, [cancelTurn]);
 
   const send = useCallback(async () => {
     const text = draft.trim();
@@ -163,6 +213,12 @@ export function AgentPanel() {
     const assistantId = crypto.randomUUID();
     dispatch({ type: "send", userId, assistantId, message: text });
 
+    cancelTurn();
+    const turn = new AbortController();
+    turnRef.current = turn;
+    // Only the turn the panel is on may change it: one that was cancelled
+    // (a reset, another project) can still have a dispatch in flight.
+    const current = () => turnRef.current === turn;
     try {
       const response = await fetch("/api/agent/turns", {
         method: "POST",
@@ -172,26 +228,22 @@ export function AgentPanel() {
           conversationId: state.conversationId ?? undefined,
           message: text,
         }),
+        signal: turn.signal,
       });
 
       if (!response.ok) {
-        let problem: AgentProblem = {
-          title: "Couldn't talk to the agent",
-          detail: "Try again shortly.",
-        };
-        try {
-          const data = await response.json();
-          if (data.title) {
-            problem = { title: data.title, detail: data.detail ?? null };
-          }
-        } catch {
-          // ignore
-        }
-        dispatch({ type: "fail", problem });
+        const body: unknown = await response.json().catch(() => null);
+        if (!current()) return;
+        if (isAgentDisabled(body)) setStatus({ projectId, status: "disabled" });
+        dispatch({
+          type: "fail",
+          problem: describeRefusal(response.status, body, response.headers.get("Retry-After")),
+        });
         return;
       }
 
       if (!response.body) {
+        if (!current()) return;
         dispatch({
           type: "fail",
           problem: { title: "No response from agent", detail: null },
@@ -200,18 +252,44 @@ export function AgentPanel() {
       }
 
       for await (const event of agentEvents(response.body)) {
+        if (!current()) return;
         dispatch({ type: "event", event });
+        // Its last word: the turn is over, and closing the panel now must
+        // not stamp "stopped" on a finished reply.
+        if (event.type === "done" || event.type === "error") {
+          turnRef.current = null;
+          return;
+        }
+      }
+      // ⚠ **A stream can close without its last word**: the server's task
+      // dying, a proxy cutting the connection. Without this the reply looked
+      // in progress forever and the input stayed disabled.
+      if (current()) {
+        dispatch({
+          type: "fail",
+          problem: {
+            title: "The reply was cut off.",
+            detail: "The connection closed before the agent finished. Try again.",
+          },
+        });
       }
     } catch {
+      if (!current()) return;
       dispatch({
         type: "fail",
         problem: { title: "Network error", detail: "Please try again shortly." },
       });
+    } finally {
+      if (turnRef.current === turn) turnRef.current = null;
     }
-  }, [draft, projectId, state.conversationId, state.streaming]);
+  }, [draft, projectId, state.conversationId, state.streaming, cancelTurn]);
 
   const onInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // Enter while an input method is composing confirms the candidate; it
+    // does not send a half-typed message. Safari reports that Enter with
+    // `isComposing` already false, and keyCode 229 instead.
+    const composing = e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229;
+    if (e.key === "Enter" && !e.shiftKey && !composing) {
       e.preventDefault();
       void send();
     }
@@ -232,7 +310,7 @@ export function AgentPanel() {
 
   if (!agentOpen) return null;
 
-  const effectiveStatus = projectId ? status : null;
+  const effectiveStatus = projectId && status?.projectId === projectId ? status.status : null;
   const canSend = Boolean(projectId && effectiveStatus === "enabled" && !state.streaming);
 
   return (
@@ -272,7 +350,7 @@ export function AgentPanel() {
             {!projectId
               ? "Select a project to start"
               : effectiveStatus === "enabled"
-                ? "Answers questions about your telemetry"
+                ? "Answers questions about this project"
                 : effectiveStatus === "disabled"
                   ? "Agent is disabled"
                   : effectiveStatus === "unavailable"

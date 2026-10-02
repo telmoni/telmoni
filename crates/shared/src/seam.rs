@@ -29,8 +29,10 @@ pub enum Audience {
     Everyone,
     /// A role that may read the audit log: a project's own chain.
     Audit,
-    /// The organization's owner: its whole chain and its own feed.
-    Owner,
+    /// The organization's owner and its admins, as the console reads it
+    /// (`OrganizationRole::can_view_rolled_up_audit`): its whole chain and
+    /// its own feed.
+    OrganizationAdmin,
 }
 
 /// Where the indexer stopped in a source: the last row taken, in the
@@ -110,6 +112,30 @@ pub trait Auth: Send + Sync {
     /// nothing about who is asking.
     async fn resolve(&self, headers: &HeaderMap) -> Result<Acting, TelmoniError>;
 
+    /// The person `acting` names, on the same project, read again from the
+    /// tables: their session still live, their role on it now, and the
+    /// organization that holds it now. For a module still working on a
+    /// request it resolved a while ago — the agent's tool calls, up to a
+    /// minute and a half into a turn. The bearer is not presented again, so
+    /// one that merely ran out since does not end the request.
+    async fn resolve_again(&self, acting: &Acting) -> Result<Acting, TelmoniError> {
+        let _ = acting;
+        Err(not_linked("a role read again"))
+    }
+
+    /// Where each of `projects` is held now — its organization — for every
+    /// one that still exists; one that does not is left out. For a module
+    /// keying rows on a project and its organization, finding the ones a
+    /// transfer or a delete left behind. An error answers nothing, never
+    /// "none of them exist".
+    async fn project_homes(
+        &self,
+        projects: &[ProjectId],
+    ) -> Result<Vec<(ProjectId, OrganizationId)>, TelmoniError> {
+        let _ = projects;
+        Err(not_linked("project homes"))
+    }
+
     /// The global feature-flag set. **An unreadable set is an error, never
     /// all-on**: a kill switch that fails open during the outage it was
     /// thrown for is no kill switch.
@@ -141,7 +167,7 @@ pub trait Auth: Send + Sync {
     }
 
     /// Audit events this person may read: the project's to a role that reads
-    /// the audit log, the whole organization's to its owner.
+    /// the audit log, the whole organization's to its owner and admins.
     async fn audit_events(
         &self,
         acting: &Acting,
@@ -243,30 +269,36 @@ pub trait Notifications: Send + Sync {
 }
 
 /// What the agent does for the modules beside it: forget what it holds of a
-/// person, an organization or a project when they go, and hand a person
-/// their own conversations for an export. Each purge is idempotent and
-/// answers how many rows went.
+/// person or an organization when they go. Each purge is idempotent and
+/// answers how many rows went. A project that moved or was deleted needs no
+/// call: the agent asks [`Auth::project_homes`] itself, hourly, and removes
+/// what it holds of the project under an organization that no longer has it.
 #[async_trait]
 pub trait Agent: Send + Sync {
     /// Every conversation of the person's, and every passage that names them.
-    async fn erase_person(&self, user_id: &UserId) -> Result<u64, TelmoniError>;
+    ///
+    /// The model quotes their `address` and `name` from the member list into
+    /// other people's answers, which carry no id to find them by, so those
+    /// are scrubbed by the text itself: the address, theirs alone, wherever
+    /// it is; the name, which is not, in the `organizations` they are in.
+    ///
+    /// An answer still being written in those organizations when this runs
+    /// is withheld when it lands rather than saved. Idempotent, and auth
+    /// calls it twice: before the person's memberships go, while it can still
+    /// name the organizations, and after, once no lane can read them.
+    async fn erase_person(
+        &self,
+        user_id: &UserId,
+        address: &str,
+        name: Option<&str>,
+        organizations: &[OrganizationId],
+    ) -> Result<u64, TelmoniError>;
 
     /// Everything held for the organization.
     async fn purge_organization(
         &self,
         organization_id: &OrganizationId,
     ) -> Result<u64, TelmoniError>;
-
-    /// Everything held for the project: before it is handed to another
-    /// organization, and after it is deleted.
-    async fn purge_project(&self, project_id: &ProjectId) -> Result<u64, TelmoniError>;
-
-    /// The person's conversations in the organization, messages included.
-    async fn export_person(
-        &self,
-        user_id: &UserId,
-        organization_id: &OrganizationId,
-    ) -> Result<serde_json::Value, TelmoniError>;
 }
 
 /// A module of the deployment's own that holds something of an

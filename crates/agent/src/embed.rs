@@ -8,10 +8,10 @@ use serde_json::{Value, json};
 use telmoni_shared::TelmoniError;
 
 use crate::config::{EMBEDDING_DIMENSIONS, EmbeddingsConfig};
-use crate::model::{error_kind, http_client, send, unavailable};
+use crate::model::{error_kind, http_client, not_now_error, send, unavailable};
 
 /// How many texts one request carries.
-const BATCH: usize = 32;
+pub(crate) const BATCH: usize = 32;
 
 /// How long one batch may take: a local model on a CPU is slow to embed 32
 /// passages, and the indexer is not waiting on anyone.
@@ -54,10 +54,16 @@ impl OpenAiEmbedder {
             request = request.bearer_auth(key.expose());
         }
         let response = send("embeddings", request).await?;
-        let body: Value = response
-            .json()
+        // Read, then parsed: a body that never arrived whole is the
+        // endpoint's state, and a whole one that does not parse — a
+        // gateway's page in place of vectors, say — is its answer, and may be
+        // about what it was sent. reqwest calls both a decode error.
+        let body = response
+            .bytes()
             .await
-            .map_err(|e| unavailable(format!("embeddings {}", error_kind(&e))))?;
+            .map_err(|e| not_now_error("embeddings", error_kind(&e)))?;
+        let body: Value = serde_json::from_slice(&body)
+            .map_err(|_| unavailable("embeddings answered a body that does not parse"))?;
         vectors(&body, texts.len())
     }
 }
@@ -130,6 +136,10 @@ pub fn literal(vector: &[f32]) -> Result<String, TelmoniError> {
             "an embedding with a non-finite value".into(),
         ));
     }
+    // Cosine distance to a zero vector is NaN, which sorts anywhere.
+    if vector.iter().all(|x| *x == 0.0) {
+        return Err(TelmoniError::Internal("an embedding of all zeros".into()));
+    }
     let mut out = String::with_capacity(vector.len() * 12);
     out.push('[');
     for (i, x) in vector.iter().enumerate() {
@@ -163,7 +173,9 @@ mod tests {
     fn only_a_full_width_finite_vector_becomes_a_literal() {
         assert!(literal(&[0.5; 3]).is_err());
         let mut v = vec![0.0f32; EMBEDDING_DIMENSIONS];
-        assert!(literal(&v).unwrap().starts_with("[0,0,"));
+        assert!(literal(&v).is_err(), "a zero vector has no direction");
+        v[1] = 0.5;
+        assert!(literal(&v).unwrap().starts_with("[0,0.5,"));
         v[3] = f32::NAN;
         assert!(literal(&v).is_err());
     }

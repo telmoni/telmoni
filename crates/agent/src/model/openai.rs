@@ -159,7 +159,11 @@ impl Assembler {
             if let Some(extra) = call.get("extra_content") {
                 partial.extra_content = Some(extra.clone());
             }
-            if let Some(name) = call.pointer("/function/name").and_then(Value::as_str) {
+            // Some servers repeat the whole name on every fragment; appending
+            // that made `searchsearch`, a tool that does not exist.
+            if let Some(name) = call.pointer("/function/name").and_then(Value::as_str)
+                && partial.name != name
+            {
                 partial.name.push_str(name);
             }
             if let Some(arguments) = call.pointer("/function/arguments").and_then(Value::as_str) {
@@ -172,6 +176,14 @@ impl Assembler {
                 Ok(Some(text.to_owned()))
             }
             _ => Ok(None),
+        }
+    }
+
+    /// The server said `[DONE]`: a stream that named no `finish_reason`
+    /// still ended where its server meant it to.
+    pub(crate) fn done(&mut self) {
+        if self.finish_reason == StopReason::Unfinished {
+            self.finish_reason = StopReason::Finished;
         }
     }
 
@@ -245,6 +257,7 @@ impl Model for OpenAi {
         let mut assembler = Assembler::default();
         read_events("openai-compatible", response, |event| {
             if event.data.trim() == "[DONE]" {
+                assembler.done();
                 return Ok(false);
             }
             let Ok(chunk) = serde_json::from_str::<Value>(&event.data) else {

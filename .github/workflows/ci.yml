@@ -90,7 +90,7 @@ jobs:
       AUTH_DATABASE_URL: postgresql://telmoni:telmoni_dev@localhost:5432/telmoni
     services:
       postgres:
-        image: postgres:17-alpine
+        image: pgvector/pgvector:pg17
         env:
           POSTGRES_USER: telmoni
           POSTGRES_PASSWORD: telmoni_dev
@@ -121,10 +121,15 @@ jobs:
       # CI has one database and one superuser, so the migrator's DSN is the
       # tests'. The per-module roles do not exist here, so the grants are
       # skipped; the suites that need the role topology build it themselves.
+      #
+      # The agent's migration only checks for `vector`, which a superuser
+      # installs, so the extensions go in first as compose's init script does.
+      - name: Install extensions (mirrors compose's init script)
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f crates/migrator/sql/dev_extensions.sql
       - name: Run migrations (every schema, as make db-migrate runs them)
         run: MIGRATOR_DATABASE_URL="$DATABASE_URL" MIGRATION_SETS="$(make -s migration-sets)" cargo run -p telmoni -- migrate
       - name: Pin dev-role search_path (mirrors make db-dev-setup)
-        run: psql "$DATABASE_URL" -c "ALTER ROLE telmoni SET search_path = auth, notifications, audit, public;"
+        run: psql "$DATABASE_URL" -c "ALTER ROLE telmoni SET search_path = auth, notifications, agent, audit, public;"
       - name: cargo test
         run: cargo test --workspace --no-fail-fast -- --test-threads=4
 

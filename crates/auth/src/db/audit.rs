@@ -130,8 +130,9 @@ pub struct IndexedEvent {
 
 /// How old a row must be before the index pages past it. An event's
 /// `created_at` is its transaction's start, so one committed late would land
-/// behind a cursor that had already moved on; no transaction of the auth
-/// role outlives its two-minute idle cut-off, and this is past it.
+/// behind a cursor that had already moved on; a transaction of the auth role
+/// that writes one does not outlive its two-minute idle cut-off (the sweeps'
+/// pinged leader lock does, and writes none), and this is past it.
 const INDEX_SETTLE_SECONDS: i32 = 180;
 
 /// Every organization's events after `(after_at, after_id)`, oldest first,

@@ -355,6 +355,10 @@ const PERSON_IN_TENANT_TABLES: &[&str] = &[
     // nobody else in it reads them.
     "agent.conversations",
     "agent.messages",
+    // An erasure's fence: whom it erased, and when it reached the
+    // organization. Every answer saved there reads whether one fell inside
+    // its turn; the person is an id, and no lane serves the row.
+    "agent.erasures",
 ];
 
 /// ⚠ **A table keyed on both a person and a tenant is isolated only as far as

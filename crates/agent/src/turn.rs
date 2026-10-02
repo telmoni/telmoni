@@ -28,9 +28,21 @@ pub const MAX_TOOL_ROUNDS: usize = 8;
 /// here first leaves room to save what was written, cite it and say `done`.
 pub const TURN_BUDGET: Duration = Duration::from_secs(100);
 
+/// How often a model call is checked, while it streams, for an asker who
+/// has gone.
+const RECHECK_EVERY: Duration = if cfg!(test) {
+    Duration::from_millis(10)
+} else {
+    Duration::from_secs(10)
+};
+
 /// What the person is told when the turn ran out of time.
 const TIMED_OUT_NOTE: &str = "\n\nI ran out of time before finishing. Ask again, or try a \
                               narrower question.";
+
+/// What the person is told when the model broke off mid-answer.
+const INTERRUPTED_NOTE: &str = "\n\nThe model stopped answering before it finished. Ask again \
+                                for the rest.";
 
 /// What the person is told when the cap cut the turn short.
 const CAPPED_NOTE: &str = "\n\nI stopped after looking things up 8 times without reaching an \
@@ -46,7 +58,13 @@ pub trait Runner: Send {
     /// Run one call.
     async fn run(&mut self, call: &ToolCall) -> ToolResult;
 
-    /// Whether the asker has gone, so the loop stops spending on them.
+    /// Read again whether the asker is still who began the turn, before the
+    /// model writes to them again; one found gone shows in
+    /// [`Runner::cancelled`].
+    async fn recheck(&mut self) {}
+
+    /// Whether the asker has gone — left, or is no longer who began the turn
+    /// — so the loop stops spending on them.
     fn cancelled(&self) -> bool {
         false
     }
@@ -63,7 +81,9 @@ pub enum Ending {
     Truncated,
     /// The deadline passed first.
     TimedOut,
-    /// The asker left; nothing is saved or sent.
+    /// The model's stream broke off after it had written something.
+    Interrupted,
+    /// The asker left, or is no longer who began the turn; nothing is saved.
     Cancelled,
 }
 
@@ -75,6 +95,7 @@ impl Ending {
             Self::Capped => Some(CAPPED_NOTE),
             Self::Truncated => Some(TRUNCATED_NOTE),
             Self::TimedOut => Some(TIMED_OUT_NOTE),
+            Self::Interrupted => Some(INTERRUPTED_NOTE),
             Self::Answered | Self::Cancelled => None,
         }
     }
@@ -122,17 +143,74 @@ pub async fn converse(
         if Instant::now() >= deadline {
             return Ok(ended(Ending::TimedOut));
         }
-        let Ok(turn) =
-            tokio::time::timeout_at(deadline, model.stream(system, transcript, tools, &sink)).await
-        else {
+        // Before every call after the first: a round that calls no tool
+        // would otherwise write to an asker who has gone since the last.
+        if round > 0 {
+            let Ok(()) = tokio::time::timeout_at(deadline, runner.recheck()).await else {
+                return Ok(ended(Ending::TimedOut));
+            };
+            if runner.cancelled() {
+                return Ok(ended(Ending::Cancelled));
+            }
+        }
+        let before = text().len();
+        // ⚠ **Watched while it streams.** One call can write for a minute
+        // and more; an asker gone meanwhile — signed out everywhere, taken
+        // off the project, the panel closed — has it dropped within
+        // `RECHECK_EVERY`, not read to its end.
+        let streamed =
+            tokio::time::timeout_at(deadline, model.stream(system, transcript, tools, &sink));
+        let watching = async {
+            let mut every = tokio::time::interval(RECHECK_EVERY);
+            every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            // The first tick is immediate; the asker was read just now.
+            every.tick().await;
+            loop {
+                every.tick().await;
+                // Bounded: an auth slow to answer is asked again at the next
+                // tick, not waited on, nor asked back to back, and ends nothing.
+                let _ = tokio::time::timeout(RECHECK_EVERY, runner.recheck()).await;
+                if runner.cancelled() {
+                    return;
+                }
+            }
+        };
+        let streamed = tokio::select! {
+            biased;
+            streamed = streamed => streamed,
+            () = watching => return Ok(ended(Ending::Cancelled)),
+        };
+        let Ok(turn) = streamed else {
             return Ok(ended(Ending::TimedOut));
         };
-        let turn = turn?;
+        // A model that breaks off mid-answer leaves words the person has
+        // already read; they are kept, with a note, not thrown away with
+        // the error. A call that failed before writing anything is an
+        // error, even after an earlier round's "let me check": that
+        // preamble is no answer to save.
+        let turn = match turn {
+            Ok(turn) => turn,
+            Err(e) if text().len() > before => {
+                tracing::warn!(error = %e, "the model broke off mid-answer; keeping what it wrote");
+                return Ok(ended(Ending::Interrupted));
+            }
+            Err(e) => return Err(e),
+        };
         if runner.cancelled() {
             return Ok(ended(Ending::Cancelled));
         }
         if turn.stop_reason == StopReason::Refused && turn.text.is_empty() {
             return Err(unavailable("the model declined the request"));
+        }
+        // A stream that ended without saying it finished: cut off in
+        // transit, or not a stream at all (a 200 carrying an error body).
+        // Its tool calls may be half-written, so none of them run. As with a
+        // broken stream, only words this call wrote make it an answer.
+        if turn.stop_reason == StopReason::Unfinished {
+            if text().len() > before {
+                return Ok(ended(Ending::Interrupted));
+            }
+            return Err(unavailable("the model's stream ended without an answer"));
         }
         if turn.tool_calls.is_empty() {
             let ending = match turn.stop_reason {
@@ -143,6 +221,7 @@ pub async fn converse(
                 | StopReason::ToolUse
                 | StopReason::Refused
                 | StopReason::Other => Ending::Answered,
+                StopReason::Unfinished => Ending::Interrupted,
             };
             return Ok(ended(ending));
         }
@@ -151,7 +230,19 @@ pub async fn converse(
         }
         let mut results = Vec::with_capacity(turn.tool_calls.len());
         for call in &turn.tool_calls {
-            results.push(runner.run(call).await);
+            // ⚠ **The lookups are inside the deadline too.** One search can
+            // wait minutes on an embeddings endpoint, and a turn past its
+            // budget outlives the console's cut-off and the erasure fence's
+            // reckoning of how long a turn can still be writing.
+            let Ok(result) = tokio::time::timeout_at(deadline, runner.run(call)).await else {
+                return Ok(ended(Ending::TimedOut));
+            };
+            // A lookup that found the asker gone ends the turn here, before
+            // the model writes another word to them.
+            if runner.cancelled() {
+                return Ok(ended(Ending::Cancelled));
+            }
+            results.push(result);
         }
         transcript.push(turn.into_message());
         transcript.push(Message::ToolResults(results));
@@ -215,6 +306,7 @@ mod tests {
                         name: "list_connectors".into(),
                         input: json!({}),
                     }],
+                    stop_reason: StopReason::ToolUse,
                     ..ModelTurn::default()
                 });
             }
@@ -225,6 +317,7 @@ mod tests {
             on_text(&text);
             Ok(ModelTurn {
                 text,
+                stop_reason: StopReason::Finished,
                 ..ModelTurn::default()
             })
         }
@@ -396,16 +489,228 @@ mod tests {
         ));
     }
 
+    /// A model that writes a few words, then its stream breaks.
+    struct Breaks;
+
+    #[async_trait]
+    impl Model for Breaks {
+        async fn stream(
+            &self,
+            _system: &str,
+            _messages: &[Message],
+            _tools: &[ToolSpec],
+            on_text: TextSink<'_>,
+        ) -> Result<ModelTurn, TelmoniError> {
+            on_text("Partly");
+            Err(unavailable("stream broke"))
+        }
+    }
+
+    #[tokio::test]
+    async fn a_stream_that_breaks_or_stops_short_keeps_what_was_written() {
+        let quiet = |_: &str| {};
+        let broke = converse(
+            &Breaks,
+            "",
+            &mut vec![Message::User("q".into())],
+            &[],
+            &mut Counting(0),
+            &quiet,
+            unhurried(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(broke.ending, Ending::Interrupted);
+        assert_eq!(broke.text, "Partly");
+        assert!(broke.ending.note().is_some());
+
+        let short = converse(
+            &Stops(StopReason::Unfinished, "half an answer"),
+            "",
+            &mut vec![Message::User("q".into())],
+            &[],
+            &mut Counting(0),
+            &quiet,
+            unhurried(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            short.ending,
+            Ending::Interrupted,
+            "saved as if it were whole"
+        );
+
+        let nothing = converse(
+            &Stops(StopReason::Unfinished, ""),
+            "",
+            &mut vec![Message::User("q".into())],
+            &[],
+            &mut Counting(0),
+            &quiet,
+            unhurried(),
+        )
+        .await;
+        assert!(
+            nothing.is_err(),
+            "a body that was no stream became an empty answer"
+        );
+    }
+
+    /// A lookup that never answers.
+    struct Hangs;
+
+    #[async_trait]
+    impl Runner for Hangs {
+        async fn run(&mut self, _: &ToolCall) -> ToolResult {
+            std::future::pending().await
+        }
+    }
+
+    /// A tool call that hangs ends the turn at its deadline, keeping what the
+    /// model wrote before it, rather than running past the budget.
+    #[tokio::test]
+    async fn the_deadline_ends_a_hung_lookup_too() {
+        let outcome = converse(
+            &Looping(AtomicUsize::new(0)),
+            "sys",
+            &mut vec![Message::User("q".into())],
+            &[],
+            &mut Hangs,
+            &|_| {},
+            Instant::now() + Duration::from_millis(20),
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome.ending, Ending::TimedOut);
+        assert_eq!(outcome.text, ".");
+    }
+
+    /// A lookup that finds the asker no longer who began the turn.
+    #[derive(Default)]
+    struct FindsThemGone(bool);
+
+    #[async_trait]
+    impl Runner for FindsThemGone {
+        async fn run(&mut self, call: &ToolCall) -> ToolResult {
+            self.0 = true;
+            ToolResult {
+                id: call.id.clone(),
+                content: String::new(),
+                is_error: true,
+            }
+        }
+
+        fn cancelled(&self) -> bool {
+            self.0
+        }
+    }
+
+    /// An asker signed out everywhere, or taken off the project, mid-turn
+    /// ends the turn at that lookup: the model is not asked again, so nothing
+    /// more reaches the stream.
+    #[tokio::test]
+    async fn a_lookup_that_finds_the_asker_gone_ends_the_turn() {
+        let model = Looping(AtomicUsize::new(0));
+        let outcome = converse(
+            &model,
+            "sys",
+            &mut vec![Message::User("q".into())],
+            &[],
+            &mut FindsThemGone::default(),
+            &|_| {},
+            unhurried(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome.ending, Ending::Cancelled);
+        assert_eq!(
+            model.0.load(Ordering::SeqCst),
+            1,
+            "the model was asked again"
+        );
+    }
+
+    /// Finds the asker gone when it reads them again between rounds.
+    #[derive(Default)]
+    struct GoneByTheNextRound(bool);
+
+    #[async_trait]
+    impl Runner for GoneByTheNextRound {
+        async fn run(&mut self, call: &ToolCall) -> ToolResult {
+            ToolResult {
+                id: call.id.clone(),
+                content: "found".into(),
+                is_error: false,
+            }
+        }
+
+        async fn recheck(&mut self) {
+            self.0 = true;
+        }
+
+        fn cancelled(&self) -> bool {
+            self.0
+        }
+    }
+
+    /// ⚠ An asker gone between rounds hears nothing more: the round that
+    /// would have answered without a lookup is never asked for.
+    #[tokio::test]
+    async fn an_asker_gone_between_rounds_is_not_answered() {
+        let model = OnceThenAnswer(AtomicUsize::new(0));
+        let outcome = converse(
+            &model,
+            "sys",
+            &mut vec![Message::User("q".into())],
+            &[],
+            &mut GoneByTheNextRound::default(),
+            &|_| {},
+            unhurried(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome.ending, Ending::Cancelled);
+        assert_eq!(
+            model.0.load(Ordering::SeqCst),
+            1,
+            "the answering call was made"
+        );
+    }
+
+    /// ⚠ An asker gone while the model is still writing has the call dropped
+    /// there, not read to its end.
+    #[tokio::test]
+    async fn an_asker_gone_mid_stream_ends_the_call() {
+        let outcome = converse(
+            &Stalls,
+            "sys",
+            &mut vec![Message::User("q".into())],
+            &[],
+            &mut GoneByTheNextRound::default(),
+            &|_| {},
+            unhurried(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome.ending, Ending::Cancelled);
+        assert_eq!(outcome.text, "So far");
+    }
+
     #[test]
     fn the_cap_note_names_the_cap() {
         assert!(CAPPED_NOTE.contains(&format!("{MAX_TOOL_ROUNDS} times")));
     }
 
     /// The console's own cut-off (`AGENT_STREAM_TIMEOUT_MS`), which the
-    /// budget has to leave room under for the save and the `done` event.
+    /// budget has to leave room under: the last check for an asker gone,
+    /// the save's wait on the erasure lock, and the rest of the save and the
+    /// `done` event.
     #[test]
     fn the_budget_ends_a_turn_before_the_console_gives_up_on_it() {
         const CONSOLE_STREAM_TIMEOUT: Duration = Duration::from_secs(120);
-        assert!(TURN_BUDGET + Duration::from_secs(10) <= CONSOLE_STREAM_TIMEOUT);
+        const REST_OF_THE_SAVE: Duration = Duration::from_secs(5);
+        let after = crate::handler::FINAL_RECHECK + crate::db::SAVE_STATEMENT + REST_OF_THE_SAVE;
+        assert!(TURN_BUDGET + after <= CONSOLE_STREAM_TIMEOUT);
     }
 }

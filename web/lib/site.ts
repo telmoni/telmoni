@@ -2,7 +2,7 @@
 // a deployment — the company, its support address, where its legal documents
 // are — is not here; that is `lib/server/branding.ts`, read from the
 // environment, so this repository names no operator.
-export const REPO_URL: string | null = null;
+export const REPO_URL: string | null = "https://github.com/telmoni/telmoni";
 export const DOCS_URL = "https://docs.telmoni.com";
 // The same host without the scheme, for anywhere that prints it rather than
 // links it. Derived, because it was written out a second time in the search

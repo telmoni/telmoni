@@ -3,16 +3,17 @@
 //!
 //! Two filters stand between a person and a passage. Row-level security
 //! binds the person, their organization and the project they asked from,
-//! so another tenant's rows and another person's conversations do not
-//! exist in the query. `visibility` then keeps what their role reads on
+//! and the query names the same itself, so another tenant's rows and
+//! another person's conversations do not exist in it, under the policies
+//! or without them. `visibility` then keeps what their role reads on
 //! that project, which the policies cannot know: the project's audit events
 //! to a role that reads the audit log, the organization's own chain and
-//! feed to its owner.
+//! feed to its owner and admins, as the console's own pages give them.
 
+use telmoni_shared::TelmoniError;
 use telmoni_shared::acting::Acting;
 use telmoni_shared::db::tenant_session::person_scope;
 use telmoni_shared::rbac::{Resource, Verb, can};
-use telmoni_shared::{OrganizationRole, TelmoniError};
 
 use crate::AppState;
 use crate::db::{self, Found, Visibility};
@@ -33,8 +34,11 @@ pub fn visibilities(acting: &Acting) -> Vec<Visibility> {
     {
         out.push(Visibility::Audit);
     }
-    if acting.organization_role == Some(OrganizationRole::Owner) {
-        out.push(Visibility::Owner);
+    if acting
+        .organization_role
+        .is_some_and(|role| role.can_view_rolled_up_audit())
+    {
+        out.push(Visibility::OrganizationAdmin);
     }
     out
 }
@@ -65,7 +69,15 @@ pub async fn search(
     let tx = person_scope(&state.db, &acting.user_id).await?;
     let tx = tx.bind_organization(&acting.organization_id).await?;
     let mut tx = tx.bind_project(&project.project_id).await?;
-    let found = db::search(&mut tx, &embedding, query, &visibility, depth).await?;
+    let found = db::search(
+        &mut tx,
+        &embedding,
+        embedder.model(),
+        query,
+        &visibility,
+        depth,
+    )
+    .await?;
     tx.commit().await?;
 
     let keep = usize::try_from(limit).unwrap_or(usize::MAX);
@@ -96,7 +108,7 @@ pub async fn search(
 mod tests {
     use super::*;
     use telmoni_shared::acting::ActingProject;
-    use telmoni_shared::{OrganizationId, ProjectId, Role, UserId};
+    use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, Role, UserId};
 
     fn acting(role: Role, organization_role: Option<OrganizationRole>) -> Acting {
         Acting {
@@ -113,19 +125,23 @@ mod tests {
     }
 
     #[test]
-    fn a_member_reads_no_audit_and_only_the_owner_reads_the_organizations_own() {
-        use Visibility::{Audit, Author, Everyone, Owner};
+    fn a_member_reads_no_audit_and_the_organizations_own_is_its_owner_and_admins() {
+        use Visibility::{Audit, Author, Everyone, OrganizationAdmin};
         assert_eq!(
             visibilities(&acting(Role::Member, Some(OrganizationRole::Member))),
             vec![Everyone, Author]
         );
         assert_eq!(
-            visibilities(&acting(Role::Admin, Some(OrganizationRole::Admin))),
+            visibilities(&acting(Role::Admin, Some(OrganizationRole::Member))),
             vec![Everyone, Author, Audit]
         );
         assert_eq!(
+            visibilities(&acting(Role::Admin, Some(OrganizationRole::Admin))),
+            vec![Everyone, Author, Audit, OrganizationAdmin]
+        );
+        assert_eq!(
             visibilities(&acting(Role::Owner, Some(OrganizationRole::Owner))),
-            vec![Everyone, Author, Audit, Owner]
+            vec![Everyone, Author, Audit, OrganizationAdmin]
         );
     }
 }

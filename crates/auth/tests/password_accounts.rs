@@ -549,6 +549,14 @@ async fn a_refresh_rotates_the_token_and_a_reuse_ends_the_session(pool: PgPool) 
         StatusCode::UNAUTHORIZED,
         "the session's bearers went with it"
     );
+    let mut tx = maintenance_scope(&db, AuthLane).await.unwrap();
+    let live: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM auth.sessions WHERE revoked_at IS NULL")
+            .fetch_one(tx.conn())
+            .await
+            .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(live, 0, "the session itself is ended, not only its tokens");
 }
 
 #[sqlx::test]

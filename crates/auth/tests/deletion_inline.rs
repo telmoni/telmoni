@@ -3192,7 +3192,10 @@ async fn the_purge_lane_refuses_an_active_organization(pool: PgPool) {
 // ── The notices that named a person ──────────────────────────────────────────
 
 /// The erasure asks notifications to rewrite every notice that named the
-/// person, after their memberships go and before their identity does.
+/// person twice, both after the provider and before their identity goes:
+/// once before the agent's first erase, which reads the feed again, and once
+/// after their memberships go, for a notice announced while they still had
+/// them.
 #[sqlx::test]
 async fn erasing_a_person_redacts_the_notices_that_named_them(pool: PgPool) {
     seed_account_deletion_owning_nothing(&pool).await;
@@ -3220,7 +3223,11 @@ async fn erasing_a_person_redacts_the_notices_that_named_them(pool: PgPool) {
     assert_eq!(person(&pool, USER).await, Person::Erased);
 
     assert_eq!(provider_deletes(&provider), 1);
-    assert_eq!(calls.calls(), [notifications_redact(USER)]);
+    assert_eq!(
+        calls.calls(),
+        [notifications_redact(USER), notifications_redact(USER)],
+        "before the agent's first erase, and after the memberships"
+    );
     assert_eq!(
         deletes_before_redact.load(Ordering::SeqCst),
         1,
@@ -3231,13 +3238,14 @@ async fn erasing_a_person_redacts_the_notices_that_named_them(pool: PgPool) {
 /// ⚠ **A redaction that fails stops the erasure before the identity goes**,
 /// for the sweep to retry: the person stays pending with their memberships
 /// already gone and the provider already asked once, and the erase lane
-/// finishes it once notifications answers.
+/// finishes it once notifications answers. The second pass is the one that
+/// fails here, as it is the one after the memberships went.
 #[sqlx::test]
 async fn a_failed_redaction_leaves_the_person_pending_for_the_sweep(pool: PgPool) {
     seed_account_deletion_owning_nothing(&pool).await;
     seed_survivor_with(&pool, USER, "admin").await;
     let (calls, hook, notifications) = siblings();
-    notifications.failing_redactions(1);
+    notifications.on_redact_person(Ok(0)).failing_redactions(1);
     let (router, provider) =
         app_with_siblings(pool.clone(), Some(hook), Some(notifications), 8_000);
     let app = || router.clone();
@@ -3271,7 +3279,12 @@ async fn a_failed_redaction_leaves_the_person_pending_for_the_sweep(pool: PgPool
     assert_eq!(provider_deletes(&provider), 2);
     assert_eq!(
         calls.calls(),
-        [notifications_redact(USER), notifications_redact(USER)],
-        "the redaction that failed, and the retry that landed"
+        [
+            notifications_redact(USER),
+            notifications_redact(USER),
+            notifications_redact(USER),
+            notifications_redact(USER),
+        ],
+        "the first pass, the second that failed, and the retry's two"
     );
 }

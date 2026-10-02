@@ -1,4 +1,5 @@
-//! `GET /internal/organization/export` — the record an owner downloads.
+//! `GET /internal/organization/export` — the record an owner or an admin
+//! downloads.
 
 #![expect(
     clippy::unwrap_used,
@@ -251,8 +252,8 @@ fn strings(v: &Value, out: &mut Vec<String>) {
     }
 }
 
-/// The export answers with the record — the organization's and the owner's
-/// own — not empty sections, and taking it is on the chain.
+/// The export answers with the organization's record, not empty sections,
+/// and taking it is on the chain.
 #[sqlx::test]
 async fn export_carries_the_record(pool: PgPool) {
     let (organization, project) = seed(&pool).await;
@@ -264,12 +265,6 @@ async fn export_carries_the_record(pool: PgPool) {
         body["organization"][0]["organization_id"], organization,
         "the organization row"
     );
-    assert_eq!(body["person"][0]["user_id"], OWNER, "the person row");
-    assert_eq!(
-        body["person"][0]["email"], "user_export_owner@example.test",
-        "the person row"
-    );
-    assert_eq!(body["person"][0]["analytics_opt_in"], json!(false));
     assert_eq!(
         body["projects"][0]["project_id"], project,
         "the projects list"
@@ -279,10 +274,6 @@ async fn export_carries_the_record(pool: PgPool) {
         "the roster, which the owner is a row of"
     );
     assert_eq!(body["organization_members"][0]["role"], "owner");
-    assert_eq!(
-        body["sessions"][0]["user_agent"], "Firefox",
-        "the sessions list"
-    );
 
     let detail = &body["project_detail"][0];
     assert_eq!(detail["project_id"], project);
@@ -339,7 +330,35 @@ async fn export_redacts_every_secret(pool: PgPool) {
     }
 }
 
-/// An export is the owner's: somebody outside the organization cannot take it.
+/// ⚠ **There is no personal export, inside this one either.** The file is the
+/// organization's: the account of whoever takes it, their sessions — which
+/// span every organization they sign in to — and their conversations with
+/// the agent stay out, so a file an admin forwards carries none of them.
+#[sqlx::test]
+async fn the_export_carries_nothing_of_the_person_taking_it(pool: PgPool) {
+    let (organization, _) = seed(&pool).await;
+
+    let (status, body) = export(&pool, OWNER, &organization).await;
+    assert_eq!(status, StatusCode::OK, "export failed: {body}");
+
+    for personal in ["person", "sessions", "agent_conversations"] {
+        assert!(
+            body.get(personal).is_none(),
+            "the export carries {personal}"
+        );
+    }
+    // Under whatever key: their address and their session's browser.
+    let mut found = Vec::new();
+    strings(&body, &mut found);
+    for theirs in ["user_export_owner@example.test", "Firefox"] {
+        assert!(
+            !found.iter().any(|s| s.contains(theirs)),
+            "the export carries the owner's {theirs}"
+        );
+    }
+}
+
+/// Somebody outside the organization cannot take its export.
 #[sqlx::test]
 async fn an_export_cannot_be_taken_for_another_organization(pool: PgPool) {
     let (organization, _) = seed(&pool).await;
@@ -349,22 +368,93 @@ async fn an_export_cannot_be_taken_for_another_organization(pool: PgPool) {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
-/// ⚠ **And no role short of owner takes it either.** The roster, the pending
-/// invitation addresses and the key metadata are the owner's to take away; an
-/// admin or a member on the roster is refused like a stranger.
+/// ⚠ **A member does not take it.** The roster, the pending invitation
+/// addresses, the key metadata and the audit chain are for the owner and its
+/// admins, who read them in the console already; a member on the roster is
+/// refused like a stranger.
 #[sqlx::test]
-async fn no_role_short_of_owner_takes_the_export(pool: PgPool) {
+async fn a_member_does_not_take_the_export(pool: PgPool) {
     let (organization, _) = seed(&pool).await;
-    for (user, role) in [
-        ("user_export_admin", "admin"),
-        ("user_export_plain", "member"),
-    ] {
-        sign_in(&pool, user).await;
-        seat(&pool, &organization, user, role).await;
+    let member = "user_export_plain";
+    sign_in(&pool, member).await;
+    seat(&pool, &organization, member, "member").await;
 
-        let (status, body) = export(&pool, user, &organization).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{role}: {body}");
-    }
+    let (status, body) = export(&pool, member, &organization).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+}
+
+/// An admin takes the organization's whole record, as its owner does, and
+/// taking it is on the chain under their name.
+#[sqlx::test]
+async fn an_admin_takes_the_whole_export(pool: PgPool) {
+    let (organization, project) = seed(&pool).await;
+    let admin = "user_export_admin";
+    sign_in(&pool, admin).await;
+    seat(&pool, &organization, admin, "admin").await;
+    // Seated by an invitation they accepted, as everyone in another
+    // organization is: the invitation is no longer the organization's to
+    // list, so it is not in the file. (Its address can still be in the audit
+    // chain's details, which the file carries as the console shows them.)
+    sqlx::query(
+        "INSERT INTO auth.organization_invites
+             (organization_id, email, role, token_hash, invited_by, expires_at, accepted_at,
+              accepted_by)
+         VALUES ($1, 'user_export_admin@example.test', 'admin', 'hash-of-an-accepted-invite',
+                 $2, now() + interval '1 day', now(), $3)",
+    )
+    .bind(&organization)
+    .bind(OWNER)
+    .bind(admin)
+    .execute(&pool)
+    .await
+    .expect("seed the accepted invitation");
+
+    let (status, body) = export(&pool, admin, &organization).await;
+    assert_eq!(status, StatusCode::OK, "export failed: {body}");
+    assert!(
+        body["organization_invites"]
+            .as_array()
+            .is_some_and(|invites| invites.is_empty()),
+        "an accepted invitation: {body}"
+    );
+
+    let roster: Vec<&Value> = body["organization_members"]
+        .as_array()
+        .expect("an organization_members array")
+        .iter()
+        .map(|m| &m["member_id"])
+        .collect();
+    assert!(
+        roster.contains(&&json!(OWNER)) && roster.contains(&&json!(admin)),
+        "the whole roster: {body}"
+    );
+    let detail = &body["project_detail"][0];
+    assert_eq!(detail["project_id"], project);
+    assert_eq!(detail["api_keys"][0]["name"], "deploy key", "the keys list");
+    assert_eq!(
+        detail["invites"][0]["email"], "guest@example.test",
+        "the invitations list"
+    );
+    assert!(
+        body["audit_events"]
+            .as_array()
+            .is_some_and(|events| !events.is_empty()),
+        "the chain: {body}"
+    );
+
+    let exported: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit.events
+          WHERE organization_id = $1 AND action = 'exported' AND actor_id = $2",
+    )
+    .bind(&organization)
+    .bind(admin)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        exported, 1,
+        "the admin's export is recorded under the admin"
+    );
 }
 
 /// ⚠ **Being on somebody else's project does not put it in your export.**

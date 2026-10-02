@@ -72,7 +72,8 @@ pub struct ModelConfig {
     pub api_key: Option<Redacted>,
     /// The longest reply one model call may write.
     pub max_tokens: u32,
-    /// How long one model call may take, streaming included.
+    /// How long one model call may go without sending anything: before its
+    /// first byte, or between two pieces of its answer.
     pub timeout_secs: u64,
 }
 

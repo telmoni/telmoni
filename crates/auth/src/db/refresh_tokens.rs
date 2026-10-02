@@ -95,6 +95,10 @@ pub async fn spend(
         }
         revoke_sid(tx, &row.sid).await?;
         crate::db::access_tokens::delete_for_sid(tx, &row.sid).await?;
+        // The session itself ends, not only its tokens: a request resolved
+        // before the reuse asks the session, not a token, whether it still
+        // stands (`seam::Auth::resolve_again`), and the sessions page shows it.
+        crate::db::sessions::revoke_by_sid(tx, &row.sid).await?;
         return Ok(Some(Spent::Reused));
     }
     if row.expires_at <= now {

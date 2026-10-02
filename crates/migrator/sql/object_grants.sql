@@ -80,6 +80,12 @@ BEGIN
     IF to_regclass('agent._sqlx_migrations') IS NOT NULL THEN
         EXECUTE 'REVOKE ALL ON agent._sqlx_migrations FROM agent';
     END IF;
+    -- An erasure's fence is the lane's: a request reads whether one stands,
+    -- and nothing a request does may lift or forge one. Revoked here, after
+    -- the schema-wide grant, which is reissued on every run.
+    IF to_regclass('agent.erasures') IS NOT NULL THEN
+        EXECUTE 'REVOKE INSERT, UPDATE, DELETE ON agent.erasures FROM agent';
+    END IF;
 EXCEPTION
     WHEN invalid_schema_name THEN
         RAISE NOTICE 'agent schema not yet created — agent own-schema grants land on next re-apply';

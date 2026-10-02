@@ -1,13 +1,18 @@
 //! `GET /internal/organization/export` — everything auth holds about one
-//! organization, and about the person taking it, assembled for them to
-//! download.
+//! organization, assembled for its owner or an admin to download.
 //!
-//! ⚠ **THE OWNER'S ALONE.** The organization's roster, invitations and key
-//! metadata are its owner's to take away, and the person half is only ever
-//! the caller's own. And the queries use explicit column lists, never
-//! `SELECT *`: token and invite hashes and `provider_sid` must never land in a
-//! file a customer forwards, and a `*` would leak each the day a column is
-//! added.
+//! ⚠ **THE ORGANIZATION'S, AND ITS OWNER'S AND ADMINS' ALONE.** There is no
+//! personal export: the file carries nothing of the person taking it but
+//! what the organization's own records hold of them, as the console shows
+//! those — their seat on the roster, and the audit chain's events, whose
+//! details can name them — and not their account, their sessions, which
+//! span every organization they sign in to, nor their conversations with the
+//! agent. The roster, the invitations still waiting, key metadata and the
+//! audit chain are the owner's and admins' to take away — they read all of
+//! it in the console already — and a member, who reads none of it there, is
+//! refused. And the queries use explicit column lists, never `SELECT *`:
+//! token and invite hashes and `provider_sid` must never land in a file a
+//! customer forwards, and a `*` would leak each the day a column is added.
 //!
 //! ⚠ **EVERY QUERY NAMES ITS TENANT, NOT JUST RLS.** The policies are
 //! permissive and OR together: `auth.projects`' `project_member_read` admits
@@ -25,9 +30,7 @@ use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::person_scope;
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
-use telmoni_shared::{
-    AuditAction, AuthzError, OrganizationRole, TelmoniError, TelmoniResourceKind,
-};
+use telmoni_shared::{AuditAction, AuthzError, TelmoniError, TelmoniResourceKind};
 
 use crate::{
     AppState,
@@ -37,9 +40,14 @@ use crate::{
 /// The most audit rows one export carries.
 const AUDIT_LIMIT: i64 = 10_000;
 
+/// An invitation still waiting on its invitee, as the console lists them.
+/// One accepted carries the address of the member it seated — the person
+/// taking the export, it may be — and the chain records its history anyway.
+const LIVE_INVITE: &str = "accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now()";
+
 /// Run one query and return its rows as a JSON array. `sql` is always a
-/// literal from this file (or a `format!` of constants, which
-/// `sql_is_parameterised.rs` scans too); the value is always bound.
+/// literal from this file, or a `format!` of this file's constants
+/// (`AUDIT_LIMIT`, `LIVE_INVITE`); the value is always bound.
 async fn rows(tx: &mut sqlx::PgConnection, sql: &str, bind: &str) -> Result<Value, TelmoniError> {
     let value: Value = sqlx::query_scalar(&format!(
         "SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM ({sql}) t"
@@ -50,8 +58,8 @@ async fn rows(tx: &mut sqlx::PgConnection, sql: &str, bind: &str) -> Result<Valu
     Ok(value)
 }
 
-/// `GET /internal/organization/export` — the owner's record of the active
-/// organization, and of themselves.
+/// `GET /internal/organization/export` — the record of the active
+/// organization, for its owner or an admin.
 pub async fn export_organization(
     State(state): State<Arc<AppState>>,
     principal: Principal,
@@ -60,15 +68,18 @@ pub async fn export_organization(
     let organization = organization_of(&headers)?;
     let actor = principal.user_id;
 
-    // Both keys: the person's for their own rows, the organization's for its.
+    // Both keys: the person's to read the caller's own seat, the
+    // organization's for its rows.
     let tx = person_scope(&state.db, &actor).await?;
     let mut tx = tx.bind_organization(&organization).await?;
-    if organization_role_or_forbidden(&mut tx, &organization, &actor).await?
-        != OrganizationRole::Owner
+    if !organization_role_or_forbidden(&mut tx, &organization, &actor)
+        .await?
+        .can_export_organization()
     {
-        return Err(
-            AuthzError::Forbidden("only the organization's owner can export it".into()).into(),
-        );
+        return Err(AuthzError::Forbidden(
+            "only the organization's owner or an admin can export it".into(),
+        )
+        .into());
     }
 
     let organization_row = rows(
@@ -76,15 +87,6 @@ pub async fn export_organization(
         "SELECT external_id AS organization_id, name, status::text, created_at \
            FROM auth.organizations WHERE external_id = $1",
         organization.as_str(),
-    )
-    .await?;
-    let person = rows(
-        &mut tx,
-        "SELECT i.user_id, i.email, i.display_name, \
-                COALESCE(a.analytics_opt_in, false) AS analytics_opt_in, i.updated_at \
-           FROM auth.identities i LEFT JOIN auth.accounts a ON a.user_id = i.user_id \
-          WHERE i.user_id = $1",
-        actor.as_str(),
     )
     .await?;
 
@@ -104,17 +106,12 @@ pub async fn export_organization(
     .await?;
     let organization_invites = rows(
         &mut tx,
-        "SELECT email, role::text, invited_by, expires_at, accepted_at, accepted_by, \
-                revoked_at, created_at \
-           FROM auth.organization_invites WHERE organization_id = $1 ORDER BY created_at",
+        &format!(
+            "SELECT email, role::text, invited_by, expires_at, created_at \
+               FROM auth.organization_invites \
+              WHERE organization_id = $1 AND {LIVE_INVITE} ORDER BY created_at"
+        ),
         organization.as_str(),
-    )
-    .await?;
-    let sessions = rows(
-        &mut tx,
-        "SELECT user_agent, created_at, last_seen_at, revoked_at \
-           FROM auth.sessions WHERE user_id = $1 ORDER BY created_at",
-        actor.as_str(),
     )
     .await?;
 
@@ -150,9 +147,11 @@ pub async fn export_organization(
         .await?;
         let invites = rows(
             &mut ptx,
-            "SELECT email, role::text, invited_by, expires_at, accepted_at, accepted_by, \
-                    revoked_at, created_at \
-               FROM auth.member_invites WHERE project_id = $1 ORDER BY created_at",
+            &format!(
+                "SELECT email, role::text, invited_by, expires_at, created_at \
+                   FROM auth.member_invites \
+                  WHERE project_id = $1 AND {LIVE_INVITE} ORDER BY created_at"
+            ),
             project_id,
         )
         .await?;
@@ -193,25 +192,13 @@ pub async fn export_organization(
 
     tx.commit().await?;
 
-    // The owner's own conversations with the agent in this organization.
-    // After the commit, so the export's audit row stands whatever the agent
-    // answers; an agent that fails fails the export, rather than hand back
-    // a file that silently leaves them out.
-    let agent_conversations = match state.siblings.agent.as_ref() {
-        Some(agent) => agent.export_person(&actor, &organization).await?,
-        None => json!([]),
-    };
-
     Ok(Json(json!({
         "exported_at": chrono::Utc::now(),
-        "agent_conversations": agent_conversations,
         "organization": organization_row,
-        "person": person,
         "projects": projects,
         "project_detail": project_detail,
         "organization_members": organization_members,
         "organization_invites": organization_invites,
-        "sessions": sessions,
         "audit_events": audit_events,
         "audit_truncated": audit_truncated,
         "audit_limit": AUDIT_LIMIT,
