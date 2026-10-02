@@ -35,23 +35,26 @@ export async function rateLimitRetryAfter(
   opts: RateLimitOptions,
 ): Promise<number | null> {
   const redis = getRedis();
-  if (redis) await firstConnect(redis);
-  if (redis && redis.status !== "ready") noteFallback(redis.status);
-  if (redis && redis.status === "ready") {
-    try {
-      const [allowed, retryMs] = await withScript(redis).slidingWindow(
-        key,
-        String(opts.windowMs),
-        String(opts.limit),
-        crypto.randomUUID(),
-      );
-      if (allowed === 1) return null;
-      return Math.max(1, Math.ceil(retryMs / 1000));
-    } catch (err: unknown) {
-      logger.error(
-        { err },
-        "rate-limit: redis error, falling back to the per-instance limiter",
-      );
+  if (redis) {
+    await firstConnect(redis);
+    if (redis.status === "ready") {
+      try {
+        const [allowed, retryMs] = await withScript(redis).slidingWindow(
+          key,
+          String(opts.windowMs),
+          String(opts.limit),
+          crypto.randomUUID(),
+        );
+        if (allowed === 1) return null;
+        return Math.max(1, Math.ceil(retryMs / 1000));
+      } catch (err: unknown) {
+        logger.error(
+          { err },
+          "rate-limit: redis error, falling back to the per-instance limiter",
+        );
+      }
+    } else {
+      noteFallback(redis.status);
     }
   }
   return inMemoryRateLimit(key, opts);
