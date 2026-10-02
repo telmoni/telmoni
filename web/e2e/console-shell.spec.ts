@@ -88,7 +88,7 @@ test.describe("Console chrome row", () => {
     ).toBeVisible();
     await page.waitForTimeout(400);
 
-    // ⚠ **Gone, not moved.** Collapsed, the rail is a 44px icon column and the
+    // ⚠ **Gone, not moved.** Collapsed, the rail is a 32px icon column and the
     // name is the one piece of chrome wider than it, so it belongs to the open
     // rail rather than to the header. The toggle takes the whole column and
     // lands on the centre every rail icon shares.

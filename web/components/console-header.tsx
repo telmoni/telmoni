@@ -21,15 +21,15 @@ export function ConsoleHeader() {
     header?.backHref && header.backLabel
       ? { href: header.backHref, label: header.backLabel }
       : null;
-  // The controls are sidebar rows (44 × 32), and `py-3.5` is the sidebar's
-  // 14px either side of its column, turned vertical.
+  // The controls are the closed sidebar's icon buttons (32 × 32), and `py-3.5`
+  // is the sidebar's 14px either side of its column, turned vertical.
   return (
     <header className="relative z-50 flex shrink-0 items-center gap-3.5 bg-background px-3.5 py-3.5 md:gap-3">
       <div className="flex min-w-0 items-center gap-3.5 md:flex-1">
         <div
           className={cn(
             "flex shrink-0 items-center justify-between",
-            collapsed ? "md:w-11" : "md:w-64",
+            collapsed ? "md:w-8" : "md:w-64",
           )}
         >
           {!collapsed && (

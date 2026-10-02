@@ -28,6 +28,33 @@ function NavRow({
   showLabel: boolean;
   step?: boolean;
 }) {
+  const onClick = () => {
+    if (item.title && !step) {
+      document.title = `${item.title} · ${PRODUCT_NAME}`;
+    }
+  };
+  // Closed, a row is an icon button in the header's hamburger's 32 × 32 box,
+  // and the rail is one button wide, so the two share a column.
+  if (!showLabel) {
+    return (
+      <Link
+        href={item.url}
+        onClick={onClick}
+        aria-label={item.title}
+        title={item.title}
+        aria-current={item.isActive ? "page" : undefined}
+        {...(step ? { ["data-rail-step"]: "" } : {})}
+        className={cn(
+          "flex size-8 items-center justify-center rounded-menu [a+&]:mt-1",
+          item.isActive
+            ? "bg-console-accent-tint text-console-accent-strong"
+            : "text-muted-foreground hover:bg-sidebar-accent",
+        )}
+      >
+        <item.icon className="size-4" />
+      </Link>
+    );
+  }
   const rowClass = cn(
     "flex h-8 items-center rounded-menu text-sm [a+&]:mt-1",
     item.isActive
@@ -41,20 +68,15 @@ function NavRow({
       />
     </span>
   );
-  const label = showLabel ? (
+  const label = (
     <span className="flex flex-1 items-center min-w-0 overflow-hidden pr-1">
       <span className="whitespace-nowrap truncate">{item.title}</span>
     </span>
-  ) : null;
+  );
   return (
     <Link
       href={item.url}
-      onClick={() => {
-        if (item.title && !step) {
-          document.title = `${item.title} · ${PRODUCT_NAME}`;
-        }
-      }}
-      title={showLabel ? undefined : item.title}
+      onClick={onClick}
       aria-current={item.isActive ? "page" : undefined}
       {...(step ? { ["data-rail-step"]: "" } : {})}
       className={rowClass}
@@ -117,7 +139,7 @@ export function ConsoleSidebar() {
         "rounded-r-menu md:rounded-none",
         collapsed ? "-translate-x-full" : "translate-x-0",
         "md:static md:shrink-0 md:translate-x-0",
-        collapsed ? "md:w-11" : "md:w-64",
+        collapsed ? "md:w-8" : "md:w-64",
         animating ? "transition-transform duration-200 md:transition-none" : "transition-none",
       )}
       onClick={(e) => {
@@ -144,7 +166,7 @@ export function ConsoleSidebar() {
                   <span className="whitespace-nowrap">{group.title}</span>
                 </div>
               ) : (
-                i > 0 && <div className="mx-4 my-2 border-t border-sidebar-border" />
+                i > 0 && <div className="mx-2.5 my-2 border-t border-sidebar-border" />
               )}
               {group.items.map((item) => (
                 <NavRow
