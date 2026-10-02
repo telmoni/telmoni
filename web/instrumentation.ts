@@ -6,11 +6,13 @@ export async function onRequestError(
 ) {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   const { logger } = await import("./lib/logger");
+  // The route, never the path: a path spells an organization and a project by
+  // the slugs of their names, and carries an invitation's token or a
+  // callback's code.
   logger.error(
     {
       err,
       digest: (err as { digest?: string } | null)?.digest,
-      path: request.path,
       method: request.method,
       routerKind: context.routerKind,
       routePath: context.routePath,
