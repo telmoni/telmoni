@@ -51,7 +51,7 @@ export function NotificationsBell() {
         data-testid="notifications-bell"
         aria-label={bellLabel(count)}
         className={cn(
-          "relative flex h-8 w-11 shrink-0 items-center justify-center",
+          "relative flex size-8 shrink-0 items-center justify-center",
           "rounded-menu text-muted-foreground hover:text-foreground",
           "outline-none focus-visible:ring-2 focus-visible:ring-ring",
           "hover:bg-sidebar-accent",

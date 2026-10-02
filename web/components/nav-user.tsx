@@ -114,7 +114,7 @@ export function NavUser() {
             aria-keyshortcuts="Control+K Meta+K"
             title={name}
             size={null}
-            className="h-8 w-11 shrink-0 rounded-menu text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+            className="size-8 shrink-0 rounded-menu text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
           >
             <Avatar>
               <AvatarImage src="" alt="" />

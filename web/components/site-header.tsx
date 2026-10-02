@@ -35,14 +35,14 @@ export function SiteHeader({ signedIn }: { signedIn: boolean }) {
         {/* The console header's icon buttons: 44 × 32, `gap-3` apart. */}
         <div className="hidden items-center gap-3 lg:flex">
           {REPO_URL && (
-            <Button asChild variant="ghost" size={null} className="h-8 w-11">
+            <Button asChild variant="ghost" size={null} className="size-8">
               <a href={REPO_URL} target="_blank" rel="noreferrer" aria-label="GitHub">
                 <GithubIcon />
               </a>
             </Button>
           )}
           {DISCUSSIONS_URL && (
-            <Button asChild variant="ghost" size={null} className="h-8 w-11">
+            <Button asChild variant="ghost" size={null} className="size-8">
               <a
                 href={DISCUSSIONS_URL}
                 target="_blank"

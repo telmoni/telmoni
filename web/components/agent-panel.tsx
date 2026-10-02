@@ -450,7 +450,7 @@ export function AgentPanel() {
           <Button
             type="submit"
             size="icon"
-            className="h-8 w-11 shrink-0"
+            className="size-8 shrink-0"
             aria-label="Send"
             title="Send"
             disabled={!canSend || draft.trim() === ""}

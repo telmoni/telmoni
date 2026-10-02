@@ -44,7 +44,7 @@ export function ConsoleHeader() {
             aria-expanded={!collapsed}
             aria-controls="console-sidebar"
             title={collapsed ? "Expand navigation" : "Collapse navigation"}
-            className="group flex h-8 w-11 shrink-0 cursor-pointer text-foreground"
+            className="group flex size-8 shrink-0 cursor-pointer text-foreground"
           >
             <span className="flex flex-1 items-center justify-center rounded-menu text-muted-foreground group-hover:bg-sidebar-accent">
               <Menu className="size-4" />

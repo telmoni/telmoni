@@ -45,7 +45,7 @@ export function MobileNav({ signedIn }: { signedIn: boolean }) {
         ref={triggerRef}
         variant="ghost"
         size={null}
-        className="h-8 w-11"
+        className="size-8"
         aria-label={open ? "Close menu" : "Open menu"}
         onClick={() => setOpen(!open)}
       >
