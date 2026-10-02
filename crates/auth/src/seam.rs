@@ -282,11 +282,16 @@ fn audit_document(e: audit::IndexedEvent) -> SourceDocument {
         body.push_str("\nDetails: ");
         body.push_str(&metadata.to_string());
     }
+    // By id, not slug: the index keeps this past any rename, and the console
+    // redirects an id to the slug the row goes by now.
     let (audience, url) = match &e.in_project {
-        Some(project) => (Audience::Audit, format!("/{project}/audit-log")),
+        Some(project) => (
+            Audience::Audit,
+            format!("/{}/{project}/audit-log", e.organization_id),
+        ),
         None => (
             Audience::OrganizationAdmin,
-            "/organization/audit-log".to_owned(),
+            format!("/{}/~/audit-log", e.organization_id),
         ),
     };
     SourceDocument {

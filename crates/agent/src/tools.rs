@@ -352,11 +352,14 @@ async fn search(
     Ok(out)
 }
 
+/// A page of the project acted on. By id, not slug: a conversation keeps its
+/// citations past any rename, and the console redirects an id to the slug the
+/// row goes by now.
 fn project_path(acting: &Acting, page: &str) -> Option<String> {
     acting
         .project
         .as_ref()
-        .map(|p| format!("/{}/{page}", p.project_id))
+        .map(|p| format!("/{}/{}/{page}", acting.organization_id, p.project_id))
 }
 
 async fn list_members(state: &AppState, acting: &Acting, citations: &mut Citations) -> Outcome {

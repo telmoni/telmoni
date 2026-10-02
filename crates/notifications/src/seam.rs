@@ -124,9 +124,17 @@ const DELIVERIES_TOOL_MAX: i64 = 20;
 /// project; the organization's own feed is its owner's and admins', as the
 /// feed lane gives it (`require_organization_admin`).
 fn feed_document(item: db::IndexedFeedItem) -> SourceDocument {
+    // By id, not slug: the index keeps this past any rename, and the console
+    // redirects an id to the slug the row goes by now.
     let (audience, url) = match &item.project_id {
-        Some(project) => (Audience::Everyone, format!("/{project}")),
-        None => (Audience::OrganizationAdmin, "/organization".to_owned()),
+        Some(project) => (
+            Audience::Everyone,
+            format!("/{}/{project}", item.organization_id),
+        ),
+        None => (
+            Audience::OrganizationAdmin,
+            format!("/{}", item.organization_id),
+        ),
     };
     SourceDocument {
         source_id: item.id.to_string(),
@@ -179,7 +187,7 @@ fn delivery_document(d: db::IndexedDelivery) -> SourceDocument {
             queued = d.created_at.to_rfc3339(),
             changed = d.updated_at.to_rfc3339(),
         ),
-        url: format!("/{}/connectors", d.project_id),
+        url: format!("/{}/{}/connectors", d.organization_id, d.project_id),
         organization_id: d.organization_id,
         project_id: Some(d.project_id),
         subject_user_id: d.subject_user_id,
