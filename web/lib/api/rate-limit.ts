@@ -156,9 +156,13 @@ export function clientKeyFromHeaders(headers: Headers, scope: string): string {
   return `bfrl:${scope}:${trustedClientIp(headers)}`;
 }
 
+// ⚠ **`X-Forwarded-For` and nothing a caller can write.** Google's load
+// balancer appends the address it saw the client at, then its own, so the
+// second entry from the end is the one hop a caller cannot forge. A header
+// another vendor's edge would set (`cf-connecting-ip`, `true-client-ip`) is
+// just a request header here: read first, it let any caller pick a fresh
+// bucket per request and walk past every per-address ceiling.
 function trustedClientIp(headers: Headers): string {
-  const cf = headers.get("cf-connecting-ip")?.trim();
-  if (cf) return cf;
   const parts = headers
     .get("x-forwarded-for")
     ?.split(",")
@@ -166,7 +170,7 @@ function trustedClientIp(headers: Headers): string {
     .filter(Boolean);
   if (parts && parts.length >= 2) return parts[parts.length - 2]!;
   if (parts && parts.length === 1) return parts[0]!;
-  return headers.get("x-real-ip")?.trim() || "unknown";
+  return headers.get("x-real-ip") || "unknown";
 }
 
 const SLIDING_WINDOW_LUA = `

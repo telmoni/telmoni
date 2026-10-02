@@ -13,6 +13,8 @@ vi.mock("@/lib/redis", () => ({
   getRedis: () => redisMock,
 }));
 
+import { logger } from "@/lib/logger";
+
 import { clientKey, rateLimit, sessionKey } from "./rate-limit";
 
 describe("sessionKey", () => {
@@ -23,17 +25,6 @@ describe("sessionKey", () => {
 });
 
 describe("clientKey", () => {
-  it("prioritizes cf-connecting-ip when present from edge ingress", () => {
-    const req = new Request("http://example.com", {
-      headers: {
-        "cf-connecting-ip": "203.0.113.195",
-        "x-forwarded-for": "1.2.3.4, 5.6.7.8, 9.9.9.9",
-      },
-    });
-    expect(clientKey(req as never, "unsubscribe"))
-      .toBe("bfrl:unsubscribe:203.0.113.195");
-  });
-
   it("keys on the trusted second-from-last hop, not the spoofable first", () => {
     const req = new Request("http://example.com", {
       headers: { "x-forwarded-for": "1.2.3.4, 5.6.7.8, 9.9.9.9" },
@@ -41,6 +32,22 @@ describe("clientKey", () => {
     expect(clientKey(req as never, "unsubscribe"))
       .toBe("bfrl:unsubscribe:5.6.7.8");
   });
+
+  // ⚠ Nothing in front of the console sets these, so a caller can: read ahead
+  // of the load balancer's hop, a fresh value per request is a fresh bucket
+  // per request, and every per-address ceiling admits everything.
+  it.each(["cf-connecting-ip", "true-client-ip", "x-client-ip"])(
+    "takes no address from %s, which a caller can write",
+    (header) => {
+      const req = new Request("http://example.com", {
+        headers: {
+          [header]: "198.51.100.7",
+          "x-forwarded-for": "1.2.3.4, 5.6.7.8, 9.9.9.9",
+        },
+      });
+      expect(clientKey(req as never, "unsubscribe")).toBe("bfrl:unsubscribe:5.6.7.8");
+    },
+  );
 
   it("takes the sole hop when only one element is present", () => {
     const req = new Request("http://example.com", {
@@ -129,16 +136,45 @@ describe("rateLimit (Redis backend)", () => {
     expect(res2).not.toBeNull();
     expect(res2!.status).toBe(429);
   });
+});
 
-  it("in-memory fallback limits correctly", async () => {
-    evalMock.mockRejectedValue(new Error("ECONNREFUSED"));
-    const opts = { limit: 2, windowMs: 60_000 };
-    const r1 = await rateLimit("bfrl:mem:test", opts);
-    expect(r1).toBeNull();
-    const r2 = await rateLimit("bfrl:mem:test", opts);
-    expect(r2).toBeNull();
-    const r3 = await rateLimit("bfrl:mem:test", opts);
-    expect(r3).not.toBeNull();
-    expect(r3!.status).toBe(429);
+describe("a limit of zero denies on BOTH backends", () => {
+  beforeEach(() => {
+    evalMock.mockReset();
+  });
+
+  it("returns a usable Retry-After from the in-memory backstop", async () => {
+    evalMock.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    const res = await rateLimit("bfrl:zero:memory", { limit: 0, windowMs: 60_000 });
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(429);
+    const retryAfter = res!.headers.get("retry-after")!;
+    expect(retryAfter).not.toBe("NaN");
+    expect(Number.isFinite(Number(retryAfter))).toBe(true);
+    expect(Number(retryAfter)).toBeGreaterThan(0);
+  });
+});
+
+describe("a client that exists but is not ready", () => {
+  beforeEach(() => {
+    evalMock.mockReset();
+  });
+  afterEach(() => {
+    redisMock.status = "ready";
+  });
+
+  it("uses the per-instance limiter and says so once a minute, not once a request", async () => {
+    redisMock.status = "reconnecting";
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => logger);
+    try {
+      const opts = { limit: 1, windowMs: 60_000 };
+      expect(await rateLimit("bfrl:notready:a", opts)).toBeNull();
+      const second = await rateLimit("bfrl:notready:a", opts);
+      expect(second?.status).toBe(429);
+      expect(evalMock).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
