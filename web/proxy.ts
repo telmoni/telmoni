@@ -89,29 +89,12 @@ export function legalRedirect(pathname: string): string | null {
   return `${base}/${LEGAL_ALIASES[name] ?? name}/`;
 }
 
-function applySecurityHeaders(
-  response: NextResponse,
-  csp?: string,
-): NextResponse {
-  if (csp) {
-    response.headers.set('content-security-policy', csp);
-  }
-  response.headers.set('x-frame-options', 'DENY');
-  response.headers.set('x-content-type-options', 'nosniff');
-  response.headers.set('referrer-policy', 'strict-origin-when-cross-origin');
-  response.headers.set(
-    'permissions-policy',
-    'camera=(), microphone=(), geolocation=()',
-  );
-  return response;
-}
-
 export const proxy: NextProxy = async (request) => {
   const { pathname } = request.nextUrl;
 
   if (pathname === '/legal' || pathname.startsWith('/legal/')) {
     const target = legalRedirect(pathname);
-    if (target) return applySecurityHeaders(NextResponse.redirect(target, 308));
+    if (target) return NextResponse.redirect(target, 308);
   }
 
   const loggedIn     = await isLoggedIn(request);
@@ -122,18 +105,18 @@ export const proxy: NextProxy = async (request) => {
     if (activeOrg && activeOrg !== 'organization' && (isValidSlug(activeOrg.toLowerCase()) || /^org_[0-9A-Za-z]+$/.test(activeOrg))) {
       const rest = pathname.slice('/organization'.length);
       const target = `/${activeOrg}${rest || ''}${request.nextUrl.search}`;
-      return applySecurityHeaders(NextResponse.redirect(new URL(target, request.url), 307));
+      return NextResponse.redirect(new URL(target, request.url), 307);
     }
   }
 
   if (isProtected && !loggedIn) {
     if (pathname.startsWith('/api/')) {
-      return applySecurityHeaders(NextResponse.json({ error: 'unauthenticated' }, { status: 401 }));
+      return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
     }
     const entry = '/auth/login';
     const url = new URL(entry, request.url);
     url.searchParams.set('returnTo', pathname + request.nextUrl.search);
-    return applySecurityHeaders(NextResponse.redirect(url));
+    return NextResponse.redirect(url);
   }
 
   const nonce = btoa(crypto.randomUUID());
@@ -172,7 +155,8 @@ export const proxy: NextProxy = async (request) => {
     }
   }
 
-  return applySecurityHeaders(response, csp);
+  response.headers.set('content-security-policy', csp);
+  return response;
 };
 
 export const config = {

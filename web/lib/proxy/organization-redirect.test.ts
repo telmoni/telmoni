@@ -39,17 +39,4 @@ describe("proxy organization routing", () => {
     expect(res?.status).toBe(307);
     expect(res?.headers.get("location")).toContain("/auth/login?returnTo=%2Forg_beta%2Fproject_1");
   });
-
-  it("attaches defensive security headers to short-circuited responses", async () => {
-    const req = new NextRequest("http://localhost:3000/organization", {
-      headers: {
-        cookie: "telmoni-active-organization=org_alpha",
-      },
-    });
-    const res = await proxy(req, {} as never);
-    expect(res?.headers.get("x-frame-options")).toBe("DENY");
-    expect(res?.headers.get("x-content-type-options")).toBe("nosniff");
-    expect(res?.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
-    expect(res?.headers.get("permissions-policy")).toBe("camera=(), microphone=(), geolocation=()");
-  });
 });
