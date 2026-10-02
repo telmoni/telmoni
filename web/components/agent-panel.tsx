@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useReducer, useRef, useState, useTransition } from "react";
 import { useParams } from "next/navigation";
-import { ArrowUp, HistoryIcon, MessageSquare, SquarePen, X as XIcon } from "lucide-react";
+import { CornerDownLeft, HistoryIcon, MessageSquare, SquarePen, X as XIcon } from "lucide-react";
 
 import {
   agentStatusAction,
@@ -13,7 +13,6 @@ import {
 import { useConsoleUi } from "@/components/console-ui-context";
 import { Conversation } from "@/components/agent/agent-messages";
 import { Empty, HistoryList, ICON_BUTTON, type HistoryState } from "@/components/agent/agent-history-list";
-import { Button } from "@/components/ui/button";
 import {
   agentEvents,
   agentReducer,
@@ -424,7 +423,14 @@ export function AgentPanel() {
           void send();
         }}
       >
-        <div className="flex items-center gap-2">
+        <div
+          className={cn(
+            "relative flex items-center rounded-menu border border-input bg-transparent",
+            "dark:bg-input/30 dark:border-transparent",
+            "focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50",
+            "transition-[color,box-shadow]",
+          )}
+        >
           <textarea
             ref={inputRef}
             rows={1}
@@ -436,27 +442,30 @@ export function AgentPanel() {
               !projectId
                 ? "Open a project first"
                 : effectiveStatus === "enabled"
-                  ? "Ask about this project…"
+                  ? "Reply"
                   : "Agent is unavailable"
             }
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onInputKeyDown}
             className={cn(
-              "min-h-8 max-h-32 min-w-0 flex-1 resize-none rounded-menu border border-input",
-              "bg-transparent px-3 py-1.5 text-sm outline-none placeholder:text-muted-foreground",
-              "focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+              "min-h-9 max-h-32 min-w-0 flex-1 resize-none border-0 bg-transparent py-2 pl-3.5 pr-9 text-sm outline-none",
+              "placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
             )}
           />
-          <Button
+          <button
             type="submit"
-            size="icon"
-            className="size-8 shrink-0"
             aria-label="Send"
             title="Send"
             disabled={!canSend || draft.trim() === ""}
+            className={cn(
+              "absolute right-2 flex size-6 cursor-pointer items-center justify-center rounded-menu",
+              "text-muted-foreground transition-colors hover:text-foreground",
+              "disabled:cursor-not-allowed disabled:opacity-30",
+              "outline-none",
+            )}
           >
-            <ArrowUp />
-          </Button>
+            <CornerDownLeft className="size-4" />
+          </button>
         </div>
         <p className="text-center text-[11px] text-muted-foreground py-3">
           Telmoni Agent is AI and can make mistakes.
