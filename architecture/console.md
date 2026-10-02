@@ -7,6 +7,7 @@ It has **no database access and no business logic**. Every rule, query and permi
 ## Contents
 
 - [Shape](#shape)
+- [Paths and slugs](#paths-and-slugs)
 - [Talking to the server](#talking-to-the-server)
 - [proxy.ts](#proxyts)
 - [Same-origin checks](#same-origin-checks)
@@ -17,7 +18,6 @@ It has **no database access and no business logic**. Every rule, query and permi
 - [Logging](#logging)
 - [Tests and image](#tests-and-image)
 - [Where it lives](#where-it-lives)
-- [URL Structure and Slug Resolution](#url-structure-and-slug-resolution)
 
 ## Shape
 
@@ -36,7 +36,7 @@ flowchart LR
 
 | Path | What |
 |---|---|
-| `(app)/` | The console shell: `[organizationId]/…` (overview, projects, members, audit log, settings, billing), `[organizationId]/[projectId]/…` (project overview, API keys, audit log, connectors, members, settings), `account/…` |
+| `(app)/` | The console shell: `[organization]` (its overview), `[organization]/~/…` (its own pages: projects, members, audit log, settings), `[organization]/[project]/…` (a project's overview, API keys, connectors, members, audit log, settings), `account/…`. See [paths and slugs](#paths-and-slugs). |
 | `(auth)/auth/` | Sign-in, sign-up, forgot, reset, verify and device pages, and the sign-in route handlers (`login`, `login/external`, `signup`, `callback`, `logout`) |
 | `console/` | Redirects to the right first page |
 | `invite/[token]` | A public invitation page |
@@ -65,6 +65,59 @@ flowchart LR
   - **relays.**
 - **Secrets stay on the server.** `web/lib/env.ts` and `web/lib/server/data.ts` import `server-only`, so importing either from client code fails the build.
 
+## Paths and slugs
+
+The path names the organization, and the project under it, by slug:
+
+| Path | What |
+|---|---|
+| `/{organization}` | The organization's overview |
+| `/{organization}/~/{page}` | The organization's own pages |
+| `/{organization}/{project}` | A project's overview |
+| `/{organization}/{project}/{page}` | A project's pages |
+
+- ⚠ **`~` is what keeps the two levels apart.** It is no slug's shape, so a project may go by any slug at all, `settings` or `members` included, and never lands on one of its organization's pages. A console built on this one adds an organization page under `~` without reserving its name. Read as `/{organization}/{page}`, every organization page drew the project rail, for a project that did not exist.
+- **`web/lib/slug.ts` spells the scheme** (`organizationPath`, `projectPath`), and `consolePlace` (`web/lib/console-nav.ts`) reads it back. Nothing else builds or splits a console path.
+
+**Auth mints every slug** (`crates/shared/src/slug.rs`, `crates/auth/src/db/`). The console derives none.
+- A slug is derived from the row's name and follows it: creation, a rename, and a project's move into another organization each pick one.
+- **An organization's is unique across every organization**, pending ones included, so a restore never finds it taken. **A project's is unique within its organization.**
+- A name that reads as a slug already taken gets the next number (`slug::candidates`). ⚠ An organization's numbers run out for a common name, its namespace being everybody's: its last candidate is the name with a random tail, so the slug still reads as the name.
+- A name with no Latin letters in it gives no slug: the row keeps the one it had, or takes a placeholder.
+- An organization nobody has named goes by a placeholder. It is never derived from the owner's address: a path is logged.
+- **A slug and an id never look alike.** A slug has no underscore and a minted id always has one, so a path segment is never both: the layouts look one up as a slug, then as an id.
+- **Reserved words** (`slug::RESERVED`) are the console's own first path segments, the ones a console built on it serves or may yet, and the ones Next answers itself. No organization goes by one. The console's copy (`RESERVED_ORGANIZATION_SLUGS`) is pinned to the wire contract, and `web/app/organization-slugs.test.ts` checks every route under `web/app/` against it.
+
+**Which organization a request acts in:**
+1. **The path decides.** `proxy.ts` reads the first segment and hands it to the server as a request header (`ORGANIZATION_HEADER`, `web/lib/proxy/organization.ts`). It drops a client's own copy.
+2. **`getServerContext` sends it to `/me`** as `x-organization-slug`. Auth answers with that organization only when the person is in it.
+3. **Every read checks the answer.** Auth falls back to one of the person's own organizations rather than refuse, which is right for a stale cookie and wrong for a path. So when the path names an organization auth did not answer with, the context says so (`organizationNotFound`):
+   - `activeOrganization()` and `identityContext()` answer nobody, so no fetcher and no action has an organization to name;
+   - every organization page calls `notFound()`;
+   - `fetchProjectBySlug`, which every project page reads its project through, does the same, and also for a slug the organization's listing does not hold.
+   - ⚠ **Not once, in a layout.** The router keeps a layout across a move between the pages under it, so a check there does not run again. A page also renders beside its layout, not after it. The two layouts only redirect (below) and seed the store.
+- So a page, and every Server Action posted from it, acts in the organization the page shows. Two tabs on two organizations do not interfere.
+- **Off an organization's path** (Account, `/console`, the route handlers) a cookie stands in (`ACTIVE_ORGANIZATION_COOKIE`): the organization of the last page on screen. `getServerContext` sends it to `/me` as `x-organization-id`, and never beside the path's slug.
+  - **It holds the id, not the slug.** It outlives the page that wrote it, and a rename moves a slug.
+  - ⚠ **The browser writes it** (`OrganizationSync`), **never the proxy.** Only a page on screen may move it. The proxy cannot tell one from a prefetch: Next strips the headers that mark a prefetch before the proxy runs, and the router prefetches every link it draws.
+  - So it is not `HttpOnly`. That costs nothing: it claims nothing, and auth honours it only for an organization the person is in.
+- ⚠ **A route handler that is handed a project resolves it by id, in whichever organization holds it** (`fetchProjectAnywhere`), and names that organization to the server. Its path names none, and the cookie follows whichever tab opened a page last.
+
+**Ids still name the row everywhere but the address bar.**
+- Server Actions take the ids their page rendered. The services key on ids.
+- ⚠ **Anything kept longer than a page names the row by id**: an indexed document's URL, a notice's link, the connect handshake's cookie, the cookie that remembers an organization. A slug moves with a rename; an id does not.
+- **The layouts redirect an id to its slug**, keeping the rest of the path and the query. A project's id follows it into another organization it was handed to. A slug typed with a capital is redirected the same way.
+- ⚠ **`~` needs no escaping, and a chat client, a mail client or a link checker may escape it anyway.** The router matches the literal, and would read `%7E` as a project's name. The proxy redirects the escaped segment to the plain one (`unescapedPath`).
+
+**A rename moves the page.**
+- The rename actions answer the slug the row goes by now (`movedTo`), and the form replaces the path with it. They revalidate nothing in that case: the path they were posted from names nothing any more.
+- **Everybody else with a page under the old slug open follows too.** The action publishes `slug:moved` on the organization's channel. `RealtimeListener` replaces the path where it is spelled with the old slug (`movedPath`), and asks for the rest again, since every link on screen was drawn with it.
+- A tab that missed the event finds the old path not found. `/console` finds the organization again, by the cookie's id.
+
+**Moving between organizations** is a link like any other. The router keeps the `(app)` layout across it, so two things follow the path:
+- `[organization]/layout.tsx` hands the client store the seed for the organization arrived in (`StoreSeed`, `storeSeed`);
+- `OrganizationSync` refreshes the `(app)` layout when it was rendered for another organization than the path names.
+
 ## Talking to the server
 
 **Every call goes through `fetchWithTimeout` or `tryFetchWithTimeout`** (`web/lib/api/fetch.ts`):
@@ -86,8 +139,8 @@ flowchart LR
 - **`identityContext()` answers `null` when `/me` fails, and never falls back.** A fallback could name the wrong tenant.
 
 **`/me`** (`getServerContext`, `web/lib/server/entities/organization.ts`) runs once per request (React `cache`).
-- It sends the person's bearer and the `telmoni-active-organization` cookie as the requested organization.
-- **Auth decides which organization is active.** It honours the cookie only for a real membership, so writing the cookie claims nothing.
+- It sends the person's bearer and the organization to act in: the slug of the one the path names, else the id the cookie remembers (see [paths and slugs](#paths-and-slugs)).
+- **Auth decides which organization is active.** It honours either only for a real membership, so neither the path nor the cookie claims anything.
 
 **How failures reach the screen:**
 - Entity fetchers validate the server's answers with zod, and answer `ok`, `forbidden` or `unavailable`.
@@ -96,28 +149,36 @@ flowchart LR
   - a whole-page "access denied";
   - a section-level role notice;
   - `notFound()`.
+- **A page that is not found keeps the console's chrome** (`(app)/not-found.tsx`), **and has no rail of its own.**
+  - The rail is spelled from the path (`buildConsoleNav`), so a path that names nothing would spell a rail of links to more "not found".
+  - The page marks itself (`data-console-not-found`), and the rail's rows answer the mark in CSS: the address's rows are hidden, and the way back that Account draws is shown.
+  - ⚠ **In CSS, not from the store or from state.** Only the page knows it was not found: an outage leaves the same empty store a dead address does. And the page renders after the rail, so state would be right only once the console had hydrated; a class is right in the server's HTML.
 - Actions flatten the server's RFC 9457 problem into one message (`extractProblem`).
-- ⚠ **An action that changes an organization carries the organization its page rendered.** It is refused (`SWITCHED_ORGANIZATION`) if another tab has switched organization since.
-- Anything uncaught reaches the error boundaries. `instrumentation.ts` logs it, with the digest and the route.
+- ⚠ **An action that changes an organization carries the organization its page rendered.** It is refused (`SWITCHED_ORGANIZATION`) when its request resolves another one: the page has gone stale, by a rename on an organization's path or by another tab off it.
+- Anything uncaught reaches the error boundaries. `instrumentation.ts` logs it, with the digest and the route's pattern. ⚠ Never the path: it spells an organization and a project by the slugs of their names, and may carry an invitation's token or a callback's code.
 
 **Sessions** live in a sealed cookie, refreshed by the server components and a client heartbeat. See [identity](identity.md#the-consoles-side).
 
 ## proxy.ts
 
-`web/proxy.ts` runs on every request except static assets. It does three things, and `next.config.mjs` adds a fourth:
+`web/proxy.ts` runs on every request except static assets. It does five things, and `next.config.mjs` adds a sixth:
 
 1. **Legal redirects.** `/legal/*` gets a 308 to the deployment's `LEGAL_URL`. Without one, it is a 404.
-2. **The sign-in gate.**
+2. **An escaped `~`** in an organization's path gets a 308 to the plain one (see [paths and slugs](#paths-and-slugs)).
+3. **The sign-in gate.**
    - "Signed in" means the session cookie unseals with `AUTH_SECRET` and names a person.
    - A protected path without a session gets a JSON 401 under `/api/*`, and otherwise a redirect to `/auth/login?returnTo=…`.
    - Expiry, refresh and the blacklist are left to `getSession`.
    - Public paths are listed in `web/lib/proxy/public-paths.ts`, plus whatever a console built on this one adds (see [extension slots](#extension-slots)).
-3. **Content Security Policy, with a nonce per request.** It is set on the request and the response. The root layout hands the nonce to its inline boot script.
+4. **Content Security Policy, with a nonce per request.** It is set on the request and the response. The root layout hands the nonce to its inline boot script.
    - Scripts are `'self'` and the nonce only.
    - Frames are refused (`frame-ancestors 'none'`).
    - `connect-src` is `'self'`.
    - `form-action` adds the identity providers' origins (`AUTH_PROVIDER_ORIGINS`). ⚠ Sign-in and sign-out leave the site through redirects that this directive governs.
-4. **Static security headers**, from `next.config.mjs`'s `headers()`, not the proxy: HSTS with preload, `X-Frame-Options: DENY`, `nosniff`, a referrer policy and a permissions policy.
+5. **The organization the path names**, handed to the server as a request header, with the path itself for the layouts to redirect from (see [paths and slugs](#paths-and-slugs)). It writes no cookie.
+6. **Static security headers**, from `next.config.mjs`'s `headers()`, not the proxy: HSTS with preload, `X-Frame-Options: DENY`, `nosniff`, a referrer policy and a permissions policy.
+   - Next applies them ahead of the proxy, and keeps them on whatever the proxy answers itself: its redirects and its 401 carry them too.
+   - ⚠ **One list.** A copy set in the proxy is applied after it, so it would silently win over a change made here.
 
 ## Same-origin checks
 
@@ -151,7 +212,8 @@ Why the code is shaped this way:
   - ⚠ A keepalive, because the VPC firewall drops idle connections, which would leave the subscriber silently deaf.
   - ⚠ A command timeout, because a node that is connected but silent would hang the inline limiter.
   - ⚠ Reconnecting on `READONLY` after a high-availability failover.
-- **The client address** used by the limiter prioritizes edge-authenticated `cf-connecting-ip` from trusted ingress, falling back to the second-to-last `X-Forwarded-For` entry (`trustedClientIp`). Google's load balancer appends the address it saw the client at, then its own, so earlier entries, which the client can write, are ignored.
+- **The client address** used by the limiter is the second-to-last `X-Forwarded-For` entry (`trustedClientIp`). Google's load balancer appends the address it saw the client at, then its own, so earlier entries, which the client can write, are ignored.
+  - ⚠ **No other header is read for it.** `cf-connecting-ip` and its like are set by an edge this deployment does not have, so here they are whatever the caller sends. Read first, one let any caller choose a fresh bucket per request, past every per-address ceiling.
 
 ## Live events
 
@@ -166,7 +228,8 @@ Why the code is shaped this way:
 
 **What the stream carries:**
 - It subscribes to the person's channel and to one channel per organization they are in.
-- It forwards `ownership:changed` and `invite:*` events, validated with zod. **Notices from the feed are not pushed** (see [notifications](notifications.md#live-updates-in-the-console)).
+- It forwards `ownership:changed`, `membership:removed`, `slug:moved` and `invite:*` events, validated with zod. **Notices from the feed are not pushed** (see [notifications](notifications.md#live-updates-in-the-console)).
+- ⚠ **A `slug:moved` event's slugs are held to a slug's shape** (`web/lib/events/types.ts`), because the browser spells a path with them.
 - A revocation message on the session's channel closes the stream with a `close` event.
 - A keepalive comment goes out on an interval. Each time, it also re-checks the blacklist.
 
@@ -175,6 +238,7 @@ Why the code is shaped this way:
 
 **`RealtimeListener`** (`web/components/realtime-listener.tsx`) is the browser's `EventSource`.
 - It updates the store and calls `router.refresh()`, so the server components render again.
+- It moves the page when the page's own address has moved: out of a project or an organization the person was removed from, after a project handed to another organization, and after a renamed slug.
 - It reconnects after a delay, or when the tab becomes visible or comes back online.
 - It stops on `close`.
 
@@ -233,6 +297,7 @@ All logging goes through `@/lib/logger` (pino), never `console.*`:
 | Concern | File |
 |---|---|
 | Middleware | `web/proxy.ts`, `web/lib/proxy/` |
+| Paths and slugs | `web/lib/slug.ts`, `web/lib/console-nav.ts`, `web/lib/proxy/organization.ts`, `web/components/organization-sync.tsx`, `web/app/(app)/[organization]/layout.tsx`, `web/app/(app)/[organization]/[project]/layout.tsx` |
 | Headers, redirects, build output | `web/next.config.mjs` |
 | Server calls | `web/lib/api/fetch.ts` |
 | Identity and `/me` | `web/lib/server/entities/identity-context.ts`, `web/lib/server/entities/organization.ts` |
@@ -246,28 +311,3 @@ All logging goes through `@/lib/logger` (pino), never `console.*`:
 | Environment | `web/lib/env.ts`, `web/.env.local.example` |
 | Logging | `web/lib/logger.ts`, `web/instrumentation.ts` |
 | Image | `web/Dockerfile` |
-
-
-## URL Structure and Slug Resolution
-
-The console implements hierarchical human-friendly vanity slugs (following Vercel/GitHub/Linear design conventions) with dual resolution for internal IDs:
-
-- **Organization pages**: `/:organizationSlug` or `/:organizationId`
-  - Projects: `/:organizationSlug/projects`
-  - Members: `/:organizationSlug/members`
-  - Settings: `/:organizationSlug/settings`
-  - Audit Log: `/:organizationSlug/audit-log`
-  - Billing: `/:organizationSlug/billing`
-- **Project pages**: `/:organizationSlug/:projectSlug` or `/:organizationId/:projectId`
-  - Project Overview: `/:organizationSlug/:projectSlug`
-  - API Keys: `/:organizationSlug/:projectSlug/api-keys`
-  - Connectors: `/:organizationSlug/:projectSlug/connectors`
-  - Members: `/:organizationSlug/:projectSlug/members`
-  - Settings: `/:organizationSlug/:projectSlug/settings`
-  - Audit Log: `/:organizationSlug/:projectSlug/audit-log`
-- **Slug Normalization & Safety**:
-  - Valid slugs contain lowercase alphanumerics and single hyphens (`^[a-z0-9]+(?:-[a-z0-9]+)*$`), 2 to 48 characters.
-  - Reserved top-level keywords (`api`, `auth`, `account`, `console`, `billing`, `settings`, `_next`, `security.txt`, `manifest.json`, `null`, `undefined`, `root`, `system`) are prohibited and automatically qualified with `-organization` or `-app`.
-  - Non-ASCII/diacritics are normalized via NFKD, and consecutive hyphens are collapsed.
-  - Dual resolution allows deep linking and API usage via immutable external IDs (`org_...`, `project_...`) without breaking.
-  - Case normalization in `proxy.ts` safely maps vanity slugs to lowercase while preserving case-sensitive base62 IDs (`org_...`).

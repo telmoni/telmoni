@@ -190,8 +190,8 @@ There is no lane that signs a person out of every session but the current one.
 |---|---|---|
 | `telmoni_session` | The person's id, address and names; the bearer, the refresh token, the sid, the session row's id, the expiry, the provider's id token, the sign-in method | `SESSION_TTL_SECONDS`. `httpOnly`, `SameSite=Lax`, `secure` in production. |
 | `telmoni_pkce` | The sign-in's `state`, where to return, and the chosen provider | One sign-in |
-| `telmoni_connect` | A connector handshake's `state`, project and vendor | One handshake |
-| `telmoni-active-organization` | Plain, not sealed: which organization the person last chose | It claims nothing. Auth honours it only for a member. |
+| `telmoni_connect` | A connector handshake's `state`, organization, project and vendor, each by id | One handshake |
+| `telmoni-organization` | Plain, not sealed, and not `httpOnly`: the id of the organization of the last page on screen, for the paths that name none. ⚠ The browser writes it, never the proxy. | It claims nothing. Auth honours it only for a member. See [the console's paths](console.md#paths-and-slugs). |
 
 Rotating `AUTH_SECRET` voids every console session.
 
@@ -265,6 +265,7 @@ API tokens are for the public `/v1` API (`crates/auth/src/handler/tokens.rs`, `c
   - The `BetaAccess` and `PublicApi` flags must be on.
   - `last_used_at` is updated at most once an interval.
 - **`/v1` is organization-wide.** It resolves only the organization: a token is the organization's key to its own data.
+  - `GET /v1/organization` answers its id, its slug, its name and its owner, all from the validation's own join. The slug is there so a script holding only a key can spell a console link. No lane takes one back: a token is its organization.
 
 The console relays `/v1/*` (`web/app/v1/[...path]/route.ts`), passing the client's own `Authorization` header, and meters each token and each source address.
 

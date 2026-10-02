@@ -37,10 +37,12 @@ flowchart TD
   - `OrganizationId` must start with `org_`, and a `UserId` must not.
   - A minted id is a prefix plus random base62 characters.
   - Each id type is its own type, so a project id cannot be passed where an organization id is expected.
-- **Slugs provide canonical vanity URLs** (`/:organizationSlug/:projectSlug`):
-  - Both `auth.organizations` and `auth.projects` persist an indexed `slug` column (2–48 characters, lowercase alphanumeric with hyphens).
-  - Uniqueness is enforced at the database level (`lower(slug)` for organizations; `(organization_id, lower(slug))` for projects).
-  - Dual resolution allows routes, the CLI, and server actions to accept either immutable IDs or slugs transparently.
+- **Slugs spell the console's paths, and nothing else.** An organization and a project each carry one (`crates/shared/src/slug.rs`):
+  - Auth derives it from the row's name, and derives it again when the name changes. It is never the row's identity.
+  - An organization's is unique across every organization; a project's is unique within its organization. The database holds both.
+  - Every lane, header and foreign key names a row by id. Only `/me` takes a slug, as the organization the console asks to act in.
+  - `/me` answers each organization's slug beside its id, and `/v1/organization` answers the one a key belongs to. The CLI reads it there, and takes a slug wherever it takes an id, but resolves it itself: what it sends is the id.
+  - See [the console's paths](console.md#paths-and-slugs).
 
 **Nobody creates an organization.**
 - A person's first organization is provisioned the first time `/me` finds them in none (`provision_first_organization`, `crates/auth/src/handler/me.rs`). It writes the organization, its owner row, a first project, and their audit rows.

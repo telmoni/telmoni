@@ -53,7 +53,7 @@ The answer is a 202, carrying `erase_after`.
 
 **Restoring it.**
 - **The owner** can restore an organization they asked to delete, while `erase_after` is still ahead on the database's clock, the same clock the sweep reads. Restoring clears every deletion column and is audited. Whatever the purge hook already dropped is not brought back.
-- **The operator** can run `telmoni terminate <organization>` and `telmoni restore <organization>`. These are audited as `service:operator`. An operator's restore works past the window too.
+- **The operator** can run `telmoni terminate <org_id>` and `telmoni restore <org_id>`. These are audited as `service:operator`. An operator's restore works past the window too. They take the organization's id, never its slug: a slug moves with a rename, and may be another organization's by the time the command runs.
 - **An organization taken by an account deletion is never restored.**
 
 ### Finalizing it

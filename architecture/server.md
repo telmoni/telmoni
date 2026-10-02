@@ -274,17 +274,17 @@ The sweeps, `terminate` and `restore` are run by hand, or by an operator's own j
 | `sweep audit-verify` | Walks every audit chain and logs any break. It never repairs. |
 | `sweep retention` | Auth's retention, once |
 | `sweep agent-reindex` | Re-embeds every passage a different embedding model made |
-| `terminate <organization>` | Marks an organization for deletion, as the operator, audited as the operator |
-| `restore <organization>` | Restores a deletion the owner or an operator asked for, for as long as the row stands, even past the window. It refuses an organization taken by an account deletion. |
+| `terminate <org_id>` | Marks an organization for deletion, as the operator, audited as the operator. By id, never by slug. |
+| `restore <org_id>` | Restores a deletion the owner or an operator asked for, for as long as the row stands, even past the window. It refuses an organization taken by an account deletion. |
 
 ## The wire contract
 
 `contract/` holds two generated files. They are never edited by hand.
 
-- **`wire-contract.json`.** The enums the console must agree with: roles, organization status, notification kinds and flags.
+- **`wire-contract.json`.** What the console must agree with: the enums (roles, organization status, notification kinds and flags), and the words no organization's slug may be.
   - `crates/shared/tests/wire_contract.rs` writes it under `make contract` and checks it otherwise.
   - Adding a variant without listing it is a compile error.
-  - The console's side is `web/lib/types/enums.ts`, written by hand and held to the file by `contract.test.ts`.
+  - The console's side is `web/lib/types/enums.ts` and `web/lib/slug.ts`, written by hand and held to the file by `contract.test.ts`.
 - **`openapi.json`.** The public `/v1` API. `V1_LANES` (`crates/auth/src/handler/v1.rs`) builds both the router and the document, so a lane the document does not describe is a lane the service does not serve. `crates/shared/tests/openapi_contract.rs` checks it, and its rules for what the public API may contain.
 
 After a change to either: `make contract`, then update `enums.ts` until `contract.test.ts` passes.

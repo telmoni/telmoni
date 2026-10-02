@@ -63,7 +63,7 @@ flowchart LR
 
 A person opens a project's members page:
 
-1. **`proxy.ts`** checks that the session cookie unseals, and sets a CSP nonce ([console](console.md#proxyts)).
+1. **`proxy.ts`** checks that the session cookie unseals, sets a CSP nonce, and hands on the organization the path names ([console](console.md#proxyts)).
 2. **The page's Server Component** reads the session. If the bearer is near expiry it refreshes it ([identity](identity.md#the-consoles-side)).
 3. **The console calls `/me`.** Auth decides which organization is active, and who the person is there.
 4. **The console calls `GET /internal/projects/{id}/members`** with `Authorization: Bearer <opaque token>`, `x-service-secret`, `x-organization-id`, `x-project-id` and `x-request-id`, through `fetchWithTimeout` ([console](console.md#talking-to-the-server)).

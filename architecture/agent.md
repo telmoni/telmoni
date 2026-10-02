@@ -273,6 +273,8 @@ The other modules' rows are copied into `agent.chunks`, split into passages, emb
 
 ⚠ **Nothing crosses a database role.** Auth reads its audit events as auth, and notifications its feed and deliveries as notifications. Each hands back documents through the seam. The agent writes them in its own lane. The sibling decides the audience of each document, so visibility comes from the module that knows the rule.
 
+⚠ **A document's URL names its rows by id, never by slug**, and so does the console path a tool cites (`project_path`, `crates/agent/src/tools.rs`). A passage is kept for as long as its source is, and a rename moves a slug. The console redirects an id to the slug the row goes by now (see [the console's paths](console.md#paths-and-slugs)).
+
 **The loop** (`index::run`) runs in every replica:
 
 - It starts `START_DELAY` after boot, then ticks every `EVERY`.
