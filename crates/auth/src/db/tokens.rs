@@ -72,6 +72,9 @@ pub async fn create(
 pub struct ValidatedToken {
     pub id: Uuid,
     pub organization_id: OrganizationId,
+    /// The slug the console's paths name the organization by, for
+    /// `/v1/organization`'s answer.
+    pub slug: String,
     /// The organization's name, and its owner's address — what an unnamed
     /// organization is labelled by — carried because `/v1` has no BFF to look
     /// them up.
@@ -94,6 +97,7 @@ impl ValidatedToken {
 type ValidatedRow = (
     Uuid,
     OrganizationId,
+    String,
     Option<String>,
     Option<String>,
     Option<String>,
@@ -116,7 +120,7 @@ pub async fn validate(
     // per call) in a single statement.
     let row: Option<ValidatedRow> = sqlx::query_as(
         "WITH v AS (
-            SELECT t.id, a.external_id, a.name, oi.email, oi.display_name
+            SELECT t.id, a.external_id, a.slug, a.name, oi.email, oi.display_name
               FROM auth.api_tokens t
               JOIN auth.organizations a ON a.external_id = t.organization_id
               LEFT JOIN auth.organization_members om
@@ -131,16 +135,17 @@ pub async fn validate(
              WHERE id = (SELECT id FROM v)
                AND (last_used_at IS NULL OR last_used_at < now() - interval '1 minute')
          )
-         SELECT id, external_id, name, email, display_name FROM v",
+         SELECT id, external_id, slug, name, email, display_name FROM v",
     )
     .bind(token_hash)
     .fetch_optional(tx.conn())
     .await?;
 
     Ok(row.map(
-        |(id, organization_id, name, owner_email, owner_display_name)| ValidatedToken {
+        |(id, organization_id, slug, name, owner_email, owner_display_name)| ValidatedToken {
             id,
             organization_id,
+            slug,
             name,
             owner_email,
             owner_display_name,

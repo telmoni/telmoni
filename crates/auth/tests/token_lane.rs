@@ -69,6 +69,8 @@ async fn json_body(resp: axum::response::Response) -> Value {
 struct Fixture {
     /// The organization `/me` provisioned for [`USER`] — minted, never their id.
     organization: String,
+    /// The slug `/me` answered for it.
+    slug: String,
     /// The raw `telmoni_` value, as a customer holds it.
     raw: String,
     id: String,
@@ -105,9 +107,14 @@ async fn token(pool: &PgPool) -> Fixture {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let organization = json_body(resp).await["activeOrganizationId"]
+    let me = json_body(resp).await;
+    let organization = me["activeOrganizationId"]
         .as_str()
         .expect("/me names the organization it provisioned")
+        .to_owned();
+    let slug = me["organizations"][0]["slug"]
+        .as_str()
+        .expect("/me answers the organization's slug")
         .to_owned();
 
     let project = project_of(pool, &organization).await;
@@ -137,6 +144,7 @@ async fn token(pool: &PgPool) -> Fixture {
     let body = json_body(resp).await;
     Fixture {
         organization,
+        slug,
         raw: body["token"].as_str().expect("the raw token").to_owned(),
         id: body["id"].as_str().expect("the token id").to_owned(),
     }
@@ -165,6 +173,10 @@ async fn a_live_token_reads_the_organization_it_belongs_to(pool: PgPool) {
     assert_eq!(resp.status(), StatusCode::OK);
     let body = json_body(resp).await;
     assert_eq!(body["organization_id"], fixture.organization.as_str());
+    // The slug the console's URL shows, as `/me` answers it: a script holding
+    // only a key can spell a console link, or name the organization to the CLI.
+    assert!(telmoni_shared::slug::is_slug(&fixture.slug), "{body}");
+    assert_eq!(body["slug"], fixture.slug.as_str(), "{body}");
     assert!(body["name"].is_null(), "nobody has named it yet: {body}");
     assert_eq!(
         body["owner"]["email"], EMAIL,

@@ -50,9 +50,11 @@ pub const V1_LANES: &[V1Lane] = &[
             path: "/v1/organization",
             summary: "Who this token is",
             description: "The organization the token belongs to — its id, \
-                          its name and its owner's address and name. A token \
-                          IS an organization, so this answers for the caller \
-                          and for nobody else.",
+                          its slug, its name and its owner's address and name. \
+                          The slug is what the console's URLs name it by, and \
+                          it follows the name: a rename moves it, the id \
+                          never moves. A token IS an organization, so this \
+                          answers for the caller and for nobody else.",
             params: &[],
             answers: &[Answer {
                 status: 200,
@@ -89,7 +91,9 @@ pub struct TokenOrganization {
     /// without ever seeing it.
     pub token_id: Uuid,
     /// What the validation's join already carries about the organization —
-    /// its name and its owner — so `/v1/organization` reads nothing more.
+    /// its slug, its name and its owner — so `/v1/organization` reads nothing
+    /// more.
+    pub slug: String,
     pub name: Option<String>,
     pub owner_email: Option<String>,
     pub owner_display_name: Option<String>,
@@ -167,6 +171,7 @@ pub async fn require_token(
             request.extensions_mut().insert(TokenOrganization {
                 organization_id: v.organization_id,
                 token_id: v.id,
+                slug: v.slug,
                 name: v.name,
                 owner_email: v.owner_email,
                 owner_display_name: v.owner_display_name,
@@ -217,6 +222,7 @@ pub async fn get_organization(
 ) -> Result<impl IntoResponse, TelmoniError> {
     let organization_id = token_organization.organization_id.clone();
     let TokenOrganization {
+        slug,
         name,
         owner_email,
         owner_display_name,
@@ -224,6 +230,7 @@ pub async fn get_organization(
     } = token_organization;
     Ok(Json(json!({
         "organization_id": organization_id,
+        "slug": slug,
         "name": name,
         "owner": owner_email.map(|email| json!({ "email": email, "display_name": owner_display_name })),
     })))
