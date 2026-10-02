@@ -98,6 +98,7 @@ GRANT SELECT ON auth.accounts TO auth_maintenance;
 CREATE TABLE auth.organizations (
     id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     external_id           TEXT        NOT NULL UNIQUE,
+    slug                  TEXT,
     name                  TEXT,
     status                TEXT        NOT NULL DEFAULT 'active',
     deletion_requested_at TIMESTAMPTZ,
@@ -118,6 +119,9 @@ CREATE TABLE auth.organizations (
 );
 
 CREATE INDEX organizations_shard_key_idx ON auth.organizations (shard_key);
+CREATE UNIQUE INDEX organizations_slug_lower_active_idx
+    ON auth.organizations (lower(slug))
+    WHERE status = 'active';
 CREATE INDEX organizations_pending_deletion_idx ON auth.organizations (erase_after)
     WHERE status = 'pending_deletion';
 
@@ -232,6 +236,7 @@ GRANT SELECT, UPDATE, DELETE ON auth.organization_invites TO auth_maintenance;
 CREATE TABLE auth.projects (
     id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     external_id           TEXT        NOT NULL UNIQUE,
+    slug                  TEXT,
     organization_id       TEXT        NOT NULL REFERENCES auth.organizations (external_id) ON DELETE CASCADE,
     name                  TEXT        NOT NULL,
     status                TEXT        NOT NULL DEFAULT 'active',
@@ -245,6 +250,9 @@ CREATE TABLE auth.projects (
 
 CREATE INDEX projects_shard_key_idx ON auth.projects (shard_key);
 CREATE UNIQUE INDEX projects_organization_name_key ON auth.projects (organization_id, lower(name));
+CREATE UNIQUE INDEX projects_organization_slug_lower_active_idx
+    ON auth.projects (organization_id, lower(slug))
+    WHERE status = 'active';
 
 ALTER TABLE auth.projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE auth.projects FORCE ROW LEVEL SECURITY;
