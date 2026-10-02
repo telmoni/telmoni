@@ -19,6 +19,7 @@ import {
   isOrganizationSlug,
   organizationPath,
   projectPath,
+  withLeadingSegments,
 } from "@/lib/slug";
 
 export const NAV_COLLAPSED_COOKIE = "telmoni-nav-collapsed";
@@ -87,6 +88,27 @@ export function staleShellOrganization(
   const named = place.organization;
   if (named === rendered || !organizations.some((o) => o.slug === named)) return null;
   return named;
+}
+
+/**
+ * Where `pathname` is now that a rename has moved a slug it is spelled with:
+ * an organization's (`from` to `to`), or, when `organization` names the one a
+ * project is in, that project's. `null` when the path is not under it.
+ */
+export function movedPath(
+  pathname: string,
+  moved: { organization?: string; from: string; to: string },
+): string | null {
+  const place = consolePlace(pathname);
+  if (place === null || place.kind === "account") return null;
+  if (moved.organization === undefined) {
+    return place.organization === moved.from ? withLeadingSegments(pathname, [moved.to]) : null;
+  }
+  return place.kind === "project" &&
+    place.organization === moved.organization &&
+    place.project === moved.from
+    ? withLeadingSegments(pathname, [moved.organization, moved.to])
+    : null;
 }
 
 /**

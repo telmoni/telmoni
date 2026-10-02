@@ -40,6 +40,11 @@ const mockRevalidate = vi.fn();
 vi.mock("next/cache", () => ({
   revalidatePath: (...a: unknown[]) => mockRevalidate(...a),
 }));
+const mockPublishEvent = vi.fn<(...args: unknown[]) => Promise<boolean>>(async () => true);
+vi.mock("@/lib/events/publisher", () => ({
+  publishEvent: (...args: unknown[]) => mockPublishEvent(...args),
+  organizationChannel: (organizationId: string) => `bfev:organization:${organizationId}`,
+}));
 
 import { tryFetchWithTimeout } from "@/lib/api/fetch";
 import { identityContext } from "@/lib/server/entities/identity-context";
@@ -105,6 +110,8 @@ describe("renameOrganizationAction", () => {
       }),
     );
     expect(mockRevalidate).toHaveBeenCalledWith("/", "layout");
+    // Its paths are where they were: nobody has anywhere to follow it to.
+    expect(mockPublishEvent).not.toHaveBeenCalled();
   });
 
   // ⚠ A rename moves the organization's slug with its name, out from under
@@ -120,6 +127,19 @@ describe("renameOrganizationAction", () => {
     expect(mockRevalidate).not.toHaveBeenCalled();
   });
 
+  // Everybody else with one of its pages open is on a path that now names
+  // nothing: the organization's channel tells them where it went.
+  it("tells the organization's channel where a rename moved it", async () => {
+    wentBy("org-4k2j9x0q1z");
+    fetchMock.mockResolvedValue(renamed("acme-robotics"));
+    await renameOrganizationAction(ORGANIZATION, "Acme Robotics");
+    expect(mockPublishEvent).toHaveBeenCalledTimes(1);
+    expect(mockPublishEvent).toHaveBeenCalledWith(`bfev:organization:${ORGANIZATION}`, {
+      type: "slug:moved",
+      data: { organizationId: ORGANIZATION, from: "org-4k2j9x0q1z", to: "acme-robotics" },
+    });
+  });
+
   it("revalidates in place when it cannot tell whether the slug moved", async () => {
     vi.mocked(getServerContext).mockResolvedValue(null);
     fetchMock.mockResolvedValue(renamed("acme-robotics"));
@@ -127,6 +147,17 @@ describe("renameOrganizationAction", () => {
       error: null,
     });
     expect(mockRevalidate).toHaveBeenCalledWith("/", "layout");
+    expect(mockPublishEvent).not.toHaveBeenCalled();
+  });
+
+  it("tells nobody about a rename auth refused", async () => {
+    wentBy("org-4k2j9x0q1z");
+    fetchMock.mockResolvedValue(new Response(null, { status: 409 }));
+    expect(await renameOrganizationAction(ORGANIZATION, "Acme Robotics")).toEqual({
+      error: "problem",
+    });
+    expect(mockPublishEvent).not.toHaveBeenCalled();
+    expect(mockRevalidate).not.toHaveBeenCalled();
   });
 
   // ⚠ The organization this page rendered has been renamed since, so its path

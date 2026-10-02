@@ -245,6 +245,46 @@ describe("GET /api/events (SSE)", () => {
     await reader.cancel();
   });
 
+  // A rename moved a slug: the console replaces the path it is on with one
+  // spelled by `to`, so nothing that is not a slug may reach it as one.
+  it("relays a slug:moved event, and drops one whose slugs are no slug's shape", async () => {
+    mockGetSession.mockResolvedValue(LIVE_SESSION);
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const res = await GET(new NextRequest("http://localhost:3000/api/events"));
+    const reader = res.body!.getReader();
+    await reader.read();
+
+    for (const to of ["/evil.example", "acme/../account", "Acme", ""]) {
+      messageListener?.(
+        organizationChannel("org_own"),
+        JSON.stringify({
+          type: "slug:moved",
+          data: { organizationId: "org_own", from: "org-4k2j9x0q1z", to },
+        }),
+      );
+    }
+    expect(warn).toHaveBeenCalledTimes(4);
+
+    const moved = {
+      organizationId: "org_own",
+      organization: "acme",
+      projectId: "proj_1",
+      from: "default-project",
+      to: "web",
+    };
+    messageListener?.(
+      organizationChannel("org_own"),
+      JSON.stringify({ type: "slug:moved", data: moved }),
+    );
+    const chunk = await reader.read();
+    expect(new TextDecoder().decode(chunk.value)).toBe(
+      `event: slug:moved\ndata: ${JSON.stringify(moved)}\n\n`,
+    );
+
+    warn.mockRestore();
+    await reader.cancel();
+  });
+
   it("drops a message that is not one of our events, and says so", async () => {
     mockGetSession.mockResolvedValue(LIVE_SESSION);
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});

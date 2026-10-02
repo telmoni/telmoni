@@ -12,7 +12,7 @@ import {
   useAddIncomingInvite,
   useRemoveIncomingInvite,
 } from "@/lib/store";
-import { projectAt } from "@/lib/console-nav";
+import { movedPath, projectAt } from "@/lib/console-nav";
 import { RealtimeEventDataSchema } from "@/lib/events/types";
 import { projectPath } from "@/lib/slug";
 
@@ -139,6 +139,18 @@ export function RealtimeListener() {
           router.replace(projectPath(data.organizationId, data.projectId));
           return;
         }
+        router.refresh();
+      });
+
+      // A rename moved a slug this path may be spelled with: on to where the
+      // page is now. Everything else on screen still links by the old slug,
+      // so it is asked for again either way — after the move, never before:
+      // the old path names nothing any more.
+      es.addEventListener("slug:moved", (e: MessageEvent) => {
+        const moved = payload(e, "slug:moved");
+        if (!moved) return;
+        const path = movedPath(pathnameRef.current, moved);
+        if (path) router.replace(path + window.location.search);
         router.refresh();
       });
 

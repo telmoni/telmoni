@@ -6,6 +6,7 @@ import {
   buildConsoleNav,
   consolePlace,
   isAccountPath,
+  movedPath,
   organizationToRemember,
   projectAt,
   rootSegment,
@@ -448,6 +449,38 @@ describe("staleShellOrganization", () => {
   it("is quiet for an organization the person is not in", () => {
     expect(staleShellOrganization("/initech/web", "acme", organizations)).toBeNull();
     expect(staleShellOrganization("/initech/web", "acme", [])).toBeNull();
+  });
+});
+
+describe("movedPath", () => {
+  it("follows an organization's slug on every page under it", () => {
+    const moved = { from: "org-4k2j9x0q1z", to: "acme" };
+    expect(movedPath("/org-4k2j9x0q1z", moved)).toBe("/acme");
+    expect(movedPath("/org-4k2j9x0q1z/~/settings", moved)).toBe("/acme/~/settings");
+    expect(movedPath("/org-4k2j9x0q1z/web/api-keys", moved)).toBe("/acme/web/api-keys");
+  });
+
+  it("follows a project's slug in the organization that holds it", () => {
+    const moved = { organization: "acme", from: "default-project", to: "web" };
+    expect(movedPath("/acme/default-project", moved)).toBe("/acme/web");
+    expect(movedPath("/acme/default-project/members", moved)).toBe("/acme/web/members");
+  });
+
+  it("leaves a path that is not spelled with the slug", () => {
+    expect(movedPath("/globex/web", { from: "acme", to: "acme-robotics" })).toBeNull();
+    expect(movedPath("/account/settings", { from: "account", to: "acme" })).toBeNull();
+    expect(movedPath("/console", { from: "console", to: "acme" })).toBeNull();
+  });
+
+  // ⚠ Two organizations may each hold a project called `web`, and an
+  // organization may go by the slug a project just left.
+  it("never follows a project's move in another organization, or onto an organization's pages", () => {
+    const moved = { organization: "acme", from: "web", to: "site" };
+    expect(movedPath("/globex/web", moved)).toBeNull();
+    expect(movedPath("/web/~/settings", moved)).toBeNull();
+    expect(movedPath("/acme/~/settings", moved)).toBeNull();
+    expect(movedPath("/acme", moved)).toBeNull();
+    expect(movedPath("/acme/api/web", moved)).toBeNull();
   });
 });
 

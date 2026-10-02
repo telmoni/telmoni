@@ -7,6 +7,7 @@ import { z } from "zod";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
+import { organizationChannel, publishEvent } from "@/lib/events/publisher";
 import { identityContext, organizationHeaders } from "@/lib/server/entities/identity-context";
 import { activeOrganization, getServerContext } from "@/lib/server/entities/organization";
 import { SWITCHED_ORGANIZATION } from "@/lib/server/identity";
@@ -16,9 +17,10 @@ import { getServerSession } from "@/lib/server/session";
 const Renamed = z.object({ slug: z.string() });
 
 /// `movedTo` is the slug the organization goes by now, when the rename moved
-/// it: the page follows it there. Nothing is revalidated then — the path this
-/// was posted from names no organization any more, and rendering it again
-/// would answer "not found" before the page had moved.
+/// it: the page follows it there, and so does everybody else with one of the
+/// organization's pages open, who is told. Nothing is revalidated then — the
+/// path this was posted from names no organization any more, and rendering it
+/// again would answer "not found" before the page had moved.
 export async function renameOrganizationAction(
   organizationId: string,
   name: string,
@@ -63,6 +65,10 @@ export async function renameOrganizationAction(
 
   const renamed = Renamed.safeParse(await res.json().catch(() => null));
   if (renamed.success && was !== undefined && renamed.data.slug !== was) {
+    await publishEvent(organizationChannel(organizationId), {
+      type: "slug:moved",
+      data: { organizationId, from: was, to: renamed.data.slug },
+    });
     return { error: null, movedTo: renamed.data.slug };
   }
   revalidatePath("/", "layout");
