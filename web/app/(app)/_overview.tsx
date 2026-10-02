@@ -10,13 +10,15 @@ import { Card } from "@/components/ui/card";
 export function Overview({
   children,
   sections,
+  action,
 }: {
   children: ReactNode;
   sections?: ReactNode;
+  action?: ReactNode;
 }) {
   return (
     <>
-      <PageHeader title="Overview" />
+      <PageHeader title="Overview" action={action} />
       <div className="grid gap-3">
         <section className="grid gap-3">
           <Card>{children}</Card>

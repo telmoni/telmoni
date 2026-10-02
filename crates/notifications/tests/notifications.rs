@@ -873,8 +873,14 @@ async fn erasing_a_person_rewrites_every_notice_that_named_them(pool: PgPool) {
             r#"{{"kind":"member_added","subject_user_id":"{who}","title":"{name} joined the project","body":"{name} accepted the invitation and is now {role} on the project.","metadata":{{"project_id":"p","role":"{role}"}}}}"#
         )
     };
+    let left = |who: &str, name: &str| {
+        format!(
+            r#"{{"kind":"member_left","subject_user_id":"{who}","title":"{name} left the project","body":"{name} left the project.","metadata":{{"project_id":"p"}}}}"#
+        )
+    };
     for (organization, body) in [
         (ORGANIZATION, joined("user_leaver", "Sam Leaver", "admin")),
+        (ORGANIZATION, left("user_leaver", "Sam Leaver")),
         (OTHER_ORGANIZATION, joined("user_leaver", "sam@example.test", "member")),
         (ORGANIZATION, joined("user_stayer", "Kim Stayer", "member")),
         (
@@ -899,7 +905,7 @@ async fn erasing_a_person_rewrites_every_notice_that_named_them(pool: PgPool) {
     };
     let resp = redact().await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(json_body(resp).await["redacted"], 2);
+    assert_eq!(json_body(resp).await["redacted"], 3);
 
     for (organization, role) in [(ORGANIZATION, "admin"), (OTHER_ORGANIZATION, "member")] {
         let resp = app(state.clone())
@@ -923,6 +929,14 @@ async fn erasing_a_person_rewrites_every_notice_that_named_them(pool: PgPool) {
             format!("A former member accepted the invitation and is now {role} on the project."),
             "{organization}: the role survives the redaction, the name does not"
         );
+        if organization == ORGANIZATION {
+            let former_left: Vec<&serde_json::Value> = items
+                .iter()
+                .filter(|i| i["title"] == "A former member left the project")
+                .collect();
+            assert_eq!(former_left.len(), 1, "former left in {organization}");
+            assert_eq!(former_left[0]["body"], "A former member left the project.");
+        }
         let text = body.to_string();
         assert!(!text.contains("Sam Leaver"), "{organization}: {text}");
         assert!(!text.contains("sam@example.test"), "{organization}: {text}");
@@ -959,7 +973,7 @@ async fn erasing_a_person_rewrites_every_notice_that_named_them(pool: PgPool) {
 
 /// ⚠ **A notice naming a person that the redaction has no words for stops
 /// the erasure**, rather than leaving the name in a feed after the person is
-/// gone. Today only `member_added` names anyone; a producer that starts
+/// gone. Today `member_added` and `member_left` name anyone; a producer that starts
 /// naming people on another kind adds its words to `redact_person` or its
 /// emits fail every erasure they touch, loudly.
 #[sqlx::test]

@@ -4,6 +4,7 @@ import { NotificationKind } from "@/lib/types/enums";
 // typecheck here until it has a label.
 const LABELS = {
   member_added: "Member added",
+  member_left: "Member left",
   organization_alert: "Organization alert",
   connector_connected: "Channel connected",
   connector_disconnected: "Channel disconnected",

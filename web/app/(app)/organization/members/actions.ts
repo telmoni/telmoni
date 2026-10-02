@@ -143,6 +143,7 @@ export async function updateOrganizationMemberRoleAction(
 export async function removeOrganizationMemberAction(
   organizationId: string,
   memberId: string,
+  memberEmail?: string,
 ): Promise<ActionResult> {
   const gate = await open("members:remove", 30, organizationId);
   if ("error" in gate) return gate;
@@ -150,6 +151,14 @@ export async function removeOrganizationMemberAction(
     `${gate.base}/internal/organization/members/${encodeURIComponent(memberId)}`,
     { method: "DELETE", headers: gate.headers },
   );
+  if (!res?.ok) return answer(res);
+
+  if (memberEmail) {
+    await publishEvent(userChannel(memberEmail), {
+      type: "membership:removed",
+      data: { organizationId: gate.organizationId },
+    });
+  }
   return answer(res);
 }
 

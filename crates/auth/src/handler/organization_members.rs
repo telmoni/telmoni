@@ -190,6 +190,9 @@ pub async fn remove_organization_member(
         .into());
     }
 
+    let leaver_name =
+        organization_members::member_display_name(&mut tx, &organization, &member_id).await?;
+
     let project_memberships =
         members::memberships_in_organization(&mut tx, &organization, &member_id).await?;
 
@@ -244,6 +247,12 @@ pub async fn remove_organization_member(
     }
 
     tx.commit().await?;
+
+    let name = leaver_name.as_deref().unwrap_or("A member");
+    for pm in &project_memberships {
+        crate::notify::emit_member_left(&state, &pm.project_id, &organization, &member_id, name)
+            .await;
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }

@@ -96,6 +96,11 @@ const REDACTED_MEMBER_ADDED_BODY_BEFORE_ROLE: &str =
     "A former member accepted the invitation and is now ";
 const REDACTED_MEMBER_ADDED_BODY_AFTER_ROLE: &str = " on the project.";
 
+/// The text a `member_left` notice is left with once the person it named is
+/// erased.
+const REDACTED_MEMBER_LEFT_TITLE: &str = "A former member left the project";
+const REDACTED_MEMBER_LEFT_BODY: &str = "A former member left the project.";
+
 /// What a failed send's recorded answer becomes when the notice it carried
 /// named a person who has since been erased.
 const REDACTED_ERROR: &str =
@@ -110,7 +115,7 @@ const REDACTED_ERROR: &str =
 /// person after every rewrite is a notice this function does not know how
 /// to redact; leaving it would be the erasure silently not kept, so the
 /// error stops the erasure, and the sweep retries until somebody adds the
-/// words. Today only `member_added` names a person.
+/// words. Today `member_added` and `member_left` name a person.
 pub async fn redact_person(
     tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
     user_id: &UserId,
@@ -129,6 +134,19 @@ pub async fn redact_person(
     .execute(tx.conn())
     .await?
     .rows_affected();
+    let feed_left = sqlx::query(
+        "UPDATE notifications.feed
+            SET title = $2,
+                body = $3,
+                subject_user_id = NULL
+          WHERE subject_user_id = $1 AND kind = 'member_left'",
+    )
+    .bind(user_id)
+    .bind(REDACTED_MEMBER_LEFT_TITLE)
+    .bind(REDACTED_MEMBER_LEFT_BODY)
+    .execute(tx.conn())
+    .await?
+    .rows_affected();
     // A receiver may echo the notice back in its refusal, and the log keeps
     // that answer, so the error of every send of a named delivery goes too —
     // replaced, not emptied, since a failed send always says why. First, while
@@ -138,7 +156,7 @@ pub async fn redact_person(
             SET error = $2
           WHERE delivery_id IN (
               SELECT id FROM notifications.deliveries
-               WHERE subject_user_id = $1 AND kind = 'member_added'
+               WHERE subject_user_id = $1 AND kind IN ('member_added', 'member_left')
           )
             AND outcome = 'failed'",
     )
@@ -166,6 +184,22 @@ pub async fn redact_person(
     .execute(tx.conn())
     .await?
     .rows_affected();
+    let deliveries_left = sqlx::query(
+        "UPDATE notifications.deliveries
+            SET subject = $2,
+                body = CASE WHEN body = '' THEN '' ELSE $3 END,
+                last_error = CASE WHEN last_error IS NULL THEN NULL ELSE $4 END,
+                subject_user_id = NULL,
+                updated_at = now()
+          WHERE subject_user_id = $1 AND kind = 'member_left'",
+    )
+    .bind(user_id)
+    .bind(REDACTED_MEMBER_LEFT_TITLE)
+    .bind(REDACTED_MEMBER_LEFT_BODY)
+    .bind(REDACTED_ERROR)
+    .execute(tx.conn())
+    .await?
+    .rows_affected();
     let unredacted: Option<String> = sqlx::query_scalar(
         "SELECT kind FROM notifications.feed WHERE subject_user_id = $1
           UNION ALL
@@ -180,7 +214,7 @@ pub async fn redact_person(
             "a `{kind}` notice names a person and `redact_person` has no words for it"
         )));
     }
-    Ok(feed + deliveries)
+    Ok(feed + feed_left + deliveries + deliveries_left)
 }
 
 /// The replayed emit's answer: the id the first emit minted for this key.

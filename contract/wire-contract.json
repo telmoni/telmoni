@@ -12,6 +12,7 @@
     "NotificationKind": [
       "organization_alert",
       "member_added",
+      "member_left",
       "connector_connected",
       "connector_disconnected"
     ],

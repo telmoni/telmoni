@@ -224,6 +224,27 @@ describe("GET /api/events (SSE)", () => {
     await reader.cancel();
   });
 
+  it("relays a membership:removed event on the user personal channel as it came", async () => {
+    mockGetSession.mockResolvedValue(LIVE_SESSION);
+    const res = await GET(new NextRequest("http://localhost:3000/api/events"));
+    const reader = res.body!.getReader();
+    await reader.read();
+
+    messageListener?.(
+      USER_CHANNEL,
+      JSON.stringify({
+        type: "membership:removed",
+        data: { organizationId: "org_own", projectId: "proj_1" },
+      }),
+    );
+
+    const chunk = await reader.read();
+    expect(new TextDecoder().decode(chunk.value)).toBe(
+      'event: membership:removed\ndata: {"organizationId":"org_own","projectId":"proj_1"}\n\n',
+    );
+    await reader.cancel();
+  });
+
   it("drops a message that is not one of our events, and says so", async () => {
     mockGetSession.mockResolvedValue(LIVE_SESSION);
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});

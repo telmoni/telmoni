@@ -28,7 +28,14 @@ export default async function OverviewPage({
   if (!project) return <ServiceUnavailable />;
 
   return (
-    <Overview sections={<ProjectActivity projectId={projectId} feed={activity} />}>
+    <Overview
+      action={
+        activity && activity.unread > 0 ? (
+          <MarkProjectRead projectId={projectId} unread={activity.unread} />
+        ) : undefined
+      }
+      sections={<ProjectActivity feed={activity} />}
+    >
       <h2 className="text-base font-semibold">{project.name}</h2>
     </Overview>
   );
@@ -44,10 +51,8 @@ export default async function OverviewPage({
 // A null feed is the service being unset or unreachable, which renders nothing
 // rather than an error: the page's subject is the project, not its activity.
 function ProjectActivity({
-  projectId,
   feed,
 }: {
-  projectId: string;
   feed: NotificationFeed | null;
 }) {
   if (feed === null) return null;
@@ -56,16 +61,13 @@ function ProjectActivity({
     <section className="grid gap-3" data-testid="project-activity">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-sm font-medium">Recent activity</h2>
-        {feed.unread > 0 && (
-          <MarkProjectRead projectId={projectId} unread={feed.unread} />
-        )}
       </div>
       {feed.items.length === 0 ? (
         <p
           className="text-sm text-muted-foreground"
           data-testid="project-activity-empty"
         >
-          Nothing yet. Members joining and channels connecting show up here.
+          Nothing yet. Members joining, leaving, and channels connecting show up here.
         </p>
       ) : (
         <Rows>
@@ -83,21 +85,30 @@ function ActivityRow({ item }: { item: FeedItem }) {
   return (
     <Row
       label={
-        <span className={cn("block min-w-0 truncate", !unread && "font-normal text-muted-foreground")}>
+        <span
+          className={cn(
+            "block min-w-0 truncate",
+            unread ? "font-bold text-foreground" : "font-normal text-muted-foreground",
+          )}
+        >
           <span>{item.title}</span>
           {unread && <span className="sr-only"> Unread</span>}
         </span>
       }
       hint={
         <span className="block">
-          {item.body}
+          <span className={cn(unread ? "text-foreground/80" : "text-muted-foreground")}>
+            {item.body}
+          </span>
           <span className="mt-0.5 block text-xs opacity-70">
             {eventKindLabel(item.kind)}
           </span>
         </span>
       }
     >
-      <LocalTime iso={item.created_at} mode="datetime" />
+      <span className={cn(unread ? "font-medium text-foreground" : "text-muted-foreground")}>
+        <LocalTime iso={item.created_at} mode="datetime" />
+      </span>
     </Row>
   );
 }

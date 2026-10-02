@@ -331,7 +331,7 @@ A lone too-long passage answered with a 503 is read as "not now", so its source 
 
 ## Storage
 
-`crates/agent/migrations/20260929120000_agent_initial.sql`. Every table has RLS enabled and forced.
+`crates/agent/migrations/20261001100000_agent_initial.sql`. Every table has RLS enabled and forced.
 
 | Table | Holds | Policies |
 |---|---|---|
@@ -454,5 +454,5 @@ sequenceDiagram
 | Chunking, docs, remembered exchanges | `crates/agent/src/index/{chunk,docs,conversations}.rs` |
 | Erasure and purge | `crates/agent/src/seam.rs`, `crates/agent/src/db.rs` |
 | Retention | `crates/agent/src/retention.rs` |
-| Schema | `crates/agent/migrations/20260929120000_agent_initial.sql` |
+| Schema | `crates/agent/migrations/20261001100000_agent_initial.sql` |
 | Console relay, stream parser, renderer | `web/app/api/agent/turns/route.ts`, `web/lib/agent/` |

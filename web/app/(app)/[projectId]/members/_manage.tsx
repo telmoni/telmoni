@@ -360,7 +360,7 @@ export function MemberRow({
               title={`Remove ${personName(who(member))}?`}
               description="They lose access to this project immediately."
               confirmLabel="Remove"
-              onConfirm={() => act(() => removeMemberAction(projectId, member.member_id))}
+              onConfirm={() => act(() => removeMemberAction(projectId, member.member_id, member.email))}
             />
           )}
         </div>

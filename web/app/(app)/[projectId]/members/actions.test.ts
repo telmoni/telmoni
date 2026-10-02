@@ -61,6 +61,7 @@ import {
   inviteMemberAction,
   offerProjectAction,
   revokeInviteAction,
+  removeMemberAction,
 } from "./actions";
 
 const fetchMock = vi.mocked(tryFetchWithTimeout);
@@ -448,6 +449,26 @@ describe("Incoming invites server actions", () => {
       );
       expect(mockPublishEvent).not.toHaveBeenCalled();
       expect(vi.mocked(revalidatePath)).not.toHaveBeenCalled();
+    });
+  });
+  describe("removeMemberAction", () => {
+    it("calls delete member endpoint and emits membership:removed when email is provided", async () => {
+      fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+      const res = await removeMemberAction("project_1", "user_2", "removed@example.test");
+      expect(res).toEqual({ error: null });
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://auth.test/internal/projects/project_1/members/user_2",
+        expect.objectContaining({
+          method: "DELETE",
+        }),
+      );
+      expect(mockPublishEvent).toHaveBeenCalledWith(
+        "bfev:user:removed@example.test",
+        {
+          type: "membership:removed",
+          data: { organizationId: "org_1", projectId: "project_1" },
+        },
+      );
     });
   });
 });

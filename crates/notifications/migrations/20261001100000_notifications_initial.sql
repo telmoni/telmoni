@@ -43,7 +43,7 @@ CREATE TABLE notifications.feed (
     shard_key       UUID        NOT NULL DEFAULT gen_random_uuid(),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT feed_kind_check CHECK (kind IN (
-        'organization_alert', 'member_added',
+        'organization_alert', 'member_added', 'member_left',
         'connector_connected', 'connector_disconnected'
     ))
 );
@@ -124,7 +124,7 @@ CREATE TABLE notifications.connections (
     ),
     CONSTRAINT connections_event_kinds_check CHECK (
         event_kinds IS NULL OR (cardinality(event_kinds) > 0 AND event_kinds <@ ARRAY[
-            'organization_alert', 'member_added',
+            'organization_alert', 'member_added', 'member_left',
             'connector_connected', 'connector_disconnected'
         ]::text[])
     ),
@@ -182,7 +182,7 @@ CREATE TABLE notifications.deliveries (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT deliveries_status_check CHECK (status IN ('pending', 'delivered', 'failed')),
     CONSTRAINT deliveries_kind_check CHECK (kind IN (
-        'organization_alert', 'member_added',
+        'organization_alert', 'member_added', 'member_left',
         'connector_connected', 'connector_disconnected'
     )),
     -- The whole tenant, not the id alone: the enqueue policies check only the

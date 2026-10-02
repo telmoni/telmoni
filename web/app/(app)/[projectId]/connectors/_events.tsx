@@ -20,6 +20,7 @@ import type { NotificationKind } from "@/lib/types/enums";
 const HINT = {
   organization_alert: "An alert for the organization's owner.",
   member_added: "Someone accepted an invitation to this project.",
+  member_left: "Someone left or was removed from this project.",
   connector_connected: "A destination was connected to this project.",
   connector_disconnected: "A destination stopped accepting notices.",
 } as const satisfies Record<NotificationKind, string>;

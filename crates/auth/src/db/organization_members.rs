@@ -145,6 +145,26 @@ pub async fn role_on_organization<B: RosterRead>(
     .await
 }
 
+/// A member's display name, resolved through the organization's view of `auth.identities`.
+pub async fn member_display_name<B: RosterRead>(
+    tx: &mut Scoped<'_, B>,
+    organization_id: &OrganizationId,
+    user_id: &UserId,
+) -> sqlx::Result<Option<String>> {
+    let row: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT i.email, i.display_name
+           FROM auth.organization_members m
+           JOIN auth.identities i ON i.user_id = m.user_id
+          WHERE m.organization_id = $1 AND m.user_id = $2",
+    )
+    .bind(organization_id)
+    .bind(user_id)
+    .fetch_optional(tx.conn())
+    .await?;
+    Ok(row
+        .map(|(email, display_name)| crate::identity::display_for(display_name.as_deref(), &email)))
+}
+
 /// Bindings the owner's row is read under: each with the organization bound,
 /// and the lane the project transfer's accept runs in, which seats the owner
 /// of the organization the project leaves.

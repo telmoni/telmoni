@@ -385,6 +385,23 @@ describe("organization members actions", () => {
         }),
       );
     });
+
+    it("notifies the removed member on their personal channel via SSE", async () => {
+      fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+      const res = await removeOrganizationMemberAction(
+        ORGANIZATION,
+        "user_2",
+        "removed@example.test",
+      );
+      expect(res).toEqual({ error: null });
+      expect(mockPublishEvent).toHaveBeenCalledWith(
+        "bfev:user:removed@example.test",
+        {
+          type: "membership:removed",
+          data: { organizationId: ORGANIZATION },
+        },
+      );
+    });
   });
 });
 

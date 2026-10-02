@@ -5,8 +5,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NotificationFeed } from "@/lib/server/data";
 
 vi.mock("@/components/page-header", () => ({
-  PageHeader: ({ title }: { title: string }) => (
-    <div data-testid="page-header">{title}</div>
+  PageHeader: ({ title, action }: { title?: string; action?: React.ReactNode }) => (
+    <div data-testid="page-header">
+      {title}
+      {action}
+    </div>
   ),
 }));
 
@@ -124,6 +127,21 @@ describe("OverviewPage project activity", () => {
     };
     await renderAt(PROJECT);
     expect(screen.queryByTestId("mark-read")).toBeNull();
+  });
+
+  it("renders unread notifications with bold text and read with muted text", async () => {
+    mockFeed = {
+      items: [
+        item({ id: "unread-1", title: "Unread Notice", read_at: null }),
+        item({ id: "read-1", title: "Read Notice", read_at: "2026-09-20T11:00:00Z" }),
+      ],
+      unread: 1,
+    };
+    await renderAt(PROJECT);
+    const unreadTitle = screen.getByText("Unread Notice").closest("span");
+    const readTitle = screen.getByText("Read Notice").closest("span");
+    expect(unreadTitle?.parentElement).toHaveClass("font-bold", "text-foreground");
+    expect(readTitle?.parentElement).toHaveClass("font-normal", "text-muted-foreground");
   });
 
   it("says what will appear here when the feed is empty", async () => {

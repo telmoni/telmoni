@@ -29,10 +29,10 @@ This page covers migrations, partitions, the audit log and retention. Who may re
 
 | Set | File |
 |---|---|
-| `audit` | `crates/migrator/migrations/20260527200000_audit_initial.sql` |
-| `auth` | `crates/auth/migrations/20260523000000_auth_initial.sql` |
-| `notifications` | `crates/notifications/migrations/20260714120000_notifications_initial.sql` |
-| `agent` | `crates/agent/migrations/20260929120000_agent_initial.sql` |
+| `audit` | `crates/migrator/migrations/20261001100000_audit_initial.sql` |
+| `auth` | `crates/auth/migrations/20261001100000_auth_initial.sql` |
+| `notifications` | `crates/notifications/migrations/20261001100000_notifications_initial.sql` |
+| `agent` | `crates/agent/migrations/20261001100000_agent_initial.sql` |
 
 **`telmoni migrate`** (`crates/migrator/src/lib.rs`) connects only as `MIGRATOR_DATABASE_URL`. It never builds the server.
 
@@ -177,7 +177,7 @@ Each module's own sweep applies its windows (see [background work](background.md
 | Migration runner, sets, grants | `crates/migrator/src/lib.rs` |
 | Rotation | `crates/migrator/src/rotate.rs`, `crates/shared/src/db/retention.rs` |
 | Roles, grants, local setup | `crates/migrator/sql/` |
-| Audit schema | `crates/migrator/migrations/20260527200000_audit_initial.sql` |
+| Audit schema | `crates/migrator/migrations/20261001100000_audit_initial.sql` |
 | Writing the audit log | `crates/shared/src/audit.rs` |
 | The chain's hash, verifying it | `crates/shared/src/db/audit_hash.rs`, `crates/shared/src/db/audit_verify.rs`, `crates/shared/src/digest.rs` |
 | Reading the audit log | `crates/auth/src/handler/audit.rs`, `crates/auth/src/db/audit.rs` |

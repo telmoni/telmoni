@@ -260,6 +260,7 @@ describe("OrganizationMembersPage", () => {
     expect(actions.removeOrganizationMemberAction).toHaveBeenCalledWith(
       "org_acme",
       "user_member",
+      "member@example.com",
     );
 
     await confirm("Withdraw the invitation to invited@example.com", "Withdraw");

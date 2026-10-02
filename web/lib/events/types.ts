@@ -13,10 +13,20 @@ const OwnershipRefSchema = z.object({
   projectId: z.string().optional(),
 });
 
+/// A project or organization from which the user's membership has been revoked.
+const MembershipRemovedSchema = z.object({
+  organizationId: z.string(),
+  projectId: z.string().optional(),
+});
+
 export const RealtimeEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("ownership:changed"),
     data: OwnershipRefSchema,
+  }),
+  z.object({
+    type: z.literal("membership:removed"),
+    data: MembershipRemovedSchema,
   }),
   z.object({
     type: z.literal("invite:created"),
@@ -40,6 +50,7 @@ export type RealtimeEvent = z.infer<typeof RealtimeEventSchema>;
 
 export const RealtimeEventDataSchema = {
   "ownership:changed": OwnershipRefSchema,
+  "membership:removed": MembershipRemovedSchema,
   "invite:created": IncomingInviteSchema,
   "invite:sent": InviteRefSchema,
   "invite:revoked": InviteRefSchema,

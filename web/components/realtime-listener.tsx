@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { z } from "zod";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  useActiveOrganizationId,
   useIncomingInvites,
   useOrganizations,
   useAddIncomingInvite,
@@ -14,6 +15,10 @@ import { RealtimeEventDataSchema } from "@/lib/events/types";
 const RETRY_MS = 30_000;
 
 const ROSTER_PAGES = /^\/[^/]+\/(members|audit-log)$/;
+
+function matchesProject(pathname: string, projectId: string): boolean {
+  return pathname === `/${projectId}` || pathname.startsWith(`/${projectId}/`);
+}
 
 function payload<K extends keyof typeof RealtimeEventDataSchema>(
   e: MessageEvent,
@@ -38,13 +43,16 @@ export function RealtimeListener() {
   const removeInvite = useRemoveIncomingInvite();
   const memberships = useOrganizations();
   const incomingInvites = useIncomingInvites();
+  const activeOrganizationId = useActiveOrganizationId();
   const esRef = useRef<EventSource | null>(null);
 
   const pathnameRef = useRef(pathname);
   const invitesRef = useRef(incomingInvites);
+  const activeOrgIdRef = useRef(activeOrganizationId);
   useEffect(() => {
     pathnameRef.current = pathname;
     invitesRef.current = incomingInvites;
+    activeOrgIdRef.current = activeOrganizationId;
   });
 
   const membershipKey = memberships
@@ -112,6 +120,29 @@ export function RealtimeListener() {
       // in changing hands: every role on the page may have moved.
       es.addEventListener("ownership:changed", () => {
         router.refresh();
+      });
+
+      // You were removed from a project or organization: eject immediately
+      // if currently viewing that project/organization, otherwise refresh.
+      es.addEventListener("membership:removed", (e: MessageEvent) => {
+        const data = payload(e, "membership:removed");
+        if (!data) return;
+
+        const isAccountPage = pathnameRef.current.startsWith("/account");
+        const isCurrentProject = Boolean(
+          data.projectId && matchesProject(pathnameRef.current, data.projectId),
+        );
+        const isCurrentOrg = Boolean(
+          !data.projectId &&
+            data.organizationId === activeOrgIdRef.current &&
+            !isAccountPage,
+        );
+
+        if (isCurrentProject || isCurrentOrg) {
+          router.replace("/console");
+        } else {
+          router.refresh();
+        }
       });
 
       es.addEventListener("close", () => {

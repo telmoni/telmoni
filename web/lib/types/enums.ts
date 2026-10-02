@@ -17,6 +17,7 @@ export type Flag = typeof Flag[keyof typeof Flag];
 export const NotificationKind = {
   OrganizationAlert:     "organization_alert",
   MemberAdded:           "member_added",
+  MemberLeft:            "member_left",
   ConnectorConnected:    "connector_connected",
   ConnectorDisconnected: "connector_disconnected",
 } as const;

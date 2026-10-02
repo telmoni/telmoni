@@ -40,6 +40,11 @@ export default async function OrganizationOverviewPage() {
 
   return (
     <Overview
+      action={
+        notices && notices.unread > 0 ? (
+          <MarkOrganizationRead unread={notices.unread} />
+        ) : undefined
+      }
       sections={
         <>
           {notices && notices.items.length > 0 && <OrganizationNotices feed={notices} />}
@@ -59,7 +64,6 @@ function OrganizationNotices({ feed }: { feed: NotificationFeed }) {
     <section className="grid gap-3" aria-label="Organization notices">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-medium">Organization notices</h3>
-        {feed.unread > 0 && <MarkOrganizationRead unread={feed.unread} />}
       </div>
       <Rows>
         {feed.items.map((item) => (
@@ -75,19 +79,28 @@ function OrganizationNoticeRow({ item }: { item: FeedItem }) {
   return (
     <Row
       label={
-        <span className={cn("block min-w-0 truncate", !unread && "font-normal text-muted-foreground")}>
+        <span
+          className={cn(
+            "block min-w-0 truncate",
+            unread ? "font-bold text-foreground" : "font-normal text-muted-foreground",
+          )}
+        >
           <span>{item.title}</span>
           {unread && <span className="sr-only"> Unread</span>}
         </span>
       }
       hint={
         <span className="block">
-          {item.body}
+          <span className={cn(unread ? "text-foreground/80" : "text-muted-foreground")}>
+            {item.body}
+          </span>
           <span className="mt-0.5 block text-xs opacity-70">{eventKindLabel(item.kind)}</span>
         </span>
       }
     >
-      <LocalTime iso={item.created_at} mode="datetime" />
+      <span className={cn(unread ? "font-medium text-foreground" : "text-muted-foreground")}>
+        <LocalTime iso={item.created_at} mode="datetime" />
+      </span>
     </Row>
   );
 }

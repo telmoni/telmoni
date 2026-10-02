@@ -3401,7 +3401,10 @@ async fn a_webhook_receives_only_the_events_it_chose(pool: PgPool) {
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     for (body, why) in [
         (r#"{"event_kinds":[]}"#, "an empty choice"),
-        (r#"{"event_kinds":["member_left"]}"#, "a kind nothing emits"),
+        (
+            r#"{"event_kinds":["nonexistent_event"]}"#,
+            "a kind nothing emits",
+        ),
         ("{}", "a replace that states no value"),
     ] {
         let resp = app(&st)

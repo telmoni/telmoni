@@ -64,6 +64,7 @@ The ids are UUIDv7, minted in Rust.
 | Kind | Raised by |
 |---|---|
 | `member_added` | auth, when a project invitation is accepted. Accepting an organization invitation raises nothing. |
+| `member_left` | auth, when a member leaves or is removed from a project |
 | `connector_connected` | notifications, in the same transaction as the new connection |
 | `connector_disconnected` | notifications, when a connection is retired: by the delivery loop, by a test send or manual resend that gets a terminal answer, or by Slack's uninstall and token-revoked events |
 | `organization_alert` | nothing in this repository; a deployment's own module raises it through the seam |
@@ -366,4 +367,4 @@ How it runs:
 | Envelope and KEK | `crates/shared/src/envelope/` |
 | Egress guard | `crates/shared/src/net_guard.rs` |
 | Webhook signature, console side | `web/lib/webhook-signature.ts` |
-| Schema and policies | `crates/notifications/migrations/20260714120000_notifications_initial.sql` |
+| Schema and policies | `crates/notifications/migrations/20261001100000_notifications_initial.sql` |

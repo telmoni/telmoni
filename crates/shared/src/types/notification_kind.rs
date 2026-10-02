@@ -18,6 +18,8 @@ pub enum NotificationKind {
     OrganizationAlert,
     /// An organization owner added somebody as a member.
     MemberAdded,
+    /// A member left or was removed from a project.
+    MemberLeft,
     /// A Slack or Discord channel was connected to the project.
     ConnectorConnected,
     /// A connection stopped: the vendor answered that the installation is gone
@@ -29,10 +31,11 @@ pub enum NotificationKind {
 impl NotificationKind {
     /// Every kind, in wire order.
     #[must_use]
-    pub const fn all() -> [Self; 4] {
+    pub const fn all() -> [Self; 5] {
         [
             Self::OrganizationAlert,
             Self::MemberAdded,
+            Self::MemberLeft,
             Self::ConnectorConnected,
             Self::ConnectorDisconnected,
         ]
@@ -44,6 +47,7 @@ impl fmt::Display for NotificationKind {
         match self {
             Self::OrganizationAlert => write!(f, "organization_alert"),
             Self::MemberAdded => write!(f, "member_added"),
+            Self::MemberLeft => write!(f, "member_left"),
             Self::ConnectorConnected => write!(f, "connector_connected"),
             Self::ConnectorDisconnected => write!(f, "connector_disconnected"),
         }
@@ -56,11 +60,12 @@ impl FromStr for NotificationKind {
         match s {
             "organization_alert" => Ok(Self::OrganizationAlert),
             "member_added" => Ok(Self::MemberAdded),
+            "member_left" => Ok(Self::MemberLeft),
             "connector_connected" => Ok(Self::ConnectorConnected),
             "connector_disconnected" => Ok(Self::ConnectorDisconnected),
             _ => Err(ParseEnumError::new(
                 s,
-                "organization_alert, member_added, connector_connected, connector_disconnected",
+                "organization_alert, member_added, member_left, connector_connected, connector_disconnected",
             )),
         }
     }
@@ -71,7 +76,7 @@ mod tests {
     use super::*;
 
     /// The vocabulary, read from the enum rather than restated here.
-    const ALL: [NotificationKind; 4] = NotificationKind::all();
+    const ALL: [NotificationKind; 5] = NotificationKind::all();
 
     /// `all()` is a hand-written array, so nothing but a `match` forces it to
     /// stay complete: a new variant fails to compile here until it is listed.
@@ -81,6 +86,7 @@ mod tests {
             match kind {
                 NotificationKind::OrganizationAlert
                 | NotificationKind::MemberAdded
+                | NotificationKind::MemberLeft
                 | NotificationKind::ConnectorConnected
                 | NotificationKind::ConnectorDisconnected => {}
             }

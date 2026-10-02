@@ -48,3 +48,41 @@ pub async fn emit_member_joined(
         }
     }
 }
+
+/// Tell the PROJECT that `leaver` left the project. Returns whether
+/// notifications took the notice.
+pub async fn emit_member_left(
+    state: &AppState,
+    project: &telmoni_shared::ProjectId,
+    organization: &telmoni_shared::OrganizationId,
+    leaver_id: &telmoni_shared::UserId,
+    leaver: &str,
+) -> bool {
+    let Some(notifications) = state.siblings.notifications.as_ref() else {
+        tracing::info!(project = %project, "member-left notification skipped (no notifications module)");
+        return false;
+    };
+    let title = format!("{leaver} left the project");
+    let body = format!("{leaver} left the project.");
+    let notice = Notice {
+        kind: NotificationKind::MemberLeft,
+        subject_user_id: Some(leaver_id),
+        title: &title,
+        body: &body,
+        metadata: json!({ "project_id": project }),
+        dedup_key: None,
+    };
+    match notifications
+        .emit(organization, Some(project), notice)
+        .await
+    {
+        Ok(_) => {
+            tracing::info!(project = %project, "member-left notification emitted");
+            true
+        }
+        Err(e) => {
+            tracing::warn!(project = %project, error = %e, "member-left notification failed to emit");
+            false
+        }
+    }
+}

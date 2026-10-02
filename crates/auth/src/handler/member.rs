@@ -50,13 +50,16 @@ pub(crate) fn grantable(role: Role) -> Result<Role, TelmoniError> {
 async fn is_organization_owner<'a>(
     acting: ActingProject<'a>,
     member: &UserId,
-) -> Result<(ActingProject<'a>, bool), TelmoniError> {
+) -> Result<(ActingProject<'a>, bool, Option<String>), TelmoniError> {
     let mut acting = acting.enter_owner_scope().await?;
     let role =
         organization_members::role_on_organization(&mut acting.tx, &acting.organization, member)
             .await?;
+    let name =
+        organization_members::member_display_name(&mut acting.tx, &acting.organization, member)
+            .await?;
     let acting = acting.leave_owner_scope().await?;
-    Ok((acting, role == Some(OrganizationRole::Owner)))
+    Ok((acting, role == Some(OrganizationRole::Owner), name))
 }
 
 /// `GET /internal/projects/{project_id}/members` — the roster.
@@ -96,7 +99,7 @@ pub async fn update_role(
     let acting = acting_project(&state, &project_id, &actor).await?;
     authorize(acting.role, Verb::Update, Resource::Member)?;
 
-    let (mut acting, owner) = is_organization_owner(acting, &member_id).await?;
+    let (mut acting, owner, _) = is_organization_owner(acting, &member_id).await?;
     if owner {
         acting.tx.rollback().await?;
         return Err(AuthError::BadRequest("cannot modify the project owner's role".into()).into());
@@ -141,7 +144,7 @@ pub async fn remove_member(
     let acting = acting_project(&state, &project_id, &actor).await?;
     authorize(acting.role, Verb::Delete, Resource::Member)?;
 
-    let (mut acting, owner) = is_organization_owner(acting, &member_id).await?;
+    let (mut acting, owner, leaver_name) = is_organization_owner(acting, &member_id).await?;
     if owner {
         acting.tx.rollback().await?;
         return Err(AuthError::BadRequest("cannot remove the project owner".into()).into());
@@ -166,7 +169,11 @@ pub async fn remove_member(
         },
     )
     .await?;
+    let organization = acting.organization.clone();
     acting.tx.commit().await?;
+
+    let name = leaver_name.as_deref().unwrap_or("A member");
+    crate::notify::emit_member_left(&state, &project_id, &organization, &member_id, name).await;
 
     tracing::info!(project_id = %project_id, member = %member_id, "member removed");
     Ok(StatusCode::NO_CONTENT)
@@ -194,10 +201,12 @@ pub async fn leave(
         .into());
     }
 
+    let owner = owner?;
+    let leaver_name = organization_members::member_display_name(&mut tx, &owner, &actor).await?;
+
     if !members::remove(&mut tx, &project_id, &actor).await? {
         return Err(AuthError::NotFound("you are not a member of this project".into()).into());
     }
-    let owner = owner?;
     emit_audit(
         &mut tx,
         AuditEvent {
@@ -215,6 +224,9 @@ pub async fn leave(
     )
     .await?;
     tx.commit().await?;
+
+    let name = leaver_name.as_deref().unwrap_or("A member");
+    crate::notify::emit_member_left(&state, &project_id, &owner, &actor, name).await;
 
     tracing::info!(project_id = %project_id, member = %actor, "member left");
     Ok(StatusCode::NO_CONTENT)

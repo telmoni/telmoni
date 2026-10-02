@@ -14,8 +14,11 @@ const leaveOrganizationAction = vi.hoisted(() =>
 vi.mock("./members/actions", () => ({ leaveOrganizationAction }));
 
 vi.mock("@/components/page-header", () => ({
-  PageHeader: ({ title }: { title: string }) => (
-    <div data-testid="page-header">{title}</div>
+  PageHeader: ({ title, action }: { title?: string; action?: React.ReactNode }) => (
+    <div data-testid="page-header">
+      {title}
+      {action}
+    </div>
   ),
 }));
 
