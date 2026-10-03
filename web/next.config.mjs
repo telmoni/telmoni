@@ -50,10 +50,12 @@ const nextConfig = {
       // `/legal/*` is `proxy.ts`'s: it redirects to the deployment's own
       // documents at request time, which a build-time rule here could not.
 
+      // The CLI's release workflow publishes the installer beside its
+      // archives; this repository publishes no release at all.
       {
         source: "/install.sh",
         destination:
-          "https://github.com/telmoni/telmoni/releases/latest/download/install.sh",
+          "https://github.com/telmoni/telmoni-cli/releases/latest/download/install.sh",
         permanent: false,
       },
     ];

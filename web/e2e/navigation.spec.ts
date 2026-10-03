@@ -28,7 +28,7 @@ test.describe("Unauthenticated navigation", () => {
     expect(res.status(), "the install line is not gated").toBe(307);
     const location = res.headers()["location"] ?? "";
     expect(location).toBe(
-      "https://github.com/telmoni/telmoni/releases/latest/download/install.sh",
+      "https://github.com/telmoni/telmoni-cli/releases/latest/download/install.sh",
     );
     expect(location, "a login page is not a shell script").not.toContain(
       "/auth/login",
