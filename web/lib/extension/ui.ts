@@ -28,4 +28,5 @@ export { RoleRestricted } from "@/components/role-restricted";
 export { ServiceUnavailable } from "@/components/service-unavailable";
 export { DOCS_URL, PRODUCT_NAME, SPONSORS_URL } from "@/lib/site";
 export { cn } from "@/lib/utils";
+export { organizationLabel } from "@/lib/identity";
 export { organizationPath, projectPath } from "@/lib/slug";

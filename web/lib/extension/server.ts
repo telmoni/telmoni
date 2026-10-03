@@ -20,6 +20,6 @@ export {
   type IdentityContext,
 } from "@/lib/server/entities/identity-context";
 export { featureOff } from "@/lib/server/flags";
-export { SWITCHED_ORGANIZATION } from "@/lib/server/identity";
+export { SWITCHED_ORGANIZATION, unplacedOrganization } from "@/lib/server/identity";
 export { getServerSession } from "@/lib/server/session";
 export { PaperShell } from "@/components/paper-shell";
