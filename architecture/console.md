@@ -76,12 +76,12 @@ The path names the organization, and the project under it, by slug:
 | `/{organization}/{project}` | A project's overview |
 | `/{organization}/{project}/{page}` | A project's pages |
 
-- ⚠ **`~` is what keeps the two levels apart.** It is no slug's shape, so a project may go by any slug at all, `settings` or `members` included, and never lands on one of its organization's pages. A console built on this one adds an organization page under `~` without reserving its name. Read as `/{organization}/{page}`, every organization page drew the project rail, for a project that did not exist.
+- ⚠ **`~` is what keeps the two levels apart.** It is no slug's shape, so a project may go by any slug at all, `settings` or `members` included, and never lands on one of its organization's pages. A console built on this one adds an organization page under `~` without reserving its name. Read as `/{organization}/{page}`, every organization page drew the project rail, for a project that did not exist. The route folder is named `~` itself, which a shell reads as home: quote it.
 - **`web/lib/slug.ts` spells the scheme** (`organizationPath`, `projectPath`), and `consolePlace` (`web/lib/console-nav.ts`) reads it back. Nothing else builds or splits a console path.
 
 **Auth mints every slug** (`crates/shared/src/slug.rs`, `crates/auth/src/db/`). The console derives none.
 - A slug is derived from the row's name and follows it: creation, a rename, and a project's move into another organization each pick one.
-- **An organization's is unique across every organization**, pending ones included, so a restore never finds it taken. **A project's is unique within its organization.**
+- **An organization's is unique across every organization**, pending ones included, so a restore never finds it taken. ⚠ The purge frees it: another organization may take `acme` afterwards, and a bookmark spelled with it lands there. Everything the platform keeps names the row by id (below); a bookmark is the person's. **A project's is unique within its organization.**
 - A name that reads as a slug already taken gets the next number (`slug::candidates`). ⚠ An organization's numbers run out for a common name, its namespace being everybody's: its last candidate is the name with a random tail, so the slug still reads as the name.
 - A name with no Latin letters in it gives no slug: the row keeps the one it had, or takes a placeholder.
 - An organization nobody has named goes by a placeholder. It is never derived from the owner's address: a path is logged.
@@ -112,7 +112,8 @@ The path names the organization, and the project under it, by slug:
 **A rename moves the page.**
 - The rename actions answer the slug the row goes by now (`movedTo`), and the form replaces the path with it. They revalidate nothing in that case: the path they were posted from names nothing any more.
 - **Everybody else with a page under the old slug open follows too.** The action publishes `slug:moved` on the organization's channel. `RealtimeListener` replaces the path where it is spelled with the old slug (`movedPath`), and asks for the rest again, since every link on screen was drawn with it.
-- A tab that missed the event finds the old path not found. `/console` finds the organization again, by the cookie's id.
+- A tab that missed the event finds the old path not found, and a form it posts is told the address is gone rather than to try again (`unplacedOrganization`, `web/lib/server/identity.ts`): `identityContext` places the caller in no organization, and the context says why. `/console` finds the organization again, by the cookie's id.
+- A project handed to another organization moves the same way, by id: the accept action publishes `ownership:changed` to both organizations, and a tab showing the project goes to its new address, which the layouts spell with the slugs it goes by there, or to "not found" for somebody not in it.
 
 **Moving between organizations** is a link like any other. The router keeps the `(app)` layout across it, so two things follow the path:
 - `[organization]/layout.tsx` hands the client store the seed for the organization arrived in (`StoreSeed`, `storeSeed`);
@@ -279,6 +280,8 @@ All logging goes through `@/lib/logger` (pino), never `console.*`:
 
 **What is redacted.** The logger's redact paths are `*.authorization`, `*.cookie`, `*["x-service-secret"]`, `*.accessToken`, `*.refreshToken`, `*.idToken` and `*.token`. Pino's `*` matches exactly one level: `{ headers: { authorization } }` is censored, but a top-level or deeper field, or one of another name, is not. Log ids, never the objects that carry secrets.
 
+**A slug counts as a name.** It follows one, and a path spells two. So nothing here logs a path or a slug: `instrumentation.ts` logs the route's pattern, the route handlers log the lane and the request id, and the server's request span (`crates/shared/src/middleware/http.rs`) carries the server's own path, which names an organization by header and a project by id. What this does not reach: the load balancer's access log, a browser's history and a Playwright report carry the console's paths, which is why no slug is ever derived from an address.
+
 **Analytics.** `track()` logs events, and sends them on only with explicit consent.
 
 ## Tests and image
@@ -297,7 +300,7 @@ All logging goes through `@/lib/logger` (pino), never `console.*`:
 | Concern | File |
 |---|---|
 | Middleware | `web/proxy.ts`, `web/lib/proxy/` |
-| Paths and slugs | `web/lib/slug.ts`, `web/lib/console-nav.ts`, `web/lib/proxy/organization.ts`, `web/components/organization-sync.tsx`, `web/app/(app)/[organization]/layout.tsx`, `web/app/(app)/[organization]/[project]/layout.tsx` |
+| Paths and slugs | `web/lib/slug.ts`, `web/lib/console-nav.ts`, `web/lib/proxy/organization.ts`, `web/lib/server/identity.ts`, `web/components/organization-sync.tsx`, `web/app/(app)/[organization]/layout.tsx`, `web/app/(app)/[organization]/[project]/layout.tsx` |
 | Headers, redirects, build output | `web/next.config.mjs` |
 | Server calls | `web/lib/api/fetch.ts` |
 | Identity and `/me` | `web/lib/server/entities/identity-context.ts`, `web/lib/server/entities/organization.ts` |
