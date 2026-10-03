@@ -9,9 +9,12 @@ import {
   identityContext,
   organizationHeaders,
 } from "@/lib/server/entities/identity-context";
+import { SWITCHED_ORGANIZATION, unplacedOrganization } from "@/lib/server/identity";
 import { getServerSession } from "@/lib/server/session";
 
-export async function markOrganizationReadAction(): Promise<{
+/// Mark the organization's own feed read: the organization the overview
+/// rendered, which the action refuses to mistake for another.
+export async function markOrganizationReadAction(organizationId: string): Promise<{
   error: string | null;
 }> {
   const session = await getServerSession();
@@ -24,11 +27,8 @@ export async function markOrganizationReadAction(): Promise<{
   if (limited) return { error: "Too many requests — slow down a moment." };
 
   const ctx = await identityContext();
-  if (!ctx) {
-    return {
-      error: "Couldn't resolve your organization right now. Try again in a moment.",
-    };
-  }
+  if (!ctx) return { error: await unplacedOrganization() };
+  if (ctx.organizationId !== organizationId) return { error: SWITCHED_ORGANIZATION };
 
   const res = await tryFetchWithTimeout(
     `${env.SERVER_URL}/internal/notifications/read`,

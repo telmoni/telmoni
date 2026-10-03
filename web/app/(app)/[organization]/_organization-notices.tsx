@@ -8,7 +8,14 @@ import { Button } from "@/components/ui/button";
 
 import { markOrganizationReadAction } from "./notice-actions";
 
-export function MarkOrganizationRead({ unread }: { unread: number }) {
+export function MarkOrganizationRead({
+  organizationId,
+  unread,
+}: {
+  /// The organization this page rendered; the action refuses any other.
+  organizationId: string;
+  unread: number;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
 
@@ -21,7 +28,7 @@ export function MarkOrganizationRead({ unread }: { unread: number }) {
       onClick={() =>
         start(async () => {
           try {
-            const { error } = await markOrganizationReadAction();
+            const { error } = await markOrganizationReadAction(organizationId);
             if (error) {
               toast.error(error);
               return;

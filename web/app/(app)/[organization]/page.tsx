@@ -46,7 +46,10 @@ export default async function OrganizationOverviewPage() {
     <Overview
       action={
         notices && notices.unread > 0 ? (
-          <MarkOrganizationRead unread={notices.unread} />
+          <MarkOrganizationRead
+            organizationId={organization.organizationId}
+            unread={notices.unread}
+          />
         ) : undefined
       }
       sections={
