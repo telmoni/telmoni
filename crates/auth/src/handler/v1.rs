@@ -6,7 +6,7 @@ use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use axum::{
     extract::{Request, State},
-    http::{StatusCode, header},
+    http::{HeaderValue, StatusCode, header},
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -51,10 +51,12 @@ pub const V1_LANES: &[V1Lane] = &[
             summary: "Who this token is",
             description: "The organization the token belongs to — its id, \
                           its slug, its name and its owner's address and name. \
-                          The slug is what the console's URLs name it by, and \
-                          it follows the name: a rename moves it, the id \
-                          never moves. A token IS an organization, so this \
-                          answers for the caller and for nobody else.",
+                          The slug is what the console's URLs name it by: set \
+                          from its first name, when that reads as one, and \
+                          moved only when the URL is changed in Settings; the \
+                          id never moves. A \
+                          token IS an organization, so this answers for the \
+                          caller and for nobody else.",
             params: &[],
             answers: &[Answer {
                 status: 200,
@@ -127,12 +129,9 @@ pub async fn require_token(
 
     let token_hash = crate::handler::tokens::hash_token(token);
 
-    let Ok(mut tx) = maintenance_scope(&state.db, AuthLane).await else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "error": "database unavailable" })),
-        )
-            .into_response();
+    let mut tx = match maintenance_scope(&state.db, AuthLane).await {
+        Ok(tx) => tx,
+        Err(e) => return unavailable(&e, "v1: token check could not open a transaction"),
     };
     let validated = tokens::validate(&mut tx, &token_hash).await;
 
@@ -142,22 +141,10 @@ pub async fn require_token(
                 crate::db::flags::resolve_for_organization(&mut tx, &v.organization_id).await;
             let flags = match flags {
                 Ok(f) => f,
-                Err(e) => {
-                    tracing::error!(error = %e, "v1: flag resolution failed");
-                    return (
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        Json(json!({ "error": "database unavailable" })),
-                    )
-                        .into_response();
-                }
+                Err(e) => return unavailable(&e, "v1: flag resolution failed"),
             };
             if let Err(e) = tx.commit().await {
-                tracing::error!(error = %e, "v1: token validation commit failed");
-                return (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    Json(json!({ "error": "database unavailable" })),
-                )
-                    .into_response();
+                return unavailable(&e, "v1: token validation commit failed");
             }
             for flag in [
                 telmoni_shared::Flag::BetaAccess,
@@ -179,26 +166,40 @@ pub async fn require_token(
             next.run(request).await
         }
         Ok(None) => unauthorized(),
-        Err(e) => {
-            tracing::error!(error = %e, "v1: token validation failed");
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({ "error": "database unavailable" })),
-            )
-                .into_response()
-        }
+        Err(e) => unavailable(&e, "v1: token validation failed"),
     }
 }
 
-/// `401` with a `WWW-Authenticate` challenge, outside the RFC 9457 path on
-/// purpose: routing it through `AuthError` would `error!`-log every scanner.
+/// The token check could not reach the database: a `503` problem document,
+/// the same `identity-unavailable` a sign-in gets when the identity provider
+/// cannot be read, and a log line, since this is an outage and not a caller's
+/// doing.
+fn unavailable(error: &dyn std::fmt::Display, what: &str) -> Response {
+    tracing::error!(error = %error, "{what}");
+    TelmoniError::from(AuthError::IdentityUnavailable).into_response()
+}
+
+/// A path under `/v1` no lane serves: a `404` problem document, like every
+/// other answer here, in place of axum's bare one.
+pub async fn not_found() -> TelmoniError {
+    AuthError::NotFound("no such lane under /v1".into()).into()
+}
+
+/// `401` with a `WWW-Authenticate` challenge: a problem document, as every
+/// answer under `/v1` is, built by hand because an `AuthError` can carry
+/// neither the challenge header nor this detail. The type is the one a bad
+/// credential gets everywhere else.
 fn unauthorized() -> Response {
-    (
-        StatusCode::UNAUTHORIZED,
-        [(header::WWW_AUTHENTICATE, "Bearer")],
-        Json(json!({ "error": "a live telmoni_ API token is required" })),
-    )
-        .into_response()
+    let mut problem = AuthError::InvalidToken.to_problem_details();
+    problem.detail = Some("a live telmoni_ API token is required".into());
+    let mut resp = (StatusCode::UNAUTHORIZED, Json(problem)).into_response();
+    resp.headers_mut()
+        .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+    resp.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/problem+json"),
+    );
+    resp
 }
 
 /// Pull the organization the middleware resolved.

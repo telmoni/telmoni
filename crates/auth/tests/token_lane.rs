@@ -71,18 +71,39 @@ struct Fixture {
     organization: String,
     /// The slug `/me` answered for it.
     slug: String,
+    /// The project the token was minted on.
+    project: String,
     /// The raw `telmoni_` value, as a customer holds it.
     raw: String,
     id: String,
 }
 
-/// The project an organization was provisioned with.
-async fn project_of(pool: &PgPool, organization: &str) -> String {
-    sqlx::query_scalar("SELECT external_id FROM auth.projects WHERE organization_id = $1")
-        .bind(organization)
-        .fetch_one(pool)
+/// A project in `organization`, made by [`USER`] as the console would: sign-in
+/// makes none, and a token hangs off a project.
+async fn create_project(pool: &PgPool, organization: &str) -> String {
+    let resp = app(pool.clone())
+        .oneshot(
+            as_person(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/projects")
+                    .header("x-service-secret", SERVICE_SECRET)
+                    .header("x-organization-id", organization)
+                    .header("content-type", "application/json"),
+                pool,
+                USER,
+            )
+            .await
+            .body(Body::from(json!({ "name": "Platform" }).to_string()))
+            .unwrap(),
+        )
         .await
-        .expect("sign-in provisions exactly one project")
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED, "the fixture project");
+    json_body(resp).await["id"]
+        .as_str()
+        .expect("the project's id")
+        .to_owned()
 }
 
 /// Sign in and mint one token.
@@ -117,7 +138,7 @@ async fn token(pool: &PgPool) -> Fixture {
         .expect("/me answers the organization's slug")
         .to_owned();
 
-    let project = project_of(pool, &organization).await;
+    let project = create_project(pool, &organization).await;
 
     let resp = app(pool.clone())
         .oneshot(
@@ -145,6 +166,7 @@ async fn token(pool: &PgPool) -> Fixture {
     Fixture {
         organization,
         slug,
+        project,
         raw: body["token"].as_str().expect("the raw token").to_owned(),
         id: body["id"].as_str().expect("the token id").to_owned(),
     }
@@ -180,7 +202,7 @@ async fn a_live_token_reads_the_organization_it_belongs_to(pool: PgPool) {
     assert!(body["name"].is_null(), "nobody has named it yet: {body}");
     assert_eq!(
         body["owner"]["email"], EMAIL,
-        "the owner's address labels an unnamed organization: {body}"
+        "the owner rides beside the organization, as its contact: {body}"
     );
 }
 
@@ -205,6 +227,13 @@ async fn no_lane_reads_a_customer_their_audit_chain(pool: PgPool) {
         StatusCode::NOT_FOUND,
         "a token that reads /v1/organization must still find no audit lane"
     );
+    // As a problem document, like every other `/v1` answer.
+    assert_eq!(
+        resp.headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        Some("application/problem+json")
+    );
 }
 
 #[sqlx::test]
@@ -226,10 +255,7 @@ async fn a_revoked_token_is_401(pool: PgPool) {
                     .uri(format!("/internal/tokens/{}", fixture.id))
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("x-organization-id", &fixture.organization)
-                    .header(
-                        "x-project-id",
-                        project_of(&pool, &fixture.organization).await,
-                    ),
+                    .header("x-project-id", &fixture.project),
                 &pool,
                 USER,
             )
@@ -251,6 +277,18 @@ async fn a_revoked_token_is_401(pool: PgPool) {
         Some("Bearer"),
         "a refused credential says what one looks like"
     );
+    // A problem document, like every other `/v1` answer, under the type a bad
+    // credential gets everywhere else.
+    assert_eq!(
+        refused
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        Some("application/problem+json")
+    );
+    let body = json_body(refused).await;
+    assert_eq!(body["type"], "/errors/auth/invalid-token");
+    assert_eq!(body["detail"], "a live telmoni_ API token is required");
 }
 
 #[sqlx::test]

@@ -569,8 +569,12 @@ pub fn router(state: Arc<AppState>) -> Router {
         .iter()
         .filter(|lane| !lane.route.bearer)
         .fold(Router::new(), mount);
+    // A path under `/v1` that no lane serves is a problem document too, not
+    // axum's bare 404; the fallback sits outside `require_token`, so it names
+    // no organization and costs no database round trip.
     let public_v1 = bearer_v1
         .merge(open_v1)
+        .fallback(handler::v1::not_found)
         .layer(middleware::from_fn_with_state(
             secrets,
             require_service_secret,

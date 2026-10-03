@@ -14,9 +14,9 @@ import { logger } from "@/lib/logger";
 // forwards exactly the lanes below and nothing else: a path that is not in
 // the table is a 404 before any hop, a body is parsed here and re-encoded so
 // only the fields a lane takes cross, and a bearer travels only on the lanes
-// that act for a person. The bearer itself is the person's own provider
-// token, verified by auth against the provider's keys — this door adds no
-// identity of its own and never reads a cookie.
+// that act for a person. The bearer itself is the opaque access token auth's
+// issuer minted at the device grant, which auth checks against its own
+// table — this door adds no identity of its own and never reads a cookie.
 //
 // The lanes are the CLI's session lifecycle and no more: begin a device
 // authorization, poll it, refresh, `/me` (which records the session row that
@@ -241,7 +241,14 @@ async function proxy(request: NextRequest, path: string[]): Promise<NextResponse
     body = JSON.stringify({ userAgent: request.headers.get("user-agent") });
   }
 
-  const unavailable = NextResponse.json({ error: "upstream unavailable" }, { status: 503 });
+  // A problem document like every other answer of this door's; the type is the
+  // door's own, since auth never answered.
+  const unavailable = problem(
+    503,
+    "/errors/upstream-unavailable",
+    "upstream unavailable",
+    "the server did not answer; try again shortly",
+  );
   const base = env.SERVER_URL;
 
   const headers = new Headers({

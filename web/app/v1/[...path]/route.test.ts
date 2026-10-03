@@ -15,7 +15,7 @@ vi.mock("@/lib/env", () => ({
 
 import { NextRequest } from "next/server";
 
-import { DELETE, GET, HEAD, POST } from "./route";
+import { DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT } from "./route";
 
 function req(
   authorization?: string,
@@ -145,7 +145,7 @@ describe("/v1 routing", () => {
       params,
     );
     expect(res.status).toBe(405);
-    expect(res.headers.get("allow")).toBe("GET, HEAD");
+    expect(res.headers.get("allow")).toBe("GET, HEAD, OPTIONS");
     expect(fetchWithTimeout).not.toHaveBeenCalled();
   });
 
@@ -162,7 +162,7 @@ describe("/v1 routing", () => {
       { params: Promise.resolve({ path }) },
     );
     expect(res.status).toBe(405);
-    expect(res.headers.get("allow")).toBe("GET, HEAD");
+    expect(res.headers.get("allow")).toBe("GET, HEAD, OPTIONS");
     expect(fetchWithTimeout).not.toHaveBeenCalled();
   });
 
@@ -172,8 +172,61 @@ describe("/v1 routing", () => {
       { params: Promise.resolve({ path: ["constructor"] }) },
     );
     expect(res.status).toBe(405);
-    expect(res.headers.get("allow")).toBe("GET, HEAD");
+    expect(res.headers.get("allow")).toBe("GET, HEAD, OPTIONS");
     expect(fetchWithTimeout).not.toHaveBeenCalled();
+  });
+
+  // A method the route did not export got Next's bodiless 405, with no
+  // `allow`: the one `/v1` answer that was no problem document.
+  it.each([
+    ["PUT", PUT],
+    ["PATCH", PATCH],
+  ])("answers %s with the same 405 problem document as a POST", async (method, handler) => {
+    const res = await handler(
+      req("Bearer telmoni_abc", { method, body: "{}" }),
+      params,
+    );
+    expect(res.status).toBe(405);
+    expect(res.headers.get("allow")).toBe("GET, HEAD, OPTIONS");
+    expect(res.headers.get("content-type")).toBe("application/problem+json");
+    expect(((await res.json()) as { type: string }).type).toBe("/errors/method-not-allowed");
+    expect(fetchWithTimeout).not.toHaveBeenCalled();
+  });
+
+  it("answers OPTIONS with the reads it takes, not every method it exports", async () => {
+    const res = await OPTIONS();
+    expect(res.status).toBe(204);
+    expect(res.headers.get("allow")).toBe("GET, HEAD, OPTIONS");
+  });
+
+  it("forwards the 401 challenge and a Retry-After, and nothing else of auth's", async () => {
+    fetchWithTimeout.mockResolvedValueOnce(
+      new Response('{"type":"/errors/auth/invalid-token"}', {
+        status: 401,
+        headers: {
+          "content-type": "application/problem+json",
+          "www-authenticate": "Bearer",
+          "retry-after": "30",
+          "x-request-id": "internal",
+        },
+      }),
+    );
+    const res = await GET(req("Bearer telmoni_abc"), params);
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toBe("Bearer");
+    expect(res.headers.get("retry-after")).toBe("30");
+    expect(res.headers.get("x-request-id")).toBeNull();
+  });
+
+  it("answers an unreachable server with a 503 problem document", async () => {
+    fetchWithTimeout.mockRejectedValueOnce(new Error("connect ECONNREFUSED"));
+    const res = await GET(req("Bearer telmoni_abc"), params);
+    expect(res.status).toBe(503);
+    expect(res.headers.get("content-type")).toBe("application/problem+json");
+    expect(await res.json()).toMatchObject({
+      type: "/errors/upstream-unavailable",
+      status: 503,
+    });
   });
 
   it("passes the upstream body back untouched", async () => {

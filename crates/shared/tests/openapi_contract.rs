@@ -21,7 +21,8 @@ const UNIVERSAL: &[Answer] = &[
     Answer {
         status: 503,
         description: "The lane is switched off, or something it needs did not \
-                      answer. `Retry-After` says when to try again.",
+                      answer. A switched-off lane says when to try again in \
+                      `Retry-After`.",
     },
 ];
 

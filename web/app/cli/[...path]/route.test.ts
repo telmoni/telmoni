@@ -226,7 +226,11 @@ describe("/cli refusals, all before the hop", () => {
     fetchWithTimeout.mockRejectedValueOnce(new Error("boom"));
     const res = await call("auth/refresh", { body: { refreshToken: "rt_1" } });
     expect(res.status).toBe(503);
-    expect(await res.text()).not.toContain("boom");
+    const body = await res.text();
+    expect(body).not.toContain("boom");
+    // A problem document, as every answer of this door's is.
+    expect(res.headers.get("content-type")).toBe("application/problem+json");
+    expect(JSON.parse(body)).toMatchObject({ type: "/errors/upstream-unavailable", status: 503 });
   });
 });
 

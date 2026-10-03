@@ -13,7 +13,14 @@ const FORWARDED_REQUEST_HEADERS = [
   "content-length",
 ] as const;
 
-const FORWARDED_RESPONSE_HEADERS = ["content-type", "content-length"] as const;
+// `www-authenticate` carries the 401's challenge and `retry-after` a 429's or a
+// feature-off 503's wait; nothing else auth sets is the client's business.
+const FORWARDED_RESPONSE_HEADERS = [
+  "content-type",
+  "content-length",
+  "www-authenticate",
+  "retry-after",
+] as const;
 const READ_TIMEOUT_MS = 10_000;
 // ⚠ **Empty, and that is the current truth rather than an oversight.** Every
 // `/v1` lane auth serves is a read. A path listed here is forwarded with its
@@ -85,7 +92,9 @@ async function proxy(
   if (write) {
     if (method !== write) return methodNotAllowed(write);
   } else if (method !== "GET" && method !== "HEAD") {
-    return methodNotAllowed("GET, HEAD");
+    // `Allow` lists every method the resource takes, OPTIONS included, as the
+    // OPTIONS answer below does.
+    return methodNotAllowed("GET, HEAD, OPTIONS");
   }
 
   const authorization = request.headers.get("authorization");
@@ -98,9 +107,22 @@ async function proxy(
     if (retryAfter !== null) return rateLimitedProblem(retryAfter);
   }
 
+  // A problem document like every other `/v1` answer; its type is the relay's
+  // own, since auth never answered.
   const unavailable = NextResponse.json(
-    { error: "upstream unavailable" },
-    { status: 503 },
+    {
+      type: "/errors/upstream-unavailable",
+      title: "upstream unavailable",
+      status: 503,
+      detail: "the server did not answer; try again shortly",
+    },
+    {
+      status: 503,
+      headers: {
+        "content-type": "application/problem+json",
+        "cache-control": "no-store, private",
+      },
+    },
   );
 
   const suffix = path.map(encodeURIComponent).join("/");
@@ -190,5 +212,33 @@ export async function HEAD(
 ): Promise<NextResponse> {
   const { path } = await context.params;
   return proxy(request, path);
+}
+
+// Exported so a PUT or PATCH reaches `methodNotAllowed` and gets a problem
+// document with `allow`, rather than the bodiless 405 Next answers for a
+// method a route does not export.
+export async function PUT(
+  request: NextRequest,
+  context: Context,
+): Promise<NextResponse> {
+  const { path } = await context.params;
+  return proxy(request, path);
+}
+
+export async function PATCH(
+  request: NextRequest,
+  context: Context,
+): Promise<NextResponse> {
+  const { path } = await context.params;
+  return proxy(request, path);
+}
+
+// Next's own OPTIONS would advertise every exported method, writes included;
+// the lanes take reads alone.
+export async function OPTIONS(): Promise<NextResponse> {
+  return new NextResponse(null, {
+    status: 204,
+    headers: { allow: "GET, HEAD, OPTIONS", "cache-control": "no-store, private" },
+  });
 }
 
