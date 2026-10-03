@@ -276,6 +276,7 @@ The CLI signs in with a device grant, modelled on RFC 8628.
 **The console's `/cli` door** (`web/app/cli/[...path]/route.ts`) is ⚠ a security boundary:
 - It forwards a fixed allowlist of lanes: start, poll, refresh, `/me`, and revoking one of the person's sessions. That can be any of their sessions, browser sessions included, not only the CLI's own.
 - It refuses any request from a browser (`Sec-Fetch-Site`).
+- It refuses an `x-organization-id` that is not an organization id (`400`). `/me` reads one it cannot parse as none and answers the person's own organization, which is right for the console's stale cookie and wrong for a client that named one: a slug sent by mistake would act elsewhere.
 - It caps and re-encodes bodies, so only the fields in its schema cross.
 - It meters each source and each bearer.
 

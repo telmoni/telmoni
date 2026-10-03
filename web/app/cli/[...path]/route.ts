@@ -115,6 +115,12 @@ function match(path: string[]): { lane: Lane; ids: string[] } | null {
   return null;
 }
 
+// Auth's `OrganizationId::try_new`, which `/me` applies: an `org_` id of at
+// most 256 characters, with no whitespace or control character in it.
+function isOrganizationId(value: string): boolean {
+  return value.startsWith("org_") && [...value].length <= 256 && !/[\s\p{Cc}]/u.test(value);
+}
+
 function problem(
   status: number,
   type: string,
@@ -200,6 +206,20 @@ async function proxy(request: NextRequest, path: string[]): Promise<NextResponse
     if (retryAfter !== null) return rateLimitedProblem(retryAfter);
   }
 
+  // ⚠ An organization a client names has to be an id. `/me` reads one it
+  // cannot parse as none and answers the person's own organization: right
+  // for the console's stale cookie, wrong for a client, which would act in
+  // another organization without a word, given a slug by mistake.
+  const organization = lane.bearer ? request.headers.get("x-organization-id") : null;
+  if (organization && !isOrganizationId(organization)) {
+    return problem(
+      400,
+      "/errors/bad-request",
+      "bad request",
+      "x-organization-id is not an organization id",
+    );
+  }
+
   let body: string | undefined;
   if (lane.body.kind === "json") {
     const raw = await readBodyCapped(request, BODY_CAP_BYTES);
@@ -232,7 +252,6 @@ async function proxy(request: NextRequest, path: string[]): Promise<NextResponse
   if (body !== undefined) headers.set("content-type", "application/json");
   if (lane.bearer) {
     headers.set("authorization", authorization!);
-    const organization = request.headers.get("x-organization-id");
     if (organization) headers.set("x-organization-id", organization);
   }
 

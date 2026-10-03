@@ -167,6 +167,22 @@ describe("/cli refusals, all before the hop", () => {
     expect(fetchWithTimeout).not.toHaveBeenCalled();
   });
 
+  // `/me` reads an organization it cannot parse as none, and answers the
+  // person's own: a slug sent here by mistake would act in another one.
+  it("answers 400 for an organization that is not an id, on either person lane", async () => {
+    const notIds = ["acme", "acme-2", "org_ac me", `org_${"a".repeat(253)}`];
+    for (const path of ["me", `sessions/${ROW}/revoke`]) {
+      for (const organization of notIds) {
+        const res = await call(path, {
+          headers: { authorization: BEARER, "x-organization-id": organization },
+        });
+        expect(res.status, `${path} with ${organization}`).toBe(400);
+        expect(await res.json()).toMatchObject({ type: "/errors/bad-request" });
+      }
+    }
+    expect(fetchWithTimeout).not.toHaveBeenCalled();
+  });
+
   it("answers 400 for a body that is not JSON or not the lane's shape", async () => {
     const notJson = new NextRequest("https://app.example/cli/auth/refresh", {
       method: "POST",
