@@ -167,7 +167,7 @@ export async function offerOwnershipAction(
   organizationId: string,
   memberId: string,
 ): Promise<ActionResult> {
-  const gate = await open("members:transfer", 10, organizationId);
+  const gate = await open("members:transfer", 10, organizationId, "ownership");
   if ("error" in gate) return gate;
   const res = await tryFetchWithTimeout(
     `${gate.base}/internal/organization/owner-transfer`,
@@ -186,7 +186,7 @@ export async function offerOwnershipAction(
 
 /// Withdraw the organization's live offer.
 export async function cancelOwnershipOfferAction(organizationId: string): Promise<ActionResult> {
-  const gate = await open("members:transfer", 10, organizationId);
+  const gate = await open("members:transfer", 10, organizationId, "ownership");
   if ("error" in gate) return gate;
   const res = await tryFetchWithTimeout(
     `${gate.base}/internal/organization/owner-transfer`,
@@ -252,10 +252,17 @@ export async function leaveOrganizationAction(
   redirect("/console");
 }
 
+/// Presentation's half of the rule, mirrored from auth, which enforces it on
+/// its own rows: members, their roles and invitations are an owner's or an
+/// admin's to manage (`can_manage_org_members`); the organization itself is
+/// the owner's alone to hand over (`require_owner`). The page draws the
+/// controls by the same rule, so a refusal here is a stale page, never a
+/// button that cannot work.
 async function open(
   bucket: string,
   limit: number,
   organizationId: string,
+  lane: "members" | "ownership" = "members",
 ): Promise<
   | {
       base: string;
@@ -280,9 +287,11 @@ async function open(
   const organization = context ? activeOrganization(context) : null;
   if (!ctx || !organization) return { error: await unplacedOrganization() };
   if (ctx.organizationId !== organizationId) return { error: SWITCHED_ORGANIZATION };
-  // Presentation's half of the rule; auth enforces it on the owner's row.
-  if (ctx.role !== "owner") {
-    return { error: "Only the organization owner can manage organization members." };
+  if (lane === "ownership" && ctx.role !== "owner") {
+    return { error: "Only the organization owner can hand it over." };
+  }
+  if (ctx.role !== "owner" && ctx.role !== "admin") {
+    return { error: "Only an organization owner or admin can manage organization members." };
   }
   return {
     base: env.SERVER_URL,

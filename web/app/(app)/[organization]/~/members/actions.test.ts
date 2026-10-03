@@ -80,7 +80,8 @@ const fetchMock = vi.mocked(tryFetchWithTimeout);
 
 // The organization the members page rendered, and handed to every control.
 const ORGANIZATION = "org_acme";
-const OWNER_ONLY = "Only the organization owner can manage organization members.";
+const MANAGERS_ONLY = "Only an organization owner or admin can manage organization members.";
+const OWNER_ONLY = "Only the organization owner can hand it over.";
 const UNRESOLVED = "Couldn't resolve your organization right now. Try again in a moment.";
 const SWITCHED =
   "This page is out of date. Reload it to act on the organization you're viewing.";
@@ -147,43 +148,43 @@ beforeEach(() => {
 });
 
 describe("organization members actions", () => {
-  // An ADMIN is the case that matters: they hold organization-wide powers,
-  // just not this one. The gate is presentation's half of the rule; auth
-  // enforces it on the owner's row.
-  describe.each(["admin", "member"] as const)("when acting as an organization %s", (role) => {
+  // The gate is presentation's half of auth's rule, and the members page
+  // draws its controls by the same one: a member sees none and may do none.
+  describe("when acting as an organization member", () => {
     beforeEach(() => {
-      standingAs(role);
+      standingAs("member");
     });
 
-    it("rejects inviteOrganizationMemberAction", async () => {
-      const res = await inviteOrganizationMemberAction(ORGANIZATION, "new@example.test", "member");
-      expect(res).toEqual({ error: OWNER_ONLY });
+    it.each(ROSTER_ACTIONS.slice(0, 4))("%s refuses, asking auth nothing", async (_, act) => {
+      expect(await act()).toEqual({ error: MANAGERS_ONLY });
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it("rejects revokeOrganizationInviteAction", async () => {
-      const res = await revokeOrganizationInviteAction(ORGANIZATION, "inv_123");
-      expect(res).toEqual({ error: OWNER_ONLY });
-      expect(fetchMock).not.toHaveBeenCalled();
-    });
-
-    it("rejects updateOrganizationMemberRoleAction", async () => {
-      const res = await updateOrganizationMemberRoleAction(ORGANIZATION, "user_2", "admin");
-      expect(res).toEqual({ error: OWNER_ONLY });
-      expect(fetchMock).not.toHaveBeenCalled();
-    });
-
-    it("rejects removeOrganizationMemberAction", async () => {
-      const res = await removeOrganizationMemberAction(ORGANIZATION, "user_2");
-      expect(res).toEqual({ error: OWNER_ONLY });
-      expect(fetchMock).not.toHaveBeenCalled();
-    });
-
-    it("rejects offerOwnershipAction, and tells nobody", async () => {
-      const res = await offerOwnershipAction(ORGANIZATION, "user_2");
-      expect(res).toEqual({ error: OWNER_ONLY });
+    it.each(ROSTER_ACTIONS.slice(4))("%s refuses, asking auth nothing and telling nobody", async (_, act) => {
+      expect(await act()).toEqual({ error: OWNER_ONLY });
       expect(fetchMock).not.toHaveBeenCalled();
       expect(mockPublishEvent).not.toHaveBeenCalled();
+    });
+  });
+
+  // ⚠ An ADMIN manages the roster — auth's `can_manage_org_members`, and the
+  // controls the page draws them — and may not hand the organization over,
+  // which is the owner's alone. The gate once refused admins everything, from
+  // a page that showed them every control.
+  describe("when acting as an organization admin", () => {
+    beforeEach(() => {
+      standingAs("admin");
+    });
+
+    it.each(ROSTER_ACTIONS.slice(0, 4))("%s goes to auth, under the organization the page rendered", async (_, act) => {
+      fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+      expect(await act()).toEqual({ error: null });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0]![1]).toEqual(
+        expect.objectContaining({
+          headers: expect.objectContaining({ "x-organization-id": ORGANIZATION }),
+        }),
+      );
     });
 
     it.each([{ link: null }, { link: 42 }, {}])(
@@ -197,9 +198,8 @@ describe("organization members actions", () => {
       },
     );
 
-    it("rejects cancelOwnershipOfferAction, and tells nobody", async () => {
-      const res = await cancelOwnershipOfferAction(ORGANIZATION);
-      expect(res).toEqual({ error: OWNER_ONLY });
+    it.each(ROSTER_ACTIONS.slice(4))("%s refuses, asking auth nothing and telling nobody", async (_, act) => {
+      expect(await act()).toEqual({ error: OWNER_ONLY });
       expect(fetchMock).not.toHaveBeenCalled();
       expect(mockPublishEvent).not.toHaveBeenCalled();
     });
