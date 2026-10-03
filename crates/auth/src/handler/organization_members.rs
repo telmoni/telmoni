@@ -106,7 +106,7 @@ pub async fn update_organization_member_role(
     if !caller_role.can_manage_org_members() {
         tx.commit().await?;
         return Err(AuthzError::Forbidden(
-            "only the organization owner can change organization member roles".into(),
+            "only an organization owner or admin can change organization member roles".into(),
         )
         .into());
     }
@@ -185,7 +185,7 @@ pub async fn remove_organization_member(
     if !leaving && !caller_role.can_manage_org_members() {
         tx.commit().await?;
         return Err(AuthzError::Forbidden(
-            "only the organization owner can remove organization members".into(),
+            "only an organization owner or admin can remove organization members".into(),
         )
         .into());
     }
@@ -303,7 +303,7 @@ pub async fn create_organization_invite(
     if !caller_role.can_manage_org_members() {
         tx.commit().await?;
         return Err(AuthzError::Forbidden(
-            "only the organization owner can invite organization members".into(),
+            "only an organization owner or admin can invite organization members".into(),
         )
         .into());
     }
@@ -426,7 +426,7 @@ pub async fn revoke_organization_invite(
     if !caller_role.can_manage_org_members() {
         tx.commit().await?;
         return Err(AuthzError::Forbidden(
-            "only the organization owner can revoke organization invitations".into(),
+            "only an organization owner or admin can revoke organization invitations".into(),
         )
         .into());
     }

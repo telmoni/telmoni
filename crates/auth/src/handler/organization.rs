@@ -353,7 +353,7 @@ pub async fn rename_organization(
     if !caller_role.can_manage_org_settings() {
         tx.commit().await?;
         return Err(AuthzError::Forbidden(
-            "only the organization owner can rename the organization".into(),
+            "only an organization owner or admin can rename the organization".into(),
         )
         .into());
     }

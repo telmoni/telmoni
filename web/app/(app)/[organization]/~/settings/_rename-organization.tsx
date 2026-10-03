@@ -87,7 +87,7 @@ export function RenameOrganizationForm({
       {error && <p className="text-sm text-destructive">{error}</p>}
       {!canEdit && (
         <p className="text-sm text-muted-foreground">
-          Only the organization owner can rename it.
+          Only an organization owner or admin can rename it.
         </p>
       )}
     </form>
