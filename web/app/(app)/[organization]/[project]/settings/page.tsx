@@ -48,7 +48,7 @@ export default async function SettingsPage({
 
         <Section
           title="Project name"
-          description="Used to identify this project across the console and notifications."
+          description="Used to identify this project across the console and notifications. Its address follows the name: a rename moves every link to its pages, and a name with no Latin letters or digits keeps the address it has."
         >
           <Card>
             <RenameProjectForm

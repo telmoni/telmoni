@@ -58,7 +58,7 @@ export default async function OrganizationSettingsPage() {
       <div className="grid gap-6">
         <Section
           title="Name"
-          description="What this organization is called across the console — the rail, the resource selector, and every invitation it sends. Everyone in it sees it; it is not a person's name. It needs one before it can be handed over."
+          description="What this organization is called across the console — the rail, the resource selector, and every invitation it sends. Everyone in it sees it; it is not a person's name. It needs one before it can be handed over. Its address follows the name: a rename moves every link to its pages, and a name with no Latin letters or digits keeps the address it has."
         >
           <RenameOrganizationForm
             organizationId={organization.organizationId}
