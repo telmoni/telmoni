@@ -37,7 +37,7 @@ export function IncomingInvitesSection({
       </div>
       <DataTable>
         <THead>
-          <Th>Workspace</Th>
+          <Th>Invited to</Th>
           <Th>Invited by</Th>
           <Th>Role</Th>
           <Th>Expires</Th>
@@ -50,7 +50,8 @@ export function IncomingInvitesSection({
         </tbody>
       </DataTable>
       <p className="text-xs text-muted-foreground">
-        Accepting an invitation grants you access to that workspace. Declining withdraws the offer.
+        Accepting an invitation grants you access to that organization or project. Declining
+        withdraws the offer.
       </p>
     </section>
   );
@@ -135,7 +136,7 @@ function IncomingInviteRow({ invite }: { invite: IncomingInvite }) {
               </Button>
             }
             title={`Decline invitation to join ${invite.targetName}?`}
-            description="You will not receive access to this workspace. You can be invited again later if needed."
+            description="You will not receive access to it. You can be invited again later if needed."
             confirmLabel="Decline"
             onConfirm={() =>
               settle(

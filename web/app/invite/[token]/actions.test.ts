@@ -29,6 +29,9 @@ vi.mock("@/lib/env", () => ({
     SERVER_URL: "http://auth.test",
   },
 }));
+vi.mock("@/lib/server/cookies", () => ({
+  setActiveOrganizationCookie: vi.fn(),
+}));
 const mockPublishEvent = vi.fn();
 vi.mock("@/lib/events/publisher", () => ({
   publishEvent: (...args: unknown[]) => mockPublishEvent(...args),
@@ -46,6 +49,7 @@ import { NextResponse } from "next/server";
 
 import { tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit } from "@/lib/api/rate-limit";
+import { setActiveOrganizationCookie } from "@/lib/server/cookies";
 import { identityContext } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
 
@@ -121,6 +125,23 @@ describe("acceptInviteAction", () => {
       "/(app)/[organization]/~/projects",
       "page",
     );
+  });
+
+  // ⚠ The page goes on to `/console`, which opens the cookie's organization.
+  // Without this a new invitee — no cookie, and an unnamed organization of
+  // their own from their first sign-in — was asked to name that one instead
+  // of landing in the one they had just joined.
+  it("points the console at the organization joined", async () => {
+    await acceptInviteAction("token_abc");
+    expect(setActiveOrganizationCookie).toHaveBeenCalledWith("org_owner");
+  });
+
+  it("leaves the cookie alone when auth names no organization", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ inviteId: "inv_123" }), { status: 201 }),
+    );
+    await acceptInviteAction("token_abc");
+    expect(setActiveOrganizationCookie).not.toHaveBeenCalled();
   });
 
   it("tells each stakeholder once when the inviter is the accepting person's own address", async () => {

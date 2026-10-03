@@ -134,7 +134,7 @@ export default async function MembersPage({
           )}
           <p className="text-xs text-muted-foreground">
             A member has read-only access. An admin also manages members, keys,
-            connectors, and sees the audit log. Only the owner can delete the project.
+            connectors, and sees the audit log. Only the owner can delete the project or hand it to another organization.
           </p>
         </section>
 

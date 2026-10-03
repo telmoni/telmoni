@@ -129,22 +129,26 @@ export function RealtimeListener() {
       es.addEventListener("ownership:changed", (e: MessageEvent) => {
         const data = payload(e, "ownership:changed");
         // The project on screen was handed to another organization, and this
-        // path no longer names it: on to where it is now, by id, which the
-        // console redirects to the slugs it goes by there.
+        // path no longer names it: on to where it is now, by the slugs the
+        // event carries. Without them there is nowhere to spell, and the
+        // refresh answers "not found" here, which is the truth of this path.
         if (
           data?.projectId &&
           data.projectId === projectIdRef.current &&
-          data.organizationId !== activeOrgIdRef.current
+          data.organizationId !== activeOrgIdRef.current &&
+          data.organizationSlug &&
+          data.projectSlug
         ) {
-          router.replace(projectPath(data.organizationId, data.projectId));
+          router.replace(projectPath(data.organizationSlug, data.projectSlug));
           return;
         }
         router.refresh();
       });
 
-      // A rename moved a slug this path may be spelled with: on to where the
-      // page is now. Everything else on screen still links by the old slug,
-      // so it is asked for again either way — after the move, never before:
+      // A slug this path may be spelled with moved — a project renamed, an
+      // organization's URL changed: on to where the page is now. Everything
+      // else on screen still links by the old slug, so it is asked for again
+      // either way — after the move, never before:
       // the old path names nothing any more.
       es.addEventListener("slug:moved", (e: MessageEvent) => {
         const moved = payload(e, "slug:moved");

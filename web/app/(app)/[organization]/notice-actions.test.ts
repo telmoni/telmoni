@@ -83,15 +83,15 @@ describe("markOrganizationReadAction", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  // Posted from a tab whose organization was renamed, or let the person go,
-  // after the page rendered: a reload would answer "not found".
+  // Posted from a tab whose organization changed its URL, or let the person
+  // go, after the page rendered: a reload would answer "not found".
   it("tells a tab that missed a move that its address is gone", async () => {
     vi.mocked(identityContext).mockResolvedValue(null);
     vi.mocked(getServerContext).mockResolvedValue({
       organizationNotFound: true,
     } as Awaited<ReturnType<typeof getServerContext>>);
     const res = await markOrganizationReadAction(ORGANIZATION);
-    expect(res.error).toMatch(/renamed, or you're no longer in it/);
+    expect(res.error).toMatch(/URL was changed, or you're no longer in it/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

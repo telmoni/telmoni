@@ -1,12 +1,20 @@
 import { redirect } from "next/navigation";
 
+import { PaperShell } from "@/components/paper-shell";
 import { ServiceUnavailable } from "@/components/service-unavailable";
+import { Card } from "@/components/ui/card";
 import { administersOrganization } from "@/lib/organization-role";
 import { activeOrganization, fetchProjectListing, getServerContext } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
 import { organizationPath, projectPath } from "@/lib/slug";
 
-export default async function ConsoleEntry() {
+import { NameOrganizationForm } from "./_name-organization";
+
+export default async function ConsoleEntry({
+  searchParams,
+}: {
+  searchParams: Promise<{ organization?: string | string[] }>;
+}) {
   const session = await getServerSession();
 
   if (!session) redirect("/auth/logout");
@@ -15,6 +23,43 @@ export default async function ConsoleEntry() {
   // gives them their account; this one names what is there for them.
   const ctx = await getServerContext();
   if (ctx && ctx.activeOrganizationId === null) redirect("/account/notifications");
+
+  // ⚠ An organization is named before the console opens to its owner, as a
+  // Vercel team is named when it is made. Provisioned at first sign-in, it has
+  // a placeholder slug nobody chose, which would otherwise be the first
+  // address they saw; its first name gives it a URL, and both are theirs to
+  // change on Settings. Asked here, under `/console`, where the address bar
+  // spells no slug at all. Nobody else is in it: auth invites nobody to an
+  // unnamed organization.
+  //
+  // `?organization=` is `[organization]/layout.tsx` saying which one it sent
+  // the owner from. This path names no organization, so `/me` answers the
+  // cookie's — another organization, when the owner opened an unnamed one of
+  // theirs from inside it — and the question would otherwise be asked of the
+  // wrong one, or not at all.
+  const { organization: sentFrom } = await searchParams;
+  const sent =
+    typeof sentFrom === "string"
+      ? ctx?.organizations.find((o) => o.organizationId === sentFrom)
+      : undefined;
+  const standing = sent ?? (ctx ? activeOrganization(ctx) : null);
+  if (standing && !standing.name?.trim() && standing.role === "owner") {
+    return (
+      <PaperShell signedIn>
+        <main className="mx-auto grid w-full max-w-xl gap-6 px-3.5 py-10">
+          <Card data-testid="name-organization">
+            <h1 className="text-lg font-semibold">Name your organization</h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              This is what everyone in it sees: your company or group, not a person&apos;s
+              name. Its address on Telmoni follows from it, and you can change both in
+              Settings.
+            </p>
+            <NameOrganizationForm organizationId={standing.organizationId} />
+          </Card>
+        </main>
+      </PaperShell>
+    );
+  }
 
   const listing = await fetchProjectListing();
   // This route has no layout, and it is the only caller of

@@ -59,30 +59,27 @@ describe("what to call it", () => {
     ).toBe("Acme Robotics");
   });
 
-  // ⚠ The regression this file exists for. `name` is NULL until the owner
-  // names it, so the label comes off the owner's LIVE address — change it, or
-  // hand the organization to somebody else, and every surface follows, where a
-  // seeded copy of the old address would not.
-  it("falls back to the owner's live address when nobody has named it", () => {
-    expect(resolve().label).toBe("ada@example.com");
-    expect(
-      resolve({ organizations: [{ ...mine, ownerEmail: "ada@new.example" }, theirs] }).label,
-    ).toBe("ada@new.example");
+  // ⚠ `name` is NULL only before the owner has named the organization, which
+  // the console asks for before it opens to them. Nothing is ever labelled by
+  // the owner's address: it is a person's, and a path and a mail would carry
+  // it.
+  it("never falls back to the owner's address", () => {
+    expect(resolve().label).toBe("Organization");
+    expect(resolve().label).not.toContain("ada@");
   });
 
   it("treats a blank name as no name", () => {
     expect(resolve({ organizations: [{ ...mine, name: "   " }, theirs] }).label).toBe(
-      "ada@example.com",
+      "Organization",
     );
   });
 
-  // An organization is named by its name or its owner's address, never by the
-  // person who holds it — and "Personal" is gone, because it was one word for
-  // every customer.
+  // An organization is named by its name, never by the person who holds it —
+  // and "Personal" is gone, because it was one word for every customer.
   it("never labels an organization with a person's name", () => {
     expect(resolve().label).not.toBe("Personal");
     expect(resolve().label).not.toContain("Ada");
-    expect(resolve({ activeOrganizationId: THEIRS }).label).toBe("grace@other.example");
+    expect(resolve({ activeOrganizationId: THEIRS }).label).toBe("Organization");
     expect(resolve({ activeOrganizationId: THEIRS }).label).not.toContain("Grace");
   });
 
@@ -100,9 +97,5 @@ describe("what to call it", () => {
   it("says Organization when there is nothing to name it with", () => {
     expect(resolve({ activeOrganizationId: "org_stranger" }).label).toBe("Organization");
     expect(resolve({ organizations: [] }).label).toBe("Organization");
-    // An entry read mid-transfer has no owner row to take an address from.
-    expect(resolve({ organizations: [{ ...mine, ownerEmail: null }] }).label).toBe(
-      "Organization",
-    );
   });
 });

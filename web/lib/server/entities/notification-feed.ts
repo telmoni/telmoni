@@ -34,10 +34,11 @@ export const fetchNotifications = cache(
 
 // ⚠ **The project's feed is a DIFFERENT SET from the organization's**, not a
 // filtered view of it. The service picks its scope from the presence of
-// `x-project-id`: with a project it answers that project's rows, without one it answers
-// the rows that name no project and refuses anybody but the organization's owner.
-// So this is the only way to read a `member_added` or a `connector_*` notice,
-// and `fetchNotifications` is the only way to read an `organization_alert`.
+// `x-project-id`: with a project it answers that project's rows, without one
+// it answers the rows that name no project and refuses anybody but the
+// organization's owner and admins. So this is the only way to read a
+// `member_added` or a `connector_*` notice, and `fetchNotifications` is the
+// only way to read an `organization_alert`.
 export const fetchProjectNotifications = cache(
   async (projectId: string): Promise<NotificationFeed | null> => readProject(projectId),
 );

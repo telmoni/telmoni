@@ -10,18 +10,16 @@ import { Input } from "@/components/ui/input";
 import { MAX_ORGANIZATION_NAME } from "@/lib/organization-name";
 import { organizationPath } from "@/lib/slug";
 
-import { renameOrganizationAction } from "./rename-actions";
+import { renameOrganizationAction } from "./settings-actions";
 
-export function RenameOrganizationForm({
+export function OrganizationNameForm({
   organizationId,
   initialName,
-  fallbackLabel,
   canEdit,
 }: {
   /// The organization this page rendered; the rename refuses any other.
   organizationId: string;
   initialName: string;
-  fallbackLabel: string;
   canEdit: boolean;
 }) {
   const router = useRouter();
@@ -55,7 +53,8 @@ export function RenameOrganizationForm({
           return;
         }
         toast.success("Organization renamed.");
-        // Its slug follows its name, and so does this page.
+        // A name moves no URL once the organization has one; the first name
+        // takes it off its placeholder, and this page follows it there.
         if (res.movedTo) router.replace(organizationPath(res.movedTo, "/settings"));
         else router.refresh();
       } catch {
@@ -73,7 +72,7 @@ export function RenameOrganizationForm({
           value={name}
           onChange={(e) => setName(e.target.value)}
           disabled={!canEdit || pending}
-          placeholder={fallbackLabel}
+          placeholder="Organization name"
           maxLength={MAX_ORGANIZATION_NAME}
           className="max-w-md"
           aria-label="Organization name"

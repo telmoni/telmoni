@@ -187,9 +187,15 @@ describe("answering the offer of a project", () => {
     expect(init.headers).not.toHaveProperty("x-organization-id");
     expect(init.headers).not.toHaveProperty("x-user-id");
 
+    // With the slugs its new address is spelled with, for a tab showing it.
     const changed = {
       type: "ownership:changed",
-      data: { organizationId: "org_own", projectId: "project_offered" },
+      data: {
+        organizationId: "org_own",
+        projectId: "project_offered",
+        organizationSlug: "own",
+        projectSlug: "payments-2",
+      },
     };
     expect(mockPublishEvent).toHaveBeenCalledTimes(2);
     expect(mockPublishEvent).toHaveBeenCalledWith("bfev:organization:org_own", changed);

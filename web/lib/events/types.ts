@@ -5,13 +5,20 @@ import { IncomingInviteSchema } from "@/lib/types/incoming-invite";
 
 const InviteRefSchema = z.object({ inviteId: z.string() });
 
+const Slug = z.string().refine(isSlug);
+
 /// An organization whose ownership offer or owner just changed — or, when a
 /// project is named, one of whose projects was offered, answered, or moved.
 /// It carries no roles: the console re-reads `/me`, which is where
-/// who-owns-what comes from.
+/// who-owns-what comes from. A moved project carries the slugs its new
+/// address is spelled with, so a tab showing it can go there, by slug as every
+/// link is; each is held to a slug's shape, because the listener spells a path
+/// with it.
 const OwnershipRefSchema = z.object({
   organizationId: z.string(),
   projectId: z.string().optional(),
+  organizationSlug: Slug.optional(),
+  projectSlug: Slug.optional(),
 });
 
 /// A project or organization from which the user's membership has been revoked.
@@ -20,12 +27,12 @@ const MembershipRemovedSchema = z.object({
   projectId: z.string().optional(),
 });
 
-/// A rename moved a slug, and with it the address of every page under it:
-/// an open tab follows, where its path is spelled with `from`. The slugs are
-/// the organization's own — or, when a project is named, that project's, in
-/// the organization that goes by `organization`. Each is held to a slug's
-/// shape here, because the listener spells a path with it.
-const Slug = z.string().refine(isSlug);
+/// A slug moved — an organization's URL changed on Settings, or a project
+/// renamed — and with it the address of every page under it: an open tab
+/// follows, where its path is spelled with `from`. The slugs are the
+/// organization's own — or, when a project is named, that project's, in the
+/// organization that goes by `organization`. Each is held to a slug's shape
+/// here, because the listener spells a path with it.
 const SlugMovedSchema = z.object({
   organizationId: z.string(),
   organization: Slug.optional(),

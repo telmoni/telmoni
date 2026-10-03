@@ -137,20 +137,29 @@ async function answerProjectOffer(
   }
 
   // Both organizations see the project move — the one it left, whose owner
-  // is now an admin on it, and the one it landed in.
+  // is now an admin on it, and the one it landed in. The project is in the
+  // destination now, under the slug it landed with: the event carries both
+  // slugs, so a tab showing the project can follow it there, by slug as every
+  // link is.
   const destination = id(body?.organizationId);
   const source = id(body?.previousOrganizationId);
+  const organization = id(body?.organizationSlug);
+  const project = id(body?.slug);
   await publishToAll(
     [
       destination ? organizationChannel(destination) : null,
       source ? organizationChannel(source) : null,
     ],
-    { type: "ownership:changed", data: { organizationId: destination ?? source ?? "", projectId } },
+    {
+      type: "ownership:changed",
+      data: {
+        organizationId: destination ?? source ?? "",
+        projectId,
+        ...(organization && project ? { organizationSlug: organization, projectSlug: project } : {}),
+      },
+    },
   );
   revalidatePath("/", "layout");
-  // The project is in the destination now, under the slug it landed with.
-  const organization = id(body?.organizationSlug);
-  const project = id(body?.slug);
   return {
     error: null,
     href: organization && project ? projectPath(organization, project) : undefined,

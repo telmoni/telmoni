@@ -32,15 +32,12 @@ vi.mock("./_delete-account", () => ({
 vi.mock("./_deleted-organizations", () => ({
   DeletedOrganizations: ({
     organizations,
-    ownerEmail,
   }: {
     organizations: readonly { organizationId: string }[];
-    ownerEmail: string;
   }) => (
     <div
       data-testid="deleted-organizations"
       data-ids={organizations.map((o) => o.organizationId).join("|")}
-      data-owner={ownerEmail}
     />
   ),
 }));
@@ -150,10 +147,6 @@ describe("AccountPrivacyPage", () => {
       "danger zone",
     ]);
     expect(screen.getByTestId("deleted-organizations")).toHaveAttribute("data-ids", "org_closed");
-    expect(screen.getByTestId("deleted-organizations")).toHaveAttribute(
-      "data-owner",
-      "k@example.com",
-    );
   });
 
   // ⚠ Deleting the account takes every organization the person owns on their
@@ -165,34 +158,31 @@ describe("AccountPrivacyPage", () => {
       person: { analyticsOptIn: false },
       organizations: [
         { organizationId: "org_1", slug: "acme", name: "Acme", ownerEmail: "k@example.com", role: "owner" },
-        { organizationId: "org_2", slug: "two", name: null, ownerEmail: "k@example.com", role: "owner" },
+        { organizationId: "org_2", slug: "two", name: "Two", ownerEmail: "k@example.com", role: "owner" },
         { organizationId: "org_3", slug: "theirs", name: "Theirs", ownerEmail: "t@example.com", role: "admin" },
-        { organizationId: "org_4", slug: "four", name: null, ownerEmail: "m@example.com", role: "member" },
+        { organizationId: "org_4", slug: "four", name: "Four", ownerEmail: "m@example.com", role: "member" },
       ],
     };
     render(await AccountPrivacyPage());
-    expect(screen.getByTestId("delete-account")).toHaveAttribute(
-      "data-owned",
-      "Acme|k@example.com",
-    );
+    expect(screen.getByTestId("delete-account")).toHaveAttribute("data-owned", "Acme|Two");
   });
 
-  // Every unnamed organization wears its owner's address, so two of them —
-  // one made at sign-up, one handed over — would otherwise read as the same
-  // organization named twice, and collide as keys.
+  // Two organizations may carry one name — one made at sign-up, one handed
+  // over — and would otherwise read as the same organization named twice, and
+  // collide as keys.
   it("counts owned organizations that share a label instead of repeating it", async () => {
     mockContext = {
       person: { analyticsOptIn: false },
       organizations: [
-        { organizationId: "org_1", slug: "one", name: null, ownerEmail: "k@example.com", role: "owner" },
-        { organizationId: "org_2", slug: "acme", name: "Acme", ownerEmail: "k@example.com", role: "owner" },
-        { organizationId: "org_3", slug: "three", name: null, ownerEmail: "k@example.com", role: "owner" },
+        { organizationId: "org_1", slug: "one", name: "Acme", ownerEmail: "k@example.com", role: "owner" },
+        { organizationId: "org_2", slug: "globex", name: "Globex", ownerEmail: "k@example.com", role: "owner" },
+        { organizationId: "org_3", slug: "three", name: "Acme", ownerEmail: "k@example.com", role: "owner" },
       ],
     };
     render(await AccountPrivacyPage());
     expect(screen.getByTestId("delete-account")).toHaveAttribute(
       "data-owned",
-      "k@example.com (2 organizations)|Acme",
+      "Acme (2 organizations)|Globex",
     );
   });
 

@@ -21,7 +21,7 @@ import { DOCS_URL } from "@/lib/site";
 import { EventPicker, isChoiceEmpty, kindsFrom, type EventChoice } from "./_events";
 import { createWebhookConnectorAction, type SecretResult } from "./actions";
 
-// The webhook is the one connector with no handshake: the owner types the
+// The webhook is the one connector with no handshake: an owner or admin types the
 // endpoint here, the service checks it and mints the signing secret, and the
 // secret is shown exactly once on the way back. Slack and Discord are a link
 // to a GET route instead, because the browser has to leave for the vendor.

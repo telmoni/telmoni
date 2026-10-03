@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
+import { setActiveOrganizationCookie } from "@/lib/server/cookies";
 import { personHeaders } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
 import {
@@ -59,6 +60,12 @@ export async function acceptInviteAction(
     ],
     { type: "invite:resolved", data: { inviteId: data?.inviteId || "" } },
   );
+
+  // The page goes on to `/console`, which asks `/me` for the cookie's
+  // organization. A new invitee has no cookie, and `/me` would fall back to
+  // the organization their own sign-in provisioned — unnamed — and ask them to
+  // name it; the one they just joined is where they are going.
+  if (data?.ownerOrganizationId) await setActiveOrganizationCookie(data.ownerOrganizationId);
 
   revalidatePath("/(app)/[organization]/~/projects", "page");
   return { error: null };

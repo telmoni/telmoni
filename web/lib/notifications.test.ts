@@ -91,7 +91,7 @@ describe("inviterText", () => {
 
   // The invitation outlives a sender who deleted their account, and it is
   // still the organization's to honour — so it is credited to that.
-  it("credits the workspace when the sender's address is gone", () => {
+  it("credits the organization when the sender's address is gone", () => {
     expect(inviterText(invite({ inviterEmail: null, inviterDisplayName: null }))).toBe(
       "Platform",
     );

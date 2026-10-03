@@ -205,8 +205,8 @@ describe("organization members actions", () => {
     });
   });
 
-  // Posted from a tab whose organization was renamed, or let the person go,
-  // after the page rendered: its path names an organization auth did not
+  // Posted from a tab whose organization changed its URL, or let the person
+  // go, after the page rendered: its path names an organization auth did not
   // answer with. A reload would answer "not found", so "try again" would be
   // the wrong advice.
   describe("when the path names an organization auth did not answer with", () => {
@@ -220,7 +220,7 @@ describe("organization members actions", () => {
 
     it.each(ROSTER_ACTIONS)("%s says the address is gone, asking auth nothing", async (_, act) => {
       const res = await act();
-      expect(res.error).toMatch(/renamed, or you're no longer in it/);
+      expect(res.error).toMatch(/URL was changed, or you're no longer in it/);
       expect(fetchMock).not.toHaveBeenCalled();
       expect(mockPublishEvent).not.toHaveBeenCalled();
     });
@@ -228,12 +228,11 @@ describe("organization members actions", () => {
 
   // ⚠ **The page rendered one organization; the request now resolves
   // another.** Every action here resolves the active organization when it is
-  // called — from a path whose slug a rename has since moved — so without this
-  // check an owner of two organizations would invite, remove or hand over in
-  // the one auth fell back to, from a roster that shows the first. The
-  // refusal is the answer whatever the caller's role
-  // there: an owner-only refusal would blame a role they hold in the one they
-  // are looking at.
+  // called — from a path whose slug a URL change has since moved — so without
+  // this check an owner of two organizations would invite, remove or hand over
+  // in the one auth fell back to, from a roster that shows the first. The
+  // refusal is the answer whatever the caller's role there: a role refusal
+  // would blame a role they hold in the one they are looking at.
   describe.each(["owner", "admin", "member"] as const)(
     "when the request resolves another organization, standing there as %s",
     (role) => {
@@ -350,7 +349,7 @@ describe("organization members actions", () => {
       });
     });
 
-    it("revokeOrganizationInviteAction tells the recipient auth names, and the workspace", async () => {
+    it("revokeOrganizationInviteAction tells the recipient auth names, and the organization", async () => {
       fetchMock.mockResolvedValue(
         new Response(
           JSON.stringify({
@@ -622,8 +621,8 @@ describe("leaveOrganizationAction", () => {
     );
   });
 
-  // ⚠ The page said "Leave <A>"; A has since been renamed, its path names no
-  // organization, and auth answered with B. Sent on, the caller would have
+  // ⚠ The page said "Leave <A>"; A has since changed its URL, its path names
+  // no organization, and auth answered with B. Sent on, the caller would have
   // walked out of B — every project seat in it with them — from a button
   // that named A.
   it.each(["member", "admin", "owner"] as const)(

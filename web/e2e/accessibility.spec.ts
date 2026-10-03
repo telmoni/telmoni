@@ -2,6 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import type { SessionData } from "@/lib/auth/session";
 import { buildConsoleNav } from "@/lib/console-nav";
+import { landOnProject } from "./helpers";
 
 async function injectSession(page: Page, data: Partial<SessionData>) {
   const res = await page.request.post("/api/test/session", { data });
@@ -26,11 +27,10 @@ test.describe("Accessibility Audit (WCAG 2.1 AA)", () => {
       idToken: null,
     });
 
-    await page.goto("/console");
+    const landing = await landOnProject(page);
     await expect(
       page.getByRole("heading", { name: "Overview", level: 1 }),
     ).toBeVisible();
-    const landing = new URL(page.url()).pathname;
     expect(landing, "the door lands on a project").toMatch(/^\/[a-z0-9-]+\/[a-z0-9-]+$/);
     const [, organization] = landing.split("/");
 

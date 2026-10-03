@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import type { SessionData } from "@/lib/auth/session";
+import { landOnProject } from "./helpers";
 
 async function injectSession(page: Page, data: Partial<SessionData>) {
   const res = await page.request.post("/api/test/session", { data });
@@ -41,12 +42,12 @@ test.describe("Authentication", () => {
 
   test("the portal is reachable after injecting a test session", async ({ page }, testInfo) => {
     await injectSession(page, testUser(testInfo.project.name));
-    await page.goto("/console");
+    const landing = await landOnProject(page);
     await expect(
       page.getByRole("heading", { name: "Overview", level: 1 }),
     ).toBeVisible();
     // A project's overview: its slug under its organization's.
-    expect(new URL(page.url()).pathname).toMatch(/^\/[a-z0-9-]+\/[a-z0-9-]+$/);
+    expect(landing).toMatch(/^\/[a-z0-9-]+\/[a-z0-9-]+$/);
   });
 
   test("the intended destination survives the login round-trip", async ({ page }, testInfo) => {
@@ -61,7 +62,7 @@ test.describe("Authentication", () => {
 
   test("clearing the session re-gates protected routes", async ({ page }, testInfo) => {
     await injectSession(page, testUser(testInfo.project.name));
-    await page.goto("/console");
+    await landOnProject(page);
     await expect(
       page.getByRole("heading", { name: "Overview", level: 1 }),
     ).toBeVisible();

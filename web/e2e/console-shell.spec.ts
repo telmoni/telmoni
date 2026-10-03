@@ -1,5 +1,6 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import type { SessionData } from "@/lib/auth/session";
+import { landOnProject } from "./helpers";
 
 async function injectSession(page: Page, data: Partial<SessionData>) {
   const res = await page.request.post("/api/test/session", { data });
@@ -19,9 +20,7 @@ function testUser(project: string): Partial<SessionData> {
 // The members page of the organization the door lands in: its path is
 // spelled with the organization's slug, which only the landing gives.
 async function gotoOrganizationMembers(page: Page) {
-  await page.goto("/console");
-  await page.waitForURL((url) => /^\/[a-z0-9-]+\/[a-z0-9-]+$/.test(url.pathname));
-  const [, organization] = new URL(page.url()).pathname.split("/");
+  const [, organization] = (await landOnProject(page)).split("/");
   await page.goto(`/${organization}/~/members`);
 }
 
@@ -125,9 +124,7 @@ test.describe("Console rail on a dead address", () => {
     page,
   }, testInfo) => {
     await injectSession(page, testUser(testInfo.project.name));
-    await page.goto("/console");
-    await page.waitForURL((url) => /^\/[a-z0-9-]+\/[a-z0-9-]+$/.test(url.pathname));
-    const [, organization] = new URL(page.url()).pathname.split("/");
+    const [, organization] = (await landOnProject(page)).split("/");
     const rail = page.locator("#console-sidebar");
 
     // A project's page: its own rows, and no way back to step out by.

@@ -212,7 +212,7 @@ describe("Incoming invites server actions", () => {
       expect(identityContext).not.toHaveBeenCalled();
     });
 
-    it("settles the offer for the inviter and the workspace, not only the invitee", async () => {
+    it("settles the offer for the inviter and the project, not only the invitee", async () => {
       fetchMock.mockResolvedValue(
         new Response(
           JSON.stringify({
@@ -266,7 +266,7 @@ describe("Incoming invites server actions", () => {
   });
 
   describe("revokeInviteAction", () => {
-    it("tells the recipient auth names, and the workspace, that the offer is gone", async () => {
+    it("tells the recipient auth names, and the project, that the offer is gone", async () => {
       fetchMock.mockResolvedValue(
         new Response(
           JSON.stringify({

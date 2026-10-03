@@ -33,14 +33,14 @@ import { ConnectWebhookButton } from "./_webhook";
 export const metadata = { title: "Connectors" };
 
 // Three destinations for a project's notices. Slack and Discord are OAuth
-// grants: the owner is sent to the vendor, picks a channel in the vendor's
-// own dialog, and the service keeps what comes back — sealed, and never shown
-// here; the handshake itself is `app/connect/[provider]`. The webhook is an
-// endpoint the owner types into a dialog on this page, and the one thing
-// shown of it afterwards is its host. This page lists what is connected and
-// offers the control that connects more.
+// grants: an owner or admin is sent to the vendor, picks a channel in the
+// vendor's own dialog, and the service keeps what comes back — sealed, and
+// never shown here; the handshake itself is `app/connect/[provider]`. The
+// webhook is an endpoint an owner or admin types into a dialog on this page,
+// and the one thing shown of it afterwards is its host. This page lists what
+// is connected and offers the control that connects more.
 const BLURB: Record<Provider, string> = {
-  slack: "Post this project's notices to a channel in your workspace.",
+  slack: "Post this project's notices to a channel in your Slack workspace.",
   discord: "Post this project's notices to a channel in your server.",
   webhook: "Post this project's notices as signed JSON to an HTTPS endpoint you run.",
 };

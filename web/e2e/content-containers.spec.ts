@@ -1,6 +1,7 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import type { SessionData } from "@/lib/auth/session";
 import { buildConsoleNav } from "@/lib/console-nav";
+import { landOnProject } from "./helpers";
 
 const SERVICE_SECRET = "e2e-service-secret-do-not-use-in-production";
 const SERVER = "http://localhost:8082";
@@ -192,16 +193,15 @@ test.describe("Console content containers", () => {
     const user = testUser(testInfo.project.name);
     await injectSession(page, user);
 
-    await page.goto("/console");
+    const landing = await landOnProject(page);
     await expect(page.getByRole("heading", { name: "Overview", level: 1 })).toBeVisible();
-    const landing = new URL(page.url()).pathname;
     expect(landing, "the door lands on a project").toMatch(/^\/[a-z0-9-]+\/[a-z0-9-]+$/);
     const [, organization, projectSlug] = landing.split("/");
     await seed(page.request, user, projectSlug!);
     // `seed` revoked every session, this browser's included. A fresh one, and
     // the `/me` its first visit makes, is the single row the privacy page lists.
     await injectSession(page, user);
-    await page.goto("/console");
+    await landOnProject(page);
     await expect(page.getByRole("heading", { name: "Overview", level: 1 })).toBeVisible();
 
     const rows = (pathname: string) =>
@@ -286,7 +286,7 @@ test.describe("Console content containers", () => {
     const settings = seen.get(`/${organization}/~/settings`)!;
     expect(
       settings.tables.length,
-      "organization settings: no table, just the rename and the danger zone",
+      "organization settings: no table — the name, the URL, the id row and the danger zone",
     ).toBe(0);
     const privacy = seen.get("/account/privacy")!;
     expect(privacy.tables.map((t) => t.rows), "privacy: the recorded session").toEqual([1]);

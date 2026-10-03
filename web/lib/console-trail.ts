@@ -52,8 +52,9 @@ const TrailSchema = z.array(z.string());
  * - An account path. Account is the mode you step INTO and leave by the back
  *   arrow, so recording one would make the arrow a no-op — and it is not a
  *   resource the selector can switch to either.
- * - `/console`, which is a redirect and not a destination: it resolves to the
- *   first project, so remembering it would land you somewhere you never stood.
+ * - `/console`, which is a door and not a destination: it asks the owner to name an unnamed
+ *   organization, or resolves to the first project or the Projects page, so
+ *   remembering it would land you somewhere you never stood.
  */
 export function isReturnablePath(path: string): path is ReturnablePath {
   if (!path.startsWith("/") || path.startsWith("//")) return false;
@@ -152,9 +153,10 @@ export function liveResources(
  * ⚠ **Each entry is checked against the resources the console is drawing, not
  * trusted.** You can leave a project, or lose your role in it, from inside
  * Account — its connectors page is then a 404 with a back arrow aimed at it —
- * and a rename moves a slug out from under the path that was recorded. The
- * walk carries on to the next resource rather than giving up, so somebody who
- * left one project still gets the page they were on in another.
+ * and a moved slug — a project renamed, an organization's URL changed — leaves
+ * the path that was recorded naming nothing. The walk carries on to the next
+ * resource rather than giving up, so somebody who left one project still gets
+ * the page they were on in another.
  *
  * Only the resource is checked, never the role a page needs: the rail does not
  * know which rows a project grants, and a page you can reach but not read

@@ -27,18 +27,8 @@ vi.mock("./account/notifications/_incoming-invites", () => ({
   ),
 }));
 vi.mock("./account/privacy/_deleted-organizations", () => ({
-  DeletedOrganizations: ({
-    organizations,
-    ownerEmail,
-  }: {
-    organizations: readonly DeletedOrganization[];
-    ownerEmail: string;
-  }) => (
-    <div
-      data-testid="deleted-organizations"
-      data-count={organizations.length}
-      data-owner={ownerEmail}
-    />
+  DeletedOrganizations: ({ organizations }: { organizations: readonly DeletedOrganization[] }) => (
+    <div data-testid="deleted-organizations" data-count={organizations.length} />
   ),
 }));
 
@@ -172,10 +162,6 @@ describe("AccountOnly", () => {
     for (const reason of ["no-organization", "not-in-beta"] as const) {
       const { unmount } = mount({ reason, deletedOrganizations: [DELETED] });
       expect(screen.getByTestId("deleted-organizations")).toHaveAttribute("data-count", "1");
-      expect(screen.getByTestId("deleted-organizations")).toHaveAttribute(
-        "data-owner",
-        "ada@example.test",
-      );
       expect(screen.getByRole("heading", { name: /deleted organizations/i })).toBeInTheDocument();
       unmount();
     }

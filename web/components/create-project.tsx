@@ -67,8 +67,8 @@ export function useCreateProjectTargets(): CreateProjectTarget[] {
   return organizations
     .filter((o) => o.role === "owner" || o.role === "admin")
     .sort((a, b) => rank(a.role) - rank(b.role))
-    // The organization's name or its owner's address, never a person's name:
-    // this dialog asks which organization the project lands in.
+    // The organization's name, never a person's name or address: this dialog
+    // asks which organization the project lands in.
     .map((o) => ({ id: o.organizationId, label: organizationLabel(o) }));
 }
 

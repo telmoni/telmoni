@@ -41,7 +41,7 @@ export function LeaveOrganization({
         <p className="text-sm font-medium">Leave {name}</p>
         <p className="text-sm text-muted-foreground">
           You will be removed from this organization and from every project in it.
-          Organizations you own are not affected. Its owner can invite you
+          Organizations you own are not affected. An owner or admin can invite you
           back.
         </p>
       </div>

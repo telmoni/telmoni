@@ -32,7 +32,8 @@ export async function GET(
   }
 
   // Back to the project's Connectors page, by id: the cookie was sealed up to
-  // ten minutes ago, and a rename since has moved the slugs.
+  // ten minutes ago, and a project rename or an organization URL change since
+  // may have moved the slugs.
   const done = (query: Record<string, string>) => {
     const response = NextResponse.redirect(
       new URL(connectorsPath(pending.organizationId, pending.projectId, query), env.AUTH_URL),

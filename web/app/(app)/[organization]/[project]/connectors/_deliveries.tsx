@@ -28,7 +28,8 @@ type Load =
   | { state: "ready"; entries: DeliveryLogEntry[]; nextBefore: string | null };
 
 // The log is a read, so it is offered to every role on the project. Resend is
-// an owner's, and a webhook's only; the service refuses anything else anyway.
+// an owner's or admin's, and a webhook's only; the service refuses anything
+// else anyway.
 export function DeliveriesButton({
   projectId,
   connectionId,

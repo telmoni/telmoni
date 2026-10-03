@@ -91,9 +91,10 @@ export function staleShellOrganization(
 }
 
 /**
- * Where `pathname` is now that a rename has moved a slug it is spelled with:
- * an organization's (`from` to `to`), or, when `organization` names the one a
- * project is in, that project's. `null` when the path is not under it.
+ * Where `pathname` is now that a slug it is spelled with has moved: an
+ * organization's URL changed (`from` to `to`), or, when `organization` names
+ * the one a project is in, that project renamed. `null` when the path is not
+ * under it.
  */
 export function movedPath(
   pathname: string,

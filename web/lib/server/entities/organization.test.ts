@@ -118,7 +118,7 @@ describe("what getServerContext asks /me to resolve", () => {
   });
 
   // Account, `/console` and the route handlers name none in their path. By
-  // id: the cookie outlives the page that wrote it, and a rename moves a slug.
+  // id: the cookie outlives the page that wrote it, and a URL change moves a slug.
   it("asks for the organization the cookie remembers on a path that names none", async () => {
     cookieNamed.mockImplementation((name: string) =>
       name === "telmoni-organization" ? { value: "org_2" } : undefined,

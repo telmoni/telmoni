@@ -40,9 +40,9 @@ export async function identityContext(): Promise<IdentityContext | null> {
   };
 }
 
-// What every person lane downstream reads: the session's own bearer, which
-// auth verifies against the identity provider's keys, and the organization
-// (and project) the request acts on. The console asserts nothing about WHO is
+// What every person lane downstream reads: the session's own bearer — an
+// opaque secret auth looks up in its own tables — and the organization (and
+// project) the request acts on. The console asserts nothing about WHO is
 // asking — the token names the person, and a service holding it can act only
 // as the one it was issued to. No role travels either: auth derives it from
 // its own tables, and its siblings ask auth rather than read a header.

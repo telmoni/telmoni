@@ -18,7 +18,7 @@ import type { NotificationKind } from "@/lib/types/enums";
 // vocabulary for the same reason the labels are: a new kind has no row here
 // until someone says what raises it.
 const HINT = {
-  organization_alert: "An alert for the organization's owner.",
+  organization_alert: "An alert for the organization's owner and admins.",
   member_added: "Someone accepted an invitation to this project.",
   member_left: "Someone left or was removed from this project.",
   connector_connected: "A destination was connected to this project.",

@@ -245,7 +245,7 @@ describe("GET /api/events (SSE)", () => {
     await reader.cancel();
   });
 
-  // A rename moved a slug: the console replaces the path it is on with one
+  // A slug moved: the console replaces the path it is on with one
   // spelled by `to`, so nothing that is not a slug may reach it as one.
   it("relays a slug:moved event, and drops one whose slugs are no slug's shape", async () => {
     mockGetSession.mockResolvedValue(LIVE_SESSION);

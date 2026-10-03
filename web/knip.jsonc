@@ -11,8 +11,7 @@
     "components/ui/**"
   ],
   // Every entry needs a written reason: an unexplained exemption is an unknown
-  // hole (AGENTS.md § Testing). This file uses JSONC to allow documenting
-  // the rationale for each exemption.
+  // hole. This file uses JSONC so each one can carry its rationale.
   "ignoreDependencies": [
     // Referenced only by the `@type {import('postcss-load-config').Config}`
     // JSDoc in `postcss.config.mjs`. A type-only reference in a comment, so it

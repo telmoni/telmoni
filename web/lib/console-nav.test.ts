@@ -490,7 +490,7 @@ describe("organizationToRemember", () => {
     { organizationId: "org_globex", slug: "globex" },
   ];
 
-  // By id: the cookie outlives the page, and a rename moves a slug.
+  // By id: the cookie outlives the page, and a URL change moves a slug.
   it("remembers the organization of the page on screen, by its id", () => {
     expect(organizationToRemember("/globex/web", organizations, "org_acme")).toBe("org_globex");
     expect(organizationToRemember("/globex/~/members", organizations, null)).toBe("org_globex");

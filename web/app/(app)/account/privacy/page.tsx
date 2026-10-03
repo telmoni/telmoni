@@ -53,10 +53,7 @@ export default async function AccountPrivacyPage() {
             title="Deleted organizations"
             description="Organizations you own that are closed and waiting to be erased. One you deleted yourself can be restored for 14 days, whole."
           >
-            <DeletedOrganizations
-              organizations={deletedOrganizations}
-              ownerEmail={session.email}
-            />
+            <DeletedOrganizations organizations={deletedOrganizations} />
           </Section>
         )}
 

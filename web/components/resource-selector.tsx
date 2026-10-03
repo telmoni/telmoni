@@ -105,7 +105,7 @@ export function ResourceSelector() {
     add(
       t.organizationId,
       t.organizationSlug,
-      organizationLabel({ name: t.organizationName, ownerEmail: t.organizationOwnerEmail }),
+      organizationLabel({ name: t.organizationName }),
       null,
     );
   }

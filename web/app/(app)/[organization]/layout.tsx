@@ -28,8 +28,8 @@ export default async function OrganizationLayout({
 
   const named = ctx.organizations.find((o) => o.slug === segment);
   if (!named) {
-    // An id, which is how anything kept longer than a page names an
-    // organization, or a slug typed with a capital: on to the slug it goes by.
+    // An id — the connect callback's redirect, or a path an API client spelled
+    // with one — or a slug typed with a capital: on to the slug it goes by.
     const meant = ctx.organizations.find(
       (o) => o.organizationId === segment || o.slug === segment.toLowerCase(),
     );
@@ -37,6 +37,13 @@ export default async function OrganizationLayout({
     redirect(await canonicalPath([meant.slug]));
   }
   if (ctx.activeOrganizationId !== named.organizationId) notFound();
+  // Not named yet, and the owner's to name: the console asks on `/console`,
+  // where the address bar spells no placeholder slug. Told which one: that
+  // path names no organization, so `/me` would answer the cookie's there,
+  // which is another organization when the owner came from one.
+  if (!named.name?.trim() && named.role === "owner") {
+    redirect(`/console?organization=${named.organizationId}`);
+  }
 
   return (
     <>

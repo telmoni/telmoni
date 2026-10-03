@@ -26,29 +26,27 @@ describe("ownerContact", () => {
   });
 });
 
-const MINE = "ada@example.test";
 
 describe("ownedOrganizationLabels", () => {
   it("names the organizations the person owns, and only those", () => {
     expect(
       ownedOrganizationLabels([
-        { name: "Acme", ownerEmail: MINE, role: "owner" },
-        { name: "Theirs", ownerEmail: "grace@example.test", role: "admin" },
-        { name: null, ownerEmail: "linus@example.test", role: "member" },
+        { name: "Acme", role: "owner" },
+        { name: "Theirs", role: "admin" },
+        { name: null, role: "member" },
       ]),
     ).toEqual(["Acme"]);
   });
 
-  // Every unnamed organization wears its owner's address, so two of them
-  // would otherwise read as the same organization named twice.
+  // Two organizations may carry one name, and must not read as one.
   it("counts the ones that share a label instead of repeating it", () => {
     expect(
       ownedOrganizationLabels([
-        { name: null, ownerEmail: MINE, role: "owner" },
-        { name: "Acme", ownerEmail: MINE, role: "owner" },
-        { name: "  ", ownerEmail: MINE, role: "owner" },
+        { name: "Acme", role: "owner" },
+        { name: "Globex", role: "owner" },
+        { name: "Acme", role: "owner" },
       ]),
-    ).toEqual([`${MINE} (2 organizations)`, "Acme"]);
+    ).toEqual(["Acme (2 organizations)", "Globex"]);
   });
 
   it("is empty for somebody who owns nothing", () => {

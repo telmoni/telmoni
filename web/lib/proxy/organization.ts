@@ -24,7 +24,7 @@ export const PATH_HEADER = "x-telmoni-path";
 /**
  * The organization the console last stood in, for the paths that name none:
  * Account, `/console`, the route handlers. By id, not by slug: it outlives
- * the page that wrote it, and a rename moves a slug.
+ * the page that wrote it, and a URL change moves a slug.
  *
  * ⚠ **Written by the console in the browser** (`OrganizationSync`), **never
  * by the proxy.** Only a page that is on screen may move it, and the proxy

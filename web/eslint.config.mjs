@@ -89,8 +89,8 @@ const eslintConfig = [
   {
     // ⚠ **`*actions` and not `actions` — the plain spelling is the minority.**
     // `app/**/actions.ts` matches only a file called exactly that, so
-    // `notice-actions.ts`, `rename-actions.ts` and `search-actions.ts` sat
-    // outside the bare-`fetch` ban: three Server Action
+    // `notice-actions.ts`, `rename-actions.ts` (`settings-actions.ts` today)
+    // and `search-actions.ts` sat outside the bare-`fetch` ban: three Server Action
     // files, every one of them making outbound calls, exempt from the rule
     // written for outbound calls. `server-action-lint.test.ts` asks ESLint
     // itself whether each `"use server"` file is covered, so the next

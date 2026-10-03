@@ -26,9 +26,10 @@ const PersonSchema = z.object({
 export type Person = z.infer<typeof PersonSchema>;
 
 /// One organization the person is in, and as what. ⚠ An organization is
-/// NOBODY: it is labelled by the name its owner gave it, else by the owner's
-/// address (`organizationLabel`), and the person's own organization is simply
-/// the entries where they are `owner`.
+/// NOBODY: it is labelled by the name it was given (`organizationLabel`),
+/// never by a person, and the person's own organization is simply the entries
+/// where they are `owner`. `name` is null only before the owner has given one,
+/// which the console asks for before it opens to them.
 const OrganizationEntrySchema = z.object({
   organizationId:          z.string(),
   /// Where its paths begin: `/{slug}` (`lib/slug.ts`).
@@ -106,7 +107,7 @@ export interface ServerContext {
   /// console (`accountOnlyReason`).
   activeOrganizationId: string | null;
   /// ⚠ The path named an organization and auth answered with another: the
-  /// person is not in it, or a rename has moved its slug. Auth falls back to
+  /// person is not in it, or a URL change has moved its slug. Auth falls back to
   /// one of the person's own rather than refuse, which is right for a stale
   /// cookie and wrong for a path — the page would show, and its actions act
   /// in, an organization its address does not name. `activeOrganization`

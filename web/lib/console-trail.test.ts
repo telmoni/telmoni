@@ -59,8 +59,8 @@ describe("which paths the console may be sent back to", () => {
     expect(isReturnablePath("/account/settings")).toBe(false);
   });
 
-  // `/console` resolves to the first project, so remembering it would send you
-  // somewhere you never stood.
+  // `/console` is a door: it asks for a name or resolves to a first page,
+  // so remembering it would send you somewhere you never stood.
   it("refuses the console entry redirect", () => {
     expect(isReturnablePath("/console")).toBe(false);
   });
@@ -100,7 +100,7 @@ describe("arriving somewhere", () => {
     expect(walk("/acme", "/acme/~/projects", "/acme/~/billing")).toEqual(["/acme/~/billing"]);
   });
 
-  // Every organization starts with a project of the same name.
+  // Two organizations may each have a project of the same name.
   it("keeps same-named projects of two organizations apart", () => {
     expect(walk("/acme/web/connectors", "/globex/web")).toEqual([
       "/globex/web",

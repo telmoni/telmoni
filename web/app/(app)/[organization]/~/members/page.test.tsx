@@ -320,12 +320,11 @@ describe("OrganizationMembersPage: handing the organization over", () => {
         screen.getByRole("button", { name: "Transfer ownership to admin@example.com" }),
       );
     });
-    expect(screen.getByRole("alertdialog")).toHaveTextContent(/an admin in every project/i);
+    expect(screen.getByRole("alertdialog")).toHaveTextContent(/an admin of the organization and of every project/i);
   });
 
-  // Auth refuses to offer an unnamed organization: it is shown by its owner's
-  // address, which would change hands with it. The owner is sent to name it,
-  // not to a refusal.
+  // Auth refuses to offer an unnamed organization: the offer calls it by a name
+  // it does not have. The owner is sent to name it, not to a refusal.
   it("sends the owner of an unnamed organization to name it first", async () => {
     standingAs("owner", "user_owner", [], null);
     render(await OrganizationMembersPage());

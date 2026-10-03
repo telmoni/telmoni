@@ -10,10 +10,12 @@
  * landing on one of its organization's pages, and a console built on this one
  * can add an organization page without reserving its name.
  *
- * ⚠ **Auth mints every slug; nothing here derives one.** A slug follows its
- * row's name, so a rename moves the URL: build every path from the slug the
- * server last answered, never from a name. Something kept longer than a page
- * names the row by its id, and the layouts redirect an id to its slug.
+ * ⚠ **Auth mints every slug; nothing here derives one.** A project's slug
+ * follows its name and an organization's is a setting of its own, so either
+ * can move: build every path from the slug the server last answered, never
+ * from a name. Only the cookie and the headers name a row by its id; a link
+ * kept — the trail, a notice, a citation — is spelled with slugs and dies when
+ * one moves, and the layouts redirect an id in a path to its slug.
  */
 
 /** The segment an organization's own pages sit under. */

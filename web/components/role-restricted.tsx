@@ -6,8 +6,8 @@ import { Card } from "@/components/ui/card";
  * role, so this is what a member meets behind the audit log, and it
  * has to say what the role lacks and whom to ask, because the row that brought
  * them here said neither. The owner is named when `/me` knew them
- * (`ownerContact`): at either level they are the one person who can change a
- * role.
+ * (`ownerContact`): admins can change a role too, but the owner is the one
+ * person every organization is sure to have.
  *
  * The page-level version is `AccessDenied`.
  */

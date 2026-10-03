@@ -45,9 +45,10 @@ describe("fetchProjectBySlug", () => {
     await expect(fetchProjectBySlug("gone")).rejects.toThrow("NOT_FOUND");
   });
 
-  // ⚠ Slugs are unique within an organization, not across them: every one
-  // starts with a `default-project`. Auth answered another organization than
-  // the path names, and its project of the same slug is a different project.
+  // ⚠ Slugs are unique within an organization, not across them: two
+  // organizations may each hold a `web`. Auth answered another organization
+  // than the path names, and its project of the same slug is a different
+  // project.
   it("is not found when the path names an organization auth did not answer with", async () => {
     getServerContext.mockResolvedValue({ organizationNotFound: true });
     await expect(fetchProjectBySlug("web")).rejects.toThrow("NOT_FOUND");
@@ -74,7 +75,6 @@ describe("fetchProjectAnywhere", () => {
     organizationId: "org_home",
     organizationSlug: "acme",
     organizationName: "Acme",
-    organizationOwnerEmail: null,
   };
 
   it("finds a project by id in whichever organization holds it", async () => {

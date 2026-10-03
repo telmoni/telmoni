@@ -49,8 +49,10 @@ async function renderLayout(organization: string) {
   render(ui as React.ReactElement);
 }
 
-const ACME = { organizationId: "org_acme", slug: "acme", role: "owner" };
-const GLOBEX = { organizationId: "org_globex", slug: "globex", role: "member" };
+const ACME = { organizationId: "org_acme", slug: "acme", name: "Acme", role: "owner" };
+const GLOBEX = { organizationId: "org_globex", slug: "globex", name: "Globex", role: "member" };
+// Provisioned at first sign-in and not yet named: its slug is a placeholder.
+const FRESH = { organizationId: "org_fresh", slug: "org-k3x9qz1a2b", name: null, role: "owner" };
 
 // `/me` as auth answers it when the path names `active`.
 function standingIn(active: string | null) {
@@ -98,8 +100,8 @@ describe("OrganizationLayout", () => {
     expect(screen.queryByTestId("page")).toBeNull();
   });
 
-  // An id is how a mailed link, an indexed page and a notice name an
-  // organization: none of them can follow a rename, so the layout does.
+  // An id is how a link kept longer than a page may name an organization: it
+  // cannot follow a URL change, so the layout does.
   it("redirects an organization's id to its slug, keeping the page and the query", async () => {
     mockPath = "/org_globex/~/billing?plan=team";
     await expect(renderLayout("org_globex")).rejects.toThrow(
@@ -123,6 +125,30 @@ describe("OrganizationLayout", () => {
   it("answers 404 for the id of an organization the person is not in", async () => {
     mockPath = "/org_initech";
     await expect(renderLayout("org_initech")).rejects.toThrow("NOT_FOUND");
+    expect(mockRedirect).not.toHaveBeenCalled();
+  });
+
+  // ⚠ The owner names their organization before the console opens to them,
+  // on `/console`: nothing is drawn under the placeholder slug, which looks
+  // like an id and is nobody's choice of address.
+  it("sends the owner of an organization not yet named to name it", async () => {
+    mockContext = { organizations: [FRESH], activeOrganizationId: "org_fresh" };
+    mockSeed = { activeOrganizationId: "org_fresh" };
+    await expect(renderLayout("org-k3x9qz1a2b")).rejects.toThrow("REDIRECT:/console?organization=org_fresh");
+    expect(mockNotFound).not.toHaveBeenCalled();
+  });
+
+  // Nobody but the owner is in an unnamed organization (auth refuses its
+  // invitations), so this is the operator's case: an organization left
+  // unnamed renders for a member, under the label the console gives one.
+  it("renders an unnamed organization for somebody who is not its owner", async () => {
+    mockContext = {
+      organizations: [{ ...FRESH, role: "member" }],
+      activeOrganizationId: "org_fresh",
+    };
+    mockSeed = { activeOrganizationId: "org_fresh" };
+    await renderLayout("org-k3x9qz1a2b");
+    expect(screen.getByTestId("page")).toBeInTheDocument();
     expect(mockRedirect).not.toHaveBeenCalled();
   });
 

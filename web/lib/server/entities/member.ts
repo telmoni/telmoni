@@ -132,7 +132,8 @@ const InviteLookSchema = z.object({
   /// roles the same, so the role alone cannot say.
   scope: z.enum(["project", "organization"]),
   inviter: z.string(),
-  /// What the organization is called: its name, else its owner's address.
+  /// What the organization is called: its name, which it has before it can
+  /// invite.
   organization: z.string(),
   email: z.string(),
   role: z.string(),

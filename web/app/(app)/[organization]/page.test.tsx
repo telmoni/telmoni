@@ -69,8 +69,8 @@ async function renderPage() {
 
 const OWNED: OrganizationEntry = {
   organizationId: "org_1",
-  slug: "org-4k2j9x0q1z",
-  name: null,
+  slug: "ada-works",
+  name: "Ada Works",
   ownerEmail: "ada@example.test",
   ownerDisplayName: "Ada",
   role: "owner",
@@ -99,7 +99,8 @@ describe("OrganizationOverviewPage", () => {
     await renderPage();
 
     expect(screen.getByTestId("page-header")).toHaveTextContent("Overview");
-    expect(screen.getByText("ada@example.test")).toBeInTheDocument();
+    expect(screen.getByText("Ada Works")).toBeInTheDocument();
+    expect(screen.queryByText("ada@example.test")).toBeNull();
     expect(screen.queryByText("Ada")).toBeNull();
     expect(screen.queryByText("org_1")).toBeNull();
     expect(screen.queryByText("This organization")).toBeNull();
@@ -112,8 +113,8 @@ describe("OrganizationOverviewPage", () => {
         { ...OWNED, ownerEmail: "admin@example.test", ownerDisplayName: "Admin" },
         {
           organizationId: "org_2",
-          slug: "org-9z8y7x6w5v",
-          name: null,
+          slug: "founder-labs",
+          name: "Founder Labs",
           ownerEmail: "alex@example.test",
           ownerDisplayName: "Alex Founder",
           role: "admin",
@@ -123,15 +124,16 @@ describe("OrganizationOverviewPage", () => {
     };
     await renderPage();
 
-    // ⚠ The ADDRESS of the organization's owner, not their name. `Alex Founder`
-    // is a human; this heading names a workspace, and the two are only ever the
-    // same by coincidence.
-    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("alex@example.test");
+    // ⚠ The organization's NAME, never its owner's name or address. `Alex
+    // Founder` is a human; this heading names an organization, and the two are
+    // only ever the same by coincidence.
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Founder Labs");
     expect(screen.queryByText("Alex Founder")).toBeNull();
-    expect(screen.queryByText("admin@example.test")).toBeNull();
+    expect(screen.queryByText("alex@example.test")).toBeNull();
+    expect(screen.queryByText("Ada Works")).toBeNull();
   });
 
-  it("prefers the organization's own name over its address", async () => {
+  it("shows the organization's own name, whoever owns it", async () => {
     mockContext = {
       organizations: [{ ...OWNED, name: "Difference Engine" }],
       activeOrganizationId: "org_1",

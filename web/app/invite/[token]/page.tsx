@@ -39,7 +39,7 @@ export default async function InvitePage({
       ? "You would be an admin of the organization: you could create projects, manage members and settings, and work as an admin on every project."
       : "You would be a member of the organization, with access to the projects you are given."
     : invite.role === "admin"
-      ? "You would be an admin on the project: you could see its members, keys, connectors and audit log."
+      ? "You would be an admin on the project: you could manage its members, keys and connectors, and read its audit log."
       : "You would be a member of the project, with read-only access.";
 
   const offer = (

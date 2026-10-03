@@ -117,7 +117,7 @@ describe("identityContext", () => {
     expect(await identityContext()).toBeNull();
   });
 
-  // ⚠ The page is `/acme/…`, Acme has been renamed or the caller removed, and
+  // ⚠ The page is `/acme/…`, Acme's URL has changed or the caller was removed, and
   // auth fell back to the organization they own. Every lane and every action
   // builds its headers from here: answering `org_mine` would aim them at an
   // organization the address does not name.

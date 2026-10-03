@@ -16,15 +16,13 @@ import { restoreOrganizationAction } from "./actions";
 /// place of the button, so the page never shows a deletion the person did
 /// not ask for as theirs to undo.
 ///
-/// The label is the organization's name, else this person's own address:
-/// every one of these is theirs, so the address an unnamed one wears is
-/// theirs too.
+/// The label is the organization's name, as everywhere in the console. One
+/// closed before its owner named it — an operator's termination, since the
+/// console opens to nobody until it is named — reads as "Organization".
 export function DeletedOrganizations({
   organizations,
-  ownerEmail,
 }: {
   organizations: readonly DeletedOrganization[];
-  ownerEmail: string;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +60,7 @@ export function DeletedOrganizations({
             className="flex flex-wrap items-center justify-between gap-3"
           >
             <div className="grid gap-1">
-              <span className="font-medium">{organizationLabel({ name: o.name, ownerEmail })}</span>
+              <span className="font-medium">{organizationLabel({ name: o.name })}</span>
               <span className="text-muted-foreground">
                 {o.restorable ? (
                   <>

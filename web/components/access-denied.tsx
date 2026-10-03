@@ -22,8 +22,8 @@ export function AccessDenied({
 }: {
   what: string;
   /// The organization owner's name, else their address, from `ownerContact`;
-  /// `null` when `/me` did not carry them. The owner, and not "an admin": at
-  /// the organization level only the owner changes a role.
+  /// `null` when `/me` did not carry them. The owner, and not "an admin": the
+  /// owner is the one person every organization is sure to have.
   owner?: string | null;
   /// The overview of the organization or project the page belongs to.
   backHref: string;

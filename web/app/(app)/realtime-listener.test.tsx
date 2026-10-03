@@ -2,7 +2,7 @@
 import { render } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { RealtimeListener } from "./realtime-listener";
+import { RealtimeListener } from "@/components/realtime-listener";
 
 const mockReplace = vi.fn();
 const mockRefresh = vi.fn();
@@ -131,7 +131,7 @@ describe("RealtimeListener - membership:removed edge cases", () => {
     expect(mockRefresh).toHaveBeenCalled();
   });
 
-  // Every organization starts with a project of the same name: the slug alone
+  // Two organizations may each have a project of the same name: the slug alone
   // says nothing about which project the path is on.
   it("does not eject from a same-named project of another organization", () => {
     mockPathname = "/globex/web";
@@ -216,7 +216,8 @@ describe("RealtimeListener - membership:removed edge cases", () => {
 });
 
 // A project handed to another organization leaves the path it was open on
-// naming nothing. The event names where it went, by id.
+// naming nothing. The event names where it went, by the slugs its new address
+// is spelled with.
 describe("RealtimeListener - ownership:changed", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -235,11 +236,28 @@ describe("RealtimeListener - ownership:changed", () => {
     MockEventSource.instances[0].emit("ownership:changed", {
       organizationId: "org_2",
       projectId: "project_1",
+      organizationSlug: "globex",
+      projectSlug: "web",
     });
 
-    // By id: the console redirects it to the slugs the project goes by there.
-    expect(mockReplace).toHaveBeenCalledWith("/org_2/project_1");
+    // By slug, as every link is spelled.
+    expect(mockReplace).toHaveBeenCalledWith("/globex/web");
     expect(mockRefresh).not.toHaveBeenCalled();
+  });
+
+  // Without the slugs there is nowhere to spell: the refresh answers "not
+  // found" here, which is the truth of this path.
+  it("refreshes in place when the event does not say where the project went", () => {
+    mockPathname = "/acme/web/members";
+    render(<RealtimeListener />);
+
+    MockEventSource.instances[0].emit("ownership:changed", {
+      organizationId: "org_2",
+      projectId: "project_1",
+    });
+
+    expect(mockReplace).not.toHaveBeenCalled();
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
   });
 
   // An offer made, withdrawn or declined names the organization the project

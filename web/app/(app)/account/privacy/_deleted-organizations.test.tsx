@@ -48,7 +48,7 @@ afterEach(() => {
 });
 
 const mount = (organizations: DeletedOrganization[]) =>
-  render(<DeletedOrganizations organizations={organizations} ownerEmail="ada@example.test" />);
+  render(<DeletedOrganizations organizations={organizations} />);
 
 describe("DeletedOrganizations", () => {
   it("renders nothing when nothing is being deleted", () => {
@@ -57,12 +57,13 @@ describe("DeletedOrganizations", () => {
   });
 
   // The label is what the console calls the organization everywhere else:
-  // its name, else its owner's address — and every one of these is the
-  // reader's own.
+  // its name. One closed before it was named — an operator's termination —
+  // has nothing else to go by, and never the reader's address.
   it("names each organization as the console does, and says until when it can come back", () => {
     mount([MINE, UNNAMED]);
     expect(screen.getByText("Acme")).toBeInTheDocument();
-    expect(screen.getByText("ada@example.test")).toBeInTheDocument();
+    expect(screen.getByText("Organization")).toBeInTheDocument();
+    expect(screen.queryByText("ada@example.test")).toBeNull();
     expect(document.body.textContent).toMatch(/you can restore it until/i);
     const times = [...document.querySelectorAll("time")].map((t) => t.getAttribute("dateTime"));
     expect(times).toContain("2026-10-07T10:00:00Z");

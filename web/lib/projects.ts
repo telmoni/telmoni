@@ -9,7 +9,6 @@ export function compareProjects(a: { name: string }, b: { name: string }): numbe
 type OrganizationProject = {
   name: string;
   organizationName: string | null;
-  organizationOwnerEmail: string | null;
 };
 
 // Grouped by what the switcher prints for each organization — the rule
@@ -19,8 +18,8 @@ export function compareProjectsByOrganization(
   b: OrganizationProject,
 ): number {
   const byOrganization = collator.compare(
-    organizationLabel({ name: a.organizationName, ownerEmail: a.organizationOwnerEmail }),
-    organizationLabel({ name: b.organizationName, ownerEmail: b.organizationOwnerEmail }),
+    organizationLabel({ name: a.organizationName }),
+    organizationLabel({ name: b.organizationName }),
   );
   return byOrganization !== 0 ? byOrganization : compareProjects(a, b);
 }

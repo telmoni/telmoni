@@ -79,7 +79,7 @@ export function AccountOnly({
         {deletedOrganizations.length > 0 && (
           <div className="grid gap-2">
             <h2 className="text-base font-medium">Deleted organizations</h2>
-            <DeletedOrganizations organizations={deletedOrganizations} ownerEmail={email} />
+            <DeletedOrganizations organizations={deletedOrganizations} />
           </div>
         )}
 

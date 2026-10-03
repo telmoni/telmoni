@@ -66,8 +66,9 @@ function OwnershipOffer({ offer }: { offer: OrganizationEntry }) {
           {owner} wants to hand you {label}
         </p>
         <p className="text-sm text-muted-foreground">
-          As its owner you hold its members, its API keys and the decision to
-          delete it, and {owner} stays on as an admin.
+          As its owner you can do what only an owner can: delete it, hand it on,
+          and delete its projects or hand them to other organizations. {owner}{" "}
+          stays on as an admin.
         </p>
         {offer.ownershipOfferExpiresAt && (
           <p className="text-xs text-muted-foreground">

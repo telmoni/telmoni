@@ -156,7 +156,7 @@ export default async function OrganizationMembersPage() {
             </tbody>
           </DataTable>
           <p className="text-xs text-muted-foreground">
-            Organization roles grant workspace-wide capabilities. Owners manage members,
+            Organization roles grant organization-wide capabilities. Owners manage members,
             settings, and projects. Admins create projects, manage settings and members, and
             work as admins in every project. Members receive access via individual projects.
           </p>

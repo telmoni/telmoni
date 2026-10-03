@@ -23,7 +23,7 @@ function organization(who: string): OrganizationEntry {
   return {
     organizationId: `org_${who}`,
     slug: who,
-    name: null,
+    name: who,
     ownerEmail: `${who}@example.test`,
     ownerDisplayName: null,
     role: "owner",
@@ -73,7 +73,7 @@ describe("StoreProvider", () => {
         <ActiveOrganization />
       </StoreProvider>,
     );
-    expect(screen.getByTestId("organization").textContent).toBe("alpha@example.test");
+    expect(screen.getByTestId("organization").textContent).toBe("alpha");
   });
 
   it("finds the active organization in the list, and none it does not hold", () => {
@@ -90,7 +90,7 @@ describe("StoreProvider", () => {
       </StoreProvider>
     );
     const view = render(at("org_acme"));
-    expect(screen.getByTestId("organization").textContent).toBe("acme@example.test");
+    expect(screen.getByTestId("organization").textContent).toBe("acme");
 
     view.unmount();
     render(at("org_gone"));
@@ -295,7 +295,6 @@ describe("StoreProvider: projects elsewhere", () => {
       organizationId: organization,
       organizationSlug: organization.replace(/^org_/, ""),
       organizationName: null,
-      organizationOwnerEmail: `${organization}@example.test`,
     };
   }
 

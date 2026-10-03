@@ -4,15 +4,19 @@ import { AccessDenied } from "@/components/access-denied";
 import { PageHeader } from "@/components/page-header";
 import { Section } from "@/components/section";
 import { ServiceUnavailable } from "@/components/service-unavailable";
+import { Rows } from "@/components/rows";
+import { SettingsRow } from "@/components/settings-row";
 import { Card } from "@/components/ui/card";
 import { organizationLabel, ownerContact } from "@/lib/identity";
 import { administersOrganization } from "@/lib/organization-role";
 import { activeOrganization, getServerContext, identityContext } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
+import { SITE_URL } from "@/lib/site";
 import { organizationPath } from "@/lib/slug";
 
 import { DeleteOrganizationForm } from "./_delete-organization";
-import { RenameOrganizationForm } from "./_rename-organization";
+import { OrganizationNameForm } from "./_organization-name";
+import { OrganizationUrlForm } from "./_organization-url";
 
 export const metadata = { title: "Settings" };
 
@@ -22,10 +26,10 @@ export default async function OrganizationSettingsPage() {
 
   // One source for both what the page shows and what its actions send:
   // `identityContext` is `/me`'s active organization — the one the path names
-  // — and the rename and the deletion are handed its id and act on that one or
-  // on nothing: not on whichever one their request resolves once the page has
-  // gone stale. Reading one organization and writing another is how this page
-  // once showed one name in a box that renamed a different organization.
+  // — and every form is handed its id and acts on that one or on nothing: not
+  // on whichever one their request resolves once the page has gone stale.
+  // Reading one organization and writing another is how this page once showed
+  // one name in a box that renamed a different organization.
   const [gate, ident] = await Promise.all([getServerContext(), identityContext()]);
   // No `/me` is an outage, not a refusal: said as one, as every sibling page
   // says it, rather than telling an owner they lack access.
@@ -34,8 +38,8 @@ export default async function OrganizationSettingsPage() {
   if (gate.organizationNotFound) notFound();
   const organization = activeOrganization(gate);
 
-  // An ADMIN keeps the read-only view: they hold organization-wide powers,
-  // just not these (`can_manage_org_settings` is Owner). A MEMBER holds none,
+  // An ADMIN edits the name and the URL alongside the owner
+  // (`can_manage_org_settings`). A MEMBER holds no organization-wide powers,
   // and organization settings are not a thing they have a reading interest in
   // either.
   if (!organization || !ident || !administersOrganization(ident.role)) {
@@ -58,18 +62,36 @@ export default async function OrganizationSettingsPage() {
       <div className="grid gap-6">
         <Section
           title="Name"
-          description="What this organization is called across the console — the rail, the resource selector, and every invitation it sends. Everyone in it sees it; it is not a person's name. It needs one before it can be handed over. Its address follows the name: a rename moves every link to its pages, and a name with no Latin letters or digits keeps the address it has."
+          description="Your organization's visible name within Telmoni — your company or group, not a person's name. Everyone in it sees it: the rail, the resource selector and every invitation it sends. Renaming moves nothing: its address stays as it is."
         >
-          <RenameOrganizationForm
+          <OrganizationNameForm
             organizationId={organization.organizationId}
             initialName={organization.name ?? ""}
-            // ⚠️ **The owner's address, which is what the console actually
-            // shows for an organization nobody has named** — and the reason
-            // auth refuses to hand one over: the address would change hands
-            // with it.
-            fallbackLabel={organization.ownerEmail ?? ""}
             canEdit={canManage}
           />
+        </Section>
+
+        <Section
+          title="URL"
+          description="Your organization's address on Telmoni, where its pages and every project in it live. Lowercase letters and digits, in words joined by hyphens. Changing it moves every link to those pages: the old address stops working."
+        >
+          <OrganizationUrlForm
+            organizationId={organization.organizationId}
+            slug={organization.slug}
+            host={new URL(SITE_URL).host}
+            canEdit={canManage}
+          />
+        </Section>
+
+        <Section
+          title="Organization ID"
+          description="Your organization's identifier within Telmoni, for the API and the CLI. It never changes."
+        >
+          <Rows>
+            <SettingsRow label="Organization ID" mono copy={organization.organizationId}>
+              {organization.organizationId}
+            </SettingsRow>
+          </Rows>
         </Section>
 
         {isOwner && (

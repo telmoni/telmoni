@@ -282,7 +282,7 @@ export function OrganizationMemberRow({
             <ConfirmDialog
               trigger={transferTrigger}
               title={`Hand this organization to ${personName(who(member))}?`}
-              description="They become the owner when they accept, and its API keys, members and deleting the organization become theirs. You stay on as an admin: an admin in every project, with no say over its members, keys or connectors. The offer lapses in 7 days if they do nothing."
+              description="They become the owner when they accept: deleting the organization, handing it on, and deleting its projects or handing them to other organizations become theirs alone. You stay on as an admin of the organization and of every project, managing members, keys and connectors as before. The offer lapses in 7 days if they do nothing."
               confirmLabel="Send offer"
               onConfirm={() =>
                 act(() => offerOwnershipAction(organizationId, member.member_id))
@@ -293,7 +293,7 @@ export function OrganizationMemberRow({
             <ConfirmDialog
               trigger={transferTrigger}
               title="Name this organization first"
-              description="Until it has a name, this organization is shown by its owner's email address, so handing it over would show it by the new owner's address instead, for everyone in it. Name it in the organization's settings, then hand it over."
+              description="The offer calls this organization by its name, and it has none yet. Name it in the organization's settings, then hand it over."
               confirmLabel="Go to settings"
               onConfirm={() => router.push(settingsHref)}
             />

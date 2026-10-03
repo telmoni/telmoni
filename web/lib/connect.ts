@@ -3,7 +3,7 @@
 // `app/connect/[provider]/` and the Connectors page that links to them.
 //
 // Two of the three are OAuth grants the browser is handed off for; the third
-// is a webhook the owner connects with a URL, in a dialog, and it never
+// is a webhook an owner or admin connects with a URL, in a dialog, and it never
 // reaches the handshake routes — which is why they are two lists.
 
 import { projectPath } from "@/lib/slug";

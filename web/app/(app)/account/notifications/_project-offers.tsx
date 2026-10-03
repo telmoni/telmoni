@@ -69,7 +69,7 @@ function ProjectOfferCard({
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
 
-  const from = organizationLabel({ name: offer.organizationName, ownerEmail: offer.ownerEmail });
+  const from = organizationLabel({ name: offer.organizationName });
   const owner = offer.ownerEmail
     ? personName({ displayName: offer.ownerDisplayName, email: offer.ownerEmail })
     : "The owner";

@@ -90,17 +90,14 @@ const ProjectEverywhereSchema = ProjectSchema.extend({
   organizationId: z.string(),
   organizationSlug: z.string(),
   organizationName: z.string().nullable().optional(),
-  organizationOwnerEmail: z.string().nullable().optional(),
 });
 
 /// A project in any organization the person can open, with where its
-/// organization's paths begin and what labels it: the name its owner gave it,
-/// else the owner's address.
+/// organization's paths begin and what labels it: the name it was given.
 export type ProjectEverywhere = Project & {
   organizationId: string;
   organizationSlug: string;
   organizationName: string | null;
-  organizationOwnerEmail: string | null;
 };
 
 export type ProjectEverywhereListing =
@@ -133,7 +130,6 @@ export const fetchProjectsEverywhere = cache(async (): Promise<ProjectEverywhere
           ...t,
           role: asRole(t.role),
           organizationName: t.organizationName ?? null,
-          organizationOwnerEmail: t.organizationOwnerEmail ?? null,
         }))
         .sort(compareProjectsByOrganization),
     };

@@ -13,7 +13,7 @@ describe("contentSecurityPolicy", () => {
     delete process.env.AUTH_PROVIDER_ORIGINS;
   });
 
-  it("lets the sign-in and sign-out redirect chains through form-action", () => {
+  it("lets the sign-out redirect chain through form-action", () => {
     process.env.AUTH_PROVIDER_ORIGINS = "https://idp.example https://*.idp.example";
     const directive = formAction();
     expect(directive).toContain("'self'");

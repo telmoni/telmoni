@@ -178,8 +178,8 @@ describe("updateProjectNameAction", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  // Posted from a tab whose organization was renamed, or let the person go,
-  // after the page rendered: its path names an organization auth did not
+  // Posted from a tab whose organization changed its URL, or let the person
+  // go, after the page rendered: its path names an organization auth did not
   // answer with, and a reload would answer "not found".
   it("tells a tab that missed a move that its address is gone", async () => {
     vi.mocked(identityContext).mockResolvedValue(null);
@@ -187,7 +187,7 @@ describe("updateProjectNameAction", () => {
       organizationNotFound: true,
     } as Awaited<ReturnType<typeof getServerContext>>);
     const res = await updateProjectNameAction(PROJECT, "Marketing Site");
-    expect(res.error).toMatch(/renamed, or you're no longer in it/);
+    expect(res.error).toMatch(/URL was changed, or you're no longer in it/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

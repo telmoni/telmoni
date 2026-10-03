@@ -251,7 +251,7 @@ function InviteRow({ invite }: { invite: IncomingInvite }) {
         </Button>
         {/* No confirmation step here, unlike the page's table. A dropdown that
             opens a dialog over itself loses the menu underneath, and declining
-            is recoverable — the owner can invite again. */}
+            is recoverable — an owner or admin can invite again. */}
         <Button
           variant="outline"
           size="sm"

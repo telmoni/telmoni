@@ -26,25 +26,50 @@ vi.mock("./_delete-organization", () => ({
     />
   ),
 }));
-vi.mock("./_rename-organization", () => ({
-  RenameOrganizationForm: ({
+vi.mock("./_organization-name", () => ({
+  OrganizationNameForm: ({
     organizationId,
     initialName,
-    fallbackLabel,
     canEdit,
   }: {
     organizationId: string;
     initialName: string;
-    fallbackLabel: string;
     canEdit: boolean;
   }) => (
     <div
-      data-testid="rename-form"
+      data-testid="name-form"
       data-organization-id={organizationId}
       data-initial={initialName}
-      data-fallback={fallbackLabel}
       data-can-edit={String(canEdit)}
     />
+  ),
+}));
+vi.mock("./_organization-url", () => ({
+  OrganizationUrlForm: ({
+    organizationId,
+    slug,
+    host,
+    canEdit,
+  }: {
+    organizationId: string;
+    slug: string;
+    host: string;
+    canEdit: boolean;
+  }) => (
+    <div
+      data-testid="url-form"
+      data-organization-id={organizationId}
+      data-slug={slug}
+      data-host={host}
+      data-can-edit={String(canEdit)}
+    />
+  ),
+}));
+vi.mock("@/components/settings-row", () => ({
+  SettingsRow: ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <div data-testid="settings-row" data-label={label}>
+      {children}
+    </div>
   ),
 }));
 
@@ -98,7 +123,7 @@ import OrganizationSettingsPage from "./page";
 const MINE: OrganizationEntry = {
   organizationId: "org_mine",
   slug: "mine",
-  name: null,
+  name: "My Own Workspace",
   ownerEmail: "ada@example.com",
   ownerDisplayName: null,
   role: "owner",
@@ -139,104 +164,76 @@ describe("OrganizationSettingsPage", () => {
     expect(screen.queryByTestId("access-denied")).toBeNull();
   });
 
-  it("holds the organization's name, and nothing of the person's", async () => {
+  // Vercel's team page, for an organization: the name and the URL are two
+  // settings, the id is shown for the API, and the danger zone is the owner's.
+  it("shows the name, the URL, the id and the danger zone, in that order, to the owner", async () => {
     render(await OrganizationSettingsPage());
     expect(screen.getByTestId("page-header")).toHaveTextContent("Settings");
-    expect(screen.getByTestId("rename-form")).toBeInTheDocument();
-    expect(screen.queryByText("k@example.com")).toBeNull();
-    expect(screen.queryByTestId("sessions")).toBeNull();
-  });
-
-  // ⚠ This page offered no way to destroy anything while deleting an
-  // organization meant deleting its owner's account, which lives on Privacy.
-  // The two are separate now: the organization goes from here, its owner's
-  // account stays, and the danger zone is the OWNER's alone.
-  it("ends with the danger zone for the owner, and it deletes the organization", async () => {
-    render(await OrganizationSettingsPage());
-    expect(headings()).toEqual(["name", "danger zone"]);
+    expect(headings()).toEqual(["name", "url", "organization id", "danger zone"]);
+    expect(screen.getByTestId("name-form")).toHaveAttribute("data-initial", "My Own Workspace");
+    expect(screen.getByTestId("name-form")).toHaveAttribute("data-can-edit", "true");
+    expect(screen.getByTestId("url-form")).toHaveAttribute("data-slug", "mine");
+    expect(screen.getByTestId("url-form")).toHaveAttribute("data-host", "example.com");
+    expect(screen.getByTestId("url-form")).toHaveAttribute("data-can-edit", "true");
+    expect(screen.getByTestId("settings-row")).toHaveTextContent("org_mine");
     expect(screen.getByTestId("delete-form")).toHaveAttribute(
       "data-organization",
-      "ada@example.com",
+      "My Own Workspace",
     );
     expect(document.body.textContent).toMatch(/your account stays/i);
+    expect(screen.queryByText("k@example.com")).toBeNull();
   });
 
-  it("offers an admin no way to destroy anything, but allows rename", async () => {
+  it("offers an admin the name and the URL, and no way to destroy anything", async () => {
     standIn([{ ...MINE, role: "admin" }], "org_mine");
     render(await OrganizationSettingsPage());
-    expect(headings()).toEqual(["name"]);
-    expect(screen.queryByText(/danger zone/i)).toBeNull();
+    expect(headings()).toEqual(["name", "url", "organization id"]);
     expect(screen.queryByTestId("delete-form")).toBeNull();
-    expect(screen.getByTestId("rename-form")).toHaveAttribute("data-can-edit", "true");
-  });
-
-  it("offers the rename to the owner", async () => {
-    render(await OrganizationSettingsPage());
-    expect(screen.getByTestId("rename-form")).toHaveAttribute("data-can-edit", "true");
+    expect(screen.getByTestId("name-form")).toHaveAttribute("data-can-edit", "true");
+    expect(screen.getByTestId("url-form")).toHaveAttribute("data-can-edit", "true");
   });
 
   // Each action refuses an organization other than the one it is handed, so
   // what it is handed has to be the one this page names — the check is only
   // as good as the id on this side of it.
-  it("hands both forms the id of the organization it names", async () => {
+  it("hands every form the id of the organization it names", async () => {
     render(await OrganizationSettingsPage());
-    expect(screen.getByTestId("rename-form")).toHaveAttribute(
-      "data-organization-id",
-      "org_mine",
-    );
-    expect(screen.getByTestId("delete-form")).toHaveAttribute(
-      "data-organization-id",
-      "org_mine",
-    );
+    for (const form of ["name-form", "url-form", "delete-form"]) {
+      expect(screen.getByTestId(form)).toHaveAttribute("data-organization-id", "org_mine");
+    }
   });
 
   // ⚠ **THE BUG THIS PAGE SHIPPED WITH.** It read `/me` — always the signed-in
-  // person's OWN organization — while `renameOrganizationAction` sends the
-  // ACTIVE one upstream. Switched into somebody else's organization, the box
-  // showed your organization's name and Save renamed theirs. Auth refused it
-  // below owner, so it usually read as an unexplainable 403; an owner of two
-  // organizations would have renamed the wrong one to a name they never typed.
-  //
-  // The test above named a member case it never exercised, which is how this
-  // got through. These do exercise it.
+  // person's OWN organization — while the rename sent the ACTIVE one upstream.
+  // Switched into somebody else's organization, the box showed your
+  // organization's name and Save renamed theirs.
   describe("standing in somebody else's organization", () => {
     const THEIRS: OrganizationEntry = {
       organizationId: "org_theirs",
       slug: "theirs",
-      name: null,
+      name: "Analytical Engines",
       ownerEmail: "owner@example.com",
       ownerDisplayName: "Grace Hopper",
-      // An ADMIN, so the read-only view still renders and the assertions
-      // below stay about what they were always about — which organization the
-      // page names. A member is refused outright; that is the test after these.
+      // An ADMIN, so the view still renders and the assertions below stay
+      // about which organization the page names. A member is refused
+      // outright; that is the test after these.
       role: "admin",
     };
 
     beforeEach(() => {
-      standIn([{ ...MINE, name: "My Own Workspace" }, THEIRS], "org_theirs");
+      standIn([MINE, THEIRS], "org_theirs");
     });
 
-    // Every organization's entry carries its own name now, so the form can
-    // show the one you are in — editable by owner and admin. The rule
-    // that survives is the one this test was for: never another's name.
-    it("shows its name and allows rename, and never prefills your own", async () => {
+    it("shows its name and its URL, and never yours", async () => {
       render(await OrganizationSettingsPage());
-      const form = screen.getByTestId("rename-form");
-      expect(form).toHaveAttribute("data-can-edit", "true");
-      expect(form).toHaveAttribute("data-initial", "");
-      expect(
-        document.body.innerHTML,
-        "your own organization's name is on another organization's settings page",
-      ).not.toContain("My Own Workspace");
-    });
-
-    it("names the organization you are actually in, by its owner's address", async () => {
-      render(await OrganizationSettingsPage());
-      // The address, not the owner's name: this page is about a workspace.
-      const form = screen.getByTestId("rename-form");
-      expect(form).toHaveAttribute("data-fallback", "owner@example.com");
-      expect(form).toHaveAttribute("data-organization-id", "org_theirs");
+      expect(screen.getByTestId("name-form")).toHaveAttribute("data-initial", "Analytical Engines");
+      expect(screen.getByTestId("url-form")).toHaveAttribute("data-slug", "theirs");
+      expect(screen.getByTestId("settings-row")).toHaveTextContent("org_theirs");
+      expect(document.body.innerHTML).not.toContain("My Own Workspace");
+      expect(document.body.innerHTML).not.toContain("mine");
+      // The organization's name, never its owner's.
       expect(document.body.innerHTML).not.toContain("Grace Hopper");
+      expect(document.body.innerHTML).not.toContain("owner@example.com");
     });
 
     it("offers no danger zone in an organization you do not own", async () => {
@@ -246,10 +243,10 @@ describe("OrganizationSettingsPage", () => {
     });
 
     // ⚠ A member holds no organization-wide powers, so organization settings
-    // are not theirs to read either. Auth refuses the rename below owner; this
+    // are not theirs to read either. Auth refuses the write below admin; this
     // is the console refusing the page before anybody presses anything.
     it("refuses the page outright to a member", async () => {
-      standIn([{ ...MINE, name: "My Own Workspace" }, { ...THEIRS, role: "member" }], "org_theirs");
+      standIn([MINE, { ...THEIRS, role: "member" }], "org_theirs");
       render(await OrganizationSettingsPage());
       expect(screen.getByTestId("access-denied")).toBeInTheDocument();
       expect(document.body.textContent).toMatch(
@@ -259,27 +256,24 @@ describe("OrganizationSettingsPage", () => {
         "href",
         "/theirs",
       );
-      expect(screen.queryByTestId("rename-form")).toBeNull();
+      expect(screen.queryByTestId("name-form")).toBeNull();
+      expect(screen.queryByTestId("url-form")).toBeNull();
     });
 
-    it("still offers the rename once you switch back", async () => {
-      standIn([{ ...MINE, name: "My Own Workspace" }, THEIRS], "org_mine");
+    it("shows yours again once you switch back", async () => {
+      standIn([MINE, THEIRS], "org_mine");
       render(await OrganizationSettingsPage());
-      expect(screen.getByTestId("rename-form")).toHaveAttribute(
-        "data-initial",
-        "My Own Workspace",
-      );
+      expect(screen.getByTestId("name-form")).toHaveAttribute("data-initial", "My Own Workspace");
+      expect(screen.getByTestId("url-form")).toHaveAttribute("data-slug", "mine");
     });
   });
 
-  // ⚠ The rename used to exist only for "your own organization" — the one
-  // whose id was your user id — because `/me` carried no other organization's
-  // name. Any organization you own is yours to name and to delete: a second
-  // one, or one handed to you by its previous owner.
-  it("offers the rename and the danger zone in any organization the caller owns", async () => {
+  // Any organization you own is yours to name, to re-address and to delete: a
+  // second one, or one handed to you by its previous owner.
+  it("offers everything in any organization the caller owns", async () => {
     standIn(
       [
-        { ...MINE, name: "My Own Workspace" },
+        MINE,
         {
           organizationId: "org_handed_over",
           slug: "second-shop",
@@ -291,30 +285,13 @@ describe("OrganizationSettingsPage", () => {
       "org_handed_over",
     );
     render(await OrganizationSettingsPage());
-    const form = screen.getByTestId("rename-form");
-    expect(form).toHaveAttribute("data-can-edit", "true");
-    expect(form).toHaveAttribute("data-initial", "Second Shop");
-    expect(form).toHaveAttribute("data-organization-id", "org_handed_over");
+    expect(screen.getByTestId("name-form")).toHaveAttribute("data-initial", "Second Shop");
+    expect(screen.getByTestId("name-form")).toHaveAttribute("data-organization-id", "org_handed_over");
+    expect(screen.getByTestId("url-form")).toHaveAttribute("data-slug", "second-shop");
+    expect(screen.getByTestId("url-form")).toHaveAttribute("data-organization-id", "org_handed_over");
     const deletion = screen.getByTestId("delete-form");
     expect(deletion).toHaveAttribute("data-organization", "Second Shop");
     expect(deletion).toHaveAttribute("data-organization-id", "org_handed_over");
     expect(document.body.innerHTML).not.toContain("My Own Workspace");
-  });
-
-  it("hands the form the current name, and what to show while there is none", async () => {
-    standIn([{ ...MINE, name: "Acme Robotics" }], "org_mine");
-    render(await OrganizationSettingsPage());
-    const form = screen.getByTestId("rename-form");
-    expect(form).toHaveAttribute("data-initial", "Acme Robotics");
-  });
-
-  // ⚠ **The ADDRESS, which is what the rail and the selector actually print
-  // for an unnamed organization.** It was the word "Personal", so the
-  // placeholder named a label no other surface would show.
-  it("shows the address as the placeholder when nobody has renamed it", async () => {
-    render(await OrganizationSettingsPage());
-    const form = screen.getByTestId("rename-form");
-    expect(form).toHaveAttribute("data-initial", "");
-    expect(form).toHaveAttribute("data-fallback", "ada@example.com");
   });
 });

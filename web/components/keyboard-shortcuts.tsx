@@ -180,7 +180,7 @@ export function KeyboardShortcuts() {
     { label: "Search", keys: [modifier, "K"] },
     { label: "Search", keys: [SEARCH_KEY] },
     { label: "Ask the agent", keys: [modifier, AGENT_MODIFIER_KEY.toUpperCase()] },
-    { label: "Open the organization menu", keys: [modifier, "Shift", "K"] },
+    { label: "Open the account menu", keys: [modifier, "Shift", "K"] },
     { label: "This sheet", keys: ["?"] },
   ].filter((c) => c.label.toLowerCase().includes(q));
 

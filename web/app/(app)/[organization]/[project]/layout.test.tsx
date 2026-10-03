@@ -48,7 +48,6 @@ const moved = (over: Record<string, unknown> = {}) => ({
   organizationId: "org_new",
   organizationSlug: "globex",
   organizationName: "Globex",
-  organizationOwnerEmail: null,
   ...over,
 });
 
@@ -76,7 +75,7 @@ describe("ProjectLayout", () => {
     expect(mockNotFound).toHaveBeenCalledTimes(1);
   });
 
-  // Every organization starts with a project of the same name, so a slug says
+  // Two organizations may each have a project of the same name, so a slug says
   // nothing about a project anywhere but in the organization the path names.
   it("answers 404 rather than guess at a same-named project in another organization", async () => {
     mockEverywhere = { kind: "ok", projects: [moved({ slug: "default-project" })] };
@@ -89,8 +88,9 @@ describe("ProjectLayout", () => {
     await expect(renderLayout("default-project")).rejects.toThrow("NOT_FOUND");
   });
 
-  // An id is how a mailed link, an indexed page and the connect handshake name
-  // a project: none of them can follow a rename, so the layout does.
+  // An id is how the connect handshake's cookie names a project, and how a
+  // link kept longer than a page may: neither can follow a rename, so the
+  // layout does.
   it("redirects a project's id to the slug it goes by, keeping the page and the query", async () => {
     mockPath = "/acme/project_in_context/connectors?connected=slack";
     await expect(renderLayout("project_in_context")).rejects.toThrow(

@@ -8,10 +8,10 @@ export default function ConsoleNotFound() {
       <p className="text-xs tracking-label text-muted-foreground uppercase">404</p>
       <h1 className="text-xl font-light tracking-tight">Not found.</h1>
       <p className="text-sm text-muted-foreground leading-relaxed">
-        Nothing at this address. An organization&apos;s and a project&apos;s
-        addresses follow their names: this one may have been renamed, moved
-        or deleted since the link was made, or it isn&apos;t one you&apos;re
-        in. Find it in the organization menu.
+        Nothing at this address. A project&apos;s address follows its name and
+        an organization&apos;s URL is a setting of its own: this one may have
+        moved or been deleted since the link was made, or it isn&apos;t one
+        you&apos;re in. Find it in the organization menu.
       </p>
       <div>
         <Link
