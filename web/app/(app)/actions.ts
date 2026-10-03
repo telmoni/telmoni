@@ -13,6 +13,7 @@ import {
 } from "@/lib/server/entities/identity-context";
 import { getServerContext } from "@/lib/server/entities/organization";
 import type { Project } from "@/lib/server/entities/projects";
+import { unplacedOrganization } from "@/lib/server/identity";
 import { getServerSession } from "@/lib/server/session";
 import { asRole } from "@/lib/types/enums";
 
@@ -49,7 +50,7 @@ export async function createProjectAction(
   }
 
   const ctx = await identityContext();
-  if (!ctx) return { error: "Unable to resolve session." };
+  if (!ctx) return { error: await unplacedOrganization() };
 
   // ⚠ **The organization is the caller's to CHOOSE and ours to CHECK.** The
   // project used to land wherever the active-organization cookie pointed, which

@@ -14,6 +14,7 @@ import {
   projectHeaders,
 } from "@/lib/server/entities/identity-context";
 import { fetchProjects } from "@/lib/server/data";
+import { unplacedOrganization } from "@/lib/server/identity";
 import { getServerSession } from "@/lib/server/session";
 import {
   organizationChannel,
@@ -265,11 +266,7 @@ async function open(
   });
   if (limited) return { error: "Too many requests — slow down a moment." };
   const ctx = await identityContext();
-  if (!ctx) {
-    return {
-      error: "Couldn't resolve your organization right now. Try again in a moment.",
-    };
-  }
+  if (!ctx) return { error: await unplacedOrganization() };
   return {
     base: env.SERVER_URL,
     projectId,

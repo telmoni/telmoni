@@ -31,6 +31,10 @@ vi.mock("@/lib/server/entities/identity-context", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/server/entities/identity-context")>()),
   identityContext: vi.fn(),
 }));
+// `/me` did not answer: the refusal for an unplaced caller is the generic one.
+vi.mock("@/lib/server/entities/organization", () => ({
+  getServerContext: vi.fn(async () => null),
+}));
 const mockRedirect = vi.fn((to: string) => {
   throw new Error(`REDIRECT:${to}`);
 });

@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { identityContext } from "@/lib/server/entities/identity-context";
+import { getServerContext } from "@/lib/server/entities/organization";
 
 import { activeProjectForMutation } from "./identity";
 
 vi.mock("@/lib/server/entities/identity-context", () => ({
   identityContext: vi.fn(),
+}));
+vi.mock("@/lib/server/entities/organization", () => ({
+  getServerContext: vi.fn(async () => null),
 }));
 
 // Standing in an organization the caller administers and does not own — the
@@ -43,5 +47,19 @@ describe("activeProjectForMutation", () => {
     const active = await activeProjectForMutation("project_1");
     expect(active.organizationId).toBeUndefined();
     expect(active.error).toMatch(/try again/i);
+  });
+
+  // The path this was posted from names an organization auth did not answer
+  // with: a rename this tab missed, or a membership that ended. A reload would
+  // find the same address gone, so "try again" would be the wrong advice.
+  it("tells a tab that missed a move that its address is gone", async () => {
+    vi.mocked(identityContext).mockResolvedValue(null);
+    vi.mocked(getServerContext).mockResolvedValue({
+      organizationNotFound: true,
+    } as Awaited<ReturnType<typeof getServerContext>>);
+    const active = await activeProjectForMutation("project_1");
+    expect(active.organizationId).toBeUndefined();
+    expect(active.error).toMatch(/renamed, or you're no longer in it/);
+    expect(active.error).not.toMatch(/try again/i);
   });
 });

@@ -16,7 +16,7 @@ import {
 } from "@/lib/server/entities/identity-context";
 import { ACTIVE_ORGANIZATION_COOKIE } from "@/lib/proxy/organization";
 import { activeOrganization, getServerContext } from "@/lib/server/entities/organization";
-import { SWITCHED_ORGANIZATION } from "@/lib/server/identity";
+import { SWITCHED_ORGANIZATION, unplacedOrganization } from "@/lib/server/identity";
 import { getServerSession } from "@/lib/server/session";
 import {
   organizationChannel,
@@ -227,11 +227,7 @@ export async function leaveOrganizationAction(
   if (limited) return { error: "Too many requests — slow down a moment." };
 
   const ctx = await identityContext();
-  if (!ctx) {
-    return {
-      error: "Couldn't resolve your organization right now. Try again in a moment.",
-    };
-  }
+  if (!ctx) return { error: await unplacedOrganization() };
   if (ctx.organizationId !== organizationId) return { error: SWITCHED_ORGANIZATION };
   if (ctx.role === "owner") {
     return {
@@ -282,11 +278,7 @@ async function open(
     getServerContext(),
   ]);
   const organization = context ? activeOrganization(context) : null;
-  if (!ctx || !organization) {
-    return {
-      error: "Couldn't resolve your organization right now. Try again in a moment.",
-    };
-  }
+  if (!ctx || !organization) return { error: await unplacedOrganization() };
   if (ctx.organizationId !== organizationId) return { error: SWITCHED_ORGANIZATION };
   // Presentation's half of the rule; auth enforces it on the owner's row.
   if (ctx.role !== "owner") {

@@ -205,6 +205,27 @@ describe("organization members actions", () => {
     });
   });
 
+  // Posted from a tab whose organization was renamed, or let the person go,
+  // after the page rendered: its path names an organization auth did not
+  // answer with. A reload would answer "not found", so "try again" would be
+  // the wrong advice.
+  describe("when the path names an organization auth did not answer with", () => {
+    beforeEach(() => {
+      standingAs("owner");
+      vi.mocked(identityContext).mockResolvedValue(null);
+      vi.mocked(getServerContext).mockResolvedValue({
+        organizationNotFound: true,
+      } as Awaited<ReturnType<typeof getServerContext>>);
+    });
+
+    it.each(ROSTER_ACTIONS)("%s says the address is gone, asking auth nothing", async (_, act) => {
+      const res = await act();
+      expect(res.error).toMatch(/renamed, or you're no longer in it/);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(mockPublishEvent).not.toHaveBeenCalled();
+    });
+  });
+
   // ⚠ **The page rendered one organization; the request now resolves
   // another.** Every action here resolves the active organization when it is
   // called — from a path whose slug a rename has since moved — so without this

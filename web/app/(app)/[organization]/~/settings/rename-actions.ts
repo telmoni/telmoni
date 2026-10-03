@@ -10,7 +10,7 @@ import { env } from "@/lib/env";
 import { organizationChannel, publishEvent } from "@/lib/events/publisher";
 import { identityContext, organizationHeaders } from "@/lib/server/entities/identity-context";
 import { activeOrganization, getServerContext } from "@/lib/server/entities/organization";
-import { SWITCHED_ORGANIZATION } from "@/lib/server/identity";
+import { SWITCHED_ORGANIZATION, unplacedOrganization } from "@/lib/server/identity";
 import { MAX_ORGANIZATION_NAME } from "@/lib/organization-name";
 import { getServerSession } from "@/lib/server/session";
 
@@ -43,9 +43,7 @@ export async function renameOrganizationAction(
   }
 
   const ctx = await identityContext();
-  if (!ctx) {
-    return { error: "Couldn't resolve your organization right now. Try again in a moment." };
-  }
+  if (!ctx) return { error: await unplacedOrganization() };
   if (ctx.organizationId !== organizationId) return { error: SWITCHED_ORGANIZATION };
   const gate = await getServerContext();
   const was = gate ? activeOrganization(gate)?.slug : undefined;

@@ -1,4 +1,18 @@
 import { identityContext } from "@/lib/server/entities/identity-context";
+import { getServerContext } from "@/lib/server/entities/organization";
+
+/// What an action answers when `identityContext` could place the person in no
+/// organization. The context tells the two causes apart: the path the action
+/// was posted from names an organization auth did not answer with — renamed
+/// since the page rendered, or one the person is no longer in — which is a
+/// tab that missed the move, and a reload would only answer "not found"; or
+/// `/me` itself did not answer, which a moment may mend.
+export async function unplacedOrganization(): Promise<string> {
+  const ctx = await getServerContext();
+  return ctx?.organizationNotFound
+    ? "Nothing at this address any more: the organization was renamed, or you're no longer in it. Find it in the organization menu."
+    : "Couldn't resolve your organization right now. Try again in a moment.";
+}
 
 /// What an action that changes an organization answers when the organization
 /// its page rendered is not the one the action resolves.
@@ -28,8 +42,6 @@ export async function activeProjectForMutation(projectId: string): Promise<
     return { error: "Couldn't tell which project this is. Reload and try again." };
   }
   const ident = await identityContext();
-  if (!ident) {
-    return { error: "Couldn't resolve your organization right now. Try again in a moment." };
-  }
+  if (!ident) return { error: await unplacedOrganization() };
   return { organizationId: ident.organizationId, projectId, error: null };
 }

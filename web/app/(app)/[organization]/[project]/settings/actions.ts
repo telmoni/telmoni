@@ -13,7 +13,7 @@ import {
 } from "@/lib/server/entities/identity-context";
 import { activeOrganization, getServerContext } from "@/lib/server/entities/organization";
 import { fetchProject } from "@/lib/server/entities/projects";
-
+import { unplacedOrganization } from "@/lib/server/identity";
 import { getServerSession } from "@/lib/server/session";
 
 interface ActionResult {
@@ -48,7 +48,7 @@ export async function updateProjectNameAction(
   }
 
   const ctx = await identityContext();
-  if (!ctx) return { error: "Unable to resolve session." };
+  if (!ctx) return { error: await unplacedOrganization() };
   const was = (await fetchProject(projectId))?.slug;
   const gate = await getServerContext();
   const organization = gate ? activeOrganization(gate)?.slug : undefined;
@@ -102,7 +102,7 @@ export async function deleteProjectAction(projectId: string): Promise<ActionResu
   if (limited) return { error: "Too many requests — slow down a moment." };
 
   const ctx = await identityContext();
-  if (!ctx) return { error: "Unable to resolve session." };
+  if (!ctx) return { error: await unplacedOrganization() };
 
   const res = await tryFetchWithTimeout(
     `${env.SERVER_URL}/internal/projects/${projectId}`,

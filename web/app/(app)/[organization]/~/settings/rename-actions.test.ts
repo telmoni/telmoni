@@ -180,4 +180,18 @@ describe("renameOrganizationAction", () => {
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  // The form was posted from the path the organization went by before another
+  // tab renamed it, and this one missed the move: its path names an
+  // organization auth did not answer with, and a reload would answer "not
+  // found", so "try again" would be the wrong advice.
+  it("tells a tab that missed the move that its address is gone", async () => {
+    vi.mocked(identityContext).mockResolvedValue(null);
+    vi.mocked(getServerContext).mockResolvedValue({
+      organizationNotFound: true,
+    } as never);
+    const res = await renameOrganizationAction(ORGANIZATION, "Acme Robotics");
+    expect(res.error).toMatch(/renamed, or you're no longer in it/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

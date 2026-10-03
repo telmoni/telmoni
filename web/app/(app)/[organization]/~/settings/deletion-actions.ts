@@ -8,7 +8,7 @@ import { isSessionBlacklisted } from "@/lib/auth/session-blacklist";
 import { sessionEndKey } from "@/lib/auth/session-end-key";
 import { env } from "@/lib/env";
 import { identityContext, organizationHeaders } from "@/lib/server/entities/identity-context";
-import { SWITCHED_ORGANIZATION } from "@/lib/server/identity";
+import { SWITCHED_ORGANIZATION, unplacedOrganization } from "@/lib/server/identity";
 import { getServerSession } from "@/lib/server/session";
 
 // Deleting an ORGANIZATION — the one the settings page rendered, which must
@@ -17,7 +17,6 @@ import { getServerSession } from "@/lib/server/session";
 // to. If that was their last, auth gives them a new one while sign-ups are
 // open, and the console gives them their account alone while they are closed.
 
-const UNRESOLVED = "Couldn't resolve your organization right now. Try again in a moment.";
 const UNREACHABLE = "The organization service is unreachable. Try again.";
 
 export async function requestOrganizationDeletionCodeAction(
@@ -36,7 +35,7 @@ export async function requestOrganizationDeletionCodeAction(
   if (limited) return { error: "Too many requests. Try again in an hour." };
 
   const ctx = await identityContext();
-  if (!ctx) return { error: UNRESOLVED };
+  if (!ctx) return { error: await unplacedOrganization() };
   // The code is bound to the organization it is minted for, so minting it for
   // one the page is not showing is how typing it deletes the wrong one.
   if (ctx.organizationId !== organizationId) return { error: SWITCHED_ORGANIZATION };
@@ -76,7 +75,7 @@ export async function deleteOrganizationAction(
   if (limited) return { error: "Too many attempts. Try again in an hour." };
 
   const ctx = await identityContext();
-  if (!ctx) return { error: UNRESOLVED };
+  if (!ctx) return { error: await unplacedOrganization() };
   if (ctx.organizationId !== organizationId) return { error: SWITCHED_ORGANIZATION };
   if (ctx.role !== "owner") {
     return { error: "Only this organization's owner can delete it." };
