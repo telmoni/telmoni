@@ -3,7 +3,7 @@
 [![CI](https://github.com/telmoni/telmoni/actions/workflows/ci.yml/badge.svg)](https://github.com/telmoni/telmoni/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-A multi-tenant foundation: organizations and projects, members and roles, API tokens, notifications, a hash-chained audit log and a console agent, served by one Rust binary behind a Next.js console.
+A foundation for organizations and their projects: members and roles, API tokens, notifications, a hash-chained audit log and a console agent, served by one Rust binary behind a Next.js console.
 
 **Pre-release:** Telmoni is currently pre-release. Until the first release (`v0.1.0`), schema changes edit migrations in place. Customer documentation is maintained in the [`telmoni/docs`](https://github.com/telmoni/docs) repository.
 
@@ -84,7 +84,7 @@ In brief:
 
 The server image (`crates/telmoni/Dockerfile`) serves all roles:
 - Default command: `serve`
-- Operational tasks: `migrate`, `rotate`, `sweep <name>`, `terminate <org>`, `restore <org>`
+- Operational tasks: `migrate`, `rotate`, `sweep <name>`, `terminate <org_id>`, `restore <org_id>`
 
 Deployments are supported via:
 - **Kubernetes / Helm:** Helm chart located under `deploy/charts/telmoni`.

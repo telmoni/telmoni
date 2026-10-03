@@ -30,9 +30,11 @@ async function isLoggedIn(request: NextRequest): Promise<boolean> {
   }
 }
 
-// The identity provider's origins, for `form-action`: sign-in and sign-out
-// leave this site through redirects the browser holds to that directive, so
-// a provider missing from it is a sign-in that dies at the first hop. Space
+// The identity provider's origins, for `form-action`: signing out from the
+// account menu is a form post that ends in a redirect to the provider, which
+// the browser holds to that directive, so a provider missing from it is a
+// sign-out that dies at the first hop (sign-in, and the other sign-out links,
+// are links, which the directive does not govern). Space
 // separated, and the console has no other opinion about who the provider is:
 // auth mints the URLs, and this only lets the browser follow them.
 function authProviderOrigins(): string[] {

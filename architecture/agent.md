@@ -273,7 +273,7 @@ The other modules' rows are copied into `agent.chunks`, split into passages, emb
 
 ⚠ **Nothing crosses a database role.** Auth reads its audit events as auth, and notifications its feed and deliveries as notifications. Each hands back documents through the seam. The agent writes them in its own lane. The sibling decides the audience of each document, so visibility comes from the module that knows the rule.
 
-⚠ **A document's URL names its rows by id, never by slug**, and so does the console path a tool cites (`project_path`, `crates/agent/src/tools.rs`). A passage is kept for as long as its source is, and a rename moves a slug. The console redirects an id to the slug the row goes by now (see [the console's paths](console.md#paths-and-slugs)).
+⚠ **A document's URL is spelled with slugs, as every link a person is shown is**, and so is the console path a tool cites (`project_path`, `crates/agent/src/tools.rs`): the sibling that hands back a document asks auth for the slugs (`project_homes`, `organization_slugs`), and the tool asks for the acting project's. A passage is kept for as long as its source is, and a slug moved afterwards — an organization's URL changed on Settings, a project renamed — leaves its citations behind, which is the choice made for every link (see [the console's paths](console.md#paths-and-slugs)). A document whose organization or project auth no longer knows keeps a path spelled with the id, which the console answers "not found"; the tool cites no path at all then.
 
 **The loop** (`index::run`) runs in every replica:
 

@@ -162,7 +162,7 @@ The premise is that in one process there is nothing to secure or cache between m
 
 | Trait | Implemented by | Methods, and who calls them |
 |---|---|---|
-| `Auth` | `crates/auth/src/seam.rs` | `resolve`: notifications' and the agent's lanes. `resolve_again`: the agent, mid-turn. `project_homes`: the agent's retention. `global_flags`: the delivery loop and connector lanes. `members`, `audit_events`: the agent's tools. `audit_documents`: the agent's indexer. `organization_standing`: for a deployment's modules. |
+| `Auth` | `crates/auth/src/seam.rs` | `resolve`: notifications' and the agent's lanes. `resolve_again`: the agent, mid-turn. `project_homes`: the agent's retention and citations, and notifications' document links. `organization_slugs`: notifications' document links, and a deployment's modules. `global_flags`: the delivery loop and connector lanes. `members`, `audit_events`: the agent's tools. `audit_documents`: the agent's indexer. `organization_standing`: for a deployment's modules. |
 | `Notifications` | `Notifier`, `crates/notifications/src/seam.rs` | `emit`, `purge_organization`, `purge_project`, `redact_person`: auth. `activity_documents`, `connectors`, `connector_deliveries`: the agent. |
 | `Agent` | `AgentSeam`, `crates/agent/src/seam.rs` | `erase_person`, `purge_organization`: auth's deletion |
 | `PurgeHook` | A deployment's own code | Called when an organization's deletion is confirmed (in the request's inline tail), again by the sweep until a run is recorded, and again at finalize. The row is kept until the hook answers `Ok`. ⚠ It runs while the organization can still be restored, and a restore undoes nothing it did. |
@@ -185,7 +185,7 @@ Every handler returns `TelmoniError` (`crates/shared/src/error.rs`). Its nested 
 
 **Other conventions:**
 - The `Json` and `Query` extractors turn every rejection into a 400 problem (`crates/shared/src/extract.rs`).
-- **The error catalog.** Every `type` needs a row in the customer docs' `errors.mdx`. `crates/shared/tests/error_catalog.rs` checks `error.rs` against that page both ways, when a docs checkout sits beside this repo. Problems minted outside `error.rs` are beyond the test's reach.
+- **The error catalog.** Every `type` needs a row in the customer docs' `errors.mdx`. `crates/shared/tests/error_catalog.rs` checks the types `error.rs` builds and every `/errors/…` literal in `crates/*/src` against that page both ways, when a docs checkout sits beside this repo. Only the types the console mints itself — its relays' `/errors/method-not-allowed` and `/errors/upstream-unavailable` — are beyond the test's reach.
 
 **Panics.**
 - Lints deny `unwrap`, `expect`, `panic!`, indexing and string slicing outside tests, so a panic is a bug the lints missed.
@@ -287,7 +287,7 @@ The sweeps, `terminate` and `restore` are run by hand, or by an operator's own j
   - The console's side is `web/lib/types/enums.ts` and `web/lib/slug.ts`, written by hand and held to the file by `contract.test.ts`.
 - **`openapi.json`.** The public `/v1` API. `V1_LANES` (`crates/auth/src/handler/v1.rs`) builds both the router and the document, so a lane the document does not describe is a lane the service does not serve. `crates/shared/tests/openapi_contract.rs` checks it, and its rules for what the public API may contain.
 
-After a change to either: `make contract`, then update `enums.ts` until `contract.test.ts` passes.
+After a change to either: `make contract`, then update `enums.ts` (and `web/lib/slug.ts`, which it also pins) until `contract.test.ts` passes.
 
 ## Where it lives
 

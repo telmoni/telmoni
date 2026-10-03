@@ -38,7 +38,7 @@ flowchart LR
 |---|---|
 | `(app)/` | The console shell: `[organization]` (its overview), `[organization]/~/…` (its own pages: projects, members, audit log, settings), `[organization]/[project]/…` (a project's overview, API keys, connectors, members, audit log, settings), `account/…`. See [paths and slugs](#paths-and-slugs). |
 | `(auth)/auth/` | Sign-in, sign-up, forgot, reset, verify and device pages, and the sign-in route handlers (`login`, `login/external`, `signup`, `callback`, `logout`) |
-| `console/` | Redirects to the right first page |
+| `console/` | Asks an owner to name an unnamed organization; otherwise redirects to the right first page |
 | `invite/[token]` | A public invitation page |
 | `connect/[provider]/` | Slack and Discord OAuth: start and callback |
 | `api/` | Route handlers: events, agent turns, heartbeat, health, the Slack relay, the test session |
@@ -61,7 +61,7 @@ flowchart LR
   7. `revalidatePath`.
 - **Route Handlers** do what an action or a page cannot:
   - **streams**, because an action answers once;
-  - **cookie writes**, because a Server Component cannot write cookies;
+  - **cookie writes on a GET**, because a Server Component cannot write cookies (a Server Action can: two set the organization cookie and leaving an organization clears it, under the cookie below);
   - **relays.**
 - **Secrets stay on the server.** `web/lib/env.ts` and `web/lib/server/data.ts` import `server-only`, so importing either from client code fails the build.
 
@@ -80,11 +80,10 @@ The path names the organization, and the project under it, by slug:
 - **`web/lib/slug.ts` spells the scheme** (`organizationPath`, `projectPath`), and `consolePlace` (`web/lib/console-nav.ts`) reads it back. Nothing else builds or splits a console path.
 
 **Auth mints every slug** (`crates/shared/src/slug.rs`, `crates/auth/src/db/`). The console derives none.
-- A slug is derived from the row's name and follows it: creation, a rename, and a project's move into another organization each pick one.
-- **An organization's is unique across every organization**, pending ones included, so a restore never finds it taken. ⚠ The purge frees it: another organization may take `acme` afterwards, and a bookmark spelled with it lands there. Everything the platform keeps names the row by id (below); a bookmark is the person's. **A project's is unique within its organization.**
-- A name that reads as a slug already taken gets the next number (`slug::candidates`). ⚠ An organization's numbers run out for a common name, its namespace being everybody's: its last candidate is the name with a random tail, so the slug still reads as the name.
-- A name with no Latin letters in it gives no slug: the row keeps the one it had, or takes a placeholder.
-- An organization nobody has named goes by a placeholder. It is never derived from the owner's address: a path is logged.
+- **An organization's name and its URL are two settings**, as a Vercel team's are (`PATCH /internal/organization`, `crates/auth/src/handler/organization.rs`). The first name gives the organization its slug — the first free one the name reads as — and from then on a rename moves nothing: the slug changes only when an owner or admin changes the URL on Settings. **A project's slug follows its name**: creation, a rename, and a move into another organization each pick one.
+- ⚠ **An organization is named before the console opens to its owner.** Provisioned at first sign-in, it carries a placeholder slug (`org-` and ten random characters) that nobody chose: `/console` asks the owner for the name (`web/app/console/page.tsx`), and `[organization]/layout.tsx` sends the owner there from any of its paths while it has none, with `?organization=` naming it — `/console` stands on no organization's path, so `/me` would otherwise answer the cookie's, which is another organization when the owner opened this one from inside it (the switcher lists an owner's unnamed organizations too). The form posts `nameOrganizationAction`, which acts on the organization named rather than the one the request resolves, and lands on the Projects page at the URL the name gave. Nobody else is in an unnamed organization: auth refuses its invitations (`create_organization_invite`, `create_invite`), its ownership offer and a project transfer into it, each a 409. It has no project either — provisioning makes none, as a Vercel team starts empty — so once named, the owner lands on the Projects page, where the first one is made. A name with no Latin letter or digit in it gives no slug: the organization keeps its placeholder, which its pages then do show, until a URL is chosen; a project takes a placeholder of its own. No label is ever derived from the owner's address: the console's `organizationLabel` answers the name, else "Organization"; auth's `organization_label`, in mail, the name, else "A Telmoni organization".
+- **An organization's slug is unique across every organization**, pending ones included, so a restore never finds it taken. ⚠ The purge frees it: another organization may take `acme` afterwards, and a link spelled with it lands there. **A project's is unique within its organization.**
+- A name that reads as a slug already taken gets the next number (`slug::candidates`). ⚠ An organization's numbers run out for a common name, its namespace being everybody's: its last candidate is the name with a random tail, so the slug still reads as the name. A URL chosen on Settings is taken as written: another organization's is a 409, a word the console keeps or a string that is no slug a 400.
 - **A slug and an id never look alike.** A slug has no underscore and a minted id always has one, so a path segment is never both: the layouts look one up as a slug, then as an id.
 - **Reserved words** (`slug::RESERVED`) are the console's own first path segments, the ones a console built on it serves or may yet, and the ones Next answers itself. No organization goes by one. The console's copy (`RESERVED_ORGANIZATION_SLUGS`) is pinned to the wire contract, and `web/app/organization-slugs.test.ts` checks every route under `web/app/` against it.
 
@@ -98,22 +97,22 @@ The path names the organization, and the project under it, by slug:
    - ⚠ **Not once, in a layout.** The router keeps a layout across a move between the pages under it, so a check there does not run again. A page also renders beside its layout, not after it. The two layouts only redirect (below) and seed the store.
 - So a page, and every Server Action posted from it, acts in the organization the page shows. Two tabs on two organizations do not interfere.
 - **Off an organization's path** (Account, `/console`, the route handlers) a cookie stands in (`ACTIVE_ORGANIZATION_COOKIE`): the organization of the last page on screen. `getServerContext` sends it to `/me` as `x-organization-id`, and never beside the path's slug.
-  - **It holds the id, not the slug.** It outlives the page that wrote it, and a rename moves a slug.
-  - ⚠ **The browser writes it** (`OrganizationSync`), **never the proxy.** Only a page on screen may move it. The proxy cannot tell one from a prefetch: Next strips the headers that mark a prefetch before the proxy runs, and the router prefetches every link it draws.
+  - **It holds the id, not the slug.** It outlives the page that wrote it, and a URL change moves a slug.
+  - ⚠ **The browser writes it** (`OrganizationSync`), **never the proxy.** Only a page on screen may move it — and two Server Actions set it, for an organization no page of the person's has shown yet: an organization's restore (`account/privacy/actions.ts`) and an invitation's accept (`invite/[token]/actions.ts`), so `/console` opens what they brought into reach rather than the cookie's last organization; leaving an organization clears it (`~/members/actions.ts`). The proxy cannot tell one from a prefetch: Next strips the headers that mark a prefetch before the proxy runs, and the router prefetches every link it draws.
   - So it is not `HttpOnly`. That costs nothing: it claims nothing, and auth honours it only for an organization the person is in.
 - ⚠ **A route handler that is handed a project resolves it by id, in whichever organization holds it** (`fetchProjectAnywhere`), and names that organization to the server. Its path names none, and the cookie follows whichever tab opened a page last.
 
-**Ids still name the row everywhere but the address bar.**
-- Server Actions take the ids their page rendered. The services key on ids.
-- ⚠ **Anything kept longer than a page names the row by id**: an indexed document's URL, a notice's link, the connect handshake's cookie, the cookie that remembers an organization. A slug moves with a rename; an id does not.
-- **The layouts redirect an id to its slug**, keeping the rest of the path and the query. A project's id follows it into another organization it was handed to. A slug typed with a capital is redirected the same way.
+**Ids name the row in every lane, header, cookie and foreign key; slugs spell every link.**
+- Server Actions take the ids their page rendered. The services key on ids. The cookie that remembers an organization and the connect handshake's cookie hold ids.
+- ⚠ **Every link a person is shown or sent is spelled with slugs, as Vercel spells its own** — a page's links, a notice's link, an indexed document's URL and a tool's citation (`crates/auth/src/seam.rs`, `crates/notifications/src/seam.rs`, `crates/agent/src/tools.rs`, which ask auth for the slugs through `project_homes` and `organization_slugs`), the Stripe return page of a console built on this one. A URL changed on Settings afterwards leaves such a link behind: it answers "not found", as on Vercel. That is the choice made, for a product with no users yet, over links that redirect through an id and show one in the address bar.
+- **The layouts still redirect an id to its slug**, keeping the rest of the path and the query, and a slug typed with a capital the same way: a fallback for an id somebody pasted, and the one address the console spells with ids itself — the connect handshake's callback (`web/app/connect/[provider]/callback/route.ts`) redirects by id, since its cookie is up to ten minutes old and a rename or a URL change since would have moved the slugs. A project's id follows it into another organization it was handed to.
 - ⚠ **`~` needs no escaping, and a chat client, a mail client or a link checker may escape it anyway.** The router matches the literal, and would read `%7E` as a project's name. The proxy redirects the escaped segment to the plain one (`unescapedPath`).
 
-**A rename moves the page.**
-- The rename actions answer the slug the row goes by now (`movedTo`), and the form replaces the path with it. They revalidate nothing in that case: the path they were posted from names nothing any more.
+**A moved slug moves the page.**
+- The organization's URL form and the project's rename form answer the slug the row goes by now (`movedTo`), and replace the path with it. The first-name form on `/console` does too (`nameOrganizationAction` answers `slug`, moved or not, and `movedTo` when it moved), for the one name that moves a slug: the first; the Settings name form handles `movedTo` the same way, though auth moves a slug for the first name alone. They revalidate nothing in that case: the path they were posted from names nothing any more.
 - **Everybody else with a page under the old slug open follows too.** The action publishes `slug:moved` on the organization's channel. `RealtimeListener` replaces the path where it is spelled with the old slug (`movedPath`), and asks for the rest again, since every link on screen was drawn with it.
 - A tab that missed the event finds the old path not found, and a form it posts is told the address is gone rather than to try again (`unplacedOrganization`, `web/lib/server/identity.ts`): `identityContext` places the caller in no organization, and the context says why. `/console` finds the organization again, by the cookie's id.
-- A project handed to another organization moves the same way, by id: the accept action publishes `ownership:changed` to both organizations, and a tab showing the project goes to its new address, which the layouts spell with the slugs it goes by there, or to "not found" for somebody not in it.
+- A project handed to another organization moves the same way: the accept action publishes `ownership:changed` to both organizations with the slugs its new address is spelled with, and a tab showing the project goes there, or finds this path not found when it is somebody not in the new organization.
 
 **Moving between organizations** is a link like any other. The router keeps the `(app)` layout across it, so two things follow the path:
 - `[organization]/layout.tsx` hands the client store the seed for the organization arrived in (`StoreSeed`, `storeSeed`);
@@ -134,7 +133,7 @@ The path names the organization, and the project under it, by slug:
 | `organizationHeaders`, `projectHeaders` | Bearer, service secret, organization (and project), request id |
 | `personHeaders` | No organization: for invitations and account deletion |
 | `accountHeaders` | The organization only when one is active. The Sessions page's lanes use it. |
-| `sessionHeaders` | The bearer, plus an organization (and project) the caller names itself: API-key actions, an organization's restore, answers to ownership offers |
+| `sessionHeaders` | The bearer, plus an organization (and project) the caller names itself: API-key actions, an organization's restore, its first name (`nameOrganizationAction`), answers to ownership offers |
 
 - ⚠ **No role or identity claim travels.** The bearer names the person, and auth works out the rest.
 - **`identityContext()` answers `null` when `/me` fails, and never falls back.** A fallback could name the wrong tenant.
@@ -155,8 +154,8 @@ The path names the organization, and the project under it, by slug:
   - The page marks itself (`data-console-not-found`), and the rail's rows answer the mark in CSS: the address's rows are hidden, and the way back that Account draws is shown.
   - ⚠ **In CSS, not from the store or from state.** Only the page knows it was not found: an outage leaves the same empty store a dead address does. And the page renders after the rail, so state would be right only once the console had hydrated; a class is right in the server's HTML.
 - Actions flatten the server's RFC 9457 problem into one message (`extractProblem`).
-- ⚠ **An action that changes an organization carries the organization its page rendered.** It is refused (`SWITCHED_ORGANIZATION`) when its request resolves another one: the page has gone stale, by a rename on an organization's path or by another tab off it.
-- Anything uncaught reaches the error boundaries. `instrumentation.ts` logs it, with the digest and the route's pattern. ⚠ Never the path: it spells an organization and a project by the slugs of their names, and may carry an invitation's token or a callback's code.
+- ⚠ **An action that changes an organization carries the organization its page rendered.** It is refused (`SWITCHED_ORGANIZATION`) when its request resolves another one: the page has gone stale, by a URL change on an organization's path or by another tab off it.
+- Anything uncaught reaches the error boundaries. `instrumentation.ts` logs it, with the digest and the route's pattern. ⚠ Never the path: it spells an organization and a project by their slugs, which count as names, and may carry an invitation's token or a callback's code.
 
 **Sessions** live in a sealed cookie, refreshed by the server components and a client heartbeat. See [identity](identity.md#the-consoles-side).
 
@@ -175,7 +174,7 @@ The path names the organization, and the project under it, by slug:
    - Scripts are `'self'` and the nonce only.
    - Frames are refused (`frame-ancestors 'none'`).
    - `connect-src` is `'self'`.
-   - `form-action` adds the identity providers' origins (`AUTH_PROVIDER_ORIGINS`). ⚠ Sign-in and sign-out leave the site through redirects that this directive governs.
+   - `form-action` adds the identity providers' origins (`AUTH_PROVIDER_ORIGINS`). ⚠ Signing out from the account menu is a form post that ends in a redirect to the provider, which this directive governs; sign-in, and the sign-out links elsewhere, are links, which it does not.
 5. **The organization the path names**, handed to the server as a request header, with the path itself for the layouts to redirect from (see [paths and slugs](#paths-and-slugs)). It writes no cookie.
 6. **Static security headers**, from `next.config.mjs`'s `headers()`, not the proxy: HSTS with preload, `X-Frame-Options: DENY`, `nosniff`, a referrer policy and a permissions policy.
    - Next applies them ahead of the proxy, and keeps them on whatever the proxy answers itself: its redirects and its 401 carry them too.
@@ -239,7 +238,7 @@ Why the code is shaped this way:
 
 **`RealtimeListener`** (`web/components/realtime-listener.tsx`) is the browser's `EventSource`.
 - It updates the store and calls `router.refresh()`, so the server components render again.
-- It moves the page when the page's own address has moved: out of a project or an organization the person was removed from, after a project handed to another organization, and after a renamed slug.
+- It moves the page when the page's own address has moved: out of a project or an organization the person was removed from, after a project handed to another organization, and after a moved slug (an organization's URL changed, a project renamed).
 - It reconnects after a delay, or when the tab becomes visible or comes back online.
 - It stops on `close`.
 
@@ -280,7 +279,7 @@ All logging goes through `@/lib/logger` (pino), never `console.*`:
 
 **What is redacted.** The logger's redact paths are `*.authorization`, `*.cookie`, `*["x-service-secret"]`, `*.accessToken`, `*.refreshToken`, `*.idToken` and `*.token`. Pino's `*` matches exactly one level: `{ headers: { authorization } }` is censored, but a top-level or deeper field, or one of another name, is not. Log ids, never the objects that carry secrets.
 
-**A slug counts as a name.** It follows one, and a path spells two. So nothing here logs a path or a slug: `instrumentation.ts` logs the route's pattern, the route handlers log the lane and the request id, and the server's request span (`crates/shared/src/middleware/http.rs`) carries the server's own path, which names an organization by header and a project by id. What this does not reach: the load balancer's access log, a browser's history and a Playwright report carry the console's paths, which is why no slug is ever derived from an address.
+**A slug counts as a name.** A project's follows one, an organization's was chosen like one, and a path spells two. So nothing here logs a path or a slug: `instrumentation.ts` logs the route's pattern, the route handlers log the lane and the request id, and the server's request span (`crates/shared/src/middleware/http.rs`) carries the server's own path, which names an organization by header and a project by id. What this does not reach: the load balancer's access log, a browser's history and a Playwright report carry the console's paths, which is why no slug is ever derived from an address.
 
 **Analytics.** `track()` logs events, and sends them on only with explicit consent.
 

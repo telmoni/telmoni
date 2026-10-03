@@ -2,8 +2,11 @@
 # and Redis — four containers, plus the one-shot migration that runs first.
 #
 # Quickstart:
-#   1. Copy env: cp .env.example .env (and adjust credentials). Two values
-#      have no default and the stack does not start without them:
+#   1. Write .env beside this file with the keys the docs list
+#      (docs.telmoni.com/self-host/docker-compose) — not a copy of the
+#      repository's root .env.example, which is the development stack's and
+#      names services this stack does not run. Two values have no default
+#      and the stack does not start without them:
 #      SERVICE_SECRET (any random string; both processes get the same one)
 #      and AUTH_SECRET (the console's cookie seal, 32 bytes or more):
 #        openssl rand -hex 32
@@ -113,10 +116,12 @@ services:
       AGENT_DATABASE_URL: *database_url
       SERVICE_SECRET: ${SERVICE_SECRET}
       APP_URL: ${APP_URL:-http://localhost:3000}
-      # The login form is on unless DISABLE_LOGIN_FORM, sign-ups are closed
-      # unless ALLOW_SIGN_UP, ADMIN_EMAIL and ADMIN_PASSWORD seed the first
-      # account, and an OpenID Connect provider sits beside the form when
-      # OIDC_ISSUER names one.
+      # The login form is on unless DISABLE_LOGIN_FORM; password sign-ups are
+      # closed unless ALLOW_SIGN_UP (an invited address may still sign up);
+      # ADMIN_EMAIL and ADMIN_PASSWORD seed the first account. An OpenID
+      # Connect provider sits beside the form when OIDC_ISSUER names one, and
+      # its first sign-ins make accounts while OIDC_ALLOW_SIGN_UP is on.
+      # Whether a new person gets an organization is the `signup` feature flag.
       ALLOW_SIGN_UP: ${ALLOW_SIGN_UP:-false}
       VERIFY_EMAIL: ${VERIFY_EMAIL:-false}
       DISABLE_LOGIN_FORM: ${DISABLE_LOGIN_FORM:-false}
@@ -184,3 +189,8 @@ services:
       SERVICE_SECRET: ${SERVICE_SECRET}
       SERVER_URL: http://server:8082
       REDIS_URL: redis://redis:6379
+      # The identity provider's origins, space separated: signing out from the
+      # account menu is a form post that ends in a redirect to the provider, and the console's
+      # Content Security Policy lets the browser follow it there and nowhere
+      # else (sign-in is a link, which the policy does not govern).
+      AUTH_PROVIDER_ORIGINS: ${AUTH_PROVIDER_ORIGINS:-}

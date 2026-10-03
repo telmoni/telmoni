@@ -44,7 +44,7 @@ help:
 	@echo "    make db-migrate           apply every migration set to the local DB"
 	@echo "    make db-reset             wipe and rebuild the local DB"
 	@echo "    make db-shell             psql into local postgres"
-	@echo "    make flag KEY=connectors ON=false WHY=\"...\"   flip a feature flag (ORG=<id> for one organization; make flags lists)"
+	@echo "    make flag KEY=connectors ON=false WHY=\"...\" BY=<who>   flip a feature flag (ORG=<id> for one organization; make flags lists)"
 	@echo ""
 	@echo "  Before you push"
 	@echo "    make ci                   the full gate — run this (check + lint + test + web + deny + typos)"

@@ -1,7 +1,7 @@
 # Local development services for Telmoni.
 #
-#   make docker-up       # start postgres + redis
-#   make web-local       # Next.js dev server
+#   make docker-up       # start postgres, redis and mailpit
+#   make web-dev         # Next.js dev server
 #   make up              # the whole stack: these, then the server and the console
 #   make down            # stop containers (volumes survive)
 

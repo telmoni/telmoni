@@ -17,7 +17,7 @@ The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni
 | `crates/agent` | The console agent, read-only: model adapters, embeddings, the index, hybrid search, tools. Needs the `vector` extension, which a superuser installs. Off until `AGENT_MODEL_PROVIDER` is set. |
 | `crates/shared` | `TelmoniError`, RBAC (`rbac.rs`), tenancy scopes, the seams between modules (`seam.rs`), audit, `Redacted`. `tests/` holds the cross-module suites. |
 | `crates/migrator` | The migration runner and the `audit` schema; grants, role hardening and the local roles and extensions in `sql/`. Each module's SQL is in `crates/<module>/migrations/`. |
-| `web/` | `app/` routes and their tests, `lib/` logic and its tests, `components/` UI (no tests), `e2e/` Playwright, `proxy.ts` middleware, `lib/extension/` the slots a console built on this one fills. |
+| `web/` | `app/` routes and their tests, `lib/` logic and its tests, `components/` UI (no tests), `e2e/` Playwright, `proxy.ts` middleware, `lib/extension/` and `components/extension/banner.tsx` the slots a console built on this one fills. |
 | `contract/` | Generated wire contract and OpenAPI document (`make contract`); never hand-edited. |
 | `scripts/` | `up.sh` and the webhook tunnel and receiver. Ask before adding one. |
 | `deploy/` | The Helm chart (`charts/telmoni`) and the self-host compose (`compose/`). |
@@ -27,14 +27,14 @@ The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni
 
 ## Commands
 - **After every change** (no permission needed; report failures verbatim): `make check` (typecheck, cargo check, fmt, clippy, rustdoc), then `make lint`.
-- **Only when asked:** `make test TEST_THREADS=2`, `make test-svc SVC=<crate> TEST_THREADS=2 [TEST_FILTER=<name>]`, `make ci`, `make e2e`, `npm run test` in `web/`, `make db-reset`. Never bare `cargo test`; the Makefile starts Postgres. Unasked, say "untested" and name the command (`make db-reset` first if a migration changed).
-- **After a wire-contract change:** `make contract`, then update `web/lib/types/enums.ts` until `contract.test.ts` passes.
-- **Locally:** `make up` starts `docker-compose.yml` (Postgres, Redis, Mailpit, Ollama), then runs the server (`:8082`) and console (`:3000`) in one terminal; `make server-dev` and `make web-dev` run either alone.
+- **Only when asked:** `make test TEST_THREADS=2`, `make test-svc SVC=<crate> TEST_THREADS=2 [TEST_FILTER=<name>]`, `make ci`, `make e2e`, `npm run test` in `web/`, `make db-reset`. Never bare `cargo test`: `make test` starts Postgres, and `make test-svc` expects it running. Unasked, say "untested" and name the command (`make db-reset` first if a migration changed).
+- **After a wire-contract change:** `make contract`, then update `web/lib/types/enums.ts` (and `web/lib/slug.ts`, which it also pins) until `contract.test.ts` passes.
+- **Locally:** `make up` starts `docker-compose.yml` (Postgres, Redis, Mailpit; Ollama with `COMPOSE_PROFILES=ollama`), then runs the server (`:8082`) and console (`:3000`) in one terminal; `make server-dev` and `make web-dev` run either alone.
 
 ## Code Rules
 - **Rust owns the logic:** business rules, queries, audit, RBAC and tenancy, session resolution. Log only through `tracing` (no `println!` or `dbg!` outside tests). Return `TelmoniError` as RFC 9457 problem details; every `type` needs a row in the customer `errors.mdx` (`crates/shared/tests/error_catalog.rs`). Never leak a panic or stack trace.
 - **Never log secrets or PII**, at any level, nor put them in an error `detail` or panic: no keys, tokens, signing or service secrets, confirmation codes, `Authorization`/`Cookie`/`x-service-secret` headers, emails, names or free text. Log ids. Hold secrets in `Redacted` and read them with `.expose()`.
-- **`web/` is a thin proxy:** no database access or business logic. Call the server only with `fetchWithTimeout`/`tryFetchWithTimeout` (`web/lib/api/fetch.ts`) and headers from `web/lib/server/entities/identity-context.ts` (`organizationHeaders`, `projectHeaders`, `personHeaders`, `accountHeaders`). Log through `@/lib/logger`, never `console.*`. App Router only; server components by default, `"use client"` only at interactive leaves. Test in `web/lib/` and `web/app/`, never `web/components/`.
+- **`web/` is a thin proxy:** no database access or business logic. Call the server only with `fetchWithTimeout`/`tryFetchWithTimeout` (`web/lib/api/fetch.ts`) and headers from `web/lib/server/entities/identity-context.ts` (`organizationHeaders`, `projectHeaders`, `personHeaders`, `sessionHeaders`, `accountHeaders`). Log through `@/lib/logger`, never `console.*`. App Router only; server components by default, `"use client"` only at interactive leaves. Test in `web/lib/` and `web/app/`, never `web/components/`.
 - **Twelve-factor:** config and backing services (Postgres, Redis, the model, embeddings and rerank URLs) come only from the environment; both processes are stateless; each binds `PORT`; both drain on `SIGTERM`/`SIGINT`; logs are JSON on stdout; admin tasks are subcommands of the binary, never part of the request loop.
 
 ## Contracts
