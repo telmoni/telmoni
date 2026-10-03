@@ -20,20 +20,18 @@ pub trait ProjectCreate: Binding {}
 impl ProjectCreate for Organization {}
 impl ProjectCreate for PersonAndOrganization {}
 
-/// The first of `slugs` no other project in `organization` goes by, the
-/// project itself excepted; each argument names the placeholder that carries
-/// it. Every write of a project's slug picks it here, in the same statement,
-/// under the organization's lock, so no two writes can pick the same one.
-fn first_free_slug(project: &str, organization: &str, slugs: &str) -> String {
-    format!(
-        "SELECT c.slug FROM unnest({slugs}::text[]) WITH ORDINALITY AS c(slug, position)
-          WHERE NOT EXISTS (SELECT 1 FROM auth.projects p
-                             WHERE p.organization_id = {organization} AND p.slug = c.slug
-                               AND p.external_id <> {project})
-          ORDER BY c.position
-          LIMIT 1"
-    )
-}
+/// The first of the slugs in `$3` no other project in organization `$2` goes
+/// by, project `$1` itself excepted: a statement that splices this in numbers
+/// those three so. Every write of a project's slug picks it here, in the same
+/// statement, under the organization's lock, so no two writes can pick the
+/// same one.
+const FIRST_FREE_SLUG: &str =
+    "SELECT c.slug FROM unnest($3::text[]) WITH ORDINALITY AS c(slug, position)
+      WHERE NOT EXISTS (SELECT 1 FROM auth.projects p
+                         WHERE p.organization_id = $2 AND p.slug = c.slug
+                           AND p.external_id <> $1)
+      ORDER BY c.position
+      LIMIT 1";
 
 /// The slugs a project called `name` may take, with a placeholder last for a
 /// write that must find one.
@@ -54,16 +52,15 @@ pub async fn create<B: ProjectCreate>(
     sqlx::query_scalar(&format!(
         "INSERT INTO auth.projects
              (id, external_id, organization_id, name, slug, shard_key)
-         VALUES ($1, $2, $3, $4, ({}), $6)
+         VALUES ($4, $1, $2, $5, ({FIRST_FREE_SLUG}), $6)
          ON CONFLICT (external_id) DO NOTHING
-         RETURNING slug",
-        first_free_slug("$2", "$3", "$5"),
+         RETURNING slug"
     ))
-    .bind(uuid::Uuid::now_v7())
     .bind(project_id)
     .bind(owner)
-    .bind(name)
     .bind(slugs_for(name))
+    .bind(uuid::Uuid::now_v7())
+    .bind(name)
     .bind(derive_shard_key(project_id))
     .fetch_optional(tx.conn())
     .await
@@ -275,16 +272,15 @@ pub async fn move_to_organization(
 ) -> sqlx::Result<Option<String>> {
     sqlx::query_scalar(&format!(
         "UPDATE auth.projects
-            SET organization_id = $3, name = $4, slug = ({}), updated_at = now()
-          WHERE external_id = $1 AND organization_id = $2
-      RETURNING slug",
-        first_free_slug("$1", "$3", "$5"),
+            SET organization_id = $2, name = $5, slug = ({FIRST_FREE_SLUG}), updated_at = now()
+          WHERE external_id = $1 AND organization_id = $4
+      RETURNING slug"
     ))
     .bind(project_id)
-    .bind(from)
     .bind(to)
-    .bind(name)
     .bind(slugs_for(name))
+    .bind(from)
+    .bind(name)
     .fetch_optional(tx.conn())
     .await
 }
@@ -302,15 +298,14 @@ pub async fn update_name(
 ) -> sqlx::Result<Option<String>> {
     sqlx::query_scalar(&format!(
         "UPDATE auth.projects
-            SET name = $3, slug = COALESCE(({}), slug), updated_at = now()
+            SET name = $4, slug = COALESCE(({FIRST_FREE_SLUG}), slug), updated_at = now()
           WHERE external_id = $1 AND organization_id = $2
-      RETURNING slug",
-        first_free_slug("$1", "$2", "$4"),
+      RETURNING slug"
     ))
     .bind(project_id)
     .bind(organization_id)
-    .bind(name)
     .bind(slug::candidates(slug::Scope::Project, name))
+    .bind(name)
     .fetch_optional(tx.conn())
     .await
 }
