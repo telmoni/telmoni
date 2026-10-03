@@ -7,7 +7,8 @@
 //! that no request value is ever part of a statement's text. This test holds
 //! the service source to it: a `format!` that builds SQL may splice in only a
 //! `SCREAMING_CASE` constant (a column list, a shared `WHERE`), or one of the
-//! identifiers listed below, each validated before it gets there.
+//! identifiers listed below, each validated before it gets there. A positional
+//! `{}` names nothing, so nothing can vouch for it, and it is never allowed.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
 use std::path::{Path, PathBuf};
@@ -15,8 +16,15 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 use telmoni_shared::test_util::project_root;
 
-/// Placeholders that are not constants, by file, and why each is safe.
+/// Placeholders that are not constants, by file, and why each is safe. `*`
+/// vouches for every placeholder in a file whose SQL is built from nothing a
+/// request can reach.
 const VALIDATED: &[(&str, &str, &str)] = &[
+    (
+        "crates/shared/src/db/retention.rs",
+        "*",
+        "partition DDL over `RETENTION`'s compile-time table definitions and a month's digits",
+    ),
     (
         "crates/migrator/src/lib.rs",
         "schema",
@@ -51,8 +59,35 @@ const VALIDATED: &[(&str, &str, &str)] = &[
 
 const SQL_START: &[&str] = &[
     "SELECT", "INSERT", "UPDATE", "DELETE", "WITH", "SET", "CREATE", "ALTER", "GRANT", "REVOKE",
-    "DROP",
+    "DROP", "DO",
 ];
+
+/// A `format!` call's string literal. `(?s)` so that a `\` at the end of a
+/// line, which continues the literal, does not end the match: a continued
+/// literal is still one statement.
+const FORMAT_CALL: &str = r#"(?s)format!\(\s*"((?:[^"\\]|\\.)*)""#;
+
+/// The placeholders in one SQL `format!` literal from `rel` that splice in
+/// anything but a constant or an identifier validated for that file, spelled
+/// as written: `{id}`, or `{}` and `{0}`, which name nothing.
+fn offenders_in(literal: &str, rel: &str) -> Vec<String> {
+    let placeholder = Regex::new(r"\{([^{}:]*)(?::[^}]*)?\}").expect("regex");
+    let constant = Regex::new(r"^[A-Z][A-Z0-9_]*$").expect("regex");
+    let unescaped = literal.replace("{{", "").replace("}}", "");
+    placeholder
+        .captures_iter(&unescaped)
+        .map(|c| c.get(1).map_or("", |m| m.as_str()))
+        .filter(|name| {
+            let positional = name.is_empty() || name.bytes().all(|b| b.is_ascii_digit());
+            positional
+                || !(constant.is_match(name)
+                    || VALIDATED
+                        .iter()
+                        .any(|(f, n, _)| *f == rel && (*n == "*" || n == name)))
+        })
+        .map(|name| format!("{{{name}}}"))
+        .collect()
+}
 
 fn rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(dir)
@@ -82,9 +117,7 @@ fn sql_text_splices_in_constants_and_validated_identifiers_only() {
         }
     }
 
-    let format_call = Regex::new(r#"format!\(\s*"((?:[^"\\]|\\.)*)""#).expect("regex");
-    let placeholder = Regex::new(r"\{([A-Za-z_][A-Za-z0-9_]*)(?::[^}]*)?\}").expect("regex");
-    let constant = Regex::new(r"^[A-Z][A-Z0-9_]*$").expect("regex");
+    let format_call = Regex::new(FORMAT_CALL).expect("regex");
 
     let mut sql_formats = 0usize;
     let mut offenders = Vec::new();
@@ -102,15 +135,8 @@ fn sql_text_splices_in_constants_and_validated_identifiers_only() {
                 continue;
             }
             sql_formats += 1;
-            let unescaped = literal.replace("{{", "").replace("}}", "");
-            for name in placeholder.captures_iter(&unescaped) {
-                let name = name.get(1).map_or("", |m| m.as_str());
-                if constant.is_match(name)
-                    || VALIDATED.iter().any(|(f, n, _)| *f == rel && *n == name)
-                {
-                    continue;
-                }
-                offenders.push(format!("{rel}: {{{name}}} in \"{}\"", literal.trim()));
+            for placeholder in offenders_in(literal, &rel) {
+                offenders.push(format!("{rel}: {placeholder} in \"{}\"", literal.trim()));
             }
         }
     }
@@ -136,19 +162,36 @@ fn sql_text_splices_in_constants_and_validated_identifiers_only() {
 
 #[test]
 fn a_spliced_value_is_caught() {
-    let format_call = Regex::new(r#"format!\(\s*"((?:[^"\\]|\\.)*)""#).expect("regex");
-    let placeholder = Regex::new(r"\{([A-Za-z_][A-Za-z0-9_]*)(?::[^}]*)?\}").expect("regex");
-    let constant = Regex::new(r"^[A-Z][A-Z0-9_]*$").expect("regex");
-    let src = r#"sqlx::query(&format!("SELECT {COLUMNS} FROM auth.x WHERE id = '{id}'"))"#;
+    let format_call = Regex::new(FORMAT_CALL).expect("regex");
+    // A constant, a named value, an escaped brace, and the two positional
+    // forms — the ones the scan once let through, since they name nothing —
+    // across a continued line, which once ended the match.
+    let src = r#"sqlx::query(&format!(
+        "SELECT {COLUMNS} FROM auth.x WHERE id = '{id}' AND tags = '{{}}' \
+         AND a = {} AND b = {0:?}",
+        a, b
+    ))"#;
     let literal = format_call
         .captures(src)
         .and_then(|c| c.get(1))
         .expect("the fixture is a format! call")
         .as_str();
-    let spliced: Vec<&str> = placeholder
-        .captures_iter(literal)
-        .filter_map(|c| c.get(1).map(|m| m.as_str()))
-        .filter(|name| !constant.is_match(name))
-        .collect();
-    assert_eq!(spliced, vec!["id"]);
+    assert_eq!(
+        offenders_in(literal, "crates/auth/src/x.rs"),
+        vec!["{id}", "{}", "{0}"]
+    );
+    // A validated identifier passes in its own file alone; `*` vouches for a
+    // file's every name, and for no positional.
+    assert!(offenders_in("SET search_path = {schema}", "crates/shared/src/db.rs").is_empty());
+    assert_eq!(
+        offenders_in("SET search_path = {schema}", "crates/auth/src/x.rs"),
+        vec!["{schema}"]
+    );
+    assert_eq!(
+        offenders_in(
+            "DROP TABLE {schema}.{table}_{}",
+            "crates/shared/src/db/retention.rs"
+        ),
+        vec!["{}"]
+    );
 }

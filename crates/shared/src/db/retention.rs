@@ -233,10 +233,10 @@ pub fn is_expired(t: &PartitionedTable, m: PartitionMonth, now: DateTime<Utc>) -
 #[must_use]
 pub fn drop_ddl(t: &PartitionedTable, m: PartitionMonth) -> String {
     format!(
-        "DROP TABLE IF EXISTS {}.{}_{}",
-        t.schema,
-        t.table,
-        m.suffix()
+        "DROP TABLE IF EXISTS {schema}.{table}_{suffix}",
+        schema = t.schema,
+        table = t.table,
+        suffix = m.suffix()
     )
 }
 
