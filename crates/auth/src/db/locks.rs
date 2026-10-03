@@ -9,11 +9,11 @@
 //! lanes that change the roster or its ownership — roles, removal and leaving,
 //! both invite accepts, every ownership lane, organization and account deletion
 //! — take the organization's lock first and read the roles again under it.
-//! Owner-only lanes that change something else (renames, projects, invites
-//! out) read the role unlocked, as a sibling does through its 30-second
-//! authorize cache: a transfer racing one of them lets the owner of a moment
-//! ago finish. `auth.organizations` itself cannot be the lock: the maintenance
-//! lane holds no UPDATE on it.
+//! The owner's and admins' lanes that change something else (renames,
+//! projects, invites out) read the role unlocked, as a sibling's `resolve`
+//! does: a transfer racing one of them lets the owner of a moment ago finish.
+//! `auth.organizations` itself cannot be the lock: the maintenance lane holds
+//! no UPDATE on it.
 //!
 //! **The person's lock** is taken by every lane that changes what they own or
 //! belong to, or writes their own rows: `/me`'s provisioning, both invite

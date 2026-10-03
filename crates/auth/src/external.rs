@@ -100,8 +100,10 @@ impl External {
             tracing::info!(
                 "an external sign-in for a subject nobody here is, with sign-ups closed"
             );
+            // An invitation opens nothing here: this gate knows no addresses,
+            // only identities the provider has brought before.
             return Err(AuthzError::Forbidden(format!(
-                "sign-ups through {} are closed; ask to be invited",
+                "sign-ups through {} are closed; ask the operator to let you in",
                 self.provider.name()
             ))
             .into());

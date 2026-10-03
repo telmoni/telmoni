@@ -76,8 +76,8 @@ pub struct Organization {
     pub external_id: OrganizationId,
     /// The organization's segment in console paths (`telmoni_shared::slug`).
     pub slug: String,
-    /// What the OWNER called the organization; `None` means never named, and
-    /// a page labels it by the owner's address instead.
+    /// What the organization is called; `None` only before the owner
+    /// has named it, which the console asks for before it opens to them.
     pub name: Option<String>,
     /// Lifecycle state. See the schema comment on `auth.organizations.status`.
     pub status: OrganizationStatus,
@@ -207,8 +207,8 @@ impl std::fmt::Debug for ValidateTokenRequest {
 pub struct ValidateTokenResponse {
     /// The organization the token belongs to — the tenancy boundary a `/v1`
     pub organization_id: OrganizationId,
-    /// What to PRINT for that organization — its name, or its owner's
-    /// address. A name, never a key: nothing may match on it.
+    /// What to PRINT for that organization — its name, else a generic label.
+    /// A name, never a key: nothing may match on it.
     pub name: String,
     /// The feature flags resolved for `organization_id`, so one round trip
     /// says who is asking and what is switched on for them.

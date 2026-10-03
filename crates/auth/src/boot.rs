@@ -8,7 +8,8 @@
 //! its tokens are opaque secrets auth stores as their hashes: there is no
 //! signing key to configure. The login form — email and password, held
 //! here — is on unless `DISABLE_LOGIN_FORM=true`; who may create an account
-//! is `ALLOW_SIGN_UP` (off: the invited alone), whether a new account
+//! with a password is `ALLOW_SIGN_UP` (off: invited addresses alone; the
+//! provider's own sign-ups are `OIDC_ALLOW_SIGN_UP`'s), whether a new account
 //! confirms its address first is `VERIFY_EMAIL` (off), and `ADMIN_EMAIL`
 //! with `ADMIN_PASSWORD` seeds the first account at boot. Set `OIDC_ISSUER`,
 //! `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`, and the sign-in page offers

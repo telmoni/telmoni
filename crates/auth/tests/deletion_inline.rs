@@ -1307,8 +1307,8 @@ async fn a_pending_organization_is_refused_on_every_lane_that_acts_in_it(pool: P
         ),
         ("POST", "/internal/organization/deletion-code".into(), None),
         (
-            "PUT",
-            "/internal/organization/name".into(),
+            "PATCH",
+            "/internal/organization".into(),
             Some(json!({ "name": "Renamed" })),
         ),
         ("GET", "/internal/organization/members".into(), None),
@@ -1400,7 +1400,7 @@ async fn a_pending_organization_is_refused_on_every_lane_that_acts_in_it(pool: P
 
     // The project listing is a read that answers strangers with nothing, and
     // answers its own members the same once the organization is going: no
-    // project in it is theirs to open, and no Default Project is made again.
+    // project in it is theirs to open.
     let resp = app
         .oneshot(
             request(
@@ -2115,14 +2115,15 @@ async fn an_account_that_owns_a_shared_organization_is_refused_until_it_is_empti
     );
 }
 
-/// Every unnamed organization wears its owner's address — this person's — so
-/// the refusal counts the ones that share a label instead of naming the same
-/// thing twice.
+/// Two organizations may well go by the same name, so the refusal counts the
+/// ones that share a label instead of naming the same thing twice.
 #[sqlx::test]
 async fn the_refusal_counts_shared_organizations_that_share_a_label(pool: PgPool) {
     seed_account_deletion(&pool).await;
     let second = "org_inline_second";
     seed_organization(&pool, second, USER, "active").await;
+    name_organization(&pool, ORGANIZATION, "Acme").await;
+    name_organization(&pool, second, "Acme").await;
     seed_person(&pool, COLLEAGUE).await;
     seat(&pool, ORGANIZATION, COLLEAGUE, "member").await;
     seat(&pool, second, COLLEAGUE, "member").await;
@@ -2134,10 +2135,7 @@ async fn the_refusal_counts_shared_organizations_that_share_a_label(pool: PgPool
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CONFLICT);
     let body = json_body(resp).await.to_string();
-    assert!(
-        body.contains(&format!("{} (2 organizations)", email_of(USER))),
-        "{body}"
-    );
+    assert!(body.contains("Acme (2 organizations)"), "{body}");
     assert_eq!(person(&pool, USER).await, Person::Live);
 }
 
@@ -2639,6 +2637,7 @@ async fn the_standing_seam_answers_active_being_deleted_and_gone(pool: PgPool) {
 #[sqlx::test]
 async fn an_invitation_from_an_organization_being_deleted_is_withdrawn_with_it(pool: PgPool) {
     seed_organization_deletion(&pool, "active").await;
+    name_organization(&pool, ORGANIZATION, "Alpha Robotics").await;
     seed_person(&pool, COLLEAGUE).await;
     let (router, _provider) = app(pool.clone(), None, 8_000);
     let app = || router.clone();
@@ -2948,8 +2947,8 @@ async fn an_operator_terminates_without_a_code_and_only_an_operator_restores(poo
         .oneshot(
             request(
                 &pool,
-                "PUT",
-                "/internal/organization/name",
+                "PATCH",
+                "/internal/organization",
                 USER,
                 Some(ORGANIZATION),
                 Some(json!({ "name": "Renamed" })),

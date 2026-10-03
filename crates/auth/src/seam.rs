@@ -15,7 +15,9 @@ use uuid::Uuid;
 use telmoni_shared::acting::{Acting, ActingProject};
 use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope};
 use telmoni_shared::rbac::{Resource, Verb, can};
-use telmoni_shared::seam::{Audience, AuditEventsQuery, Auth, DocumentCursor, SourceDocument};
+use telmoni_shared::seam::{
+    Audience, AuditEventsQuery, Auth, DocumentCursor, ProjectHome, SourceDocument,
+};
 use telmoni_shared::{
     AuthError, AuthzError, FlagSet, OrganizationId, OrganizationRole, OrganizationStatus,
     ProjectId, TelmoniError, UserId,
@@ -94,11 +96,21 @@ impl Auth for AppState {
     async fn project_homes(
         &self,
         projects: &[ProjectId],
-    ) -> Result<Vec<(ProjectId, OrganizationId)>, TelmoniError> {
+    ) -> Result<Vec<ProjectHome>, TelmoniError> {
         let mut tx = maintenance_scope(&self.db, AuthLane).await?;
         let homes = projects::homes(&mut tx, projects).await?;
         tx.commit().await?;
         Ok(homes)
+    }
+
+    async fn organization_slugs(
+        &self,
+        organizations: &[OrganizationId],
+    ) -> Result<Vec<(OrganizationId, String)>, TelmoniError> {
+        let mut tx = maintenance_scope(&self.db, AuthLane).await?;
+        let slugs = organizations::slugs(&mut tx, organizations).await?;
+        tx.commit().await?;
+        Ok(slugs)
     }
 
     async fn global_flags(&self) -> Result<FlagSet, TelmoniError> {
@@ -282,16 +294,22 @@ fn audit_document(e: audit::IndexedEvent) -> SourceDocument {
         body.push_str("\nDetails: ");
         body.push_str(&metadata.to_string());
     }
-    // By id, not slug: the index keeps this past any rename, and the console
-    // redirects an id to the slug the row goes by now.
-    let (audience, url) = match &e.in_project {
-        Some(project) => (
+    // By slug, as every link a person is shown: a URL changed on Settings
+    // afterwards leaves this citation behind, which is the choice made for
+    // every link (console.md, "Paths and slugs"). An event of a project since
+    // deleted cites the organization's log, where the event still is.
+    let (audience, url) = match (&e.in_project, &e.project_slug) {
+        (Some(_), Some(project)) => (
             Audience::Audit,
-            format!("/{}/{project}/audit-log", e.organization_id),
+            format!("/{}/{project}/audit-log", e.organization_slug),
         ),
-        None => (
+        (Some(_), None) => (
+            Audience::Audit,
+            format!("/{}/~/audit-log", e.organization_slug),
+        ),
+        (None, _) => (
             Audience::OrganizationAdmin,
-            format!("/{}/~/audit-log", e.organization_id),
+            format!("/{}/~/audit-log", e.organization_slug),
         ),
     };
     SourceDocument {

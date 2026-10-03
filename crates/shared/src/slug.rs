@@ -3,11 +3,15 @@
 //! an organization's own pages under `/{organization}/~/…`, where no project's
 //! slug can land on them.
 //!
-//! ⚠ **A slug follows its row's name and is never the row's identity.** Auth
-//! derives it whenever the name is set — creation, a rename, a project's move
-//! into another organization — so a rename moves the URL. Anything kept longer
-//! than a page (an index entry, a notice's link) names the row by its id, which
-//! the console redirects to wherever the slug is now.
+//! ⚠ **A slug is never the row's identity.** A project's follows its name:
+//! auth derives it whenever the name is set — creation, a rename, a move into
+//! another organization — so a rename moves the URL. An organization's is
+//! derived once, from its first name, and is a setting of its own after that
+//! (`PATCH /internal/organization`), so only a URL change moves it. Ids key
+//! lanes, headers, cookies and foreign keys; every link a person is shown —
+//! an index entry's URL and a citation included — is spelled with slugs, and
+//! dies when the slug moves, as a Vercel link does. The console redirects an
+//! id in a path to wherever the slug is now.
 //!
 //! An organization's slug is unique across every organization, being the
 //! path's first segment; a project's only within its organization.

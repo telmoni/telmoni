@@ -8,7 +8,7 @@ use telmoni_shared::{OrganizationId, ProjectId, Role, UserId, derive_shard_key};
 
 use crate::db::AuthLane;
 
-/// One live invitation, as the owner's roster shows it.
+/// One live invitation, as the roster shows it to owners and admins.
 #[derive(Debug, serde::Serialize, sqlx::FromRow)]
 pub struct Invite {
     pub id: Uuid,
@@ -36,8 +36,6 @@ pub struct LiveInvite {
     pub inviter_display_name: Option<String>,
     /// What the organization is called; `None` means never named.
     pub organization_name: Option<String>,
-    /// The owner's address, which labels an unnamed organization.
-    pub owner_email: Option<String>,
 }
 
 /// Write the offer. **Every add lands here**, for an address with an
@@ -106,7 +104,7 @@ pub async fn list_pending(
     .await
 }
 
-/// The owner takes the offer back. Answers the address it was sent to, so
+/// An owner or admin takes the offer back. Answers the address it was sent to, so
 /// that person's open sessions can be told; `None` when nothing live matched.
 pub async fn revoke(
     tx: &mut Scoped<'_, Project>,
@@ -135,16 +133,12 @@ pub async fn find_live(
         "SELECT i.id, i.project_id, p.organization_id, i.email, i.role,
                 inviter.email        AS inviter_email,
                 inviter.display_name AS inviter_display_name,
-                o.name               AS organization_name,
-                owner_identity.email AS owner_email
+                o.name               AS organization_name
            FROM auth.member_invites i
            JOIN auth.projects p ON p.external_id = i.project_id
            JOIN auth.organizations o
              ON o.external_id = p.organization_id AND o.status = 'active'
            LEFT JOIN auth.identities inviter ON inviter.user_id = i.invited_by
-           LEFT JOIN auth.organization_members owner_row
-                  ON owner_row.organization_id = p.organization_id AND owner_row.role = 'owner'
-           LEFT JOIN auth.identities owner_identity ON owner_identity.user_id = owner_row.user_id
           WHERE i.token_hash = $1
             AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > now()",
     )
@@ -245,8 +239,8 @@ pub struct IncomingInvite {
     /// A `ProjectId` or an `OrganizationId` depending on `scope`. A plain
     /// string because no one newtype is honest for both halves of the union.
     pub target_id: String,
-    /// The project's name, or the organization's: its name, else its owner's
-    /// address.
+    /// The project's name, or the organization's. An organization invites
+    /// nobody until it is named, so the latter is never blank in practice.
     pub target_name: String,
     pub role: String,
     /// Who sent it. `None` once they have been erased.
@@ -319,7 +313,7 @@ pub async fn list_incoming(
          SELECT i.id,
                 'organization'::text AS scope,
                 i.organization_id AS target_id,
-                COALESCE(o.name, owner_identity.email, '') AS target_name,
+                COALESCE(o.name, '') AS target_name,
                 i.role,
                 inviter.email AS inviter_email,
                 inviter.display_name AS inviter_display_name,
@@ -329,9 +323,6 @@ pub async fn list_incoming(
            JOIN auth.organizations o
              ON o.external_id = i.organization_id AND o.status = 'active'
            LEFT JOIN auth.identities inviter ON inviter.user_id = i.invited_by
-           LEFT JOIN auth.organization_members owner_row
-                  ON owner_row.organization_id = i.organization_id AND owner_row.role = 'owner'
-           LEFT JOIN auth.identities owner_identity ON owner_identity.user_id = owner_row.user_id
           WHERE i.email = $1
             AND i.accepted_at IS NULL
             AND i.revoked_at IS NULL

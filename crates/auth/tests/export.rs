@@ -74,8 +74,7 @@ fn active_organization(me: &Value) -> String {
         .to_owned()
 }
 
-/// Sign in, which provisions the organization and its first project, and
-/// answer the organization's id.
+/// Sign in, which provisions the organization, and answer its id.
 async fn sign_in(pool: &PgPool, user: &str) -> String {
     seed_identity(pool, user, &format!("{user}@example.test")).await;
     let body = json!({});
@@ -128,16 +127,6 @@ async fn sign_in_from_a_browser(pool: &PgPool, user: &str, sid: &str, user_agent
         "a sign-in records its session's row: {me}"
     );
     active_organization(&me)
-}
-
-async fn project_of(pool: &PgPool, organization: &str) -> String {
-    sqlx::query_scalar(
-        "SELECT external_id FROM auth.projects WHERE organization_id = $1 ORDER BY created_at",
-    )
-    .bind(organization)
-    .fetch_one(pool)
-    .await
-    .expect("sign-in provisions a project")
 }
 
 /// Put `user` on `organization`'s roster at `role`.
@@ -204,7 +193,35 @@ async fn export(pool: &PgPool, caller: &str, organization: &str) -> (StatusCode,
 async fn seed(pool: &PgPool) -> (String, String) {
     apply_audit_migrations(pool).await;
     let organization = sign_in_from_a_browser(pool, OWNER, PROVIDER_SID, "Firefox").await;
-    let project = project_of(pool, &organization).await;
+    // What the console has the owner do before anything else: name the
+    // organization, which the invitation below needs, and make a project.
+    let (status, named) = call(
+        pool,
+        "PATCH",
+        "/internal/organization",
+        OWNER,
+        &organization,
+        None,
+        Some(json!({ "name": "Acme" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "name: {named}");
+    let (status, created) = call(
+        pool,
+        "POST",
+        "/internal/projects",
+        OWNER,
+        &organization,
+        None,
+        Some(json!({ "name": "Platform" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "project: {created}");
+    let project = created
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("the project's id")
+        .to_owned();
 
     let (status, _) = call(
         pool,
@@ -467,6 +484,18 @@ async fn an_export_carries_nothing_from_a_project_the_caller_is_only_a_member_of
     let (foreign_organization, foreign) = seed(&pool).await;
     let member = "user_export_member";
     let own_organization = sign_in(&pool, member).await;
+    let (status, created) = call(
+        &pool,
+        "POST",
+        "/internal/projects",
+        member,
+        &own_organization,
+        None,
+        Some(json!({ "name": "Platform" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let own = created["id"].as_str().expect("the project's id").to_owned();
     seat(&pool, &foreign_organization, member, "member").await;
     sqlx::query(
         "INSERT INTO auth.project_members (project_id, user_id, role, added_by)
@@ -482,7 +511,6 @@ async fn an_export_carries_nothing_from_a_project_the_caller_is_only_a_member_of
     let (status, body) = export(&pool, member, &own_organization).await;
     assert_eq!(status, StatusCode::OK, "export failed: {body}");
 
-    let own = project_of(&pool, &own_organization).await;
     let listed: Vec<&Value> = body["projects"]
         .as_array()
         .expect("a projects array")

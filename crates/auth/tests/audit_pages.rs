@@ -71,8 +71,8 @@ async fn json_body(resp: axum::response::Response) -> Value {
     serde_json::from_slice(&bytes).expect("JSON body")
 }
 
-/// Sign in, which provisions the organization and its first project. Returns
-/// the organization's id, as `/me` names it active.
+/// Sign in, which provisions the organization and nothing in it. Returns the
+/// organization's id, as `/me` names it active.
 async fn sign_in(pool: &PgPool, user: &str) -> String {
     seed_identity(pool, user, &format!("{user}@example.test")).await;
     let body = json!({});
@@ -100,18 +100,25 @@ async fn sign_in(pool: &PgPool, user: &str) -> String {
         .to_owned()
 }
 
-/// The project an organization was provisioned with.
-async fn project_of(pool: &PgPool, organization: &str) -> String {
-    sqlx::query_scalar(
-        "SELECT external_id FROM auth.projects WHERE organization_id = $1 ORDER BY created_at",
+/// A project in `organization`, made by [`OWNER`] as the console would, so its
+/// creation is the first row on its own page: sign-in makes none.
+async fn create_project(pool: &PgPool, organization: &str, name: &str) -> String {
+    let (status, body) = call(
+        pool,
+        "POST",
+        "/internal/projects",
+        OWNER,
+        organization,
+        None,
+        Some(json!({ "name": name })),
     )
-    .bind(organization)
-    .fetch_one(pool)
-    .await
-    .expect("sign-in provisions a project")
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "creating {name}: {body}");
+    body["id"].as_str().expect("the project's id").to_owned()
 }
 
-/// A second project in the same organization, whose page must not read the first's.
+/// A second project in the same organization, seeded without a row of its
+/// own, whose page must not read the first's.
 async fn second_project(pool: &PgPool, organization: &str) -> String {
     let id = ProjectId::new();
     let organization = OrganizationId::try_new(organization).unwrap();
@@ -176,7 +183,7 @@ fn events(body: &Value) -> &Vec<Value> {
 async fn a_projects_page_lists_the_rows_written_inside_it_and_no_others(pool: PgPool) {
     apply_audit_migrations(&pool).await;
     let organization = sign_in(&pool, OWNER).await;
-    let first = project_of(&pool, &organization).await;
+    let first = create_project(&pool, &organization, "First project").await;
     let second = second_project(&pool, &organization).await;
     mint(&pool, OWNER, &organization, &first, "first key").await;
     mint(&pool, OWNER, &organization, &second, "second key").await;
@@ -255,7 +262,7 @@ async fn the_owner_and_admins_read_a_project_and_the_organization(pool: PgPool) 
     let admins = sign_in(&pool, ADMIN).await;
     sign_in(&pool, MEMBER).await;
     sign_in(&pool, STRANGER).await;
-    let project = project_of(&pool, &owners).await;
+    let project = create_project(&pool, &owners, "Platform").await;
     let owner_organization = OrganizationId::try_new(&owners).unwrap();
     let project_id = ProjectId::try_new(&project).unwrap();
     let added_by = UserId::try_new(OWNER).unwrap();
@@ -379,7 +386,7 @@ async fn the_owner_and_admins_read_a_project_and_the_organization(pool: PgPool) 
 async fn a_filter_narrows_the_page_and_a_word_outside_the_vocabulary_is_refused(pool: PgPool) {
     apply_audit_migrations(&pool).await;
     let organization = sign_in(&pool, OWNER).await;
-    let project = project_of(&pool, &organization).await;
+    let project = create_project(&pool, &organization, "Platform").await;
     mint(&pool, OWNER, &organization, &project, "filtered key").await;
 
     let page = format!("/internal/audit/projects/{project}");

@@ -103,6 +103,21 @@ fn not_linked(what: &str) -> TelmoniError {
     TelmoniError::Internal(format!("{what} is not answered by this module"))
 }
 
+/// Where a project is held, and how the console's paths spell it there:
+/// `/{organization_slug}/{slug}`. A module keeps rows by id and links by slug,
+/// since the slugs are the address a person reads and an id never is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectHome {
+    /// The project asked about.
+    pub project_id: ProjectId,
+    /// The project's segment in console paths.
+    pub slug: String,
+    /// The organization holding it now.
+    pub organization_id: OrganizationId,
+    /// The organization's segment, which the project's follows.
+    pub organization_slug: String,
+}
+
 /// What auth answers the modules beside it.
 #[async_trait]
 pub trait Auth: Send + Sync {
@@ -123,17 +138,29 @@ pub trait Auth: Send + Sync {
         Err(not_linked("a role read again"))
     }
 
-    /// Where each of `projects` is held now — its organization — for every
-    /// one that still exists; one that does not is left out. For a module
-    /// keying rows on a project and its organization, finding the ones a
-    /// transfer or a delete left behind. An error answers nothing, never
-    /// "none of them exist".
+    /// Where each of `projects` is held now — its organization, and the slugs
+    /// the console's paths spell both by — for every one that still exists;
+    /// one that does not is left out. For a module keying rows on a project
+    /// and its organization, finding the ones a transfer or a delete left
+    /// behind, and for one spelling a link to a project's page. An error
+    /// answers nothing, never "none of them exist".
     async fn project_homes(
         &self,
         projects: &[ProjectId],
-    ) -> Result<Vec<(ProjectId, OrganizationId)>, TelmoniError> {
+    ) -> Result<Vec<ProjectHome>, TelmoniError> {
         let _ = projects;
         Err(not_linked("project homes"))
+    }
+
+    /// The slug each of `organizations` goes by, for every one that exists in
+    /// any status; one that does not is left out. For a module spelling a
+    /// link to an organization's own page.
+    async fn organization_slugs(
+        &self,
+        organizations: &[OrganizationId],
+    ) -> Result<Vec<(OrganizationId, String)>, TelmoniError> {
+        let _ = organizations;
+        Err(not_linked("organization slugs"))
     }
 
     /// The global feature-flag set. **An unreadable set is an error, never

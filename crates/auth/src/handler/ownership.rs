@@ -83,11 +83,11 @@ async fn locked<'a>(
 /// it has a name, and only to one of its admins. Answers the name, for the
 /// mail.
 ///
-/// ⚠ **Only a named organization.** An unnamed one is shown by its owner's
-/// address, so handing it over would relabel it as the new owner's for
-/// everyone in it, and the new owner's own unnamed organization already wears
-/// that label. A name can be changed but never cleared, so one checked here
-/// is still there at accept.
+/// ⚠ **Only a named organization.** The offer's mail and notice call the
+/// organization by its name, and an unnamed one has nothing to be called by
+/// — nor anyone in it but its owner, since the invite lanes hold the same
+/// line. A name can be changed but never cleared, so one checked here is
+/// still there at accept.
 async fn offerable(
     tx: &mut Scoped<'_, Organization>,
     role: OrganizationRole,
@@ -106,8 +106,8 @@ async fn offerable(
         .filter(|name| !name.is_empty())
     else {
         return Err(AuthError::Conflict(
-            "name the organization before handing it over — until it has a name it is shown \
-             by its owner's address, which would change hands with it"
+            "name the organization before handing it over — the offer calls it by its name, \
+             and it has none yet"
                 .into(),
         )
         .into());
@@ -296,7 +296,7 @@ pub async fn cancel(
     tx.commit().await?;
 
     if let (Some(to), Some(owner)) = (&holder_email, owner) {
-        let label = crate::identity::organization_label(name.as_deref(), Some(&owner.email));
+        let label = crate::identity::organization_label(name.as_deref());
         if let Err(e) = state
             .mailer
             .send_ownership_offer_withdrawn(to, &owner.display(), &label)
@@ -356,7 +356,7 @@ pub async fn decline(
     tx.commit().await?;
 
     if let (Some(owner), Some(admin)) = (owner, admin) {
-        let label = crate::identity::organization_label(name.as_deref(), Some(&owner.email));
+        let label = crate::identity::organization_label(name.as_deref());
         if let Err(e) = state
             .mailer
             .send_ownership_declined(&owner.email, &admin.display(), &label)
@@ -487,7 +487,7 @@ pub async fn accept(
     tx.commit().await?;
 
     if let (Some(previous), Some(new_owner)) = (previous_contact, new_owner) {
-        let label = crate::identity::organization_label(name.as_deref(), Some(&new_owner.email));
+        let label = crate::identity::organization_label(name.as_deref());
         if let Err(e) = state
             .mailer
             .send_ownership_accepted(&previous.email, &new_owner.display(), &label)

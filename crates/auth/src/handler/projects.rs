@@ -53,9 +53,6 @@ fn name_taken(e: sqlx::Error, name: &str) -> TelmoniError {
     }
 }
 
-/// The project every organization starts with.
-pub const DEFAULT_PROJECT_NAME: &str = "Default Project";
-
 /// `GET /internal/projects` — the projects the caller can open in the
 /// organization named by `x-organization-id`, by name.
 pub async fn list_projects(
@@ -164,8 +161,9 @@ pub async fn create_project(
 /// **The audit chain stays, and must**: `in_project` has no foreign key, so a
 /// destruction does not erase its own record.
 ///
-/// ⚠️ **OWNER ONLY, tighter than create**: what a workspace IS belongs to the
-/// owner. The last project may go; `/console` handles an organization with none.
+/// ⚠️ **OWNER ONLY, tighter than create**: what an organization IS belongs to
+/// the owner. The last project may go; `/console` handles an organization
+/// with none.
 ///
 /// Notifications keys its rows on `project_id` with no cross-schema foreign
 /// key, so its purge lane is called once the row is gone, best effort: what a

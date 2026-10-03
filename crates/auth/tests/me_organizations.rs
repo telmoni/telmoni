@@ -96,13 +96,41 @@ async fn me(pool: &PgPool, user: &str, requested: Option<&str>) -> (StatusCode, 
     call(pool, "POST", "/me", user, requested, None).await
 }
 
-/// Sign somebody in for the first time; answers the organization they were
-/// provisioned with.
+/// Sign somebody in for the first time and name the organization they were
+/// provisioned with, as the console has every owner do before it opens to
+/// them; answers its id.
 async fn sign_in(pool: &PgPool, user: &str) -> String {
     seed_identity(pool, user, &format!("{user}@example.test")).await;
     let (status, body) = me(pool, user, None).await;
     assert_eq!(status, StatusCode::OK, "sign-in failed for {user}: {body}");
-    body["activeOrganizationId"].as_str().unwrap().to_owned()
+    let organization = body["activeOrganizationId"].as_str().unwrap().to_owned();
+    let (status, body) = call(
+        pool,
+        "PATCH",
+        "/internal/organization",
+        user,
+        Some(&organization),
+        Some(json!({ "name": "Acme" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "naming {organization}: {body}");
+    organization
+}
+
+/// `owner` makes a project in `organization`, which sign-in does not;
+/// answers its id.
+async fn create_project(pool: &PgPool, owner: &str, organization: &str, name: &str) -> String {
+    let (status, body) = call(
+        pool,
+        "POST",
+        "/internal/projects",
+        owner,
+        Some(organization),
+        Some(json!({ "name": name })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "creating {name}: {body}");
+    body["id"].as_str().unwrap().to_owned()
 }
 
 /// `owner` brings `user` into `organization` as a member: invite, accept.
@@ -218,7 +246,7 @@ async fn the_active_organization_is_the_requested_one_only_when_the_person_is_in
     );
     assert_eq!(
         body["organizations"][1]["ownerEmail"], "user_me_other_owner@example.test",
-        "an unnamed organization is labelled by its owner"
+        "each organization carries its owner, for the console to name whom to ask"
     );
 
     for requested in [stranger.as_str(), "user_me_active", "not an id at all"] {
@@ -319,6 +347,7 @@ async fn somebody_who_owns_nothing_lands_where_they_belong(pool: PgPool) {
     // seat must go the way of the organization in the answer.
     let third = sign_in(&pool, "user_me_third_owner").await;
     join(&pool, &third, "user_me_third_owner", "user_me_member_only").await;
+    create_project(&pool, "user_me_third_owner", &third, "Platform").await;
     sqlx::query(
         "INSERT INTO auth.project_members (project_id, user_id, role, added_by)
          SELECT external_id, 'user_me_member_only', 'member', 'user_me_third_owner'

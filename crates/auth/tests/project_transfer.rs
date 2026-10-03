@@ -36,8 +36,7 @@ const SERVICE_SECRET: &str = "test-service-secret";
 const OWNER: &str = "user_handover_owner";
 const ADMIN: &str = "user_handover_admin";
 const MEMBER: &str = "user_handover_member";
-/// What the owner calls the project. Every organization is provisioned a
-/// "Default Project", so a project still called that could land nowhere.
+/// What the owner calls the project.
 const PROJECT_NAME: &str = "Payments";
 
 /// Every mail auth hands its transport, kept for the tests that read them.
@@ -170,9 +169,33 @@ async fn call(
     .await
 }
 
-/// Sign somebody in for the first time; answers the organization they were
-/// provisioned with.
+/// Sign somebody in for the first time and name the organization they were
+/// provisioned with, as the console has every owner do before it opens to
+/// them; answers its id.
 async fn sign_in(pool: &PgPool, user: &str) -> String {
+    seed_identity(pool, user, &format!("{user}@example.test")).await;
+    let (status, body) = call(pool, "POST", "/me", user, None, None).await;
+    assert_eq!(status, StatusCode::OK, "sign-in failed for {user}: {body}");
+    let organization = body["activeOrganizationId"]
+        .as_str()
+        .expect("/me names the active organization")
+        .to_owned();
+    let (status, body) = call(
+        pool,
+        "PATCH",
+        "/internal/organization",
+        user,
+        Some(&organization),
+        Some(json!({ "name": "Acme" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "naming {organization}: {body}");
+    organization
+}
+
+/// Sign somebody in for the first time and leave their organization as
+/// provisioning left it: without a name.
+async fn sign_in_unnamed(pool: &PgPool, user: &str) -> String {
     seed_identity(pool, user, &format!("{user}@example.test")).await;
     let (status, body) = call(pool, "POST", "/me", user, None, None).await;
     assert_eq!(status, StatusCode::OK, "sign-in failed for {user}: {body}");
@@ -182,13 +205,20 @@ async fn sign_in(pool: &PgPool, user: &str) -> String {
         .to_owned()
 }
 
-/// The one project an organization was provisioned with.
-async fn project_in(pool: &PgPool, organization: &str) -> String {
-    sqlx::query_scalar("SELECT external_id FROM auth.projects WHERE organization_id = $1")
-        .bind(organization)
-        .fetch_one(pool)
-        .await
-        .expect("sign-in provisions exactly one project")
+/// `caller` makes a project called `name` in `organization`, which sign-in
+/// does not; answers its id.
+async fn create_project(pool: &PgPool, caller: &str, organization: &str, name: &str) -> String {
+    let (status, body) = call(
+        pool,
+        "POST",
+        "/internal/projects",
+        caller,
+        Some(organization),
+        Some(json!({ "name": name })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "creating {name}: {body}");
+    body["id"].as_str().expect("the project's id").to_owned()
 }
 
 /// The organization a project is in now.
@@ -263,8 +293,7 @@ struct Handover {
 async fn staffed_project(pool: &PgPool) -> Handover {
     apply_audit_migrations(pool).await;
     let source = sign_in(pool, OWNER).await;
-    let project = project_in(pool, &source).await;
-    rename(pool, &source, &project, PROJECT_NAME).await;
+    let project = create_project(pool, OWNER, &source, PROJECT_NAME).await;
     let admins = sign_in(pool, ADMIN).await;
     let members = sign_in(pool, MEMBER).await;
     seat(pool, &source, &project, ADMIN, "admin").await;
@@ -818,23 +847,61 @@ async fn the_destination_is_one_the_acceptor_owns(pool: PgPool) {
     );
 }
 
-/// Every organization starts with a "Default Project", so a clash is the
-/// common case, not the odd one: the project lands under the first free
-/// numbered name, judged case-insensitively as the index judges, and the
-/// destination's own projects keep their names.
+/// ⚠ **A project lands only in a named organization.** Nobody can be invited
+/// into an unnamed one, and a project brings every seat on it along, so the
+/// accept holds the line the invite lanes hold — until the admin names theirs.
+#[sqlx::test]
+async fn the_destination_must_be_named(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let second = "user_handover_unnamed_admin";
+    let theirs = sign_in_unnamed(&pool, second).await;
+    seat(&pool, &h.source, &h.project, second, "admin").await;
+    assert_eq!(
+        offer(&pool, &h, OWNER, &h.source, second).await.0,
+        StatusCode::OK
+    );
+
+    let (status, body) = accept(&pool, &h, second, &theirs, None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        body["detail"]
+            .as_str()
+            .unwrap()
+            .starts_with("name the organization"),
+        "{body}"
+    );
+    assert_eq!(organization_of_project(&pool, &h.project).await, h.source);
+
+    let (status, body) = call(
+        &pool,
+        "PATCH",
+        "/internal/organization",
+        second,
+        Some(&theirs),
+        Some(json!({ "name": "Beta Labs" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = accept(&pool, &h, second, &theirs, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(organization_of_project(&pool, &h.project).await, theirs);
+}
+
+/// Two organizations naming a project alike is the common case, not the odd
+/// one: the project lands under the first free numbered name, judged
+/// case-insensitively as the index judges, and the destination's own projects
+/// keep their names.
 #[sqlx::test]
 async fn a_name_already_taken_in_the_destination_lands_numbered(pool: PgPool) {
     let h = staffed_project(&pool).await;
-    let default = telmoni_auth::handler::projects::DEFAULT_PROJECT_NAME;
-    rename(&pool, &h.source, &h.project, default).await;
-    let own = project_in(&pool, &h.admins).await;
+    let own = create_project(&pool, ADMIN, &h.admins, PROJECT_NAME).await;
     let (status, created) = call(
         &pool,
         "POST",
         "/internal/projects",
         ADMIN,
         Some(&h.admins),
-        Some(json!({ "name": "DEFAULT PROJECT 2" })),
+        Some(json!({ "name": "PAYMENTS 2" })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
@@ -845,7 +912,7 @@ async fn a_name_already_taken_in_the_destination_lands_numbered(pool: PgPool) {
 
     let (status, body) = accept(&pool, &h, ADMIN, &h.admins, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["name"], "Default Project 3", "{body}");
+    assert_eq!(body["name"], "Payments 3", "{body}");
     assert_eq!(organization_of_project(&pool, &h.project).await, h.admins);
 
     let name_of = |project: String| {
@@ -858,11 +925,11 @@ async fn a_name_already_taken_in_the_destination_lands_numbered(pool: PgPool) {
                 .expect("read the project's name")
         }
     };
-    assert_eq!(name_of(h.project.clone()).await, "Default Project 3");
-    assert_eq!(name_of(own).await, default);
+    assert_eq!(name_of(h.project.clone()).await, "Payments 3");
+    assert_eq!(name_of(own).await, PROJECT_NAME);
     assert_eq!(
         name_of(created["id"].as_str().expect("id").to_owned()).await,
-        "DEFAULT PROJECT 2"
+        "PAYMENTS 2"
     );
 
     let renamed_from: Option<String> = sqlx::query_scalar(
@@ -873,7 +940,7 @@ async fn a_name_already_taken_in_the_destination_lands_numbered(pool: PgPool) {
     .fetch_one(&pool)
     .await
     .expect("read the received row");
-    assert_eq!(renamed_from.as_deref(), Some(default));
+    assert_eq!(renamed_from.as_deref(), Some(PROJECT_NAME));
 }
 
 /// Hand `h.project`, named `name`, to the admin, whose organization has also
@@ -901,14 +968,13 @@ async fn land(pool: &PgPool, h: &Handover, name: &str, held: &[&str]) -> Value {
     body["name"].clone()
 }
 
-/// "Default Project 2" arriving where "Default Project" and a "2" already
-/// are carries the series on, rather than becoming "Default Project 2 2".
+/// "Payments 2" arriving where "Payments" and a "2" already are carries the
+/// series on, rather than becoming "Payments 2 2".
 #[sqlx::test]
 async fn a_numbered_name_continues_its_series(pool: PgPool) {
     let h = staffed_project(&pool).await;
-    // The admin's organization holds "Default Project" from its sign-in.
-    let landed = land(&pool, &h, "Default Project 2", &["Default Project 2"]).await;
-    assert_eq!(landed, "Default Project 3");
+    let landed = land(&pool, &h, "Payments 2", &["Payments", "Payments 2"]).await;
+    assert_eq!(landed, "Payments 3");
 }
 
 /// A number that is part of the name is left alone: with no "Project" in the

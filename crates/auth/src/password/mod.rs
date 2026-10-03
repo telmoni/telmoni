@@ -72,8 +72,9 @@ pub struct PasswordProvider {
     db: PgPool,
     issuer: Arc<Issuer>,
     mailer: Arc<dyn Mailer>,
-    /// Whether anybody may create an account (`ALLOW_SIGN_UP`). Off, an
-    /// invitation is the only way in.
+    /// Whether anybody may create a password account (`ALLOW_SIGN_UP`). Off,
+    /// an invited address alone may; the provider's sign-ups are its own
+    /// switch.
     allow_sign_up: bool,
 }
 

@@ -585,7 +585,8 @@ async fn authorize_mints_a_state_and_stores_only_its_hash(pool: PgPool) {
     assert_eq!(provider, "slack");
 }
 
-/// Connecting is the owner's; a member is refused before anything is written or asked.
+/// Connecting is the owner's and the admins'; a member is refused before
+/// anything is written or asked.
 #[sqlx::test]
 async fn a_member_cannot_start_a_handshake(pool: PgPool) {
     apply_audit_migrations(&pool).await;

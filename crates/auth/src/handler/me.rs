@@ -9,9 +9,9 @@
 //! `activeOrganizationId: null`, on which the console shows exactly those.
 //!
 //! The SUBJECT is the resolved bearer. What the provider says about them is
-//! `auth.identities`, recorded from the provider's own answer at the code
-//! exchange and every refresh; nothing in the body may name or describe the
-//! person.
+//! `auth.identities`, recorded from the provider's own answer at each
+//! sign-in's code exchange — a refresh asks the provider nothing; nothing in
+//! the body may name or describe the person.
 
 use std::sync::Arc;
 
@@ -24,7 +24,7 @@ use telmoni_shared::db::tenant_session::{maintenance_scope, person_scope};
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::{
-    AuditAction, AuthError, AuthzError, Flag, FlagSet, OrganizationId, OrganizationRole, ProjectId,
+    AuditAction, AuthError, AuthzError, Flag, FlagSet, OrganizationId, OrganizationRole,
     TelmoniError, TelmoniResourceKind, UserId, slug,
 };
 
@@ -32,7 +32,7 @@ use crate::{
     AppState,
     db::{
         AuthLane, flags, identities, invites, locks, members, organization_members, organizations,
-        projects, sessions,
+        sessions,
     },
 };
 
@@ -174,7 +174,7 @@ pub async fn me(
     };
 
     // ⚠ **The maintenance lane, for a question about the caller.** Each
-    // organization is labelled by its OWNER — another person's row and
+    // organization comes with its owner to contact — another person's row and
     // identity — and every invitation is another organization's. There is no
     // one GUC that opens exactly those, as `/internal/projects/everywhere`
     // found before this.
@@ -323,8 +323,9 @@ enum Provisioning {
 }
 
 /// Give a person who belongs to no active organization one of their own: the
-/// organization, their owner row, and a Default Project, audited, in one
-/// transaction.
+/// organization and their owner row, audited, in one transaction. Nothing
+/// else: the organization has no name until its owner gives it one, and no
+/// project until somebody makes one, as a Vercel team starts empty.
 ///
 /// ⚠ **Serialised on the person, and re-checked under the lock.** Two
 /// concurrent first renders would otherwise each see "no organization" and
@@ -359,22 +360,13 @@ async fn provision_first_organization(
         return Err(AuthzError::Forbidden("account deletion in progress".into()).into());
     }
 
-    // ⚠ MINTED, both of them: an organization is nobody's id, and a project
-    // borrowing one would put it in every console URL.
+    // ⚠ MINTED: an organization is nobody's id.
     let organization = OrganizationId::new();
-    let project = ProjectId::new();
     // Both GUCs from here: the person's for the check above, the new
     // organization's for the rows below, whose policies' WITH CHECK name it.
     let mut tx = tx.bind_organization(&organization).await?;
     organizations::create(&mut tx, &organization).await?;
     organization_members::insert_owner(&mut tx, &organization, user_id).await?;
-    projects::create(
-        &mut tx,
-        &project,
-        &organization,
-        crate::handler::projects::DEFAULT_PROJECT_NAME,
-    )
-    .await?;
     emit_audit(
         &mut tx,
         AuditEvent {
@@ -406,25 +398,6 @@ async fn provision_first_organization(
             metadata: Some(serde_json::json!({
                 "kind": "auto_provision",
                 "role": OrganizationRole::Owner.to_string(),
-            })),
-        },
-    )
-    .await?;
-    emit_audit(
-        &mut tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: Some(&project),
-            actor: Actor::User(user_id.as_str()),
-            action: AuditAction::Created,
-            resource_kind: TelmoniResourceKind::Project,
-            resource_id: Some(project.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(serde_json::json!({
-                "name": crate::handler::projects::DEFAULT_PROJECT_NAME,
-                "kind": "auto_provision",
             })),
         },
     )

@@ -87,14 +87,40 @@ async fn me(pool: &PgPool, user: &str) -> Value {
     json_body(resp).await
 }
 
-/// Sign somebody in, provisioning the organization they own. Returns its id,
-/// as `/me` names it active.
+/// Sign somebody in, provisioning the organization they own, then name it, as
+/// the console has every owner do before anything else, and make the one
+/// project these tests act on. Returns its id, as `/me` names it active.
 async fn sign_in(pool: &PgPool, user: &str, email: &str) -> String {
     seed_identity(pool, user, email).await;
-    me(pool, user).await["activeOrganizationId"]
+    let organization = me(pool, user).await["activeOrganizationId"]
         .as_str()
         .expect("/me names the active organization")
-        .to_owned()
+        .to_owned();
+    let (status, body) = call_organization(
+        pool,
+        "PATCH",
+        "/internal/organization",
+        user,
+        &organization,
+        Some(json!({ "name": "Acme" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "naming {organization}: {body}");
+    let (status, body) = call_organization(
+        pool,
+        "POST",
+        "/internal/projects",
+        user,
+        &organization,
+        Some(json!({ "name": "Platform" })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "{user}'s first project: {body}"
+    );
+    organization
 }
 
 async fn call_organization(

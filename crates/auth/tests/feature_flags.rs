@@ -97,13 +97,34 @@ async fn sign_in(pool: &PgPool, user: &str) -> String {
         .to_owned()
 }
 
-/// The project an organization was provisioned with.
-async fn project_of(pool: &PgPool, organization: &str) -> String {
-    sqlx::query_scalar("SELECT external_id FROM auth.projects WHERE organization_id = $1")
-        .bind(organization)
-        .fetch_one(pool)
+/// A project in `organization`, made by `owner` as the console would: sign-in
+/// makes none.
+async fn create_project(pool: &PgPool, owner: &str, organization: &str) -> String {
+    let resp = app(pool.clone())
+        .oneshot(
+            as_person(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/projects")
+                    .header("x-service-secret", SERVICE_SECRET)
+                    .header("x-organization-id", organization)
+                    .header("content-type", "application/json"),
+                pool,
+                owner,
+            )
+            .await
+            .body(Body::from(json!({ "name": "Platform" }).to_string()))
+            .unwrap(),
+        )
         .await
-        .expect("sign-in provisions exactly one project")
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED, "the fixture project");
+    json_body(resp)
+        .await
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .expect("the project's id")
+        .to_owned()
 }
 
 /// What `make flag` writes: one append-only row, global or per organization.
@@ -234,7 +255,10 @@ async fn validation_carries_the_set_and_v1_refuses_when_public_api_is_off(pool: 
                     .uri("/internal/tokens")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("x-organization-id", &organization)
-                    .header("x-project-id", &project_of(&pool, &organization).await)
+                    .header(
+                        "x-project-id",
+                        &create_project(&pool, "u_owner", &organization).await,
+                    )
                     .header("content-type", "application/json"),
                 &pool,
                 "u_owner",
@@ -349,7 +373,10 @@ async fn a_walled_organizations_token_opens_nothing_and_a_served_read_stamps_las
                     .uri("/internal/tokens")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("x-organization-id", &organization)
-                    .header("x-project-id", &project_of(&pool, &organization).await)
+                    .header(
+                        "x-project-id",
+                        &create_project(&pool, "u_owner", &organization).await,
+                    )
                     .header("content-type", "application/json"),
                 &pool,
                 "u_owner",

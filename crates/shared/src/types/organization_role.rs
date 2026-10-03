@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 
 /// Role a user holds across an entire organization.
 ///
-/// Organization-wide roles govern workspace management: creating projects,
-/// managing organization-level settings, and invite authority. Project-level
-/// permissions remain governed by [`crate::Role`].
+/// Organization-wide roles govern the organization's management: creating
+/// projects, managing organization-level settings, and invite authority.
+/// Project-level permissions remain governed by [`crate::Role`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
@@ -23,7 +23,8 @@ pub enum OrganizationRole {
     /// Administrative access across all projects in the organization.
     ///
     /// Can create projects, manage organization settings, members and audit
-    /// logs. Cannot delete the organization or hand over ownership.
+    /// logs. Cannot delete the organization or its projects, hand over
+    /// ownership, or hand a project to another organization.
     Admin,
     /// Default role for invited members.
     ///

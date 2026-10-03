@@ -1276,7 +1276,7 @@ pub async fn fail_pending_for_connections(
     Ok(done.rows_affected())
 }
 
-/// Who started an attempt: the queue, or an owner resending from the log.
+/// Who started an attempt: the queue, or an owner or admin resending from the log.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttemptTrigger {
     Scheduled,

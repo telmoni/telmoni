@@ -30,7 +30,9 @@ use sqlx::PgPool;
 use telmoni_shared::acting::Acting;
 use telmoni_shared::config::env_parse;
 use telmoni_shared::middleware::service_auth::{ServiceSecrets, require_service_secret};
-use telmoni_shared::seam::{AuditEventsQuery, Auth, DocumentCursor, PurgeHook, SourceDocument};
+use telmoni_shared::seam::{
+    AuditEventsQuery, Auth, DocumentCursor, ProjectHome, PurgeHook, SourceDocument,
+};
 use telmoni_shared::{
     AuthError, FlagSet, OrganizationId, OrganizationStatus, ProjectId, TelmoniError,
 };
@@ -123,8 +125,15 @@ impl Auth for LateAuth {
     async fn project_homes(
         &self,
         projects: &[ProjectId],
-    ) -> Result<Vec<(ProjectId, OrganizationId)>, TelmoniError> {
+    ) -> Result<Vec<ProjectHome>, TelmoniError> {
         self.get()?.project_homes(projects).await
+    }
+
+    async fn organization_slugs(
+        &self,
+        organizations: &[OrganizationId],
+    ) -> Result<Vec<(OrganizationId, String)>, TelmoniError> {
+        self.get()?.organization_slugs(organizations).await
     }
 
     async fn global_flags(&self) -> Result<FlagSet, TelmoniError> {

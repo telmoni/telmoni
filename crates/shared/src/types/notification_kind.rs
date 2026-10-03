@@ -12,11 +12,11 @@ use serde::{Deserialize, Serialize};
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum NotificationKind {
-    /// An alert for the organization's owner, raised by a service beside this
-    /// repository's, which writes its own title and body. It lands on the
-    /// organization's feed, never a project's.
+    /// An alert for the organization's owner and admins, raised by a service
+    /// beside this repository's, which writes its own title and body. It lands
+    /// on the organization's feed, never a project's.
     OrganizationAlert,
-    /// An organization owner added somebody as a member.
+    /// Somebody accepted an invitation to a project.
     MemberAdded,
     /// A member left or was removed from a project.
     MemberLeft,

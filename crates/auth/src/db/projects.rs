@@ -4,9 +4,9 @@ use serde::Serialize;
 use sqlx::prelude::FromRow;
 
 use telmoni_shared::db::tenant_session::{
-    Binding, Maintenance, Organization, PersonAndOrganization, ProjectAndOrganization,
-    ProjectAndPerson, Scoped,
+    Binding, Maintenance, Organization, ProjectAndOrganization, ProjectAndPerson, Scoped,
 };
+use telmoni_shared::seam::ProjectHome;
 use telmoni_shared::{
     OrganizationId, OrganizationRole, OrganizationStatus, ProjectId, Role, UserId,
     derive_shard_key, slug,
@@ -14,11 +14,9 @@ use telmoni_shared::{
 
 use crate::db::AuthLane;
 
-/// Bindings a project is created under: the organization's own, and the
-/// person's with it at first-sign-in provisioning.
+/// The binding a project is created under: the organization's own.
 pub trait ProjectCreate: Binding {}
 impl ProjectCreate for Organization {}
-impl ProjectCreate for PersonAndOrganization {}
 
 /// The first of the slugs in `$3` no other project in organization `$2` goes
 /// by, project `$1` itself excepted: a statement that splices this in numbers
@@ -190,18 +188,32 @@ pub async fn standing<B: Binding>(
     .await
 }
 
-/// The organization holding each of `projects`, for those that exist.
-/// Across every tenant, so the lane.
+/// The organization holding each of `projects`, with both slugs, for those
+/// that exist. Across every tenant, so the lane.
 pub async fn homes(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     projects: &[ProjectId],
-) -> sqlx::Result<Vec<(ProjectId, OrganizationId)>> {
-    sqlx::query_as(
-        "SELECT external_id, organization_id FROM auth.projects WHERE external_id = ANY($1)",
+) -> sqlx::Result<Vec<ProjectHome>> {
+    let rows: Vec<(ProjectId, String, OrganizationId, String)> = sqlx::query_as(
+        "SELECT p.external_id, p.slug, p.organization_id, o.slug
+           FROM auth.projects p
+           JOIN auth.organizations o ON o.external_id = p.organization_id
+          WHERE p.external_id = ANY($1)",
     )
     .bind(projects)
     .fetch_all(tx.conn())
-    .await
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(project_id, slug, organization_id, organization_slug)| ProjectHome {
+                project_id,
+                slug,
+                organization_id,
+                organization_slug,
+            },
+        )
+        .collect())
 }
 
 /// How many projects an organization holds.
@@ -340,16 +352,12 @@ pub struct ProjectEverywhere {
     pub organization_id: OrganizationId,
     /// Where the organization's paths begin, so a link names both segments.
     pub organization_slug: String,
-    /// What the organization's owner called it; `None` means never named.
+    /// What the organization is called; `None` means never named.
     pub organization_name: Option<String>,
-    /// The organization's owner's address — what a page shows when it has no
-    /// name.
-    pub organization_owner_email: Option<String>,
 }
 
 /// Every project this person can open in ANY active organization. One query
 /// rather than one per organization, because the rail renders on every page.
-/// The owner who labels each organization is somebody else.
 pub async fn list_everywhere_for_user(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     user_id: &UserId,
@@ -369,8 +377,7 @@ pub async fn list_everywhere_for_user(
          SELECT t.external_id AS id, t.slug, t.name, {ROLE_ON_PROJECT} AS role,
                 t.organization_id,
                 a.slug AS organization_slug,
-                a.name AS organization_name,
-                owner_identity.email AS organization_owner_email
+                a.name AS organization_name
            FROM reachable r
            JOIN auth.projects t ON t.external_id = r.external_id
            JOIN auth.organizations a
@@ -379,11 +386,7 @@ pub async fn list_everywhere_for_user(
                   ON tm.project_id = t.external_id AND tm.user_id = $1
            LEFT JOIN auth.organization_members om
                   ON om.organization_id = t.organization_id AND om.user_id = $1
-           LEFT JOIN auth.organization_members owner_row
-                  ON owner_row.organization_id = t.organization_id AND owner_row.role = 'owner'
-           LEFT JOIN auth.identities owner_identity
-                  ON owner_identity.user_id = owner_row.user_id
-          ORDER BY COALESCE(a.name, owner_identity.email), t.organization_id, t.name"
+          ORDER BY a.name, t.organization_id, t.name"
     ))
     .bind(user_id)
     .fetch_all(tx.conn())

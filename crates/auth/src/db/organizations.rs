@@ -38,11 +38,11 @@ pub const MAX_ORGANIZATION_NAME: usize = 80;
 /// Write a new organization. `external_id` is freshly minted by the caller;
 /// the slug is a placeholder until the owner names it.
 ///
-/// ⚠ **`name` IS LEFT NULL, AND THAT IS THE DEFAULT WORKING.** A new
-/// organization shows its owner's address, derived at read time. Seeding a
-/// copy was the bug: an address moves and the copy does not. NULL means the
-/// owner has not named it. Nor does the slug borrow the address: it is in
-/// every path, and a path is logged.
+/// ⚠ **`name` IS LEFT NULL, AND THAT IS THE DEFAULT WORKING.** NULL means the
+/// owner has not named it yet, which the console reads as "ask them before
+/// anything else": an organization is seen by nobody but its owner until it
+/// has a name, and no label is ever derived from the owner's address. Nor does
+/// the slug borrow the address: it is in every path, and a path is logged.
 pub async fn create<B: HasOrganization>(
     tx: &mut Scoped<'_, B>,
     external_id: &OrganizationId,
@@ -95,21 +95,44 @@ pub async fn slug_of<B: Binding>(
         .await
 }
 
-/// Rename the organization, moving its slug with the name when `slug` is
-/// given, and answer the slug it goes by now; `None` when it is not active.
-/// A slug another organization took since it was found free fails on
-/// `organizations_slug_key`, which the caller names.
-pub async fn rename(
+/// The slug each of `organizations` goes by, in any status, for those that
+/// exist. Across every tenant, so the lane: a sibling module spelling a link
+/// to an organization's page asks here.
+pub async fn slugs(
+    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+    organizations: &[OrganizationId],
+) -> sqlx::Result<Vec<(OrganizationId, String)>> {
+    sqlx::query_as("SELECT external_id, slug FROM auth.organizations WHERE external_id = ANY($1)")
+        .bind(organizations)
+        .fetch_all(tx.conn())
+        .await
+}
+
+/// The name an organization goes by and the slug it goes by, as the console's
+/// Settings hold them: one field each, written when given.
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct NameAndSlug {
+    pub name: Option<String>,
+    pub slug: String,
+}
+
+/// Set the organization's name, its slug, or both, and answer what it goes by
+/// now; `None` when it is not active. The name never moves the slug here: the
+/// caller decides whether a slug is written, so a rename on Settings leaves
+/// every link to the organization's pages standing. A slug another
+/// organization holds fails on `organizations_slug_key`, which the caller
+/// names.
+pub async fn update(
     tx: &mut Scoped<'_, tenant_session::Organization>,
     external_id: &OrganizationId,
-    name: &str,
+    name: Option<&str>,
     slug: Option<&str>,
-) -> sqlx::Result<Option<String>> {
-    sqlx::query_scalar(
+) -> sqlx::Result<Option<NameAndSlug>> {
+    sqlx::query_as::<_, NameAndSlug>(
         "UPDATE auth.organizations
-            SET name = $2, slug = COALESCE($3, slug), updated_at = now()
+            SET name = COALESCE($2, name), slug = COALESCE($3, slug), updated_at = now()
           WHERE external_id = $1 AND status = 'active'
-      RETURNING slug",
+      RETURNING name, slug",
     )
     .bind(external_id)
     .bind(name)

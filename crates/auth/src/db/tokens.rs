@@ -75,9 +75,8 @@ pub struct ValidatedToken {
     /// The slug the console's paths name the organization by, for
     /// `/v1/organization`'s answer.
     pub slug: String,
-    /// The organization's name, and its owner's address — what an unnamed
-    /// organization is labelled by — carried because `/v1` has no BFF to look
-    /// them up.
+    /// The organization's name, and its owner's address, carried because
+    /// `/v1` has no BFF to look them up.
     pub name: Option<String>,
     pub owner_email: Option<String>,
     /// The owner's display name, for `/v1/organization`'s answer: the one
@@ -87,10 +86,10 @@ pub struct ValidatedToken {
 }
 
 impl ValidatedToken {
-    /// What to print for the organization: its name, else its owner's address.
+    /// What to print for the organization: its name.
     #[must_use]
     pub fn label(&self) -> String {
-        crate::identity::organization_label(self.name.as_deref(), self.owner_email.as_deref())
+        crate::identity::organization_label(self.name.as_deref())
     }
 }
 

@@ -79,8 +79,6 @@ pub struct LiveOrganizationInvite {
     pub inviter_display_name: Option<String>,
     /// What the organization is called; `None` means never named.
     pub organization_name: Option<String>,
-    /// The owner's address, which labels an unnamed organization.
-    pub owner_email: Option<String>,
 }
 
 /// An organization the caller belongs to, as `/me` lists it.
@@ -90,10 +88,11 @@ pub struct OrganizationMembership {
     pub organization_id: OrganizationId,
     /// Where its paths begin in the console: `/{slug}`.
     pub slug: String,
-    /// What the owner called it; `None` means never named.
+    /// What the owner called it; `None` only before they have, which the
+    /// console asks for before it opens to them.
     pub name: Option<String>,
-    /// The owner's address and name: what an unnamed organization is labelled
-    /// by. `None` only for an organization caught mid-transfer or mid-erasure.
+    /// The owner's address and name, for the console to name whom to ask.
+    /// `None` only for an organization caught mid-transfer or mid-erasure.
     pub owner_email: Option<String>,
     pub owner_display_name: Option<String>,
     /// The caller's role there.
@@ -310,41 +309,31 @@ pub async fn active_organizations_owned_by(
     .await
 }
 
-/// What labels an organization: the name its owner gave it, and the owner's
-/// address and name for one never named.
+/// What labels an organization: the name it was given.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct LabelParts {
     pub name: Option<String>,
-    pub owner_email: Option<String>,
-    pub owner_display_name: Option<String>,
 }
 
 impl LabelParts {
-    /// The label the console shows: the name, else the owner's address.
+    /// The label the console shows: the name.
     #[must_use]
     pub fn label(&self) -> String {
-        crate::identity::organization_label(self.name.as_deref(), self.owner_email.as_deref())
+        crate::identity::organization_label(self.name.as_deref())
     }
 }
 
-/// An organization's label parts, under any binding whose roster read admits
-/// its owner's row: its own, a project's with it, or the lane. `None` when the
-/// binding sees no such organization.
+/// An organization's label parts, under any binding that sees its row: its
+/// own, a project's with it, or the lane. `None` when the binding sees no
+/// such organization.
 pub async fn label_parts<B: RosterRead>(
     tx: &mut Scoped<'_, B>,
     organization_id: &OrganizationId,
 ) -> sqlx::Result<Option<LabelParts>> {
-    sqlx::query_as::<_, LabelParts>(
-        "SELECT o.name, i.email AS owner_email, i.display_name AS owner_display_name
-           FROM auth.organizations o
-           LEFT JOIN auth.organization_members m
-                  ON m.organization_id = o.external_id AND m.role = 'owner'
-           LEFT JOIN auth.identities i ON i.user_id = m.user_id
-          WHERE o.external_id = $1",
-    )
-    .bind(organization_id)
-    .fetch_optional(tx.conn())
-    .await
+    sqlx::query_as::<_, LabelParts>("SELECT name FROM auth.organizations WHERE external_id = $1")
+        .bind(organization_id)
+        .fetch_optional(tx.conn())
+        .await
 }
 
 /// Every organization this person holds a row in, with the role — the
@@ -591,14 +580,11 @@ pub async fn find_live_organization_invite(
     sqlx::query_as::<_, LiveOrganizationInvite>(
         "SELECT i.id, i.organization_id, i.email, i.role,
                 inviter.email AS inviter_email, inviter.display_name AS inviter_display_name,
-                o.name AS organization_name, owner_identity.email AS owner_email
+                o.name AS organization_name
            FROM auth.organization_invites i
            JOIN auth.organizations o
              ON o.external_id = i.organization_id AND o.status = 'active'
            LEFT JOIN auth.identities inviter ON inviter.user_id = i.invited_by
-           LEFT JOIN auth.organization_members owner_row
-                  ON owner_row.organization_id = i.organization_id AND owner_row.role = 'owner'
-           LEFT JOIN auth.identities owner_identity ON owner_identity.user_id = owner_row.user_id
           WHERE i.token_hash = $1
             AND i.accepted_at IS NULL
             AND i.revoked_at IS NULL
@@ -664,7 +650,7 @@ pub async fn add_member<B: RosterInsert>(
 }
 
 /// Every ACTIVE organization this person belongs to, oldest membership
-/// first, each with the owner who labels it and any live offer to the person.
+/// first, each with its owner to contact and any live offer to the person.
 ///
 /// The owner's row and identity belong to other people, which nothing in the
 /// person's own scope may see.
@@ -701,8 +687,8 @@ pub async fn organizations_of(
 #[serde(rename_all = "camelCase")]
 pub struct DeletedOrganization {
     pub organization_id: OrganizationId,
-    /// What the owner called it; `None` means never named, and the page
-    /// labels it by the caller's own address, since the caller owns it.
+    /// What the organization is called; `None` means never named, and the
+    /// page labels it "Organization".
     pub name: Option<String>,
     pub deletion_requested_at: DateTime<Utc>,
     /// When the row goes. The restore window ends here.

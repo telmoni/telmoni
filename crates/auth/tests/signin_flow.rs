@@ -697,8 +697,9 @@ async fn a_sign_in_records_the_session_its_bearer_names(pool: PgPool) {
     assert_eq!(provider_sid.as_deref(), Some("sid_456"));
 }
 
-/// ⚠ AN ORGANIZATION IS BORN UNNAMED, and its owner's address is what labels
-/// it — read from the person, never copied onto the organization.
+/// ⚠ AN ORGANIZATION IS BORN UNNAMED, and its owner's address travels beside
+/// it for the console to name whom to ask — read from the person, never copied
+/// onto the organization.
 #[sqlx::test]
 async fn provisioning_leaves_the_organization_unnamed(pool: PgPool) {
     telmoni_shared::test_util::apply_audit_migrations(&pool).await;
@@ -742,7 +743,7 @@ async fn provisioning_leaves_the_organization_unnamed(pool: PgPool) {
 
     assert_eq!(
         name, None,
-        "provisioning stored a name, and a stored copy of the address goes stale"
+        "provisioning stored a name; the owner gives it one"
     );
     assert_eq!(body["organizations"][0]["ownerEmail"], "ada@example.com");
 }
@@ -820,7 +821,7 @@ async fn an_address_moved_onto_one_in_use_is_followed_on_the_next_sign_in(pool: 
     assert_eq!(body["person"]["email"], "user1@example.com");
     assert_eq!(
         body["organizations"][0]["ownerEmail"], "user1@example.com",
-        "and it labels the organization they own"
+        "and rides beside the organization they own, for the console to name whom to ask"
     );
 }
 

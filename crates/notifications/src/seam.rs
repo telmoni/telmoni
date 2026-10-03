@@ -3,6 +3,7 @@
 //! state. Auth raises its notices and runs its purges through this; a
 //! deployment's own module raises its `organization_alert`s the same way.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -13,7 +14,8 @@ use telmoni_shared::acting::Acting;
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam::{
-    ActivitySource, Audience, DocumentCursor, Emitted, Notice, Notifications, SourceDocument,
+    ActivitySource, Audience, DocumentCursor, Emitted, Notice, Notifications, ProjectHome,
+    SourceDocument,
 };
 use telmoni_shared::{AuthError, OrganizationId, ProjectId, TelmoniError, UserId};
 
@@ -67,18 +69,37 @@ impl Notifications for Notifier {
         };
         let mut tx = maintenance_scope(&self.0.db, NotificationsLane).await?;
         let documents = match source {
-            ActivitySource::Feed => db::feed_after(&mut tx, after, limit)
-                .await?
-                .into_iter()
-                .map(feed_document)
-                .collect(),
-            ActivitySource::Delivery => db::deliveries_after(&mut tx, after, limit)
-                .await?
-                .into_iter()
-                .map(delivery_document)
-                .collect(),
+            ActivitySource::Feed => {
+                let items = db::feed_after(&mut tx, after, limit).await?;
+                tx.commit().await?;
+                let addresses = Addresses::of(
+                    self.0.auth.as_ref(),
+                    items
+                        .iter()
+                        .map(|i| (&i.organization_id, i.project_id.as_ref())),
+                )
+                .await?;
+                items
+                    .into_iter()
+                    .map(|item| feed_document(item, &addresses))
+                    .collect()
+            }
+            ActivitySource::Delivery => {
+                let deliveries = db::deliveries_after(&mut tx, after, limit).await?;
+                tx.commit().await?;
+                let addresses = Addresses::of(
+                    self.0.auth.as_ref(),
+                    deliveries
+                        .iter()
+                        .map(|d| (&d.organization_id, Some(&d.project_id))),
+                )
+                .await?;
+                deliveries
+                    .into_iter()
+                    .map(|d| delivery_document(d, &addresses))
+                    .collect()
+            }
         };
-        tx.commit().await?;
         Ok(documents)
     }
 
@@ -120,21 +141,86 @@ impl Notifications for Notifier {
 /// The most deliveries one agent tool call reads.
 const DELIVERIES_TOOL_MAX: i64 = 20;
 
+/// The slugs the console's paths spell a page of documents' rows with, read
+/// from auth once per page. A document links by slug, as every link a person
+/// is shown does; a URL changed on Settings afterwards leaves it behind, which
+/// is the choice made for every link (console.md, "Paths and slugs").
+struct Addresses {
+    organizations: HashMap<OrganizationId, String>,
+    projects: HashMap<ProjectId, ProjectHome>,
+}
+
+impl Addresses {
+    async fn of<'a>(
+        auth: &dyn telmoni_shared::seam::Auth,
+        rows: impl Iterator<Item = (&'a OrganizationId, Option<&'a ProjectId>)>,
+    ) -> Result<Self, TelmoniError> {
+        let mut organizations: Vec<OrganizationId> = Vec::new();
+        let mut projects: Vec<ProjectId> = Vec::new();
+        for (organization, project) in rows {
+            if !organizations.contains(organization) {
+                organizations.push(organization.clone());
+            }
+            if let Some(project) = project
+                && !projects.contains(project)
+            {
+                projects.push(project.clone());
+            }
+        }
+        let organizations = if organizations.is_empty() {
+            HashMap::new()
+        } else {
+            auth.organization_slugs(&organizations)
+                .await?
+                .into_iter()
+                .collect()
+        };
+        let projects = if projects.is_empty() {
+            HashMap::new()
+        } else {
+            auth.project_homes(&projects)
+                .await?
+                .into_iter()
+                .map(|home| (home.project_id.clone(), home))
+                .collect()
+        };
+        Ok(Self {
+            organizations,
+            projects,
+        })
+    }
+
+    /// `/{organization}`, or `/{organization}/{project}` with `page` under it.
+    /// A row whose organization or project auth no longer knows keeps a path
+    /// spelled with the id: the console answers "not found" to it, as it would
+    /// to any address of a row that is gone.
+    fn path(
+        &self,
+        organization: &OrganizationId,
+        project: Option<&ProjectId>,
+        page: &str,
+    ) -> String {
+        let Some(project) = project else {
+            return match self.organizations.get(organization) {
+                Some(slug) => format!("/{slug}{page}"),
+                None => format!("/{organization}{page}"),
+            };
+        };
+        match self.projects.get(project) {
+            Some(home) => format!("/{}/{}{page}", home.organization_slug, home.slug),
+            None => format!("/{organization}/{project}{page}"),
+        }
+    }
+}
+
 /// A notice as the agent indexes it. A project's is read by everyone on the
 /// project; the organization's own feed is its owner's and admins', as the
 /// feed lane gives it (`require_organization_admin`).
-fn feed_document(item: db::IndexedFeedItem) -> SourceDocument {
-    // By id, not slug: the index keeps this past any rename, and the console
-    // redirects an id to the slug the row goes by now.
-    let (audience, url) = match &item.project_id {
-        Some(project) => (
-            Audience::Everyone,
-            format!("/{}/{project}", item.organization_id),
-        ),
-        None => (
-            Audience::OrganizationAdmin,
-            format!("/{}", item.organization_id),
-        ),
+fn feed_document(item: db::IndexedFeedItem, addresses: &Addresses) -> SourceDocument {
+    let url = addresses.path(&item.organization_id, item.project_id.as_ref(), "");
+    let audience = match &item.project_id {
+        Some(_) => Audience::Everyone,
+        None => Audience::OrganizationAdmin,
     };
     SourceDocument {
         source_id: item.id.to_string(),
@@ -161,7 +247,7 @@ fn feed_document(item: db::IndexedFeedItem) -> SourceDocument {
 
 /// A delivery as the agent indexes it: where it went, how it stands and the
 /// last error, so "why didn't Slack get it" finds the attempt.
-fn delivery_document(d: db::IndexedDelivery) -> SourceDocument {
+fn delivery_document(d: db::IndexedDelivery, addresses: &Addresses) -> SourceDocument {
     let error = d
         .last_error
         .as_deref()
@@ -187,7 +273,7 @@ fn delivery_document(d: db::IndexedDelivery) -> SourceDocument {
             queued = d.created_at.to_rfc3339(),
             changed = d.updated_at.to_rfc3339(),
         ),
-        url: format!("/{}/{}/connectors", d.organization_id, d.project_id),
+        url: addresses.path(&d.organization_id, Some(&d.project_id), "/connectors"),
         organization_id: d.organization_id,
         project_id: Some(d.project_id),
         subject_user_id: d.subject_user_id,

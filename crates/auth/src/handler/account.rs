@@ -498,8 +498,8 @@ pub async fn delete_account(
     };
 
     let owned = organization_members::owned_by(&mut tx, &user_id).await?;
-    // Label and count: every unnamed organization is labelled by its owner's
-    // address — this person's — so two of them must not read as one.
+    // Label and count: two organizations may carry one name, and must not
+    // read as one.
     let mut blockers: Vec<(String, usize)> = Vec::new();
     for organization in &owned {
         locks::lock_organization(&mut tx, organization).await?;
@@ -518,7 +518,7 @@ pub async fn delete_account(
         let Some(row) = row.filter(|_| shared) else {
             continue;
         };
-        let label = crate::identity::organization_label(row.name.as_deref(), Some(&person.email));
+        let label = crate::identity::organization_label(row.name.as_deref());
         match blockers.iter_mut().find(|(seen, _)| *seen == label) {
             Some((_, count)) => *count += 1,
             None => blockers.push((label, 1)),

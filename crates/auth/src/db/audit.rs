@@ -119,7 +119,15 @@ pub async fn list<B: HasOrganization>(
 pub struct IndexedEvent {
     pub id: Uuid,
     pub organization_id: OrganizationId,
+    /// The organization's segment in console paths, for the citation. The
+    /// chain outlives the organization, not the other way round: the inner
+    /// join leaves a deleted organization's events unindexed, on purpose —
+    /// nobody is left to read them.
+    pub organization_slug: String,
     pub in_project: Option<ProjectId>,
+    /// The project's segment, `None` when the event was the organization's own
+    /// or the project has since been deleted.
+    pub project_slug: Option<String>,
     pub actor_id: String,
     pub action: String,
     pub resource_kind: String,
@@ -144,12 +152,15 @@ pub async fn after_cursor(
 ) -> sqlx::Result<Vec<IndexedEvent>> {
     let (after_at, after_id) = after.unwrap_or((DateTime::<Utc>::UNIX_EPOCH, Uuid::nil()));
     sqlx::query_as::<_, IndexedEvent>(
-        "SELECT id, organization_id, in_project, actor_id, action, resource_kind, resource_id,
-                metadata, created_at
-           FROM audit.events
-          WHERE (created_at, id) > ($1, $2)
-            AND created_at < now() - make_interval(secs => $3)
-          ORDER BY created_at, id
+        "SELECT e.id, e.organization_id, o.slug AS organization_slug, e.in_project,
+                p.slug AS project_slug, e.actor_id, e.action, e.resource_kind, e.resource_id,
+                e.metadata, e.created_at
+           FROM audit.events e
+           JOIN auth.organizations o ON o.external_id = e.organization_id
+           LEFT JOIN auth.projects p ON p.external_id = e.in_project
+          WHERE (e.created_at, e.id) > ($1, $2)
+            AND e.created_at < now() - make_interval(secs => $3)
+          ORDER BY e.created_at, e.id
           LIMIT $4",
     )
     .bind(after_at)

@@ -100,16 +100,18 @@ async fn organization_of(pool: &PgPool, user: &str) -> String {
     .expect("sign-in provisions an organization its person owns")
 }
 
-/// The project a person's own organization was provisioned with.
+/// The one project [`sign_in`] made in a person's own organization.
 async fn project_of(pool: &PgPool, user: &str) -> String {
     sqlx::query_scalar("SELECT external_id FROM auth.projects WHERE organization_id = $1")
         .bind(organization_of(pool, user).await)
         .fetch_one(pool)
         .await
-        .expect("sign-in provisions exactly one project")
+        .expect("sign_in makes exactly one project")
 }
 
-/// Sign somebody in, provisioning their organization. Returns the `/me` body.
+/// Sign somebody in, provisioning their organization. The first time, it then
+/// names the organization, as the console has every owner do before anything
+/// else, and makes the one project these tests act on. Returns the `/me` body.
 async fn sign_in(pool: &PgPool, user: &str) -> Value {
     seed_identity(pool, user, &format!("{user}@example.test")).await;
     let body = json!({});
@@ -131,7 +133,36 @@ async fn sign_in(pool: &PgPool, user: &str) -> Value {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK, "sign-in failed for {user}");
-    json_body(resp).await
+    let me = json_body(resp).await;
+    if me["firstLogin"] == true {
+        let (status, body) = call(
+            pool,
+            "PATCH",
+            "/internal/organization",
+            user,
+            Some(json!({ "name": "Acme" })),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "naming {user}'s organization: {body}"
+        );
+        let (status, body) = call(
+            pool,
+            "POST",
+            "/internal/projects",
+            user,
+            Some(json!({ "name": "Platform" })),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::CREATED,
+            "{user}'s first project: {body}"
+        );
+    }
+    me
 }
 
 /// One request on the internal lane, as the BFF sends it: in the caller's own
@@ -788,9 +819,8 @@ async fn a_validated_token_carries_the_organizations_it_may_act_on(pool: PgPool)
         "the token's own organization"
     );
     assert_eq!(
-        verdict["name"],
-        address_of(&member),
-        "an unnamed organization is printed as its owner's address"
+        verdict["name"], "Acme",
+        "the token names its organization by the name its owner gave it"
     );
     assert_eq!(verdict["token_id"], minted["id"]);
     assert!(
@@ -980,6 +1010,26 @@ async fn an_invitation_mails_the_address_the_owner_typed(pool: PgPool) {
         "sign-in sent mail: {:?}",
         mail.0.lock().unwrap()
     );
+    // Signed in by hand above, so what `sign_in` does next is done here: the
+    // invitation needs a named organization and a project to be invited to.
+    let (status, body) = call(
+        &pool,
+        "PATCH",
+        "/internal/organization",
+        "user_owner",
+        Some(json!({ "name": "Acme" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = call(
+        &pool,
+        "POST",
+        "/internal/projects",
+        "user_owner",
+        Some(json!({ "name": "Platform" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
 
     let resp = app
         .clone()

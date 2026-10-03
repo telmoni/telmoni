@@ -1,7 +1,8 @@
 //! `auth.identities` — the person. What the identity provider last asserted
 //! about them (written only with values the provider handed this service at a
-//! code exchange or a refresh, never from a request body), plus the few facts that
-//! are theirs and no organization's: analytics consent, and a pending deletion.
+//! sign-in's code exchange, never from a request body; a refresh asks the
+//! provider nothing), plus the few facts that are theirs and no
+//! organization's: analytics consent, and a pending deletion.
 
 use chrono::{DateTime, Utc};
 use telmoni_shared::UserId;
@@ -159,7 +160,7 @@ pub async fn set_verified(
     Ok(())
 }
 
-/// The person, or `None` when no exchange or refresh has recorded them.
+/// The person, or `None` when no sign-in's exchange has recorded them.
 pub async fn get<B: IdentityRead>(
     tx: &mut Scoped<'_, B>,
     user_id: &UserId,
@@ -206,8 +207,8 @@ pub async fn contact<B: HasOrganization>(
 
 /// Move the recorded address to one the provider has just confirmed, in the
 /// email-change transaction. `verified` is the provider's word, not ours: the
-/// next token refresh writes its answer anyway, and recording anything else
-/// would only postpone `/me`'s refusal to that refresh.
+/// next sign-in's exchange writes its answer anyway, and recording anything
+/// else would only postpone `/me`'s refusal to that sign-in.
 pub async fn set_email(
     tx: &mut Scoped<'_, tenant_session::Person>,
     user_id: &UserId,

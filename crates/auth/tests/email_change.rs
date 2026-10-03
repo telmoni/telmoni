@@ -613,8 +613,7 @@ async fn a_caller_cannot_mail_the_world_from_one_account(pool: PgPool) {
 }
 
 /// Both codes move the address, and `/me` — which reads the identity and
-/// nothing else — shows the new one, as the label of the organization they own
-/// too.
+/// nothing else — shows the new one, beside the organization they own too.
 #[sqlx::test]
 async fn both_codes_move_the_address(pool: PgPool) {
     let organization = seed_signed_in(&pool, USER, EMAIL).await;
@@ -640,7 +639,7 @@ async fn both_codes_move_the_address(pool: PgPool) {
     );
     assert_eq!(
         me["organizations"][0]["ownerEmail"], NEW_EMAIL,
-        "the organization the person owns is still labelled by the old address"
+        "the organization the person owns still carries the old address"
     );
 }
 

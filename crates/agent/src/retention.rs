@@ -168,7 +168,7 @@ async fn drop_projects_that_left(state: &AppState) -> u64 {
         };
         let home: HashMap<&str, &str> = homes
             .iter()
-            .map(|(project, organization)| (project.as_str(), organization.as_str()))
+            .map(|h| (h.project_id.as_str(), h.organization_id.as_str()))
             .collect();
         for (organization, project) in &pairs {
             let asked = projects.iter().any(|p| p.as_str() == project.as_str());
@@ -195,7 +195,9 @@ async fn still_left(state: &AppState, organization: &str, project: &str) -> bool
         return false;
     };
     match state.auth.project_homes(std::slice::from_ref(&id)).await {
-        Ok(homes) => !homes.iter().any(|(_, home)| home.as_str() == organization),
+        Ok(homes) => !homes
+            .iter()
+            .any(|h| h.organization_id.as_str() == organization),
         Err(_) => false,
     }
 }

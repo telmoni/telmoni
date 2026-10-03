@@ -2,7 +2,7 @@
 //! rotation and its choice of events, the list, the disconnect, the test send,
 //! and the delivery log with its resend. Every lane acts for a
 //! PERSON under `Resource::Connector`: a connection is a credential like a
-//! token, so every role reads and only the owner writes.
+//! token, so every role reads and only an owner or admin writes.
 
 use std::sync::Arc;
 

@@ -2,7 +2,7 @@
 //!
 //! The invitee is matched by the address on their IDENTITY — what the
 //! identity provider asserted — against the address the invitation was sent
-//! to, so a forwarded link cannot seat somebody the owner never named.
+//! to, so a forwarded link cannot seat somebody the inviter never named.
 //!
 //! ⚠ **An accept never rewrites a role.** It inserts, and a person already in
 //! the organization is told so. Once the owner became a row, an upsert here
@@ -124,14 +124,17 @@ pub async fn create_invite(
     if invites::already_a_member_by_email(&mut acting.tx, &project_id, &email).await? {
         return Err(AuthError::Conflict(format!("{email} is already a member")).into());
     }
-    let name = organizations::get(&mut acting.tx, &organization)
+    // ⚠ Only a named organization invites: the invitation shows the person the
+    // organization's name, and the console asks the owner for one before it
+    // opens; this holds the same line for any client.
+    let Some(name) = organizations::get(&mut acting.tx, &organization)
         .await?
-        .and_then(|o| o.name);
-    let owner_email = match organization_members::owner_of(&mut acting.tx, &organization).await? {
-        Some(owner) => identities::contact(&mut acting.tx, &owner)
-            .await?
-            .map(|c| c.email),
-        None => None,
+        .and_then(|o| o.name)
+    else {
+        return Err(AuthError::Conflict(
+            "name the organization before inviting anyone to its projects".into(),
+        )
+        .into());
     };
     let mut acting = acting.leave_owner_scope().await?;
 
@@ -182,7 +185,7 @@ pub async fn create_invite(
     acting.tx.commit().await?;
 
     let link = invite_link(&state, &secret);
-    let label = crate::identity::organization_label(name.as_deref(), owner_email.as_deref());
+    let label = crate::identity::organization_label(Some(&name));
     let inviter = inviter.map_or_else(|| label.clone(), |c| c.display());
     if let Err(e) = state
         .mailer
@@ -295,10 +298,7 @@ pub async fn look_up_invite(
 
     if let Some(invite) = found {
         tx.commit().await?;
-        let organization = crate::identity::organization_label(
-            invite.organization_name.as_deref(),
-            invite.owner_email.as_deref(),
-        );
+        let organization = crate::identity::organization_label(invite.organization_name.as_deref());
         // ⚠ `scope` says which roster the link seats somebody on. The two
         // ladders spell their roles the same, so the role alone cannot.
         return Ok(Json(json!({
@@ -319,10 +319,7 @@ pub async fn look_up_invite(
     tx.commit().await?;
 
     if let Some(invite) = found_organization {
-        let organization = crate::identity::organization_label(
-            invite.organization_name.as_deref(),
-            invite.owner_email.as_deref(),
-        );
+        let organization = crate::identity::organization_label(invite.organization_name.as_deref());
         return Ok(Json(json!({
             "scope": "organization",
             "inviter": inviter_label(
@@ -527,9 +524,9 @@ async fn seat_organization_member(
 /// been confirmed takes no new seat for its erasure to trip over.
 ///
 /// ⚠ **Verified, or refused.** An invitation is matched by address, and the
-/// recorded address is whatever the provider last asserted — verified or not,
-/// since a refresh writes both. Only a verified one is proof the caller holds
-/// the inbox the invitation went to.
+/// recorded address is whatever the provider asserted at the last sign-in —
+/// verified or not, since the exchange records both. Only a verified one is
+/// proof the caller holds the inbox the invitation went to.
 async fn accepter(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     actor: &UserId,

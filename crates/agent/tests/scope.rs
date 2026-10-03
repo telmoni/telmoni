@@ -29,7 +29,7 @@ use telmoni_agent::{AppState, retention, retrieve};
 use telmoni_shared::acting::{Acting, ActingProject};
 use telmoni_shared::db::tenant_session::{maintenance_scope, person_scope};
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
-use telmoni_shared::seam::{Agent, Auth, Emitted, Notice, Notifications};
+use telmoni_shared::seam::{Agent, Auth, Emitted, Notice, Notifications, ProjectHome};
 use telmoni_shared::test_util::service_pool;
 use telmoni_shared::{
     AuthError, FlagSet, OrganizationId, OrganizationRole, OrganizationStatus, ProjectId, Role,
@@ -315,8 +315,9 @@ fn titles(names: &[&str]) -> BTreeSet<String> {
 }
 
 /// Another organization's passages, another project's, and another
-/// person's questions never come back; a Member reads no audit event, an
-/// admin the project's, and only the owner the organization's own chain.
+/// person's questions never come back; a Member reads no audit event, a
+/// project admin the project's, and the organization's owner and admins its
+/// own chain.
 #[sqlx::test]
 async fn a_search_returns_what_the_askers_scope_and_role_read(pool: PgPool) {
     seed_chunks(&pool, CAST).await;
@@ -687,15 +688,15 @@ impl Auth for Homes {
     async fn project_homes(
         &self,
         projects: &[ProjectId],
-    ) -> Result<Vec<(ProjectId, OrganizationId)>, TelmoniError> {
+    ) -> Result<Vec<ProjectHome>, TelmoniError> {
         Ok([("proj_a", "org_c"), ("proj_b", "org_b")]
             .into_iter()
             .filter(|(project, _)| projects.iter().any(|p| p.as_str() == *project))
-            .map(|(project, organization)| {
-                (
-                    ProjectId::try_new(project).unwrap(),
-                    OrganizationId::try_new(organization).unwrap(),
-                )
+            .map(|(project, organization)| ProjectHome {
+                project_id: ProjectId::try_new(project).unwrap(),
+                slug: project.replace('_', "-"),
+                organization_id: OrganizationId::try_new(organization).unwrap(),
+                organization_slug: organization.replace('_', "-"),
             })
             .collect())
     }

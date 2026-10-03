@@ -99,15 +99,56 @@ async fn sign_in(app: &Router, pool: &PgPool, user: &str, sid: Option<&str>) -> 
         .as_str()
         .expect("/me names the active organization")
         .to_owned();
+    // A first sign-in leaves the organization unnamed, and an unnamed
+    // organization invites nobody: name it, as the console has its owner do.
+    if me["firstLogin"] == true {
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::patch("/internal/organization")
+                    .header("x-service-secret", SERVICE_SECRET)
+                    .header("x-organization-id", &organization)
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {bearer}"))
+                    .body(Body::from(json!({ "name": "Acme" }).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "naming {user}'s organization"
+        );
+    }
     (organization, me)
 }
 
-async fn project_of(pool: &PgPool, organization: &str) -> String {
-    sqlx::query_scalar("SELECT external_id FROM auth.projects WHERE organization_id = $1")
-        .bind(organization)
-        .fetch_one(pool)
+/// A project in `organization`, made by `owner` as the console would: sign-in
+/// makes none.
+async fn create_project(app: &Router, pool: &PgPool, owner: &str, organization: &str) -> String {
+    let resp = app
+        .clone()
+        .oneshot(
+            as_person(
+                Request::post("/internal/projects")
+                    .header("x-service-secret", SERVICE_SECRET)
+                    .header("x-organization-id", organization)
+                    .header("content-type", "application/json"),
+                pool,
+                owner,
+            )
+            .await
+            .body(Body::from(json!({ "name": "Platform" }).to_string()))
+            .unwrap(),
+        )
         .await
-        .expect("sign-in provisions exactly one project")
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED, "the fixture project");
+    json_body(resp).await["id"]
+        .as_str()
+        .expect("the project's id")
+        .to_owned()
 }
 
 /// The headers a module beside auth hands the seam, as the console relayed
@@ -141,17 +182,17 @@ async fn resolve(
         .await
 }
 
-/// Seat `member` on the project `organization` was provisioned with, at
-/// `role`, through the invite lane: `owner` sends it and `member` accepts.
+/// Seat `member` on `project`, in `organization`, at `role`, through the
+/// invite lane: `owner` sends it and `member` accepts.
 async fn seat(
     app: &Router,
     pool: &PgPool,
     owner: &str,
     organization: &str,
+    project: &str,
     member: &str,
     role: &str,
 ) {
-    let project = project_of(pool, organization).await;
     let resp = app
         .clone()
         .oneshot(
@@ -200,16 +241,17 @@ async fn the_seam_answers_owner_seat_and_non_member_from_auths_own_tables(pool: 
     let (organization, _) = sign_in(&app, &pool, "user_owner", None).await;
     sign_in(&app, &pool, "user_member", None).await;
     sign_in(&app, &pool, "user_stranger", None).await;
+    let project = create_project(&app, &pool, "user_owner", &organization).await;
     seat(
         &app,
         &pool,
         "user_owner",
         &organization,
+        &project,
         "user_member",
         "member",
     )
     .await;
-    let project = project_of(&pool, &organization).await;
 
     let acting = resolve(&state, "user_owner", &organization, Some(&project))
         .await

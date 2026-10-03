@@ -104,9 +104,9 @@ async fn locked<'a>(
     Ok((acting, role))
 }
 
-/// A name ending in a plain number from 2 up, as `"Default Project 2"`: the
-/// part before the number, and the number. `"Project 007"`, `"Project 1"`
-/// and `"Project +5"` are not.
+/// A name ending in a plain number from 2 up, as `"Payments 2"`: the part
+/// before the number, and the number. `"Project 007"`, `"Project 1"` and
+/// `"Project +5"` are not.
 fn numbered(name: &str) -> Option<(&str, u32)> {
     let (base, digits) = name.rsplit_once(' ')?;
     let n: u32 = digits.parse().ok()?;
@@ -115,13 +115,13 @@ fn numbered(name: &str) -> Option<(&str, u32)> {
 }
 
 /// The names a project may land under, best first: its own, then numbered
-/// ones, each cut short to fit `MAX_PROJECT_NAME`. Every organization starts
-/// with a "Default Project", so refusing a clash would refuse every handover
-/// of one.
+/// ones, each cut short to fit `MAX_PROJECT_NAME`. Two organizations name
+/// their projects alike all the time — "Web", "API", "Payments" — so refusing
+/// a clash would refuse the ordinary handover.
 ///
 /// The numbers are `"{name} 2"`, `"{name} 3"`, … unless `family` names the
-/// series the name already belongs to: `"Default Project 2"` arriving where
-/// "Default Project" is continues as `"Default Project 3"`. The caller only
+/// series the name already belongs to: `"Payments 2"` arriving where
+/// "Payments" is continues as `"Payments 3"`. The caller only
 /// passes a family whose base the destination holds, so `"Project 2024"`
 /// becomes `"Project 2024 2"`, not a different year.
 ///
@@ -143,9 +143,8 @@ fn landing_names(wanted: &str, held: usize, family: Option<(&str, u32)>) -> Vec<
 
 /// The refusal an accept can still trip on the destination's name index, as
 /// a 409 naming the project, not a 500: the destination's lock keeps creates
-/// out, but a rename does not take it. It does not name the organization: an
-/// unnamed one is labelled by its owner's address, and an error's detail
-/// carries no address.
+/// out, but a rename does not take it. It does not name the organization: the
+/// page it is read on names it already.
 fn name_taken_in(e: sqlx::Error, name: &str) -> TelmoniError {
     match e {
         sqlx::Error::Database(ref db)
@@ -303,7 +302,7 @@ pub async fn offer(
     let organization_label = organization_members::label_parts(&mut acting.tx, &organization)
         .await?
         .map_or_else(
-            || crate::identity::organization_label(None, None),
+            || crate::identity::organization_label(None),
             |parts| parts.label(),
         );
     acting.tx.commit().await?;
@@ -761,12 +760,21 @@ pub async fn accept(
         )
         .into());
     };
-    let destination_label = organization_members::label_parts(&mut tx, &destination)
+    // ⚠ An unnamed organization has nobody in it but its owner — the invite
+    // lanes hold that line — and a project brings every seat on it along, so
+    // the accept holds it too. The name is also what the mails call the
+    // destination by.
+    let Some(destination_label) = organization_members::label_parts(&mut tx, &destination)
         .await?
-        .map_or_else(
-            || crate::identity::organization_label(None, None),
-            |parts| parts.label(),
-        );
+        .and_then(|parts| parts.name)
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty())
+    else {
+        return Err(AuthError::Conflict(
+            "name the organization before taking a project into it".into(),
+        )
+        .into());
+    };
 
     if !members::fold_offered_seat(&mut tx, &project_id, &user_id).await? {
         return Err(AuthError::Conflict(

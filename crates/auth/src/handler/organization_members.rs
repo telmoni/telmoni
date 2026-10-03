@@ -317,6 +317,21 @@ pub async fn create_organization_invite(
         .into());
     }
 
+    // ⚠ Only a named organization invites. The invitation, the console and
+    // the roster all show the person the organization's name, and an
+    // organization has only its owner until it has one: the console asks for
+    // the name before it opens, and this holds the same line for any client.
+    if organizations::get(&mut tx, &organization)
+        .await?
+        .is_none_or(|o| o.name.is_none())
+    {
+        tx.commit().await?;
+        return Err(AuthError::Conflict(
+            "name the organization before inviting anyone to it".into(),
+        )
+        .into());
+    }
+
     // Everyone on the roster, the owner included: an invitation to somebody
     // already in could only fail at accept, and an owner's would have been
     // the one that demoted them before accepts stopped rewriting roles.
@@ -368,10 +383,6 @@ pub async fn create_organization_invite(
     let name = organizations::get(&mut tx, &organization)
         .await?
         .and_then(|o| o.name);
-    let owner_email = match organization_members::owner_of(&mut tx, &organization).await? {
-        Some(owner) => identities::contact(&mut tx, &owner).await?.map(|c| c.email),
-        None => None,
-    };
     tx.commit().await?;
 
     let link = format!(
@@ -380,7 +391,7 @@ pub async fn create_organization_invite(
         raw_token
     );
 
-    let label = crate::identity::organization_label(name.as_deref(), owner_email.as_deref());
+    let label = crate::identity::organization_label(name.as_deref());
     let inviter = inviter.map_or_else(|| label.clone(), |c| c.display());
     if let Err(e) = state
         .mailer

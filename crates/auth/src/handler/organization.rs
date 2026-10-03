@@ -1,8 +1,8 @@
 //! The organization itself: its name, its deletion by its owner and the
 //! owner's restore. An operator's termination and restore, and the steps
-//! the deletion sweep drives it through, are [`crate::sweep`]. It CAN be
-//! renamed: once others can be let onto it, a shared workspace named after
-//! its owner's inbox is one nobody else can name.
+//! the deletion sweep drives it through, are [`crate::sweep`]. Its name and
+//! its URL are two settings: the first name sets the URL once, and a rename
+//! afterwards moves nothing.
 
 use std::sync::Arc;
 
@@ -82,7 +82,7 @@ pub async fn request_organization_deletion_code(
     .await?;
     tx.commit().await?;
 
-    let label = crate::identity::organization_label(row.name.as_deref(), Some(&person.email));
+    let label = crate::identity::organization_label(row.name.as_deref());
     if let Err(e) = state
         .mailer
         .send_organization_deletion_code(&person.email, &code, &label)
@@ -318,33 +318,68 @@ pub async fn restore_organization(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Body of `PUT /internal/organization/name`.
+/// Body of `PATCH /internal/organization`: the name, the slug, or both.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RenameOrganizationRequest {
-    pub name: String,
+pub struct UpdateOrganizationRequest {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub slug: Option<String>,
 }
 
-/// `PUT /internal/organization/name` — name the organization. Its slug moves
-/// with the name, so the answer carries both and the console follows it.
-pub async fn rename_organization(
+/// `PATCH /internal/organization` — what the organization is called, and the
+/// slug its paths begin with, as two settings. A name moves no slug, so a
+/// rename leaves every link to the organization's pages standing; the slug
+/// moves only when asked to, and the answer carries both so the console can
+/// follow. The one exception is the first name: an organization is provisioned
+/// under a placeholder slug nobody chose, and its first name gives it a real
+/// one unless the request names one itself.
+pub async fn update_organization(
     State(state): State<Arc<AppState>>,
     principal: Principal,
     headers: HeaderMap,
-    Json(req): Json<RenameOrganizationRequest>,
+    Json(req): Json<UpdateOrganizationRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
     let organization = organization_of(&headers)?;
     let actor = principal.user_id;
 
-    let Some(name) = crate::identity::sanitize_organization_name(&req.name) else {
-        return Err(AuthError::BadRequest("give the organization a name".into()).into());
-    };
-    if name.chars().count() > MAX_ORGANIZATION_NAME {
-        return Err(AuthError::BadRequest(format!(
-            "an organization name is at most {MAX_ORGANIZATION_NAME} characters"
-        ))
-        .into());
+    if req.name.is_none() && req.slug.is_none() {
+        return Err(AuthError::BadRequest("give a name, a slug, or both".into()).into());
     }
+    let name = match &req.name {
+        None => None,
+        Some(raw) => {
+            let Some(name) = crate::identity::sanitize_organization_name(raw) else {
+                return Err(AuthError::BadRequest("give the organization a name".into()).into());
+            };
+            if name.chars().count() > MAX_ORGANIZATION_NAME {
+                return Err(AuthError::BadRequest(format!(
+                    "an organization name is at most {MAX_ORGANIZATION_NAME} characters"
+                ))
+                .into());
+            }
+            Some(name)
+        }
+    };
+    let asked_slug = match req.slug.as_deref().map(str::trim) {
+        None => None,
+        Some(s) if !slug::is_slug(s) => {
+            return Err(AuthError::BadRequest(format!(
+                "a URL is lowercase letters and digits, in words joined by single hyphens, at \
+                 most {} characters",
+                slug::MAX_LEN
+            ))
+            .into());
+        }
+        Some(s) if slug::is_reserved(s) => {
+            return Err(AuthError::BadRequest(format!(
+                "{s} is a word the console's own paths use — choose another URL"
+            ))
+            .into());
+        }
+        Some(s) => Some(s.to_owned()),
+    };
 
     let ActingOrganization {
         mut tx,
@@ -353,24 +388,38 @@ pub async fn rename_organization(
     if !caller_role.can_manage_org_settings() {
         tx.commit().await?;
         return Err(AuthzError::Forbidden(
-            "only an organization owner or admin can rename the organization".into(),
+            "only an organization owner or admin can change the organization's name or URL".into(),
         )
         .into());
     }
 
-    // Whether a slug is free is the lane's to read: the organization's own
-    // binding sees no other organization's row. A name that gives none keeps
-    // the slug it had.
-    let candidates = slug::candidates(slug::Scope::Organization, &name);
-    let free = if candidates.is_empty() {
-        None
-    } else {
-        let mut lane = maintenance_scope(&state.db, AuthLane).await?;
-        let free = organizations::first_free_slug(&mut lane, &organization, &candidates).await?;
-        lane.commit().await?;
-        free
+    let Some(before) = organizations::get(&mut tx, &organization).await? else {
+        tx.commit().await?;
+        return Err(AuthError::NotFound("organization not found".into()).into());
     };
-    let Some(slug) = organizations::rename(&mut tx, &organization, &name, free.as_deref())
+
+    // The first name takes the organization off its placeholder: the first
+    // free slug the name gives, read in the lane because the organization's
+    // own binding sees no other organization's row. A name that gives none
+    // leaves the placeholder, and the owner picks a URL on Settings.
+    let slug = match (asked_slug, &name) {
+        (Some(s), _) => Some(s),
+        (None, Some(name)) if before.name.is_none() => {
+            let candidates = slug::candidates(slug::Scope::Organization, name);
+            if candidates.is_empty() {
+                None
+            } else {
+                let mut lane = maintenance_scope(&state.db, AuthLane).await?;
+                let free =
+                    organizations::first_free_slug(&mut lane, &organization, &candidates).await?;
+                lane.commit().await?;
+                free
+            }
+        }
+        _ => None,
+    };
+
+    let Some(now) = organizations::update(&mut tx, &organization, name.as_deref(), slug.as_deref())
         .await
         .map_err(slug_taken)?
     else {
@@ -390,25 +439,23 @@ pub async fn rename_organization(
             request_id: None,
             ip_address: None,
             user_agent: None,
-            metadata: Some(json!({ "name": name, "slug": slug })),
+            metadata: Some(json!({ "name": now.name, "slug": now.slug })),
         },
     )
     .await?;
 
     tx.commit().await?;
-    tracing::info!(organization_id = %organization, "organization renamed");
-    Ok(Json(json!({ "name": name, "slug": slug })))
+    tracing::info!(organization_id = %organization, "organization updated");
+    Ok(Json(json!({ "name": now.name, "slug": now.slug })))
 }
 
-/// The slug another organization took between [`organizations::first_free_slug`]
-/// and the rename's write, as a 409 to try again rather than a 500.
+/// A slug another organization holds — chosen on Settings, or taken between
+/// [`organizations::first_free_slug`] and the first name's write — as a 409
+/// rather than a 500.
 fn slug_taken(e: sqlx::Error) -> TelmoniError {
     match e {
         sqlx::Error::Database(ref db) if db.constraint() == Some("organizations_slug_key") => {
-            AuthError::Conflict(
-                "another organization took this name's URL a moment ago — try again".into(),
-            )
-            .into()
+            AuthError::Conflict("another organization already has that URL".into()).into()
         }
         other => other.into(),
     }

@@ -155,7 +155,7 @@ const MUTATIONS: &[Mutation] = &[
     },
     Mutation {
         file: "crates/auth/src/handler/organization.rs",
-        fn_name: "rename_organization",
+        fn_name: "update_organization",
         action: "Updated",
         resource_kind: "Organization",
         actor_id: ActorPattern::Variable,
@@ -257,13 +257,6 @@ const MUTATIONS: &[Mutation] = &[
         fn_name: "provision_first_organization",
         action: "Created",
         resource_kind: "Member",
-        actor_id: ActorPattern::Variable,
-    },
-    Mutation {
-        file: "crates/auth/src/handler/me.rs",
-        fn_name: "provision_first_organization",
-        action: "Created",
-        resource_kind: "Project",
         actor_id: ActorPattern::Variable,
     },
     Mutation {

@@ -91,7 +91,7 @@ pub struct ProjectOffer {
     pub name: String,
     /// The organization it would leave.
     pub organization_id: OrganizationId,
-    /// What that organization's owner called it; `None` means never named.
+    /// What that organization is called; `None` means never named.
     pub organization_name: Option<String>,
     /// Its owner — who is offering — by address and name.
     pub owner_email: Option<String>,
@@ -158,8 +158,8 @@ pub async fn list_for_project(
 
 /// Every project offered to this person and still open: their admin seats
 /// carrying a live offer, in an active organization. The maintenance lane,
-/// because each is labelled by its organization's owner — another person's
-/// row and identity.
+/// because each names the owner who offers it — another person's row and
+/// identity.
 pub async fn project_offers_to(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     user_id: &UserId,
@@ -455,7 +455,7 @@ pub async fn fold_offered_seat(
     Ok(result.rows_affected() == 1)
 }
 
-/// Remove a seat — the owner removing a member, the member leaving, or an
+/// Remove a seat — an owner or admin removing a member, the member leaving, or an
 /// erasure. Returns `false` when there is no such seat.
 pub async fn remove<B: SeatRemove>(
     tx: &mut Scoped<'_, B>,

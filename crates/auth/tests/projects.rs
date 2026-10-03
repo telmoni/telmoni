@@ -86,10 +86,23 @@ async fn sign_in(pool: &PgPool, user: &str, email: &str) -> String {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK, "sign-in failed for {user}");
-    json_body(resp).await["activeOrganizationId"]
+    let organization = json_body(resp).await["activeOrganizationId"]
         .as_str()
         .expect("/me names the active organization")
-        .to_owned()
+        .to_owned();
+    // What the console has every owner do before it opens to them; the
+    // invitations below need it.
+    let (status, body) = call(
+        pool,
+        "PATCH",
+        "/internal/organization",
+        user,
+        &organization,
+        Some(json!({ "name": "Acme" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "naming {organization}: {body}");
+    organization
 }
 
 /// The organization a person owns: the one their first sign-in provisioned,
@@ -216,9 +229,9 @@ async fn an_owner_creates_a_project_and_it_lists(pool: PgPool) {
 
     let owner = "usr_projects_owner_01";
     let organization = sign_in(&pool, owner, "projects-owner-01@example.test").await;
-    assert_eq!(
-        project_names(&pool, owner, &organization).await,
-        vec!["Default Project"]
+    assert!(
+        project_names(&pool, owner, &organization).await.is_empty(),
+        "sign-in made a project"
     );
 
     let (status, created) = call(
@@ -242,7 +255,7 @@ async fn an_owner_creates_a_project_and_it_lists(pool: PgPool) {
 
     assert_eq!(
         project_names(&pool, owner, &organization).await,
-        vec!["Default Project", "Platform"],
+        vec!["Platform"],
         "the new project is in the switcher's own read"
     );
 }
@@ -633,17 +646,22 @@ async fn only_the_organization_owner_deletes_a_project(pool: PgPool) {
 }
 
 /// ⚠ THE LAST PROJECT MAY GO, AND IT STAYS GONE: listing the organization
-/// afterwards must not put a Default Project back behind the owner's delete.
+/// afterwards must not put a project back behind the owner's delete.
 #[sqlx::test]
 async fn deleting_the_only_project_leaves_the_organization_empty(pool: PgPool) {
     apply_audit_migrations(&pool).await;
     let organization = sign_in(&pool, "user_del_last", "del-last@example.com").await;
-    let project_id: String =
-        sqlx::query_scalar("SELECT external_id FROM auth.projects WHERE organization_id = $1")
-            .bind(&organization)
-            .fetch_one(&pool)
-            .await
-            .expect("sign-in provisions a project");
+    let (status, created) = call(
+        &pool,
+        "POST",
+        "/internal/projects",
+        "user_del_last",
+        &organization,
+        Some(json!({ "name": "Platform" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let project_id = created["id"].as_str().expect("id").to_owned();
 
     assert_eq!(
         delete_project(&pool, "user_del_last", &organization, &project_id).await,
@@ -741,7 +759,7 @@ async fn a_name_already_taken_in_the_organization_is_a_409(pool: PgPool) {
 
     assert_eq!(
         project_names(&pool, owner, &organization).await,
-        vec!["Default Project", "Platform"],
+        vec!["Platform"],
         "the refused duplicates wrote nothing"
     );
 }
@@ -802,7 +820,7 @@ async fn the_slug_follows_the_name_within_the_organization(pool: PgPool) {
         .iter()
         .map(|p| p["slug"].as_str().unwrap())
         .collect();
-    assert_eq!(slugs, ["default-project", "marketing-site", "web-app"]);
+    assert_eq!(slugs, ["marketing-site", "web-app"]);
 
     let other = "usr_projects_other_slug";
     let others = sign_in(&pool, other, "projects-other-slug@example.test").await;
@@ -852,7 +870,7 @@ async fn renaming_into_a_taken_name_is_a_409(pool: PgPool) {
 
     assert_eq!(
         project_names(&pool, owner, &organization).await,
-        vec!["Default Project", "Growth", "Platform"],
+        vec!["Growth", "Platform"],
         "the refused rename changed nothing"
     );
 }
@@ -982,9 +1000,9 @@ async fn the_everywhere_list_spans_organizations_with_each_persons_reach(pool: P
         (cy, &cy_org),
         (dee, &dee_org),
     ] {
-        assert_eq!(
-            project_names(&pool, who, organization).await,
-            vec!["Default Project"]
+        assert!(
+            project_names(&pool, who, organization).await.is_empty(),
+            "{who}: sign-in made a project"
         );
     }
 
@@ -1021,10 +1039,39 @@ async fn the_everywhere_list_spans_organizations_with_each_persons_reach(pool: P
     )
     .await;
 
+    // Bo and Cy each hold a project of their own too, so their lists span two
+    // organizations. The list is ordered by organization name first; every
+    // sign-in named its organization "Acme", so theirs are renamed to pin the
+    // order rather than leave it to the ids.
+    for (who, organization, organization_name, project) in [
+        (bo, &bo_org, "Bo Labs", "Payments"),
+        (cy, &cy_org, "Cy Works", "Site"),
+    ] {
+        let (status, body) = call(
+            &pool,
+            "PATCH",
+            "/internal/organization",
+            who,
+            organization,
+            Some(json!({ "name": organization_name })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "renaming for {who}: {body}");
+        let (status, body) = call(
+            &pool,
+            "POST",
+            "/internal/projects",
+            who,
+            organization,
+            Some(json!({ "name": project })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{who}'s project: {body}");
+    }
+
     assert_eq!(
         everywhere(&pool, alex).await,
         vec![
-            row(&alex_org, "Default Project", "owner"),
             row(&alex_org, "Growth", "owner"),
             row(&alex_org, "Platform", "owner"),
         ]
@@ -1033,10 +1080,9 @@ async fn the_everywhere_list_spans_organizations_with_each_persons_reach(pool: P
     assert_eq!(
         everywhere(&pool, bo).await,
         vec![
-            row(&alex_org, "Default Project", "admin"),
             row(&alex_org, "Growth", "admin"),
             row(&alex_org, "Platform", "admin"),
-            row(&bo_org, "Default Project", "owner"),
+            row(&bo_org, "Payments", "owner"),
         ]
     );
 
@@ -1044,26 +1090,35 @@ async fn the_everywhere_list_spans_organizations_with_each_persons_reach(pool: P
         everywhere(&pool, cy).await,
         vec![
             row(&alex_org, "Platform", "member"),
-            row(&cy_org, "Default Project", "owner")
+            row(&cy_org, "Site", "owner"),
         ]
     );
 
-    assert_eq!(
-        everywhere(&pool, dee).await,
-        vec![row(&dee_org, "Default Project", "owner")]
+    assert!(
+        everywhere(&pool, dee).await.is_empty(),
+        "somebody with no project reaches none"
     );
 }
 
-/// Every row names its organization by its owner's address, and by name only
-/// once the owner has given it one.
+/// Every row names its organization by the name its owner gave it and the
+/// slug its paths begin with — and by nothing of the owner's: an address is a
+/// person's, and labels no organization.
 #[sqlx::test]
 async fn every_everywhere_row_names_its_organization(pool: PgPool) {
     apply_audit_migrations(&pool).await;
 
     let owner = "usr_everywhere_named";
-    let email = "everywhere-named@example.test";
-    let organization = sign_in(&pool, owner, email).await;
-    project_names(&pool, owner, &organization).await;
+    let organization = sign_in(&pool, owner, "everywhere-named@example.test").await;
+    let (status, created) = call(
+        &pool,
+        "POST",
+        "/internal/projects",
+        owner,
+        &organization,
+        Some(json!({ "name": "Platform" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
 
     let (status, body) = call(
         &pool,
@@ -1078,9 +1133,13 @@ async fn every_everywhere_row_names_its_organization(pool: PgPool) {
     let rows = body["projects"].as_array().expect("projects array");
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["organizationId"], organization);
-    assert_eq!(rows[0]["organizationOwnerEmail"], email);
-    assert!(rows[0]["organizationName"].is_null());
+    assert_eq!(rows[0]["organizationName"], "Acme");
+    assert_eq!(rows[0]["organizationSlug"], "acme");
     assert_eq!(rows[0]["role"], "owner");
+    assert!(
+        !body.to_string().contains("everywhere-named@example.test"),
+        "the owner's address rode along: {body}"
+    );
 }
 
 /// ⚠ The boundary pins for the cross-organization read: it runs in the
@@ -1095,6 +1154,16 @@ async fn the_everywhere_read_is_gated_on_the_caller_and_nothing_else(pool: PgPoo
     let dee_org = sign_in(&pool, dee, "everywhere-gate-dee@example.test").await;
     project_names(&pool, alex, &alex_org).await;
     project_names(&pool, dee, &dee_org).await;
+    let (status, created) = call(
+        &pool,
+        "POST",
+        "/internal/projects",
+        dee,
+        &dee_org,
+        Some(json!({ "name": "Platform" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
     let (status, _) = call(
         &pool,
         "POST",
@@ -1165,7 +1234,7 @@ async fn the_everywhere_read_is_gated_on_the_caller_and_nothing_else(pool: PgPoo
             )
         })
         .collect();
-    assert_eq!(rows, vec![(dee_org, "Default Project".to_string())]);
+    assert_eq!(rows, vec![(dee_org, "Platform".to_string())]);
     assert!(
         !body.to_string().contains("Private"),
         "Alex's project leaked into Dee's reply: {body}"

@@ -1,4 +1,4 @@
-//! The two things an organization is called, and the address an owner shares with.
+//! What an organization is called, and the address an owner shares with.
 
 use telmoni_shared::{AuthError, TelmoniError};
 
@@ -18,7 +18,7 @@ fn is_invisible_formatting(c: char) -> bool {
         | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
 }
 
-/// The gate every address an OWNER types passes through, on its way to an
+/// The gate every address an inviter types passes through, on its way to an
 /// invitation. Returns the normalised address, so a caller cannot check one
 /// string and store another.
 ///
@@ -77,8 +77,8 @@ pub fn sanitize_display_name(raw: Option<&str>) -> Option<String> {
 }
 
 /// An organization's name, held to what a display name is held to: it is
-/// printed in mail to any address the owner invites, and in every member's
-/// console. `None` when nothing printable is left.
+/// printed in mail to any address an owner or admin invites, and in every
+/// member's console. `None` when nothing printable is left.
 #[must_use]
 pub fn sanitize_organization_name(raw: &str) -> Option<String> {
     let cleaned: String = raw
@@ -101,19 +101,17 @@ pub fn display_for(display_name: Option<&str>, email: &str) -> String {
         .to_string()
 }
 
-/// What a page prints for an organization: the name its owner gave it, else
-/// its owner's address — the console's `organizationLabel` makes the same
-/// choice. The last fallback covers an organization read with no owner row,
-/// which exists only mid-transfer or mid-erasure.
+/// What a page prints for an organization: the name it was given — the
+/// console's `organizationLabel` makes the same choice. Never the owner's
+/// address: an organization is named before anyone but its owner sees it, and
+/// the fallback covers only the owner's own unnamed one, read on a lane the
+/// console does not show them before they have named it.
 #[must_use]
-pub fn organization_label(name: Option<&str>, owner_email: Option<&str>) -> String {
-    name.map(str::trim)
-        .filter(|n| !n.is_empty())
-        .or(owner_email)
-        .map_or_else(
-            || format!("A {} organization", telmoni_shared::PRODUCT_NAME),
-            str::to_string,
-        )
+pub fn organization_label(name: Option<&str>) -> String {
+    name.map(str::trim).filter(|n| !n.is_empty()).map_or_else(
+        || format!("A {} organization", telmoni_shared::PRODUCT_NAME),
+        str::to_string,
+    )
 }
 
 #[cfg(test)]

@@ -121,7 +121,7 @@ const PERSON_ROUTES: &[(&str, &str)] = &[
     ("DELETE", "/internal/organization"),
     ("POST", "/internal/organization/deletion-code"),
     ("POST", "/internal/organization/restore"),
-    ("PUT", "/internal/organization/name"),
+    ("PATCH", "/internal/organization"),
     ("POST", "/internal/organization/owner-transfer"),
     ("DELETE", "/internal/organization/owner-transfer"),
     ("POST", "/internal/organization/owner-transfer/accept"),
@@ -185,12 +185,30 @@ async fn every_person_lane_refuses_a_request_with_no_bearer(pool: PgPool) {
     .await;
     assert_eq!(status, StatusCode::OK, "sign-in");
     let organization = active_organization(&body);
-    let project: String =
-        sqlx::query_scalar("SELECT external_id FROM auth.projects WHERE organization_id = $1")
-            .bind(&organization)
-            .fetch_one(&pool)
-            .await
-            .expect("sign-in provisions a project");
+    // Sign-in makes no project; the routes below are filled in with a real
+    // one, so a refusal below is the lane's and never a missing row's.
+    let resp = app(pool.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/internal/projects")
+                .header("x-service-secret", SERVICE_SECRET)
+                .header("x-organization-id", &organization)
+                .header(
+                    "authorization",
+                    format!("Bearer {}", bearer(&pool, USER).await),
+                )
+                .header("content-type", "application/json")
+                .body(Body::from(json!({ "name": "Platform" }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED, "the fixture project");
+    let project = json_body(resp).await["id"]
+        .as_str()
+        .expect("the project's id")
+        .to_owned();
 
     for (method, pattern) in PERSON_ROUTES {
         let uri = fill(pattern, &organization, &project);

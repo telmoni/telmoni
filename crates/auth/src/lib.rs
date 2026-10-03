@@ -336,7 +336,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route(
             "/organization",
-            delete(handler::organization::delete_organization),
+            delete(handler::organization::delete_organization)
+                .patch(handler::organization::update_organization),
         )
         .route(
             "/organization/deletion-code",
@@ -345,10 +346,6 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/organization/restore",
             post(handler::organization::restore_organization),
-        )
-        .route(
-            "/organization/name",
-            put(handler::organization::rename_organization),
         )
         .route(
             "/organization/owner-transfer",

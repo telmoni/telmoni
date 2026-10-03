@@ -6,6 +6,7 @@
 
 use regex::Regex;
 use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 use telmoni_shared::test_util::{customer_docs_page, project_root};
 
 /// Whole `type` URIs only: quoted in code, back-ticked on the page.
@@ -18,13 +19,46 @@ fn uris_in(text: &str, quote: char) -> BTreeSet<String> {
         .collect()
 }
 
+/// Every production `.rs` under `crates/*/src`, each cut off at its
+/// `#[cfg(test)]` tail. A module may spell a problem type of its own, outside
+/// `TelmoniError` — notifications does — and the page owes it a row too.
+fn production_sources(root: &Path) -> Vec<String> {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    for crate_dir in std::fs::read_dir(root.join("crates")).unwrap() {
+        let src = crate_dir.unwrap().path().join("src");
+        if src.is_dir() {
+            walk(&src, &mut files);
+        }
+    }
+    files
+        .into_iter()
+        .map(|path| {
+            let code = std::fs::read_to_string(path).unwrap();
+            code.split("#[cfg(test)]").next().unwrap().to_owned()
+        })
+        .collect()
+}
+
 #[test]
 fn the_error_page_and_the_error_code_name_the_same_types() {
     let root = project_root();
+    let mut in_code = BTreeSet::new();
+    for source in production_sources(&root) {
+        in_code.extend(uris_in(&source, '"'));
+    }
     let code = std::fs::read_to_string(root.join("crates/shared/src/error.rs")).unwrap();
     let production = code.split("#[cfg(test)]").next().unwrap();
     let slug_re = Regex::new(r#"\(\s*"([a-z-]+)",\s*(?:[0-9]{3},\s*)?"[^"]+""#).unwrap();
-    let mut in_code = uris_in(production, '"');
     for cap in slug_re.captures_iter(production) {
         let slug = &cap[1];
         let prefix = if ["forbidden", "insufficient-role"].contains(&slug) {

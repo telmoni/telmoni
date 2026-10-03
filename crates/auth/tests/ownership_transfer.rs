@@ -232,12 +232,44 @@ async fn join(pool: &PgPool, organization: &str, user: &str, role: &str) {
     assert_eq!(status, StatusCode::OK, "accept for {user}: {body}");
 }
 
+/// Seat `user` on `organization` at `role` by hand. The invite lane refuses an
+/// organization with no name, and one test needs an admin on one.
+async fn seat(pool: &PgPool, organization: &str, user: &str, role: &str) {
+    sqlx::query(
+        "INSERT INTO auth.organization_members (id, organization_id, user_id, role, added_by, shard_key)
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, gen_random_uuid())",
+    )
+    .bind(organization)
+    .bind(user)
+    .bind(role)
+    .bind(OWNER)
+    .execute(pool)
+    .await
+    .expect("seat the member");
+}
+
+/// The owner makes a project in `organization`, which sign-in does not;
+/// answers its id.
+async fn create_project(pool: &PgPool, organization: &str, name: &str) -> String {
+    let (status, body) = call(
+        pool,
+        "POST",
+        "/internal/projects",
+        OWNER,
+        Some(organization),
+        Some(json!({ "name": name })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "creating {name}: {body}");
+    body["id"].as_str().expect("the project's id").to_owned()
+}
+
 /// The owner names their organization, as they must before handing it over.
 async fn name(pool: &PgPool, organization: &str, name: &str) {
     let (status, body) = call(
         pool,
-        "PUT",
-        "/internal/organization/name",
+        "PATCH",
+        "/internal/organization",
         OWNER,
         Some(organization),
         Some(json!({ "name": name })),
@@ -439,16 +471,16 @@ async fn only_the_owner_offers_and_only_to_an_admin(pool: PgPool) {
     );
 }
 
-/// ⚠ **An organization is handed over by its name.** Until it has one it is
-/// shown by its owner's address, so handing it over would relabel it, for
-/// everyone in it, as the new owner's — whose own unnamed organization already
-/// wears that label.
+/// ⚠ **An organization is handed over by its name.** The offer's mail and
+/// notice call it by one, and until the owner gives it one there is nothing
+/// to call it by. Nobody can be invited into an unnamed organization either,
+/// so the admin to offer it to is seated by hand.
 #[sqlx::test]
 async fn an_unnamed_organization_cannot_be_offered(pool: PgPool) {
     apply_audit_migrations(&pool).await;
     let organization = sign_in(&pool, OWNER).await;
     sign_in(&pool, ADMIN).await;
-    join(&pool, &organization, ADMIN, "admin").await;
+    seat(&pool, &organization, ADMIN, "admin").await;
 
     let (status, body) = offer(&pool, &organization, OWNER, ADMIN).await;
     assert_eq!(
@@ -1336,12 +1368,7 @@ async fn an_accept_queued_behind_the_acceptors_account_deletion_is_refused(pool:
 #[sqlx::test]
 async fn seats_the_new_owner_held_are_folded_into_the_ownership(pool: PgPool) {
     let organization = organization_with_staff(&pool).await;
-    let project: String =
-        sqlx::query_scalar("SELECT external_id FROM auth.projects WHERE organization_id = $1")
-            .bind(&organization)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let project = create_project(&pool, &organization, "Platform").await;
     sqlx::query(
         "INSERT INTO auth.project_members (id, project_id, user_id, role, added_by)
          VALUES (gen_random_uuid(), $1, $2, 'member', $2)",
@@ -1384,12 +1411,7 @@ async fn seats_the_new_owner_held_are_folded_into_the_ownership(pool: PgPool) {
 #[sqlx::test]
 async fn a_key_rotated_after_a_transfer_is_recorded_as_the_new_owners(pool: PgPool) {
     let organization = organization_with_staff(&pool).await;
-    let project: String =
-        sqlx::query_scalar("SELECT external_id FROM auth.projects WHERE organization_id = $1")
-            .bind(&organization)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let project = create_project(&pool, &organization, "Platform").await;
     let (status, minted) = call_in_project(
         &pool,
         "POST",

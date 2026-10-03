@@ -322,10 +322,10 @@ impl Mailer for ComposingMailer {
                         "A member has read-only access to the project: its members, API keys and connectors."
                     }
                     (InvitedTo::Project, "admin") => {
-                        "An admin reads everything in the project, its audit log included, and changes none of it; who else has access is the organization owner's call."
+                        "An admin manages the project: its members, API keys and connectors, with its audit log to read; only the organization's owner can delete or hand over the project."
                     }
                     (InvitedTo::Organization, "admin") => {
-                        "An admin can create projects, see everyone in the organization and work in every project as an admin, but only its owner decides who is in it."
+                        "An admin can create projects, manage the organization's members and settings, and work in every project as an admin; only its owner can delete the organization or its projects, or hand either over."
                     }
                     (InvitedTo::Organization, "member") => {
                         "A member sees the projects they are given access to, and nothing else."
@@ -354,8 +354,9 @@ impl Mailer for ComposingMailer {
                 "{owner} has offered to hand you the {product} organization \
                  {organization}. Nothing has changed yet: it becomes yours only \
                  when you accept.\n\n\
-                 As the owner you would hold its members, its API keys and the \
-                 decision to delete it, and {owner} would stay on as an admin.\n\n\
+                 As the owner you could do what only an owner can: delete the \
+                 organization, hand it on, and delete its projects or hand them \
+                 to other organizations. {owner} would stay on as an admin.\n\n\
                  Accept or decline here:\n{link}\n\n\
                  The offer lapses in {days} days. If you did not expect it, do \
                  nothing, or decline it. To tell us it was unwanted, write to \
@@ -400,10 +401,10 @@ impl Mailer for ComposingMailer {
                 "{new_owner} accepted your offer and now owns the {product} \
                  organization {organization}.\n\n\
                  You stay on as an admin, which makes you an admin in every one \
-                 of its projects: you can go on working in them, but its members, \
-                 API keys, connectors and deletion are {new_owner}'s to decide \
-                 now. You can leave the organization from its Overview page at \
-                 any time.\n\n\
+                 of its projects: you can go on managing its members, API keys \
+                 and connectors, but deleting the organization or its projects, \
+                 and handing either on, are {new_owner}'s to decide now. You can \
+                 leave the organization from its Overview page at any time.\n\n\
                  If you did not offer them the organization, write to {contact} \
                  right away.",
                 contact = self.contact(),
@@ -501,9 +502,10 @@ impl Mailer for ComposingMailer {
                 "{new_owner} accepted your offer, and the {product} project \
                  {project} is now in their organization {organization}.\n\n\
                  You stay on as an admin of the project, and as a member of \
-                 {organization}: you can go on reading its members, API keys, \
-                 connectors and audit log, but they are {new_owner}'s to change \
-                 now. Its API keys went with it, and its connectors did not — \
+                 {organization}: you can go on managing the project's members, \
+                 API keys and connectors and reading its audit log, but deleting \
+                 it or handing it on is {new_owner}'s to decide now. Its API keys went \
+                 with it, and its connectors did not — \
                  they stayed with your organization and were disconnected. You \
                  can leave the project from its Members page, or the \
                  organization from its Overview, at any time.\n\n\
@@ -998,7 +1000,14 @@ mod tests {
             mail.text
         );
         assert!(mail.text.contains("Acme"), "{}", mail.text);
-        assert!(mail.text.contains("decision to delete it"), "{}", mail.text);
+        assert!(
+            mail.text.contains(
+                "delete the organization, hand it on, and delete its projects or hand them to \
+                 other organizations"
+            ),
+            "{}",
+            mail.text
+        );
         assert!(
             mail.text
                 .contains("https://telmoni.com/account/notifications"),
@@ -1009,7 +1018,7 @@ mod tests {
     }
 
     /// The previous owner learns what they kept — an admin's place in every
-    /// project — and what is the new owner's to decide now.
+    /// project, managing as before — and what only the new owner decides now.
     #[tokio::test]
     async fn the_accepted_offer_says_what_the_previous_owner_kept_and_what_moved() {
         let mail = composed(async |m| {
