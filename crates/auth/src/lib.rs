@@ -111,7 +111,7 @@ const EXCHANGE_TTL: std::time::Duration = std::time::Duration::from_secs(30);
 enum ExchangeState {
     /// ⚠ **The `Instant` is what makes this evictable, and it is load-bearing.**
     InProgress(
-        tokio::sync::watch::Receiver<Option<Result<handler::session::AuthnResult, String>>>,
+        tokio::sync::watch::Receiver<Option<ExchangeOutcome>>,
         std::time::Instant,
     ),
     Completed(Box<handler::session::AuthnResult>, std::time::Instant),
@@ -124,14 +124,20 @@ impl ExchangeState {
     }
 }
 
+/// What the leader of an exchange hands every waiter: the session, or the
+/// refusal as the wire would carry it. A problem document rather than the
+/// error's text, so a waiter answers with the leader's status and detail and
+/// never with the words of an internal error the leader itself redacted.
+pub type ExchangeOutcome = Result<handler::session::AuthnResult, telmoni_shared::ProblemDetails>;
+
 /// Decision made when checking or starting an authorization code exchange.
 pub enum CacheDecision {
     /// Result was found in cache.
     Hit(Box<handler::session::AuthnResult>),
     /// Another concurrent exchange is already in flight; wait for its outcome.
-    Wait(tokio::sync::watch::Receiver<Option<Result<handler::session::AuthnResult, String>>>),
+    Wait(tokio::sync::watch::Receiver<Option<ExchangeOutcome>>),
     /// This caller is the leader responsible for performing the exchange.
-    Leader(tokio::sync::watch::Sender<Option<Result<handler::session::AuthnResult, String>>>),
+    Leader(tokio::sync::watch::Sender<Option<ExchangeOutcome>>),
 }
 
 /// In-memory cache of recent code exchange results, so a double-click or a

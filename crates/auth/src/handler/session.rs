@@ -496,7 +496,7 @@ async fn exchange_once(
             if let Some(res) = rx.borrow().clone() {
                 return match res {
                     Ok(authn) => Ok(authn),
-                    Err(msg) => Err(AuthError::BadRequest(msg).into()),
+                    Err(problem) => Err(TelmoniError::Upstream(Box::new(problem))),
                 };
             }
             if rx.changed().await.is_err() {
@@ -514,7 +514,7 @@ async fn exchange_once(
             }
             Err(err) => {
                 state.exchange_cache.remove(&code);
-                let _ = tx.send(Some(Err(err.to_string())));
+                let _ = tx.send(Some(Err(err.to_problem_details())));
                 Err(err)
             }
         },
