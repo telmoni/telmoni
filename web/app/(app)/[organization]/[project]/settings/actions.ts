@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
+import { isProjectId } from "@/lib/connect";
 import { env } from "@/lib/env";
 import { organizationChannel, publishEvent } from "@/lib/events/publisher";
 import {
@@ -21,6 +22,8 @@ interface ActionResult {
 }
 
 const Renamed = z.object({ slug: z.string() });
+
+const UNRESOLVED_PROJECT = "Couldn't resolve that project. Reload and try again.";
 
 /// `movedTo` is the slug the project goes by now, when the rename moved it:
 /// the page follows it there, and so does everybody else with one of the
@@ -47,6 +50,11 @@ export async function updateProjectNameAction(
     return { error: "Project name must be 100 characters or fewer." };
   }
 
+  // A Server Action is a public endpoint, and the id becomes a path segment
+  // of the upstream URL: anything but a project id is refused before it can
+  // aim the request at another lane.
+  if (!isProjectId(projectId)) return { error: UNRESOLVED_PROJECT };
+
   const ctx = await identityContext();
   if (!ctx) return { error: await unplacedOrganization() };
   const was = (await fetchProject(projectId))?.slug;
@@ -54,7 +62,7 @@ export async function updateProjectNameAction(
   const organization = gate ? activeOrganization(gate)?.slug : undefined;
 
   const res = await tryFetchWithTimeout(
-    `${env.SERVER_URL}/internal/projects/${projectId}`,
+    `${env.SERVER_URL}/internal/projects/${encodeURIComponent(projectId)}`,
     {
       method: "PATCH",
       headers: {
@@ -100,12 +108,13 @@ export async function deleteProjectAction(projectId: string): Promise<ActionResu
     windowMs: 60_000,
   });
   if (limited) return { error: "Too many requests — slow down a moment." };
+  if (!isProjectId(projectId)) return { error: UNRESOLVED_PROJECT };
 
   const ctx = await identityContext();
   if (!ctx) return { error: await unplacedOrganization() };
 
   const res = await tryFetchWithTimeout(
-    `${env.SERVER_URL}/internal/projects/${projectId}`,
+    `${env.SERVER_URL}/internal/projects/${encodeURIComponent(projectId)}`,
     {
       method: "DELETE",
       headers: projectHeaders(ctx, projectId),

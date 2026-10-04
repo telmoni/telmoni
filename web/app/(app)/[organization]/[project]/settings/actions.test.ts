@@ -90,6 +90,18 @@ beforeEach(() => {
 });
 
 describe("updateProjectNameAction", () => {
+  // The id is a path segment of the upstream URL. A Server Action is a public
+  // endpoint, so `../organization` from a caller would otherwise aim the
+  // PATCH at another lane under their own bearer.
+  it("refuses anything but a project id before asking auth", async () => {
+    for (const id of ["../organization", "x?limit=1", "", "a/b"]) {
+      expect(await updateProjectNameAction(id, "Marketing Site")).toEqual({
+        error: "Couldn't resolve that project. Reload and try again.",
+      });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("renames the project by its id, in the organization the request acts in", async () => {
     fetchMock.mockResolvedValue(renamed("marketing-site"));
     expect(await updateProjectNameAction(PROJECT, "  Marketing Site  ")).toEqual({ error: null });
