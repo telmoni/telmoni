@@ -6,6 +6,8 @@
 // package behind it.
 import "server-only";
 
+import { DOCS_URL } from "./site";
+
 const REQUIRED = [
   "SERVER_URL",
   "SERVICE_SECRET",
@@ -22,8 +24,10 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
 class MissingEnvError extends Error {
   constructor(missing: string[]) {
+    // The docs page rather than `web/.env.local.example`: whoever reads this
+    // is running the published image, where the repository is not.
     super(
-      `Missing required env vars: ${missing.join(", ")}\nSee web/.env.local.example for documentation.`,
+      `Missing required env vars: ${missing.join(", ")}\nEvery variable: ${DOCS_URL}/self-host/configuration/`,
     );
     this.name = "MissingEnvError";
   }
