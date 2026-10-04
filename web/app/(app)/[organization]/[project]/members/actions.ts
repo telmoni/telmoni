@@ -14,6 +14,7 @@ import {
   projectHeaders,
 } from "@/lib/server/entities/identity-context";
 import { fetchProjects } from "@/lib/server/data";
+import { fetchMembers } from "@/lib/server/entities/member";
 import { unplacedOrganization } from "@/lib/server/identity";
 import { getServerSession } from "@/lib/server/session";
 import {
@@ -139,18 +140,23 @@ export async function updateMemberRoleAction(
 export async function removeMemberAction(
   projectId: string,
   memberId: string,
-  memberEmail?: string,
 ): Promise<ActionResult> {
   const gate = await open("members:remove", 30, projectId);
   if ("error" in gate) return gate;
+  // The channel told is the removed person's own console, so their address
+  // comes from the roster auth answers for this project, never from the
+  // caller, who could otherwise name anybody's.
+  const roster = await fetchMembers(gate.projectId);
+  const removed =
+    roster.kind === "ok" ? roster.members.find((m) => m.member_id === memberId) : undefined;
   const res = await tryFetchWithTimeout(
     `${gate.base}/internal/projects/${encodeURIComponent(gate.projectId)}/members/${encodeURIComponent(memberId)}`,
     { method: "DELETE", headers: gate.headers },
   );
   if (!res?.ok) return answer(res);
 
-  if (memberEmail) {
-    await publishEvent(userChannel(memberEmail), {
+  if (removed) {
+    await publishEvent(userChannel(removed.email), {
       type: "membership:removed",
       data: { organizationId: gate.organizationId, projectId: gate.projectId },
     });

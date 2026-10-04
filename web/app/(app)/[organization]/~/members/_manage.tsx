@@ -334,7 +334,7 @@ export function OrganizationMemberRow({
               description="They will immediately lose access to all projects and resources in this organization."
               confirmLabel="Remove"
               onConfirm={() =>
-                act(() => removeOrganizationMemberAction(organizationId, member.member_id, member.email))
+                act(() => removeOrganizationMemberAction(organizationId, member.member_id))
               }
             />
           )}

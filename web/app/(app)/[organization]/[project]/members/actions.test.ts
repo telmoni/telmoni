@@ -36,6 +36,14 @@ vi.mock("@/lib/server/data", () => ({
     { id: "project_1", slug: "payments", name: "Payments", role: "owner" },
   ]),
 }));
+// The roster auth answers for the project: where a removal reads the address
+// it tells, since the caller's argument could name anybody's.
+vi.mock("@/lib/server/entities/member", () => ({
+  fetchMembers: vi.fn(async () => ({
+    kind: "ok",
+    members: [{ member_id: "user_2", email: "removed@example.test" }],
+  })),
+}));
 const mockPublishEvent = vi.fn();
 vi.mock("@/lib/events/publisher", () => ({
   publishEvent: (...args: unknown[]) => mockPublishEvent(...args),
@@ -459,9 +467,16 @@ describe("Incoming invites server actions", () => {
     });
   });
   describe("removeMemberAction", () => {
-    it("calls delete member endpoint and emits membership:removed when email is provided", async () => {
+    it("tells nobody about a removal the roster does not know", async () => {
       fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-      const res = await removeMemberAction("project_1", "user_2", "removed@example.test");
+      const res = await removeMemberAction("project_1", "user_9");
+      expect(res).toEqual({ error: null });
+      expect(mockPublishEvent).not.toHaveBeenCalled();
+    });
+
+    it("calls delete member endpoint and tells the removed member at the roster's address", async () => {
+      fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+      const res = await removeMemberAction("project_1", "user_2");
       expect(res).toEqual({ error: null });
       expect(fetchMock).toHaveBeenCalledWith(
         "http://auth.test/internal/projects/project_1/members/user_2",

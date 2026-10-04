@@ -22,6 +22,14 @@ vi.mock("@/lib/server/entities/organization", async (importOriginal) => ({
 vi.mock("@/lib/server/flags", () => ({
   featureOff: vi.fn(async () => null),
 }));
+// The roster auth answers: where a removal reads the address it tells, since
+// the caller's argument could name anybody's.
+vi.mock("@/lib/server/entities/organization-member", () => ({
+  fetchOrganizationMembers: vi.fn(async () => ({
+    kind: "ok",
+    members: [{ member_id: "user_2", email: "removed@example.test" }],
+  })),
+}));
 vi.mock("@/lib/api/fetch", () => ({
   tryFetchWithTimeout: vi.fn(),
   extractProblem: vi.fn(async () => ({ message: "problem" })),
@@ -405,13 +413,9 @@ describe("organization members actions", () => {
       );
     });
 
-    it("notifies the removed member on their personal channel via SSE", async () => {
+    it("notifies the removed member on their personal channel, at the roster's address", async () => {
       fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-      const res = await removeOrganizationMemberAction(
-        ORGANIZATION,
-        "user_2",
-        "removed@example.test",
-      );
+      const res = await removeOrganizationMemberAction(ORGANIZATION, "user_2");
       expect(res).toEqual({ error: null });
       expect(mockPublishEvent).toHaveBeenCalledWith(
         "bfev:user:removed@example.test",

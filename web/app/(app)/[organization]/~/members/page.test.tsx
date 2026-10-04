@@ -256,11 +256,12 @@ describe("OrganizationMembersPage", () => {
       });
     };
 
+    // The id alone: the address the removed person is told at is the
+    // roster's, read in the action, never the page's argument.
     await confirm("Remove member@example.com", "Remove");
     expect(actions.removeOrganizationMemberAction).toHaveBeenCalledWith(
       "org_acme",
       "user_member",
-      "member@example.com",
     );
 
     await confirm("Withdraw the invitation to invited@example.com", "Withdraw");
