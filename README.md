@@ -3,7 +3,7 @@
 [![CI](https://github.com/telmoni/telmoni/actions/workflows/ci.yml/badge.svg)](https://github.com/telmoni/telmoni/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-A foundation for organizations and their projects: members and roles, API tokens, notifications, a hash-chained audit log and a console agent. One Rust binary runs all of it behind a Next.js console.
+A foundation for organizations and their projects: members and roles, API keys, notifications, a hash-chained audit log and a console agent. One Rust binary runs all of it behind a Next.js console.
 
 Telmoni has not launched yet. The customer documentation is at [docs.telmoni.com](https://docs.telmoni.com) ([`telmoni/docs`](https://github.com/telmoni/docs)); the CLI and SDKs are in [`telmoni/telmoni-cli`](https://github.com/telmoni/telmoni-cli).
 
@@ -23,7 +23,7 @@ Sign in with the password form; mail lands in Mailpit at http://localhost:8025. 
 ```text
 crates/
   telmoni/        the binary: `serve`, and the admin commands (`migrate`, `rotate`, `sweep`, …)
-  auth/           sign-in, organizations and projects, members, invitations, API tokens
+  auth/           sign-in, organizations and projects, members, invitations, API keys
   notifications/  the feed, the Slack, Discord and webhook connectors, delivery
   agent/          the console agent: search over the docs and a project's own data
   migrator/       the migration runner, grants, role hardening, the audit schema

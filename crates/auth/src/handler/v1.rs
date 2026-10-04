@@ -196,7 +196,7 @@ pub async fn not_found() -> TelmoniError {
 /// credential gets everywhere else.
 fn unauthorized() -> Response {
     let mut problem = AuthError::InvalidToken.to_problem_details();
-    problem.detail = Some("a live telmoni_ API token is required".into());
+    problem.detail = Some("a live telmoni_ API key is required".into());
     let mut resp = (StatusCode::UNAUTHORIZED, Json(problem)).into_response();
     resp.headers_mut()
         .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));

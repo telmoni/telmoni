@@ -1,5 +1,5 @@
 const RESOURCE_LABELS: Record<string, string> = {
-  token: "API token",
+  token: "API key",
   ledger_entry: "Ledger entry",
 };
 

@@ -33,7 +33,7 @@ export default async function SplashPage() {
             click, and there is no layer now. `flex-1` alone fills the shell. */}
         <div className="px-3.5 py-6">
           <h1 className="max-w-xl text-sm text-muted-foreground">
-            Organizations and projects, members and roles, API tokens, and an
+            Organizations and projects, members and roles, API keys, and an
             audit log you can verify.
           </h1>
         </div>

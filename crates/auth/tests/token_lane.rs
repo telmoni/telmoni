@@ -350,7 +350,7 @@ async fn a_revoked_token_is_401(pool: PgPool) {
     );
     let body = json_body(refused).await;
     assert_eq!(body["type"], "/errors/auth/invalid-token");
-    assert_eq!(body["detail"], "a live telmoni_ API token is required");
+    assert_eq!(body["detail"], "a live telmoni_ API key is required");
 }
 
 #[sqlx::test]

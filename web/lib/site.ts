@@ -10,7 +10,7 @@ export const DOCS_URL = "https://docs.telmoni.com";
 export const DOCS_HOST = DOCS_URL.replace(/^https?:\/\//, "");
 export const PRODUCT_NAME = "Telmoni";
 export const PRODUCT_DESCRIPTION =
-  "A foundation for organizations and their projects: members and roles, API tokens, and a hash-chained audit log.";
+  "A foundation for organizations and their projects: members and roles, API keys, and a hash-chained audit log.";
 export const TWITTER_URL: string | null = null;
 export const STATUS_URL: string | null = null;
 export const DISCUSSIONS_URL: string | null = null;
