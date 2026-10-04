@@ -105,7 +105,7 @@ fn mrkdwn_escape(s: &str) -> String {
 #[must_use]
 pub fn render(event: &Event<'_>) -> Value {
     json!({
-        "text": event.title,
+        "text": mrkdwn_escape(event.title),
         "blocks": [
             {
                 "type": "header",
@@ -441,10 +441,11 @@ mod tests {
         let event = Event {
             id: uuid::Uuid::nil(),
             kind: telmoni_shared::types::NotificationKind::MemberAdded,
-            title: "t",
+            title: "<!here> t",
             body: "<!channel> api & <https://x|api> is down",
         };
         let v = render(&event);
+        assert_eq!(v["text"], "&lt;!here&gt; t");
         assert_eq!(
             v["blocks"][1]["text"]["text"],
             "&lt;!channel&gt; api &amp; &lt;https://x|api&gt; is down"
