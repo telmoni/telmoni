@@ -51,6 +51,7 @@ export function validateEnv(): void {
   }
 
   void env.AUTH_URL;
+  void env.TRUSTED_PROXY_HOPS;
 }
 
 export function isSecureOrigin(value: string): boolean {
@@ -111,6 +112,24 @@ export const env = {
   get REDIS_CA_CERT(): string | undefined {
     const v = process.env.REDIS_CA_CERT;
     return v && v.trim() ? v.trim() : undefined;
+  },
+
+  // How many entries the proxies in front of the console append to
+  // `X-Forwarded-For`, which is where `lib/api/rate-limit.ts` finds the one
+  // address a caller did not write. Google's load balancer appends the
+  // client's address and then its own, so the chart's deployment is two; a
+  // single reverse proxy is one; nothing in front is zero, and then the
+  // per-address ceilings take the caller's word.
+  get TRUSTED_PROXY_HOPS(): number {
+    const raw = process.env.TRUSTED_PROXY_HOPS?.trim();
+    if (!raw) return 2;
+    if (!/^\d{1,2}$/.test(raw)) {
+      throw new InvalidEnvError(
+        "TRUSTED_PROXY_HOPS",
+        "must be the number of proxies in front of the console (0 when there is none)",
+      );
+    }
+    return Number(raw);
   },
 
   // Who runs this deployment: `lib/server/branding.ts` reads these. All

@@ -89,6 +89,11 @@ web:
   enabled: true
   image: "web"
   replicas: 1
+  # How many entries the proxies in front of the console append to
+  # X-Forwarded-For, where it finds the one client address no caller wrote
+  # and keys its per-address rate limits: the GKE Gateway appends the
+  # client's address and then its own.
+  trustedProxyHops: 2
   extraEnv: []
   resources:
     requests:

@@ -212,7 +212,7 @@ Why the code is shaped this way:
   - ⚠ A keepalive, because the VPC firewall drops idle connections, which would leave the subscriber silently deaf.
   - ⚠ A command timeout, because a node that is connected but silent would hang the inline limiter.
   - ⚠ Reconnecting on `READONLY` after a high-availability failover.
-- **The client address** used by the limiter is the second-to-last `X-Forwarded-For` entry (`trustedClientIp`). Google's load balancer appends the address it saw the client at, then its own, so earlier entries, which the client can write, are ignored.
+- **The client address** used by the limiter is the `X-Forwarded-For` entry `TRUSTED_PROXY_HOPS` back from the end (`trustedClientIp`): each proxy in front appends the address it saw the request come from, so that entry is the first one no caller wrote. Google's load balancer appends the client's address and then its own, so the chart sets `web.trustedProxyHops: 2`; the compose stack assumes one reverse proxy (1); `0` means nothing is in front, the limiter takes the caller's word, and boot warns.
   - ⚠ **No other header is read for it.** `cf-connecting-ip` and its like are set by an edge this deployment does not have, so here they are whatever the caller sends. Read first, one let any caller choose a fresh bucket per request, past every per-address ceiling.
 
 ## Live events

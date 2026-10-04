@@ -40,6 +40,8 @@ spec:
               value: "3000"
             - name: SERVER_URL
               value: http://server:8082
+            - name: TRUSTED_PROXY_HOPS
+              value: {{ .Values.web.trustedProxyHops | quote }}
             {{- with .Values.web.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

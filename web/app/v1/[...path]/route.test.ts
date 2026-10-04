@@ -10,7 +10,7 @@ vi.mock("@/lib/api/rate-limit", async (importOriginal) => {
 const fetchWithTimeout = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/fetch", () => ({ fetchWithTimeout }));
 vi.mock("@/lib/env", () => ({
-  env: { SERVER_URL: "http://server:8082", SERVICE_SECRET: "s3cret" },
+  env: { SERVER_URL: "http://server:8082", SERVICE_SECRET: "s3cret", TRUSTED_PROXY_HOPS: 2 },
 }));
 
 import { NextRequest } from "next/server";

@@ -189,6 +189,12 @@ services:
       SERVICE_SECRET: ${SERVICE_SECRET}
       SERVER_URL: http://server:8082
       REDIS_URL: redis://redis:6379
+      # How many entries the proxy in front appends to X-Forwarded-For: the
+      # console's per-address rate limits key on the one address no caller
+      # wrote. This stack serves plain HTTP, so one reverse proxy terminating
+      # TLS and appending the client's address is assumed; 0 when the console
+      # is reached directly, which leaves those limits to the caller's word.
+      TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-1}
       # The identity provider's origins, space separated: signing out from the
       # account menu is a form post that ends in a redirect to the provider, and the console's
       # Content Security Policy lets the browser follow it there and nowhere

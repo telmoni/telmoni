@@ -26,11 +26,16 @@ export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
   const { logger } = await import("./lib/logger");
-  const { validateEnv } = await import("./lib/env");
+  const { env, validateEnv } = await import("./lib/env");
 
   if (process.env.NODE_ENV === "production") {
     validateEnv();
     logger.info("environment validated");
+    if (env.TRUSTED_PROXY_HOPS === 0) {
+      logger.warn(
+        "TRUSTED_PROXY_HOPS=0: nothing in front of the console, so the per-address rate limits take the caller's word for its address",
+      );
+    }
   } else {
     try {
       validateEnv();

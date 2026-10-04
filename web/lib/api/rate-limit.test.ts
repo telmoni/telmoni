@@ -25,6 +25,11 @@ describe("sessionKey", () => {
 });
 
 describe("clientKey", () => {
+  afterEach(() => {
+    delete process.env.TRUSTED_PROXY_HOPS;
+  });
+
+  // Unset is Google's load balancer: the client's address and then its own.
   it("keys on the trusted second-from-last hop, not the spoofable first", () => {
     const req = new Request("http://example.com", {
       headers: { "x-forwarded-for": "1.2.3.4, 5.6.7.8, 9.9.9.9" },
@@ -57,12 +62,34 @@ describe("clientKey", () => {
       .toBe("bfrl:unsubscribe:1.2.3.4");
   });
 
-  it("falls back to x-real-ip then to 'unknown'", () => {
+  // One reverse proxy appends the client's address and nothing more, so the
+  // last entry is the client, and anything a caller wrote sits in front of it.
+  it("reads one hop back behind a single proxy", () => {
+    process.env.TRUSTED_PROXY_HOPS = "1";
+    const forged = new Request("http://example.com", {
+      headers: { "x-forwarded-for": "198.51.100.7, 5.6.7.8" },
+    });
+    expect(clientKey(forged as never, "unsubscribe")).toBe("bfrl:unsubscribe:5.6.7.8");
+  });
+
+  // Nothing in front: the last entry is what Next recorded from the socket
+  // when the caller sent no header, and the caller's word when it did.
+  it("takes the last entry when no proxy is trusted", () => {
+    process.env.TRUSTED_PROXY_HOPS = "0";
+    const req = new Request("http://example.com", {
+      headers: { "x-forwarded-for": "1.2.3.4, 5.6.7.8" },
+    });
+    expect(clientKey(req as never, "unsubscribe")).toBe("bfrl:unsubscribe:5.6.7.8");
+  });
+
+  // `x-real-ip` is a request header like any other here: nothing in front of
+  // the console sets it, so a caller could.
+  it("takes no address from x-real-ip, and keys an unaddressed request as unknown", () => {
     const noXff = new Request("http://example.com", {
       headers: { "x-real-ip": "9.9.9.9" },
     });
     expect(clientKey(noXff as never, "unsubscribe"))
-      .toBe("bfrl:unsubscribe:9.9.9.9");
+      .toBe("bfrl:unsubscribe:unknown");
 
     const naked = new Request("http://example.com");
     expect(clientKey(naked as never, "unsubscribe"))
