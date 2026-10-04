@@ -7,11 +7,11 @@ import { ServiceUnavailable } from "@/components/service-unavailable";
 import { Rows } from "@/components/rows";
 import { SettingsRow } from "@/components/settings-row";
 import { Card } from "@/components/ui/card";
+import { env } from "@/lib/env";
 import { organizationLabel, ownerContact } from "@/lib/identity";
 import { administersOrganization } from "@/lib/organization-role";
 import { activeOrganization, getServerContext, identityContext } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
-import { SITE_URL } from "@/lib/site";
 import { organizationPath } from "@/lib/slug";
 
 import { DeleteOrganizationForm } from "./_delete-organization";
@@ -78,7 +78,7 @@ export default async function OrganizationSettingsPage() {
           <OrganizationUrlForm
             organizationId={organization.organizationId}
             slug={organization.slug}
-            host={new URL(SITE_URL).host}
+            host={new URL(env.AUTH_URL).host}
             canEdit={canManage}
           />
         </Section>

@@ -31,14 +31,10 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# ⚠ A build arg, not container env: `NEXT_PUBLIC_` vars are inlined into the
-# client bundle at BUILD time. Without it the image ships `https://example.com`
-# (web/lib/site.ts) in robots.txt, the sitemap, canonical links, OG tags and
-# JSON-LD. That default is deliberate — an unconfigured build should look
-# obviously wrong rather than guess a real host.
-ARG NEXT_PUBLIC_APP_URL
-ENV NEXT_TELEMETRY_DISABLED=1 \
-    NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+# No origin is baked in: the console reads AUTH_URL at request time, so the
+# one published image serves every deployment. A `NEXT_PUBLIC_` variable here
+# would be inlined into the bundle and name the build machine's host.
+ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 # ⚠ Next writes its ISR cache here at RUNTIME, but the runtime stage is
 # distroless (no shell, so no `RUN mkdir`) and nonroot. Without this every

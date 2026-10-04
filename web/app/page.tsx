@@ -1,3 +1,4 @@
+import { JsonLd } from "@/components/json-ld";
 import { PaperShell } from "@/components/paper-shell";
 import { getServerSession } from "@/lib/server/session";
 
@@ -11,6 +12,11 @@ export default async function SplashPage() {
 
   return (
     <PaperShell signedIn={signedIn} className="dark">
+      {/* The structured data describes this page, the one a crawler may index
+          (robots.ts), and it names the deployment's origin, which is read per
+          request: in the root layout it would also reach the 404 page, which
+          is built once with no origin to read. */}
+      <JsonLd />
       <main className="flex flex-1 flex-col">
         {/* ⚠ **The sentence IS the `<h1>`, and that is the last of the drawn
             wordmark.** The mark that used to close this page held the only

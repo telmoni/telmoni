@@ -16,8 +16,8 @@
 #
 # The ports are pinned here rather than inherited. The server's is what
 # web/.env.local's SERVER_URL names and `make port-check` probes; the
-# console's 3000 is what AUTH_URL / NEXT_PUBLIC_APP_URL and a provider's
-# redirect URI are registered against. The server reads its DSNs and secrets
+# console's 3000 is what AUTH_URL and a provider's redirect URI are
+# registered against. The server reads its DSNs and secrets
 # from .env itself.
 #
 # Usage:   make up                        (which builds the binary first)

@@ -57,7 +57,7 @@ flowchart LR
 
 **The console** (`web/Dockerfile`):
 - It builds the standalone Next.js server and runs it on a distroless, non-root Node image on port 3000.
-- `NEXT_PUBLIC_APP_URL` must be a build argument, because it is inlined at build time.
+- It bakes in no origin: the console reads `AUTH_URL` at request time, so one image serves every deployment.
 
 ## The Helm chart
 

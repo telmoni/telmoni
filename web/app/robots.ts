@@ -1,6 +1,11 @@
 import type { MetadataRoute } from "next";
 
-import { SITE_URL } from "@/lib/site";
+import { env } from "@/lib/env";
+
+// Rendered per request: the console's origin is `AUTH_URL`, read at runtime so
+// one image serves every deployment, and a file built once would carry the
+// build machine's.
+export const dynamic = "force-dynamic";
 
 export default function robots(): MetadataRoute.Robots {
   return {
@@ -11,6 +16,6 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ["/api/", "/auth/", "/console", "/invites"],
       },
     ],
-    sitemap: `${SITE_URL}/sitemap.xml`,
+    sitemap: `${env.AUTH_URL}/sitemap.xml`,
   };
 }

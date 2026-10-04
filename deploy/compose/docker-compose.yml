@@ -192,7 +192,6 @@ services:
       PORT: "3000"
       NODE_ENV: production
       AUTH_URL: ${AUTH_URL:-http://localhost:3000}
-      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
       AUTH_SECRET: ${AUTH_SECRET}
       SERVICE_SECRET: ${SERVICE_SECRET}
       SERVER_URL: http://server:8082

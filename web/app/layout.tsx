@@ -2,14 +2,15 @@ import type { Metadata } from "next";
 import { Geist_Mono, Inter } from "next/font/google";
 import { headers } from "next/headers";
 import "./globals.css";
-import { JsonLd } from "@/components/json-ld";
 import { CORNERS_BOOT_SCRIPT } from "@/lib/corners";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
-import { PRODUCT_DESCRIPTION, PRODUCT_NAME, SITE_URL } from "@/lib/site";
+import { PRODUCT_DESCRIPTION, PRODUCT_NAME } from "@/lib/site";
 
+// No `metadataBase`: nothing here names a relative URL for it to resolve, and
+// the console's origin is `AUTH_URL`, read per request, which a module
+// constant evaluated at build time could not carry.
 export const metadata: Metadata = {
-  metadataBase: new URL(SITE_URL),
   title: {
     template: `%s · ${PRODUCT_NAME}`,
     default: PRODUCT_NAME,
@@ -50,7 +51,6 @@ export default async function RootLayout({
         />
       </head>
       <body>
-        <JsonLd />
         <ThemeProvider
           nonce={nonce}
           attribute="class"

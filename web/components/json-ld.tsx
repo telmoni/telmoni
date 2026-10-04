@@ -1,25 +1,29 @@
+import { env } from "@/lib/env";
 import { branding } from "@/lib/server/branding";
-import { PRODUCT_DESCRIPTION, PRODUCT_NAME, REPO_URL, SITE_URL } from "@/lib/site";
+import { PRODUCT_DESCRIPTION, PRODUCT_NAME, REPO_URL } from "@/lib/site";
 
 export function JsonLd() {
+  // The deployment's own origin, read at request time as `branding` is, so
+  // one image serves every operator.
+  const origin = env.AUTH_URL;
   const graph = {
     "@context": "https://schema.org",
     "@graph": [
       {
         "@type": "Organization",
-        "@id": `${SITE_URL}/#organization`,
+        "@id": `${origin}/#organization`,
         name: branding.COMPANY_NAME,
-        url: SITE_URL,
+        url: origin,
         ...(REPO_URL ? { sameAs: [REPO_URL] } : {}),
       },
       {
         "@type": "SoftwareApplication",
-        "@id": `${SITE_URL}/#application`,
+        "@id": `${origin}/#application`,
         name: PRODUCT_NAME,
         applicationCategory: "DeveloperApplication",
         operatingSystem: "Web",
-        url: SITE_URL,
-        publisher: { "@id": `${SITE_URL}/#organization` },
+        url: origin,
+        publisher: { "@id": `${origin}/#organization` },
         description: PRODUCT_DESCRIPTION,
       },
     ],

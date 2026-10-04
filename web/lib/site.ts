@@ -15,6 +15,3 @@ export const TWITTER_URL: string | null = null;
 export const STATUS_URL: string | null = null;
 export const DISCUSSIONS_URL: string | null = null;
 export const SPONSORS_URL: string | null = null;
-export const SITE_URL = (
-  process.env.NEXT_PUBLIC_APP_URL || "https://example.com"
-).replace(/\/$/, "");
