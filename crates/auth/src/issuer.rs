@@ -68,8 +68,8 @@ pub struct Issuer {
     verify_email: bool,
 }
 
-/// 256 random bits, base64url: a bearer, a refresh token, a code, a link's
-/// token.
+/// Two v4 UUIDs — 244 random bits — base64url: a bearer, a refresh token, a
+/// code, a link's token.
 pub(crate) fn secret() -> String {
     let mut bytes = [0u8; 32];
     bytes[..16].copy_from_slice(Uuid::new_v4().as_bytes());
