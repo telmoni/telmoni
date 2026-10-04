@@ -41,6 +41,13 @@ const PROVIDER_LOGOUT =
   "https://idp.example/logout" +
   "?session_id=session_42&return_to=http%3A%2F%2Flocalhost%3A3000%2F";
 
+// The account menu's own form: a same-origin post.
+const post = (site = "same-origin") =>
+  new NextRequest("http://localhost:3000/auth/logout", {
+    method: "POST",
+    headers: { "sec-fetch-site": site },
+  });
+
 // A signed-in browser's cookie: the session the exchange answered with, and
 // an opaque bearer nothing reads.
 async function plantSession(sessionId: string, sessionRowId: string | null = null) {
@@ -71,6 +78,52 @@ beforeEach(() => {
 });
 
 describe("POST /auth/logout", () => {
+  // ⚠ A form on another site can post here; the browser withholds the session
+  // cookie, and an unguarded answer would still clear it — a forced sign-out
+  // from anywhere. The heartbeat refuses the same way.
+  it("refuses a cross-site form post without touching the session", async () => {
+    await plantSession("session_42");
+    const sealed = jar.store.get(SESSION_COOKIE);
+
+    const res = await POST(post("cross-site"));
+
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("http://localhost:3000/");
+    expect(jar.store.get(SESSION_COOKIE)).toBe(sealed);
+    expect(mockedGetLogoutUrl).not.toHaveBeenCalled();
+    expect(mockedRevoke).not.toHaveBeenCalled();
+  });
+
+  // A browser that sends no Fetch Metadata still sends `Origin` on a
+  // cross-origin post; the console's own form sends its own origin.
+  it("refuses a post whose Origin is another site, with no Fetch Metadata", async () => {
+    await plantSession("session_42");
+    const sealed = jar.store.get(SESSION_COOKIE);
+
+    const res = await POST(
+      new NextRequest("http://localhost:3000/auth/logout", {
+        method: "POST",
+        headers: { origin: "https://evil.example" },
+      }),
+    );
+
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("http://localhost:3000/");
+    expect(jar.store.get(SESSION_COOKIE)).toBe(sealed);
+    expect(mockedRevoke).not.toHaveBeenCalled();
+
+    mockedGetLogoutUrl.mockResolvedValue(null);
+    const own = await POST(
+      new NextRequest("http://localhost:3000/auth/logout", {
+        method: "POST",
+        headers: { origin: "http://localhost:3000" },
+      }),
+    );
+    expect(own.status).toBe(303);
+    expect(mockedRevoke).toHaveBeenCalledWith("session_42");
+    expect(jar.store.get(SESSION_COOKIE)).toBe("");
+  });
+
   // ⚠ The session ends at auth on EVERY sign-out. This test used to pin the
   // opposite — "skips the server revoke" — which is how a normal sign-out
   // left auth's row live and the outstanding access token accepted.
@@ -78,7 +131,7 @@ describe("POST /auth/logout", () => {
     await plantSession("session_42");
     mockedGetLogoutUrl.mockResolvedValue(PROVIDER_LOGOUT);
 
-    const res = await POST();
+    const res = await POST(post());
 
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe(PROVIDER_LOGOUT);
@@ -95,7 +148,7 @@ describe("POST /auth/logout", () => {
     await plantSession("session_42");
     mockedGetLogoutUrl.mockResolvedValue(null);
 
-    const res = await POST();
+    const res = await POST(post());
 
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe("http://localhost:3000/");
@@ -104,7 +157,7 @@ describe("POST /auth/logout", () => {
   });
 
   it("lands on the splash without provider calls when there is no session", async () => {
-    const res = await POST();
+    const res = await POST(post());
 
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe("http://localhost:3000/");
@@ -123,7 +176,7 @@ describe("POST /auth/logout", () => {
     await blacklistSession("row_42");
     mockedGetLogoutUrl.mockResolvedValue(PROVIDER_LOGOUT);
 
-    const res = await POST();
+    const res = await POST(post());
 
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe("http://localhost:3000/");
@@ -136,7 +189,7 @@ describe("POST /auth/logout", () => {
     await plantSession("session_42", "row_42");
     mockedGetLogoutUrl.mockResolvedValue(PROVIDER_LOGOUT);
 
-    const res = await POST();
+    const res = await POST(post());
 
     expect(res.headers.get("location")).toBe(PROVIDER_LOGOUT);
     expect(mockedRevoke).toHaveBeenCalledWith("session_42");
