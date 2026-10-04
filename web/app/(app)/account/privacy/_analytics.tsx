@@ -36,11 +36,12 @@ export function AnalyticsPreference({ optIn }: { optIn: boolean }) {
       <div className="grid gap-1">
         <p className="font-medium">Product analytics</p>
         <p className="text-muted-foreground">
-          Off unless you turn it on. While it is on, we send which console pages
-          you use to our analytics provider, so we can see which parts of the
-          product people get stuck in. It never includes your API keys or
-          anything inside your projects. Either way the platform still writes its
-          own operational log, which stays on our servers.
+          Off unless you turn it on. While it is on, the console sends the product
+          events you trigger &mdash; which steps you complete, never their content
+          &mdash; to the analytics provider this deployment has configured, so its
+          operator can see where people get stuck. It never includes your API keys
+          or anything inside your projects. Either way the platform still writes
+          its own operational log, which stays on its servers.
         </p>
       </div>
       <Switch

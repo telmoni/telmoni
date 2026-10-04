@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { Section } from "@/components/section";
 import { Card } from "@/components/ui/card";
+import { analyticsConfigured } from "@/lib/analytics";
 import { ownedOrganizationLabels } from "@/lib/identity";
 import { fetchActiveSessions, getServerContext } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
@@ -30,16 +31,20 @@ export default async function AccountPrivacyPage() {
     <>
       <PageHeader title="Privacy" />
       <div className="grid gap-6">
-        <Section
-          title="Data collection"
-          description="What leaves this platform about how you use it."
-        >
-          <Card className="text-sm">
-            <AnalyticsPreference
-              optIn={context?.person.analyticsOptIn ?? false}
-            />
-          </Card>
-        </Section>
+        {/* Only where there is a provider to send to: a deployment without one
+            collects nothing, and a switch would promise otherwise. */}
+        {analyticsConfigured() && (
+          <Section
+            title="Data collection"
+            description="What leaves this platform about how you use it."
+          >
+            <Card className="text-sm">
+              <AnalyticsPreference
+                optIn={context?.person.analyticsOptIn ?? false}
+              />
+            </Card>
+          </Section>
+        )}
 
         <Section
           title="Active sessions"

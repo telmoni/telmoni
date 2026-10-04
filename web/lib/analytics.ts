@@ -6,6 +6,13 @@ type AnalyticsEvent =
   | "onboarding.signup_completed"
   | "activation.topup_started";
 
+// Whether this deployment has a sink at all. Without one nothing is sent
+// whatever the person chooses, so the console offers no switch: a consent for
+// nothing would promise a provider that does not exist.
+export function analyticsConfigured(): boolean {
+  return Boolean(env.ANALYTICS_INGEST_URL && env.ANALYTICS_WRITE_KEY);
+}
+
 export function track(
   event: AnalyticsEvent,
   props: Record<string, unknown> = {},

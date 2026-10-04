@@ -2,6 +2,7 @@ import { PaperShell } from "@/components/paper-shell";
 import { SessionHeartbeat } from "@/components/session-heartbeat";
 import { Card } from "@/components/ui/card";
 import type { AccountOnlyReason } from "@/lib/account-only";
+import { analyticsConfigured } from "@/lib/analytics";
 import type { ActiveSession, DeletedOrganization } from "@/lib/server/data";
 import { canChangeEmail, canResetPassword } from "@/lib/sign-in-method";
 import type { IncomingInvite } from "@/lib/types/incoming-invite";
@@ -97,10 +98,13 @@ export function AccountOnly({
           </Card>
         )}
 
-        <Card className="grid gap-3 text-sm">
-          <h2 className="text-base font-medium">Data collection</h2>
-          <AnalyticsPreference optIn={analyticsOptIn} />
-        </Card>
+        {/* As on the privacy page: no provider, no switch. */}
+        {analyticsConfigured() && (
+          <Card className="grid gap-3 text-sm">
+            <h2 className="text-base font-medium">Data collection</h2>
+            <AnalyticsPreference optIn={analyticsOptIn} />
+          </Card>
+        )}
 
         <div className="grid gap-2">
           <h2 className="text-base font-medium">Active sessions</h2>

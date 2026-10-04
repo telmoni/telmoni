@@ -61,6 +61,10 @@ vi.mock("./account/privacy/_analytics", () => ({
     <div data-testid="analytics" data-opt-in={String(optIn)} />
   ),
 }));
+// Whether the deployment has an analytics provider, which decides whether the
+// consent card is drawn at all.
+const analyticsConfigured = vi.hoisted(() => vi.fn(() => true));
+vi.mock("@/lib/analytics", () => ({ analyticsConfigured }));
 
 import type { ActiveSession, DeletedOrganization } from "@/lib/server/data";
 
@@ -151,6 +155,14 @@ describe("AccountOnly", () => {
     expect(screen.queryByTestId("change-email")).toBeNull();
     expect(screen.queryByTestId("password-reset")).toBeNull();
     expect(screen.getByTestId("analytics")).toHaveAttribute("data-opt-in", "false");
+  });
+
+  // A deployment without a provider sends nothing, so it asks for no consent.
+  it("offers no analytics consent where the deployment has no provider", () => {
+    analyticsConfigured.mockReturnValueOnce(false);
+    mount({ analyticsOptIn: true });
+    expect(screen.queryByTestId("analytics")).toBeNull();
+    expect(screen.queryByRole("heading", { name: /data collection/i })).toBeNull();
   });
 
   it("shows no invitations section when none are waiting", () => {

@@ -22,6 +22,10 @@ vi.mock("./_analytics", () => ({
     <div data-testid="analytics" data-opt-in={String(optIn)} />
   ),
 }));
+// Whether the deployment has an analytics provider, which decides whether the
+// data collection section is drawn at all.
+const analyticsConfigured = vi.hoisted(() => vi.fn(() => true));
+vi.mock("@/lib/analytics", () => ({ analyticsConfigured }));
 
 vi.mock("./_delete-account", () => ({
   DeleteAccountForm: ({ ownedOrganizations }: { ownedOrganizations: readonly string[] }) => (
@@ -86,6 +90,18 @@ describe("AccountPrivacyPage", () => {
     expect(screen.getByTestId("sessions")).toBeInTheDocument();
     expect(screen.getByTestId("delete-account")).toBeInTheDocument();
     expect(screen.getByTestId("analytics")).toBeInTheDocument();
+  });
+
+  // A deployment without a provider sends nothing, so the page asks for no
+  // consent and opens on the sessions.
+  it("draws no data collection section where the deployment has no provider", async () => {
+    analyticsConfigured.mockReturnValueOnce(false);
+    render(await AccountPrivacyPage());
+    expect(screen.queryByTestId("analytics")).toBeNull();
+    const headings = screen
+      .getAllByRole("heading", { level: 2 })
+      .map((h) => h.textContent?.toLowerCase() ?? "");
+    expect(headings).toEqual(["active sessions", "danger zone"]);
   });
 
   // The consent is the person's own, and `/me` always states it; the one way
