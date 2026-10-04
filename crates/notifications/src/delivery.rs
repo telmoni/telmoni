@@ -580,7 +580,11 @@ async fn attempt_one(
             id: delivery.id,
             message,
         },
-        Err(DeliveryError::Terminal { class, reason, .. }) => match class {
+        Err(DeliveryError::Terminal {
+            class,
+            reason,
+            status,
+        }) => match class {
             Terminal::Retire | Terminal::BadTarget => Outcome::Retire {
                 connection_id: delivery.connection_id,
                 class,
@@ -588,11 +592,14 @@ async fn attempt_one(
                 attempt,
             },
             Terminal::OurBug | Terminal::Unknown => {
+                // The vendor's sentence goes to the row, never the log: a far
+                // end echoes what it was sent, which names people.
                 tracing::error!(
                     delivery_id = %delivery.id,
                     connection_id = %delivery.connection_id,
                     kind = %delivery.kind,
-                    reason = %reason,
+                    class = ?class,
+                    status = ?status,
                     "delivery refused by the vendor for a reason retrying cannot fix"
                 );
                 Outcome::Spent {
@@ -759,13 +766,15 @@ pub async fn retire(
     let failed = db::fail_pending_for_connection(&mut tx, connection_id, reason).await?;
     let notices = notify::connector_disconnected(&mut tx, &retired, reason).await?;
     tx.commit().await?;
+    // The far end's answer is kept on the row and told to the project; the
+    // log gets the class, because that answer is the receiver's own text.
     tracing::error!(
         connection_id = %connection_id,
         project_id = %retired.project_id,
         provider = %retired.provider,
         status,
+        class = ?class,
         failed,
-        reason,
         "connector retired on the far end's answer"
     );
     spawn_first_attempts(state, notices);
