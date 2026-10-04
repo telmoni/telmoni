@@ -176,7 +176,7 @@ With the hook disabled, the Job is an ordinary object, with no ordering against 
 
 How it differs from the chart:
 - **Every module and the migrator connect as one database user**, the superuser. Row-level security and the per-module grants therefore do not apply. Only the queries that name their tenant themselves still keep tenants apart there. Most queries rely on row-level security (see [tenancy](tenancy.md#when-everything-connects-as-a-superuser)).
-- **The default `CONNECTOR_KEK` is a `local:` key**, which is fine outside Kubernetes.
+- **`CONNECTOR_KEK` has no default**: connectors stay off until the operator mints a `local:` key, which is fine outside Kubernetes and a secret to back up beside the database.
 - **Partition rotation is run by hand**, or from cron: `docker compose … run --rm migrate rotate`.
 - **The server's deployed-tier refusals do not fire**, because there is no `KUBERNETES_SERVICE_HOST`.
 

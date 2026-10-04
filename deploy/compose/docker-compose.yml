@@ -5,11 +5,17 @@
 #   1. Write .env beside this file with the keys the docs list
 #      (docs.telmoni.com/self-host/docker-compose) — not a copy of the
 #      repository's root .env.example, which is the development stack's and
-#      names services this stack does not run. Two values have no default
+#      names services this stack does not run. Three values have no default
 #      and the stack does not start without them:
-#      SERVICE_SECRET (any random string; both processes get the same one)
-#      and AUTH_SECRET (the console's cookie seal, 32 bytes or more):
+#      SERVICE_SECRET (any random string; both processes get the same one),
+#      AUTH_SECRET (the console's cookie seal, 32 bytes or more) and
+#      POSTGRES_PASSWORD (the one database user's; a default here would be
+#      the same on every install):
 #        openssl rand -hex 32
+#      Connectors (Slack, Discord, webhooks) stay off until a fourth is set,
+#      CONNECTOR_KEK=local:<openssl rand -hex 32>, which seals their grants
+#      at rest: a secret to back up beside the database, since a dump
+#      restored without it leaves every grant unreadable.
 #   2. Run: docker compose -f deploy/compose/docker-compose.yml up -d
 #
 # The server runs its own sweeps on a timer (the deletion saga, retention, the
@@ -35,7 +41,7 @@ volumes:
   ollama_models:
 
 x-database-url: &database_url
-  postgres://${POSTGRES_USER:-telmoni}:${POSTGRES_PASSWORD:-telmoni_dev}@postgres:5432/${POSTGRES_DB:-telmoni}
+  postgres://${POSTGRES_USER:-telmoni}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/compose/.env}@postgres:5432/${POSTGRES_DB:-telmoni}
 
 services:
   postgres:
@@ -46,7 +52,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-telmoni}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-telmoni_dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/compose/.env}
       POSTGRES_DB: ${POSTGRES_DB:-telmoni}
     command: ["postgres", "-c", "max_connections=300"]
     ports:
@@ -139,13 +145,15 @@ services:
       MAIL_FROM: ${MAIL_FROM:-Telmoni <no-reply@localhost>}
       SUPPORT_EMAIL: ${SUPPORT_EMAIL:-}
       # The connectors: a vendor app each, and the key that seals every
-      # grant at rest. `local:` is for a machine you control.
+      # grant at rest. No default: a key written here would be the same on
+      # every install, and a database dump would then open every grant.
+      # `local:` is for a machine you control.
       SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-}
       SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-}
       SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
       DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
       DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
-      CONNECTOR_KEK: ${CONNECTOR_KEK:-local:0000000000000000000000000000000000000000000000000000000000000000}
+      CONNECTOR_KEK: ${CONNECTOR_KEK:-}
       # The agent: `anthropic` or `openai` (the protocol), the model and its
       # key, and the embeddings the `ollama` service serves.
       AGENT_MODEL_PROVIDER: ${AGENT_MODEL_PROVIDER:-}
