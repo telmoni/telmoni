@@ -1,18 +1,18 @@
 # Telmoni — Agent Guidelines
 
-The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni/telmoni)): organizations and projects, members and roles, API tokens, notifications, an audit log and a console agent. One Rust binary, `telmoni`, runs auth, notifications and the console agent as modules; the Next.js console in `web/` sits beside it; the Helm chart in `deploy/` deploys both to GKE. A deployment that needs more builds its own binary and console on top (README § Extending Telmoni); nothing here names one.
+The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni/telmoni)): organizations and projects, members and roles, API keys (`api_tokens` in the code; customer copy always says *API key*), notifications, an audit log and a console agent. One Rust binary, `telmoni`, runs auth, notifications and the console agent as modules; the Next.js console in `web/` sits beside it; the Helm chart in `deploy/` deploys both to GKE. A deployment that needs more builds its own binary and console on top (README § Extending Telmoni); nothing here names one.
 
 ## Ground Rules
 - **Pre-launch:** nothing has shipped. Fix schemas, wire contracts, Redis keys and APIs directly to their ideal state; no migration paths, dual-writes, shims or versioned schemas.
 - **Quality gate:** never weaken a test or leave the tree broken.
 - **Ask first:** any dependency change (any edit to `Cargo.toml`, `Cargo.lock`, `web/package.json` or `web/package-lock.json`, lockfile-only refreshes included) and any external-state change (`helm install`/`upgrade`, `kubectl apply`, `gcloud` writes, secrets, DNS, a hosted model or embeddings call with a real key).
-- **No new migration files:** edit the module's existing migration; rebuild with `make db-reset` when asked.
+- **No new migration files:** edit the module's existing migration, and give a new module exactly one; rebuild with `make db-reset` when asked.
 
 ## Where Things Live
 | Path | What |
 |---|---|
 | `crates/telmoni` | The binary: `serve` (every module on `PORT` 8082, the sweeps and the agent's indexer on timers) and one-shot admin subcommands (`cli.rs`). `App::assemble` is what a deployment's own binary calls. |
-| `crates/auth` | Sign-in (password form, OIDC), identities, organizations, projects, members, invitations, transfers, API tokens, sessions, flags, export and deletion, `/v1`. |
+| `crates/auth` | Sign-in (password form, OIDC), identities, organizations, projects, members, invitations, transfers, API keys, sessions, flags, export and deletion, `/v1`. |
 | `crates/notifications` | The in-app feed, Slack/Discord/webhook connectors, the delivery queue. |
 | `crates/agent` | The console agent, read-only: model adapters, embeddings, the index, hybrid search, tools. Needs the `vector` extension, which a superuser installs. Off until `AGENT_MODEL_PROVIDER` is set. |
 | `crates/shared` | `TelmoniError`, RBAC (`rbac.rs`), tenancy scopes, the seams between modules (`seam.rs`), audit, `Redacted`. `tests/` holds the cross-module suites. |

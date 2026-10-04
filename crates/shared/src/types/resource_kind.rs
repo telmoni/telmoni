@@ -137,6 +137,9 @@ mod tests {
         assert!("projects".parse::<TelmoniResourceKind>().is_err());
         assert!("".parse::<TelmoniResourceKind>().is_err());
         assert!("subscription".parse::<TelmoniResourceKind>().is_err());
+        // The retired observability product's kinds. They guard against its
+        // stale values, not against the names: one that comes back as a
+        // variant leaves this list in the same change.
         assert!("heartbeat".parse::<TelmoniResourceKind>().is_err());
         assert!("service".parse::<TelmoniResourceKind>().is_err());
         assert!("slo".parse::<TelmoniResourceKind>().is_err());
