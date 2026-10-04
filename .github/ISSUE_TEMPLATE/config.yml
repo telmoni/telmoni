@@ -6,4 +6,4 @@ contact_links:
     url: https://github.com/telmoni/telmoni/security/advisories/new
     about: >-
       Please do NOT open a public issue for a suspected vulnerability. This link goes to GitHub's
-      private reporting form; see SECURITY.md for our reporting guidelines.
+      private reporting form; the security policy is at docs.telmoni.com/legal/security/.

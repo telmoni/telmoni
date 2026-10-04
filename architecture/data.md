@@ -25,7 +25,7 @@ This page covers migrations, partitions, the audit log and retention. Who may re
 
 ## Migrations
 
-**One migration file per module, edited in place until the first release.** Pre-release, schema changes edit the module's single `*_initial.sql`. They never add a file. A local database is rebuilt with `make db-reset`.
+**One migration file per module, edited in place.** Nothing has shipped, so a schema change edits the module's single `*_initial.sql` and never adds a file; a local database is rebuilt with `make db-reset`.
 
 | Set | File |
 |---|---|
