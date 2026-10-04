@@ -5,6 +5,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { IdentityContext } from "@/lib/server/entities/identity-context";
 import type { OrganizationEntry } from "@/lib/server/entities/organization";
 
+// The host under the URL field is the deployment's own origin, read from
+// `AUTH_URL` at request time; `env` refuses to answer without it.
+vi.mock("@/lib/env", () => ({
+  env: { AUTH_URL: "https://console.example" },
+}));
+
 vi.mock("@/components/page-header", () => ({
   PageHeader: ({ title }: { title: string }) => (
     <div data-testid="page-header">{title}</div>
@@ -173,7 +179,7 @@ describe("OrganizationSettingsPage", () => {
     expect(screen.getByTestId("name-form")).toHaveAttribute("data-initial", "My Own Workspace");
     expect(screen.getByTestId("name-form")).toHaveAttribute("data-can-edit", "true");
     expect(screen.getByTestId("url-form")).toHaveAttribute("data-slug", "mine");
-    expect(screen.getByTestId("url-form")).toHaveAttribute("data-host", "example.com");
+    expect(screen.getByTestId("url-form")).toHaveAttribute("data-host", "console.example");
     expect(screen.getByTestId("url-form")).toHaveAttribute("data-can-edit", "true");
     expect(screen.getByTestId("settings-row")).toHaveTextContent("org_mine");
     expect(screen.getByTestId("delete-form")).toHaveAttribute(

@@ -5,19 +5,24 @@ import "./globals.css";
 import { CORNERS_BOOT_SCRIPT } from "@/lib/corners";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
+import { env } from "@/lib/env";
 import { PRODUCT_DESCRIPTION, PRODUCT_NAME } from "@/lib/site";
 
-// No `metadataBase`: nothing here names a relative URL for it to resolve, and
-// the console's origin is `AUTH_URL`, read per request, which a module
-// constant evaluated at build time could not carry.
-export const metadata: Metadata = {
-  title: {
-    template: `%s · ${PRODUCT_NAME}`,
-    default: PRODUCT_NAME,
-  },
-  description: PRODUCT_DESCRIPTION,
-  robots: "index, follow",
-};
+// A function, not a constant: `metadataBase` is the deployment's origin, which
+// is `AUTH_URL` at request time and nothing a build could carry. Without it,
+// Next resolves a relative social image, which a console built on this one may
+// add as `opengraph-image`, against localhost.
+export function generateMetadata(): Metadata {
+  return {
+    metadataBase: new URL(env.AUTH_URL),
+    title: {
+      template: `%s · ${PRODUCT_NAME}`,
+      default: PRODUCT_NAME,
+    },
+    description: PRODUCT_DESCRIPTION,
+    robots: "index, follow",
+  };
+}
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",

@@ -291,7 +291,7 @@ All logging goes through `@/lib/logger` (pino), never `console.*`:
 
 **The image** (`web/Dockerfile`) builds on Node and runs the standalone `server.js` on a distroless, non-root Node image.
 - ⚠ The build and runtime images must share a Node major version.
-- The console's origin is `AUTH_URL`, read at request time (`robots.ts`, `sitemap.ts`, the structured data, the organization URL form). No `NEXT_PUBLIC_` variable names a host, so the one published image serves every deployment; `robots.txt` and `sitemap.xml` are therefore rendered per request rather than at build.
+- The console's origin is `AUTH_URL`, read at request time (`robots.ts`, `sitemap.ts`, the structured data, the organization URL form, and `metadataBase` in the root layout's `generateMetadata`, so a social image a console built on this one adds resolves to the deployment rather than to the build host). No `NEXT_PUBLIC_` variable names a host, so the one published image serves every deployment; `robots.txt` and `sitemap.xml` are therefore rendered per request rather than at build.
 - ⚠ `.next/cache` is created and handed to the runtime user at build time, because a distroless image cannot `mkdir`.
 
 ## Where it lives
