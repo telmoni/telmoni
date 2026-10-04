@@ -179,9 +179,12 @@ pub fn is_global_ip(ip: IpAddr) -> bool {
                 return is_global_v4(Ipv4Addr::new(a, b, c, d));
             }
             // ULA, link-local, site-local, multicast, 6to4, Teredo (its inner v4
-            // is obfuscated, so refused whole), documentation and discard.
+            // is obfuscated, so refused whole), the local-use NAT64 prefix
+            // (RFC 8215: the operator picks where the v4 sits, so refused
+            // whole too), documentation and discard.
             !(ip.is_loopback()
                 || ip.is_unspecified()
+                || (s0 == 0x64 && s1 == 0xff9b && s2 == 1)
                 || (s0 & 0xfe00) == 0xfc00
                 || (s0 & 0xffc0) == 0xfe80
                 || (s0 & 0xffc0) == 0xfec0
@@ -321,6 +324,7 @@ mod tests {
             Ipv6Addr::new(0xfec0, 0, 0, 0, 0, 0, 0, 1),
             Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 1),
             Ipv6Addr::new(0x2002, 0xa9fe, 0xa9fe, 0, 0, 0, 0, 1),
+            Ipv6Addr::new(0x64, 0xff9b, 1, 0, 0, 0, 0xa9fe, 0xa9fe),
             Ipv6Addr::new(0x2001, 0, 0, 0, 0, 0, 0, 1),
             Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1),
             Ipv6Addr::new(0x100, 0, 0, 0, 0, 0, 0, 1),
