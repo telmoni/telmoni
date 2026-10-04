@@ -83,8 +83,8 @@ function SecretDescription(): ReactNode {
       <code>Telmoni-Delivery-Id</code> that is stable across retries of one notice.
       While a replaced secret still works the header carries a second <code>v1</code>,
       so accept a delivery when any <code>v1</code> matches.
-      The receiver&rsquo;s side &mdash; verifying, the replay window, retries and the
-      addresses to allowlist &mdash; is at{" "}
+      The receiver&rsquo;s side &mdash; verifying, the replay window and retries &mdash; is
+      at{" "}
       <a href={WEBHOOK_DOCS_URL} target="_blank" rel="noreferrer" className="underline">
         {WEBHOOK_DOCS_URL}
       </a>
