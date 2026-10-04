@@ -1,9 +1,0 @@
-# Issue intake routing. Suspected vulnerabilities go to the private
-# security-advisory form, never a public issue.
-blank_issues_enabled: true
-contact_links:
-  - name: Report a security vulnerability (private)
-    url: https://github.com/telmoni/telmoni/security/advisories/new
-    about: >-
-      Please do NOT open a public issue for a suspected vulnerability. This link goes to GitHub's
-      private reporting form; the security policy is at docs.telmoni.com/legal/security/.
