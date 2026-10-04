@@ -72,6 +72,9 @@ pub async fn create(
 pub struct ValidatedToken {
     pub id: Uuid,
     pub organization_id: OrganizationId,
+    /// The project the token was minted on: the roster `/v1/members` reads,
+    /// since a project admin may mint a key and may see no more than that.
+    pub project_id: ProjectId,
     /// The slug the console's paths name the organization by, for
     /// `/v1/organization`'s answer.
     pub slug: String,
@@ -96,6 +99,7 @@ impl ValidatedToken {
 type ValidatedRow = (
     Uuid,
     OrganizationId,
+    ProjectId,
     String,
     Option<String>,
     Option<String>,
@@ -119,7 +123,7 @@ pub async fn validate(
     // per call) in a single statement.
     let row: Option<ValidatedRow> = sqlx::query_as(
         "WITH v AS (
-            SELECT t.id, a.external_id, a.slug, a.name, oi.email, oi.display_name
+            SELECT t.id, a.external_id, t.project_id, a.slug, a.name, oi.email, oi.display_name
               FROM auth.api_tokens t
               JOIN auth.organizations a ON a.external_id = t.organization_id
               LEFT JOIN auth.organization_members om
@@ -134,20 +138,23 @@ pub async fn validate(
              WHERE id = (SELECT id FROM v)
                AND (last_used_at IS NULL OR last_used_at < now() - interval '1 minute')
          )
-         SELECT id, external_id, slug, name, email, display_name FROM v",
+         SELECT id, external_id, project_id, slug, name, email, display_name FROM v",
     )
     .bind(token_hash)
     .fetch_optional(tx.conn())
     .await?;
 
     Ok(row.map(
-        |(id, organization_id, slug, name, owner_email, owner_display_name)| ValidatedToken {
-            id,
-            organization_id,
-            slug,
-            name,
-            owner_email,
-            owner_display_name,
+        |(id, organization_id, project_id, slug, name, owner_email, owner_display_name)| {
+            ValidatedToken {
+                id,
+                organization_id,
+                project_id,
+                slug,
+                name,
+                owner_email,
+                owner_display_name,
+            }
         },
     ))
 }

@@ -16,9 +16,9 @@ use uuid::Uuid;
 use telmoni_shared::extract::Json;
 use telmoni_shared::openapi::{Answer, Method, Route};
 
-use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope};
+use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::types::API_TOKEN_PREFIX;
-use telmoni_shared::{AuthError, OrganizationId, TelmoniError};
+use telmoni_shared::{AuthError, OrganizationId, ProjectId, TelmoniError};
 
 use crate::AppState;
 use crate::db::{AuthLane, tokens};
@@ -70,15 +70,16 @@ pub const V1_LANES: &[V1Lane] = &[
             method: Method::Get,
             bearer: true,
             path: "/v1/members",
-            summary: "Who is in the organization",
-            description: "Everyone in the organization, the owner first, with \
-                          the role each holds. The same body the console reads, \
-                          so a token and a browser cannot be told two different \
-                          member lists.",
+            summary: "Who is on the project",
+            description: "Everyone on the project the token was minted on, the \
+                          owner first, with the role each holds. The same body \
+                          the console's project roster shows, so a token reads \
+                          no more than the project admin who minted it could; \
+                          the organization's roster is the console's alone.",
             params: &[],
             answers: &[Answer {
                 status: 200,
-                description: "The members: the owner, then everyone else newest first.",
+                description: "The members: the owner, then the project's seats.",
             }],
         },
     },
@@ -89,6 +90,9 @@ pub const V1_LANES: &[V1Lane] = &[
 #[derive(Debug, Clone)]
 pub struct TokenOrganization {
     pub organization_id: OrganizationId,
+    /// The project the token was minted on, which bounds what it reads: a
+    /// project admin may mint one and sees no further than their project.
+    pub project_id: ProjectId,
     /// The row the bearer hashed to, so a lane can act on the credential
     /// without ever seeing it.
     pub token_id: Uuid,
@@ -157,6 +161,7 @@ pub async fn require_token(
             }
             request.extensions_mut().insert(TokenOrganization {
                 organization_id: v.organization_id,
+                project_id: v.project_id,
                 token_id: v.id,
                 slug: v.slug,
                 name: v.name,
@@ -237,16 +242,25 @@ pub async fn get_organization(
     })))
 }
 
-/// `GET /v1/members` — everyone in the calling token's ORGANIZATION, with
-/// their roles.
+/// `GET /v1/members` — the roster of the PROJECT the token was minted on,
+/// with each role. ⚠ Never the organization's: a project admin may mint a
+/// key, and the console refuses that seat the organization's roster, so a key
+/// that listed it would read past its minter. Read under the owning
+/// organization as the console's roster page is — the owner's row and every
+/// address are the organization's to show, and a project-only scope would
+/// join them against nothing.
 pub async fn list_members(
     State(state): State<Arc<AppState>>,
     token_organization: TokenOrganization,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let organization_id = token_organization.organization_id.clone();
-    let mut tx = organization_scope(&state.db, &organization_id).await?;
-    let rows =
-        crate::db::organization_members::list_for_organization(&mut tx, &organization_id).await?;
+    let TokenOrganization {
+        organization_id,
+        project_id,
+        ..
+    } = token_organization;
+    let tx = project_scope(&state.db, &project_id).await?;
+    let mut tx = tx.bind_organization(&organization_id).await?;
+    let rows = crate::db::members::list_for_project(&mut tx, &project_id).await?;
     tx.commit().await?;
     Ok(Json(json!({ "members": rows })))
 }

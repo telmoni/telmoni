@@ -46,10 +46,10 @@
   "paths": {
     "/v1/members": {
       "get": {
-        "description": "Everyone in the organization, the owner first, with the role each holds. The same body the console reads, so a token and a browser cannot be told two different member lists.",
+        "description": "Everyone on the project the token was minted on, the owner first, with the role each holds. The same body the console's project roster shows, so a token reads no more than the project admin who minted it could; the organization's roster is the console's alone.",
         "responses": {
           "200": {
-            "description": "The members: the owner, then everyone else newest first."
+            "description": "The members: the owner, then the project's seats."
           },
           "401": {
             "content": {
@@ -82,7 +82,7 @@
             "description": "The lane is switched off, or something it needs did not answer. A switched-off lane says when to try again in `Retry-After`."
           }
         },
-        "summary": "Who is in the organization"
+        "summary": "Who is on the project"
       }
     },
     "/v1/organization": {

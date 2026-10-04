@@ -264,7 +264,7 @@ API tokens are for the public `/v1` API (`crates/auth/src/handler/tokens.rs`, `c
   - The token must be live, and its organization must be active. While an organization is pending deletion its keys stop working, and they come back if it is restored. An account deletion revokes the keys of the organizations it takes.
   - The `BetaAccess` and `PublicApi` flags must be on.
   - `last_used_at` is updated at most once an interval.
-- **`/v1` is organization-wide.** It resolves only the organization: a token is the organization's key to its own data.
+- **`/v1` resolves the organization and reads at the project.** A token names its organization and the project it was minted on. `GET /v1/members` answers that project's roster — what every member of the project sees in the console — and never the organization's, which a project admin's seat is refused there; a key reads no further than whoever minted it could.
   - `GET /v1/organization` answers its id, its slug, its name and its owner, all from the validation's own join. The slug is there so a script holding only a key can spell a console link. No lane takes one back: a token is its organization.
 
 The console relays `/v1/*` (`web/app/v1/[...path]/route.ts`), passing the client's own `Authorization` header, and meters each token and each source address.
