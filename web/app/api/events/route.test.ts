@@ -81,12 +81,21 @@ const INVITE = {
 // an entry like any other and shares nothing with their user id.
 const OWN = { organizationId: "org_own", ownerEmail: "test@example.com", role: "owner" };
 
+// `/me`'s word on the person: an address somebody proved, as auth records it.
+const PERSON = {
+  userId: "user_123",
+  email: "test@example.com",
+  displayName: null,
+  analyticsOptIn: false,
+  emailVerified: true,
+};
+
 describe("GET /api/events (SSE)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockIsSessionBlacklisted.mockResolvedValue(false);
     mockRateLimit.mockResolvedValue(null);
-    mockGetServerContext.mockResolvedValue({ organizations: [OWN] });
+    mockGetServerContext.mockResolvedValue({ organizations: [OWN], person: PERSON });
     messageListener = null;
     revocationListener = null;
   });
@@ -200,6 +209,33 @@ describe("GET /api/events (SSE)", () => {
     const chunkText = new TextDecoder().decode(chunk?.value);
     expect(chunkText).toContain("event: invite:created\n");
     expect(chunkText).toContain('"id":"inv_1"');
+
+    await reader?.cancel();
+  });
+
+  // An address nobody has proved learns nothing about invitations to it on
+  // the stream either — `/me` lists it none and the seat is refused — while
+  // every other event on its channel still arrives.
+  it("drops invitation events for an address that is not verified", async () => {
+    mockGetSession.mockResolvedValue(LIVE_SESSION);
+    mockGetServerContext.mockResolvedValue({
+      organizations: [OWN],
+      person: { ...PERSON, emailVerified: false },
+    });
+    const res = await GET(new NextRequest("http://localhost:3000/api/events"));
+    const reader = res.body?.getReader();
+    await reader?.read();
+
+    messageListener?.(USER_CHANNEL, JSON.stringify({ type: "invite:created", data: INVITE }));
+    messageListener?.(
+      USER_CHANNEL,
+      JSON.stringify({ type: "membership:removed", data: { organizationId: "org_own" } }),
+    );
+
+    const chunk = await reader?.read();
+    const chunkText = new TextDecoder().decode(chunk?.value);
+    expect(chunkText).not.toContain("invite:created");
+    expect(chunkText).toContain("event: membership:removed\n");
 
     await reader?.cancel();
   });

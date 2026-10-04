@@ -140,7 +140,7 @@ Concurrent first sign-ins are settled by the unique keys.
 |---|---|
 | `DISABLE_LOGIN_FORM` (default off) | Removes the password provider and unmounts its lanes. Boot refuses it without an external provider, or with an admin seed set. |
 | `ALLOW_SIGN_UP` (default off) | Off: a **password** sign-up works only for an address that holds a live invitation. It does not gate provider sign-ups. |
-| `VERIFY_EMAIL` (default off) | On: sign-up mails a verification link, and `/me` refuses unverified people. Off: an address is taken at its word, from a password sign-up or a provider alike. |
+| `VERIFY_EMAIL` (default off) | On: sign-up mails a verification link, and `/me` refuses unverified people. Off: an address is taken at its word for signing in, from a password sign-up or a provider alike; `auth.identities.email_verified` still records only what was proved, so an invitation to an unproved address is accepted from its link alone, never from the console. |
 | `OIDC_ALLOW_SIGN_UP` (default **on**) | Whether an unknown provider identity may create a person. ⚠ Adding a provider to an invitation-only deployment lets in anyone that provider can sign in, unless this is turned off. |
 | `OIDC_ALLOW_INSECURE_EMAIL_LOOKUP` (default off) | Whether a provider identity may link to an existing account by address alone |
 | the global `Signup` flag | Whether a person with no organization gets one provisioned at their first `/me` |

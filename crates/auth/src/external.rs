@@ -38,7 +38,6 @@ impl External {
         &self,
         db: &sqlx::PgPool,
         subject: &Subject,
-        verify_email: bool,
     ) -> Result<UserId, TelmoniError> {
         let Some(email) = subject.email.as_deref().filter(|e| !e.trim().is_empty()) else {
             tracing::warn!("the identity provider named a person with no address; refused");
@@ -50,10 +49,13 @@ impl External {
         let email = crate::identity::validate_email(email)?;
         let identity = identities::Identity {
             email,
-            // Off, an address is taken at the provider's word; on, at its
-            // word too, but a provider that vouches for none keeps the
-            // person out until it does.
-            email_verified: subject.email_verified || !verify_email,
+            // The provider's word, recorded as given: with `VERIFY_EMAIL` off
+            // the session reports the address verified either way
+            // (`Issuer::address_verified`), and with it on a provider that
+            // vouches for none keeps the person out until it does. The column
+            // itself gates only what needs the inbox proved — accepting an
+            // invitation without its link.
+            email_verified: subject.email_verified,
             first_name: crate::identity::sanitize_display_name(subject.given_name.as_deref()),
             last_name: crate::identity::sanitize_display_name(subject.family_name.as_deref()),
         };

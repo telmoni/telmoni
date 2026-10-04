@@ -465,11 +465,7 @@ pub async fn exchange(
                 .exchange_code(&req.code, &state.config.redirect_uri)
                 .await?;
             let user_id = external
-                .resolve_person(
-                    &state.db,
-                    &authenticated.subject,
-                    state.issuer.verify_email(),
-                )
+                .resolve_person(&state.db, &authenticated.subject)
                 .await?;
             state
                 .issuer

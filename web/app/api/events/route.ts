@@ -136,6 +136,11 @@ export async function GET(request: NextRequest) {
           return;
         }
         const event: RealtimeEvent = parsed.data;
+        // An address nobody has proved is told nothing about invitations to
+        // it — who invited it, to what, as which role — on this stream any
+        // more than in `/me`: a sign-up for an invited address is open to
+        // anyone who knows it, and the seat itself is refused to them.
+        if (event.type.startsWith("invite:") && ctx.person.emailVerified !== true) return;
         send(`event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`);
       });
     },

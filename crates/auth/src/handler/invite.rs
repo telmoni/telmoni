@@ -523,10 +523,9 @@ async fn seat_organization_member(
 /// the match below and the seat. Under it too, an account whose deletion has
 /// been confirmed takes no new seat for its erasure to trip over.
 ///
-/// ⚠ **Verified, or refused.** An invitation is matched by address, and the
-/// recorded address is whatever the provider asserted at the last sign-in —
-/// verified or not, since the exchange records both. Only a verified one is
-/// proof the caller holds the inbox the invitation went to.
+/// The link's token is the proof that the caller holds the inbox the
+/// invitation went to, so the address need only match; the in-console lanes,
+/// which have no token, go through [`verified_accepter`].
 async fn accepter(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     actor: &UserId,
@@ -540,9 +539,25 @@ async fn accepter(
     if person.deletion_requested_at.is_some() {
         return Err(AuthzError::Forbidden("account deletion in progress".into()).into());
     }
+    Ok(person)
+}
+
+/// [`accepter`], for a lane that names the invitation by id rather than by
+/// its token. ⚠ **Verified, or refused.** The recorded address is whatever
+/// was asserted at sign-up or by the provider, and with `VERIFY_EMAIL` off
+/// nothing proved it; a password sign-up for an invited address is open to
+/// anyone who knows it. Only a verified address is proof the caller holds the
+/// inbox, so without one the link in the mail is the only way in.
+async fn verified_accepter(
+    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+    actor: &UserId,
+) -> Result<identities::Person, TelmoniError> {
+    let person = accepter(tx, actor).await?;
     if !person.email_verified {
         return Err(AuthzError::Forbidden(
-            "verify your email address before accepting an invitation to it".into(),
+            "this account's address has not been verified — open the invitation from the link \
+             in its mail"
+                .into(),
         )
         .into());
     }
@@ -658,7 +673,7 @@ pub async fn list_my_incoming_invites(
     let actor = principal.user_id;
 
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-    let me = accepter(&mut tx, &actor).await?;
+    let me = verified_accepter(&mut tx, &actor).await?;
     let rows = invites::list_incoming(&mut tx, &me.email, &actor).await?;
     tx.commit().await?;
 
@@ -674,7 +689,7 @@ pub async fn accept_my_incoming_invite(
     let actor = principal.user_id;
 
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-    let me = accepter(&mut tx, &actor).await?;
+    let me = verified_accepter(&mut tx, &actor).await?;
 
     if let Some(invite) =
         invites::find_incoming_member_invite(&mut tx, invite_id, &me.email).await?
@@ -757,7 +772,7 @@ pub async fn decline_my_incoming_invite(
     let actor = principal.user_id;
 
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-    let me = accepter(&mut tx, &actor).await?;
+    let me = verified_accepter(&mut tx, &actor).await?;
 
     if let Some(invite) =
         invites::find_incoming_member_invite(&mut tx, invite_id, &me.email).await?

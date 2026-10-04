@@ -54,7 +54,7 @@ flowchart TD
 - An organization invitation never grants `owner`.
 - Accepting a project invitation also puts the person on the organization's roster as `member`.
 - Accepting inserts a role and never rewrites one, so an owner cannot demote themselves by accepting an invitation.
-- Accepting runs in auth's maintenance lane, because no tenant key names the invitee yet. It requires a verified email that matches the invitation.
+- Accepting runs in auth's maintenance lane, because no tenant key names the invitee yet. The address must match the invitation; the in-console accept, which has no link token to prove the inbox, needs it verified as well.
 
 **What lives where:**
 

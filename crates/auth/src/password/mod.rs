@@ -152,7 +152,12 @@ impl PasswordProvider {
         let password_hash = hashing::hash(password.to_owned()).await?;
         let identity = identities::Identity {
             email: email.clone(),
-            email_verified: !verify,
+            // Recorded as proved only once the link is followed. With
+            // verification off the session still reports the address verified
+            // (`Issuer::address_verified`), and what the column alone gates —
+            // accepting an invitation without its link — stays closed, since a
+            // sign-up for an invited address is open to anyone who knows it.
+            email_verified: false,
             first_name: crate::identity::sanitize_display_name(given_name),
             last_name: crate::identity::sanitize_display_name(family_name),
         };

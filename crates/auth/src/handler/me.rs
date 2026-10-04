@@ -57,6 +57,11 @@ pub struct PersonSummary {
     /// Whether this person opted in to product analytics; served here so the
     /// privacy page costs no second fetch.
     pub analytics_opt_in: bool,
+    /// Whether the address was ever proved — the verification link, an email
+    /// change, a provider's word — as the column records it, not as the
+    /// session reports it with `VERIFY_EMAIL` off. The console tells an
+    /// unproved address nothing about invitations to it, live events included.
+    pub email_verified: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -182,7 +187,14 @@ pub async fn me(
     let organizations = organization_members::organizations_of(&mut mtx, &user_id).await?;
     let deleted_organizations =
         organization_members::pending_organizations_owned_by(&mut mtx, &user_id).await?;
-    let incoming_invites = invites::list_incoming(&mut mtx, &person.email, &user_id).await?;
+    // An invitation is listed only to a verified address: the in-console
+    // accept needs one, and an unproven address learns nothing about who
+    // invited its holder.
+    let incoming_invites = if person.email_verified {
+        invites::list_incoming(&mut mtx, &person.email, &user_id).await?
+    } else {
+        Vec::new()
+    };
     let project_offers = members::project_offers_to(&mut mtx, &user_id).await?;
     let requested = requested_organization(&headers);
     let active = choose_active(&organizations, requested.as_ref());
@@ -242,6 +254,7 @@ pub async fn me(
             email: person.email,
             display_name: person.display_name,
             analytics_opt_in: person.analytics_opt_in,
+            email_verified: person.email_verified,
         },
         organizations,
         deleted_organizations,

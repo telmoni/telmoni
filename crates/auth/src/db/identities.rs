@@ -93,7 +93,14 @@ pub async fn record(
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (user_id) DO UPDATE SET
              email = excluded.email,
-             email_verified = excluded.email_verified,
+             -- Proof of an address is kept: a provider that sends no claim at
+             -- a later sign-in does not unprove what a link or an email
+             -- change proved. A new address starts from the provider's word.
+             email_verified = CASE
+                 WHEN auth.identities.email = excluded.email
+                     THEN auth.identities.email_verified OR excluded.email_verified
+                 ELSE excluded.email_verified
+             END,
              first_name = excluded.first_name,
              last_name = excluded.last_name,
              display_name = excluded.display_name,
