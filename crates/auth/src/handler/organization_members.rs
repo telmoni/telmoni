@@ -337,7 +337,7 @@ pub async fn create_organization_invite(
     // the one that demoted them before accepts stopped rewriting roles.
     if organization_members::address_on_roster(&mut tx, &organization, &email).await? {
         tx.commit().await?;
-        return Err(AuthError::Conflict(format!("{email} is already a member")).into());
+        return Err(AuthError::Conflict("that address is already a member".into()).into());
     }
 
     organization_members::revoke_live_for_email(&mut tx, &organization, &email).await?;

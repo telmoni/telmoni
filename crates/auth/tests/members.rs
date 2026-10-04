@@ -432,7 +432,10 @@ async fn the_link_is_returned_at_create_and_never_again(pool: PgPool) {
 }
 
 /// **A forwarded link seats nobody**: holding the ADDRESS is the proof, not
-/// holding the link.
+/// holding the link. The refusal says to sign in with the address the mail
+/// went to without repeating it: an address never travels in a problem
+/// `detail`, and the invitation page already shows it to whoever holds the
+/// link.
 #[sqlx::test]
 async fn a_link_only_seats_the_address_it_was_sent_to(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -448,8 +451,12 @@ async fn a_link_only_seats_the_address_it_was_sent_to(pool: PgPool) {
     assert_eq!(status, StatusCode::FORBIDDEN);
     let detail = body["detail"].as_str().unwrap_or_default();
     assert!(
-        detail.contains(&address_of("user_invited")),
-        "the refusal must name the address to sign in with, got: {detail}"
+        detail.contains("sign in with the one it was mailed to"),
+        "the refusal must point at the mailed-to address, got: {detail}"
+    );
+    assert!(
+        !detail.contains(&address_of("user_invited")),
+        "the refusal repeats the invited address: {detail}"
     );
 
     let (status, _) = accept(&pool, "user_invited", &secret).await;

@@ -57,7 +57,7 @@ pub fn validate_email(candidate: &str) -> Result<String, TelmoniError> {
         _ => false,
     };
     if !ok {
-        return Err(AuthError::BadRequest(format!("`{email}` is not an email address")).into());
+        return Err(AuthError::BadRequest("that is not an email address".into()).into());
     }
     Ok(email)
 }

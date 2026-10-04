@@ -122,7 +122,7 @@ pub async fn create_invite(
         .into());
     }
     if invites::already_a_member_by_email(&mut acting.tx, &project_id, &email).await? {
-        return Err(AuthError::Conflict(format!("{email} is already a member")).into());
+        return Err(AuthError::Conflict("that address is already a member".into()).into());
     }
     // ⚠ Only a named organization invites: the invitation shows the person the
     // organization's name, and the console asks the owner for one before it
@@ -564,11 +564,13 @@ async fn verified_accepter(
     Ok(person)
 }
 
-/// The refusal for an invitation addressed to somebody else.
-fn not_yours(email: &str) -> TelmoniError {
-    AuthzError::Forbidden(format!(
-        "this invitation was sent to {email} — sign in with that address to accept it"
-    ))
+/// The refusal for an invitation addressed to somebody else. The address it
+/// went to is not repeated: the caller is not its holder.
+fn not_yours() -> TelmoniError {
+    AuthzError::Forbidden(
+        "this invitation was sent to a different address — sign in with the one it was mailed to"
+            .into(),
+    )
     .into()
 }
 
@@ -586,7 +588,7 @@ pub async fn accept_invite(
     if let Some(invite) = invites::find_live(&mut tx, &token_hash).await? {
         let me = accepter(&mut tx, &actor).await?;
         if me.email != invite.email {
-            return Err(not_yours(&invite.email));
+            return Err(not_yours());
         }
         seat_project_member(
             &state,
@@ -624,7 +626,7 @@ pub async fn accept_invite(
     {
         let me = accepter(&mut tx, &actor).await?;
         if me.email != invite.email {
-            return Err(not_yours(&invite.email));
+            return Err(not_yours());
         }
         seat_organization_member(
             tx,
