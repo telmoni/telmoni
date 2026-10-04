@@ -1,5 +1,8 @@
 global:
-  imageRegistry: ""
+  # Where the server and web images are pulled from: the ones this repository
+  # publishes, so the chart installs as it ships. A deployment with its own
+  # registry points this at it.
+  imageRegistry: "ghcr.io/telmoni"
   imageTag: "latest"
   imagePullPolicy: IfNotPresent
 

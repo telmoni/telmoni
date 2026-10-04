@@ -5,7 +5,9 @@
 # halves are checked against each other whenever either changes.
 # Intentionally absent: benchmarks, fuzzing, OS matrix, browser e2e, and any
 # deploy — this repository builds the platform and deploys it nowhere, so no
-# job holds a cloud credential. `ci-status` is the one required check.
+# job holds a cloud credential. `ci-status` is the one required check. The
+# images are publish.yml's, which runs once this workflow has passed on main
+# and holds only its own GITHUB_TOKEN.
 #
 # Every third-party action is pinned to a MAJOR TAG, not a commit SHA — see
 # .github/dependabot.yml for the rationale. Checkouts run with

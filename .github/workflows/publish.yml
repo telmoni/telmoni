@@ -1,0 +1,76 @@
+# Publishes the two images the compose quickstart and the chart pull by name,
+# ghcr.io/telmoni/server and ghcr.io/telmoni/web, from a commit on main that
+# CI has passed. A registry push is where this ends: nothing here deploys, and
+# the only credential is the workflow's own GITHUB_TOKEN, scoped to packages.
+#
+# `workflow_run` rather than `push`, so an image never leaves a commit CI
+# refused. The checkout names the run's head SHA, because `github.sha` here is
+# whatever main had moved on to by the time that run finished.
+#
+# amd64 only: the server compiles for x86_64 musl (crates/telmoni/Dockerfile),
+# and the console follows it rather than publish a platform the server lacks.
+# Actions are on major tags, as in ci.yml — see .github/dependabot.yml.
+name: Publish images
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+# Publishes queue rather than overlap, so `latest` cannot end on the older of
+# two commits whose runs crossed.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: ${{ matrix.image }}
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: server
+            context: .
+            file: crates/telmoni/Dockerfile
+          - image: web
+            context: web
+            file: web/Dockerfile
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # `latest` for the quickstarts, which name no tag, and the commit's SHA
+      # for anyone pinning. The labels tie the package to this repository.
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ github.event.workflow_run.head_sha }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

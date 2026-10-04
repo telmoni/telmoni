@@ -59,6 +59,8 @@ flowchart LR
 - It builds the standalone Next.js server and runs it on a distroless, non-root Node image on port 3000.
 - It bakes in no origin: the console reads `AUTH_URL` at request time, so one image serves every deployment.
 
+**Publishing** (`.github/workflows/publish.yml`): once CI has passed on `main`, both images are built for `linux/amd64` and pushed to `ghcr.io/telmoni/server` and `ghcr.io/telmoni/web`, tagged `latest` and with the commit's SHA. The compose file and the chart (`global.imageRegistry`) pull those names by default. The workflow holds only its own `GITHUB_TOKEN`; a registry push is where it ends.
+
 ## The Helm chart
 
 `deploy/charts/telmoni` creates:
@@ -200,9 +202,9 @@ How it differs from the chart:
 - **Web:** `npm ci`, typecheck, lint, knip, vitest and `next build`.
 - **`ci-status`** is the one required check. It counts a skipped job as a failure.
 
-A daily workflow (`audit.yml`) checks advisories. Dependabot keeps Actions and Docker digests current.
+A daily workflow (`audit.yml`) checks advisories. Dependabot keeps Actions and Docker digests current. `publish.yml` runs when CI completes on `main`, and only if it passed: it builds both images and pushes them to GHCR (§ Images).
 
-Deliberately absent from CI: end-to-end tests, image builds and deploys.
+Deliberately absent from CI: end-to-end tests and deploys.
 
 ## Where it lives
 
