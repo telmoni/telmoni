@@ -164,7 +164,9 @@ export async function destroySession(
       await revokeSession(sid);
     }
   }
-  for (const name of [SESSION_COOKIE, PKCE_COOKIE, ACTIVE_ORGANIZATION_COOKIE]) {
+  // The connector handshake's cookie goes too: left behind, a handshake begun
+  // before the sign-out would resume for whoever signs in next on this browser.
+  for (const name of [SESSION_COOKIE, PKCE_COOKIE, ACTIVE_ORGANIZATION_COOKIE, CONNECT_COOKIE]) {
     jar.set(name, "", { path: "/", maxAge: 0 });
   }
   return providerLogoutUrl;
