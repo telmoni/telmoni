@@ -40,8 +40,26 @@ async function isLoggedIn(request: NextRequest): Promise<boolean> {
 function authProviderOrigins(): string[] {
   return (process.env.AUTH_PROVIDER_ORIGINS ?? '')
     .split(/\s+/)
-    .map((origin) => origin.trim())
-    .filter((origin) => origin.length > 0);
+    .map(asOrigin)
+    .filter((origin): origin is string => origin !== null);
+}
+
+// Only an origin enters the directive, spelled as the browser spells one. A
+// stray `*` or a bare word would be handed to the browser as a source
+// expression and widen or break the policy, and a URL with a path would name
+// one page; a default port or a trailing slash is still the provider, and
+// a wildcard subdomain (`https://*.idp.example`) is the one shape `URL`
+// cannot parse that the directive does take.
+function asOrigin(token: string): string | null {
+  const wildcard = token.includes('://*.');
+  try {
+    const url = new URL(wildcard ? token.replace('://*.', '://wildcard.') : token);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+    if (url.pathname !== '/' || url.search || url.hash || url.username) return null;
+    return wildcard ? url.origin.replace('://wildcard.', '://*.') : url.origin;
+  } catch {
+    return null;
+  }
 }
 
 export function contentSecurityPolicy(nonce: string): string {
