@@ -118,7 +118,10 @@ async fn open_target(sealed: &db::SealedConnection) -> Redacted {
 /// A stored row, sealed, read in its project's scope.
 async fn sealed_row(pool: &PgPool, organization: &str, id: Uuid) -> db::SealedConnection {
     let mut tx = project_scope(pool, &pid(organization)).await.unwrap();
-    let sealed = db::sealed_connection(&mut tx, id).await.unwrap().unwrap();
+    let sealed = db::sealed_connection(&mut tx, &pid(organization), id)
+        .await
+        .unwrap()
+        .unwrap();
     tx.commit().await.unwrap();
     sealed
 }
@@ -2483,7 +2486,10 @@ async fn a_webhook_is_connected_by_url_and_its_secret_is_answered_once(pool: PgP
     let id: Uuid = connection["id"].as_str().unwrap().parse().unwrap();
 
     let mut tx = maintenance_scope(&pool, NotificationsLane).await.unwrap();
-    let sealed = db::sealed_connection(&mut tx, id).await.unwrap().unwrap();
+    let sealed = db::sealed_connection(&mut tx, &pid(ORGANIZATION), id)
+        .await
+        .unwrap()
+        .unwrap();
     tx.commit().await.unwrap();
     assert_eq!(
         open_target(&sealed).await.expose(),

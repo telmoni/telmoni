@@ -541,14 +541,18 @@ const SEALED_COLUMNS: &str = "id, project_id, organization_id, provider, status,
      token_ciphertext, token_nonce, \
      prior_token_ciphertext, prior_token_nonce, prior_token_expires_at";
 
-/// One connection by id, sealed; the caller's scope decides what is visible.
+/// One connection by id, sealed, in the project named: the predicate is what
+/// keeps tenants apart where everything connects as one database user and
+/// row-level security has nothing to say.
 pub async fn sealed_connection<B: Binding>(
     tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
     id: Uuid,
 ) -> sqlx::Result<Option<SealedConnection>> {
     sqlx::query_as::<_, SealedConnection>(&format!(
-        "SELECT {SEALED_COLUMNS} FROM notifications.connections WHERE id = $1"
+        "SELECT {SEALED_COLUMNS} FROM notifications.connections WHERE project_id = $1 AND id = $2"
     ))
+    .bind(project_id)
     .bind(id)
     .fetch_optional(tx.conn())
     .await

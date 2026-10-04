@@ -558,7 +558,7 @@ pub async fn rotate_webhook_secret(
     }
 
     let mut tx = project_scope(&state.db, &identity.project_id).await?;
-    let sealed = db::sealed_connection(&mut tx, id)
+    let sealed = db::sealed_connection(&mut tx, &identity.project_id, id)
         .await?
         .ok_or_else(|| AuthError::NotFound(format!("connection not found: {id}")))?;
     tx.commit().await?;
@@ -675,7 +675,7 @@ pub async fn delete_connector(
     let request_id = correlation_id(&headers);
 
     let mut tx = project_scope(&state.db, &identity.project_id).await?;
-    let sealed = db::sealed_connection(&mut tx, id)
+    let sealed = db::sealed_connection(&mut tx, &identity.project_id, id)
         .await?
         .ok_or_else(|| AuthError::NotFound(format!("connection not found: {id}")))?;
     db::delete_connection(&mut tx, &identity.project_id, id)
@@ -886,7 +886,7 @@ pub async fn test_connector(
     let identity = authorize(&state, &headers, Verb::Update, Resource::Connector).await?;
 
     let mut tx = project_scope(&state.db, &identity.project_id).await?;
-    let sealed = db::sealed_connection(&mut tx, id)
+    let sealed = db::sealed_connection(&mut tx, &identity.project_id, id)
         .await?
         .ok_or_else(|| AuthError::NotFound(format!("connection not found: {id}")))?;
     tx.commit().await?;
@@ -1096,7 +1096,7 @@ async fn claim_webhook_for_redelivery(
         ))
         .into());
     }
-    let sealed = db::sealed_connection(&mut tx, id)
+    let sealed = db::sealed_connection(&mut tx, project_id, id)
         .await?
         .ok_or_else(|| AuthError::NotFound(format!("connection not found: {id}")))?;
     // A webhook's receiver deduplicates on the delivery id; a chat channel
