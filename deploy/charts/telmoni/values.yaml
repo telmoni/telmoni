@@ -7,7 +7,6 @@ global:
   imagePullPolicy: IfNotPresent
 
 config:
-  environment: "dev"
   logLevel: "info"
   appUrl: "http://localhost:3000"
   authUrl: "http://localhost:3000"
