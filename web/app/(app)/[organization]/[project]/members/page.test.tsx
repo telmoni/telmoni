@@ -88,7 +88,7 @@ const ownerContext = (incomingInvites: unknown[]) => ({
     {
       organizationId: "org_owner",
       slug: "acme",
-      name: null,
+      name: "Acme",
       ownerEmail: "owner@example.com",
       role: "owner",
     },

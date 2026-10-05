@@ -44,8 +44,8 @@ const PERSON = {
 
 const OWNED = {
   organizationId: "org_1",
-  slug: "org-4k2j9x0q1z",
-  name: null,
+  slug: "adas-organization",
+  name: "Ada's organization",
   ownerEmail: "ada@example.test",
   ownerDisplayName: "Ada Lovelace",
   role: "owner",

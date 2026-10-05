@@ -16,9 +16,7 @@ import { restoreOrganizationAction } from "./actions";
 /// place of the button, so the page never shows a deletion the person did
 /// not ask for as theirs to undo.
 ///
-/// The label is the organization's name, as everywhere in the console. One
-/// closed before its owner named it — an operator's termination, since the
-/// console opens to nobody until it is named — reads as "Organization".
+/// The label is the organization's name, as everywhere in the console.
 export function DeletedOrganizations({
   organizations,
 }: {

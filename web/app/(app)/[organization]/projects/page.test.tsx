@@ -49,7 +49,7 @@ import OrganizationProjectsPage from "./page";
 const OWNED: OrganizationEntry = {
   organizationId: "org_owned",
   slug: "owned",
-  name: null,
+  name: "Owned",
   ownerEmail: "owner@example.com",
   ownerDisplayName: null,
   role: "owner",
@@ -60,7 +60,7 @@ function founders(role: OrganizationEntry["role"]): OrganizationEntry {
   return {
     organizationId: "org_founders",
     slug: "founders",
-    name: null,
+    name: "Founders",
     ownerEmail: "alex@example.test",
     ownerDisplayName: "Alex Founder",
     role,

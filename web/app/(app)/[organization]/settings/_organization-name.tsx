@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 import { MAX_ORGANIZATION_NAME } from "@/lib/organization-name";
-import { organizationPath } from "@/lib/slug";
 
 import { renameOrganizationAction } from "./settings-actions";
 
@@ -53,10 +52,8 @@ export function OrganizationNameForm({
           return;
         }
         toast.success("Organization renamed.");
-        // A name moves no URL once the organization has one; the first name
-        // takes it off its placeholder, and this page follows it there.
-        if (res.movedTo) router.replace(organizationPath(res.movedTo, "/settings"));
-        else router.refresh();
+        // A name moves no URL: the page stays where it is.
+        router.refresh();
       } catch {
         const msg = "Network error. Please try again.";
         setError(msg);

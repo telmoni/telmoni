@@ -92,12 +92,7 @@ import OrganizationMembersPage from "./page";
 
 // The caller, standing in the owner's organization as `role`. What the page
 // shows turns on that role alone — never on whether an id matches theirs.
-function standingAs(
-  role: IdentityContext["role"],
-  userId: string,
-  incomingInvites: unknown[] = [],
-  name: string | null = "Acme",
-) {
+function standingAs(role: IdentityContext["role"], userId: string, incomingInvites: unknown[] = []) {
   mockIdentityContext = {
     userId,
     organizationId: "org_acme",
@@ -106,7 +101,7 @@ function standingAs(
   };
   mockContext = {
     organizations: [
-      { organizationId: "org_acme", slug: "acme", name, ownerEmail: "owner@example.com", role },
+      { organizationId: "org_acme", slug: "acme", name: "Acme", ownerEmail: "owner@example.com", role },
     ],
     activeOrganizationId: "org_acme",
     memberships: [],
@@ -322,25 +317,6 @@ describe("OrganizationMembersPage: handing the organization over", () => {
       );
     });
     expect(screen.getByRole("alertdialog")).toHaveTextContent(/an admin of the organization and of every project/i);
-  });
-
-  // Auth refuses to offer an unnamed organization: the offer calls it by a name
-  // it does not have. The owner is sent to name it, not to a refusal.
-  it("sends the owner of an unnamed organization to name it first", async () => {
-    standingAs("owner", "user_owner", [], null);
-    render(await OrganizationMembersPage());
-    await act(async () => {
-      fireEvent.click(
-        screen.getByRole("button", { name: "Transfer ownership to admin@example.com" }),
-      );
-    });
-    const dialog = screen.getByRole("alertdialog");
-    expect(dialog).toHaveTextContent(/name this organization first/i);
-    await act(async () => {
-      fireEvent.click(within(dialog).getByRole("button", { name: "Go to settings" }));
-    });
-    expect(router.push).toHaveBeenCalledWith("/acme/settings");
-    expect(actions.offerOwnershipAction).not.toHaveBeenCalled();
   });
 
   it("shows a live offer, and a way to withdraw it rather than make a second", async () => {

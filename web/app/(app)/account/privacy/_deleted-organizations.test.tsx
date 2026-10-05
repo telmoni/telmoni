@@ -22,9 +22,9 @@ const MINE: DeletedOrganization = {
   eraseAfter: "2026-10-07T10:00:00Z",
   restorable: true,
 };
-const UNNAMED: DeletedOrganization = {
-  organizationId: "org_unnamed",
-  name: null,
+const GLOBEX: DeletedOrganization = {
+  organizationId: "org_globex",
+  name: "Globex",
   deletionRequestedAt: "2026-09-20T10:00:00Z",
   eraseAfter: "2026-10-04T10:00:00Z",
   restorable: true,
@@ -57,12 +57,11 @@ describe("DeletedOrganizations", () => {
   });
 
   // The label is what the console calls the organization everywhere else:
-  // its name. One closed before it was named — an operator's termination —
-  // has nothing else to go by, and never the reader's address.
+  // its name, never the reader's address.
   it("names each organization as the console does, and says until when it can come back", () => {
-    mount([MINE, UNNAMED]);
+    mount([MINE, GLOBEX]);
     expect(screen.getByText("Acme")).toBeInTheDocument();
-    expect(screen.getByText("Organization")).toBeInTheDocument();
+    expect(screen.getByText("Globex")).toBeInTheDocument();
     expect(screen.queryByText("ada@example.test")).toBeNull();
     expect(document.body.textContent).toMatch(/you can restore it until/i);
     const times = [...document.querySelectorAll("time")].map((t) => t.getAttribute("dateTime"));
@@ -84,12 +83,12 @@ describe("DeletedOrganizations", () => {
   // A full navigation, not a router push: the rail, the selector and the
   // store were all read without the organization that is back.
   it("restores the one pressed and reloads the console", async () => {
-    mount([MINE, UNNAMED]);
+    mount([MINE, GLOBEX]);
     await act(async () => {
       fireEvent.click(screen.getAllByRole("button", { name: /^restore$/i })[1]!);
     });
     expect(restoreOrganizationAction).toHaveBeenCalledTimes(1);
-    expect(restoreOrganizationAction).toHaveBeenCalledWith("org_unnamed");
+    expect(restoreOrganizationAction).toHaveBeenCalledWith("org_globex");
     expect(replace).toHaveBeenCalledWith("/console");
   });
 

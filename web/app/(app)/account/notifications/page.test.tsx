@@ -70,7 +70,7 @@ import AccountNotificationsPage from "./page";
 const OWN: OrganizationEntry = {
   organizationId: "org_own",
   slug: "own",
-  name: null,
+  name: "Own",
   ownerEmail: "admin@example.test",
   role: "owner",
 };

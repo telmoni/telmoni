@@ -32,13 +32,13 @@ export type Person = z.infer<typeof PersonSchema>;
 /// One organization the person is in, and as what. ⚠ An organization is
 /// NOBODY: it is labelled by the name it was given (`organizationLabel`),
 /// never by a person, and the person's own organization is simply the entries
-/// where they are `owner`. `name` is null only before the owner has given one,
-/// which the console asks for before it opens to them.
+/// where they are `owner`. It is born named after its owner ("Ada's
+/// organization") and renamed on Settings.
 const OrganizationEntrySchema = z.object({
   organizationId:          z.string(),
   /// Where its paths begin: `/{slug}` (`lib/slug.ts`).
   slug:                    z.string(),
-  name:                    z.string().nullable().optional(),
+  name:                    z.string(),
   ownerEmail:              z.string().nullable().optional(),
   ownerDisplayName:        z.string().nullable().optional(),
   role:                    z.enum(["owner", "admin", "member"]),
@@ -55,7 +55,7 @@ export type OrganizationEntry = z.infer<typeof OrganizationEntrySchema>;
 /// among `organizations`.
 const DeletedOrganizationSchema = z.object({
   organizationId:      z.string(),
-  name:                z.string().nullable().optional(),
+  name:                z.string(),
   deletionRequestedAt: z.string(),
   /// When the row goes: the end of the restore window.
   eraseAfter:          z.string(),
@@ -70,7 +70,7 @@ const ProjectOfferSchema = z.object({
   projectId:        z.string(),
   name:             z.string(),
   organizationId:   z.string(),
-  organizationName: z.string().nullable().optional(),
+  organizationName: z.string(),
   ownerEmail:       z.string().nullable().optional(),
   ownerDisplayName: z.string().nullable().optional(),
   expiresAt:        z.string(),

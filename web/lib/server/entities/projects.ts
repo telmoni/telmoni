@@ -89,7 +89,7 @@ export const fetchProjectBySlug = cache(
 const ProjectEverywhereSchema = ProjectSchema.extend({
   organizationId: z.string(),
   organizationSlug: z.string(),
-  organizationName: z.string().nullable().optional(),
+  organizationName: z.string(),
 });
 
 /// A project in any organization the person can open, with where its
@@ -97,7 +97,7 @@ const ProjectEverywhereSchema = ProjectSchema.extend({
 export type ProjectEverywhere = Project & {
   organizationId: string;
   organizationSlug: string;
-  organizationName: string | null;
+  organizationName: string;
 };
 
 export type ProjectEverywhereListing =
@@ -126,11 +126,7 @@ export const fetchProjectsEverywhere = cache(async (): Promise<ProjectEverywhere
     return {
       kind: "ok",
       projects: parsed.data
-        .map((t) => ({
-          ...t,
-          role: asRole(t.role),
-          organizationName: t.organizationName ?? null,
-        }))
+        .map((t) => ({ ...t, role: asRole(t.role) }))
         .sort(compareProjectsByOrganization),
     };
   } catch {

@@ -35,8 +35,8 @@ export default async function OrganizationOverviewPage() {
   const organization = gate ? activeOrganization(gate) : null;
   if (!organization) return <ServiceUnavailable />;
 
-  // The organization's own name, else "Organization" — never the name or the
-  // address of the person who holds it. See `organizationLabel`.
+  // The organization's own name — never the name or the address of the
+  // person who holds it. See `organizationLabel`.
   const name = organizationLabel(organization);
 
   const isOwner = organization.role === "owner";

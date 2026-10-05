@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { compareProjectsByOrganization } from "./projects";
 
-const project = (name: string, organizationName: string | null) => ({
+const project = (name: string, organizationName: string) => ({
   name,
   organizationName,
 });
@@ -23,11 +23,5 @@ describe("compareProjectsByOrganization", () => {
     expect(
       order([project("web", "Acme"), project("Api", "Acme"), project("Data", "Acme")]),
     ).toEqual(["Api", "Data", "web"]);
-  });
-
-  it("files an organization with no name under Organization", () => {
-    expect(
-      order([project("Late", "Zed Co"), project("Orphan", null), project("Early", "Abe Inc")]),
-    ).toEqual(["Early", "Orphan", "Late"]);
   });
 });

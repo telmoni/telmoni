@@ -128,9 +128,9 @@ describe("acceptInviteAction", () => {
   });
 
   // ⚠ The page goes on to `/console`, which opens the cookie's organization.
-  // Without this a new invitee — no cookie, and an unnamed organization of
-  // their own from their first sign-in — was asked to name that one instead
-  // of landing in the one they had just joined.
+  // Without this a new invitee — no cookie, and an organization of their own
+  // from their first sign-in — landed in that one instead of the one they had
+  // just joined.
   it("points the console at the organization joined", async () => {
     await acceptInviteAction("token_abc");
     expect(setActiveOrganizationCookie).toHaveBeenCalledWith("org_owner");

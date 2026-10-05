@@ -62,7 +62,6 @@ export default async function OrganizationMembersPage() {
   const organizationId = organization.organizationId;
   const isOwner = ident.role === "owner";
   const canManage = isOwner || ident.role === "admin";
-  const organizationNamed = Boolean(organization.name);
 
   // The roster and the outstanding invitations, loaded in parallel. If the
   // roster cannot be fetched the page cannot serve its purpose.
@@ -146,8 +145,6 @@ export default async function OrganizationMembersPage() {
                 <OrganizationMemberRow
                   key={m.id}
                   organizationId={organizationId}
-                  organizationNamed={organizationNamed}
-                  settingsHref={organizationPath(organization.slug, "/settings")}
                   member={m}
                   canManage={canManage}
                   isOwnerCaller={isOwner}

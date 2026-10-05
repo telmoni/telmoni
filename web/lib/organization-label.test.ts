@@ -7,7 +7,7 @@ const THEIRS = "org_theirs";
 
 const mine = {
   organizationId: MINE,
-  name: null as string | null,
+  name: "Acme",
   ownerEmail: "ada@example.com" as string | null,
   ownerDisplayName: "Ada",
   role: "owner" as const,
@@ -15,7 +15,7 @@ const mine = {
 
 const theirs = {
   organizationId: THEIRS,
-  name: null as string | null,
+  name: "Analytical Engines",
   ownerEmail: "grace@other.example" as string | null,
   ownerDisplayName: "Grace H",
   role: "admin" as const,
@@ -53,48 +53,21 @@ describe("which organization you are in", () => {
 });
 
 describe("what to call it", () => {
-  it("prefers the name the owner chose", () => {
-    expect(
-      resolve({ organizations: [{ ...mine, name: "Acme Robotics" }, theirs] }).label,
-    ).toBe("Acme Robotics");
-  });
-
-  // ⚠ `name` is NULL only before the owner has named the organization, which
-  // the console asks for before it opens to them. Nothing is ever labelled by
-  // the owner's address: it is a person's, and a path and a mail would carry
-  // it.
-  it("never falls back to the owner's address", () => {
-    expect(resolve().label).toBe("Organization");
+  // ⚠ The name the organization goes by, and nothing the console makes up from
+  // the person who holds it: their address is theirs, and a path and a mail
+  // would carry it.
+  it("is the organization's name, never its owner's name or address", () => {
+    expect(resolve().label).toBe("Acme");
+    expect(resolve().label).not.toContain("Ada");
     expect(resolve().label).not.toContain("ada@");
   });
 
-  it("treats a blank name as no name", () => {
-    expect(resolve({ organizations: [{ ...mine, name: "   " }, theirs] }).label).toBe(
-      "Organization",
-    );
-  });
-
-  // An organization is named by its name, never by the person who holds it —
-  // and "Personal" is gone, because it was one word for every customer.
-  it("never labels an organization with a person's name", () => {
-    expect(resolve().label).not.toBe("Personal");
-    expect(resolve().label).not.toContain("Ada");
-    expect(resolve({ activeOrganizationId: THEIRS }).label).toBe("Organization");
+  it("names somebody else's organization by its own name", () => {
+    expect(resolve({ activeOrganizationId: THEIRS }).label).toBe("Analytical Engines");
     expect(resolve({ activeOrganizationId: THEIRS }).label).not.toContain("Grace");
   });
 
-  // Every entry carries its organization's own name now. Only yours did, so
-  // somebody else's organization could only ever be shown by its address.
-  it("names somebody else's organization by the name its owner chose", () => {
-    expect(
-      resolve({
-        activeOrganizationId: THEIRS,
-        organizations: [mine, { ...theirs, name: "Analytical Engines" }],
-      }).label,
-    ).toBe("Analytical Engines");
-  });
-
-  it("says Organization when there is nothing to name it with", () => {
+  it("says Organization when there is no organization to name", () => {
     expect(resolve({ activeOrganizationId: "org_stranger" }).label).toBe("Organization");
     expect(resolve({ organizations: [] }).label).toBe("Organization");
   });

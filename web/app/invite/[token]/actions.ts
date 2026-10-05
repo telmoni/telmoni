@@ -63,8 +63,8 @@ export async function acceptInviteAction(
 
   // The page goes on to `/console`, which asks `/me` for the cookie's
   // organization. A new invitee has no cookie, and `/me` would fall back to
-  // the organization their own sign-in provisioned — unnamed — and ask them to
-  // name it; the one they just joined is where they are going.
+  // their default, the organization their own sign-in provisioned; the one
+  // they just joined is where they are going.
   if (data?.ownerOrganizationId) await setActiveOrganizationCookie(data.ownerOrganizationId);
 
   revalidatePath("/(app)/[organization]/projects", "page");

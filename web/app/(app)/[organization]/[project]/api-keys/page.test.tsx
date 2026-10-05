@@ -54,7 +54,7 @@ beforeEach(() => {
       {
         organizationId: "org_1",
         slug: "acme",
-        name: null,
+        name: "Acme",
         ownerEmail: "ada@example.test",
         role: "owner",
       },

@@ -52,9 +52,9 @@ const TrailSchema = z.array(z.string());
  * - An account path. Account is the mode you step INTO and leave by the back
  *   arrow, so recording one would make the arrow a no-op — and it is not a
  *   resource the selector can switch to either.
- * - `/console`, which is a door and not a destination: it asks the owner to name an unnamed
- *   organization, or resolves to the first project or the Projects page, so
- *   remembering it would land you somewhere you never stood.
+ * - `/console`, which is a door and not a destination: it resolves to an
+ *   organization's overview, so remembering it would land you somewhere you
+ *   never stood.
  */
 export function isReturnablePath(path: string): path is ReturnablePath {
   if (!path.startsWith("/") || path.startsWith("//")) return false;

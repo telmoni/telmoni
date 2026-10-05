@@ -52,7 +52,12 @@ async function renderLayout(organization: string) {
 const ACME = { organizationId: "org_acme", slug: "acme", name: "Acme", role: "owner" };
 const GLOBEX = { organizationId: "org_globex", slug: "globex", name: "Globex", role: "member" };
 // Provisioned at first sign-in and not yet named: its slug is a placeholder.
-const FRESH = { organizationId: "org_fresh", slug: "org-k3x9qz1a2b", name: null, role: "owner" };
+const FRESH = {
+  organizationId: "org_fresh",
+  slug: "org-k3x9qz1a2b",
+  name: "李明's organization",
+  role: "owner",
+};
 
 // `/me` as auth answers it when the path names `active`.
 function standingIn(active: string | null) {
@@ -128,28 +133,17 @@ describe("OrganizationLayout", () => {
     expect(mockRedirect).not.toHaveBeenCalled();
   });
 
-  // ⚠ The owner names their organization before the console opens to them,
-  // on `/console`: nothing is drawn under the placeholder slug, which looks
-  // like an id and is nobody's choice of address.
-  it("sends the owner of an organization not yet named to name it", async () => {
+  // ⚠ Nothing is asked before a new organization opens: it is provisioned
+  // named after its owner, as Vercel and Cloudflare name a new account, and a
+  // name with no Latin letter in it keeps a placeholder slug until the owner
+  // picks a URL on Settings. Either way its pages render for the owner.
+  it("opens a just-provisioned organization for its owner, asking nothing", async () => {
     mockContext = { organizations: [FRESH], activeOrganizationId: "org_fresh" };
-    mockSeed = { activeOrganizationId: "org_fresh" };
-    await expect(renderLayout("org-k3x9qz1a2b")).rejects.toThrow("REDIRECT:/console?organization=org_fresh");
-    expect(mockNotFound).not.toHaveBeenCalled();
-  });
-
-  // Nobody but the owner is in an unnamed organization (auth refuses its
-  // invitations), so this is the operator's case: an organization left
-  // unnamed renders for a member, under the label the console gives one.
-  it("renders an unnamed organization for somebody who is not its owner", async () => {
-    mockContext = {
-      organizations: [{ ...FRESH, role: "member" }],
-      activeOrganizationId: "org_fresh",
-    };
     mockSeed = { activeOrganizationId: "org_fresh" };
     await renderLayout("org-k3x9qz1a2b");
     expect(screen.getByTestId("page")).toBeInTheDocument();
     expect(mockRedirect).not.toHaveBeenCalled();
+    expect(mockNotFound).not.toHaveBeenCalled();
   });
 
   // An outage is the page's to say, as each one does: a 404 here would tell

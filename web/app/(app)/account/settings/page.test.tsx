@@ -174,7 +174,7 @@ describe("AccountSettingsPage", () => {
     context.value = {
       organizations: [
         { organizationId: "org_1", name: "Acme", role: "owner" },
-        { organizationId: "org_2", name: null, role: "member" },
+        { organizationId: "org_2", name: "Globex", role: "member" },
       ],
       defaultOrganizationId: "org_2",
     };
@@ -185,8 +185,8 @@ describe("AccountSettingsPage", () => {
     expect(headings).toEqual(["profile", "email", "password", "default organization"]);
     const control = screen.getByTestId("default-organization");
     expect(control).toHaveAttribute("data-current", "org_2");
-    // The organization's own name, else "Organization" — never a person's.
-    expect(control).toHaveTextContent("org_1:Acme,org_2:Organization");
+    // Each by its own name, never a person's.
+    expect(control).toHaveTextContent("org_1:Acme,org_2:Globex");
   });
 
   it("leaves the default out for somebody in no organization", async () => {

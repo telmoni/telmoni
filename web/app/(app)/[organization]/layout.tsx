@@ -37,13 +37,6 @@ export default async function OrganizationLayout({
     redirect(await canonicalPath([meant.slug]));
   }
   if (ctx.activeOrganizationId !== named.organizationId) notFound();
-  // Not named yet, and the owner's to name: the console asks on `/console`,
-  // where the address bar spells no placeholder slug. Told which one: that
-  // path names no organization, so `/me` would answer the cookie's there,
-  // which is another organization when the owner came from one.
-  if (!named.name?.trim() && named.role === "owner") {
-    redirect(`/console?organization=${named.organizationId}`);
-  }
 
   return (
     <>

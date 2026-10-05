@@ -8,7 +8,7 @@ export function compareProjects(a: { name: string }, b: { name: string }): numbe
 
 type OrganizationProject = {
   name: string;
-  organizationName: string | null;
+  organizationName: string;
 };
 
 // Grouped by what the switcher prints for each organization — the rule

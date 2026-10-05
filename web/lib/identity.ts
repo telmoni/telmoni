@@ -36,17 +36,18 @@ export function ownerContact(
 // answers "which human is this", which is the right question on a member row
 // and the wrong one on an organization row: an organization you were added to
 // would render as its owner's name, and an address is a person's to show.
-// The owner names an organization before the console opens to them, so the
-// fallback covers an owner's own unnamed one, on the switcher's row for it.
-export function organizationLabel(org: { name?: string | null }): string {
-  return org.name?.trim() || "Organization";
+// Every organization has its name from birth, so this is that name; it stays
+// one function because a console built on this one labels organizations
+// through it (`lib/extension/ui.ts`).
+export function organizationLabel(org: { name: string }): string {
+  return org.name;
 }
 
 /// The organizations a person owns, as the account deletion names them:
 /// counted by label, not listed, since two may carry one name.
 export function ownedOrganizationLabels(
   organizations: readonly {
-    name?: string | null;
+    name: string;
     role: string;
   }[],
 ): string[] {

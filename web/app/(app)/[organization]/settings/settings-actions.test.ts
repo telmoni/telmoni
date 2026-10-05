@@ -51,11 +51,7 @@ import { identityContext } from "@/lib/server/entities/identity-context";
 import { getServerContext } from "@/lib/server/entities/organization";
 import { getServerSession } from "@/lib/server/session";
 
-import {
-  changeOrganizationUrlAction,
-  nameOrganizationAction,
-  renameOrganizationAction,
-} from "./settings-actions";
+import { changeOrganizationUrlAction, renameOrganizationAction } from "./settings-actions";
 
 const fetchMock = vi.mocked(tryFetchWithTimeout);
 
@@ -96,85 +92,6 @@ beforeEach(() => {
   wentBy("acme-robotics");
 });
 
-describe("nameOrganizationAction", () => {
-  const UNNAMED = { organizationId: ORGANIZATION, slug: "org-k3x9qz1a2b", name: null };
-
-  // ⚠ Posted from `/console`, which stands on no organization's path: the
-  // request resolves the cookie's organization — another one, when the owner
-  // opened their unnamed organization from inside it — so the action acts on
-  // the organization it was handed, never on the one the request resolves.
-  it("names the organization it was handed, whatever the request resolves to", async () => {
-    standingIn("org_elsewhere");
-    vi.mocked(getServerContext).mockResolvedValue({
-      activeOrganizationId: "org_elsewhere",
-      organizations: [
-        { organizationId: "org_elsewhere", slug: "elsewhere", name: "Elsewhere", role: "owner" },
-        { ...UNNAMED, role: "owner" },
-      ],
-    } as never);
-    fetchMock.mockResolvedValue(renamed("acme-robotics"));
-    expect(await nameOrganizationAction(ORGANIZATION, "  Acme Robotics  ")).toEqual({
-      error: null,
-      movedTo: "acme-robotics",
-      slug: "acme-robotics",
-    });
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://auth.test/internal/organization",
-      expect.objectContaining({
-        method: "PATCH",
-        headers: expect.objectContaining({
-          authorization: "Bearer at_1",
-          "x-organization-id": ORGANIZATION,
-        }),
-        body: JSON.stringify({ name: "Acme Robotics" }),
-      }),
-    );
-    expect(identityContext).not.toHaveBeenCalled();
-    expect(mockPublishEvent).toHaveBeenCalledWith(`bfev:organization:${ORGANIZATION}`, {
-      type: "slug:moved",
-      data: { organizationId: ORGANIZATION, from: "org-k3x9qz1a2b", to: "acme-robotics" },
-    });
-  });
-
-  it("refuses an organization the person does not own, before asking auth", async () => {
-    vi.mocked(getServerContext).mockResolvedValue({
-      activeOrganizationId: ORGANIZATION,
-      organizations: [{ ...UNNAMED, role: "admin" }],
-    } as never);
-    const res = await nameOrganizationAction(ORGANIZATION, "Acme");
-    expect(res.error).toMatch(/owner/);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  // A name with no Latin letter or digit gives no slug: the placeholder stays, so
-  // nobody is told of a move — but the form still needs the slug to land on,
-  // since `/console` would open the cookie's organization instead.
-  it("answers the slug without a move when the name gave the organization no URL", async () => {
-    vi.mocked(getServerContext).mockResolvedValue({
-      activeOrganizationId: ORGANIZATION,
-      organizations: [{ ...UNNAMED, role: "owner" }],
-    } as never);
-    fetchMock.mockResolvedValue(renamed("org-k3x9qz1a2b"));
-    expect(await nameOrganizationAction(ORGANIZATION, "東京")).toEqual({
-      error: null,
-      slug: "org-k3x9qz1a2b",
-    });
-    expect(mockPublishEvent).not.toHaveBeenCalled();
-  });
-
-  // The first name is this action's; a stale `/console` tab posting a second
-  // one would rename the organization without anyone seeing it as a rename.
-  it("refuses an organization that already has a name, before asking auth", async () => {
-    vi.mocked(getServerContext).mockResolvedValue({
-      activeOrganizationId: ORGANIZATION,
-      organizations: [{ ...UNNAMED, name: "Acme", slug: "acme", role: "owner" }],
-    } as never);
-    const res = await nameOrganizationAction(ORGANIZATION, "Acme Robotics");
-    expect(res.error).toMatch(/already has a name/);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-});
-
 describe("renameOrganizationAction", () => {
   it("renames the organization the page rendered, under the session's bearer", async () => {
     fetchMock.mockResolvedValue(renamed("acme-robotics"));
@@ -196,33 +113,6 @@ describe("renameOrganizationAction", () => {
     expect(mockRevalidate).toHaveBeenCalledWith("/", "layout");
     // Its paths are where they were: nobody has anywhere to follow it to.
     expect(mockPublishEvent).not.toHaveBeenCalled();
-  });
-
-  // ⚠ The first name takes the organization off its placeholder slug, out
-  // from under the path this was posted from. The page follows it; rendering
-  // the old path again first, as a revalidation would, answers "not found".
-  // After that a name moves nothing, which the test above pins.
-  it("says where the first name moved the organization, and revalidates nothing", async () => {
-    wentBy("org-4k2j9x0q1z");
-    fetchMock.mockResolvedValue(renamed("acme-robotics"));
-    expect(await renameOrganizationAction(ORGANIZATION, "Acme Robotics")).toEqual({
-      error: null,
-      movedTo: "acme-robotics",
-    });
-    expect(mockRevalidate).not.toHaveBeenCalled();
-  });
-
-  // Everybody else with one of its pages open is on a path that now names
-  // nothing: the organization's channel tells them where it went.
-  it("tells the organization's channel where the first name moved it", async () => {
-    wentBy("org-4k2j9x0q1z");
-    fetchMock.mockResolvedValue(renamed("acme-robotics"));
-    await renameOrganizationAction(ORGANIZATION, "Acme Robotics");
-    expect(mockPublishEvent).toHaveBeenCalledTimes(1);
-    expect(mockPublishEvent).toHaveBeenCalledWith(`bfev:organization:${ORGANIZATION}`, {
-      type: "slug:moved",
-      data: { organizationId: ORGANIZATION, from: "org-4k2j9x0q1z", to: "acme-robotics" },
-    });
   });
 
   it("revalidates in place when it cannot tell whether the slug moved", async () => {

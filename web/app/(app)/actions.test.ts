@@ -56,6 +56,7 @@ function me(organizations: OrganizationEntry[], activeOrganizationId: string): S
 const owned = (organizationId: string): OrganizationEntry => ({
   organizationId,
   slug: organizationId.replace("org_", ""),
+  name: organizationId.replace("org_", ""),
   ownerEmail: "me@example.test",
   role: "owner",
 });
@@ -63,6 +64,7 @@ const owned = (organizationId: string): OrganizationEntry => ({
 const joined = (organizationId: string, role: "admin" | "member"): OrganizationEntry => ({
   organizationId,
   slug: organizationId.replace("org_", ""),
+  name: organizationId.replace("org_", ""),
   ownerEmail: "someone@example.test",
   role,
 });

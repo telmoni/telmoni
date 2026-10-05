@@ -8,7 +8,7 @@ import { organizationLabel } from "@/lib/identity";
  * yours being the ones where your role is `owner`.
  */
 export function resolveActiveOrganization<
-  O extends { organizationId: string; name?: string | null },
+  O extends { organizationId: string; name: string },
 >(args: {
   activeOrganizationId: string | null;
   organizations: readonly O[];

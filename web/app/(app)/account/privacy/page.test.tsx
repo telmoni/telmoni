@@ -78,7 +78,7 @@ beforeEach(() => {
   mockContext = {
     person: { analyticsOptIn: false },
     organizations: [
-      { organizationId: "org_1", slug: "one", name: null, ownerEmail: "k@example.com", role: "owner" },
+      { organizationId: "org_1", slug: "one", name: "One", ownerEmail: "k@example.com", role: "owner" },
     ],
   };
 });

@@ -33,7 +33,7 @@ describe("ownedOrganizationLabels", () => {
       ownedOrganizationLabels([
         { name: "Acme", role: "owner" },
         { name: "Theirs", role: "admin" },
-        { name: null, role: "member" },
+        { name: "Ours", role: "member" },
       ]),
     ).toEqual(["Acme"]);
   });

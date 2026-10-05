@@ -294,7 +294,7 @@ describe("StoreProvider: projects elsewhere", () => {
       role: "admin",
       organizationId: organization,
       organizationSlug: organization.replace(/^org_/, ""),
-      organizationName: null,
+      organizationName: organization.replace(/^org_/, ""),
     };
   }
 

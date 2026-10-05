@@ -8,7 +8,7 @@ function organization(who: string): NonNullable<StoreInitial["organizations"]>[n
   return {
     organizationId: `org_${who}`,
     slug: who,
-    name: null,
+    name: who,
     ownerEmail: `${who}@example.test`,
     ownerDisplayName: null,
     role: "owner",

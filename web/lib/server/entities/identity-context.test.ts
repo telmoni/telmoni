@@ -50,8 +50,8 @@ function me(activeOrganizationId: string): ServerContext {
     organizations: [
       {
         organizationId: "org_mine",
-        slug: "org-4k2j9x0q1z",
-        name: null,
+        slug: "my-organization",
+        name: "My organization",
         ownerEmail: "me@example.test",
         role: "owner",
       },

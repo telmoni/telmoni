@@ -168,16 +168,11 @@ function AddOrganizationMemberDialog({
 
 export function OrganizationMemberRow({
   organizationId,
-  organizationNamed,
-  settingsHref,
   member,
   canManage,
   isOwnerCaller = false,
 }: {
   organizationId: string;
-  organizationNamed: boolean;
-  /// The organization's settings page, where it is named.
-  settingsHref: string;
   member: OrganizationMember;
   canManage: boolean;
   isOwnerCaller?: boolean;
@@ -278,7 +273,7 @@ export function OrganizationMemberRow({
       </Td>
       <Td className="text-right whitespace-nowrap">
         <div className="flex items-center justify-end gap-3">
-          {canOffer && !offered && organizationNamed && (
+          {canOffer && !offered && (
             <ConfirmDialog
               trigger={transferTrigger}
               title={`Hand this organization to ${personName(who(member))}?`}
@@ -287,15 +282,6 @@ export function OrganizationMemberRow({
               onConfirm={() =>
                 act(() => offerOwnershipAction(organizationId, member.member_id))
               }
-            />
-          )}
-          {canOffer && !offered && !organizationNamed && (
-            <ConfirmDialog
-              trigger={transferTrigger}
-              title="Name this organization first"
-              description="The offer calls this organization by its name, and it has none yet. Name it in the organization's settings, then hand it over."
-              confirmLabel="Go to settings"
-              onConfirm={() => router.push(settingsHref)}
             />
           )}
           {canOffer && offered && (

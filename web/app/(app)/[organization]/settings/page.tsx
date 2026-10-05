@@ -66,7 +66,7 @@ export default async function OrganizationSettingsPage() {
         >
           <OrganizationNameForm
             organizationId={organization.organizationId}
-            initialName={organization.name ?? ""}
+            initialName={organization.name}
             canEdit={canManage}
           />
         </Section>
