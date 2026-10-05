@@ -275,10 +275,12 @@ The CLI signs in with a device grant, modelled on RFC 8628.
 
 **The console's `/cli` door** (`web/app/cli/[...path]/route.ts`) is ⚠ a security boundary:
 - It forwards a fixed allowlist of lanes: start, poll, refresh, `/me`, and revoking one of the person's sessions. That can be any of their sessions, browser sessions included, not only the CLI's own.
+- A path outside the allowlist, a revoke whose id is not a UUID included, is a `404` of the door's own type, `/errors/not-found`. Auth's `/errors/auth/not-found` on a revoke says the session is already gone, and a client reads it so.
 - It refuses any request from a browser (`Sec-Fetch-Site`).
 - It refuses an `x-organization-id` that is not an organization id (`400`). `/me` reads one it cannot parse as none and answers the person's own organization, which is right for the console's stale cookie and wrong for a client that named one: a slug sent by mistake would act elsewhere.
 - It caps and re-encodes bodies, so only the fields in its schema cross.
 - It meters each source and each bearer.
+- ⚠ It answers auth refusing the service secret (`/errors/auth/service-credential-rejected`) as a `503` `/errors/upstream-unavailable`, never as the `401` itself. A `401` tells a client its own session was refused, and a client may end it on one, so a botched `SERVICE_SECRET` rotation relayed as one would tell every client at once. The CLI reads the type and keeps its session either way.
 
 **Start.**
 - Auth mints a device code (a hashed secret) and a short user code made of consonants only, shown as `XXXX-XXXX`.

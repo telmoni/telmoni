@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
 import { fetchWithTimeout } from "@/lib/api/fetch";
 import { clientKey, rateLimitRetryAfter } from "@/lib/api/rate-limit";
@@ -62,6 +63,41 @@ function rateLimitedProblem(retryAfterSecs: number): NextResponse {
   );
 }
 
+// A problem document like every other `/v1` answer; its type is the relay's
+// own, since auth never answered, or answered only about itself.
+function upstreamUnavailable(detail: string): NextResponse {
+  return NextResponse.json(
+    {
+      type: "/errors/upstream-unavailable",
+      title: "upstream unavailable",
+      status: 503,
+      detail,
+    },
+    {
+      status: 503,
+      headers: {
+        "content-type": "application/problem+json",
+        "cache-control": "no-store, private",
+      },
+    },
+  );
+}
+
+// Auth's `require_service_secret` refusing this process's own secret.
+const ServiceCredentialRejected = z.object({
+  type: z.literal("/errors/auth/service-credential-rejected"),
+});
+
+function isServiceCredentialRejected(body: ArrayBuffer): boolean {
+  try {
+    return ServiceCredentialRejected.safeParse(
+      JSON.parse(new TextDecoder().decode(body)),
+    ).success;
+  } catch {
+    return false;
+  }
+}
+
 function methodNotAllowed(allow: string): NextResponse {
   return NextResponse.json(
     {
@@ -107,24 +143,6 @@ async function proxy(
     if (retryAfter !== null) return rateLimitedProblem(retryAfter);
   }
 
-  // A problem document like every other `/v1` answer; its type is the relay's
-  // own, since auth never answered.
-  const unavailable = NextResponse.json(
-    {
-      type: "/errors/upstream-unavailable",
-      title: "upstream unavailable",
-      status: 503,
-      detail: "the server did not answer; try again shortly",
-    },
-    {
-      status: 503,
-      headers: {
-        "content-type": "application/problem+json",
-        "cache-control": "no-store, private",
-      },
-    },
-  );
-
   const suffix = path.map(encodeURIComponent).join("/");
   const target = `${base}/v1/${suffix}${request.nextUrl.search}`;
 
@@ -155,8 +173,12 @@ async function proxy(
   }
 
   let upstream: Response;
+  // A 401 is read whole, to tell auth refusing the caller's key from auth
+  // refusing this process's own secret.
+  let refusal: ArrayBuffer | undefined;
   try {
     upstream = await fetchWithTimeout(target, init, READ_TIMEOUT_MS);
+    if (upstream.status === 401) refusal = await upstream.arrayBuffer();
   } catch (err) {
     // A 503 with no line behind it is an outage nobody can see from the logs.
     // The request id is what ties this to auth's own record of the same hop.
@@ -164,7 +186,19 @@ async function proxy(
       { lane, requestId, error: err instanceof Error ? err.message : String(err) },
       "v1: upstream fetch failed",
     );
-    return unavailable;
+    return upstreamUnavailable("the server did not answer; try again shortly");
+  }
+
+  // ⚠ A 401 tells the caller its key was refused. A refused service secret
+  // is the platform failing on its own side (a botched `SERVICE_SECRET`
+  // rotation), and relayed as a 401 it would tell every caller that a
+  // working key was refused.
+  if (refusal && isServiceCredentialRejected(refusal)) {
+    logger.error(
+      { lane, requestId },
+      "v1: auth refused the service secret; check SERVICE_SECRET rotation",
+    );
+    return upstreamUnavailable("the platform failed on its own side; try again shortly");
   }
 
   const responseHeaders = new Headers();
@@ -174,7 +208,7 @@ async function proxy(
   }
   responseHeaders.set("cache-control", "no-store, private");
 
-  return new NextResponse(upstream.body, {
+  return new NextResponse(refusal ?? upstream.body, {
     status: upstream.status,
     headers: responseHeaders,
   });

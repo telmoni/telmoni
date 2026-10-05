@@ -139,13 +139,23 @@ describe("/cli refusals, all before the hop", () => {
     ]) {
       const res = await call(path, { headers: { authorization: BEARER }, body: {} });
       expect(res.status, path).toBe(404);
+      expect(await res.json(), path).toMatchObject({ type: "/errors/not-found" });
     }
     expect(fetchWithTimeout).not.toHaveBeenCalled();
   });
 
-  it("answers 404 for a revoke whose id is not a uuid", async () => {
+  // Auth's own 404 on a revoke, `/errors/auth/not-found`, says the session is
+  // already gone; the door's must not read as one.
+  it("answers 404 of its own type for a revoke whose id is not a uuid", async () => {
     const res = await call("sessions/not-a-uuid/revoke", { headers: { authorization: BEARER } });
     expect(res.status).toBe(404);
+    expect(res.headers.get("content-type")).toBe("application/problem+json");
+    expect(await res.json()).toEqual({
+      type: "/errors/not-found",
+      title: "not found",
+      status: 404,
+      detail: "no such lane",
+    });
     expect(fetchWithTimeout).not.toHaveBeenCalled();
   });
 
@@ -269,6 +279,58 @@ describe("/cli headers", () => {
     expect(res.headers.get("x-internal")).toBeNull();
     expect(res.headers.get("cache-control")).toBe("no-store, private");
     expect(await res.json()).toMatchObject({ type: "/errors/auth/unauthenticated" });
+  });
+
+  it("relays auth refusing the client's own credential byte for byte", async () => {
+    const refused = '{"type":"/errors/auth/invalid-token","title":"invalid token","status":401}';
+    fetchWithTimeout.mockResolvedValueOnce(
+      new Response(refused, { status: 401, headers: { "content-type": "application/problem+json" } }),
+    );
+    const res = await call("auth/refresh", { body: { refreshToken: "rt_1" } });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("content-type")).toBe("application/problem+json");
+    expect(await res.text()).toBe(refused);
+  });
+
+  // The CLI ends its session on a 401 from `/me`, a refresh or a revoke: a
+  // botched `SERVICE_SECRET` rotation relayed as one would sign out every CLI.
+  it("answers auth refusing the service secret as a 503 on every lane, never a 401", async () => {
+    fetchWithTimeout.mockImplementation(
+      async () =>
+        new Response(
+          '{"type":"/errors/auth/service-credential-rejected","title":"service credential rejected","status":401}',
+          { status: 401, headers: { "content-type": "application/problem+json" } },
+        ),
+    );
+    for (const [path, init] of [
+      ["me", { headers: { authorization: BEARER } }],
+      ["auth/refresh", { body: { refreshToken: "rt_1" } }],
+      [`sessions/${ROW}/revoke`, { headers: { authorization: BEARER } }],
+    ] as const) {
+      const res = await call(path, init);
+      expect(res.status, path).toBe(503);
+      expect(res.headers.get("content-type"), path).toBe("application/problem+json");
+      expect(await res.json(), path).toEqual({
+        type: "/errors/upstream-unavailable",
+        title: "upstream unavailable",
+        status: 503,
+        detail: "the platform failed on its own side; try again shortly",
+      });
+    }
+  });
+
+  it("answers 503 when a 401's body breaks off, rather than relay a refusal nobody read", async () => {
+    fetchWithTimeout.mockResolvedValueOnce(
+      new Response(new ReadableStream({ start: (controller) => controller.error(new Error("reset")) }), {
+        status: 401,
+      }),
+    );
+    const res = await call("me", { headers: { authorization: BEARER } });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({
+      type: "/errors/upstream-unavailable",
+      detail: "the server did not answer; try again shortly",
+    });
   });
 });
 

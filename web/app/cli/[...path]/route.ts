@@ -121,6 +121,19 @@ function isOrganizationId(value: string): boolean {
   return value.startsWith("org_") && [...value].length <= 256 && !/[\s\p{Cc}]/u.test(value);
 }
 
+// Auth's `require_service_secret` refusing this process's own secret.
+const ServiceCredentialRejected = z.object({
+  type: z.literal("/errors/auth/service-credential-rejected"),
+});
+
+function isServiceCredentialRejected(body: ArrayBuffer): boolean {
+  try {
+    return ServiceCredentialRejected.safeParse(JSON.parse(new TextDecoder().decode(body))).success;
+  } catch {
+    return false;
+  }
+}
+
 function problem(
   status: number,
   type: string,
@@ -181,9 +194,12 @@ async function proxy(request: NextRequest, path: string[]): Promise<NextResponse
     return problem(403, "/errors/authz/forbidden", "forbidden", "not a browser lane");
   }
 
+  // A type of the door's own: auth's `/errors/auth/not-found` on a revoke
+  // says the session is already gone, and a path no lane matches says
+  // nothing about any session.
   const matched = match(path);
   if (!matched) {
-    return problem(404, "/errors/auth/not-found", "not found", "no such lane");
+    return problem(404, "/errors/not-found", "not found", "no such lane");
   }
   if (request.method.toUpperCase() !== "POST") {
     return problem(405, "/errors/method-not-allowed", "method not allowed", "this lane takes POST", {
@@ -265,12 +281,16 @@ async function proxy(request: NextRequest, path: string[]): Promise<NextResponse
   const target = `${base}${lane.upstream(ids)}`;
   const lanePath = path.join("/");
   let upstream: Response;
+  // A 401 is read whole, to tell auth refusing the client's credential from
+  // auth refusing this process's own.
+  let refusal: ArrayBuffer | undefined;
   try {
     upstream = await fetchWithTimeout(
       target,
       { method: "POST", headers, body, cache: "no-store", signal: request.signal },
       UPSTREAM_TIMEOUT_MS,
     );
+    if (upstream.status === 401) refusal = await upstream.arrayBuffer();
   } catch (err) {
     logger.warn(
       { lane: lanePath, error: err instanceof Error ? err.message : String(err) },
@@ -279,12 +299,29 @@ async function proxy(request: NextRequest, path: string[]): Promise<NextResponse
     return unavailable;
   }
 
+  // ⚠ A 401 tells the client its own credential failed, and a client may end
+  // its session on one. A refused service secret is the platform failing on
+  // its own side (a botched `SERVICE_SECRET` rotation), and relayed as a 401
+  // it would tell every client at once that its session was refused.
+  if (refusal && isServiceCredentialRejected(refusal)) {
+    logger.error(
+      { lane: lanePath },
+      "cli: auth refused the service secret; check SERVICE_SECRET rotation",
+    );
+    return problem(
+      503,
+      "/errors/upstream-unavailable",
+      "upstream unavailable",
+      "the platform failed on its own side; try again shortly",
+    );
+  }
+
   const responseHeaders = new Headers({ "cache-control": "no-store, private" });
   for (const name of ["content-type", "content-length"] as const) {
     const value = upstream.headers.get(name);
     if (value) responseHeaders.set(name, value);
   }
-  return new NextResponse(upstream.body, { status: upstream.status, headers: responseHeaders });
+  return new NextResponse(refusal ?? upstream.body, { status: upstream.status, headers: responseHeaders });
 }
 
 type Context = { params: Promise<{ path: string[] }> };

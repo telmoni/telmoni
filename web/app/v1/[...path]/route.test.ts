@@ -218,6 +218,41 @@ describe("/v1 routing", () => {
     expect(res.headers.get("x-request-id")).toBeNull();
   });
 
+  it("relays a refused key's 401 byte for byte", async () => {
+    const refused =
+      '{"type":"/errors/auth/invalid-token","title":"invalid token","status":401,"detail":"a live telmoni_ API token is required"}';
+    fetchWithTimeout.mockResolvedValueOnce(
+      new Response(refused, {
+        status: 401,
+        headers: { "content-type": "application/problem+json", "www-authenticate": "Bearer" },
+      }),
+    );
+    const res = await GET(req("Bearer telmoni_abc"), params);
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toBe("Bearer");
+    expect(await res.text()).toBe(refused);
+  });
+
+  // A 401 tells the caller its key was refused, which a key that works was not.
+  it("answers auth refusing the service secret as a 503, not a refused key", async () => {
+    fetchWithTimeout.mockResolvedValueOnce(
+      new Response(
+        '{"type":"/errors/auth/service-credential-rejected","title":"service credential rejected","status":401}',
+        { status: 401, headers: { "content-type": "application/problem+json" } },
+      ),
+    );
+    const res = await GET(req("Bearer telmoni_abc"), params);
+    expect(res.status).toBe(503);
+    expect(res.headers.get("content-type")).toBe("application/problem+json");
+    expect(res.headers.get("www-authenticate")).toBeNull();
+    expect(await res.json()).toEqual({
+      type: "/errors/upstream-unavailable",
+      title: "upstream unavailable",
+      status: 503,
+      detail: "the platform failed on its own side; try again shortly",
+    });
+  });
+
   it("answers an unreachable server with a 503 problem document", async () => {
     fetchWithTimeout.mockRejectedValueOnce(new Error("connect ECONNREFUSED"));
     const res = await GET(req("Bearer telmoni_abc"), params);

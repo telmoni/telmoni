@@ -185,7 +185,7 @@ Every handler returns `TelmoniError` (`crates/shared/src/error.rs`). Its nested 
 
 **Other conventions:**
 - The `Json` and `Query` extractors turn every rejection into a 400 problem (`crates/shared/src/extract.rs`).
-- **The error catalog.** Every `type` needs a row in the customer docs' `errors.mdx`. `crates/shared/tests/error_catalog.rs` checks the types `error.rs` builds and every `/errors/…` literal in `crates/*/src` against that page both ways, when a docs checkout sits beside this repo. Only the types the console mints itself — its relays' `/errors/method-not-allowed` and `/errors/upstream-unavailable` — are beyond the test's reach.
+- **The error catalog.** Every `type` needs a row in the customer docs' `errors.mdx`. `crates/shared/tests/error_catalog.rs` checks the types `error.rs` builds and every `/errors/…` literal in `crates/*/src` against that page both ways, when a docs checkout sits beside this repo. Only the types the console mints itself — its relays' `/errors/method-not-allowed` and `/errors/upstream-unavailable`, and the CLI door's `/errors/not-found` — are beyond the test's reach.
 
 **Panics.**
 - Lints deny `unwrap`, `expect`, `panic!`, indexing and string slicing outside tests, so a panic is a bug the lints missed.
