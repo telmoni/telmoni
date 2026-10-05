@@ -38,7 +38,9 @@ describe("the bare-fetch ban reaches every Server Action", () => {
     ).toBe(true);
   });
 
-  it.each(files.map((f) => path.relative(WEB, f)))("covers %s", async (rel) => {
+  // The first case loads ESLint's config, plugins and parser: about three
+  // seconds alone, past the default five while the whole suite runs at once.
+  it.each(files.map((f) => path.relative(WEB, f)))("covers %s", { timeout: 30_000 }, async (rel) => {
     const eslint = new ESLint({ cwd: WEB });
     const config = (await eslint.calculateConfigForFile(rel)) as {
       rules?: Record<string, unknown[]>;
