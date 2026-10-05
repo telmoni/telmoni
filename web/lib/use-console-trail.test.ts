@@ -28,7 +28,7 @@ const LIVE = liveResources(
 );
 const OVERVIEW = "/acme/web";
 const CONNECTORS = `${OVERVIEW}/connectors`;
-const ORG_MEMBERS = "/acme/~/members";
+const ORG_MEMBERS = "/acme/members";
 
 beforeEach(() => {
   window.sessionStorage.clear();

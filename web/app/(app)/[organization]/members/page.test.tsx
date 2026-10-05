@@ -339,7 +339,7 @@ describe("OrganizationMembersPage: handing the organization over", () => {
     await act(async () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Go to settings" }));
     });
-    expect(router.push).toHaveBeenCalledWith("/acme/~/settings");
+    expect(router.push).toHaveBeenCalledWith("/acme/settings");
     expect(actions.offerOwnershipAction).not.toHaveBeenCalled();
   });
 

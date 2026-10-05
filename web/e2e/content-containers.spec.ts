@@ -277,13 +277,13 @@ test.describe("Console content containers", () => {
     const audit = seen.get(`${landing}/audit-log`)!;
     expect(audit.tables.length, "audit: one table").toBe(1);
     expect(audit.tables[0]!.rows, "audit: the mint on the project's page").toBeGreaterThanOrEqual(1);
-    const organizationAudit = seen.get(`/${organization}/~/audit-log`)!;
+    const organizationAudit = seen.get(`/${organization}/audit-log`)!;
     expect(organizationAudit.tables.length, "organization audit: one table").toBe(1);
     expect(
       organizationAudit.tables[0]!.rows,
       "organization audit: the mint and the pairing",
     ).toBeGreaterThanOrEqual(2);
-    const settings = seen.get(`/${organization}/~/settings`)!;
+    const settings = seen.get(`/${organization}/settings`)!;
     expect(
       settings.tables.length,
       "organization settings: no table — the name, the URL, the id row and the danger zone",

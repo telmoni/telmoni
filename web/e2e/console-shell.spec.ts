@@ -21,7 +21,7 @@ function testUser(project: string): Partial<SessionData> {
 // spelled with the organization's slug, which only the landing gives.
 async function gotoOrganizationMembers(page: Page) {
   const [, organization] = (await landOnProject(page)).split("/");
-  await page.goto(`/${organization}/~/members`);
+  await page.goto(`/${organization}/members`);
 }
 
 async function rightEdge(locator: Locator): Promise<number> {
@@ -133,7 +133,7 @@ test.describe("Console rail on a dead address", () => {
 
     for (const dead of [
       `/${organization}/no-such-project/settings`,
-      "/no-such-organization/~/settings",
+      "/no-such-organization/settings",
     ]) {
       await page.goto(dead);
       await expect(

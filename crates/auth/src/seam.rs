@@ -305,11 +305,11 @@ fn audit_document(e: audit::IndexedEvent) -> SourceDocument {
         ),
         (Some(_), None) => (
             Audience::Audit,
-            format!("/{}/~/audit-log", e.organization_slug),
+            format!("/{}/audit-log", e.organization_slug),
         ),
         (None, _) => (
             Audience::OrganizationAdmin,
-            format!("/{}/~/audit-log", e.organization_slug),
+            format!("/{}/audit-log", e.organization_slug),
         ),
     };
     SourceDocument {

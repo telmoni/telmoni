@@ -36,7 +36,7 @@ flowchart LR
 
 | Path | What |
 |---|---|
-| `(app)/` | The console shell: `[organization]` (its overview), `[organization]/~/…` (its own pages: projects, members, audit log, settings), `[organization]/[project]/…` (a project's overview, API keys, connectors, members, audit log, settings), `account/…`. See [paths and slugs](#paths-and-slugs). |
+| `(app)/` | The console shell: `[organization]` (its overview), `[organization]/…` (its own pages: projects, members, audit log, settings), `[organization]/[project]/…` (a project's overview, API keys, connectors, members, audit log, settings), `account/…`. See [paths and slugs](#paths-and-slugs). |
 | `(auth)/auth/` | Sign-in, sign-up, forgot, reset, verify and device pages, and the sign-in route handlers (`login`, `login/external`, `signup`, `callback`, `logout`) |
 | `console/` | Asks an owner to name an unnamed organization; otherwise redirects to the right first page |
 | `invite/[token]` | A public invitation page |
@@ -72,11 +72,11 @@ The path names the organization, and the project under it, by slug:
 | Path | What |
 |---|---|
 | `/{organization}` | The organization's overview |
-| `/{organization}/~/{page}` | The organization's own pages |
+| `/{organization}/{page}` | The organization's own pages |
 | `/{organization}/{project}` | A project's overview |
 | `/{organization}/{project}/{page}` | A project's pages |
 
-- ⚠ **`~` is what keeps the two levels apart.** It is no slug's shape, so a project may go by any slug at all, `settings` or `members` included, and never lands on one of its organization's pages. A console built on this one adds an organization page under `~` without reserving its name. Read as `/{organization}/{page}`, every organization page drew the project rail, for a project that did not exist. The route folder is named `~` itself, which a shell reads as home: quote it.
+- ⚠ **A word no project may take is what keeps the two levels apart.** An organization's own pages sit beside its projects, each at a word auth never hands a project (`slug::PROJECT_RESERVED`), so a project called Settings goes by `settings-2` and never lands on its organization's Settings. `consolePlace` reads a second segment on that list as a page and any other as a project; read without it, every organization page drew the project rail, for a project that did not exist. The list holds the pages a console built on this one serves there, or may yet: one that adds a page there puts its word on the list first.
 - **`web/lib/slug.ts` spells the scheme** (`organizationPath`, `projectPath`), and `consolePlace` (`web/lib/console-nav.ts`) reads it back. Nothing else builds or splits a console path.
 
 **Auth mints every slug** (`crates/shared/src/slug.rs`, `crates/auth/src/db/`). The console derives none.
@@ -85,7 +85,7 @@ The path names the organization, and the project under it, by slug:
 - **An organization's slug is unique across every organization**, pending ones included, so a restore never finds it taken. ⚠ The purge frees it: another organization may take `acme` afterwards, and a link spelled with it lands there. **A project's is unique within its organization.**
 - A name that reads as a slug already taken gets the next number (`slug::candidates`). ⚠ An organization's numbers run out for a common name, its namespace being everybody's: its last candidate is the name with a random tail, so the slug still reads as the name. A URL chosen on Settings is taken as written: another organization's is a 409, a word the console keeps or a string that is no slug a 400.
 - **A slug and an id never look alike.** A slug has no underscore and a minted id always has one, so a path segment is never both: the layouts look one up as a slug, then as an id.
-- **Reserved words** (`slug::RESERVED`) are the console's own first path segments, the ones a console built on it serves or may yet, and the ones Next answers itself. No organization goes by one. The console's copy (`RESERVED_ORGANIZATION_SLUGS`) is pinned to the wire contract, and `web/app/organization-slugs.test.ts` checks every route under `web/app/` against it.
+- **Reserved words** (`slug::ORGANIZATION_RESERVED`) are the console's own first path segments, the ones a console built on it serves or may yet, and the ones Next answers itself. No organization goes by one. **A project's** (`slug::PROJECT_RESERVED`) are its organization's own pages, and the ones a console built on it serves there or may yet; a project's name that reads as one gets the next number, as a taken slug does. The console's copies (`RESERVED_ORGANIZATION_SLUGS`, `RESERVED_PROJECT_SLUGS`) are pinned to the wire contract, and `web/app/organization-slugs.test.ts` checks every route under `web/app/` against the first and every page under `[organization]/` against the second.
 
 **Which organization a request acts in:**
 1. **The path decides.** `proxy.ts` reads the first segment and hands it to the server as a request header (`ORGANIZATION_HEADER`, `web/lib/proxy/organization.ts`). It drops a client's own copy.
@@ -98,7 +98,7 @@ The path names the organization, and the project under it, by slug:
 - So a page, and every Server Action posted from it, acts in the organization the page shows. Two tabs on two organizations do not interfere.
 - **Off an organization's path** (Account, `/console`, the route handlers) a cookie stands in (`ACTIVE_ORGANIZATION_COOKIE`): the organization of the last page on screen. `getServerContext` sends it to `/me` as `x-organization-id`, and never beside the path's slug.
   - **It holds the id, not the slug.** It outlives the page that wrote it, and a URL change moves a slug.
-  - ⚠ **The browser writes it** (`OrganizationSync`), **never the proxy.** Only a page on screen may move it — and two Server Actions set it, for an organization no page of the person's has shown yet: an organization's restore (`account/privacy/actions.ts`) and an invitation's accept (`invite/[token]/actions.ts`), so `/console` opens what they brought into reach rather than the cookie's last organization; leaving an organization clears it (`~/members/actions.ts`). The proxy cannot tell one from a prefetch: Next strips the headers that mark a prefetch before the proxy runs, and the router prefetches every link it draws.
+  - ⚠ **The browser writes it** (`OrganizationSync`), **never the proxy.** Only a page on screen may move it — and two Server Actions set it, for an organization no page of the person's has shown yet: an organization's restore (`account/privacy/actions.ts`) and an invitation's accept (`invite/[token]/actions.ts`), so `/console` opens what they brought into reach rather than the cookie's last organization; leaving an organization clears it (`[organization]/members/actions.ts`). The proxy cannot tell one from a prefetch: Next strips the headers that mark a prefetch before the proxy runs, and the router prefetches every link it draws.
   - So it is not `HttpOnly`. That costs nothing: it claims nothing, and auth honours it only for an organization the person is in.
 - ⚠ **A route handler that is handed a project resolves it by id, in whichever organization holds it** (`fetchProjectAnywhere`), and names that organization to the server. Its path names none, and the cookie follows whichever tab opened a page last.
 
@@ -106,7 +106,6 @@ The path names the organization, and the project under it, by slug:
 - Server Actions take the ids their page rendered. The services key on ids. The cookie that remembers an organization and the connect handshake's cookie hold ids.
 - ⚠ **Every link a person is shown or sent is spelled with slugs, as Vercel spells its own** — a page's links, a notice's link, an indexed document's URL and a tool's citation (`crates/auth/src/seam.rs`, `crates/notifications/src/seam.rs`, `crates/agent/src/tools.rs`, which ask auth for the slugs through `project_homes` and `organization_slugs`), the Stripe return page of a console built on this one. A URL changed on Settings afterwards leaves such a link behind: it answers "not found", as on Vercel. That is the choice made, for a product with no users yet, over links that redirect through an id and show one in the address bar.
 - **The layouts still redirect an id to its slug**, keeping the rest of the path and the query, and a slug typed with a capital the same way: a fallback for an id somebody pasted, and the one address the console spells with ids itself — the connect handshake's callback (`web/app/connect/[provider]/callback/route.ts`) redirects by id, since its cookie is up to ten minutes old and a rename or a URL change since would have moved the slugs. A project's id follows it into another organization it was handed to.
-- ⚠ **`~` needs no escaping, and a chat client, a mail client or a link checker may escape it anyway.** The router matches the literal, and would read `%7E` as a project's name. The proxy redirects the escaped segment to the plain one (`unescapedPath`).
 
 **A moved slug moves the page.**
 - The organization's URL form and the project's rename form answer the slug the row goes by now (`movedTo`), and replace the path with it. The first-name form on `/console` does too (`nameOrganizationAction` answers `slug`, moved or not, and `movedTo` when it moved), for the one name that moves a slug: the first; the Settings name form handles `movedTo` the same way, though auth moves a slug for the first name alone. They revalidate nothing in that case: the path they were posted from names nothing any more.
@@ -161,22 +160,21 @@ The path names the organization, and the project under it, by slug:
 
 ## proxy.ts
 
-`web/proxy.ts` runs on every request except static assets. It does five things, and `next.config.mjs` adds a sixth:
+`web/proxy.ts` runs on every request except static assets. It does four things, and `next.config.mjs` adds a fifth:
 
 1. **Legal redirects.** `/legal/*` gets a 308 to the deployment's `LEGAL_URL`. Without one, it is a 404.
-2. **An escaped `~`** in an organization's path gets a 308 to the plain one (see [paths and slugs](#paths-and-slugs)).
-3. **The sign-in gate.**
+2. **The sign-in gate.**
    - "Signed in" means the session cookie unseals with `AUTH_SECRET` and names a person.
    - A protected path without a session gets a JSON 401 under `/api/*`, and otherwise a redirect to `/auth/login?returnTo=…`.
    - Expiry, refresh and the blacklist are left to `getSession`.
    - Public paths are listed in `web/lib/proxy/public-paths.ts`, plus whatever a console built on this one adds (see [extension slots](#extension-slots)).
-4. **Content Security Policy, with a nonce per request.** It is set on the request and the response. The root layout hands the nonce to its inline boot script.
+3. **Content Security Policy, with a nonce per request.** It is set on the request and the response. The root layout hands the nonce to its inline boot script.
    - Scripts are `'self'` and the nonce only.
    - Frames are refused (`frame-ancestors 'none'`).
    - `connect-src` is `'self'`.
    - `form-action` adds the identity providers' origins (`AUTH_PROVIDER_ORIGINS`). ⚠ Signing out from the account menu is a form post that ends in a redirect to the provider, which this directive governs; sign-in, and the sign-out links elsewhere, are links, which it does not.
-5. **The organization the path names**, handed to the server as a request header, with the path itself for the layouts to redirect from (see [paths and slugs](#paths-and-slugs)). It writes no cookie.
-6. **Static security headers**, from `next.config.mjs`'s `headers()`, not the proxy: HSTS with preload, `X-Frame-Options: DENY`, `nosniff`, a referrer policy and a permissions policy.
+4. **The organization the path names**, handed to the server as a request header, with the path itself for the layouts to redirect from (see [paths and slugs](#paths-and-slugs)). It writes no cookie.
+5. **Static security headers**, from `next.config.mjs`'s `headers()`, not the proxy: HSTS with preload, `X-Frame-Options: DENY`, `nosniff`, a referrer policy and a permissions policy.
    - Next applies them ahead of the proxy, and keeps them on whatever the proxy answers itself: its redirects and its 401 carry them too.
    - ⚠ **One list.** A copy set in the proxy is applied after it, so it would silently win over a change made here.
 

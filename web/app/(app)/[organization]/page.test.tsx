@@ -11,7 +11,7 @@ const leaveOrganizationAction = vi.hoisted(() =>
     error: null,
   })),
 );
-vi.mock("./~/members/actions", () => ({ leaveOrganizationAction }));
+vi.mock("./members/actions", () => ({ leaveOrganizationAction }));
 
 vi.mock("@/components/page-header", () => ({
   PageHeader: ({ title, action }: { title?: string; action?: React.ReactNode }) => (

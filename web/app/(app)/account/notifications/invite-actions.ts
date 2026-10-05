@@ -84,7 +84,7 @@ export async function acceptIncomingInviteAction(
     data: { inviteId: data?.inviteId || inviteId },
   });
 
-  revalidatePath("/(app)/[organization]/~/projects", "page");
+  revalidatePath("/(app)/[organization]/projects", "page");
   return { error: null };
 }
 

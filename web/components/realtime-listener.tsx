@@ -18,8 +18,8 @@ import { projectPath } from "@/lib/slug";
 
 const RETRY_MS = 30_000;
 
-// A roster or an audit log: a project's, or the organization's under `~`.
-const ROSTER_PAGES = /^\/[^/]+\/[^/]+\/(members|audit-log)$/;
+// A roster or an audit log: a project's, or the organization's own.
+const ROSTER_PAGES = /^\/[^/]+(?:\/[^/]+)?\/(members|audit-log)$/;
 
 function payload<K extends keyof typeof RealtimeEventDataSchema>(
   e: MessageEvent,

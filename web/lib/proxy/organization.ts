@@ -4,7 +4,7 @@
 // cookie stands in. Both are requests, never claims: auth's `/me` answers with
 // an organization only when the person is in it.
 
-import { ORGANIZATION_PAGES, isOrganizationSlug } from "@/lib/slug";
+import { isOrganizationSlug } from "@/lib/slug";
 
 /**
  * The organization the path names, by slug. Set by the proxy and nowhere
@@ -55,19 +55,6 @@ export function activeOrganizationCookie(organizationId: string, secure: boolean
     "SameSite=Lax",
     ...(secure ? ["Secure"] : []),
   ].join("; ");
-}
-
-/**
- * `pathname` with the segment an organization's own pages sit under spelled
- * plainly, when something escaped it; `null` when there is nothing to put
- * right. `~` needs no escaping in a path, and a chat client, a mail client or
- * a link checker may write `%7E` all the same, into a link a notice carried.
- * The router matches the literal, and would read the escaped one as a
- * project's name.
- */
-export function unescapedPath(pathname: string): string | null {
-  const unescaped = pathname.replace(/^(\/[^/]+)\/%7e(?=\/|$)/i, `$1/${ORGANIZATION_PAGES}`);
-  return unescaped === pathname ? null : unescaped;
 }
 
 /**

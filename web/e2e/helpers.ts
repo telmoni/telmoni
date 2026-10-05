@@ -10,14 +10,16 @@ export async function landOnProject(page: Page): Promise<string> {
     await nameBox.fill("Acme");
     await page.getByRole("button", { name: "Continue" }).click();
   }
-  await page.waitForURL((url) =>
-    /^\/[a-z0-9-]+(\/[a-z0-9-]+|\/~\/projects)$/.test(url.pathname),
-  );
-  if (new URL(page.url()).pathname.endsWith("/~/projects")) {
+  await page.waitForURL((url) => /^\/[a-z0-9-]+\/[a-z0-9-]+$/.test(url.pathname));
+  const landed = new URL(page.url()).pathname;
+  if (landed.endsWith("/projects")) {
     await page.getByRole("button", { name: "New project" }).click();
     await page.getByLabel("Project name").fill("Web");
     await page.getByRole("button", { name: "Create project" }).click();
-    await page.waitForURL((url) => /^\/[a-z0-9-]+\/[a-z0-9-]+$/.test(url.pathname));
+    // The Projects page has a project's shape too: wait to leave it.
+    await page.waitForURL(
+      (url) => url.pathname !== landed && /^\/[a-z0-9-]+\/[a-z0-9-]+$/.test(url.pathname),
+    );
   }
   const landing = new URL(page.url()).pathname;
   expect(landing).not.toBe("/console");

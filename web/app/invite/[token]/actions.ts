@@ -67,6 +67,6 @@ export async function acceptInviteAction(
   // name it; the one they just joined is where they are going.
   if (data?.ownerOrganizationId) await setActiveOrganizationCookie(data.ownerOrganizationId);
 
-  revalidatePath("/(app)/[organization]/~/projects", "page");
+  revalidatePath("/(app)/[organization]/projects", "page");
   return { error: null };
 }

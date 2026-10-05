@@ -170,8 +170,8 @@ describe("parseInline", () => {
 
 describe("allowedHref", () => {
   it("allows the console and the docs and nothing else", () => {
-    expect(allowedHref("/acme/~/audit-log")).toEqual({
-      href: "/acme/~/audit-log",
+    expect(allowedHref("/acme/audit-log")).toEqual({
+      href: "/acme/audit-log",
       external: false,
     });
     expect(allowedHref("https://docs.telmoni.com")).toEqual({

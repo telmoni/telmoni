@@ -8,7 +8,7 @@ import { MAX_ORGANIZATION_NAME } from "@/lib/organization-name";
 
 import { organizationPath } from "@/lib/slug";
 
-import { nameOrganizationAction } from "@/app/(app)/[organization]/~/settings/settings-actions";
+import { nameOrganizationAction } from "@/app/(app)/[organization]/settings/settings-actions";
 
 // The first name an organization gets, before the console opens to its owner.
 // The first name is what takes the organization off its placeholder slug, and

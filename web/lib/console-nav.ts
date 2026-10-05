@@ -15,7 +15,7 @@ import {
 import { EXTRA_NAV_ITEMS, type ExtraNavItem } from "@/lib/extension/nav";
 import { Flag, type FlagSet, allOff } from "@/lib/flags";
 import {
-  ORGANIZATION_PAGES,
+  isOrganizationPage,
   isOrganizationSlug,
   organizationPath,
   projectPath,
@@ -50,7 +50,7 @@ export function consolePlace(pathname: string): ConsolePlace | null {
   const [organization = "", second = ""] = pathname.split("/").slice(1);
   if (organization === ACCOUNT_SEGMENT) return { kind: "account" };
   if (!isOrganizationSlug(organization)) return null;
-  if (second === "" || second === ORGANIZATION_PAGES) {
+  if (second === "" || isOrganizationPage(second)) {
     return { kind: "organization", organization };
   }
   return { kind: "project", organization, project: second };

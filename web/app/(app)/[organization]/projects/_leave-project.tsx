@@ -6,7 +6,7 @@ import { useState, useTransition } from "react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 
-import { leaveProjectAction } from "../../[project]/members/actions";
+import { leaveProjectAction } from "../[project]/members/actions";
 
 export function LeaveProject({
   projectId,

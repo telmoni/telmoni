@@ -35,7 +35,7 @@ describe("the go-sequence registry", () => {
     expect(resolveSequence("u", "/acme/web")).toBeNull();
     expect(resolveSequence("u", "/")).toBeNull();
     expect(resolveSequence("O", "/acme/web")).toBe("/acme");
-    expect(resolveSequence("O", "/acme/~/settings")).toBe("/acme");
+    expect(resolveSequence("O", "/acme/settings")).toBe("/acme");
     expect(resolveSequence("O", "/account/settings", "acme")).toBe("/acme");
   });
 
@@ -43,7 +43,7 @@ describe("the go-sequence registry", () => {
   // only for a path that names none.
   it("goes to the organization the path names", () => {
     expect(resolveSequence("O", "/globex/web", "acme")).toBe("/globex");
-    expect(resolveSequence("m", "/globex/~/settings", "acme")).toBe("/globex/~/members");
+    expect(resolveSequence("m", "/globex/settings", "acme")).toBe("/globex/members");
   });
 
   it("keeps every key single, unique, and off the reserved starters", () => {
@@ -85,12 +85,12 @@ describe("the go-sequence registry", () => {
     expect(resolveSequence("x", "/acme/web")).toBeNull();
     expect(resolveSequence("X", "/acme/web")).toBeNull();
     expect(resolveSequence("O", "/acme/web")).toBe("/acme");
-    expect(resolveSequence("k", "/acme/~/members")).toBeNull();
+    expect(resolveSequence("k", "/acme/members")).toBeNull();
     expect(resolveSequence("c", "/acme")).toBeNull();
     expect(resolveSequence("u", "/acme")).toBeNull();
-    expect(resolveSequence("m", "/acme")).toBe("/acme/~/members");
-    expect(resolveSequence("l", "/acme/~/members")).toBe("/acme/~/audit-log");
-    expect(resolveSequence("p", "/acme")).toBe("/acme/~/settings");
-    expect(resolveSequence("o", "/acme/~/settings")).toBe("/acme");
+    expect(resolveSequence("m", "/acme")).toBe("/acme/members");
+    expect(resolveSequence("l", "/acme/members")).toBe("/acme/audit-log");
+    expect(resolveSequence("p", "/acme")).toBe("/acme/settings");
+    expect(resolveSequence("o", "/acme/settings")).toBe("/acme");
   });
 });

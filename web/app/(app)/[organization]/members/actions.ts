@@ -186,7 +186,7 @@ export async function offerOwnershipAction(
   if (!res?.ok) return answer(res);
 
   await tellOfferRecipients(res, gate.organizationId);
-  revalidatePath("/(app)/[organization]/~/members", "page");
+  revalidatePath("/(app)/[organization]/members", "page");
   return { error: null };
 }
 
@@ -201,7 +201,7 @@ export async function cancelOwnershipOfferAction(organizationId: string): Promis
   if (!res?.ok) return answer(res);
 
   await tellOfferRecipients(res, gate.organizationId);
-  revalidatePath("/(app)/[organization]/~/members", "page");
+  revalidatePath("/(app)/[organization]/members", "page");
   return { error: null };
 }
 

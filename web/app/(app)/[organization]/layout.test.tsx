@@ -103,9 +103,9 @@ describe("OrganizationLayout", () => {
   // An id is how a link kept longer than a page may name an organization: it
   // cannot follow a URL change, so the layout does.
   it("redirects an organization's id to its slug, keeping the page and the query", async () => {
-    mockPath = "/org_globex/~/billing?plan=team";
+    mockPath = "/org_globex/billing?plan=team";
     await expect(renderLayout("org_globex")).rejects.toThrow(
-      "REDIRECT:/globex/~/billing?plan=team",
+      "REDIRECT:/globex/billing?plan=team",
     );
     expect(mockNotFound).not.toHaveBeenCalled();
   });

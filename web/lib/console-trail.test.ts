@@ -22,7 +22,7 @@ const OTHER: Resource = { kind: "project", organization: "acme", project: "api" 
 const OVERVIEW = "/acme/web";
 const CONNECTORS = `${OVERVIEW}/connectors`;
 const KEYS = `${OVERVIEW}/api-keys`;
-const ORG_MEMBERS = "/acme/~/members";
+const ORG_MEMBERS = "/acme/members";
 const ACCOUNT = "/account/settings";
 
 // What the console is drawing: one organization and its two projects.
@@ -97,7 +97,7 @@ describe("arriving somewhere", () => {
   });
 
   it("counts an organization's overview and its own pages as one resource", () => {
-    expect(walk("/acme", "/acme/~/projects", "/acme/~/billing")).toEqual(["/acme/~/billing"]);
+    expect(walk("/acme", "/acme/projects", "/acme/billing")).toEqual(["/acme/billing"]);
   });
 
   // Two organizations may each have a project of the same name.
@@ -107,7 +107,7 @@ describe("arriving somewhere", () => {
       "/acme/web/connectors",
     ]);
     expect(trailResource("/acme/web/connectors")).toBe("/acme/web");
-    expect(trailResource("/acme/~/members")).toBe("/acme");
+    expect(trailResource("/acme/members")).toBe("/acme");
     expect(trailResource("/account/settings")).toBe("");
   });
 
@@ -176,7 +176,7 @@ describe("where the rail's back arrow points", () => {
   });
 
   it("walks past an organization you are no longer in", () => {
-    expect(resolveReturnUrl(walk(CONNECTORS, "/globex/~/members"), LIVE, OVERVIEW)).toBe(
+    expect(resolveReturnUrl(walk(CONNECTORS, "/globex/members"), LIVE, OVERVIEW)).toBe(
       CONNECTORS,
     );
     expect(resolveReturnUrl(walk(CONNECTORS, "/globex/web"), LIVE, OVERVIEW)).toBe(CONNECTORS);

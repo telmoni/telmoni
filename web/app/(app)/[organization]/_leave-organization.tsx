@@ -6,7 +6,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
-import { leaveOrganizationAction } from "./~/members/actions";
+import { leaveOrganizationAction } from "./members/actions";
 
 /**
  * The door out of an organization somebody else owns.

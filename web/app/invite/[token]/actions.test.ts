@@ -122,7 +122,7 @@ describe("acceptInviteAction", () => {
       { type: "invite:resolved", data: { inviteId: "inv_123" } },
     );
     expect(vi.mocked(revalidatePath)).toHaveBeenCalledWith(
-      "/(app)/[organization]/~/projects",
+      "/(app)/[organization]/projects",
       "page",
     );
   });

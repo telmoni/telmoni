@@ -58,7 +58,10 @@ fn generated_contract() -> Value {
         },
         "slugs": {
             "max_length": slug::MAX_LEN,
-            "reserved": slug::RESERVED,
+            "reserved": {
+                "organization": slug::ORGANIZATION_RESERVED,
+                "project": slug::PROJECT_RESERVED,
+            },
         },
     })
 }

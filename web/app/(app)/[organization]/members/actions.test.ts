@@ -463,7 +463,7 @@ describe("offerOwnershipAction", () => {
       type: "ownership:changed",
       data: { organizationId: ORGANIZATION },
     });
-    expect(mockRevalidate).toHaveBeenCalledWith("/(app)/[organization]/~/members", "page");
+    expect(mockRevalidate).toHaveBeenCalledWith("/(app)/[organization]/members", "page");
   });
 
   // ⚠ **One live offer per organization, so a new one withdraws the last.**
@@ -534,7 +534,7 @@ describe("offerOwnershipAction", () => {
     );
     expect(await offerOwnershipAction(ORGANIZATION, "user_admin")).toEqual({ error: null });
     expect(mockPublishEvent).not.toHaveBeenCalled();
-    expect(mockRevalidate).toHaveBeenCalledWith("/(app)/[organization]/~/members", "page");
+    expect(mockRevalidate).toHaveBeenCalledWith("/(app)/[organization]/members", "page");
   });
 
   it("tells nobody when auth refuses the offer", async () => {
@@ -583,7 +583,7 @@ describe("cancelOwnershipOfferAction", () => {
       type: "ownership:changed",
       data: { organizationId: ORGANIZATION },
     });
-    expect(mockRevalidate).toHaveBeenCalledWith("/(app)/[organization]/~/members", "page");
+    expect(mockRevalidate).toHaveBeenCalledWith("/(app)/[organization]/members", "page");
   });
 
   it("tells nobody when auth refuses the withdrawal", async () => {

@@ -12,7 +12,7 @@ import {
 } from "@/lib/server/data";
 import { organizationPath } from "@/lib/slug";
 
-import { AuditLog } from "../../../_audit-log";
+import { AuditLog } from "../../_audit-log";
 
 export const metadata = { title: "Audit log" };
 

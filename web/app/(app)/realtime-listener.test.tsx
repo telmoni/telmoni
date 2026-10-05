@@ -150,7 +150,7 @@ describe("RealtimeListener - membership:removed edge cases", () => {
   });
 
   it("does not eject from the organization's own pages when only removed from a project in it", () => {
-    mockPathname = "/acme/~/projects";
+    mockPathname = "/acme/projects";
     render(<RealtimeListener />);
 
     const es = MockEventSource.instances[0];
@@ -164,7 +164,7 @@ describe("RealtimeListener - membership:removed edge cases", () => {
   });
 
   it("ejects the user to /console when removed from the active organization", () => {
-    mockPathname = "/acme/~/members";
+    mockPathname = "/acme/members";
     render(<RealtimeListener />);
 
     const es = MockEventSource.instances[0];
@@ -190,7 +190,7 @@ describe("RealtimeListener - membership:removed edge cases", () => {
   });
 
   it("does not eject when removed from an organization that is not currently active", () => {
-    mockPathname = "/globex/~/members";
+    mockPathname = "/globex/members";
     mockActiveOrgId = "org_2";
     render(<RealtimeListener />);
 
@@ -286,4 +286,34 @@ describe("RealtimeListener - ownership:changed", () => {
     expect(mockReplace).not.toHaveBeenCalled();
     expect(mockRefresh).toHaveBeenCalledTimes(2);
   });
+});
+
+// An invitation sent from another tab is a row on whichever roster is on
+// screen. The organization's own sits a segment higher than a project's.
+describe("RealtimeListener - rosters", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    MockEventSource.instances = [];
+    mockActiveOrgId = "org_1";
+  });
+
+  it.each(["/acme/members", "/acme/audit-log", "/acme/web/members", "/acme/web/audit-log"])(
+    "refreshes %s when an invitation is sent",
+    (pathname) => {
+      mockPathname = pathname;
+      render(<RealtimeListener />);
+      MockEventSource.instances[0].emit("invite:sent", {});
+      expect(mockRefresh).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(["/acme", "/acme/settings", "/acme/web", "/acme/web/api-keys", "/account/settings"])(
+    "leaves %s alone when an invitation is sent",
+    (pathname) => {
+      mockPathname = pathname;
+      render(<RealtimeListener />);
+      MockEventSource.instances[0].emit("invite:sent", {});
+      expect(mockRefresh).not.toHaveBeenCalled();
+    },
+  );
 });

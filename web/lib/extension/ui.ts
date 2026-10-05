@@ -29,5 +29,11 @@ export { ServiceUnavailable } from "@/components/service-unavailable";
 export { DOCS_URL, PRODUCT_NAME, SPONSORS_URL } from "@/lib/site";
 export { cn } from "@/lib/utils";
 export { organizationLabel } from "@/lib/identity";
-export { RESERVED_ORGANIZATION_SLUGS, isSlug, organizationPath, projectPath } from "@/lib/slug";
+export {
+  RESERVED_ORGANIZATION_SLUGS,
+  RESERVED_PROJECT_SLUGS,
+  isSlug,
+  organizationPath,
+  projectPath,
+} from "@/lib/slug";
 export { PRIMARY_NAV, withExtraPrimaryNav } from "@/components/site-nav";

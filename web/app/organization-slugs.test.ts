@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { RESERVED_ORGANIZATION_SLUGS, isSlug } from "@/lib/slug";
+import { RESERVED_ORGANIZATION_SLUGS, RESERVED_PROJECT_SLUGS, isSlug } from "@/lib/slug";
 
 const APP = __dirname;
 
@@ -30,6 +30,22 @@ describe("the console's own paths", () => {
       expect(
         RESERVED_ORGANIZATION_SLUGS.has(segment),
         `/${segment} is served here and is not reserved in crates/shared/src/slug.rs`,
+      ).toBe(true);
+    }
+  });
+});
+
+// ⚠ An organization's own pages sit beside its projects. A page added under a
+// word auth would still hand a project takes that project's address, and the
+// rail draws the page as the project.
+describe("an organization's own pages", () => {
+  it("are words no project may go by", () => {
+    const pages = ownSegments(path.join(APP, "(app)", "[organization]"));
+    expect(pages).toContain("settings");
+    for (const page of pages) {
+      expect(
+        RESERVED_PROJECT_SLUGS.has(page),
+        `/{organization}/${page} is served here and is not reserved in crates/shared/src/slug.rs`,
       ).toBe(true);
     }
   });

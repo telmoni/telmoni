@@ -112,7 +112,7 @@ describe("ConsoleEntry", () => {
   it("sends an owner whose organization lists nothing to its projects page", async () => {
     mockListing = { kind: "ok", projects: [] };
     await entry();
-    expect(mockRedirect).toHaveBeenCalledWith("/acme/~/projects");
+    expect(mockRedirect).toHaveBeenCalledWith("/acme/projects");
   });
 
   // The projects page refuses a member, so this was an ACCESS DENIED landing
@@ -125,7 +125,7 @@ describe("ConsoleEntry", () => {
     };
     await entry();
     expect(mockRedirect).toHaveBeenCalledWith("/acme");
-    expect(mockRedirect).not.toHaveBeenCalledWith("/acme/~/projects");
+    expect(mockRedirect).not.toHaveBeenCalledWith("/acme/projects");
   });
 
   // ⚠ The first thing a new owner sees is the question, not a console under a

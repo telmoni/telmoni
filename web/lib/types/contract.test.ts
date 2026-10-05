@@ -11,7 +11,7 @@ import {
   OrganizationStatus,
   Role,
 } from "./enums";
-import { RESERVED_ORGANIZATION_SLUGS, SLUG_MAX_LENGTH } from "../slug";
+import { RESERVED_ORGANIZATION_SLUGS, RESERVED_PROJECT_SLUGS, SLUG_MAX_LENGTH } from "../slug";
 
 const contract = JSON.parse(
   readFileSync(
@@ -21,7 +21,7 @@ const contract = JSON.parse(
 ) as {
   enums: Record<string, string[]>;
   flags: { off_detail: Record<string, string> };
-  slugs: { max_length: number; reserved: string[] };
+  slugs: { max_length: number; reserved: { organization: string[]; project: string[] } };
 };
 
 // Every enum the server publishes, and the console's copy of it. A new one
@@ -50,8 +50,17 @@ describe("wire contract", () => {
   // one of these; a word auth reserves and the console does not would be a
   // page of its own that the proxy took for an organization.
   it("the console reserves exactly the words the server refuses an organization", () => {
-    expect([...RESERVED_ORGANIZATION_SLUGS].sort()).toEqual([...contract.slugs.reserved].sort());
+    expect([...RESERVED_ORGANIZATION_SLUGS].sort()).toEqual(
+      [...contract.slugs.reserved.organization].sort(),
+    );
     expect(SLUG_MAX_LENGTH).toBe(contract.slugs.max_length);
+  });
+
+  // The rail reads a path's second segment as an organization page when it is
+  // one of these, and as a project otherwise; a word the two lists disagree on
+  // is a project the console draws as a page, or a page it draws as a project.
+  it("the console reserves exactly the words the server refuses a project", () => {
+    expect([...RESERVED_PROJECT_SLUGS].sort()).toEqual([...contract.slugs.reserved.project].sort());
   });
 
   it("the role coercion takes the three roles and nothing else", () => {

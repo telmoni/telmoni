@@ -1,7 +1,7 @@
 //! Slugs: the readable names organizations and projects go by in the
 //! console's paths — `/{organization}` and `/{organization}/{project}`, with
-//! an organization's own pages under `/{organization}/~/…`, where no project's
-//! slug can land on them.
+//! an organization's own pages beside its projects at `/{organization}/{page}`,
+//! each a word no project goes by ([`PROJECT_RESERVED`]).
 //!
 //! ⚠ **A slug is never the row's identity.** A project's follows its name:
 //! auth derives it whenever the name is set — creation, a rename, a move into
@@ -27,7 +27,7 @@ pub const MAX_LEN: usize = 48;
 /// answers itself (`/404`, `/500`, `/index`). An organization holding one
 /// would shadow that page or be shadowed by it. Sorted, and published in the
 /// wire contract, which the console's copy is pinned to.
-pub const RESERVED: &[&str] = &[
+pub const ORGANIZATION_RESERVED: &[&str] = &[
     "404",
     "500",
     "about",
@@ -110,6 +110,30 @@ pub const RESERVED: &[&str] = &[
     "www",
 ];
 
+/// Words no project may go by: its organization's own pages, which sit beside
+/// its projects (`/{organization}/settings`), and the ones a console built on
+/// it serves there or may yet. A project holding one would be shadowed by that
+/// page. Sorted, and published in the wire contract, which the console's copy
+/// is pinned to: the console tells a page from a project by it.
+pub const PROJECT_RESERVED: &[&str] = &[
+    "activity",
+    "api-keys",
+    "audit-log",
+    "billing",
+    "connectors",
+    "integrations",
+    "members",
+    "new",
+    "notifications",
+    "plans",
+    "projects",
+    "security",
+    "settings",
+    "sso",
+    "support",
+    "usage",
+];
+
 /// How many numbered slugs follow a name's own. Within an organization names
 /// collide only through punctuation and accents ("Web App", "web-app",
 /// "Web_App"), so a handful is plenty for its projects.
@@ -121,9 +145,11 @@ const TAIL_LEN: usize = 6;
 /// The namespace a slug is minted in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scope {
-    /// An organization's: unique everywhere, and never a [`RESERVED`] word.
+    /// An organization's: unique everywhere, and never an
+    /// [`ORGANIZATION_RESERVED`] word.
     Organization,
-    /// A project's: unique within its organization.
+    /// A project's: unique within its organization, and never a
+    /// [`PROJECT_RESERVED`] word.
     Project,
 }
 
@@ -135,11 +161,14 @@ impl Scope {
         }
     }
 
-    fn allows(self, slug: &str) -> bool {
-        match self {
-            Self::Organization => !is_reserved(slug),
-            Self::Project => true,
-        }
+    /// Whether no row in this scope may go by `slug`.
+    #[must_use]
+    pub fn reserves(self, slug: &str) -> bool {
+        let reserved = match self {
+            Self::Organization => ORGANIZATION_RESERVED,
+            Self::Project => PROJECT_RESERVED,
+        };
+        reserved.binary_search(&slug).is_ok()
     }
 }
 
@@ -154,12 +183,6 @@ pub fn is_slug(s: &str) -> bool {
                     .bytes()
                     .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
         })
-}
-
-/// Whether no organization may go by `s`.
-#[must_use]
-pub fn is_reserved(s: &str) -> bool {
-    RESERVED.binary_search(&s).is_ok()
 }
 
 /// The slug `name` reads as: Latin letters without their accents, digits, and
@@ -213,7 +236,7 @@ pub fn candidates(scope: Scope, name: &str) -> Vec<String> {
     std::iter::once(base.clone())
         .chain((2..=NUMBERED).map(|n| suffixed(&base, &n.to_string())))
         .chain(tail)
-        .filter(|slug| scope.allows(slug))
+        .filter(|slug| !scope.reserves(slug))
         .collect()
 }
 
@@ -356,11 +379,15 @@ mod tests {
 
     #[test]
     fn the_reserved_words_are_sorted_slugs() {
-        assert!(RESERVED.windows(2).all(|w| w[0] < w[1]));
-        assert!(RESERVED.iter().all(|w| is_slug(w)));
-        assert!(is_reserved("account"));
-        assert!(is_reserved("404"));
-        assert!(!is_reserved("acme"));
+        for reserved in [ORGANIZATION_RESERVED, PROJECT_RESERVED] {
+            assert!(reserved.windows(2).all(|w| w[0] < w[1]));
+            assert!(reserved.iter().all(|w| is_slug(w)));
+        }
+        assert!(Scope::Organization.reserves("account"));
+        assert!(Scope::Organization.reserves("404"));
+        assert!(!Scope::Organization.reserves("acme"));
+        assert!(Scope::Project.reserves("settings"));
+        assert!(!Scope::Project.reserves("acme"));
     }
 
     #[test]
@@ -384,6 +411,21 @@ mod tests {
         );
     }
 
+    // A project sits beside its organization's own pages, so it skips their
+    // words where an organization need not.
+    #[test]
+    fn a_project_skips_its_organizations_page_names() {
+        let all = candidates(Scope::Project, "Members");
+        assert_eq!(all.first().map(String::as_str), Some("members-2"));
+        assert_eq!(all.len(), 19);
+        assert_eq!(
+            candidates(Scope::Organization, "Members")
+                .first()
+                .map(String::as_str),
+            Some("members")
+        );
+    }
+
     // Twenty organizations called "Personal" is a Tuesday. The twenty-first
     // still gets a slug that reads as its name.
     #[test]
@@ -394,7 +436,10 @@ mod tests {
         let last = all.last().unwrap();
         let tail = last.strip_prefix("personal-").unwrap();
         assert_eq!(tail.len(), TAIL_LEN);
-        assert!(is_slug(last) && !is_reserved(last), "{last}");
+        assert!(
+            is_slug(last) && !Scope::Organization.reserves(last),
+            "{last}"
+        );
         assert_ne!(
             candidates(Scope::Organization, "Personal").last(),
             Some(last)
@@ -417,8 +462,12 @@ mod tests {
     fn a_placeholder_is_a_slug_of_its_scope() {
         let org = placeholder(Scope::Organization);
         let project = placeholder(Scope::Project);
-        assert!(org.starts_with("org-") && is_slug(&org) && !is_reserved(&org));
-        assert!(project.starts_with("project-") && is_slug(&project));
+        assert!(org.starts_with("org-") && is_slug(&org) && !Scope::Organization.reserves(&org));
+        assert!(
+            project.starts_with("project-")
+                && is_slug(&project)
+                && !Scope::Project.reserves(&project)
+        );
         assert_ne!(org, placeholder(Scope::Organization));
     }
 }

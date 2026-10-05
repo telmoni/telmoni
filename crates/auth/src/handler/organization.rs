@@ -372,7 +372,7 @@ pub async fn update_organization(
             ))
             .into());
         }
-        Some(s) if slug::is_reserved(s) => {
+        Some(s) if slug::Scope::Organization.reserves(s) => {
             return Err(AuthError::BadRequest(format!(
                 "{s} is a word the console's own paths use — choose another URL"
             ))

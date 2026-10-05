@@ -36,7 +36,7 @@ describe("isPublic", () => {
     "/acme",
     "/acme/web",
     "/acme/web/api-keys",
-    "/acme/~/settings",
+    "/acme/settings",
     "/v1x",
     "/v1-internal",
     "/client",

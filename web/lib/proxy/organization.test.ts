@@ -4,13 +4,13 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { proxy } from "@/proxy";
 
-import { activeOrganizationCookie, namedOrganization, unescapedPath } from "./organization";
+import { activeOrganizationCookie, namedOrganization } from "./organization";
 
 describe("namedOrganization", () => {
   it("reads the organization off the path's first segment", () => {
     expect(namedOrganization("/acme")).toBe("acme");
     expect(namedOrganization("/acme/web/api-keys")).toBe("acme");
-    expect(namedOrganization("/acme/~/settings")).toBe("acme");
+    expect(namedOrganization("/acme/settings")).toBe("acme");
   });
 
   // Account, `/console` and every route handler: the cookie stands in.
@@ -24,34 +24,9 @@ describe("namedOrganization", () => {
   // An id is redirected to its slug by the layout; until then the request
   // acts wherever the cookie points, and nothing is drawn for it.
   it("names none for an id, or a segment no slug can be", () => {
-    expect(namedOrganization("/org_7bQx2mNv9BcK4dLp/~/billing")).toBeNull();
+    expect(namedOrganization("/org_7bQx2mNv9BcK4dLp/billing")).toBeNull();
     expect(namedOrganization("/Acme/web")).toBeNull();
-    expect(namedOrganization("/~/settings")).toBeNull();
-  });
-});
-
-describe("unescapedPath", () => {
-  // `~` needs no escaping, and a mail client may escape it anyway.
-  it("spells an escaped `~` plainly, where an organization's pages sit", () => {
-    expect(unescapedPath("/acme/%7E/settings")).toBe("/acme/~/settings");
-    expect(unescapedPath("/acme/%7e/billing")).toBe("/acme/~/billing");
-    expect(unescapedPath("/org_7bQx2mNv9BcK4dLp/%7E/audit-log")).toBe(
-      "/org_7bQx2mNv9BcK4dLp/~/audit-log",
-    );
-    expect(unescapedPath("/acme/%7E")).toBe("/acme/~");
-  });
-
-  it("leaves every other path as it came", () => {
-    for (const pathname of [
-      "/acme/~/settings",
-      "/acme/web",
-      "/%7E/settings",
-      "/acme/web/%7E",
-      "/acme/%7Ex/settings",
-      "/api/events",
-    ]) {
-      expect(unescapedPath(pathname), pathname).toBeNull();
-    }
+    expect(namedOrganization("/web--app/settings")).toBeNull();
   });
 });
 
@@ -139,30 +114,18 @@ describe("the proxy and the organization a request acts in", () => {
   // so a cookie written here would follow a link nobody followed. The
   // console writes it in the browser instead.
   it("never writes the cookie that remembers an organization", async () => {
-    for (const path of ["/acme/web", "/globex/~/members", "/account/settings"]) {
+    for (const path of ["/acme/web", "/globex/members", "/account/settings"]) {
       const res = await visit(path, { cookie: `${COOKIE}=acme` });
       expect(res.cookies.get(COOKIE), path).toBeUndefined();
     }
     expect((await visit("/acme/web")).cookies.get(COOKIE)).toBeUndefined();
   });
 
-  // Ahead of the sign-in gate, so the path a visitor comes back to is the
-  // one the router can match.
-  it("redirects an escaped `~` to the plain one, query kept", async () => {
-    const res = await run(
-      new NextRequest("http://localhost:3000/org_1/%7E/billing?status=success"),
-    );
-    expect(res.status).toBe(308);
-    expect(res.headers.get("location")).toBe(
-      "http://localhost:3000/org_1/~/billing?status=success",
-    );
-  });
-
   it("sends a signed-out visitor to sign in, with the organization's path to come back to", async () => {
-    const res = await run(new NextRequest("http://localhost:3000/acme/~/settings"));
+    const res = await run(new NextRequest("http://localhost:3000/acme/settings"));
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe(
-      "http://localhost:3000/auth/login?returnTo=%2Facme%2F%7E%2Fsettings",
+      "http://localhost:3000/auth/login?returnTo=%2Facme%2Fsettings",
     );
   });
 });

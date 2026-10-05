@@ -2,12 +2,7 @@ import { unsealData } from 'iron-session';
 import { type NextProxy, type NextRequest, NextResponse } from 'next/server';
 
 import { logger } from '@/lib/logger';
-import {
-  ORGANIZATION_HEADER,
-  PATH_HEADER,
-  namedOrganization,
-  unescapedPath,
-} from '@/lib/proxy/organization';
+import { ORGANIZATION_HEADER, PATH_HEADER, namedOrganization } from '@/lib/proxy/organization';
 import { isPublic } from '@/lib/proxy/public-paths';
 
 async function isLoggedIn(request: NextRequest): Promise<boolean> {
@@ -107,12 +102,6 @@ export const proxy: NextProxy = async (request) => {
   if (pathname === '/legal' || pathname.startsWith('/legal/')) {
     const target = legalRedirect(pathname);
     if (target) return NextResponse.redirect(target, 308);
-  }
-
-  const unescaped = unescapedPath(pathname);
-  if (unescaped) {
-    const url = new URL(unescaped + request.nextUrl.search, request.url);
-    return NextResponse.redirect(url, 308);
   }
 
   const loggedIn     = await isLoggedIn(request);
