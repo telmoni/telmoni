@@ -90,8 +90,7 @@ async fn sign_in(pool: &PgPool, user: &str, email: &str) -> String {
         .as_str()
         .expect("/me names the active organization")
         .to_owned();
-    // What the console has every owner do before it opens to them; the
-    // invitations below need it.
+    // Acme, the name the rows below are read for.
     let (status, body) = call(
         pool,
         "PATCH",
@@ -1134,7 +1133,8 @@ async fn every_everywhere_row_names_its_organization(pool: PgPool) {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["organizationId"], organization);
     assert_eq!(rows[0]["organizationName"], "Acme");
-    assert_eq!(rows[0]["organizationSlug"], "acme");
+    // The slug it was provisioned at, which a rename does not move.
+    assert_eq!(rows[0]["organizationSlug"], "my-organization");
     assert_eq!(rows[0]["role"], "owner");
     assert!(
         !body.to_string().contains("everywhere-named@example.test"),

@@ -1,6 +1,6 @@
 //! What an organization is called, and the address an owner shares with.
 
-use telmoni_shared::{AuthError, TelmoniError};
+use telmoni_shared::{AuthError, TelmoniError, slug};
 
 /// The display cap. A name rides a table cell and the foot of the sidebar.
 const MAX_DISPLAY_NAME_LEN: usize = 120;
@@ -101,17 +101,33 @@ pub fn display_for(display_name: Option<&str>, email: &str) -> String {
         .to_string()
 }
 
-/// What a page prints for an organization: the name it was given — the
-/// console's `organizationLabel` makes the same choice. Never the owner's
-/// address: an organization is named before anyone but its owner sees it, and
-/// the fallback covers only the owner's own unnamed one, read on a lane the
-/// console does not show them before they have named it.
+/// What a person's first organization is called when it is provisioned, as
+/// Vercel and Cloudflare name a new account after its holder — the first word
+/// of their name, "Ada's organization" — and the slugs it may go by, best
+/// first. Somebody who gave no name gets "My organization". Nothing is read
+/// off their address: the name is shown to everyone the owner invites, and
+/// the slug that follows it is in every path. The owner renames it, and moves
+/// its URL, on Settings.
+///
+/// No slugs when the holder's own name gives none: "李明's organization"
+/// would read as `s-organization`, so it takes a placeholder instead.
 #[must_use]
-pub fn organization_label(name: Option<&str>) -> String {
-    name.map(str::trim).filter(|n| !n.is_empty()).map_or_else(
-        || format!("A {} organization", telmoni_shared::PRODUCT_NAME),
-        str::to_string,
-    )
+pub fn default_organization(display_name: Option<&str>) -> (String, Vec<String>) {
+    const POSSESSIVE: &str = "'s organization";
+    let room = crate::db::organizations::MAX_ORGANIZATION_NAME - POSSESSIVE.chars().count();
+    let Some(first) = display_name.and_then(|name| name.split_whitespace().next()) else {
+        let name = "My organization".to_owned();
+        let slugs = slug::candidates(slug::Scope::Organization, &name);
+        return (name, slugs);
+    };
+    let first: String = first.chars().take(room).collect();
+    let name = format!("{first}{POSSESSIVE}");
+    let slugs = if slug::slugify(&first).is_some() {
+        slug::candidates(slug::Scope::Organization, &name)
+    } else {
+        Vec::new()
+    };
+    (name, slugs)
 }
 
 #[cfg(test)]
@@ -181,5 +197,33 @@ mod tests {
             display_for(Some("  "), "dana@example.com"),
             "dana@example.com"
         );
+    }
+
+    #[test]
+    fn a_first_organization_is_named_after_its_holder_not_their_address() {
+        let (name, slugs) = default_organization(Some("Ada Lovelace"));
+        assert_eq!(name, "Ada's organization");
+        assert_eq!(slugs.first().map(String::as_str), Some("adas-organization"));
+
+        for nobody in [None, Some("   ")] {
+            let (name, slugs) = default_organization(nobody);
+            assert_eq!(name, "My organization");
+            assert_eq!(slugs.first().map(String::as_str), Some("my-organization"));
+        }
+
+        let (long, _) = default_organization(Some(&"a".repeat(300)));
+        assert_eq!(
+            long.chars().count(),
+            crate::db::organizations::MAX_ORGANIZATION_NAME
+        );
+        assert!(long.ends_with("'s organization"), "{long}");
+    }
+
+    // The possessive alone would read `s-organization` for every such name.
+    #[test]
+    fn a_name_with_no_latin_letter_leaves_the_slug_to_a_placeholder() {
+        let (name, slugs) = default_organization(Some("李明"));
+        assert_eq!(name, "李明's organization");
+        assert!(slugs.is_empty(), "{slugs:?}");
     }
 }

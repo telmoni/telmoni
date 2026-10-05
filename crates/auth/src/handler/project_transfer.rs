@@ -299,12 +299,12 @@ pub async fn offer(
             .map(|c| c.email),
         None => None,
     };
-    let organization_label = organization_members::label_parts(&mut acting.tx, &organization)
+    let Some(organization_label) = organization_members::label_parts(&mut acting.tx, &organization)
         .await?
-        .map_or_else(
-            || crate::identity::organization_label(None),
-            |parts| parts.label(),
-        );
+        .map(|parts| parts.name)
+    else {
+        return Err(AuthError::NotFound("organization not found".into()).into());
+    };
     acting.tx.commit().await?;
 
     let expires_at = Utc::now() + Duration::days(i64::from(members::OFFER_TTL_DAYS));
@@ -760,20 +760,12 @@ pub async fn accept(
         )
         .into());
     };
-    // ⚠ An unnamed organization has nobody in it but its owner — the invite
-    // lanes hold that line — and a project brings every seat on it along, so
-    // the accept holds it too. The name is also what the mails call the
-    // destination by.
+    // What the mails call the destination by.
     let Some(destination_label) = organization_members::label_parts(&mut tx, &destination)
         .await?
-        .and_then(|parts| parts.name)
-        .map(|name| name.trim().to_owned())
-        .filter(|name| !name.is_empty())
+        .map(|parts| parts.name)
     else {
-        return Err(AuthError::Conflict(
-            "name the organization before taking a project into it".into(),
-        )
-        .into());
+        return Err(AuthError::NotFound("organization not found".into()).into());
     };
 
     if !members::fold_offered_seat(&mut tx, &project_id, &user_id).await? {

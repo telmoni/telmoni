@@ -91,8 +91,8 @@ pub struct ProjectOffer {
     pub name: String,
     /// The organization it would leave.
     pub organization_id: OrganizationId,
-    /// What that organization is called; `None` means never named.
-    pub organization_name: Option<String>,
+    /// What that organization is called.
+    pub organization_name: String,
     /// Its owner — who is offering — by address and name.
     pub owner_email: Option<String>,
     pub owner_display_name: Option<String>,

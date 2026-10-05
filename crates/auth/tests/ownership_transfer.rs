@@ -232,22 +232,6 @@ async fn join(pool: &PgPool, organization: &str, user: &str, role: &str) {
     assert_eq!(status, StatusCode::OK, "accept for {user}: {body}");
 }
 
-/// Seat `user` on `organization` at `role` by hand. The invite lane refuses an
-/// organization with no name, and one test needs an admin on one.
-async fn seat(pool: &PgPool, organization: &str, user: &str, role: &str) {
-    sqlx::query(
-        "INSERT INTO auth.organization_members (id, organization_id, user_id, role, added_by, shard_key)
-         VALUES (gen_random_uuid(), $1, $2, $3, $4, gen_random_uuid())",
-    )
-    .bind(organization)
-    .bind(user)
-    .bind(role)
-    .bind(OWNER)
-    .execute(pool)
-    .await
-    .expect("seat the member");
-}
-
 /// The owner makes a project in `organization`, which sign-in does not;
 /// answers its id.
 async fn create_project(pool: &PgPool, organization: &str, name: &str) -> String {
@@ -264,7 +248,7 @@ async fn create_project(pool: &PgPool, organization: &str, name: &str) -> String
     body["id"].as_str().expect("the project's id").to_owned()
 }
 
-/// The owner names their organization, as they must before handing it over.
+/// The owner renames their organization: the offer's mail calls it by name.
 async fn name(pool: &PgPool, organization: &str, name: &str) {
     let (status, body) = call(
         pool,
@@ -370,18 +354,6 @@ async fn ownership_audit(pool: &PgPool, organization: &str) -> Vec<String> {
     .unwrap()
 }
 
-/// Offers on the organization's roster, live or lapsed.
-async fn offers_on_roster(pool: &PgPool, organization: &str) -> i64 {
-    sqlx::query_scalar(
-        "SELECT count(*) FROM auth.organization_members
-          WHERE organization_id = $1 AND transfer_offered_at IS NOT NULL",
-    )
-    .bind(organization)
-    .fetch_one(pool)
-    .await
-    .unwrap()
-}
-
 /// One ownership request as `caller` in `organization`, with every mail it
 /// sends kept in `outbox`.
 async fn call_mailing(
@@ -469,38 +441,6 @@ async fn only_the_owner_offers_and_only_to_an_admin(pool: PgPool) {
         Some("owner"),
         "an offer changes nothing until it is accepted"
     );
-}
-
-/// ⚠ **An organization is handed over by its name.** The offer's mail and
-/// notice call it by one, and until the owner gives it one there is nothing
-/// to call it by. Nobody can be invited into an unnamed organization either,
-/// so the admin to offer it to is seated by hand.
-#[sqlx::test]
-async fn an_unnamed_organization_cannot_be_offered(pool: PgPool) {
-    apply_audit_migrations(&pool).await;
-    let organization = sign_in(&pool, OWNER).await;
-    sign_in(&pool, ADMIN).await;
-    seat(&pool, &organization, ADMIN, "admin").await;
-
-    let (status, body) = offer(&pool, &organization, OWNER, ADMIN).await;
-    assert_eq!(
-        status,
-        StatusCode::CONFLICT,
-        "an unnamed organization was offered: {body}"
-    );
-    assert!(
-        body["detail"]
-            .as_str()
-            .unwrap()
-            .starts_with("name the organization"),
-        "{body}"
-    );
-    assert_eq!(offers_on_roster(&pool, &organization).await, 0);
-    assert!(ownership_audit(&pool, &organization).await.is_empty());
-
-    name(&pool, &organization, "Acme").await;
-    let (status, body) = offer(&pool, &organization, OWNER, ADMIN).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
 }
 
 /// ⚠ **A pending account deletion is the person's, not the organization's**:

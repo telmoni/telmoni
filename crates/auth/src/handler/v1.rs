@@ -52,9 +52,9 @@ pub const V1_LANES: &[V1Lane] = &[
             description: "The organization the token belongs to — its id, \
                           its slug, its name and its owner's address and name. \
                           The slug is what the console's URLs name it by: set \
-                          from its first name, when that reads as one, and \
-                          moved only when the URL is changed in Settings; the \
-                          id never moves. A \
+                          from the name it was created under, when that reads \
+                          as one, and moved only when the URL is changed in \
+                          Settings; the id never moves. A \
                           token IS an organization, so this answers for the \
                           caller and for nobody else.",
             params: &[],
@@ -100,7 +100,7 @@ pub struct TokenOrganization {
     /// its slug, its name and its owner — so `/v1/organization` reads nothing
     /// more.
     pub slug: String,
-    pub name: Option<String>,
+    pub name: String,
     pub owner_email: Option<String>,
     pub owner_display_name: Option<String>,
 }

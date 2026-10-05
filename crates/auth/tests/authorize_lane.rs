@@ -99,28 +99,6 @@ async fn sign_in(app: &Router, pool: &PgPool, user: &str, sid: Option<&str>) -> 
         .as_str()
         .expect("/me names the active organization")
         .to_owned();
-    // A first sign-in leaves the organization unnamed, and an unnamed
-    // organization invites nobody: name it, as the console has its owner do.
-    if me["firstLogin"] == true {
-        let resp = app
-            .clone()
-            .oneshot(
-                Request::patch("/internal/organization")
-                    .header("x-service-secret", SERVICE_SECRET)
-                    .header("x-organization-id", &organization)
-                    .header("content-type", "application/json")
-                    .header("authorization", format!("Bearer {bearer}"))
-                    .body(Body::from(json!({ "name": "Acme" }).to_string()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            resp.status(),
-            StatusCode::OK,
-            "naming {user}'s organization"
-        );
-    }
     (organization, me)
 }
 

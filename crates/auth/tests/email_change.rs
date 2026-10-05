@@ -267,14 +267,12 @@ async fn stored_email(pool: &PgPool, user: &str) -> String {
 }
 
 /// The organization's own name — the column this lane must never touch.
-async fn stored_name(pool: &PgPool, organization: &str) -> Option<String> {
-    sqlx::query_scalar::<_, Option<String>>(
-        "SELECT name FROM auth.organizations WHERE external_id = $1",
-    )
-    .bind(organization)
-    .fetch_one(pool)
-    .await
-    .unwrap()
+async fn stored_name(pool: &PgPool, organization: &str) -> String {
+    sqlx::query_scalar::<_, String>("SELECT name FROM auth.organizations WHERE external_id = $1")
+        .bind(organization)
+        .fetch_one(pool)
+        .await
+        .unwrap()
 }
 
 /// Mint a live code straight into the table, so a confirm test skips step one.
@@ -650,8 +648,8 @@ async fn the_address_moves_without_disturbing_the_name(pool: PgPool) {
     let organization = seed_signed_in(&pool, USER, EMAIL).await;
     assert_eq!(
         stored_name(&pool, &organization).await,
-        None,
-        "a freshly provisioned organization holds a name"
+        "My organization",
+        "a nameless holder's organization was named after something else, such as their address"
     );
     sqlx::query("UPDATE auth.organizations SET name = $2 WHERE external_id = $1")
         .bind(&organization)
@@ -671,8 +669,8 @@ async fn the_address_moves_without_disturbing_the_name(pool: PgPool) {
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(stored_email(&pool, USER).await, NEW_EMAIL);
     assert_eq!(
-        stored_name(&pool, &organization).await.as_deref(),
-        Some("Acme Robotics"),
+        stored_name(&pool, &organization).await,
+        "Acme Robotics",
         "the confirmed change rewrote a name the owner chose"
     );
 }

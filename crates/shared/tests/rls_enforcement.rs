@@ -472,7 +472,7 @@ async fn maintenance_membership_alone_does_not_widen_a_project_scope() {
 /// seeded as the owner, which bypasses RLS.
 async fn seed_membership(pool: &PgPool, organization: &str, member: &str) {
     sqlx::query(
-        "INSERT INTO auth.organizations (external_id, slug) VALUES ($1, 'org-' || md5($1))",
+        "INSERT INTO auth.organizations (external_id, slug, name) VALUES ($1, 'org-' || md5($1), 'Acme')",
     )
     .bind(organization)
     .execute(pool)
@@ -641,7 +641,7 @@ async fn a_person_reads_only_their_own_rows_and_a_roster_only_its_people() {
     let (organization, _) = tenant_ids();
     let (member, outsider) = person_ids();
     sqlx::query(
-        "INSERT INTO auth.organizations (external_id, slug) VALUES ($1, 'org-' || md5($1))",
+        "INSERT INTO auth.organizations (external_id, slug, name) VALUES ($1, 'org-' || md5($1), 'Acme')",
     )
     .bind(&organization)
     .execute(&pool)
@@ -807,7 +807,7 @@ async fn the_tenant_root_is_seen_only_by_its_own_scopes() {
         .await
         .expect("seed roster row");
     sqlx::query(
-        "INSERT INTO auth.organizations (external_id, slug) VALUES ($1, 'org-' || md5($1))",
+        "INSERT INTO auth.organizations (external_id, slug, name) VALUES ($1, 'org-' || md5($1), 'Acme')",
     )
     .bind(&org_b)
     .execute(&pool)
@@ -891,7 +891,7 @@ async fn the_tenant_root_is_seen_only_by_its_own_scopes() {
         "unset GUCs see nothing"
     );
     let denied = sqlx::query(
-        "INSERT INTO auth.organizations (external_id, slug) VALUES ($1, 'org-' || md5($1))",
+        "INSERT INTO auth.organizations (external_id, slug, name) VALUES ($1, 'org-' || md5($1), 'Acme')",
     )
     .bind(format!("{org_b}_x"))
     .execute(&mut *tx)
@@ -926,7 +926,7 @@ async fn the_tenant_root_is_seen_only_by_its_own_scopes() {
 async fn seed_flags(pool: &PgPool, org_a: &str, org_b: &str) {
     for org in [org_a, org_b] {
         sqlx::query(
-            "INSERT INTO auth.organizations (external_id, slug) VALUES ($1, 'org-' || md5($1))",
+            "INSERT INTO auth.organizations (external_id, slug, name) VALUES ($1, 'org-' || md5($1), 'Acme')",
         )
         .bind(org)
         .execute(pool)

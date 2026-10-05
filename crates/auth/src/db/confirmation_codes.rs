@@ -290,6 +290,10 @@ mod tests {
         OrganizationId::try_new(s).expect("valid test organization id")
     }
 
+    fn any_slug() -> String {
+        telmoni_shared::slug::placeholder(telmoni_shared::slug::Scope::Organization)
+    }
+
     async fn seed(pool: &PgPool, user: &str) {
         telmoni_shared::test_util::seed_identity(pool, user, &format!("{user}@example.com")).await;
     }
@@ -383,7 +387,8 @@ mod tests {
         seed(&pool, "user_owner").await;
         for org in ["org_first", "org_second"] {
             let mut otx = organization_scope(&pool, &organization(org)).await?;
-            crate::db::organizations::create(&mut otx, &organization(org)).await?;
+            crate::db::organizations::create(&mut otx, &organization(org), "Acme", &any_slug())
+                .await?;
             otx.commit().await?;
         }
         let mut tx = person_scope(&pool, &person("user_owner")).await?;
@@ -431,7 +436,13 @@ mod tests {
         seed(&pool, "user_casc").await;
         {
             let mut otx = organization_scope(&pool, &organization("org_casc")).await?;
-            crate::db::organizations::create(&mut otx, &organization("org_casc")).await?;
+            crate::db::organizations::create(
+                &mut otx,
+                &organization("org_casc"),
+                "Acme",
+                &any_slug(),
+            )
+            .await?;
             otx.commit().await?;
         }
         {
@@ -486,7 +497,8 @@ mod tests {
     async fn delete_all_clears_the_person(pool: PgPool) -> sqlx::Result<()> {
         seed(&pool, "user_del").await;
         let mut otx = organization_scope(&pool, &organization("org_del")).await?;
-        crate::db::organizations::create(&mut otx, &organization("org_del")).await?;
+        crate::db::organizations::create(&mut otx, &organization("org_del"), "Acme", &any_slug())
+            .await?;
         otx.commit().await?;
         let mut tx = person_scope(&pool, &person("user_del")).await?;
         create(

@@ -357,9 +357,12 @@ enum Provisioning {
 }
 
 /// Give a person who belongs to no active organization one of their own: the
-/// organization and their owner row, audited, in one transaction. Nothing
-/// else: the organization has no name until its owner gives it one, and no
-/// project until somebody makes one, as a Vercel team starts empty.
+/// organization and their owner row, audited, in one transaction. It is named
+/// after them ([`crate::identity::default_organization`]) and goes by the
+/// first free slug that name gives, so the console opens straight onto it,
+/// as Vercel and Cloudflare open a new account; the owner renames it, or moves
+/// its URL, on Settings. It has no project until somebody makes one, as a
+/// Vercel team starts empty.
 ///
 /// ⚠ **Serialised on the person, and re-checked under the lock.** Two
 /// concurrent first renders would otherwise each see "no organization" and
@@ -387,19 +390,49 @@ async fn provision_first_organization(
         tx.commit().await?;
         return Ok(Provisioning::AlreadyBelongs);
     }
-    let pending = identities::get(&mut tx, user_id)
-        .await?
-        .is_some_and(|p| p.deletion_requested_at.is_some());
-    if pending {
+    let person = identities::get(&mut tx, user_id).await?;
+    if person
+        .as_ref()
+        .is_some_and(|p| p.deletion_requested_at.is_some())
+    {
         return Err(AuthzError::Forbidden("account deletion in progress".into()).into());
     }
 
     // ⚠ MINTED: an organization is nobody's id.
     let organization = OrganizationId::new();
+    let (name, candidates) = crate::identity::default_organization(
+        person.as_ref().and_then(|p| p.display_name.as_deref()),
+    );
+    // Read in the lane, since no binding of the new organization's sees
+    // another's slug.
+    let free = if candidates.is_empty() {
+        None
+    } else {
+        let mut lane = maintenance_scope(&state.db, AuthLane).await?;
+        let free = organizations::first_free_slug(&mut lane, &organization, &candidates).await?;
+        lane.commit().await?;
+        free
+    };
     // Both GUCs from here: the person's for the check above, the new
     // organization's for the rows below, whose policies' WITH CHECK name it.
     let mut tx = tx.bind_organization(&organization).await?;
-    organizations::create(&mut tx, &organization).await?;
+    let slug = free.unwrap_or_else(|| slug::placeholder(slug::Scope::Organization));
+    if organizations::create(&mut tx, &organization, &name, &slug)
+        .await?
+        .is_none()
+    {
+        // Another first organization took the slug since the read above. A
+        // placeholder is drawn at random, until the owner picks a URL.
+        let placeholder = slug::placeholder(slug::Scope::Organization);
+        if organizations::create(&mut tx, &organization, &name, &placeholder)
+            .await?
+            .is_none()
+        {
+            return Err(TelmoniError::Internal(
+                "a fresh placeholder slug was taken".into(),
+            ));
+        }
+    }
     organization_members::insert_owner(&mut tx, &organization, user_id).await?;
     emit_audit(
         &mut tx,

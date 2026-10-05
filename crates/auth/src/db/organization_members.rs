@@ -77,8 +77,8 @@ pub struct LiveOrganizationInvite {
     /// invitation outlives them, so this is a LEFT JOIN.
     pub inviter_email: Option<String>,
     pub inviter_display_name: Option<String>,
-    /// What the organization is called; `None` means never named.
-    pub organization_name: Option<String>,
+    /// What the organization is called.
+    pub organization_name: String,
 }
 
 /// An organization the caller belongs to, as `/me` lists it.
@@ -88,9 +88,8 @@ pub struct OrganizationMembership {
     pub organization_id: OrganizationId,
     /// Where its paths begin in the console: `/{slug}`.
     pub slug: String,
-    /// What the owner called it; `None` only before they have, which the
-    /// console asks for before it opens to them.
-    pub name: Option<String>,
+    /// What it is called.
+    pub name: String,
     /// The owner's address and name, for the console to name whom to ask.
     /// `None` only for an organization caught mid-transfer or mid-erasure.
     pub owner_email: Option<String>,
@@ -312,15 +311,7 @@ pub async fn active_organizations_owned_by(
 /// What labels an organization: the name it was given.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct LabelParts {
-    pub name: Option<String>,
-}
-
-impl LabelParts {
-    /// The label the console shows: the name.
-    #[must_use]
-    pub fn label(&self) -> String {
-        crate::identity::organization_label(self.name.as_deref())
-    }
+    pub name: String,
 }
 
 /// An organization's label parts, under any binding that sees its row: its
@@ -687,9 +678,8 @@ pub async fn organizations_of(
 #[serde(rename_all = "camelCase")]
 pub struct DeletedOrganization {
     pub organization_id: OrganizationId,
-    /// What the organization is called; `None` means never named, and the
-    /// page labels it "Organization".
-    pub name: Option<String>,
+    /// What the organization is called.
+    pub name: String,
     pub deletion_requested_at: DateTime<Utc>,
     /// When the row goes. The restore window ends here.
     pub erase_after: DateTime<Utc>,

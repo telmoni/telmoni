@@ -169,33 +169,9 @@ async fn call(
     .await
 }
 
-/// Sign somebody in for the first time and name the organization they were
-/// provisioned with, as the console has every owner do before it opens to
-/// them; answers its id.
+/// Sign somebody in for the first time; answers the id of the organization
+/// they were provisioned with.
 async fn sign_in(pool: &PgPool, user: &str) -> String {
-    seed_identity(pool, user, &format!("{user}@example.test")).await;
-    let (status, body) = call(pool, "POST", "/me", user, None, None).await;
-    assert_eq!(status, StatusCode::OK, "sign-in failed for {user}: {body}");
-    let organization = body["activeOrganizationId"]
-        .as_str()
-        .expect("/me names the active organization")
-        .to_owned();
-    let (status, body) = call(
-        pool,
-        "PATCH",
-        "/internal/organization",
-        user,
-        Some(&organization),
-        Some(json!({ "name": "Acme" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "naming {organization}: {body}");
-    organization
-}
-
-/// Sign somebody in for the first time and leave their organization as
-/// provisioning left it: without a name.
-async fn sign_in_unnamed(pool: &PgPool, user: &str) -> String {
     seed_identity(pool, user, &format!("{user}@example.test")).await;
     let (status, body) = call(pool, "POST", "/me", user, None, None).await;
     assert_eq!(status, StatusCode::OK, "sign-in failed for {user}: {body}");
@@ -845,46 +821,6 @@ async fn the_destination_is_one_the_acceptor_owns(pool: PgPool) {
         organization_of_project(&pool, &h.project).await,
         second.as_str()
     );
-}
-
-/// ⚠ **A project lands only in a named organization.** Nobody can be invited
-/// into an unnamed one, and a project brings every seat on it along, so the
-/// accept holds the line the invite lanes hold — until the admin names theirs.
-#[sqlx::test]
-async fn the_destination_must_be_named(pool: PgPool) {
-    let h = staffed_project(&pool).await;
-    let second = "user_handover_unnamed_admin";
-    let theirs = sign_in_unnamed(&pool, second).await;
-    seat(&pool, &h.source, &h.project, second, "admin").await;
-    assert_eq!(
-        offer(&pool, &h, OWNER, &h.source, second).await.0,
-        StatusCode::OK
-    );
-
-    let (status, body) = accept(&pool, &h, second, &theirs, None).await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
-    assert!(
-        body["detail"]
-            .as_str()
-            .unwrap()
-            .starts_with("name the organization"),
-        "{body}"
-    );
-    assert_eq!(organization_of_project(&pool, &h.project).await, h.source);
-
-    let (status, body) = call(
-        &pool,
-        "PATCH",
-        "/internal/organization",
-        second,
-        Some(&theirs),
-        Some(json!({ "name": "Beta Labs" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    let (status, body) = accept(&pool, &h, second, &theirs, None).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(organization_of_project(&pool, &h.project).await, theirs);
 }
 
 /// Two organizations naming a project alike is the common case, not the odd

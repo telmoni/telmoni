@@ -46,7 +46,8 @@ fn state(pool: PgPool) -> Arc<AppState> {
 /// Four tokens: two past the seven-day grace, one revoked inside it, one live.
 async fn seed(pool: &PgPool) {
     sqlx::query(
-        "INSERT INTO auth.organizations (external_id, slug) VALUES ($1, 'org-' || md5($1))",
+        "INSERT INTO auth.organizations (external_id, slug, name)
+         VALUES ($1, 'org-' || md5($1), 'Acme')",
     )
     .bind(ORGANIZATION)
     .execute(pool)

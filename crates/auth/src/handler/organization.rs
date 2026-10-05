@@ -1,8 +1,8 @@
 //! The organization itself: its name, its deletion by its owner and the
 //! owner's restore. An operator's termination and restore, and the steps
 //! the deletion sweep drives it through, are [`crate::sweep`]. Its name and
-//! its URL are two settings: the first name sets the URL once, and a rename
-//! afterwards moves nothing.
+//! its URL are two settings: provisioning derives the URL from the name the
+//! organization is born with, and after that a rename moves nothing.
 
 use std::sync::Arc;
 
@@ -22,7 +22,6 @@ use telmoni_shared::{AuthError, OrganizationRole, OrganizationStatus, TelmoniErr
 use crate::{
     AppState,
     db::{
-        AuthLane,
         confirmation_codes::{self, Act, Purpose},
         identities, locks, organization_members, organizations,
     },
@@ -33,7 +32,7 @@ use crate::{
     model::DeletionKind,
 };
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
-use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope, person_scope};
+use telmoni_shared::db::tenant_session::{organization_scope, person_scope};
 use telmoni_shared::{AuditAction, TelmoniResourceKind};
 use telmoni_shared::{AuthzError, slug};
 
@@ -82,10 +81,9 @@ pub async fn request_organization_deletion_code(
     .await?;
     tx.commit().await?;
 
-    let label = crate::identity::organization_label(row.name.as_deref());
     if let Err(e) = state
         .mailer
-        .send_organization_deletion_code(&person.email, &code, &label)
+        .send_organization_deletion_code(&person.email, &code, &row.name)
         .await
     {
         tracing::error!(organization_id = %organization, error = %e,
@@ -332,9 +330,7 @@ pub struct UpdateOrganizationRequest {
 /// slug its paths begin with, as two settings. A name moves no slug, so a
 /// rename leaves every link to the organization's pages standing; the slug
 /// moves only when asked to, and the answer carries both so the console can
-/// follow. The one exception is the first name: an organization is provisioned
-/// under a placeholder slug nobody chose, and its first name gives it a real
-/// one unless the request names one itself.
+/// follow.
 pub async fn update_organization(
     State(state): State<Arc<AppState>>,
     principal: Principal,
@@ -393,35 +389,14 @@ pub async fn update_organization(
         .into());
     }
 
-    let Some(before) = organizations::get(&mut tx, &organization).await? else {
-        tx.commit().await?;
-        return Err(AuthError::NotFound("organization not found".into()).into());
-    };
-
-    // The first name takes the organization off its placeholder: the first
-    // free slug the name gives, read in the lane because the organization's
-    // own binding sees no other organization's row. A name that gives none
-    // leaves the placeholder, and the owner picks a URL on Settings.
-    let slug = match (asked_slug, &name) {
-        (Some(s), _) => Some(s),
-        (None, Some(name)) if before.name.is_none() => {
-            let candidates = slug::candidates(slug::Scope::Organization, name);
-            if candidates.is_empty() {
-                None
-            } else {
-                let mut lane = maintenance_scope(&state.db, AuthLane).await?;
-                let free =
-                    organizations::first_free_slug(&mut lane, &organization, &candidates).await?;
-                lane.commit().await?;
-                free
-            }
-        }
-        _ => None,
-    };
-
-    let Some(now) = organizations::update(&mut tx, &organization, name.as_deref(), slug.as_deref())
-        .await
-        .map_err(slug_taken)?
+    let Some(now) = organizations::update(
+        &mut tx,
+        &organization,
+        name.as_deref(),
+        asked_slug.as_deref(),
+    )
+    .await
+    .map_err(slug_taken)?
     else {
         tx.commit().await?;
         return Err(AuthError::NotFound("organization not found".into()).into());
@@ -449,9 +424,8 @@ pub async fn update_organization(
     Ok(Json(json!({ "name": now.name, "slug": now.slug })))
 }
 
-/// A slug another organization holds — chosen on Settings, or taken between
-/// [`organizations::first_free_slug`] and the first name's write — as a 409
-/// rather than a 500.
+/// A slug another organization holds, chosen on Settings, as a 409 rather than
+/// a 500.
 fn slug_taken(e: sqlx::Error) -> TelmoniError {
     match e {
         sqlx::Error::Database(ref db) if db.constraint() == Some("organizations_slug_key") => {

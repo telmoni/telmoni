@@ -80,7 +80,7 @@ pub struct ValidatedToken {
     pub slug: String,
     /// The organization's name, and its owner's address, carried because
     /// `/v1` has no BFF to look them up.
-    pub name: Option<String>,
+    pub name: String,
     pub owner_email: Option<String>,
     /// The owner's display name, for `/v1/organization`'s answer: the one
     /// column the join did not already carry, which cost that lane a second
@@ -88,20 +88,12 @@ pub struct ValidatedToken {
     pub owner_display_name: Option<String>,
 }
 
-impl ValidatedToken {
-    /// What to print for the organization: its name.
-    #[must_use]
-    pub fn label(&self) -> String {
-        crate::identity::organization_label(self.name.as_deref())
-    }
-}
-
 type ValidatedRow = (
     Uuid,
     OrganizationId,
     ProjectId,
     String,
-    Option<String>,
+    String,
     Option<String>,
     Option<String>,
 );
@@ -305,9 +297,10 @@ mod tests {
         let mut tx = organization_scope(pool, &organization)
             .await
             .expect("scope");
-        crate::db::organizations::create(&mut tx, &organization)
+        crate::db::organizations::create(&mut tx, &organization, "Acme", "acme")
             .await
-            .unwrap();
+            .unwrap()
+            .expect("the slug is free");
         crate::db::projects::create(&mut tx, &project, &organization, "Default project")
             .await
             .unwrap();

@@ -407,8 +407,8 @@ async fn sign_ups_closed_admit_the_invited_alone(pool: PgPool) {
     assert!(outbox.all().is_empty());
 
     sqlx::query(
-        "INSERT INTO auth.organizations (id, external_id, slug, shard_key)
-         VALUES ($1, $2, 'org-' || md5($2), $3)",
+        "INSERT INTO auth.organizations (id, external_id, slug, name, shard_key)
+         VALUES ($1, $2, 'org-' || md5($2), 'Acme', $3)",
     )
     .bind(uuid::Uuid::now_v7())
     .bind("org_invites_1")

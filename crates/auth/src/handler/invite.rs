@@ -124,17 +124,12 @@ pub async fn create_invite(
     if invites::already_a_member_by_email(&mut acting.tx, &project_id, &email).await? {
         return Err(AuthError::Conflict("that address is already a member".into()).into());
     }
-    // ⚠ Only a named organization invites: the invitation shows the person the
-    // organization's name, and the console asks the owner for one before it
-    // opens; this holds the same line for any client.
+    // The invitation's mail calls the organization by its name.
     let Some(name) = organizations::get(&mut acting.tx, &organization)
         .await?
-        .and_then(|o| o.name)
+        .map(|o| o.name)
     else {
-        return Err(AuthError::Conflict(
-            "name the organization before inviting anyone to its projects".into(),
-        )
-        .into());
+        return Err(AuthError::NotFound("organization not found".into()).into());
     };
     let mut acting = acting.leave_owner_scope().await?;
 
@@ -185,7 +180,7 @@ pub async fn create_invite(
     acting.tx.commit().await?;
 
     let link = invite_link(&state, &secret);
-    let label = crate::identity::organization_label(Some(&name));
+    let label = name;
     let inviter = inviter.map_or_else(|| label.clone(), |c| c.display());
     if let Err(e) = state
         .mailer
@@ -298,7 +293,7 @@ pub async fn look_up_invite(
 
     if let Some(invite) = found {
         tx.commit().await?;
-        let organization = crate::identity::organization_label(invite.organization_name.as_deref());
+        let organization = invite.organization_name;
         // ⚠ `scope` says which roster the link seats somebody on. The two
         // ladders spell their roles the same, so the role alone cannot.
         return Ok(Json(json!({
@@ -319,7 +314,7 @@ pub async fn look_up_invite(
     tx.commit().await?;
 
     if let Some(invite) = found_organization {
-        let organization = crate::identity::organization_label(invite.organization_name.as_deref());
+        let organization = invite.organization_name;
         return Ok(Json(json!({
             "scope": "organization",
             "inviter": inviter_label(

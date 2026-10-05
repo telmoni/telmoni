@@ -352,8 +352,8 @@ pub struct ProjectEverywhere {
     pub organization_id: OrganizationId,
     /// Where the organization's paths begin, so a link names both segments.
     pub organization_slug: String,
-    /// What the organization is called; `None` means never named.
-    pub organization_name: Option<String>,
+    /// What the organization is called.
+    pub organization_name: String,
 }
 
 /// Every project this person can open in ANY active organization. One query

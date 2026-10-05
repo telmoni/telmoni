@@ -107,14 +107,12 @@ async fn seat(pool: &PgPool, organization: &str, owner: &str, member: &str, role
 }
 
 /// The name on the row, straight from the table — never from a response body.
-async fn stored_name(pool: &PgPool, organization: &str) -> Option<String> {
-    sqlx::query_scalar::<_, Option<String>>(
-        "SELECT name FROM auth.organizations WHERE external_id = $1",
-    )
-    .bind(organization)
-    .fetch_one(pool)
-    .await
-    .expect("read the organization back")
+async fn stored_name(pool: &PgPool, organization: &str) -> String {
+    sqlx::query_scalar::<_, String>("SELECT name FROM auth.organizations WHERE external_id = $1")
+        .bind(organization)
+        .fetch_one(pool)
+        .await
+        .expect("read the organization back")
 }
 
 /// `PATCH /internal/organization` as `caller`, with `body` as the console
@@ -157,37 +155,6 @@ async fn rename(
     update(pool, caller, organization, json!({ "name": name })).await
 }
 
-/// A lane as `caller`, with `x-organization-id` and a JSON body: the invite
-/// lanes, for the organization that has no name yet.
-async fn post(
-    pool: &PgPool,
-    caller: &str,
-    organization: &str,
-    uri: &str,
-    body: Value,
-) -> (StatusCode, Value) {
-    let resp = app(pool.clone())
-        .oneshot(
-            as_person(
-                Request::builder()
-                    .method("POST")
-                    .uri(uri)
-                    .header("x-service-secret", SERVICE_SECRET)
-                    .header("x-organization-id", organization)
-                    .header("content-type", "application/json"),
-                pool,
-                caller,
-            )
-            .await
-            .body(Body::from(body.to_string()))
-            .unwrap(),
-        )
-        .await
-        .unwrap();
-    let status = resp.status();
-    (status, json_body(resp).await)
-}
-
 #[sqlx::test]
 async fn an_owner_names_their_own_organization(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -197,10 +164,7 @@ async fn an_owner_names_their_own_organization(pool: PgPool) {
 
     let (status, _) = rename(&pool, owner, &organization, "Acme Robotics").await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(
-        stored_name(&pool, &organization).await.as_deref(),
-        Some("Acme Robotics")
-    );
+    assert_eq!(stored_name(&pool, &organization).await, "Acme Robotics");
 }
 
 /// The slug on the row, straight from the table.
@@ -212,63 +176,41 @@ async fn stored_slug(pool: &PgPool, organization: &str) -> String {
         .expect("read the slug back")
 }
 
-/// The first name takes the organization off its placeholder: the first free
-/// slug the name gives, never another organization's, never a word the
-/// console's own paths use. A name that gives none leaves the placeholder.
+/// An organization is provisioned at the first free slug its name reads as,
+/// never another organization's: two people who gave no name are both "My
+/// organization", and the second takes the next number.
 #[sqlx::test]
-async fn the_first_name_gives_the_organization_its_url(pool: PgPool) {
+async fn provisioning_gives_the_organization_its_url(pool: PgPool) {
     apply_audit_migrations(&pool).await;
 
     let first = sign_in(&pool, "usr_slug_first", "first@example.test").await;
     let second = sign_in(&pool, "usr_slug_second", "second@example.test").await;
-    let third = sign_in(&pool, "usr_slug_third", "third@example.test").await;
-    let fourth = sign_in(&pool, "usr_slug_fourth", "fourth@example.test").await;
-    assert!(stored_slug(&pool, &first).await.starts_with("org-"));
-
-    let (status, body) = rename(&pool, "usr_slug_first", &first, "Acme Robotics").await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["slug"], "acme-robotics");
-    assert_eq!(stored_slug(&pool, &first).await, "acme-robotics");
-
-    let (_, body) = rename(&pool, "usr_slug_second", &second, "ACME robotics!").await;
+    assert_eq!(stored_slug(&pool, &first).await, "my-organization");
     assert_eq!(
-        body["slug"], "acme-robotics-2",
+        stored_slug(&pool, &second).await,
+        "my-organization-2",
         "took the first organization's slug"
-    );
-
-    let (_, body) = rename(&pool, "usr_slug_third", &third, "Account").await;
-    assert_eq!(
-        body["slug"], "account-2",
-        "took a word the console's paths use"
-    );
-
-    let placeholder = stored_slug(&pool, &fourth).await;
-    let (status, body) = rename(&pool, "usr_slug_fourth", &fourth, "株式会社").await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["name"], "株式会社");
-    assert_eq!(
-        body["slug"], placeholder,
-        "a name with no slug in it left the placeholder, for the owner to replace on Settings"
     );
 }
 
-/// ⚠ **A rename moves no URL.** The name and the URL are two settings: once
-/// an organization has its URL, every link to its pages stands through any
-/// number of renames, as on Vercel.
+/// ⚠ **A rename moves no URL.** The name and the URL are two settings: every
+/// link to an organization's pages stands through any number of renames, the
+/// first included, as on Vercel.
 #[sqlx::test]
 async fn a_rename_keeps_the_url(pool: PgPool) {
     apply_audit_migrations(&pool).await;
 
     let owner = "usr_rename_keeps";
     let organization = sign_in(&pool, owner, "keeps@example.test").await;
-    rename(&pool, owner, &organization, "Acme Robotics").await;
-    assert_eq!(stored_slug(&pool, &organization).await, "acme-robotics");
+    let url = stored_slug(&pool, &organization).await;
 
-    let (status, body) = rename(&pool, owner, &organization, "Acme Robotics Ltd").await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["name"], "Acme Robotics Ltd");
-    assert_eq!(body["slug"], "acme-robotics", "a rename moved the URL");
-    assert_eq!(stored_slug(&pool, &organization).await, "acme-robotics");
+    for name in ["Acme Robotics", "Acme Robotics Ltd"] {
+        let (status, body) = rename(&pool, owner, &organization, name).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["name"], name);
+        assert_eq!(body["slug"], url.as_str(), "a rename moved the URL");
+    }
+    assert_eq!(stored_slug(&pool, &organization).await, url);
 }
 
 /// The URL is an owner's or admin's to choose: a slug, free, and not one of the
@@ -283,7 +225,7 @@ async fn the_url_is_a_setting_of_its_own(pool: PgPool) {
     let organization = sign_in(&pool, owner, "url-owner@example.test").await;
     let others = sign_in(&pool, other, "url-other@example.test").await;
     rename(&pool, owner, &organization, "Acme Robotics").await;
-    rename(&pool, other, &others, "Globex").await;
+    update(&pool, other, &others, json!({ "slug": "globex" })).await;
 
     let (status, body) = update(&pool, owner, &organization, json!({ "slug": "acme" })).await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -339,60 +281,6 @@ async fn the_url_is_a_setting_of_its_own(pool: PgPool) {
     assert_eq!(body["slug"], "acme-ltd");
 }
 
-/// ⚠ **An unnamed organization has only its owner.** The console asks for the
-/// name before it opens; the lanes hold the same line, so no invitation ever
-/// shows somebody an organization with nothing to call it by.
-#[sqlx::test]
-async fn an_unnamed_organization_invites_nobody(pool: PgPool) {
-    apply_audit_migrations(&pool).await;
-
-    let owner = "usr_unnamed_owner";
-    let organization = sign_in(&pool, owner, "unnamed@example.test").await;
-    // A project is the owner's to make before the organization has a name; an
-    // invitation to it is not.
-    let (status, created) = post(
-        &pool,
-        owner,
-        &organization,
-        "/internal/projects",
-        json!({ "name": "Platform" }),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{created}");
-    let project = created["id"].as_str().expect("the project's id").to_owned();
-
-    let invite = json!({ "email": "colleague@example.test", "role": "member" });
-    let (status, body) = post(
-        &pool,
-        owner,
-        &organization,
-        "/internal/organization/invites",
-        invite.clone(),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
-    let (status, body) = post(
-        &pool,
-        owner,
-        &organization,
-        &format!("/internal/projects/{project}/invites"),
-        invite.clone(),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
-
-    rename(&pool, owner, &organization, "Acme Robotics").await;
-    let (status, body) = post(
-        &pool,
-        owner,
-        &organization,
-        "/internal/organization/invites",
-        invite,
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "named, it invites: {body}");
-}
-
 /// ⚠️ **A name is printed in mail to any address an owner or admin invites**,
 /// so it is held to what a display name is: control characters and invisible
 /// formatting — the line breaks, bidi overrides and zero-width characters that
@@ -414,15 +302,15 @@ async fn a_name_keeps_nothing_invisible(pool: PgPool) {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        stored_name(&pool, &organization).await.as_deref(),
-        Some("AcmeCorpBcc: x@example.test")
+        stored_name(&pool, &organization).await,
+        "AcmeCorpBcc: x@example.test"
     );
 
     let (status, _) = rename(&pool, owner, &organization, "\u{202E}\u{200B}\n").await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(
-        stored_name(&pool, &organization).await.as_deref(),
-        Some("AcmeCorpBcc: x@example.test"),
+        stored_name(&pool, &organization).await,
+        "AcmeCorpBcc: x@example.test",
         "a name of nothing visible replaced a real one"
     );
 }
@@ -443,8 +331,8 @@ async fn a_member_of_another_organization_cannot_rename_it(pool: PgPool) {
     let (status, _) = rename(&pool, member, &organization, "Renamed By A Member").await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(
-        stored_name(&pool, &organization).await.as_deref(),
-        Some("Untouched"),
+        stored_name(&pool, &organization).await,
+        "Untouched",
         "a refused rename still moved the name",
     );
 }
@@ -464,8 +352,8 @@ async fn an_admin_of_the_organization_can_rename_it(pool: PgPool) {
     let (status, _) = rename(&pool, admin, &organization, "Renamed By An Admin").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        stored_name(&pool, &organization).await.as_deref(),
-        Some("Renamed By An Admin")
+        stored_name(&pool, &organization).await,
+        "Renamed By An Admin"
     );
 }
 
@@ -483,11 +371,11 @@ async fn a_stranger_cannot_rename_an_organization_they_have_no_row_in(pool: PgPo
     let (status, _) = rename(&pool, stranger, &organization, "Renamed By A Stranger").await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(
-        stored_name(&pool, &organization).await.as_deref(),
-        Some("Untouched"),
+        stored_name(&pool, &organization).await,
+        "Untouched",
         "a stranger's forged x-organization-id renamed somebody else's organization",
     );
-    assert_eq!(stored_name(&pool, &strangers_own).await, None);
+    assert_eq!(stored_name(&pool, &strangers_own).await, "My organization");
 }
 
 /// The header pair decides: a stranger naming their OWN organization renames
@@ -503,11 +391,8 @@ async fn the_refusals_are_the_membership_check_and_not_a_dead_fixture(pool: PgPo
 
     let (status, _) = rename(&pool, other, &others, "Their Own").await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(
-        stored_name(&pool, &others).await.as_deref(),
-        Some("Their Own")
-    );
-    assert_eq!(stored_name(&pool, &owners).await, None);
+    assert_eq!(stored_name(&pool, &others).await, "Their Own");
+    assert_eq!(stored_name(&pool, &owners).await, "My organization");
 }
 
 /// An organization on its way out takes no new name: a 404, not a silent no-op.
@@ -531,8 +416,5 @@ async fn an_organization_being_deleted_is_not_renamed(pool: PgPool) {
 
     let (status, _) = rename(&pool, owner, &organization, "After").await;
     assert_ne!(status, StatusCode::OK);
-    assert_eq!(
-        stored_name(&pool, &organization).await.as_deref(),
-        Some("Before")
-    );
+    assert_eq!(stored_name(&pool, &organization).await, "Before");
 }

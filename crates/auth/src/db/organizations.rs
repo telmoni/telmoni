@@ -11,7 +11,7 @@ use telmoni_shared::db::tenant_session::{
     self, Binding, HasOrganization, Maintenance, PersonAndOrganization, ProjectAndOrganization,
     Scoped,
 };
-use telmoni_shared::{OrganizationId, OrganizationStatus, derive_shard_key, slug};
+use telmoni_shared::{OrganizationId, OrganizationStatus, derive_shard_key};
 
 /// Every column `Organization` reads, in `FromRow` order. Written once because a
 /// hand-copied list is how one query starts selecting something else.
@@ -35,30 +35,30 @@ pub async fn get<B: Binding>(
 /// bytes, so a non-Latin name is not refused at a third of an ASCII one's length.
 pub const MAX_ORGANIZATION_NAME: usize = 80;
 
-/// Write a new organization. `external_id` is freshly minted by the caller;
-/// the slug is a placeholder until the owner names it.
-///
-/// ⚠ **`name` IS LEFT NULL, AND THAT IS THE DEFAULT WORKING.** NULL means the
-/// owner has not named it yet, which the console reads as "ask them before
-/// anything else": an organization is seen by nobody but its owner until it
-/// has a name, and no label is ever derived from the owner's address. Nor does
-/// the slug borrow the address: it is in every path, and a path is logged.
+/// Write a new organization called `name`, going by `slug`. `external_id` is
+/// freshly minted by the caller. `None` when another organization took the
+/// slug between the caller's read of it ([`first_free_slug`]) and this write,
+/// which `organizations_slug_key` judges: the caller writes again under
+/// another.
 pub async fn create<B: HasOrganization>(
     tx: &mut Scoped<'_, B>,
     external_id: &OrganizationId,
-) -> sqlx::Result<Organization> {
-    let slug = slug::placeholder(slug::Scope::Organization);
+    name: &str,
+    slug: &str,
+) -> sqlx::Result<Option<Organization>> {
     sqlx::query_as::<_, Organization>(&format!(
         "INSERT INTO auth.organizations
-             (id, external_id, slug, shard_key, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, now(), now())
+             (id, external_id, slug, name, shard_key, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, now(), now())
+         ON CONFLICT ON CONSTRAINT organizations_slug_key DO NOTHING
          RETURNING {ORGANIZATION_COLUMNS}"
     ))
     .bind(Uuid::now_v7())
     .bind(external_id)
-    .bind(&slug)
+    .bind(slug)
+    .bind(name)
     .bind(derive_shard_key(external_id))
-    .fetch_one(tx.conn())
+    .fetch_optional(tx.conn())
     .await
 }
 
@@ -112,7 +112,7 @@ pub async fn slugs(
 /// Settings hold them: one field each, written when given.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 pub struct NameAndSlug {
-    pub name: Option<String>,
+    pub name: String,
     pub slug: String,
 }
 

@@ -193,19 +193,6 @@ async fn export(pool: &PgPool, caller: &str, organization: &str) -> (StatusCode,
 async fn seed(pool: &PgPool) -> (String, String) {
     apply_audit_migrations(pool).await;
     let organization = sign_in_from_a_browser(pool, OWNER, PROVIDER_SID, "Firefox").await;
-    // What the console has the owner do before anything else: name the
-    // organization, which the invitation below needs, and make a project.
-    let (status, named) = call(
-        pool,
-        "PATCH",
-        "/internal/organization",
-        OWNER,
-        &organization,
-        None,
-        Some(json!({ "name": "Acme" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "name: {named}");
     let (status, created) = call(
         pool,
         "POST",

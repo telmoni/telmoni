@@ -34,8 +34,8 @@ pub struct LiveInvite {
     /// once they have been erased: the invitation outlives them.
     pub inviter_email: Option<String>,
     pub inviter_display_name: Option<String>,
-    /// What the organization is called; `None` means never named.
-    pub organization_name: Option<String>,
+    /// What the organization is called.
+    pub organization_name: String,
 }
 
 /// Write the offer. **Every add lands here**, for an address with an
@@ -313,7 +313,7 @@ pub async fn list_incoming(
          SELECT i.id,
                 'organization'::text AS scope,
                 i.organization_id AS target_id,
-                COALESCE(o.name, '') AS target_name,
+                o.name AS target_name,
                 i.role,
                 inviter.email AS inviter_email,
                 inviter.display_name AS inviter_display_name,

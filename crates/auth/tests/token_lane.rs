@@ -199,7 +199,10 @@ async fn a_live_token_reads_the_organization_it_belongs_to(pool: PgPool) {
     // only a key can spell a console link, or name the organization to the CLI.
     assert!(telmoni_shared::slug::is_slug(&fixture.slug), "{body}");
     assert_eq!(body["slug"], fixture.slug.as_str(), "{body}");
-    assert!(body["name"].is_null(), "nobody has named it yet: {body}");
+    assert_eq!(
+        body["name"], "My organization",
+        "named after an owner who gave no name: {body}"
+    );
     assert_eq!(
         body["owner"]["email"], EMAIL,
         "the owner rides beside the organization, as its contact: {body}"

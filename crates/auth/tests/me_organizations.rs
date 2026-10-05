@@ -96,25 +96,13 @@ async fn me(pool: &PgPool, user: &str, requested: Option<&str>) -> (StatusCode, 
     call(pool, "POST", "/me", user, requested, None).await
 }
 
-/// Sign somebody in for the first time and name the organization they were
-/// provisioned with, as the console has every owner do before it opens to
-/// them; answers its id.
+/// Sign somebody in for the first time; answers the id of the organization
+/// they were provisioned with.
 async fn sign_in(pool: &PgPool, user: &str) -> String {
     seed_identity(pool, user, &format!("{user}@example.test")).await;
     let (status, body) = me(pool, user, None).await;
     assert_eq!(status, StatusCode::OK, "sign-in failed for {user}: {body}");
-    let organization = body["activeOrganizationId"].as_str().unwrap().to_owned();
-    let (status, body) = call(
-        pool,
-        "PATCH",
-        "/internal/organization",
-        user,
-        Some(&organization),
-        Some(json!({ "name": "Acme" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "naming {organization}: {body}");
-    organization
+    body["activeOrganizationId"].as_str().unwrap().to_owned()
 }
 
 /// `owner` makes a project in `organization`, which sign-in does not;

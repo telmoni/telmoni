@@ -493,7 +493,7 @@ async fn a_foreign_row_is_invisible_even_by_exact_id() {
     );
     for org in [&org_a, &org_b] {
         sqlx::query(
-            "INSERT INTO auth.organizations (external_id, slug) VALUES ($1, 'org-' || md5($1))",
+            "INSERT INTO auth.organizations (external_id, slug, name) VALUES ($1, 'org-' || md5($1), 'Acme')",
         )
         .bind(org)
         .execute(&pool)

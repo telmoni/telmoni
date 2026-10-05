@@ -76,9 +76,9 @@ pub struct Organization {
     pub external_id: OrganizationId,
     /// The organization's segment in console paths (`telmoni_shared::slug`).
     pub slug: String,
-    /// What the organization is called; `None` only before the owner
-    /// has named it, which the console asks for before it opens to them.
-    pub name: Option<String>,
+    /// What the organization is called: its owner's at provisioning ("Ada's
+    /// organization"), whatever an owner or admin renames it to after.
+    pub name: String,
     /// Lifecycle state. See the schema comment on `auth.organizations.status`.
     pub status: OrganizationStatus,
     /// When deletion was requested; NULL outside `pending_deletion`.

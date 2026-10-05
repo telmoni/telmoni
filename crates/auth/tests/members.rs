@@ -110,8 +110,8 @@ async fn project_of(pool: &PgPool, user: &str) -> String {
 }
 
 /// Sign somebody in, provisioning their organization. The first time, it then
-/// names the organization, as the console has every owner do before anything
-/// else, and makes the one project these tests act on. Returns the `/me` body.
+/// renames the organization Acme, the name the verdicts below are read for,
+/// and makes the one project these tests act on. Returns the `/me` body.
 async fn sign_in(pool: &PgPool, user: &str) -> Value {
     seed_identity(pool, user, &format!("{user}@example.test")).await;
     let body = json!({});

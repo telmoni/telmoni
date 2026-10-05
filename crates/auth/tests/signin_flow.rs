@@ -697,11 +697,13 @@ async fn a_sign_in_records_the_session_its_bearer_names(pool: PgPool) {
     assert_eq!(provider_sid.as_deref(), Some("sid_456"));
 }
 
-/// ⚠ AN ORGANIZATION IS BORN UNNAMED, and its owner's address travels beside
-/// it for the console to name whom to ask — read from the person, never copied
+/// ⚠ AN ORGANIZATION IS BORN NAMED AFTER ITS HOLDER, as Vercel and Cloudflare
+/// name a new account, at the slug that name reads as, so the console opens
+/// straight onto it. Nothing is read off the address, which travels beside it
+/// for the console to name whom to ask: read from the person, never copied
 /// onto the organization.
 #[sqlx::test]
-async fn provisioning_leaves_the_organization_unnamed(pool: PgPool) {
+async fn provisioning_names_the_organization_after_its_holder(pool: PgPool) {
     telmoni_shared::test_util::apply_audit_migrations(&pool).await;
     let (application, _provider) = app_configured(
         pool.clone(),
@@ -711,41 +713,60 @@ async fn provisioning_leaves_the_organization_unnamed(pool: PgPool) {
         },
     );
 
-    // Through the writer the exchange uses, so the lowercasing is the
-    // service's own rather than the fixture's.
-    let resp = application
-        .clone()
-        .oneshot(post_json(
-            "/test/session",
-            serde_json::json!({ "userId": "user_named_at_birth", "email": "Ada@Example.com" }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let bearer = json_body(resp).await["accessToken"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-
-    let resp = application.oneshot(post_me_under(&bearer)).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let body = json_body(resp).await;
-    let organization = body["activeOrganizationId"]
-        .as_str()
-        .expect("/me names the organization it provisioned");
-
-    let name: Option<String> =
-        sqlx::query_scalar("SELECT name FROM auth.organizations WHERE external_id = $1")
-            .bind(organization)
-            .fetch_one(&pool)
+    for (user, names, expected_name, expected_slug) in [
+        (
+            "user_named_at_birth",
+            serde_json::json!({ "firstName": "Ada", "lastName": "Lovelace" }),
+            "Ada's organization",
+            "adas-organization",
+        ),
+        (
+            "user_with_no_name",
+            serde_json::json!({}),
+            "My organization",
+            "my-organization",
+        ),
+    ] {
+        // Through the writer the exchange uses, so the lowercasing is the
+        // service's own rather than the fixture's.
+        let mut session = serde_json::json!({ "userId": user, "email": "Ada@Example.com" });
+        if let (Some(session), Some(names)) = (session.as_object_mut(), names.as_object()) {
+            session.extend(names.clone());
+        }
+        let resp = application
+            .clone()
+            .oneshot(post_json("/test/session", session))
             .await
-            .expect("the organization row");
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bearer = json_body(resp).await["accessToken"]
+            .as_str()
+            .unwrap()
+            .to_owned();
 
-    assert_eq!(
-        name, None,
-        "provisioning stored a name; the owner gives it one"
-    );
-    assert_eq!(body["organizations"][0]["ownerEmail"], "ada@example.com");
+        let resp = application
+            .clone()
+            .oneshot(post_me_under(&bearer))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = json_body(resp).await;
+        let organization = body["activeOrganizationId"]
+            .as_str()
+            .expect("/me names the organization it provisioned");
+
+        let (name, slug): (String, String) =
+            sqlx::query_as("SELECT name, slug FROM auth.organizations WHERE external_id = $1")
+                .bind(organization)
+                .fetch_one(&pool)
+                .await
+                .expect("the organization row");
+
+        assert_eq!(name, expected_name, "{user}");
+        assert_eq!(slug, expected_slug, "{user}");
+        assert_eq!(body["organizations"][0]["name"], expected_name, "{user}");
+        assert_eq!(body["organizations"][0]["ownerEmail"], "ada@example.com");
+    }
 }
 
 /// ⚠ **One address, two people, two organizations.** An external provider owns

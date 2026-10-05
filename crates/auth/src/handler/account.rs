@@ -577,7 +577,7 @@ pub async fn delete_account(
         let Some(row) = row.filter(|_| shared) else {
             continue;
         };
-        let label = crate::identity::organization_label(row.name.as_deref());
+        let label = row.name;
         match blockers.iter_mut().find(|(seen, _)| *seen == label) {
             Some((_, count)) => *count += 1,
             None => blockers.push((label, 1)),

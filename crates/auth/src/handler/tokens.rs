@@ -306,7 +306,7 @@ pub async fn validate_token(
     let validated = result.ok_or(AuthError::Unauthenticated)?;
 
     Ok(Json(ValidateTokenResponse {
-        name: validated.label(),
+        name: validated.name,
         organization_id: validated.organization_id,
         flags,
         token_id: validated.id,
@@ -431,7 +431,7 @@ mod tests {
         let added_by = telmoni_shared::UserId::try_new("user_authz").expect("valid test user id");
 
         let mut tx = organization_scope(&pool, &organization).await?;
-        crate::db::organizations::create(&mut tx, &organization).await?;
+        crate::db::organizations::create(&mut tx, &organization, "Acme", "acme").await?;
         crate::db::projects::create(&mut tx, &project, &organization, "Default project").await?;
         tx.commit().await?;
         for (who, role) in [("member", Role::Member), ("admin", Role::Admin)] {

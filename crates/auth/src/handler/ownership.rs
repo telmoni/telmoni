@@ -79,15 +79,8 @@ async fn locked<'a>(
 }
 
 /// Whether a caller holding `role` may offer `organization` to `target`,
-/// checked in the order a refusal names: only its owner offers it, only once
-/// it has a name, and only to one of its admins. Answers the name, for the
-/// mail.
-///
-/// ⚠ **Only a named organization.** The offer's mail and notice call the
-/// organization by its name, and an unnamed one has nothing to be called by
-/// — nor anyone in it but its owner, since the invite lanes hold the same
-/// line. A name can be changed but never cleared, so one checked here is
-/// still there at accept.
+/// checked in the order a refusal names: only its owner offers it, and only to
+/// one of its admins. Answers the name, for the mail.
 async fn offerable(
     tx: &mut Scoped<'_, Organization>,
     role: OrganizationRole,
@@ -99,18 +92,8 @@ async fn offerable(
             AuthzError::Forbidden("only the organization's owner can hand it over".into()).into(),
         );
     }
-    let Some(name) = organizations::get(tx, organization)
-        .await?
-        .and_then(|o| o.name)
-        .map(|name| name.trim().to_owned())
-        .filter(|name| !name.is_empty())
-    else {
-        return Err(AuthError::Conflict(
-            "name the organization before handing it over — the offer calls it by its name, \
-             and it has none yet"
-                .into(),
-        )
-        .into());
+    let Some(name) = organizations::get(tx, organization).await?.map(|o| o.name) else {
+        return Err(AuthError::NotFound("organization not found".into()).into());
     };
     match organization_members::role_on_organization(tx, organization, target).await? {
         None => Err(AuthError::NotFound("no such organization member".into()).into()),
@@ -292,20 +275,18 @@ pub async fn cancel(
     let owner = identities::contact(&mut tx, &user_id).await?;
     let name = organizations::get(&mut tx, &organization)
         .await?
-        .and_then(|o| o.name);
+        .map(|o| o.name);
     tx.commit().await?;
 
-    if let (Some(to), Some(owner)) = (&holder_email, owner) {
-        let label = crate::identity::organization_label(name.as_deref());
-        if let Err(e) = state
+    if let (Some(to), Some(owner), Some(name)) = (&holder_email, owner, name)
+        && let Err(e) = state
             .mailer
-            .send_ownership_offer_withdrawn(to, &owner.display(), &label)
+            .send_ownership_offer_withdrawn(to, &owner.display(), &name)
             .await
-        {
-            // The withdrawal stands without the mail: their console no longer
-            // lists the offer.
-            tracing::warn!(organization_id = %organization, error = %e, "ownership withdrawal mail failed");
-        }
+    {
+        // The withdrawal stands without the mail: their console no longer
+        // lists the offer.
+        tracing::warn!(organization_id = %organization, error = %e, "ownership withdrawal mail failed");
     }
 
     Ok(Json(json!({
@@ -352,20 +333,18 @@ pub async fn decline(
     let admin = identities::contact(&mut tx, &user_id).await?;
     let name = organizations::get(&mut tx, &organization)
         .await?
-        .and_then(|o| o.name);
+        .map(|o| o.name);
     tx.commit().await?;
 
-    if let (Some(owner), Some(admin)) = (owner, admin) {
-        let label = crate::identity::organization_label(name.as_deref());
-        if let Err(e) = state
+    if let (Some(owner), Some(admin), Some(name)) = (owner, admin, name)
+        && let Err(e) = state
             .mailer
-            .send_ownership_declined(&owner.email, &admin.display(), &label)
+            .send_ownership_declined(&owner.email, &admin.display(), &name)
             .await
-        {
-            // The decline stands without the mail: the owner's roster no longer
-            // lists the offer.
-            tracing::warn!(organization_id = %organization, error = %e, "ownership declined mail failed");
-        }
+    {
+        // The decline stands without the mail: the owner's roster no longer
+        // lists the offer.
+        tracing::warn!(organization_id = %organization, error = %e, "ownership declined mail failed");
     }
 
     Ok(Json(json!({ "ownerOrganizationId": organization })))
@@ -483,20 +462,18 @@ pub async fn accept(
     let new_owner = identities::contact(&mut tx, &user_id).await?;
     let name = organizations::get(&mut tx, &organization)
         .await?
-        .and_then(|o| o.name);
+        .map(|o| o.name);
     tx.commit().await?;
 
-    if let (Some(previous), Some(new_owner)) = (previous_contact, new_owner) {
-        let label = crate::identity::organization_label(name.as_deref());
-        if let Err(e) = state
+    if let (Some(previous), Some(new_owner), Some(name)) = (previous_contact, new_owner, name)
+        && let Err(e) = state
             .mailer
-            .send_ownership_accepted(&previous.email, &new_owner.display(), &label)
+            .send_ownership_accepted(&previous.email, &new_owner.display(), &name)
             .await
-        {
-            // The transfer stands without the mail: the previous owner's
-            // console shows them as an admin from their next page.
-            tracing::warn!(organization_id = %organization, error = %e, "ownership accepted mail failed");
-        }
+    {
+        // The transfer stands without the mail: the previous owner's console
+        // shows them as an admin from their next page.
+        tracing::warn!(organization_id = %organization, error = %e, "ownership accepted mail failed");
     }
 
     tracing::info!(organization_id = %organization, to = %user_id, "ownership transferred");

@@ -537,8 +537,8 @@ async fn seed_person(pool: &PgPool, user: &str) {
 async fn seed_organization(pool: &PgPool, id: &str, owner: &str, status: &str) {
     sqlx::query(
         "INSERT INTO auth.organizations
-             (external_id, slug, status, deletion_requested_at, erase_after, deletion_kind)
-         VALUES ($1, 'org-' || md5($1), $2,
+             (external_id, slug, name, status, deletion_requested_at, erase_after, deletion_kind)
+         VALUES ($1, 'org-' || md5($1), 'Acme', $2,
                  CASE WHEN $2 = 'pending_deletion' THEN now() END,
                  CASE WHEN $2 = 'pending_deletion' THEN now() + interval '14 days' END,
                  CASE WHEN $2 = 'pending_deletion' THEN 'owner' END)",
