@@ -146,6 +146,7 @@ const PERSON_ROUTES: &[(&str, &str)] = &[
     ("POST", "/internal/me/email-change"),
     ("POST", "/internal/me/email-change/confirm"),
     ("PUT", "/internal/me/analytics"),
+    ("PUT", "/internal/me/default-organization"),
     ("GET", "/internal/me/invites"),
     ("POST", "/internal/me/invites/{invite_id}/accept"),
     ("POST", "/internal/me/invites/{invite_id}/decline"),

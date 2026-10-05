@@ -391,6 +391,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             put(handler::account::set_analytics_preference),
         )
         .route(
+            "/me/default-organization",
+            put(handler::account::set_default_organization),
+        )
+        .route(
             "/organization/members",
             get(handler::organization_members::list_organization_members),
         )

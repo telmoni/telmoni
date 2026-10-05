@@ -246,6 +246,13 @@ const MUTATIONS: &[Mutation] = &[
         actor_id: ActorPattern::Variable,
     },
     Mutation {
+        file: "crates/auth/src/handler/account.rs",
+        fn_name: "set_default_organization",
+        action: "Updated",
+        resource_kind: "Member",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
         file: "crates/auth/src/handler/me.rs",
         fn_name: "provision_first_organization",
         action: "Created",

@@ -67,6 +67,13 @@ GRANT SELECT ON auth.identities TO auth_maintenance;
 CREATE TABLE auth.accounts (
     user_id               TEXT        PRIMARY KEY REFERENCES auth.identities (user_id) ON DELETE CASCADE,
     analytics_opt_in      BOOLEAN     NOT NULL DEFAULT false,
+    -- The seat whose organization a sign-in opens this person in, when they
+    -- chose one. A seat, not an organization: leaving, a removal or the
+    -- organization's erasure takes the choice with the seat, and a later seat
+    -- in the same organization is not chosen until they choose it again, as
+    -- Vercel picks a new default team for whoever leaves theirs. Its foreign
+    -- key follows `auth.organization_members`, below.
+    default_membership_id UUID,
     deletion_requested_at TIMESTAMPTZ,
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
     shard_key             UUID        NOT NULL DEFAULT gen_random_uuid()
@@ -187,6 +194,14 @@ CREATE POLICY maintenance_access ON auth.organization_members
     WITH CHECK (current_user = 'auth_maintenance');
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON auth.organization_members TO auth_maintenance;
+
+-- `auth.accounts` is made before the seats it may name. Indexed because every
+-- seat deleted looks for the account naming it.
+ALTER TABLE auth.accounts
+    ADD CONSTRAINT accounts_default_membership_fkey
+    FOREIGN KEY (default_membership_id) REFERENCES auth.organization_members (id) ON DELETE SET NULL;
+CREATE INDEX accounts_default_membership_idx ON auth.accounts (default_membership_id)
+    WHERE default_membership_id IS NOT NULL;
 
 
 -- ══════════════════════════════════════════════════════════════════════════════

@@ -324,6 +324,207 @@ async fn me_by_slug(pool: &PgPool, user: &str, slug: &str, id: Option<&str>) -> 
     json_body(resp).await
 }
 
+/// Put `organization` into its deletion window, or take it back out, as an
+/// owner's deletion and a restore do.
+async fn set_pending_deletion(pool: &PgPool, organization: &str, pending: bool) {
+    let sql = if pending {
+        "UPDATE auth.organizations
+            SET status = 'pending_deletion', deletion_requested_at = now(),
+                erase_after = now() + interval '14 days', deletion_kind = 'owner'
+          WHERE external_id = $1"
+    } else {
+        "UPDATE auth.organizations
+            SET status = 'active', deletion_requested_at = NULL,
+                erase_after = NULL, deletion_kind = NULL
+          WHERE external_id = $1"
+    };
+    sqlx::query(sql)
+        .bind(organization)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// `PUT /internal/me/default-organization` as `user`.
+async fn choose_default(pool: &PgPool, user: &str, organization: &str) -> (StatusCode, Value) {
+    call(
+        pool,
+        "PUT",
+        "/internal/me/default-organization",
+        user,
+        None,
+        Some(json!({ "organizationId": organization })),
+    )
+    .await
+}
+
+/// The organization a person chose is the one a sign-in opens: it answers a
+/// request that names none — the console's after a sign-in forgets its cookie,
+/// the CLI's at login — while a request naming another still acts there.
+/// Recorded on the chosen organization's chain.
+#[sqlx::test]
+async fn a_person_opens_in_the_organization_they_chose(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let own = sign_in(&pool, "user_me_chooser").await;
+    let other = sign_in(&pool, "user_me_chosen_owner").await;
+    join(&pool, &other, "user_me_chosen_owner", "user_me_chooser").await;
+
+    let (_, body) = me(&pool, "user_me_chooser", None).await;
+    assert_eq!(body["defaultOrganizationId"], own.as_str(), "{body}");
+    assert_eq!(body["activeOrganizationId"], own.as_str(), "{body}");
+
+    let (status, body) = choose_default(&pool, "user_me_chooser", &other).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["defaultOrganizationId"], other.as_str(), "{body}");
+
+    let (_, body) = me(&pool, "user_me_chooser", None).await;
+    assert_eq!(body["defaultOrganizationId"], other.as_str(), "{body}");
+    assert_eq!(body["activeOrganizationId"], other.as_str(), "{body}");
+
+    let (_, body) = me(&pool, "user_me_chooser", Some(&own)).await;
+    assert_eq!(body["activeOrganizationId"], own.as_str(), "{body}");
+    assert_eq!(
+        body["defaultOrganizationId"],
+        other.as_str(),
+        "acting somewhere else moved the default: {body}"
+    );
+
+    let recorded: Vec<String> = sqlx::query_scalar(
+        "SELECT organization_id FROM audit.events
+          WHERE resource_kind = 'member' AND action = 'updated'
+            AND metadata->>'default_organization' = 'true'",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(recorded, vec![other.clone()]);
+}
+
+/// ⚠ **The choice is the seat's.** Leaving the chosen organization, or being
+/// removed from it, hands the person back to the oldest they own, as Vercel
+/// picks a new default team for whoever leaves theirs — and coming back does
+/// not bring the old choice with it. One being deleted is passed over, and
+/// back once it is restored.
+#[sqlx::test]
+async fn the_default_goes_with_the_seat_it_was_chosen_on(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let own = sign_in(&pool, "user_me_mover").await;
+    let other = sign_in(&pool, "user_me_mover_host").await;
+    join(&pool, &other, "user_me_mover_host", "user_me_mover").await;
+    let (status, body) = choose_default(&pool, "user_me_mover", &other).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    set_pending_deletion(&pool, &other, true).await;
+    let (_, body) = me(&pool, "user_me_mover", None).await;
+    assert_eq!(body["defaultOrganizationId"], own.as_str(), "{body}");
+    set_pending_deletion(&pool, &other, false).await;
+    let (_, body) = me(&pool, "user_me_mover", None).await;
+    assert_eq!(body["defaultOrganizationId"], other.as_str(), "{body}");
+
+    let (status, body) = call(
+        &pool,
+        "DELETE",
+        "/internal/organization/members/user_me_mover",
+        "user_me_mover",
+        Some(&other),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let (_, body) = me(&pool, "user_me_mover", None).await;
+    assert_eq!(body["defaultOrganizationId"], own.as_str(), "{body}");
+
+    join(&pool, &other, "user_me_mover_host", "user_me_mover").await;
+    let (_, body) = me(&pool, "user_me_mover", None).await;
+    assert_eq!(
+        body["defaultOrganizationId"],
+        own.as_str(),
+        "a new seat revived the choice made on the old one: {body}"
+    );
+
+    // ⚠ A removal is the host's act, bound to the host, and the account it
+    // clears is the removed person's, which no binding of the host's reaches:
+    // the foreign key clears it whoever deleted the seat.
+    let (status, body) = choose_default(&pool, "user_me_mover", &other).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = call(
+        &pool,
+        "DELETE",
+        "/internal/organization/members/user_me_mover",
+        "user_me_mover_host",
+        Some(&other),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let chosen: Option<uuid::Uuid> = sqlx::query_scalar(
+        "SELECT default_membership_id FROM auth.accounts WHERE user_id = 'user_me_mover'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        chosen, None,
+        "the removal left the choice naming a seat that is gone"
+    );
+    let (_, body) = me(&pool, "user_me_mover", None).await;
+    assert_eq!(body["defaultOrganizationId"], own.as_str(), "{body}");
+}
+
+/// Only an organization the person holds a seat in, and that is not being
+/// deleted, can be chosen; a refusal changes nothing.
+#[sqlx::test]
+async fn a_default_is_chosen_only_among_the_persons_own_organizations(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let own = sign_in(&pool, "user_me_picky").await;
+    let stranger = sign_in(&pool, "user_me_picky_stranger").await;
+
+    let (status, body) = choose_default(&pool, "user_me_picky", &stranger).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, body) = choose_default(&pool, "user_me_picky", "not an id at all").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+
+    let (_, body) = me(&pool, "user_me_picky", None).await;
+    assert_eq!(body["defaultOrganizationId"], own.as_str(), "{body}");
+    let chosen: Option<uuid::Uuid> = sqlx::query_scalar(
+        "SELECT default_membership_id FROM auth.accounts WHERE user_id = 'user_me_picky'",
+    )
+    .fetch_optional(&pool)
+    .await
+    .unwrap()
+    .flatten();
+    assert_eq!(chosen, None, "a refusal recorded a choice");
+}
+
+/// Somebody whose account deletion is under way chooses nothing. Once they have
+/// confirmed it the person gate refuses their bearer outright; the lane's own
+/// refusal is for a deletion confirmed while the choice was on its way.
+#[sqlx::test]
+async fn somebody_on_their_way_out_chooses_no_default(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    sign_in(&pool, "user_me_going").await;
+    let other = sign_in(&pool, "user_me_going_host").await;
+    join(&pool, &other, "user_me_going_host", "user_me_going").await;
+    sqlx::query(
+        "INSERT INTO auth.accounts (user_id, deletion_requested_at) VALUES ($1, now())
+         ON CONFLICT (user_id) DO UPDATE SET deletion_requested_at = now()",
+    )
+    .bind("user_me_going")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = choose_default(&pool, "user_me_going", &other).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+    let chosen: Option<uuid::Uuid> = sqlx::query_scalar(
+        "SELECT default_membership_id FROM auth.accounts WHERE user_id = 'user_me_going'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(chosen, None, "a person on their way out recorded a choice");
+}
+
 /// A person who owns nothing active lands in the organization they joined,
 /// and is NOT given a new one while they belong somewhere.
 #[sqlx::test]

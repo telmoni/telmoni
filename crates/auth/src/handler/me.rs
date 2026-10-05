@@ -76,12 +76,18 @@ pub struct MeResponse {
     /// can be. Never active, never listed above, never chosen.
     pub deleted_organizations: Vec<organization_members::DeletedOrganization>,
     /// The organization this request acts in: the one the console asked for
-    /// when the person belongs to it, else the oldest they own, else the
-    /// oldest they belong to. The console sends it back as `x-organization-id`.
+    /// when the person belongs to it, else their default. The console sends it
+    /// back as `x-organization-id`.
     /// `None` for a person in no organization — sign-ups closed, or their last
     /// one deleted a moment ago — whose invitations and account are all the
     /// console may show.
     pub active_organization_id: Option<OrganizationId>,
+    /// The organization a sign-in opens in, and the one a request naming none
+    /// acts in: the one the person chose, while they hold its seat and it is
+    /// active, else the oldest they own, else the oldest they belong to — as
+    /// Vercel opens on a default team, and picks another for whoever leaves
+    /// theirs. `None` exactly when `active_organization_id` is.
+    pub default_organization_id: Option<OrganizationId>,
     /// The project seats the person holds.
     pub memberships: Vec<members::Membership>,
     /// Pending invitations addressed to the person's email.
@@ -197,7 +203,8 @@ pub async fn me(
     };
     let project_offers = members::project_offers_to(&mut mtx, &user_id).await?;
     let requested = requested_organization(&headers);
-    let active = choose_active(&organizations, requested.as_ref());
+    let default = default_organization(&organizations, person.default_organization_id.as_ref());
+    let active = choose_active(&organizations, requested.as_ref(), default.as_ref());
     let flags = match &active {
         Some(active) => {
             let mut flags = flags::resolve_for_organization(&mut mtx, active).await?;
@@ -259,6 +266,7 @@ pub async fn me(
         organizations,
         deleted_organizations,
         active_organization_id: active,
+        default_organization_id: default,
         memberships,
         incoming_invites,
         project_offers,
@@ -305,23 +313,36 @@ fn requested_organization(headers: &HeaderMap) -> Option<Requested> {
         })
 }
 
-/// The requested organization when the person belongs to it, else the oldest
-/// one they own, else the oldest they belong to. `organizations` is in
-/// membership order, oldest first.
-fn choose_active(
+/// The organization the person chose to open in, while it is among
+/// `organizations` — the active ones they hold a seat in — else the oldest one
+/// they own, else the oldest they belong to. `organizations` is in membership
+/// order, oldest first.
+fn default_organization(
     organizations: &[organization_members::OrganizationMembership],
-    requested: Option<&Requested>,
+    chosen: Option<&OrganizationId>,
 ) -> Option<OrganizationId> {
-    requested
-        .and_then(|r| organizations.iter().find(|o| r.names(o)))
-        .map(|o| o.organization_id.clone())
+    chosen
+        .and_then(|chosen| organizations.iter().find(|o| &o.organization_id == chosen))
         .or_else(|| {
             organizations
                 .iter()
                 .find(|o| o.role == OrganizationRole::Owner)
-                .or_else(|| organizations.first())
-                .map(|o| o.organization_id.clone())
         })
+        .or_else(|| organizations.first())
+        .map(|o| o.organization_id.clone())
+}
+
+/// The requested organization when the person belongs to it, else their
+/// default ([`default_organization`]).
+fn choose_active(
+    organizations: &[organization_members::OrganizationMembership],
+    requested: Option<&Requested>,
+    default: Option<&OrganizationId>,
+) -> Option<OrganizationId> {
+    requested
+        .and_then(|r| organizations.iter().find(|o| r.names(o)))
+        .map(|o| o.organization_id.clone())
+        .or_else(|| default.cloned())
 }
 
 /// What [`provision_first_organization`] did for a person who belonged nowhere.

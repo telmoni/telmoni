@@ -45,10 +45,16 @@ flowchart TD
   - See [the console's paths](console.md#paths-and-slugs).
 
 **Nobody creates an organization.**
-- A person's first organization is provisioned the first time `/me` finds them in none (`provision_first_organization`, `crates/auth/src/handler/me.rs`). It writes the organization, its owner row, and their audit rows — no name and no project. The owner names it before the console opens to them (see [the console's paths](console.md#paths-and-slugs)), and makes the first project from the Projects page, where `/console` lands them until one exists.
+- A person's first organization is provisioned the first time `/me` finds them in none (`provision_first_organization`, `crates/auth/src/handler/me.rs`). It writes the organization, its owner row, and their audit rows — no name and no project. The owner names it before the console opens to them (see [the console's paths](console.md#paths-and-slugs)), and makes the first project from the organization's overview, where `/console` lands everybody.
   - Provisioning is gated by the global `Signup` flag. With the flag off, the person gets an answer with no organization, not an error.
   - It takes the person's lock and checks again, so two first page loads at once provision only one organization.
 - There is no route that creates an organization. The only place `insert_owner` runs is provisioning.
+
+**A person opens in their default organization, as Vercel opens on a default team.**
+- It is where the console opens at sign-in, and the organization a request that names none acts in — the CLI's at login among them, which keeps what `/me` answered (`default_organization`, `crates/auth/src/handler/me.rs`; `/me` answers it as `defaultOrganizationId`).
+- It is the one the person chose on Account Settings (`PUT /internal/me/default-organization`), while they hold its seat and it is active; else the oldest they own; else the oldest they belong to. So the first organization is the default until another is chosen.
+- ⚠ **The choice is stored as the seat** (`auth.accounts.default_membership_id`, a foreign key to `auth.organization_members` that sets itself null), not the organization. Leaving, a removal and the organization's erasure take the choice with the seat, and a later seat in the same organization is not chosen until the person chooses it again — as Vercel picks a new default team for whoever leaves theirs. An organization being deleted is passed over while it waits, and is the default again if restored.
+- Choosing is recorded on the chosen organization's audit chain, as a person's own act on their seat there; another organization's chain has no business with it.
 
 **Invitations are the only way a person joins another organization on their own.** The one other way onto a roster is a project transfer: it enrolls the project's seat holders on the destination organization's roster (see [Transfers](#transfers)).
 - An organization invitation never grants `owner`.

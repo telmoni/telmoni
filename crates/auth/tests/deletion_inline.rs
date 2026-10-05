@@ -1323,6 +1323,11 @@ async fn a_pending_organization_is_refused_on_every_lane_that_acts_in_it(pool: P
             Some(json!({ "opt_in": true })),
         ),
         (
+            "PUT",
+            "/internal/me/default-organization".into(),
+            Some(json!({ "organizationId": ORGANIZATION })),
+        ),
+        (
             "POST",
             "/internal/auth/sessions/00000000-0000-0000-0000-000000000000/revoke".into(),
             None,

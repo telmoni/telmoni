@@ -2,13 +2,14 @@
 //! about them (written only with values the provider handed this service at a
 //! sign-in's code exchange, never from a request body; a refresh asks the
 //! provider nothing), plus the few facts that are theirs and no
-//! organization's: analytics consent, and a pending deletion.
+//! organization's: analytics consent, the organization a sign-in opens them
+//! in, and a pending deletion.
 
 use chrono::{DateTime, Utc};
-use telmoni_shared::UserId;
 use telmoni_shared::db::tenant_session::{
     self, Binding, HasOrganization, Maintenance, PersonAndOrganization, Scoped,
 };
+use telmoni_shared::{OrganizationId, UserId};
 
 use crate::db::AuthLane;
 
@@ -74,6 +75,10 @@ pub struct Person {
     /// Already sanitised by the writer.
     pub display_name: Option<String>,
     pub analytics_opt_in: bool,
+    /// The organization of the seat they chose to open in, if they chose one
+    /// and still hold it — whatever its state: `/me` decides whether it still
+    /// counts.
+    pub default_organization_id: Option<OrganizationId>,
     pub deletion_requested_at: Option<DateTime<Utc>>,
 }
 
@@ -175,9 +180,11 @@ pub async fn get<B: IdentityRead>(
     sqlx::query_as(
         "SELECT i.email, i.email_verified, i.display_name,
                 COALESCE(a.analytics_opt_in, false) AS analytics_opt_in,
+                m.organization_id AS default_organization_id,
                 a.deletion_requested_at
            FROM auth.identities i
            LEFT JOIN auth.accounts a ON a.user_id = i.user_id
+           LEFT JOIN auth.organization_members m ON m.id = a.default_membership_id
           WHERE i.user_id = $1",
     )
     .bind(user_id)
@@ -257,6 +264,41 @@ pub async fn set_analytics_opt_in(
     .execute(tx.conn())
     .await?;
     Ok(done.rows_affected() == 1)
+}
+
+/// Make `organization_id` the organization a sign-in opens this person in, and
+/// the one a request naming none acts in, by recording their seat there.
+/// `false` when they hold no seat there, or are on their way out.
+pub async fn set_default_organization(
+    tx: &mut Scoped<'_, tenant_session::Person>,
+    user_id: &UserId,
+    organization_id: &OrganizationId,
+) -> sqlx::Result<bool> {
+    // The seat is read through `member_read`, the person's own seats, so no
+    // seat of somebody else's can be recorded here.
+    let done = sqlx::query(
+        "INSERT INTO auth.accounts
+             (user_id, default_membership_id, shard_key)
+         SELECT i.user_id, m.id, i.shard_key
+           FROM auth.identities i
+           JOIN auth.organization_members m
+             ON m.user_id = i.user_id AND m.organization_id = $2
+          WHERE i.user_id = $1
+         ON CONFLICT (user_id) DO UPDATE
+            SET default_membership_id = excluded.default_membership_id, updated_at = now()
+          WHERE auth.accounts.deletion_requested_at IS NULL",
+    )
+    .bind(user_id)
+    .bind(organization_id)
+    .execute(tx.conn())
+    .await;
+    match done {
+        Ok(done) => Ok(done.rows_affected() == 1),
+        // A removal that committed while this ran: the statement read the
+        // seat, and its foreign key found it gone.
+        Err(sqlx::Error::Database(e)) if e.is_foreign_key_violation() => Ok(false),
+        Err(e) => Err(e),
+    }
 }
 
 /// Mark the person as leaving. `false` when they already are.

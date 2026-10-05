@@ -1,14 +1,17 @@
 //! The person's own lanes — `/internal/me/…`: the things somebody does to
 //! THEIR account rather than to an organization. Password reset, the address
-//! they sign in with, analytics consent, and deleting the account.
+//! they sign in with, analytics consent, the organization a sign-in opens them
+//! in, and deleting the account.
 //!
 //! The person is the bearer and nothing else, so there is nothing in the
 //! path to forge.
 //!
-//! The three that change something audit it on the chain of the organization
-//! the console names in `x-organization-id` — after checking the person is in
-//! it (`acting_person_in`). Somebody in no organization names none, and the
-//! act goes to the structured log alone.
+//! The address, consent and deletion audit their change on the chain of the
+//! organization the console names in `x-organization-id` — after checking the
+//! person is in it (`acting_person_in`). Somebody in no organization names
+//! none, and the act goes to the structured log alone. The default
+//! organization is recorded on the chain of the one chosen, which is never
+//! none: another organization's chain has no business with it.
 
 use std::sync::Arc;
 
@@ -38,7 +41,7 @@ use crate::{
     },
     handler::{
         acting_person_in, deletion::FINALIZE_GRACE_SECONDS, log_act_outside_every_organization,
-        recording_organization_of,
+        parse_organization_id, recording_organization_of,
     },
     model::DeletionKind,
 };
@@ -81,6 +84,13 @@ impl std::fmt::Debug for ConfirmEmailChangeRequest {
 #[serde(deny_unknown_fields)]
 pub struct AnalyticsPreferenceRequest {
     pub opt_in: bool,
+}
+
+/// Body of `PUT /internal/me/default-organization`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DefaultOrganizationRequest {
+    pub organization_id: String,
 }
 
 /// Body for `DELETE /internal/me` and `DELETE /internal/organization` — the
@@ -398,6 +408,55 @@ pub async fn set_analytics_preference(
 
     tx.commit().await?;
     Ok(Json(json!({ "analytics_opt_in": req.opt_in })))
+}
+
+/// `PUT /internal/me/default-organization` — the organization a sign-in opens
+/// this person in, and the one a request naming none acts in: one of the
+/// active organizations they hold a seat in, as Vercel's default team is one
+/// of yours. `/me` answers it as `defaultOrganizationId`.
+pub async fn set_default_organization(
+    State(state): State<Arc<AppState>>,
+    principal: Principal,
+    Json(req): Json<DefaultOrganizationRequest>,
+) -> Result<impl IntoResponse, TelmoniError> {
+    let user_id = principal.user_id;
+    let organization = parse_organization_id(&req.organization_id)?;
+
+    // Their seat there, and the organization being active, are proved under
+    // the person's lock, which their own deletion takes too.
+    let mut tx = acting_person_in(&state, &user_id, Some(&organization)).await?;
+    let Some(person) = identities::get(&mut tx, &user_id).await? else {
+        return Err(AuthError::Unauthenticated.into());
+    };
+    if person.deletion_requested_at.is_some() {
+        return Err(AuthzError::Forbidden("account deletion in progress".into()).into());
+    }
+    // Nothing written past those checks is a seat removed since: a removal
+    // takes no lock of the person's.
+    if !identities::set_default_organization(&mut tx, &user_id, &organization).await? {
+        return Err(
+            AuthzError::Forbidden("you are not a member of this organization".into()).into(),
+        );
+    }
+
+    emit_audit(
+        &mut tx,
+        AuditEvent {
+            organization_id: &organization,
+            in_project: None,
+            actor: Actor::User(user_id.as_str()),
+            action: AuditAction::Updated,
+            resource_kind: TelmoniResourceKind::Member,
+            resource_id: Some(user_id.as_str()),
+            request_id: None,
+            ip_address: None,
+            user_agent: None,
+            metadata: Some(json!({ "default_organization": true })),
+        },
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(Json(json!({ "defaultOrganizationId": organization })))
 }
 
 /// `POST /internal/me/deletion-code` — mail the code that authorizes deleting
