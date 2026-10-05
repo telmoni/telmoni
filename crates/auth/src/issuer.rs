@@ -351,10 +351,7 @@ impl Issuer {
         }
         let polled = match device.status {
             device_codes::Status::Pending => {
-                let too_soon = device.last_polled_at.is_some_and(|last| {
-                    last + Duration::seconds(i64::from(device.interval_secs)) > now
-                });
-                device_codes::touch(&mut tx, device.id).await?;
+                let too_soon = device_codes::touch(&mut tx, device.id).await?;
                 if too_soon {
                     DevicePoll::SlowDown
                 } else {

@@ -677,7 +677,7 @@ async fn a_reset_from_the_inbox_sets_the_password_and_ends_every_session(pool: P
 #[sqlx::test]
 async fn a_device_is_approved_or_denied_from_the_console(pool: PgPool) {
     telmoni_shared::test_util::apply_audit_migrations(&pool).await;
-    let (app, outbox) = app(pool);
+    let (app, outbox) = app(pool.clone());
     let tokens = signed_in(&app, &outbox, "ada@example.com").await;
     let bearer = tokens["accessToken"].as_str().unwrap().to_owned();
 
@@ -723,6 +723,26 @@ async fn a_device_is_approved_or_denied_from_the_console(pool: PgPool) {
         json_body(resp).await["status"],
         "slow_down",
         "a second poll inside the interval"
+    );
+
+    // A whole interval since the last poll on the database's clock, the one
+    // that stamped it, is on time whatever the server's clock says.
+    sqlx::query(
+        "UPDATE auth.device_codes
+            SET last_polled_at = last_polled_at - make_interval(secs => interval_secs)
+          WHERE device_code_hash = $1",
+    )
+    .bind(sha256_hex(device_code.as_bytes()))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let resp = poll(device_code.clone()).await;
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+    assert_eq!(json_body(resp).await["status"], "authorization_pending");
+    assert_eq!(
+        json_body(poll(device_code.clone()).await).await["status"],
+        "slow_down",
+        "the poll on time is stamped as well"
     );
 
     // Approved by the signed-in person, typing the code as people do.

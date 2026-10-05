@@ -38,8 +38,6 @@ pub struct Device {
     pub status: Status,
     /// The person who approved it, with the session minted for the device.
     pub approved: Option<(UserId, String)>,
-    pub interval_secs: i32,
-    pub last_polled_at: Option<DateTime<Utc>>,
     pub expires_at: DateTime<Utc>,
 }
 
@@ -49,8 +47,6 @@ struct Row {
     status: String,
     approved_by: Option<UserId>,
     sid: Option<String>,
-    interval_secs: i32,
-    last_polled_at: Option<DateTime<Utc>>,
     expires_at: DateTime<Utc>,
 }
 
@@ -85,7 +81,7 @@ pub async fn find_for_poll(
     device_code_hash: &str,
 ) -> sqlx::Result<Option<Device>> {
     let row = sqlx::query_as::<_, Row>(
-        "SELECT id, status, approved_by, sid, interval_secs, last_polled_at, expires_at
+        "SELECT id, status, approved_by, sid, expires_at
            FROM auth.device_codes WHERE device_code_hash = $1
             FOR UPDATE",
     )
@@ -98,19 +94,27 @@ pub async fn find_for_poll(
         // unreadable one is a row nothing wrote; treated as still waiting.
         status: Status::from_column(&r.status).unwrap_or(Status::Pending),
         approved: r.approved_by.zip(r.sid),
-        interval_secs: r.interval_secs,
-        last_polled_at: r.last_polled_at,
         expires_at: r.expires_at,
     }))
 }
 
-/// Note a poll, for the interval the next one is held to.
-pub async fn touch(tx: &mut Scoped<'_, Maintenance<AuthLane>>, id: Uuid) -> sqlx::Result<()> {
-    sqlx::query("UPDATE auth.device_codes SET last_polled_at = now() WHERE id = $1")
-        .bind(id)
-        .execute(tx.conn())
-        .await?;
-    Ok(())
+/// Note a poll, for the interval the next one is held to: `true` when it came
+/// before the last one's interval was out. ⚠ One statement on the database's
+/// clock, the one that stamps `last_polled_at`: measured on the server's,
+/// any skew between the two moved the interval.
+pub async fn touch(tx: &mut Scoped<'_, Maintenance<AuthLane>>, id: Uuid) -> sqlx::Result<bool> {
+    sqlx::query_scalar(
+        "WITH polled AS (
+            SELECT last_polled_at + make_interval(secs => interval_secs) > now() AS too_soon
+              FROM auth.device_codes WHERE id = $1
+         ), touched AS (
+            UPDATE auth.device_codes SET last_polled_at = now() WHERE id = $1
+         )
+         SELECT COALESCE(too_soon, false) FROM polled",
+    )
+    .bind(id)
+    .fetch_one(tx.conn())
+    .await
 }
 
 /// The authorization is finished, whichever way: granted, refused or lapsed.

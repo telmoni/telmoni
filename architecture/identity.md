@@ -297,7 +297,7 @@ The CLI signs in with a device grant, modelled on RFC 8628.
 | Expired | 400 |
 | Approved | The same tokens as a console sign-in, on a session of its own |
 
-The answers differ from RFC 8628's error codes, and the polling interval never grows.
+The answers differ from RFC 8628's error codes, and the polling interval never grows. "Too fast" is measured on the database's clock alone: one statement reads the last poll's stamp and writes this one's, so a skew between the server's clock and the database's neither shortens nor stretches the interval.
 
 ## The test door
 
