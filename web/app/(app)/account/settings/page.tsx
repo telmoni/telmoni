@@ -5,6 +5,8 @@ import { Rows } from "@/components/rows";
 import { Section } from "@/components/section";
 import { SettingsRow } from "@/components/settings-row";
 import { Card } from "@/components/ui/card";
+import { organizationLabel } from "@/lib/identity";
+import { defaultOrganization, getServerContext } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
 import {
   canChangeEmail,
@@ -13,6 +15,7 @@ import {
 } from "@/lib/sign-in-method";
 import { displayName } from "@/lib/user-display";
 
+import { DefaultOrganization } from "./_default-organization";
 import { ChangeEmail } from "./_email";
 import { PasswordReset } from "./_password";
 
@@ -21,6 +24,12 @@ export const metadata = { title: "Settings" };
 export default async function AccountSettingsPage() {
   const session = await getServerSession();
   if (!session) notFound();
+
+  // The one thing here that is not the session's: which organization a
+  // sign-in opens in. When `/me` cannot be read, or names no organization,
+  // that section is left out and the rest of the page stands.
+  const ctx = await getServerContext();
+  const opening = ctx ? defaultOrganization(ctx) : null;
 
   const method = signInMethodLabel(session.authMethod);
 
@@ -84,6 +93,27 @@ export default async function AccountSettingsPage() {
           >
             <Card className="text-sm">
               <PasswordReset method={session.authMethod} />
+            </Card>
+          </Section>
+        )}
+
+        {/* After how you get in: where signing in opens. Keyed on the default
+            auth answers, so a choice saved — or one picked for you after you
+            left yours — starts the control from it. */}
+        {ctx && opening && (
+          <Section
+            title="Default organization"
+            description="The organization the console opens in when you sign in. If you leave it, the console opens in another of yours."
+          >
+            <Card className="text-sm">
+              <DefaultOrganization
+                key={opening.organizationId}
+                organizations={ctx.organizations.map((o) => ({
+                  organizationId: o.organizationId,
+                  label: organizationLabel(o),
+                }))}
+                current={opening.organizationId}
+              />
             </Card>
           </Section>
         )}

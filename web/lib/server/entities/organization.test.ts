@@ -24,7 +24,12 @@ vi.mock("../session", () => ({
   }),
 }));
 
-import { activeOrganization, getServerContext, type ServerContext } from "./organization";
+import {
+  activeOrganization,
+  defaultOrganization,
+  getServerContext,
+  type ServerContext,
+} from "./organization";
 
 function meAnswers(body: Record<string, unknown>) {
   fetchWithTimeout.mockResolvedValue({ ok: true, json: async () => body });
@@ -61,6 +66,7 @@ function me(over: Record<string, unknown> = {}) {
     person: PERSON,
     organizations: [OWNED, JOINED],
     activeOrganizationId: "org_1",
+    defaultOrganizationId: "org_1",
     ...over,
   };
 }
@@ -263,13 +269,71 @@ describe("what getServerContext asks /me to resolve", () => {
   // layout needs this context — their invitations and flags — to show them
   // it. Read as an outage, they would get a broken console instead.
   it("reads an answer that places the person in no organization", async () => {
-    meAnswers(me({ organizations: [], activeOrganizationId: null, flags: { signup: false } }));
+    meAnswers(
+      me({
+        organizations: [],
+        activeOrganizationId: null,
+        defaultOrganizationId: null,
+        flags: { signup: false },
+      }),
+    );
     const ctx = await getServerContext();
     expect(ctx).not.toBeNull();
     expect(ctx?.activeOrganizationId).toBeNull();
+    expect(ctx?.defaultOrganizationId).toBeNull();
     expect(ctx?.organizations).toEqual([]);
     expect(ctx?.flags).toEqual({ signup: false });
     expect(ctx && activeOrganization(ctx)).toBeNull();
+    expect(ctx && defaultOrganization(ctx)).toBeNull();
+  });
+
+  // The organization a sign-in opens in is auth's answer beside the one this
+  // request acts in, and the two differ whenever the cookie or the path names
+  // another.
+  it("reads the default organization apart from the one the request acts in", async () => {
+    meAnswers(me({ activeOrganizationId: "org_2", defaultOrganizationId: "org_1" }));
+    const ctx = await getServerContext();
+    expect(ctx?.defaultOrganizationId).toBe("org_1");
+    expect(ctx && defaultOrganization(ctx)).toEqual(OWNED);
+    expect(ctx && activeOrganization(ctx)).toEqual(JOINED);
+  });
+
+  // Like the active organization, the default is an answer auth always gives:
+  // an answer without it is unreadable, not an invitation to pick one here.
+  it("is null when the answer does not say where a sign-in opens", async () => {
+    meAnswers({ person: PERSON, organizations: [OWNED, JOINED], activeOrganizationId: "org_1" });
+    expect(await getServerContext()).toBeNull();
+  });
+});
+
+describe("defaultOrganization", () => {
+  const ctx = (defaultOrganizationId: string) =>
+    ({
+      person: PERSON,
+      organizations: [OWNED, JOINED],
+      deletedOrganizations: [],
+      activeOrganizationId: "org_1",
+      defaultOrganizationId,
+      organizationNotFound: false,
+      memberships: [],
+      incomingInvites: [],
+      projectOffers: [],
+      flags: {},
+    }) as ServerContext;
+
+  it("is the entry auth answered, whatever the person's role in it", () => {
+    expect(defaultOrganization(ctx("org_1"))).toBe(OWNED);
+    expect(defaultOrganization(ctx("org_2"))).toBe(JOINED);
+  });
+
+  it("is null when auth names an organization its own list does not hold", () => {
+    expect(defaultOrganization(ctx("org_gone"))).toBeNull();
+  });
+
+  // Asked where the path names no organization, so a path that names one auth
+  // did not answer with says nothing about it.
+  it("stands when the path names an organization auth did not answer with", () => {
+    expect(defaultOrganization({ ...ctx("org_2"), organizationNotFound: true })).toBe(JOINED);
   });
 });
 
@@ -280,6 +344,7 @@ describe("activeOrganization", () => {
       organizations: [OWNED, JOINED],
       deletedOrganizations: [],
       activeOrganizationId,
+      defaultOrganizationId: "org_1",
       organizationNotFound: false,
       memberships: [],
       incomingInvites: [],

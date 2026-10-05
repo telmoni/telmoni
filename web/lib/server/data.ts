@@ -3,7 +3,11 @@
 // import is the mistake this turns into a build error.
 import "server-only";
 
-export { activeOrganization, getServerContext } from "./entities/organization";
+export {
+  activeOrganization,
+  defaultOrganization,
+  getServerContext,
+} from "./entities/organization";
 export type {
   DeletedOrganization,
   IncomingInvite,

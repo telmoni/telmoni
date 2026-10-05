@@ -7,7 +7,7 @@ import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { blacklistSession, isSessionBlacklisted } from "@/lib/auth/session-blacklist";
 import { sessionEndKey } from "@/lib/auth/session-end-key";
 import { env } from "@/lib/env";
-import { accountHeaders } from "@/lib/server/entities/identity-context";
+import { accountHeaders, personHeaders } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
 import { canChangeEmail } from "@/lib/sign-in-method";
 
@@ -170,4 +170,35 @@ export async function confirmEmailChangeAction(
     .object({ email: z.email() })
     .safeParse(await res.json().catch(() => null));
   return body.success ? { error: null, email: body.data.email } : { error: null };
+}
+
+// The organization a sign-in opens in, as Vercel's default team is. The
+// body names it, so no organization header goes with it: auth refuses one the
+// person holds no seat in, or one being deleted, and records the choice on the
+// chosen organization's chain.
+export async function setDefaultOrganizationAction(
+  organizationId: string,
+): Promise<{ error: string | null }> {
+  const session = await getServerSession();
+  if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
+    return { error: "Your session expired — sign in again." };
+  }
+
+  const limited = await rateLimit(sessionKey(session, "account:default-organization"), {
+    limit: 20,
+    windowMs: 60_000,
+  });
+  if (limited) return { error: "Too many requests — slow down a moment." };
+
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/me/default-organization`, {
+    method: "PUT",
+    headers: { ...personHeaders(session), "content-type": "application/json" },
+    body: JSON.stringify({ organizationId }),
+  });
+  if (!res) return { error: "The organization service is unreachable. Try again." };
+  if (!res.ok) {
+    const { message } = await extractProblem(res);
+    return { error: message };
+  }
+  return { error: null };
 }

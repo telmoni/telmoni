@@ -64,6 +64,7 @@ function me(activeOrganizationId: string): ServerContext {
       },
     ],
     activeOrganizationId,
+    defaultOrganizationId: "org_mine",
     organizationNotFound: false,
     memberships: [],
     incomingInvites: [],

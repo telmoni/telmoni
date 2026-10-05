@@ -139,6 +139,7 @@ function standingAs(
     ],
     deletedOrganizations: [],
     activeOrganizationId: organizationId,
+    defaultOrganizationId: organizationId,
     organizationNotFound: false,
     memberships: [],
     incomingInvites: [],

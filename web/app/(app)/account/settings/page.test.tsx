@@ -33,6 +33,34 @@ vi.mock("./_email", () => ({
   }) => <div data-testid="email">{`${method ?? "unknown"}:${email}`}</div>,
 }));
 
+vi.mock("./_default-organization", () => ({
+  DefaultOrganization: ({
+    organizations,
+    current,
+  }: {
+    organizations: { organizationId: string; label: string }[];
+    current: string;
+  }) => (
+    <div data-testid="default-organization" data-current={current}>
+      {organizations.map((o) => `${o.organizationId}:${o.label}`).join(",")}
+    </div>
+  ),
+}));
+
+// `/me`, for the organizations. Unread by default, so every test that is not
+// about the default organization sees the page as it stands without one.
+const context = vi.hoisted(() => ({
+  value: null as {
+    organizations: { organizationId: string; name: string | null; role: string }[];
+    defaultOrganizationId: string | null;
+  } | null,
+}));
+vi.mock("@/lib/server/data", () => ({
+  getServerContext: async () => context.value,
+  defaultOrganization: (ctx: NonNullable<typeof context.value>) =>
+    ctx.organizations.find((o) => o.organizationId === ctx.defaultOrganizationId) ?? null,
+}));
+
 const session = vi.hoisted(() => ({
   value: {
     userId: "user_1",
@@ -49,6 +77,7 @@ vi.mock("@/lib/server/session", () => ({
 
 beforeEach(() => {
   session.value = { ...session.value, authMethod: "google" };
+  context.value = null;
 });
 
 import AccountSettingsPage from "./page";
@@ -124,7 +153,7 @@ describe("AccountSettingsPage", () => {
     expect(profile?.querySelectorAll("input, textarea")).toHaveLength(0);
   });
 
-  it("holds who you are — no sessions, no erasure, no organization", async () => {
+  it("holds who you are and how you get in — no sessions, no erasure", async () => {
     session.value = { ...session.value, authMethod: "password" };
     render(await AccountSettingsPage());
     const headings = screen
@@ -138,8 +167,39 @@ describe("AccountSettingsPage", () => {
     expect(screen.queryByText(/active sessions/i)).toBeNull();
   });
 
-  it("fetches nothing", () => {
+  // After how you get in, where signing in opens: chosen among the person's
+  // own organizations, starting from the one auth answers now.
+  it("offers the default organization last, among the person's own", async () => {
+    session.value = { ...session.value, authMethod: "password" };
+    context.value = {
+      organizations: [
+        { organizationId: "org_1", name: "Acme", role: "owner" },
+        { organizationId: "org_2", name: null, role: "member" },
+      ],
+      defaultOrganizationId: "org_2",
+    };
+    render(await AccountSettingsPage());
+    const headings = screen
+      .getAllByRole("heading", { level: 2 })
+      .map((h) => h.textContent?.toLowerCase() ?? "");
+    expect(headings).toEqual(["profile", "email", "password", "default organization"]);
+    const control = screen.getByTestId("default-organization");
+    expect(control).toHaveAttribute("data-current", "org_2");
+    // The organization's own name, else "Organization" — never a person's.
+    expect(control).toHaveTextContent("org_1:Acme,org_2:Organization");
+  });
+
+  it("leaves the default out for somebody in no organization", async () => {
+    context.value = { organizations: [], defaultOrganizationId: null };
+    render(await AccountSettingsPage());
+    expect(screen.queryByTestId("default-organization")).toBeNull();
+    expect(screen.getByText("k@example.com")).toBeInTheDocument();
+  });
+
+  // Everything else on the page is the session's, so it stands when `/me`
+  // cannot be read; the organizations are the one thing asked for.
+  it("reads nothing but /me", () => {
     const source = readFileSync(path.join(__dirname, "page.tsx"), "utf8");
-    expect(source).not.toContain("@/lib/server/data");
+    expect(source).not.toMatch(/\bfetch[A-Z]/);
   });
 });

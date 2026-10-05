@@ -32,13 +32,11 @@ export function NameOrganizationForm({ organizationId }: { organizationId: strin
           return;
         }
         // A full navigation, not a router push: the rail, the selector and the
-        // store were all seeded without the name. Straight to the Projects page
-        // at the slug the organization goes by now, moved by the name or the
+        // store were all seeded without the name. Straight to the overview at
+        // the slug the organization goes by now, moved by the name or the
         // placeholder it kept — `/console` would ask `/me` for the cookie's
         // organization, which is another one when the owner came here from it.
-        window.location.replace(
-          res.slug ? organizationPath(res.slug, "/projects") : "/console",
-        );
+        window.location.replace(res.slug ? organizationPath(res.slug) : "/console");
       } catch {
         setError("Network error. Please try again.");
       }

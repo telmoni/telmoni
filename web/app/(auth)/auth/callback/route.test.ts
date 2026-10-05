@@ -240,6 +240,18 @@ describe("GET /auth/callback and a closed sign-up", () => {
     expect(res.cookies.get("telmoni_session")?.value).toBe("sealed-session");
     expect(sealSession).toHaveBeenCalledWith(expect.objectContaining({ sessionRowId: null }));
   });
+
+  // ⚠ A session that expired left the organization it last stood in behind;
+  // the sign-in forgets it, so `/console` opens the person's default.
+  it("forgets the organization an earlier session stood in", async () => {
+    fetchWithTimeout.mockResolvedValue(new Response('{"sessionRowId":"sess_1"}', { status: 200 }));
+    const req = new NextRequest("https://app.example/auth/callback?code=c0de&state=st8", {
+      headers: { cookie: "telmoni_pkce=sealed-pkce; telmoni-organization=org_last" },
+    });
+    const res = await GET(req);
+    expect(res.cookies.get("telmoni_session")?.value).toBe("sealed-session");
+    expect(res.cookies.get("telmoni-organization")?.value).toBe("");
+  });
 });
 
 describe("GET /auth/callback duplicate and concurrent requests", () => {

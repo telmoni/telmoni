@@ -31,6 +31,14 @@ vi.mock("./notice-actions", () => ({
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {} }) }));
 
+// Which organization the action is aimed at is the assertion; the dialog is
+// its own.
+vi.mock("@/components/create-project", () => ({
+  CreateProjectAction: ({ organizationId }: { organizationId?: string }) => (
+    <div data-testid="create-project-action" data-organization-id={organizationId} />
+  ),
+}));
+
 let mockContext: {
   organizations: OrganizationEntry[];
   activeOrganizationId: string;
@@ -38,6 +46,17 @@ let mockContext: {
 
 const fetchNotifications = vi.hoisted(() =>
   vi.fn<() => Promise<{ items: FeedItem[]; unread: number } | null>>(async () => null),
+);
+
+type Listing =
+  | {
+      kind: "ok";
+      projects: { id: string; slug: string; name: string; role: string | null }[];
+    }
+  | { kind: "unavailable" };
+
+const fetchProjectListing = vi.hoisted(() =>
+  vi.fn<() => Promise<Listing>>(async () => ({ kind: "ok", projects: [] })),
 );
 
 type FeedItem = {
@@ -57,6 +76,7 @@ vi.mock("@/lib/server/data", async () => {
   return {
     activeOrganization,
     fetchNotifications,
+    fetchProjectListing,
     getServerContext: async () => mockContext,
   };
 });
@@ -79,6 +99,7 @@ const OWNED: OrganizationEntry = {
 beforeEach(() => {
   vi.clearAllMocks();
   fetchNotifications.mockResolvedValue(null);
+  fetchProjectListing.mockResolvedValue({ kind: "ok", projects: [] });
   mockContext = { organizations: [OWNED], activeOrganizationId: "org_1" };
 });
 
@@ -200,6 +221,69 @@ describe("OrganizationOverviewPage", () => {
     };
     await renderPage();
     expect(fetchNotifications).not.toHaveBeenCalled();
+  });
+
+  // ⚠ The console opens here, so the projects are here: each opens its own
+  // page, by the slugs the path is spelled with.
+  it("lists the organization's projects, each opening its own page", async () => {
+    fetchProjectListing.mockResolvedValue({
+      kind: "ok",
+      projects: [
+        { id: "proj_1", slug: "web", name: "Web", role: "admin" },
+        { id: "proj_2", slug: "billing-2", name: "Billing", role: null },
+      ],
+    });
+    await renderPage();
+
+    expect(screen.getByRole("link", { name: "Web" })).toHaveAttribute("href", "/ada-works/web");
+    expect(screen.getByRole("link", { name: "Billing" })).toHaveAttribute(
+      "href",
+      "/ada-works/billing-2",
+    );
+    expect(screen.getByText("Admin")).toBeInTheDocument();
+    expect(screen.queryByText("No projects yet.")).toBeNull();
+  });
+
+  // A project is made in the organization this page names, by whoever may
+  // make one there.
+  it.each(["owner", "admin"] as const)(
+    "offers an organization %s New project, in the organization it names",
+    async (role) => {
+      mockContext = {
+        organizations: [{ ...OWNED, role }],
+        activeOrganizationId: "org_1",
+      };
+      await renderPage();
+
+      expect(screen.getByTestId("create-project-action")).toHaveAttribute(
+        "data-organization-id",
+        "org_1",
+      );
+      expect(
+        screen.getByText("Create the first one with New project, above."),
+      ).toBeInTheDocument();
+    },
+  );
+
+  it("offers a member no New project, and says who adds them to one", async () => {
+    mockContext = {
+      organizations: [{ ...OWNED, role: "member" }],
+      activeOrganizationId: "org_1",
+    };
+    await renderPage();
+
+    expect(screen.queryByTestId("create-project-action")).toBeNull();
+    expect(screen.getByText("An owner or admin adds you to a project.")).toBeInTheDocument();
+  });
+
+  // An unread listing is not an empty one: saying "no projects yet" would
+  // invite somebody to make a second of one they already have.
+  it("says the projects could not be loaded, not that there are none", async () => {
+    fetchProjectListing.mockResolvedValue({ kind: "unavailable" });
+    await renderPage();
+
+    expect(screen.getByText(/could not be loaded/)).toBeInTheDocument();
+    expect(screen.queryByText("No projects yet.")).toBeNull();
   });
 
   // ⚠ The button names the organization this page rendered, so the leave has

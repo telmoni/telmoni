@@ -47,6 +47,7 @@ import {
   confirmEmailChangeAction,
   requestEmailChangeAction,
   requestPasswordResetAction,
+  setDefaultOrganizationAction,
 } from "./actions";
 
 const UNRESOLVED = "Couldn't resolve your account right now. Try again in a moment.";
@@ -481,5 +482,64 @@ describe("confirmEmailChangeAction", () => {
       error: null,
     });
     expect(blacklistSession).toHaveBeenCalledWith("sess_1");
+  });
+});
+
+describe("setDefaultOrganizationAction", () => {
+  // The body names the organization; a header naming the one the console
+  // stands in would be a second, different answer to the same question.
+  it("asks auth to open the console in the organization chosen, named in the body alone", async () => {
+    vi.mocked(tryFetchWithTimeout).mockResolvedValue(
+      new Response(JSON.stringify({ defaultOrganizationId: "org_2" }), { status: 200 }),
+    );
+
+    expect(await setDefaultOrganizationAction("org_2")).toEqual({ error: null });
+
+    const [url, init] = vi.mocked(tryFetchWithTimeout).mock.calls[0]!;
+    expect(url).toBe("http://auth.test/internal/me/default-organization");
+    expect(init).toEqual(
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ organizationId: "org_2" }),
+      }),
+    );
+    expect(sentHeaders()).toEqual(
+      expect.objectContaining({
+        authorization: "Bearer at_1",
+        "x-service-secret": "secret",
+      }),
+    );
+    expect(sentHeaders()).not.toHaveProperty("x-organization-id");
+  });
+
+  it("hands back auth's refusal in its own words", async () => {
+    vi.mocked(tryFetchWithTimeout).mockResolvedValue(new Response(null, { status: 403 }));
+    expect(await setDefaultOrganizationAction("org_stranger")).toEqual({ error: "problem" });
+  });
+
+  it("says so when auth cannot be reached", async () => {
+    vi.mocked(tryFetchWithTimeout).mockResolvedValue(null as never);
+    expect(await setDefaultOrganizationAction("org_2")).toEqual({
+      error: "The organization service is unreachable. Try again.",
+    });
+  });
+
+  it("sends nothing for a session that has ended, or past the limit", async () => {
+    vi.mocked(isSessionBlacklisted).mockResolvedValue(true);
+    expect(await setDefaultOrganizationAction("org_2")).toEqual({
+      error: "Your session expired — sign in again.",
+    });
+
+    vi.mocked(isSessionBlacklisted).mockResolvedValue(false);
+    vi.mocked(rateLimit).mockResolvedValue({ retryAfterMs: 1_000 } as never);
+    expect(await setDefaultOrganizationAction("org_2")).toEqual({
+      error: "Too many requests — slow down a moment.",
+    });
+    expect(sessionKey).toHaveBeenCalledWith(
+      expect.anything(),
+      "account:default-organization",
+    );
+
+    expect(tryFetchWithTimeout).not.toHaveBeenCalled();
   });
 });

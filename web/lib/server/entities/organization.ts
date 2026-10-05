@@ -102,14 +102,20 @@ export interface ServerContext {
   deletedOrganizations: DeletedOrganization[];
   /// The organization this request acts in, as AUTH resolved it: the one the
   /// path names — off an organization's path, the one the cookie remembers —
-  /// when the person is in it, else the oldest they own, else the oldest they
-  /// belong to. The console never decides this itself.
+  /// when the person is in it, else their default. The console never decides
+  /// this itself.
   ///
   /// `null` for a person in no organization — sign-ups closed, or their last
   /// one gone a moment ago. They are signed in all the same, and the (app)
   /// layout gives them their invitations and their account instead of the
   /// console (`accountOnlyReason`).
   activeOrganizationId: string | null;
+  /// The organization a sign-in opens in, as auth resolved it: the one the
+  /// person chose on Account Settings while they still hold its seat, else the
+  /// oldest they own, else the oldest they belong to — as Vercel opens on a
+  /// default team. A sign-in forgets the cookie, so this is what the first
+  /// `/me` after it acts in. `null` exactly when `activeOrganizationId` is.
+  defaultOrganizationId: string | null;
   /// ⚠ The path named an organization and auth answered with another: the
   /// person is not in it, or a URL change has moved its slug. Auth falls back to
   /// one of the person's own rather than refuse, which is right for a stale
@@ -133,6 +139,12 @@ export interface ServerContext {
 export function activeOrganization(ctx: ServerContext): OrganizationEntry | null {
   if (ctx.organizationNotFound) return null;
   return ctx.organizations.find((o) => o.organizationId === ctx.activeOrganizationId) ?? null;
+}
+
+/// The entry for the organization a sign-in opens in. Not the path's, so a
+/// path naming an organization auth did not answer with leaves it standing.
+export function defaultOrganization(ctx: ServerContext): OrganizationEntry | null {
+  return ctx.organizations.find((o) => o.organizationId === ctx.defaultOrganizationId) ?? null;
 }
 
 // `headers()` is request-scoped and throws outside one (a test, a build-time
@@ -190,14 +202,15 @@ export const getServerContext = cache(
       if (!res.ok) return null;
       const parsed = z
         .object({
-          person:               PersonSchema,
-          organizations:        z.array(OrganizationEntrySchema),
-          deletedOrganizations: z.array(DeletedOrganizationSchema).optional(),
-          activeOrganizationId: z.string().nullable(),
-          memberships:          z.array(MembershipSchema).optional(),
-          incomingInvites:      z.array(IncomingInviteSchema).optional(),
-          projectOffers:        z.array(ProjectOfferSchema).optional(),
-          flags:                FlagSetSchema.optional(),
+          person:                PersonSchema,
+          organizations:         z.array(OrganizationEntrySchema),
+          deletedOrganizations:  z.array(DeletedOrganizationSchema).optional(),
+          activeOrganizationId:  z.string().nullable(),
+          defaultOrganizationId: z.string().nullable(),
+          memberships:           z.array(MembershipSchema).optional(),
+          incomingInvites:       z.array(IncomingInviteSchema).optional(),
+          projectOffers:         z.array(ProjectOfferSchema).optional(),
+          flags:                 FlagSetSchema.optional(),
         })
         .safeParse(await res.json());
       if (!parsed.success) {
@@ -210,15 +223,16 @@ export const getServerContext = cache(
       const d = parsed.data;
       const active = d.organizations.find((o) => o.organizationId === d.activeOrganizationId);
       return {
-        person:               d.person,
-        organizations:        d.organizations,
-        deletedOrganizations: d.deletedOrganizations ?? [],
-        activeOrganizationId: d.activeOrganizationId,
-        organizationNotFound: named !== null && active?.slug !== named,
-        memberships:          (d.memberships ?? []).map((m) => ({ ...m, role: asRole(m.role) })),
-        incomingInvites:      d.incomingInvites ?? [],
-        projectOffers:        d.projectOffers ?? [],
-        flags:                d.flags ?? {},
+        person:                d.person,
+        organizations:         d.organizations,
+        deletedOrganizations:  d.deletedOrganizations ?? [],
+        activeOrganizationId:  d.activeOrganizationId,
+        defaultOrganizationId: d.defaultOrganizationId,
+        organizationNotFound:  named !== null && active?.slug !== named,
+        memberships:           (d.memberships ?? []).map((m) => ({ ...m, role: asRole(m.role) })),
+        incomingInvites:       d.incomingInvites ?? [],
+        projectOffers:         d.projectOffers ?? [],
+        flags:                 d.flags ?? {},
       };
     } catch {
       return null;

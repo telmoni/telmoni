@@ -20,12 +20,6 @@ vi.mock("./_name-organization", () => ({
 }));
 
 let mockSession: { userId: string } | null;
-let mockListing:
-  | {
-      kind: "ok";
-      projects: Array<{ id: string; slug: string; name: string; role: string | null }>;
-    }
-  | { kind: "unavailable" };
 let mockContextCalls: number;
 let mockContext: {
   activeOrganizationId: string | null;
@@ -46,7 +40,6 @@ vi.mock("@/lib/server/data", () => ({
     mockContextCalls++;
     return mockContext;
   },
-  fetchProjectListing: async () => mockListing,
   activeOrganization: (ctx: NonNullable<typeof mockContext>) =>
     ctx.organizations.find((o) => o.organizationId === ctx.activeOrganizationId) ?? null,
 }));
@@ -61,17 +54,6 @@ const entry = (query: { organization?: string } = {}) =>
 beforeEach(() => {
   mockRedirect.mockReset();
   mockSession = { userId: "user_test" };
-  mockListing = {
-    kind: "ok",
-    projects: [
-      {
-        id: "project_1234567890abcdef",
-        slug: "personal-project",
-        name: "Personal project",
-        role: "owner",
-      },
-    ],
-  };
   mockContextCalls = 0;
   mockContext = {
     activeOrganizationId: "org_1",
@@ -86,46 +68,44 @@ describe("ConsoleEntry", () => {
     expect(mockRedirect).toHaveBeenCalledWith("/auth/logout");
   });
 
-  it("redirects a named organization with projects to its first project", async () => {
+  // ⚠ The overview, never a project: Vercel opens on a team's overview, and
+  // the overview is where the projects are listed. Which organization is
+  // auth's to say — the one the cookie remembers, else the person's default,
+  // which a sign-in leaves it to by forgetting the cookie.
+  it("lands on the overview of the organization auth answered", async () => {
     await entry();
     expect(mockContextCalls).toBe(1);
-    // By the slugs, the project's under its organization's: the path names both.
-    expect(mockRedirect).toHaveBeenCalledWith("/acme/personal-project");
+    expect(mockRedirect).toHaveBeenCalledWith("/acme");
   });
 
-  it("renders ServiceUnavailable when the listing could not be read", async () => {
-    mockListing = { kind: "unavailable" };
+  // The projects page refuses a member, and the overview is open to all.
+  it.each(["owner", "admin", "member"])(
+    "lands an organization %s on the overview, not a page that might refuse them",
+    async (role) => {
+      mockContext = {
+        activeOrganizationId: "org_1",
+        organizations: [{ organizationId: "org_1", slug: "acme", name: "Acme", role }],
+      };
+      await entry();
+      expect(mockRedirect).toHaveBeenCalledWith("/acme");
+      expect(mockRedirect).not.toHaveBeenCalledWith("/acme/projects");
+    },
+  );
+
+  it("renders ServiceUnavailable when auth could not answer", async () => {
+    mockContext = null;
     const ui = await entry();
     render(ui as React.ReactElement);
     expect(screen.getByTestId("outage")).toBeInTheDocument();
     expect(mockRedirect).not.toHaveBeenCalled();
   });
 
-  // Sign-ups closed, and in no organization: there is no project to land on,
+  // Sign-ups closed, and in no organization: there is no overview to land on,
   // and what there is for them is their invitations and their account.
   it("sends somebody in no organization to their account first", async () => {
     mockContext = { activeOrganizationId: null, organizations: [] };
     await entry();
     expect(mockRedirect).toHaveBeenNthCalledWith(1, "/account/notifications");
-  });
-
-  it("sends an owner whose organization lists nothing to its projects page", async () => {
-    mockListing = { kind: "ok", projects: [] };
-    await entry();
-    expect(mockRedirect).toHaveBeenCalledWith("/acme/projects");
-  });
-
-  // The projects page refuses a member, so this was an ACCESS DENIED landing
-  // for somebody whose only project there had been handed away.
-  it("sends a member with nothing to open to the overview, not a page that refuses them", async () => {
-    mockListing = { kind: "ok", projects: [] };
-    mockContext = {
-      activeOrganizationId: "org_1",
-      organizations: [{ organizationId: "org_1", slug: "acme", name: "Acme", role: "member" }],
-    };
-    await entry();
-    expect(mockRedirect).toHaveBeenCalledWith("/acme");
-    expect(mockRedirect).not.toHaveBeenCalledWith("/acme/projects");
   });
 
   // ⚠ The first thing a new owner sees is the question, not a console under a
@@ -163,7 +143,7 @@ describe("ConsoleEntry", () => {
 
   it("ignores a query naming an organization the person is not in", async () => {
     await entry({ organization: "org_stranger" });
-    expect(mockRedirect).toHaveBeenCalledWith("/acme/personal-project");
+    expect(mockRedirect).toHaveBeenCalledWith("/acme");
   });
 
   // Nobody but the owner is in an unnamed organization; should an operator
@@ -174,6 +154,6 @@ describe("ConsoleEntry", () => {
       organizations: [{ organizationId: "org_1", slug: "org-k3x9qz1a2b", name: null, role: "member" }],
     };
     await entry();
-    expect(mockRedirect).toHaveBeenCalledWith("/org-k3x9qz1a2b/personal-project");
+    expect(mockRedirect).toHaveBeenCalledWith("/org-k3x9qz1a2b");
   });
 });

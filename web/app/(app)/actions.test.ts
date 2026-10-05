@@ -44,6 +44,7 @@ function me(organizations: OrganizationEntry[], activeOrganizationId: string): S
     organizations,
     deletedOrganizations: [],
     activeOrganizationId,
+    defaultOrganizationId: activeOrganizationId,
     organizationNotFound: false,
     memberships: [],
     incomingInvites: [],
