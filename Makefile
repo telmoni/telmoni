@@ -11,6 +11,9 @@ export DATABASE_URL ?= postgresql://telmoni:telmoni_dev@localhost:5432/telmoni
 WEB_DIR     ?= web
 CRATES_DIR  ?= crates
 SERVER_PORT ?= 8082
+# The console's: scripts/up.sh pins 3000, and a stack built on this one, on
+# ports of its own, has port-check probe those instead.
+WEB_PORT    ?= 3000
 TEST_THREADS ?= 2
 
 MIGRATION_SETS := audit=$(CRATES_DIR)/migrator/migrations,auth=$(CRATES_DIR)/auth/migrations,notifications=$(CRATES_DIR)/notifications/migrations,agent=$(CRATES_DIR)/agent/migrations
@@ -107,7 +110,7 @@ port-check:
 	elif command -v lsof >/dev/null 2>&1; then probe() { lsof -i :$$1 -sTCP:LISTEN >/dev/null 2>&1; }; \
 	else echo "· port-check skipped (no ss or lsof)"; exit 0; fi; \
 	busy=""; \
-	for spec in "3000 web" "$(SERVER_PORT) server"; do \
+	for spec in "$(WEB_PORT) web" "$(SERVER_PORT) server"; do \
 		set -- $$spec; \
 		if probe $$1; then busy="$$busy $$2:$$1"; fi; \
 	done; \
@@ -115,12 +118,12 @@ port-check:
 		echo "✗ port(s) already in use:$$busy"; \
 		echo "  Something else is listening — often a stale \`make up\` or another"; \
 		echo "  project's dev server. Find it, then stop it:"; \
-		echo "    ss -ltnp | grep -E ':(3000|$(SERVER_PORT))\\s'    # Linux"; \
-		echo "    lsof -i :3000 -sTCP:LISTEN                 # macOS"; \
+		echo "    ss -ltnp | grep -E ':($(WEB_PORT)|$(SERVER_PORT))\\s'    # Linux"; \
+		echo "    lsof -i :$(WEB_PORT) -sTCP:LISTEN                 # macOS"; \
 		echo "  If it is a previous \`make up\` for THIS repo, Ctrl-C it there."; \
 		exit 1; \
 	else \
-		echo "✓ ports free — web :3000, server :$(SERVER_PORT)."; \
+		echo "✓ ports free — web :$(WEB_PORT), server :$(SERVER_PORT)."; \
 	fi
 
 .PHONY: deps-check
@@ -235,7 +238,7 @@ web-dev:
 
 .PHONY: web-prod
 web-prod:
-	cd $(WEB_DIR) && npm run build && PORT=$(or $(WEB_PORT),3000) npm run start
+	cd $(WEB_DIR) && npm run build && PORT=$(WEB_PORT) npm run start
 
 .PHONY: server-dev
 server-dev:
