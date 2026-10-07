@@ -32,7 +32,10 @@ export const fetchProjectListing = cache(async (): Promise<ProjectListing> => {
     const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/projects`, {
       headers: organizationHeaders(ctx),
     });
-    if (!res.ok) return { kind: "unavailable" };
+    if (!res.ok) {
+      logger.warn({ fetcher: "fetchProjects", status: res.status }, "entities: upstream refused");
+      return { kind: "unavailable" };
+    }
     const json = (await res.json()) as Record<string, unknown>;
     const rawList = Array.isArray(json?.projects) ? json.projects : [];
     const parsed = z.array(ProjectSchema).safeParse(rawList);
@@ -50,6 +53,7 @@ export const fetchProjectListing = cache(async (): Promise<ProjectListing> => {
         .sort(compareProjects),
     };
   } catch {
+    logger.warn({ fetcher: "fetchProjects" }, "entities: upstream error");
     return { kind: "unavailable" };
   }
 });
@@ -111,7 +115,13 @@ export const fetchProjectsEverywhere = cache(async (): Promise<ProjectEverywhere
     const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/projects/everywhere`, {
       headers: organizationHeaders(ctx),
     });
-    if (!res.ok) return { kind: "unavailable" };
+    if (!res.ok) {
+      logger.warn(
+        { fetcher: "fetchProjectsEverywhere", status: res.status },
+        "entities: upstream refused",
+      );
+      return { kind: "unavailable" };
+    }
     const json = (await res.json()) as Record<string, unknown>;
     const parsed = z
       .array(ProjectEverywhereSchema)
@@ -130,6 +140,7 @@ export const fetchProjectsEverywhere = cache(async (): Promise<ProjectEverywhere
         .sort(compareProjectsByOrganization),
     };
   } catch {
+    logger.warn({ fetcher: "fetchProjectsEverywhere" }, "entities: upstream error");
     return { kind: "unavailable" };
   }
 });

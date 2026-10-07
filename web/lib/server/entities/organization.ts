@@ -199,7 +199,13 @@ export const getServerContext = cache(
         },
         body: JSON.stringify({ userAgent: await userAgent() }),
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        logger.warn(
+          { fetcher: "getServerContext", status: res.status },
+          "entities: upstream refused",
+        );
+        return null;
+      }
       const parsed = z
         .object({
           person:                PersonSchema,
@@ -235,6 +241,7 @@ export const getServerContext = cache(
         flags:                 d.flags ?? {},
       };
     } catch {
+      logger.warn({ fetcher: "getServerContext" }, "entities: upstream error");
       return null;
     }
   },

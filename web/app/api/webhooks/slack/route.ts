@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { readBodyCapped } from "@/lib/api/body";
 import { fetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
+import { logger } from "@/lib/logger";
 
 const MAX_BODY_BYTES = 1_048_576;
 
@@ -38,7 +39,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
   }
-  headers.set("x-request-id", crypto.randomUUID());
+  const requestId = crypto.randomUUID();
+  headers.set("x-request-id", requestId);
 
   let upstream: Response;
   try {
@@ -47,7 +49,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       { method: "POST", headers, body: raw, cache: "no-store" },
       UPSTREAM_TIMEOUT_MS,
     );
-  } catch {
+  } catch (err) {
+    // Slack retries, but a 503 with no line behind it is an outage nobody can
+    // see from the logs.
+    logger.warn(
+      { requestId, error: err instanceof Error ? err.message : String(err) },
+      "slack: upstream fetch failed",
+    );
     return NextResponse.json({ error: "unavailable" }, { status: 503 });
   }
 
