@@ -31,6 +31,7 @@ crates/
 web/              the console: a thin proxy in front of the server
 contract/         the generated wire contract and OpenAPI document
 deploy/           the Helm chart and the self-host compose file
+scripts/          `up.sh` behind `make up`, and the webhook tunnel and receiver for testing a connector
 architecture/     how it is built, and why, one page per area
 ```
 

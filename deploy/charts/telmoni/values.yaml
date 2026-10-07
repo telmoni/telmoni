@@ -114,9 +114,9 @@ web:
 # when its endpoints need them, `SERVICE_SECRET`, `ADMIN_EMAIL` and `ADMIN_PASSWORD`
 # for the first account, `OIDC_ISSUER`, `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` for an
 # OpenID Connect provider beside the login form, `SMTP_URL`
-# (`smtps://user:password@host:465`) for the mail it sends — without it every
-# mail is logged rather than sent — the `SLACK_*` and `DISCORD_*` apps, and
-# `DATABASE_CA_CERT`.
+# (`smtps://user:password@host:465`) for the mail it sends — without it nothing
+# is sent, one log line per mail and no contents — the `SLACK_*` and `DISCORD_*`
+# apps, and `DATABASE_CA_CERT`.
 server:
   enabled: true
   image: "server"

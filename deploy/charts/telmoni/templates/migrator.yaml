@@ -57,8 +57,9 @@ spec:
               drop:
                 - ALL
 ---
-# The audit partitions: create the months ahead, drop the expired. DDL as the
-# migrator role, so a Job of its own rather than a task of the server's.
+# The audit partitions: create the months ahead, and drop the expired where
+# the registry allows it (nowhere today). DDL as the migrator role, so a Job
+# of its own rather than a task of the server's.
 apiVersion: batch/v1
 kind: CronJob
 metadata:

@@ -61,7 +61,7 @@ pub enum Command {
     /// Run every pending migration, then the object grants, and exit.
     Migrate,
     /// Rotate the audit partitions: create the months ahead, drop the
-    /// expired, and exit.
+    /// expired where the registry allows it (nowhere today), and exit.
     Rotate,
     /// One sweep, once, and exit.
     Sweep(Sweep),

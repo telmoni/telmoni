@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # Next.js (standalone) image for the Telmoni web app.
 #
-# Build from the web/ directory — the Makefile sets the context to $(WEB_DIR):
+# Build from the web/ directory — publish.yml sets the context to web/:
 #   docker build -f web/Dockerfile -t telmoni-web web/
 #
 # `output: "standalone"` in next.config.mjs emits a self-contained bundle that

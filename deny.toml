@@ -30,9 +30,9 @@ allow-wildcard-paths = true
 # Confidence threshold below which a detected license is treated as unknown.
 confidence-threshold = 0.8
 
-# The telmoni-* Cargo workspace crates are proprietary and unpublished
-# (`publish = false`); skip license checks on them instead of forcing a
-# parseable SPDX expression onto private code.
+# The telmoni-* Cargo workspace crates are unpublished (`publish = false`) and
+# declare no `license` of their own — the repository's is Apache-2.0 — so skip
+# license checks on them instead of forcing a parseable SPDX expression onto them.
 private = { ignore = true }
 
 # Approved SPDX identifiers. Add here when a new dep introduces a new license

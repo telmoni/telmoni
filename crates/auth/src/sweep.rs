@@ -4,13 +4,14 @@
 //! `telmoni sweep <name>`; the commands run as `telmoni terminate` and
 //! `telmoni restore`.
 //!
-//! Each sweep takes a transaction-scoped advisory lock first, so replicas
-//! running the same timer cannot both sweep one tick, and a crashed leader
-//! never wedges the next: the lock's transaction is pinged while the tick
-//! runs, and a leader that stops pinging loses it to the role's idle
-//! cut-off. Every step is idempotent: a failure stops that organization's
-//! tail, or that person's erasure, until the next tick, and never the rest
-//! of the sweep.
+//! The deletion and audit-verify sweeps take a transaction-scoped advisory
+//! lock first, so replicas running the same timer cannot both sweep one
+//! tick, and a crashed leader never wedges the next: the lock's transaction
+//! is pinged while the tick runs, and a leader that stops pinging loses it
+//! to the role's idle cut-off. The retention sweep takes none: its DELETEs
+//! are idempotent. Every step is idempotent: a failure stops that
+//! organization's tail, or that person's erasure, until the next tick, and
+//! never the rest of the sweep.
 //!
 //! **Deletion.** The `pending_deletion` mark is the durable queue. An
 //! organization past `erase_after` is **finalized** (every sibling's purge,

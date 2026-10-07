@@ -1,6 +1,7 @@
 # Allow unwrap/expect/panic/indexing in TEST code — the Cargo workspace denies them in
-# non-test code (see `[workspace.lints.clippy]` in Cargo.toml). Startup code that
-# must fail-fast uses a targeted `#[allow(clippy::expect_used)]` + rationale.
+# non-test code (see `[workspace.lints.clippy]` in Cargo.toml). An exception there is
+# written `#[expect(lint, reason = "…")]`: `allow_attributes` warns on `#[allow]`, and
+# the gate's `-D warnings` makes that fatal.
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true

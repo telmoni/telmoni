@@ -2,9 +2,9 @@
 # Pins the Cargo workspace to the compiler declared in Cargo.toml's `rust-version`.
 # Without this, a machine whose default `stable` is older than 1.98.1 would fail
 # the rust-version gate (and edition 2024 needs >=1.85). rustup auto-installs
-# this exact toolchain on the first cargo invocation in the repo. Floored at 1.97
-# by the embedded sandbox engine's MSRV — kept in step with Cargo.toml and with
-# the `rust:` image each `crates/*/Dockerfile` builds on, which never reads this.
+# this exact toolchain on the first cargo invocation in the repo. Kept in step
+# with Cargo.toml and with the `rust:` image each `crates/*/Dockerfile` builds
+# on, which never reads this.
 channel    = "1.98.1"
 components = ["rustfmt", "clippy"]
 profile    = "minimal"

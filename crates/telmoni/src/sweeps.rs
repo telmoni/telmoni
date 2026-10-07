@@ -1,7 +1,8 @@
 //! Auth's sweeps on a timer, inside `telmoni serve`.
 //!
-//! Each sweep takes a leader lock for its tick ([`telmoni_auth::sweep`]), so
-//! replicas running the same timers cannot both sweep one tick, and every
+//! The deletion and audit-verify sweeps take a leader lock for their tick
+//! ([`telmoni_auth::sweep`]), so replicas running the same timers cannot both
+//! sweep one tick; retention needs none, its DELETEs being idempotent. Every
 //! step is idempotent, so a tick cut short by a rollout is finished by the
 //! next. A failed tick is logged and the next one runs. `telmoni sweep
 //! <name>` runs any of them once by hand.

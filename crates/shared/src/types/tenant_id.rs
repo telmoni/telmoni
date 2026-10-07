@@ -4,7 +4,7 @@
 //! That incompatibility is the reason this module exists. All three are opaque
 //! strings at runtime, and each keys a different boundary: an organization id
 //! binds `app.organization_id`, a project id `app.project_id`, and a user id —
-//! a person, the identity provider's subject — `app.user_id`. A `From` between
+//! a person — `app.user_id`. A `From` between
 //! any pair would let a caller satisfy one boundary with whatever they put in
 //! another header.
 //!
@@ -161,7 +161,7 @@ fn is_minted_organization(s: &str) -> bool {
     s.starts_with(ORGANIZATION_ID_PREFIX)
 }
 
-/// A person's id is the provider's subject, and never an organization's.
+/// A person's id is minted here, and never an organization's.
 fn is_not_an_organization(s: &str) -> bool {
     !s.starts_with(ORGANIZATION_ID_PREFIX)
 }
@@ -234,7 +234,8 @@ impl Default for ProjectId {
 }
 
 tenant_id_newtype!(
-    /// User identifier — the provider `sub` of the acting person.
+    /// User identifier — the acting person's id, minted here at their first
+    /// sign-in.
     UserId,
     /// Reasons [`UserId::try_new`] can reject input.
     UserIdError,
@@ -243,13 +244,14 @@ tenant_id_newtype!(
     "must not start with `org_` — that is an organization id"
 );
 
-/// The prefix every user id the built-in provider mints carries — `user_`.
-/// An external provider's subjects are its own, and carry whatever it chose.
+/// The prefix every user id carries — `user_`. An account is minted here at
+/// its first sign-in whichever provider brought it; an external provider's
+/// subject is kept in `auth.external_identities`, never used as the id.
 pub const USER_ID_PREFIX: &str = "user_";
 
 impl UserId {
-    /// Mint a fresh user id for a person the built-in provider signs up —
-    /// `user_` and 16 random base62 characters.
+    /// Mint a fresh user id for a person at their first sign-in, built-in or
+    /// external — `user_` and 16 random base62 characters.
     #[must_use]
     pub fn new() -> Self {
         Self(mint(USER_ID_PREFIX))

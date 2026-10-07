@@ -140,7 +140,7 @@ services:
       OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-http://localhost:3000/auth/callback}
       OIDC_ALLOW_SIGN_UP: ${OIDC_ALLOW_SIGN_UP:-true}
       OIDC_ALLOW_INSECURE_EMAIL_LOOKUP: ${OIDC_ALLOW_INSECURE_EMAIL_LOOKUP:-false}
-      # Where mail leaves by; unset, every mail is logged rather than sent.
+      # Where mail leaves by; unset, nothing is sent: one log line per mail, without its contents.
       SMTP_URL: ${SMTP_URL:-}
       MAIL_FROM: ${MAIL_FROM:-Telmoni <no-reply@localhost>}
       SUPPORT_EMAIL: ${SUPPORT_EMAIL:-}

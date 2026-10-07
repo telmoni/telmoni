@@ -33,8 +33,8 @@ pub async fn migrate_from_env() -> anyhow::Result<()> {
     apply_object_grants(&options).await
 }
 
-/// Rotate every partitioned table once: create the months ahead, drop the
-/// expired ones.
+/// Rotate every partitioned table once: create the months ahead, and drop
+/// the expired ones where the registry allows it (nowhere today).
 pub async fn rotate_from_env() -> anyhow::Result<()> {
     rotate::rotate(&migrator_options()?).await
 }

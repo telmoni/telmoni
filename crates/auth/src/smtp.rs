@@ -69,7 +69,9 @@ impl SmtpSender {
 /// visible.
 pub fn transport_from_env(config: &Config) -> anyhow::Result<Arc<dyn MailSender>> {
     let Some(url) = optional("SMTP_URL") else {
-        tracing::warn!("outbound mail: SMTP_URL is unset — every mail is logged, not sent");
+        tracing::warn!(
+            "outbound mail: SMTP_URL is unset — nothing is sent; each mail leaves one log line, without its contents"
+        );
         return Ok(Arc::new(NoopSender));
     };
     let url = Redacted::from(url);
