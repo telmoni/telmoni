@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
-use telmoni_shared::seam::{Auth, Notifications};
+use telmoni_shared::seam::{AgentObserver, Auth, Notifications};
 
 use crate::config::{Config, EMBEDDING_DIMENSIONS};
 use crate::embed::{Embedder, OpenAiEmbedder};
@@ -26,13 +26,15 @@ pub async fn open_pool(config: &Config) -> anyhow::Result<sqlx::PgPool> {
 }
 
 /// The state the binary runs the module on, with the siblings it reads
-/// through. The model and the embedder exist only when the agent is on.
+/// through and what records its questions, if anything does. The model and
+/// the embedder exist only when the agent is on.
 pub fn state(
     config: Config,
     db: sqlx::PgPool,
     service_secrets: ServiceSecrets,
     auth: Arc<dyn Auth>,
     notifications: Arc<dyn Notifications>,
+    observer: Option<Arc<dyn AgentObserver>>,
 ) -> anyhow::Result<AppState> {
     let (model, embedder, reranker) = match &config.model {
         None => (None, None, None),
@@ -59,6 +61,7 @@ pub fn state(
         embeddings_model = %config.embeddings.model,
         rerank = config.rerank.is_some(),
         docs = config.docs_corpus_url.is_some(),
+        traced = observer.is_some(),
         "agent configured"
     );
     Ok(AppState {
@@ -70,6 +73,7 @@ pub fn state(
         model,
         embedder,
         reranker,
+        observer,
     })
 }
 

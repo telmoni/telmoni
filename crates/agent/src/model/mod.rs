@@ -19,6 +19,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::Value;
 use telmoni_shared::TelmoniError;
+pub use telmoni_shared::seam::TokenUsage;
 
 use crate::config::{ModelConfig, Provider};
 
@@ -109,6 +110,19 @@ impl StopReason {
             _ => Self::Other,
         }
     }
+
+    /// The reason as a question's record names it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Finished => "finished",
+            Self::ToolUse => "tool_use",
+            Self::MaxTokens => "max_tokens",
+            Self::Refused => "refused",
+            Self::Other => "other",
+            Self::Unfinished => "unfinished",
+        }
+    }
 }
 
 /// What one call came to.
@@ -120,6 +134,12 @@ pub struct ModelTurn {
     /// See [`Message::Assistant::raw`].
     pub raw: Option<Value>,
     pub stop_reason: StopReason,
+    /// The tokens the provider said the call used; `None` when it said
+    /// nothing, as some local servers do.
+    pub usage: Option<TokenUsage>,
+    /// The model that answered as the provider spells it, where the stream
+    /// names one.
+    pub model: Option<String>,
 }
 
 impl ModelTurn {

@@ -15,8 +15,8 @@ use serde_json::{Value, json};
 use telmoni_shared::TelmoniError;
 
 use super::{
-    Message, Model, ModelTurn, StopReason, TextSink, ToolCall, ToolSpec, read_events, send,
-    unavailable,
+    Message, Model, ModelTurn, StopReason, TextSink, TokenUsage, ToolCall, ToolSpec, read_events,
+    send, unavailable,
 };
 use crate::config::ModelConfig;
 
@@ -111,6 +111,23 @@ pub(crate) struct Assembler {
     text: String,
     calls: BTreeMap<u64, PartialCall>,
     finish_reason: StopReason,
+    usage: Option<TokenUsage>,
+    model: Option<String>,
+}
+
+/// Chat Completions' `usage`. OpenAI sends it once, in a last chunk with no
+/// choices; Gemini's endpoint repeats the totals so far on its chunks, so
+/// each one read replaces the last rather than adding to it, which would
+/// count a reply's tokens once per chunk.
+fn usage(usage: &Value) -> Option<TokenUsage> {
+    let count = |pointer: &str| usage.pointer(pointer).and_then(Value::as_u64).unwrap_or(0);
+    Some(TokenUsage {
+        input_tokens: usage.get("prompt_tokens").and_then(Value::as_u64)?,
+        output_tokens: count("/completion_tokens"),
+        cache_read_tokens: count("/prompt_tokens_details/cached_tokens"),
+        cache_write_tokens: 0,
+        reasoning_tokens: count("/completion_tokens_details/reasoning_tokens"),
+    })
 }
 
 impl Assembler {
@@ -127,6 +144,12 @@ impl Assembler {
                 "openai-compatible stream error {}",
                 kind.as_str().unwrap_or("error")
             )));
+        }
+        if let Some(counted) = chunk.get("usage").and_then(usage) {
+            self.usage = Some(counted);
+        }
+        if let Some(model) = chunk.get("model").and_then(Value::as_str) {
+            model.clone_into(self.model.get_or_insert_with(String::new));
         }
         let Some(choice) = chunk.pointer("/choices/0") else {
             return Ok(None);
@@ -218,6 +241,8 @@ impl Assembler {
             tool_calls,
             raw: (!extras.is_empty()).then(|| json!({ "extra_content": extras })),
             stop_reason: self.finish_reason,
+            usage: self.usage,
+            model: self.model,
         }
     }
 }
@@ -244,6 +269,9 @@ impl Model for OpenAi {
                 },
             })).collect::<Vec<_>>(),
             "stream": true,
+            // OpenAI counts a streamed reply's tokens only when asked; the
+            // servers that count anyway take the field as given.
+            "stream_options": { "include_usage": true },
         });
         let mut request = self
             .http
@@ -313,6 +341,42 @@ mod tests {
         assert_eq!(turn.tool_calls[0].name, "list_connectors");
         assert_eq!(turn.tool_calls[1].id, "g2");
         assert_eq!(turn.tool_calls[1].input, json!({"query": "x"}));
+    }
+
+    #[test]
+    fn the_usage_chunk_after_the_last_choice_is_read() {
+        let mut assembler = Assembler::default();
+        for chunk in [
+            json!({"model":"gpt-x","choices":[{"delta":{"content":"Hi"}}],"usage":null}),
+            json!({"choices":[{"delta":{},"finish_reason":"stop"}],"usage":null}),
+            json!({"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":7,"prompt_tokens_details":{"cached_tokens":100},"completion_tokens_details":{"reasoning_tokens":3}}}),
+        ] {
+            assembler.take(&chunk).unwrap();
+        }
+        let turn = assembler.finish();
+        assert_eq!(turn.model.as_deref(), Some("gpt-x"));
+        assert_eq!(
+            turn.usage,
+            Some(TokenUsage {
+                input_tokens: 120,
+                output_tokens: 7,
+                cache_read_tokens: 100,
+                cache_write_tokens: 0,
+                reasoning_tokens: 3,
+            })
+        );
+    }
+
+    #[test]
+    fn totals_repeated_on_every_chunk_are_not_added_up() {
+        let mut assembler = Assembler::default();
+        for (n, text) in ["a", "b", "c"].into_iter().enumerate() {
+            assembler
+                .take(&json!({"choices":[{"delta":{"content":text}}],"usage":{"prompt_tokens":50,"completion_tokens":n + 1}}))
+                .unwrap();
+        }
+        let usage = assembler.finish().usage.unwrap();
+        assert_eq!((usage.input_tokens, usage.output_tokens), (50, 3));
     }
 
     #[test]

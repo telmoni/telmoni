@@ -14,6 +14,7 @@ Two rules hold everything here together:
 - [Boot](#boot)
 - [Model access](#model-access)
 - [A turn, end to end](#a-turn-end-to-end)
+- [Recording the agent's own questions](#recording-the-agents-own-questions)
 - [Who is asking, read again](#who-is-asking-read-again)
 - [The tools](#the-tools)
 - [Prompt injection](#prompt-injection)
@@ -180,10 +181,21 @@ How the loop treats the text and the clock:
    - on screen, the same sentence follows the answer.
 
    The turn may have read the person before the scrub took them, and the scrub cannot see a message saved after it passed. The person asking has already read the streamed text. The fence protects what is kept, not what was shown. See [Erasure](#erasure).
-5. **`done`.**
-6. **Remember the exchange.** It becomes a passage the author's later searches can find (`index/conversations.rs`). A failure here is a log line, not a failed turn.
+5. **The record.** Whatever records the agent's questions is handed this one here, before `done`; a withheld answer's never is. See [Recording the agent's own questions](#recording-the-agents-own-questions).
+6. **`done`.**
+7. **Remember the exchange.** It becomes a passage the author's later searches can find (`index/conversations.rs`). A failure here is a log line, not a failed turn.
 
 A turn that fails after its stream began sends an `error` event with the problem's type, title and detail. It is logged only when the failure is the platform's (status 500 or above).
+
+## Recording the agent's own questions
+
+Each question is handed, as it ends, to the `AgentObserver` (`crates/shared/src/seam.rs`) set on `AgentParts::observer`. It is the hook the telemetry module fills once it exists, so the platform records its own agent's questions as runs, as any customer's agent's are. Until then nothing sets it.
+
+- **What a record holds.** Each model call with its round, model, token counts, time to first token, stop reason or error, and the tools it asked for; each tool call with its round and outcome; how the question ended; the conversation, organization, project and asker, by id.
+- ⚠ **Never what anyone wrote.** No question, answer, prompt or tool result reaches a record. The model quotes members' names and addresses, and an erasure scrubs them by their text from the agent's own tables (see [Erasure](#erasure)); it cannot reach a copy kept anywhere else. A tool name the model made up, which a passage it read can steer, is recorded as `unknown`.
+- **The loop is untouched.** `observe.rs` wraps the model and the runner `converse` is handed. A call the loop gives up on, at the deadline or with the asker gone, is still recorded, as given up.
+- **Every return is recorded, withheld answers never.** The recorder hands the record over when it drops, on whichever path `run_turn` takes. An answer withheld for an erasure in its organization drops it unsent.
+- **Tokens as the GenAI conventions count them.** The input counts every input token, the cache's among them; the output every output token, reasoning among them. The OpenAI-compatible stream asks for usage (`stream_options.include_usage`) whether or not anything records it, and Gemini's endpoint repeats the running totals on every chunk, so each one read replaces the last rather than adding to it.
 
 ## Who is asking, read again
 
@@ -446,6 +458,7 @@ sequenceDiagram
 | State, routes, loops | `crates/agent/src/lib.rs` |
 | The turn's lanes, rechecks, save | `crates/agent/src/handler.rs` |
 | The tool loop and its endings | `crates/agent/src/turn.rs` |
+| Recording each question | `crates/agent/src/observe.rs`; `AgentObserver` in `crates/shared/src/seam.rs` |
 | Tools, citations, data fencing | `crates/agent/src/tools.rs` |
 | System prompt | `crates/agent/src/prompt.rs` |
 | Search and visibility | `crates/agent/src/retrieve.rs`, `crates/agent/src/db.rs` (`search`) |

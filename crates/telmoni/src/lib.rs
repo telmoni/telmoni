@@ -175,6 +175,10 @@ pub struct AgentParts {
     pub config: telmoni_agent::Config,
     /// Its pool, opened as the `agent` role.
     pub pool: PgPool,
+    /// What records each of the agent's questions
+    /// ([`telmoni_shared::seam::AgentObserver`]): the telemetry module, once
+    /// it exists; `None` until then.
+    pub observer: Option<Arc<dyn telmoni_shared::seam::AgentObserver>>,
 }
 
 impl AgentParts {
@@ -184,7 +188,11 @@ impl AgentParts {
             return Ok(None);
         };
         let pool = telmoni_agent::boot::open_pool(&config).await?;
-        Ok(Some(Self { config, pool }))
+        Ok(Some(Self {
+            config,
+            pool,
+            observer: None,
+        }))
     }
 }
 
@@ -212,6 +220,7 @@ impl App {
                     secrets.clone(),
                     late_auth.clone(),
                     notifier.clone(),
+                    agent.observer,
                 )
                 .map(Arc::new)
             })

@@ -30,6 +30,7 @@ use crate::AppState;
 use crate::db::{self, MessageRole, StoredMessage};
 use crate::index::conversations;
 use crate::model::{Message, Model, ToolCall, ToolResult};
+use crate::observe::Recorder;
 use crate::prompt;
 use crate::tools::{self, Citation, Citations};
 use crate::turn::{self, Ending, Runner};
@@ -336,6 +337,7 @@ async fn run_turn(
     events: Events,
 ) {
     let acting = &asker.acting;
+    let recorder = Recorder::start(state.observer.clone(), acting, conversation_id);
     let system = prompt::system(acting, &Utc::now().format("%Y-%m-%d").to_string());
     let specs = tools::specs();
     let mut runner = LiveRunner {
@@ -346,16 +348,20 @@ async fn run_turn(
         ended: None,
     };
     let sink = |text: &str| events.send(TurnEvent::Text(text));
-    let outcome = turn::converse(
-        model.as_ref(),
-        &system,
-        &mut transcript,
-        &specs,
-        &mut runner,
-        &sink,
-        tokio::time::Instant::now() + turn::TURN_BUDGET,
-    )
-    .await;
+    let outcome = {
+        let watched = recorder.model(model.as_ref(), state.config.model.as_ref());
+        let mut tools = recorder.runner(&mut runner);
+        turn::converse(
+            &watched,
+            &system,
+            &mut transcript,
+            &specs,
+            &mut tools,
+            &sink,
+            tokio::time::Instant::now() + turn::TURN_BUDGET,
+        )
+        .await
+    };
     // Once more before anything is saved: the asker may have gone since the
     // last check. Bounded, as an auth slow to answer must not eat the time
     // left to save and say `done`; one that does not answer ends nothing.
@@ -367,16 +373,21 @@ async fn run_turn(
     }
     let citations = runner.citations;
     if let Some(why) = runner.ended {
+        recorder.failed(&why);
         return failed(&events, acting, conversation_id, &why);
     }
 
     let outcome = match outcome {
         Ok(outcome) if outcome.ending == Ending::Cancelled => {
+            recorder.cancelled();
             tracing::debug!("agent turn abandoned by the asker");
             return;
         }
         Ok(outcome) => outcome,
-        Err(e) => return failed(&events, acting, conversation_id, &e),
+        Err(e) => {
+            recorder.failed(&e);
+            return failed(&events, acting, conversation_id, &e);
+        }
     };
     let mut answer = outcome.text;
     if let Some(note) = outcome.ending.note() {
@@ -393,11 +404,20 @@ async fn run_turn(
     }
     let saved = match save_answer(&state, &asker, conversation_id, &answer, &cited).await {
         Ok(saved) => saved,
-        Err(e) => return failed(&events, acting, conversation_id, &e),
+        Err(e) => {
+            recorder.failed(&e);
+            return failed(&events, acting, conversation_id, &e);
+        }
     };
     if saved.withheld {
+        recorder.withhold();
         sink(&format!("\n\n{WITHHELD}"));
+    } else {
+        recorder.answered(outcome.ending);
     }
+    // Handed over now, not after the exchange is indexed for later searches,
+    // which is no part of the answer.
+    drop(recorder);
     events.send(TurnEvent::Done {
         conversation_id,
         message_id: saved.id,

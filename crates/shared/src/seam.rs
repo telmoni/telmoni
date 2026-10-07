@@ -342,3 +342,138 @@ pub trait PurgeHook: Send + Sync {
         organization_id: &OrganizationId,
     ) -> Result<(), TelmoniError>;
 }
+
+/// The tokens one model call used, counted as the GenAI conventions count
+/// them: the input every input token, a cache's reads and writes among
+/// them, and the output every output token, reasoning among them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TokenUsage {
+    /// Every input token, the cache's reads and writes among them.
+    pub input_tokens: u64,
+    /// Every output token, reasoning among them.
+    pub output_tokens: u64,
+    /// Input tokens read from the provider's cache.
+    pub cache_read_tokens: u64,
+    /// Input tokens written to the provider's cache.
+    pub cache_write_tokens: u64,
+    /// Output tokens spent reasoning, where the provider counts them apart.
+    pub reasoning_tokens: u64,
+}
+
+/// How a console question ended, as an [`AgentObserver`] is told.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentTurnEnding {
+    /// The model answered.
+    Answered {
+        /// Why the answer ends early when it does — `capped`, `truncated`,
+        /// `timed_out` or `interrupted` — as the person was told in a note.
+        stopped_short: Option<&'static str>,
+    },
+    /// The turn failed.
+    Failed {
+        /// The problem type, never its detail, which can carry what the
+        /// person wrote.
+        problem_type: String,
+    },
+    /// The asker left, or is no longer who began it; nothing was saved.
+    Cancelled,
+}
+
+/// One model call of a console question.
+#[derive(Debug, Clone)]
+pub struct AgentGeneration {
+    /// The observation's own id, fresh.
+    pub id: Uuid,
+    /// The round of the tool loop that made it, from 0.
+    pub round: usize,
+    /// When it was sent.
+    pub started_at: DateTime<Utc>,
+    /// When its first words arrived; `None` when none did.
+    pub first_token_at: Option<DateTime<Utc>>,
+    /// When it ended, or was given up.
+    pub ended_at: DateTime<Utc>,
+    /// The wire protocol it was made over: `anthropic` or `openai`.
+    pub provider: &'static str,
+    /// The model that answered as the provider spells it, or the configured
+    /// one where the stream named none.
+    pub model: String,
+    /// The ceiling on its output, `AGENT_MAX_TOKENS`.
+    pub max_tokens: u32,
+    /// `None` when the provider reported none.
+    pub usage: Option<TokenUsage>,
+    /// Why the call stopped, in the agent's words; `None` when it failed.
+    pub stop_reason: Option<&'static str>,
+    /// Why it failed: the kind, never the provider's body, which can echo the
+    /// request back.
+    pub error: Option<String>,
+    /// The tools it asked for, by the agent's names for them: `unknown` for a
+    /// name the model made up, which a passage it read can steer.
+    pub tool_calls: Vec<&'static str>,
+}
+
+/// One tool call of a console question.
+#[derive(Debug, Clone)]
+pub struct AgentToolCall {
+    /// The observation's own id, fresh.
+    pub id: Uuid,
+    /// The round whose model call asked for it.
+    pub round: usize,
+    /// When it began.
+    pub started_at: DateTime<Utc>,
+    /// When it ended, or was given up.
+    pub ended_at: DateTime<Utc>,
+    /// The tool, by the agent's name for it, or `unknown` (see
+    /// [`AgentGeneration::tool_calls`]).
+    pub name: &'static str,
+    /// Whether it answered the model with an error, or was given up.
+    pub is_error: bool,
+}
+
+/// One step of a console question, in the order it happened.
+#[derive(Debug, Clone)]
+pub enum AgentStep {
+    /// A model call.
+    Generation(AgentGeneration),
+    /// A tool call.
+    Tool(AgentToolCall),
+}
+
+/// One console question, once it has ended.
+#[derive(Debug, Clone)]
+pub struct AgentTurnRecord {
+    /// A fresh id for the question.
+    pub trace_id: Uuid,
+    /// The conversation it was asked in.
+    pub conversation_id: Uuid,
+    /// The asker's organization.
+    pub organization_id: OrganizationId,
+    /// The project it was asked about.
+    pub project_id: Option<ProjectId>,
+    /// Who asked: the id, never the address or the name.
+    pub user_id: UserId,
+    /// When the turn began.
+    pub started_at: DateTime<Utc>,
+    /// When its outcome was known.
+    pub ended_at: DateTime<Utc>,
+    /// How it ended.
+    pub ending: AgentTurnEnding,
+    /// Its model and tool calls, in the order they happened.
+    pub steps: Vec<AgentStep>,
+}
+
+/// What records the console agent's own questions — the telemetry module,
+/// once it exists, each as a run of the platform's own project — handed
+/// each question once it ends: its model calls with their tokens and
+/// timings, its tool calls, and how it ended. A question whose answer was
+/// withheld for an erasure in its organization is never handed over.
+///
+/// ⚠ **Ids and counts, never what anyone wrote.** No question, answer,
+/// prompt or tool result reaches a record. The model quotes members' names
+/// and addresses, and an erasure scrubs them by their text from the agent's
+/// own tables; it cannot reach a copy kept anywhere else.
+pub trait AgentObserver: Send + Sync {
+    /// Take one finished question. Called on the turn's own task as it ends,
+    /// so anything slow — a request to a tracing backend — goes on a task of
+    /// its own.
+    fn observe(&self, record: AgentTurnRecord);
+}

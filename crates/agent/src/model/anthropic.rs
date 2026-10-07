@@ -11,8 +11,8 @@ use serde_json::{Value, json};
 use telmoni_shared::TelmoniError;
 
 use super::{
-    Message, Model, ModelTurn, StopReason, TextSink, ToolCall, ToolSpec, read_events, send,
-    unavailable,
+    Message, Model, ModelTurn, StopReason, TextSink, TokenUsage, ToolCall, ToolSpec, read_events,
+    send, unavailable,
 };
 use crate::config::ModelConfig;
 
@@ -140,6 +140,50 @@ fn parse_input(json: &str) -> Option<Value> {
 pub(crate) struct Assembler {
     blocks: BTreeMap<u64, Block>,
     stop_reason: StopReason,
+    counts: Counts,
+    model: Option<String>,
+}
+
+/// The Messages API's token counts as the stream gives them: `message_start`
+/// carries the input's, `message_delta` the output's totals so far. Each
+/// count read replaces the last.
+#[derive(Debug, Default)]
+struct Counts {
+    input: Option<u64>,
+    cache_read: u64,
+    cache_write: u64,
+    output: u64,
+}
+
+impl Counts {
+    fn take(&mut self, usage: &Value) {
+        let field = |key: &str| usage.get(key).and_then(Value::as_u64);
+        if let Some(input) = field("input_tokens") {
+            self.input = Some(input);
+        }
+        if let Some(read) = field("cache_read_input_tokens") {
+            self.cache_read = read;
+        }
+        if let Some(write) = field("cache_creation_input_tokens") {
+            self.cache_write = write;
+        }
+        if let Some(output) = field("output_tokens") {
+            self.output = output;
+        }
+    }
+
+    /// The API counts its cache apart from `input_tokens`; the record counts
+    /// it among the input, as the conventions do. Thinking is billed as
+    /// output and counted in it, with no count of its own.
+    fn usage(&self) -> Option<TokenUsage> {
+        Some(TokenUsage {
+            input_tokens: self.input? + self.cache_read + self.cache_write,
+            output_tokens: self.output,
+            cache_read_tokens: self.cache_read,
+            cache_write_tokens: self.cache_write,
+            reasoning_tokens: 0,
+        })
+    }
 }
 
 impl Assembler {
@@ -182,9 +226,20 @@ impl Assembler {
                     _ => {}
                 }
             }
+            Some("message_start") => {
+                if let Some(model) = event.pointer("/message/model").and_then(Value::as_str) {
+                    self.model = Some(model.to_owned());
+                }
+                if let Some(usage) = event.pointer("/message/usage") {
+                    self.counts.take(usage);
+                }
+            }
             Some("message_delta") => {
                 if let Some(reason) = event.pointer("/delta/stop_reason").and_then(Value::as_str) {
                     self.stop_reason = StopReason::from_anthropic(reason);
+                }
+                if let Some(usage) = event.get("usage") {
+                    self.counts.take(usage);
                 }
             }
             Some("error") => {
@@ -202,6 +257,8 @@ impl Assembler {
     pub(crate) fn finish(self) -> ModelTurn {
         let mut turn = ModelTurn {
             stop_reason: self.stop_reason,
+            usage: self.counts.usage(),
+            model: self.model,
             ..ModelTurn::default()
         };
         let mut raw = Vec::with_capacity(self.blocks.len());
@@ -278,6 +335,35 @@ mod tests {
             assembler.take(event).unwrap();
         }
         assembler.finish()
+    }
+
+    #[test]
+    fn the_cache_is_counted_among_the_input_and_the_last_output_total_kept() {
+        let turn = feed(&[
+            json!({"type":"message_start","message":{"model":"claude-x","usage":{"input_tokens":20,"cache_read_input_tokens":300,"cache_creation_input_tokens":50,"output_tokens":1}}}),
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}),
+            json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":12}}),
+        ]);
+        assert_eq!(turn.model.as_deref(), Some("claude-x"));
+        assert_eq!(
+            turn.usage,
+            Some(TokenUsage {
+                input_tokens: 370,
+                output_tokens: 12,
+                cache_read_tokens: 300,
+                cache_write_tokens: 50,
+                reasoning_tokens: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn a_stream_that_counts_nothing_has_no_usage() {
+        let turn = feed(&[
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":"Hi"}}),
+        ]);
+        assert_eq!(turn.usage, None);
     }
 
     #[test]

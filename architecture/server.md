@@ -166,6 +166,7 @@ The premise is that in one process there is nothing to secure or cache between m
 | `Notifications` | `Notifier`, `crates/notifications/src/seam.rs` | `emit`, `purge_organization`, `purge_project`, `redact_person`: auth. `activity_documents`, `connectors`, `connector_deliveries`: the agent. |
 | `Agent` | `AgentSeam`, `crates/agent/src/seam.rs` | `erase_person`, `purge_organization`: auth's deletion |
 | `PurgeHook` | A deployment's own code | Called when an organization's deletion is confirmed (in the request's inline tail), again by the sweep until a run is recorded, and again at finalize. The row is kept until the hook answers `Ok`. ⚠ It runs while the organization can still be restored, and a restore undoes nothing it did. |
+| `AgentObserver` | Nothing yet: the telemetry module, once it exists, set on `AgentParts::observer` | `observe`: the agent, as each question ends (`crates/agent/src/observe.rs`). A record carries ids, timings and token counts, never what anyone wrote ([agent](agent.md#recording-the-agents-own-questions)). |
 
 Rules the seams follow:
 

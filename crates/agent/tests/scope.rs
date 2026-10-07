@@ -123,6 +123,7 @@ fn state_with(pool: &PgPool, embedder: Arc<SameVector>, auth: Arc<dyn Auth>) -> 
         model: None,
         embedder: Some(embedder),
         reranker: None,
+        observer: None,
     }
 }
 

@@ -283,6 +283,7 @@ mod tests {
                 }],
                 raw: None,
                 stop_reason: StopReason::ToolUse,
+                ..ModelTurn::default()
             })
         }
     }
