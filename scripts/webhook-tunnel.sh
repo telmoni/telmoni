@@ -51,8 +51,10 @@ receiver_pid=$!
 # cloudflared prints the assigned hostname to stderr a second or two after
 # start, inside a box of dashes. Tee it so the operator sees cloudflared's own
 # output, and read the URL out of the same stream to print it once, plainly,
-# with the path the endpoint should carry.
-cloudflared tunnel --url "http://localhost:${PORT}" 2>&1 | tee "$log" &
+# with the path the endpoint should carry. Process substitution rather than a
+# pipe, so `$!` is cloudflared's pid and not tee's: killed by pid, a tee leaves
+# the tunnel open until cloudflared next writes to the closed pipe.
+cloudflared tunnel --url "http://localhost:${PORT}" > >(tee "$log") 2>&1 &
 tunnel_pid=$!
 
 url=""
