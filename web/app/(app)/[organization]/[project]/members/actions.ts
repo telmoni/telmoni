@@ -126,6 +126,12 @@ export async function updateMemberRoleAction(
 ): Promise<ActionResult> {
   const gate = await open("members:role", 30, projectId);
   if ("error" in gate) return gate;
+  // The channel told is the member's own console, so their address comes
+  // from the roster auth answers for this project, never from the caller,
+  // who could otherwise name anybody's.
+  const roster = await fetchMembers(gate.projectId);
+  const changed =
+    roster.kind === "ok" ? roster.members.find((m) => m.member_id === memberId) : undefined;
   const res = await tryFetchWithTimeout(
     `${gate.base}/internal/projects/${encodeURIComponent(gate.projectId)}/members/${encodeURIComponent(memberId)}/role`,
     {
@@ -134,6 +140,14 @@ export async function updateMemberRoleAction(
       body: JSON.stringify({ role }),
     },
   );
+  if (!res?.ok) return answer(res);
+
+  if (changed) {
+    await publishEvent(userChannel(changed.email), {
+      type: "membership:changed",
+      data: { organizationId: gate.organizationId, projectId: gate.projectId },
+    });
+  }
   return answer(res);
 }
 

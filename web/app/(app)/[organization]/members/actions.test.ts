@@ -401,6 +401,24 @@ describe("organization members actions", () => {
       );
     });
 
+    it("tells the member whose role changed, at the roster's address, and nobody else", async () => {
+      fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+      const res = await updateOrganizationMemberRoleAction(ORGANIZATION, "user_2", "admin");
+      expect(res).toEqual({ error: null });
+      expect(mockPublishEvent).toHaveBeenCalledTimes(1);
+      expect(mockPublishEvent).toHaveBeenCalledWith("bfev:user:removed@example.test", {
+        type: "membership:changed",
+        data: { organizationId: ORGANIZATION },
+      });
+    });
+
+    it("tells nobody about a role change auth refused", async () => {
+      fetchMock.mockResolvedValue(new Response(null, { status: 403 }));
+      const res = await updateOrganizationMemberRoleAction(ORGANIZATION, "user_2", "admin");
+      expect(res).toEqual({ error: "problem" });
+      expect(mockPublishEvent).not.toHaveBeenCalled();
+    });
+
     it("removeOrganizationMemberAction removes from the organization the page rendered", async () => {
       fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
       const res = await removeOrganizationMemberAction(ORGANIZATION, "user_2");

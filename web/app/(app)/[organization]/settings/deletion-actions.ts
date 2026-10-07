@@ -7,7 +7,9 @@ import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { isSessionBlacklisted } from "@/lib/auth/session-blacklist";
 import { sessionEndKey } from "@/lib/auth/session-end-key";
 import { env } from "@/lib/env";
+import { publishToAll, userChannel } from "@/lib/events/publisher";
 import { identityContext, organizationHeaders } from "@/lib/server/entities/identity-context";
+import { fetchOrganizationMembers } from "@/lib/server/entities/organization-member";
 import { SWITCHED_ORGANIZATION, unplacedOrganization } from "@/lib/server/identity";
 import { getServerSession } from "@/lib/server/session";
 
@@ -81,6 +83,14 @@ export async function deleteOrganizationAction(
     return { error: "Only this organization's owner can delete it." };
   }
 
+  // Everybody else's open console is told, each by their own channel: the
+  // organization's channel would reach the owner's tab too, and sweep the
+  // success screen below away. The roster is read first, because the closed
+  // organization answers nothing afterwards.
+  const roster = await fetchOrganizationMembers();
+  const others =
+    roster.kind === "ok" ? roster.members.filter((m) => m.member_id !== ctx.userId) : [];
+
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/organization`, {
     method: "DELETE",
     headers: { ...organizationHeaders(ctx), "content-type": "application/json" },
@@ -88,6 +98,11 @@ export async function deleteOrganizationAction(
   });
   if (!res) return { error: UNREACHABLE };
   if (!res.ok) return { error: (await extractProblem(res)).message };
+
+  await publishToAll(
+    others.map((m) => userChannel(m.email)),
+    { type: "membership:removed", data: { organizationId: ctx.organizationId } },
+  );
 
   const answer = await res
     .json()

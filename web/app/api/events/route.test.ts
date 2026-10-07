@@ -281,6 +281,24 @@ describe("GET /api/events (SSE)", () => {
     await reader.cancel();
   });
 
+  it("relays a membership:changed event on the user personal channel as it came", async () => {
+    mockGetSession.mockResolvedValue(LIVE_SESSION);
+    const res = await GET(new NextRequest("http://localhost:3000/api/events"));
+    const reader = res.body!.getReader();
+    await reader.read();
+
+    messageListener?.(
+      USER_CHANNEL,
+      JSON.stringify({ type: "membership:changed", data: { organizationId: "org_own" } }),
+    );
+
+    const chunk = await reader.read();
+    expect(new TextDecoder().decode(chunk.value)).toBe(
+      'event: membership:changed\ndata: {"organizationId":"org_own"}\n\n',
+    );
+    await reader.cancel();
+  });
+
   // A slug moved: the console replaces the path it is on with one
   // spelled by `to`, so nothing that is not a slug may reach it as one.
   it("relays a slug:moved event, and drops one whose slugs are no slug's shape", async () => {

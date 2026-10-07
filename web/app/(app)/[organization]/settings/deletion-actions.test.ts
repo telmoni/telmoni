@@ -35,6 +35,28 @@ vi.mock("@/lib/server/entities/identity-context", async (importOriginal) => ({
 vi.mock("@/lib/server/entities/organization", () => ({
   getServerContext: vi.fn(async () => null),
 }));
+// The roster auth answers before the organization closes: whose open console
+// is told, by the address auth holds for each.
+vi.mock("@/lib/server/entities/organization-member", () => ({
+  fetchOrganizationMembers: vi.fn(async () => ({
+    kind: "ok",
+    members: [
+      { member_id: "user_1", email: "owner@example.test" },
+      { member_id: "user_2", email: "admin@example.test" },
+      { member_id: "user_3", email: "member@example.test" },
+    ],
+  })),
+}));
+const mockPublishEvent = vi.fn();
+vi.mock("@/lib/events/publisher", () => ({
+  publishEvent: (...args: unknown[]) => mockPublishEvent(...args),
+  publishToAll: async (channels: (string | null | undefined)[], event: unknown) => {
+    for (const channel of new Set(channels.filter(Boolean))) {
+      await mockPublishEvent(channel, event);
+    }
+  },
+  userChannel: (email: string) => `bfev:user:${email.toLowerCase()}`,
+}));
 const mockRedirect = vi.fn((to: string) => {
   throw new Error(`REDIRECT:${to}`);
 });
@@ -235,6 +257,27 @@ describe("deleteOrganizationAction", () => {
     expect(destroySession).not.toHaveBeenCalled();
     expect(blacklistSession).not.toHaveBeenCalled();
     expect(mockRedirect).not.toHaveBeenCalled();
+  });
+
+  // The organization closes for everybody at auth's answer. Each other
+  // member's open console is told by their own channel, so a tab standing in
+  // it leaves; the owner's is not, since theirs is showing the success screen.
+  it("tells every other member on their own channel, and not the owner", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ purged: true }), { status: 202 }));
+    expect(await deleteOrganizationAction(ORGANIZATION, "123456")).toEqual({
+      ok: true,
+      purged: true,
+    });
+    const gone = { type: "membership:removed", data: { organizationId: ORGANIZATION } };
+    expect(mockPublishEvent).toHaveBeenCalledTimes(2);
+    expect(mockPublishEvent).toHaveBeenCalledWith("bfev:user:admin@example.test", gone);
+    expect(mockPublishEvent).toHaveBeenCalledWith("bfev:user:member@example.test", gone);
+  });
+
+  it("tells nobody when auth refuses the deletion", async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 403 }));
+    expect(await deleteOrganizationAction(ORGANIZATION, "123456")).toEqual({ error: "problem" });
+    expect(mockPublishEvent).not.toHaveBeenCalled();
   });
 
   // ⚠ Revalidating the layout causes Next to re-render the page in the

@@ -182,6 +182,13 @@ export function RealtimeListener() {
         }
       });
 
+      // Your role in a project or organization changed, by somebody else or
+      // in another tab: the page's controls follow the role the server now
+      // answers, so it is asked for again.
+      es.addEventListener("membership:changed", () => {
+        router.refresh();
+      });
+
       es.addEventListener("close", () => {
         active = false;
         es.close();

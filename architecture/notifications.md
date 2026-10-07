@@ -298,7 +298,7 @@ The agent's model, embeddings and rerank URLs are deliberately **not** guarded: 
 - The console's `/api/events` server-sent event stream subscribes to Redis channels for:
   - the person, an HMAC of their email so channel names cannot list customers;
   - each organization they are in.
-- It forwards only the events the console's own Server Actions publish: ownership and invitation events, `slug:moved` and `membership:removed`.
+- It forwards only the events the console's own Server Actions publish: ownership and invitation events, `slug:moved`, `membership:removed` and `membership:changed`.
 - A new notice shows up when a server component renders again: on navigation, or on a refresh triggered by one of those events. Nothing polls the feed.
 
 See [the console](console.md#live-events).

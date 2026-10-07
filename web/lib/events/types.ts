@@ -22,8 +22,17 @@ const OwnershipRefSchema = z.object({
   projectSlug: Slug.optional(),
 });
 
-/// A project or organization from which the user's membership has been revoked.
+/// A project or organization from which the user's membership has been
+/// revoked, or that was deleted from under them.
 const MembershipRemovedSchema = z.object({
+  organizationId: z.string(),
+  projectId: z.string().optional(),
+});
+
+/// A project or organization in which the user's role was just changed:
+/// what they may do on the page has moved with it, so the page is asked for
+/// again. The role itself is not carried; `/me` is where it comes from.
+const MembershipChangedSchema = z.object({
   organizationId: z.string(),
   projectId: z.string().optional(),
 });
@@ -52,6 +61,10 @@ export const RealtimeEventSchema = z.discriminatedUnion("type", [
     data: MembershipRemovedSchema,
   }),
   z.object({
+    type: z.literal("membership:changed"),
+    data: MembershipChangedSchema,
+  }),
+  z.object({
     type: z.literal("slug:moved"),
     data: SlugMovedSchema,
   }),
@@ -78,6 +91,7 @@ export type RealtimeEvent = z.infer<typeof RealtimeEventSchema>;
 export const RealtimeEventDataSchema = {
   "ownership:changed": OwnershipRefSchema,
   "membership:removed": MembershipRemovedSchema,
+  "membership:changed": MembershipChangedSchema,
   "slug:moved": SlugMovedSchema,
   "invite:created": IncomingInviteSchema,
   "invite:sent": InviteRefSchema,

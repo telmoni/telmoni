@@ -234,7 +234,7 @@ Why the code is shaped this way:
 
 **What the stream carries:**
 - It subscribes to the person's channel and to one channel per organization they are in.
-- It forwards `ownership:changed`, `membership:removed`, `slug:moved` and `invite:*` events, validated with zod. **Notices from the feed are not pushed** (see [notifications](notifications.md#live-updates-in-the-console)).
+- It forwards `ownership:changed`, `membership:removed`, `membership:changed`, `slug:moved` and `invite:*` events, validated with zod. **Notices from the feed are not pushed** (see [notifications](notifications.md#live-updates-in-the-console)).
 - ⚠ **A `slug:moved` event's slugs are held to a slug's shape** (`web/lib/events/types.ts`), because the browser spells a path with them.
 - A revocation message on the session's channel closes the stream with a `close` event.
 - A keepalive comment goes out on an interval. Each time, it also re-checks the blacklist.
@@ -244,7 +244,7 @@ Why the code is shaped this way:
 
 **`RealtimeListener`** (`web/components/realtime-listener.tsx`) is the browser's `EventSource`.
 - It updates the store and calls `router.refresh()`, so the server components render again.
-- It moves the page when the page's own address has moved: out of a project or an organization the person was removed from, after a project handed to another organization, and after a moved slug (an organization's URL changed, a project renamed).
+- It moves the page when the page's own address has moved: out of a project or an organization the person was removed from, or that was deleted, after a project handed to another organization, and after a moved slug (an organization's URL changed, a project renamed). A changed role only renders the page again.
 - It reconnects after a delay, or when the tab becomes visible or comes back online.
 - It stops on `close`.
 

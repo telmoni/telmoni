@@ -72,6 +72,7 @@ import {
   offerProjectAction,
   revokeInviteAction,
   removeMemberAction,
+  updateMemberRoleAction,
 } from "./actions";
 
 const fetchMock = vi.mocked(tryFetchWithTimeout);
@@ -491,6 +492,33 @@ describe("Incoming invites server actions", () => {
           data: { organizationId: "org_1", projectId: "project_1" },
         },
       );
+    });
+  });
+
+  describe("updateMemberRoleAction", () => {
+    it("changes the role and tells the member at the roster's address, and nobody else", async () => {
+      fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+      const res = await updateMemberRoleAction("project_1", "user_2", "admin");
+      expect(res).toEqual({ error: null });
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://auth.test/internal/projects/project_1/members/user_2/role",
+        expect.objectContaining({ method: "PUT", body: JSON.stringify({ role: "admin" }) }),
+      );
+      expect(mockPublishEvent).toHaveBeenCalledTimes(1);
+      expect(mockPublishEvent).toHaveBeenCalledWith("bfev:user:removed@example.test", {
+        type: "membership:changed",
+        data: { organizationId: "org_1", projectId: "project_1" },
+      });
+    });
+
+    it("tells nobody about a role change the roster does not know, or auth refused", async () => {
+      fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+      expect(await updateMemberRoleAction("project_1", "user_9", "admin")).toEqual({ error: null });
+      fetchMock.mockResolvedValue(new Response(null, { status: 403 }));
+      expect(await updateMemberRoleAction("project_1", "user_2", "admin")).toEqual({
+        error: "invitation already used",
+      });
+      expect(mockPublishEvent).not.toHaveBeenCalled();
     });
   });
 });

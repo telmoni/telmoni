@@ -128,6 +128,14 @@ export async function deleteProjectAction(projectId: string): Promise<ActionResu
     return { error };
   }
 
+  // Everybody in the organization is told, the owner and admins who hold no
+  // seat included: a tab on the project leaves it, and every other draws its
+  // rail again. The deleting tab leaves for the console's entry page itself.
+  await publishEvent(organizationChannel(ctx.organizationId), {
+    type: "membership:removed",
+    data: { organizationId: ctx.organizationId, projectId },
+  });
+
   // Every console page lists the organization's projects in its rail.
   revalidatePath("/", "layout");
   return { error: null };

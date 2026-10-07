@@ -317,3 +317,27 @@ describe("RealtimeListener - rosters", () => {
     },
   );
 });
+
+// A role changed under the person: the page's controls follow the role the
+// server answers now, so the page is rendered again, wherever it is.
+describe("RealtimeListener - membership:changed", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    MockEventSource.instances = [];
+    mockActiveOrgId = "org_1";
+  });
+
+  it.each(["/acme/web/members", "/acme/settings", "/account/settings"])(
+    "refreshes %s and moves nowhere",
+    (pathname) => {
+      mockPathname = pathname;
+      render(<RealtimeListener />);
+      MockEventSource.instances[0].emit("membership:changed", {
+        organizationId: "org_1",
+        projectId: "project_1",
+      });
+      expect(mockRefresh).toHaveBeenCalledTimes(1);
+      expect(mockReplace).not.toHaveBeenCalled();
+    },
+  );
+});

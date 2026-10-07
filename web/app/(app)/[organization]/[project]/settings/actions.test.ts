@@ -52,7 +52,7 @@ import { getServerContext } from "@/lib/server/entities/organization";
 import { fetchProject } from "@/lib/server/entities/projects";
 import { getServerSession } from "@/lib/server/session";
 
-import { updateProjectNameAction } from "./actions";
+import { deleteProjectAction, updateProjectNameAction } from "./actions";
 
 const fetchMock = vi.mocked(tryFetchWithTimeout);
 
@@ -201,5 +201,38 @@ describe("updateProjectNameAction", () => {
     const res = await updateProjectNameAction(PROJECT, "Marketing Site");
     expect(res.error).toMatch(/URL was changed, or you're no longer in it/);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("deleteProjectAction", () => {
+  // Everybody in the organization is told on its channel, the owner and
+  // admins who hold no seat included: a tab on the project leaves it, and
+  // every other draws its rail again.
+  it("deletes the project by its id and tells the organization it is gone", async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    expect(await deleteProjectAction(PROJECT)).toEqual({ error: null });
+    expect(fetchMock).toHaveBeenCalledWith(
+      `http://auth.test/internal/projects/${PROJECT}`,
+      expect.objectContaining({
+        method: "DELETE",
+        headers: expect.objectContaining({
+          "x-organization-id": ORGANIZATION,
+          "x-project-id": PROJECT,
+        }),
+      }),
+    );
+    expect(mockPublishEvent).toHaveBeenCalledTimes(1);
+    expect(mockPublishEvent).toHaveBeenCalledWith(`bfev:organization:${ORGANIZATION}`, {
+      type: "membership:removed",
+      data: { organizationId: ORGANIZATION, projectId: PROJECT },
+    });
+    expect(mockRevalidate).toHaveBeenCalledWith("/", "layout");
+  });
+
+  it("surfaces auth's refusal, and tells nobody", async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 403 }));
+    expect(await deleteProjectAction(PROJECT)).toEqual({ error: "problem" });
+    expect(mockPublishEvent).not.toHaveBeenCalled();
+    expect(mockRevalidate).not.toHaveBeenCalled();
   });
 });
