@@ -434,3 +434,104 @@ async fn a_served_read_stamps_last_used_and_an_organizations_own_switch_refuses_
     assert_eq!(refused.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(json_body(refused).await["flag"], "public_api");
 }
+
+/// A call on the tokens lane, by `u_owner` in `project`.
+async fn token_lane(
+    pool: &PgPool,
+    organization: &str,
+    project: &str,
+    method: &str,
+    uri: &str,
+    body: serde_json::Value,
+) -> axum::response::Response {
+    app(pool.clone())
+        .oneshot(
+            as_person(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header("x-service-secret", SERVICE_SECRET)
+                    .header("x-organization-id", organization)
+                    .header("x-project-id", project)
+                    .header("content-type", "application/json"),
+                pool,
+                "u_owner",
+            )
+            .await
+            .body(Body::from(body.to_string()))
+            .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
+/// Minting and rotating are the switch's own lanes, refused by the server
+/// whoever the caller is, not only by the console in front of it. Revoking
+/// never is: a leaked key must be revocable whatever the switch says. The row
+/// is the organization's own, which only a read under its scope sees.
+#[sqlx::test]
+async fn a_switched_off_api_tokens_flag_refuses_minting_and_rotating_but_not_revoking(
+    pool: PgPool,
+) {
+    apply_audit_migrations(&pool).await;
+    let organization = sign_in(&pool, "u_owner").await;
+    let project = create_project(&pool, "u_owner", &organization).await;
+
+    let minted = token_lane(
+        &pool,
+        &organization,
+        &project,
+        "POST",
+        "/internal/tokens",
+        json!({ "name": "ci", "created_by": "u_owner" }),
+    )
+    .await;
+    assert_eq!(minted.status(), StatusCode::CREATED);
+    let id = json_body(minted).await["id"]
+        .as_str()
+        .expect("the minted token's id")
+        .to_owned();
+
+    flip(&pool, Some(&organization), Flag::ApiTokens, false).await;
+
+    let refused = token_lane(
+        &pool,
+        &organization,
+        &project,
+        "POST",
+        "/internal/tokens",
+        json!({ "name": "ci-2", "created_by": "u_owner" }),
+    )
+    .await;
+    assert_eq!(refused.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = json_body(refused).await;
+    assert_eq!(body["type"], "/errors/tenant/feature-off");
+    assert_eq!(body["flag"], "api_tokens");
+
+    let rotated = token_lane(
+        &pool,
+        &organization,
+        &project,
+        "POST",
+        &format!("/internal/tokens/{id}/rotate"),
+        json!({}),
+    )
+    .await;
+    assert_eq!(rotated.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(json_body(rotated).await["flag"], "api_tokens");
+
+    let revoked = token_lane(
+        &pool,
+        &organization,
+        &project,
+        "DELETE",
+        &format!("/internal/tokens/{id}"),
+        json!({}),
+    )
+    .await;
+    assert_eq!(
+        revoked.status(),
+        StatusCode::NO_CONTENT,
+        "a leaked key is revocable whatever the switch says"
+    );
+}

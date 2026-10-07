@@ -16,7 +16,9 @@ use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::rbac::{Resource, Verb, can};
 use telmoni_shared::types::API_TOKEN_PREFIX;
-use telmoni_shared::{AuditAction, AuthError, AuthzError, Role, TelmoniError, TelmoniResourceKind};
+use telmoni_shared::{
+    AuditAction, AuthError, AuthzError, Flag, Role, TelmoniError, TelmoniResourceKind, TenantError,
+};
 
 use crate::{
     AppState,
@@ -82,6 +84,28 @@ fn ensure_token_authz(role: Role, verb: Verb) -> Result<(), TelmoniError> {
     Ok(())
 }
 
+/// Refuse to mint or rotate while `api_tokens` is off for the project's
+/// organization. The console refuses first, with its own sentence; this is
+/// where the switch holds for a console built on it, or any other caller.
+/// The flag is read under the owning organization's scope, where its own
+/// override row is visible, and the project scope restored after, as
+/// `acting_project` handed it over. Revoking is never gated: a leaked key
+/// must be revocable whatever the switch says.
+async fn refuse_unless_tokens_on(
+    access: super::ActingProject<'_>,
+) -> Result<super::ActingProject<'_>, TelmoniError> {
+    let organization = access.organization.clone();
+    let mut access = access.enter_owner_scope().await?;
+    let flags = crate::db::flags::resolve_for_organization(&mut access.tx, &organization).await?;
+    if !flags.is_on(Flag::ApiTokens) {
+        return Err(TenantError::FeatureOff {
+            flag: Flag::ApiTokens,
+        }
+        .into());
+    }
+    access.leave_owner_scope().await
+}
+
 /// `GET /internal/tokens` — the organization's `telmoni_` tokens, metadata only.
 pub async fn list_tokens(
     State(state): State<Arc<AppState>>,
@@ -128,6 +152,7 @@ pub async fn create_token(
     }
     let access = acting_project(&state, &project_id, &actor).await?;
     ensure_token_authz(access.role, Verb::Create)?;
+    let access = refuse_unless_tokens_on(access).await?;
     let token_organization = access.organization.clone();
     let mut tx = access.tx;
     let record = tokens::create(
@@ -210,6 +235,7 @@ pub async fn rotate_token(
     let project_id = project_of(&headers)?;
     let access = acting_project(&state, &project_id, &actor).await?;
     ensure_token_authz(access.role, Verb::Update)?;
+    let access = refuse_unless_tokens_on(access).await?;
     let token_organization = access.organization.clone();
     let mut tx = access.tx;
 
