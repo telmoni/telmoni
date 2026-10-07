@@ -37,7 +37,6 @@ networks:
 
 volumes:
   postgres_data:
-  redis_data:
   ollama_models:
 
 x-database-url: &database_url
