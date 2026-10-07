@@ -92,32 +92,3 @@ pub async fn resolve_for_organization<B: FlagRead>(
     apply(&mut set, layered_rows(tx, organization_id).await?);
     Ok(set)
 }
-
-/// Whether `flag` resolves on for ANY of the organizations, by the same
-/// precedence as [`resolve_for_organization`], in one statement: `/me` asked
-/// it of every organization a person is in, two round trips each.
-pub async fn on_for_any_organization(
-    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
-    flag: Flag,
-    organization_ids: &[OrganizationId],
-) -> sqlx::Result<bool> {
-    if organization_ids.is_empty() {
-        return Ok(false);
-    }
-    sqlx::query_scalar(
-        "SELECT COALESCE(bool_or(COALESCE(o.enabled, g.enabled, true)), false)
-           FROM unnest($1::text[]) AS ids(organization_id)
-           LEFT JOIN LATERAL (
-               SELECT f.enabled FROM auth.organization_flags f
-                WHERE f.organization_id = ids.organization_id AND f.key = $2
-                ORDER BY f.created_at DESC, f.id DESC LIMIT 1) o ON true
-           LEFT JOIN LATERAL (
-               SELECT g.enabled FROM auth.feature_flags g
-                WHERE g.key = $2
-                ORDER BY g.created_at DESC, g.id DESC LIMIT 1) g ON true",
-    )
-    .bind(organization_ids)
-    .bind(flag.as_str())
-    .fetch_one(tx.conn())
-    .await
-}

@@ -7,8 +7,9 @@ const InviteRefSchema = z.object({ inviteId: z.string() });
 
 const Slug = z.string().refine(isSlug);
 
-/// An organization whose ownership offer or owner just changed — or, when a
-/// project is named, one of whose projects was offered, answered, or moved.
+/// An organization whose ownership offer or owner just changed, or that the
+/// person just founded — or, when a project is named, one of whose projects
+/// was offered, answered, or moved.
 /// It carries no roles: the console re-reads `/me`, which is where
 /// who-owns-what comes from. A moved project carries the slugs its new
 /// address is spelled with, so a tab showing it can go there, by slug as every

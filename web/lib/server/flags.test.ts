@@ -70,11 +70,6 @@ describe("featureOff — the Server Action half", () => {
     expect(await featureOff(Flag.Members)).toBeNull();
   });
 
-  it("walls every write on the caller's beta_access, before the action's own flag", async () => {
-    getServerContext.mockResolvedValue(ctx({ beta_access: false }));
-    expect(await featureOff(Flag.Members)).toBe("This organization is not in the beta yet.");
-  });
-
   it("fails CLOSED with no context — and says so, not that a switch was thrown", async () => {
     getServerContext.mockResolvedValue(null);
     expect(await featureOff(Flag.Members)).toBe(

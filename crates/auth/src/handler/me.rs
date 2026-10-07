@@ -19,20 +19,18 @@ use axum::{extract::State, http::HeaderMap, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::{maintenance_scope, person_scope};
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::{
-    AuditAction, AuthError, AuthzError, Flag, FlagSet, OrganizationId, OrganizationRole,
-    TelmoniError, TelmoniResourceKind, UserId, slug,
+    AuthError, AuthzError, FlagSet, OrganizationId, OrganizationRole, TelmoniError, UserId, slug,
 };
 
 use crate::{
     AppState,
-    db::{
-        AuthLane, flags, identities, invites, locks, members, organization_members, organizations,
-        sessions,
+    db::{AuthLane, flags, identities, invites, locks, members, organization_members, sessions},
+    handler::organization::{
+        Founding, NewUrl, found_organization, founder_under_lock, free_url, signups_open,
     },
 };
 
@@ -179,7 +177,7 @@ pub async fn me(
         false
     } else {
         matches!(
-            provision_first_organization(&state, &user_id).await?,
+            provision_first_organization(&state, &user_id, person.display_name.as_deref()).await?,
             Provisioning::Provisioned
         )
     };
@@ -206,25 +204,7 @@ pub async fn me(
     let default = default_organization(&organizations, person.default_organization_id.as_ref());
     let active = choose_active(&organizations, requested.as_ref(), default.as_ref());
     let flags = match &active {
-        Some(active) => {
-            let mut flags = flags::resolve_for_organization(&mut mtx, active).await?;
-            // ⚠ **BetaAccess is the person's, not the active organization's.**
-            // An invitee's own new organization lacks it while the one that
-            // invited them has it, and walling them in theirs would hide the
-            // switcher they need to leave it. On when ANY organization they
-            // belong to has it.
-            if !flags.is_on(Flag::BetaAccess) {
-                let others: Vec<_> = organizations
-                    .iter()
-                    .filter(|o| &o.organization_id != active)
-                    .map(|o| o.organization_id.clone())
-                    .collect();
-                if flags::on_for_any_organization(&mut mtx, Flag::BetaAccess, &others).await? {
-                    flags.set(Flag::BetaAccess, true);
-                }
-            }
-            flags
-        }
+        Some(active) => flags::resolve_for_organization(&mut mtx, active).await?,
         // No organization to resolve against: sign-ups are closed, or their
         // last one went away between the reads above. The global set, so the
         // console can say which.
@@ -357,32 +337,34 @@ enum Provisioning {
 }
 
 /// Give a person who belongs to no active organization one of their own: the
-/// organization and their owner row, audited, in one transaction. It is named
-/// after them ([`crate::identity::default_organization`]) and goes by the
-/// first free slug that name gives, so the console opens straight onto it,
-/// as Vercel and Cloudflare open a new account; the owner renames it, or moves
-/// its URL, on Settings. It has no project until somebody makes one, as a
-/// Vercel team starts empty.
+/// organization and their owner row, audited, in one transaction
+/// ([`found_organization`], as an organization asked for is made). It is named
+/// after them ([`crate::identity::default_organization`]), from the
+/// `display_name` `/me` has just read, and goes by the first free slug that
+/// name gives, so the console opens straight onto it, as Vercel and Cloudflare
+/// open a new account; the owner renames it, or moves its URL, on Settings. It
+/// has no project until somebody makes one, as a Vercel team starts empty.
 ///
 /// ⚠ **Serialised on the person, and re-checked under the lock.** Two
 /// concurrent first renders would otherwise each see "no organization" and
 /// provision one each. The account deletion takes the same lock, so it and a
-/// provisioning cannot interleave either.
+/// provisioning cannot interleave either. The slug is read before it
+/// ([`free_url`]).
 async fn provision_first_organization(
     state: &AppState,
     user_id: &UserId,
+    display_name: Option<&str>,
 ) -> Result<Provisioning, TelmoniError> {
-    // The sign-up flag gates CREATING an organization, read before anything
-    // is written: there is no organization yet to override it on. Off is not
-    // a refusal — the person still signs in, to an answer with no
-    // organization — because their invitations and their account's deletion
-    // must reach them whatever gate is up.
-    let mut ftx = maintenance_scope(&state.db, AuthLane).await?;
-    let global = flags::resolve_global(&mut ftx).await?;
-    ftx.commit().await?;
-    if !global.is_on(Flag::Signup) {
+    // Off is not a refusal here — the person still signs in, to an answer
+    // with no organization — because their invitations and their account's
+    // deletion must reach them whatever gate is up.
+    if !signups_open(state).await? {
         return Ok(Provisioning::SignupsClosed);
     }
+    // ⚠ MINTED: an organization is nobody's id.
+    let organization = OrganizationId::new();
+    let (name, candidates) = crate::identity::default_organization(display_name);
+    let url = NewUrl::Derived(free_url(state, &organization, &candidates).await?);
 
     let mut tx = person_scope(&state.db, user_id).await?;
     locks::lock_person(&mut tx, user_id).await?;
@@ -390,86 +372,9 @@ async fn provision_first_organization(
         tx.commit().await?;
         return Ok(Provisioning::AlreadyBelongs);
     }
-    let person = identities::get(&mut tx, user_id).await?;
-    if person
-        .as_ref()
-        .is_some_and(|p| p.deletion_requested_at.is_some())
-    {
-        return Err(AuthzError::Forbidden("account deletion in progress".into()).into());
-    }
-
-    // ⚠ MINTED: an organization is nobody's id.
-    let organization = OrganizationId::new();
-    let (name, candidates) = crate::identity::default_organization(
-        person.as_ref().and_then(|p| p.display_name.as_deref()),
-    );
-    // Read in the lane, since no binding of the new organization's sees
-    // another's slug.
-    let free = if candidates.is_empty() {
-        None
-    } else {
-        let mut lane = maintenance_scope(&state.db, AuthLane).await?;
-        let free = organizations::first_free_slug(&mut lane, &organization, &candidates).await?;
-        lane.commit().await?;
-        free
-    };
-    // Both GUCs from here: the person's for the check above, the new
-    // organization's for the rows below, whose policies' WITH CHECK name it.
-    let mut tx = tx.bind_organization(&organization).await?;
-    let slug = free.unwrap_or_else(|| slug::placeholder(slug::Scope::Organization));
-    if organizations::create(&mut tx, &organization, &name, &slug)
-        .await?
-        .is_none()
-    {
-        // Another first organization took the slug since the read above. A
-        // placeholder is drawn at random, until the owner picks a URL.
-        let placeholder = slug::placeholder(slug::Scope::Organization);
-        if organizations::create(&mut tx, &organization, &name, &placeholder)
-            .await?
-            .is_none()
-        {
-            return Err(TelmoniError::Internal(
-                "a fresh placeholder slug was taken".into(),
-            ));
-        }
-    }
-    organization_members::insert_owner(&mut tx, &organization, user_id).await?;
-    emit_audit(
-        &mut tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: None,
-            actor: Actor::User(user_id.as_str()),
-            action: AuditAction::Created,
-            resource_kind: TelmoniResourceKind::Organization,
-            resource_id: Some(organization.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(serde_json::json!({ "kind": "auto_provision" })),
-        },
-    )
-    .await?;
-    emit_audit(
-        &mut tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: None,
-            actor: Actor::User(user_id.as_str()),
-            action: AuditAction::Created,
-            resource_kind: TelmoniResourceKind::Member,
-            resource_id: Some(user_id.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(serde_json::json!({
-                "kind": "auto_provision",
-                "role": OrganizationRole::Owner.to_string(),
-            })),
-        },
-    )
-    .await?;
-    tx.commit().await?;
-    tracing::info!(organization_id = %organization, user_id = %user_id, "organization provisioned");
+    founder_under_lock(state, &mut tx, user_id).await?;
+    let founded =
+        found_organization(tx, organization, user_id, &name, url, Founding::Provisioned).await?;
+    tracing::info!(organization_id = %founded.id, user_id = %user_id, "organization provisioned");
     Ok(Provisioning::Provisioned)
 }

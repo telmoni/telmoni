@@ -274,6 +274,13 @@ pub async fn set_default_organization(
     user_id: &UserId,
     organization_id: &OrganizationId,
 ) -> sqlx::Result<bool> {
+    // ⚠ **Inside a savepoint.** A removal racing the write below fails it,
+    // and an error aborts the whole transaction: founding an organization
+    // records the person's default and then carries on in this one, which the
+    // failure must leave usable.
+    sqlx::query("SAVEPOINT set_default_organization")
+        .execute(tx.conn())
+        .await?;
     // The seat is read through `member_read`, the person's own seats, so no
     // seat of somebody else's can be recorded here.
     let done = sqlx::query(
@@ -293,10 +300,20 @@ pub async fn set_default_organization(
     .execute(tx.conn())
     .await;
     match done {
-        Ok(done) => Ok(done.rows_affected() == 1),
+        Ok(done) => {
+            sqlx::query("RELEASE SAVEPOINT set_default_organization")
+                .execute(tx.conn())
+                .await?;
+            Ok(done.rows_affected() == 1)
+        }
         // A removal that committed while this ran: the statement read the
         // seat, and its foreign key found it gone.
-        Err(sqlx::Error::Database(e)) if e.is_foreign_key_violation() => Ok(false),
+        Err(sqlx::Error::Database(e)) if e.is_foreign_key_violation() => {
+            sqlx::query("ROLLBACK TO SAVEPOINT set_default_organization")
+                .execute(tx.conn())
+                .await?;
+            Ok(false)
+        }
         Err(e) => Err(e),
     }
 }

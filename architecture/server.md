@@ -132,7 +132,7 @@ Then it adds two layers, once, around everything:
 |---|---|
 | `GET /health` (readiness), `GET /livez` (liveness) | None. Liveness does no I/O: a liveness probe that failed on a database stall would restart every replica at once. |
 | `/internal/log-level` | Service secret |
-| `/internal/*` person lanes: sessions, projects, members, invitations, tokens, audit, transfers, the organization, `/me/*`, approving or denying a CLI device, notifications' feed and connectors, the agent | Service secret, then the person's bearer. Auth checks the bearer with `require_person_token`. Notifications and the agent resolve it through `seam::Auth::resolve`. |
+| `/internal/*` person lanes: sessions, projects, members, invitations, tokens, audit, transfers, the organization and creating another, `/me/*`, approving or denying a CLI device, notifications' feed and connectors, the agent | Service secret, then the person's bearer. Auth checks the bearer with `require_person_token`. Notifications and the agent resolve it through `seam::Auth::resolve`. |
 | `/internal/*` service lanes: auth's configuration, starting and exchanging a sign-in, the CLI's device start and poll, refresh, logout, the password lanes, invitation look-up, token validation | Service secret only. Most run before anyone is signed in. |
 | `POST /me` | Service secret, then the bearer |
 | `/v1/*` | Service secret, then a `telmoni_` API token (`require_token`) |

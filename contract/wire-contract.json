@@ -6,8 +6,7 @@
       "public_api",
       "api_tokens",
       "members",
-      "signup",
-      "beta_access"
+      "signup"
     ],
     "NotificationKind": [
       "organization_alert",
@@ -33,7 +32,6 @@
     ],
     "off_detail": {
       "api_tokens": "API keys are switched off right now.",
-      "beta_access": "This organization is not in the beta yet.",
       "connectors": "Connectors are switched off right now.",
       "members": "Adding a member is switched off right now.",
       "public_api": "The API is switched off right now.",

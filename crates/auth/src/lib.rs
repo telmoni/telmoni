@@ -341,6 +341,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(handler::project_transfer::decline),
         )
         .route(
+            "/organizations",
+            post(handler::organization::create_organization),
+        )
+        .route(
             "/organization",
             delete(handler::organization::delete_organization)
                 .patch(handler::organization::update_organization),

@@ -22,11 +22,12 @@ import {
   getServerContext,
   fetchProjectAnnouncement,
 } from "@/lib/server/data";
+import { env } from "@/lib/env";
 import { getServerSession } from "@/lib/server/session";
 import { storeSeed } from "@/lib/server/store-seed";
 import { Flag, flagOn } from "@/lib/flags";
 import { StoreProvider } from "@/lib/store/provider";
-import { accountOnlyReason } from "@/lib/account-only";
+import { accountOnly } from "@/lib/account-only";
 import { ownedOrganizationLabels } from "@/lib/identity";
 import { SessionHeartbeat } from "@/components/session-heartbeat";
 import { ConsoleTrailRecorder } from "@/components/console-trail-recorder";
@@ -44,10 +45,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   if (!session || !seed) redirect("/auth/logout");
 
-  // Every route under (app) answers this way while a gate is up, so no page
+  // Every route under (app) answers this way while the gate is up, so no page
   // below renders for somebody with no organization to render it in.
-  const reason = ctx ? accountOnlyReason(ctx) : null;
-  if (ctx && reason) {
+  if (ctx && accountOnly(ctx)) {
     // Fetched here alone: the console's own pages list sessions on the
     // privacy page, which this screen stands in for, with the settings page.
     const sessions = await fetchActiveSessions();
@@ -68,7 +68,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             reload. */}
         <RealtimeListener />
         <AccountOnly
-          reason={reason}
           email={session.email}
           authMethod={session.authMethod}
           analyticsOptIn={ctx.person.analyticsOptIn}
@@ -108,7 +107,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               <ConsoleSearch />
               <ProjectBanner notification={projectAnnouncement} />
               <ExtensionBanner />
-              <ConsoleHeader />
+              {/* The console's host, ahead of a new organization's URL, as
+                  its Settings show it. */}
+              <ConsoleHeader host={new URL(env.AUTH_URL).host} />
               <div className="flex min-h-0 flex-1 md:pl-3.5">
                 <ConsoleSidebar />
                 <ConsoleShell>{children}</ConsoleShell>

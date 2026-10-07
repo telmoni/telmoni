@@ -190,7 +190,9 @@ pub async fn owner_of<B: OwnerRead>(
     .await
 }
 
-/// Write the owner's row, at provisioning and nowhere else.
+/// Write the owner's row of an organization being founded — provisioned at a
+/// first sign-in, or created on request (`found_organization`) — and nowhere
+/// else: a transfer promotes an admin's row rather than writing one.
 pub async fn insert_owner(
     tx: &mut Scoped<'_, PersonAndOrganization>,
     organization_id: &OrganizationId,
@@ -722,5 +724,34 @@ pub async fn belongs_anywhere(tx: &mut Scoped<'_, Person>, user_id: &UserId) -> 
     )
     .bind(user_id)
     .fetch_one(tx.conn())
+    .await
+}
+
+/// Where the default of a person who owns no active organization falls while
+/// they choose none: the oldest active one they belong to, in
+/// [`organizations_of`]'s order, as `/me` reckons it. `None` when they own one
+/// — the oldest of those is their default then, whatever else they found — or
+/// belong nowhere. Through `member_read`, their own seats.
+pub async fn default_while_owning_none(
+    tx: &mut Scoped<'_, Person>,
+    user_id: &UserId,
+) -> sqlx::Result<Option<OrganizationId>> {
+    sqlx::query_scalar(
+        "SELECT m.organization_id
+           FROM auth.organization_members m
+           JOIN auth.organizations o
+             ON o.external_id = m.organization_id AND o.status = 'active'
+          WHERE m.user_id = $1
+            AND NOT EXISTS (
+                SELECT 1 FROM auth.organization_members owned
+                  JOIN auth.organizations owned_organization
+                    ON owned_organization.external_id = owned.organization_id
+                   AND owned_organization.status = 'active'
+                 WHERE owned.user_id = $1 AND owned.role = 'owner')
+          ORDER BY m.created_at ASC, m.id ASC
+          LIMIT 1",
+    )
+    .bind(user_id)
+    .fetch_optional(tx.conn())
     .await
 }

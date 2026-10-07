@@ -143,7 +143,7 @@ Concurrent first sign-ins are settled by the unique keys.
 | `VERIFY_EMAIL` (default off) | On: sign-up mails a verification link, and `/me` refuses unverified people. Off: an address is taken at its word for signing in, from a password sign-up or a provider alike; `auth.identities.email_verified` still records only what was proved, so an invitation to an unproved address is accepted from its link alone, never from the console. |
 | `OIDC_ALLOW_SIGN_UP` (default **on**) | Whether an unknown provider identity may create a person. ⚠ Adding a provider to an invitation-only deployment lets in anyone that provider can sign in, unless this is turned off. |
 | `OIDC_ALLOW_INSECURE_EMAIL_LOOKUP` (default off) | Whether a provider identity may link to an existing account by address alone |
-| the global `Signup` flag | Whether a person with no organization gets one provisioned at their first `/me` |
+| the global `Signup` flag | Whether a person with no organization gets one provisioned at their first `/me`, and whether anyone may create one on request (`POST /internal/organizations`): off, the switcher offers no **New organization**, and the lane refuses |
 
 **Boot refuses:**
 - an OIDC issuer without its client id and secret, or one that is not `https` on a deployed tier;
@@ -262,7 +262,7 @@ API tokens are for the public `/v1` API (`crates/auth/src/handler/tokens.rs`, `c
 - **Validation on `/v1`.**
   - The service secret first, then `require_token`.
   - The token must be live, and its organization must be active. While an organization is pending deletion its keys stop working, and they come back if it is restored. An account deletion revokes the keys of the organizations it takes.
-  - The `BetaAccess` and `PublicApi` flags must be on.
+  - The `PublicApi` flag must be on for the token's organization: its own row, else the global one.
   - `last_used_at` is updated at most once an interval.
 - **`/v1` resolves the organization and reads at the project.** A token names its organization and the project it was minted on. `GET /v1/members` answers that project's roster — what every member of the project sees in the console — and never the organization's, which a project admin's seat is refused there; a key reads no further than whoever minted it could.
   - `GET /v1/organization` answers its id, its slug, its name and its owner, all from the validation's own join. The slug is there so a script holding only a key can spell a console link. No lane takes one back: a token is its organization.

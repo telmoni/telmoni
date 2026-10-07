@@ -47,7 +47,7 @@ fn generated_contract() -> Value {
             "OrganizationStatus": wire(&all_variants!(OrganizationStatus; Active, PendingDeletion, Deleted)),
             "NotificationKind": wire(&NotificationKind::all()),
             "Flag": wire(&all_variants!(Flag; Connectors, PublicApi, ApiTokens,
-                Members, Signup, BetaAccess)),
+                Members, Signup)),
         },
         "flags": {
             "global_only": Flag::all().iter().filter(|f| f.is_global_only())

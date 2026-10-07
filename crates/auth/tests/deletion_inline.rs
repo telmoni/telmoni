@@ -2798,8 +2798,8 @@ async fn the_owner_restores_the_organization_inside_the_window(pool: PgPool) {
     assert_eq!(audit_count(&pool, ORGANIZATION, "updated").await, 2);
 
     // Back among the live ones, and active again: the older owner row wins
-    // over the fresh organization's, which stays beside it, owned too. This
-    // is the one way to own two organizations one was given, and it is kept:
+    // over the fresh organization's, which stays beside it, owned too. Owning
+    // two this way is kept, as owning two by a transfer or by creating one is:
     // withholding the fresh one until the window closed would keep the owner
     // out of the product for fourteen days.
     let resp = app().oneshot(me(&pool, USER).await).await.unwrap();

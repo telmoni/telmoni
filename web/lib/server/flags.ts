@@ -16,7 +16,6 @@ const UNVERIFIED_TENANT =
 export async function featureOff(flag: Flag): Promise<string | null> {
   const ctx = await getServerContext();
   if (!ctx) return UNVERIFIED_TENANT;
-  if (!flagOn(ctx.flags, Flag.BetaAccess)) return FlagOffDetail[Flag.BetaAccess];
   return flagOn(ctx.flags, flag) ? null : FlagOffDetail[flag];
 }
 

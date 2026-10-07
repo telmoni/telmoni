@@ -1,7 +1,6 @@
 import { PaperShell } from "@/components/paper-shell";
 import { SessionHeartbeat } from "@/components/session-heartbeat";
 import { Card } from "@/components/ui/card";
-import type { AccountOnlyReason } from "@/lib/account-only";
 import { analyticsConfigured } from "@/lib/analytics";
 import type { ActiveSession, DeletedOrganization } from "@/lib/server/data";
 import { canChangeEmail, canResetPassword } from "@/lib/sign-in-method";
@@ -16,7 +15,6 @@ import { PasswordReset } from "./account/settings/_password";
 import { IncomingInvitesSection } from "./account/notifications/_incoming-invites";
 
 export function AccountOnly({
-  reason,
   email,
   authMethod = null,
   analyticsOptIn = false,
@@ -29,7 +27,6 @@ export function AccountOnly({
   expiresAt,
   needsReseal,
 }: {
-  reason: AccountOnlyReason;
   email: string;
   authMethod?: string | null;
   analyticsOptIn?: boolean;
@@ -47,16 +44,9 @@ export function AccountOnly({
       <SessionHeartbeat expiresAt={expiresAt} needsReseal={needsReseal} />
       <main className="mx-auto grid w-full max-w-xl gap-6 px-3.5 py-10">
         <Card data-testid="account-only">
-          <h1 className="text-lg font-semibold">
-            {reason === "not-in-beta" ? "Not in the beta yet" : "You're not in an organization"}
-          </h1>
+          <h1 className="text-lg font-semibold">You&apos;re not in an organization</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            {reason === "not-in-beta" ? (
-              <>
-                Telmoni is in a closed beta, and {email} is not on the list yet.
-                An invitation from an organization in the beta lets you in now.
-              </>
-            ) : signupsOpen ? (
+            {signupsOpen ? (
               <>
                 Reload this page to start a new organization of your own, or
                 accept an invitation to join someone else&rsquo;s.

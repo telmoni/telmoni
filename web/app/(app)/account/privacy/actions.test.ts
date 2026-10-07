@@ -109,9 +109,9 @@ describe("requestAccountDeletionCodeAction", () => {
   });
 
   // ⚠ **The account's own lane names no organization**, so nothing about
-  // where the person stands can stop it: somebody in none — sign-ups closed,
-  // or behind the beta wall — reaches it from the account screen, and the
-  // privacy policy promises they can.
+  // where the person stands can stop it: somebody in none, while sign-ups are
+  // closed, reaches it from the account screen, and the privacy policy
+  // promises they can.
   it("reaches somebody in no organization, and names none", async () => {
     standIn(null);
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ sent: true }), { status: 202 }));

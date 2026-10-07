@@ -23,7 +23,7 @@ function payload(over: Partial<StoreInitial> = {}): StoreInitial {
     user: null,
     organizations: [organization("alpha")],
     activeOrganizationId: "org_alpha",
-    flags: { beta_access: true },
+    flags: { members: true },
     roles: { "t-1": "owner" } as StoreInitial["roles"],
     projects: [project("t-1", "Alpha")],
     ...over,
@@ -72,10 +72,10 @@ describe("setSeed", () => {
     const { store, writes, seed } = open();
     const before = store.getState();
 
-    seed(payload({ flags: { beta_access: false } }));
+    seed(payload({ flags: { members: false } }));
 
     const after = store.getState();
-    expect(after.flags, "the field that moved").toEqual({ beta_access: false });
+    expect(after.flags, "the field that moved").toEqual({ members: false });
     expect(after.projects, "projects was replaced by an equal array").toBe(before.projects);
     expect(after.roles, "roles was replaced by an equal object").toBe(before.roles);
     expect(writes, "one write, not one per field").toHaveBeenCalledTimes(1);
@@ -90,7 +90,7 @@ describe("setSeed", () => {
     const { store, seed } = open();
     store.getState().renameProject("t-1", "Renamed", "renamed");
 
-    seed(payload({ flags: { beta_access: false } }));
+    seed(payload({ flags: { members: false } }));
 
     expect(store.getState().projects[0]?.name).toBe("Renamed");
     // The slug moves with the name, or every link to the project would still

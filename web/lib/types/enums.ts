@@ -9,7 +9,6 @@ export const Flag = {
   ApiTokens:  "api_tokens",
   Members:    "members",
   Signup:     "signup",
-  BetaAccess: "beta_access",
 } as const;
 export type Flag = typeof Flag[keyof typeof Flag];
 
@@ -41,12 +40,11 @@ export type Role = typeof Role[keyof typeof Role];
 
 /** The sentence a switched-off feature answers with, by flag — the Rust `Flag::off_detail`. */
 export const FlagOffDetail = {
-  api_tokens:  "API keys are switched off right now.",
-  beta_access: "This organization is not in the beta yet.",
-  connectors:  "Connectors are switched off right now.",
-  members:     "Adding a member is switched off right now.",
-  public_api:  "The API is switched off right now.",
-  signup:      "Sign-ups are closed right now.",
+  api_tokens: "API keys are switched off right now.",
+  connectors: "Connectors are switched off right now.",
+  members:    "Adding a member is switched off right now.",
+  public_api: "The API is switched off right now.",
+  signup:     "Sign-ups are closed right now.",
 } as const satisfies Record<Flag, string>;
 
 const ROLES: ReadonlySet<string> = new Set(Object.values(Role));

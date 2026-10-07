@@ -82,7 +82,6 @@ const DELETED: DeletedOrganization = {
 function mount(over: Partial<Parameters<typeof AccountOnly>[0]> = {}) {
   return render(
     <AccountOnly
-      reason="no-organization"
       email="ada@example.test"
       signupsOpen={false}
       invites={[]}
@@ -93,61 +92,53 @@ function mount(over: Partial<Parameters<typeof AccountOnly>[0]> = {}) {
   );
 }
 
-// ⚠ **A gate closes the product, never the way out.** Whatever put somebody
-// here, what they are owed is on the page: their invitations, their
-// account's deletion, and sign-out.
+// ⚠ **A gate closes the product, never the way out.** What somebody in no
+// organization is owed is on the page: their invitations, their account's
+// deletion, and sign-out.
 describe("AccountOnly", () => {
-  for (const reason of ["no-organization", "not-in-beta"] as const) {
-    it(`offers the account's deletion and sign-out: ${reason}`, () => {
-      mount({ reason, ownedOrganizations: ["Acme"] });
-      expect(screen.getByTestId("delete-account")).toHaveAttribute("data-owned", "Acme");
-      expect(screen.getByTestId("delete-account")).toHaveAttribute(
-        "data-email",
-        "ada@example.test",
-      );
-      expect(screen.getByRole("link", { name: /sign out/i })).toHaveAttribute(
-        "href",
-        "/auth/logout",
-      );
-      expect(screen.getByTestId("heartbeat")).toBeInTheDocument();
-    });
+  it("offers the account's deletion and sign-out", () => {
+    mount({ ownedOrganizations: ["Acme"] });
+    expect(screen.getByTestId("delete-account")).toHaveAttribute("data-owned", "Acme");
+    expect(screen.getByTestId("delete-account")).toHaveAttribute(
+      "data-email",
+      "ada@example.test",
+    );
+    expect(screen.getByRole("link", { name: /sign out/i })).toHaveAttribute(
+      "href",
+      "/auth/logout",
+    );
+    expect(screen.getByTestId("heartbeat")).toBeInTheDocument();
+  });
 
-    it(`offers the invitations waiting for them: ${reason}`, () => {
-      mount({ reason, invites: [INVITE] });
-      expect(screen.getByTestId("invitations")).toHaveAttribute("data-count", "1");
-    });
-  }
+  it("offers the invitations waiting for them", () => {
+    mount({ invites: [INVITE] });
+    expect(screen.getByTestId("invitations")).toHaveAttribute("data-count", "1");
+  });
 
   // ⚠ This screen stands in for every page, the privacy page included, so
   // ending a stolen session must be on it — for somebody in no organization
   // most of all, who has nowhere else to do it.
-  it("lists the browsers they are signed in on, marking this one, for either reason", () => {
+  it("lists the browsers they are signed in on, marking this one", () => {
     const SESSION = {
       id: "sess_1",
       user_agent: null,
       created_at: "2026-09-23T10:00:00Z",
       last_seen_at: "2026-09-23T10:00:00Z",
     };
-    for (const reason of ["no-organization", "not-in-beta"] as const) {
-      const { unmount } = mount({ reason, sessions: [SESSION], currentSessionId: "sess_1" });
-      expect(screen.getByRole("heading", { name: /active sessions/i })).toBeInTheDocument();
-      expect(screen.getByTestId("sessions")).toHaveAttribute("data-count", "1");
-      expect(screen.getByTestId("sessions")).toHaveAttribute("data-current", "sess_1");
-      unmount();
-    }
+    mount({ sessions: [SESSION], currentSessionId: "sess_1" });
+    expect(screen.getByRole("heading", { name: /active sessions/i })).toBeInTheDocument();
+    expect(screen.getByTestId("sessions")).toHaveAttribute("data-count", "1");
+    expect(screen.getByTestId("sessions")).toHaveAttribute("data-current", "sess_1");
   });
 
-  it("offers the account's address, password and analytics consent, for either reason", () => {
-    for (const reason of ["no-organization", "not-in-beta"] as const) {
-      const { unmount } = mount({ reason, authMethod: "password", analyticsOptIn: true });
-      expect(screen.getByTestId("change-email")).toHaveAttribute(
-        "data-email",
-        "ada@example.test",
-      );
-      expect(screen.getByTestId("password-reset")).toBeInTheDocument();
-      expect(screen.getByTestId("analytics")).toHaveAttribute("data-opt-in", "true");
-      unmount();
-    }
+  it("offers the account's address, password and analytics consent", () => {
+    mount({ authMethod: "password", analyticsOptIn: true });
+    expect(screen.getByTestId("change-email")).toHaveAttribute(
+      "data-email",
+      "ada@example.test",
+    );
+    expect(screen.getByTestId("password-reset")).toBeInTheDocument();
+    expect(screen.getByTestId("analytics")).toHaveAttribute("data-opt-in", "true");
   });
 
   it("offers no address or password control to a provider sign-in, and still the consent", () => {
@@ -170,13 +161,10 @@ describe("AccountOnly", () => {
     expect(screen.queryByTestId("invitations")).toBeNull();
   });
 
-  it("offers the organizations they deleted and may restore, for either reason", () => {
-    for (const reason of ["no-organization", "not-in-beta"] as const) {
-      const { unmount } = mount({ reason, deletedOrganizations: [DELETED] });
-      expect(screen.getByTestId("deleted-organizations")).toHaveAttribute("data-count", "1");
-      expect(screen.getByRole("heading", { name: /deleted organizations/i })).toBeInTheDocument();
-      unmount();
-    }
+  it("offers the organizations they deleted and may restore", () => {
+    mount({ deletedOrganizations: [DELETED] });
+    expect(screen.getByTestId("deleted-organizations")).toHaveAttribute("data-count", "1");
+    expect(screen.getByRole("heading", { name: /deleted organizations/i })).toBeInTheDocument();
   });
 
   it("shows no deleted organizations section when none is being deleted", () => {
@@ -191,12 +179,6 @@ describe("AccountOnly", () => {
     );
     expect(document.body.textContent).toMatch(/sign-ups are closed right now/i);
     expect(document.body.textContent).toMatch(/ada@example\.test/);
-  });
-
-  it("tells somebody behind the beta wall that an invitation lets them in", () => {
-    mount({ reason: "not-in-beta" });
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Not in the beta yet");
-    expect(document.body.textContent).toMatch(/invitation from an organization in the beta/i);
   });
 
   it("tells somebody left without one, while sign-ups are open, that a reload starts one", () => {

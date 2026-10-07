@@ -5,26 +5,44 @@ vi.mock("@/lib/server/entities/organization", () => ({ getServerContext: vi.fn()
 // `createProjectAction` now chooses which organization to NAME, so the rest of
 // its collaborators have to be here too.
 const mockFetch = vi.fn();
+const mockExtractProblem = vi.fn<
+  (res: unknown) => Promise<{ message: string; problem: Record<string, unknown> | null }>
+>(async () => ({ message: "problem", problem: null }));
 vi.mock("@/lib/api/fetch", () => ({
   tryFetchWithTimeout: (...a: unknown[]) => mockFetch(...a),
-  extractProblem: async () => ({ message: "problem" }),
+  extractProblem: (res: unknown) => mockExtractProblem(res),
 }));
+const mockRateLimit = vi.fn<(key: string, opts: unknown) => Promise<unknown>>(async () => null);
+const mockSessionKey = vi.fn<(session: unknown, bucket: string) => string>(() => "k");
 vi.mock("@/lib/api/rate-limit", () => ({
-  rateLimit: async () => null,
-  sessionKey: () => "k",
+  rateLimit: (key: string, opts: unknown) => mockRateLimit(key, opts),
+  sessionKey: (session: unknown, bucket: string) => mockSessionKey(session, bucket),
 }));
 const mockOrganizationHeaders = vi.fn((ctx: { organizationId: string }) => ({
   authorization: "Bearer at_me",
   "x-organization-id": ctx.organizationId,
 }));
+const mockPersonHeaders = vi.fn<(session: unknown) => Record<string, string>>(() => ({
+  authorization: "Bearer at_me",
+}));
 vi.mock("@/lib/server/entities/identity-context", () => ({
   identityContext: async () => mockIdentity,
   organizationHeaders: (ctx: { organizationId: string }) => mockOrganizationHeaders(ctx),
+  personHeaders: (session: unknown) => mockPersonHeaders(session),
+}));
+const mockPublishEvent = vi.fn<(channel: string, event: unknown) => Promise<boolean>>(
+  async () => true,
+);
+vi.mock("@/lib/events/publisher", () => ({
+  publishEvent: (channel: string, event: unknown) => mockPublishEvent(channel, event),
+  userChannel: (email: string) => `user:${email}`,
 }));
 vi.mock("@/lib/env", () => ({ env: { SERVER_URL: "http://auth.test" } }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/logger", () => ({ logger: { warn: vi.fn() } }));
 let mockIdentity: IdentityContext | null = null;
+
+import { revalidatePath } from "next/cache";
 
 import type { IdentityContext } from "@/lib/server/entities/identity-context";
 import {
@@ -34,7 +52,7 @@ import {
 } from "@/lib/server/entities/organization";
 import { getServerSession } from "@/lib/server/session";
 
-import { createProjectAction } from "./actions";
+import { createOrganizationAction, createProjectAction } from "./actions";
 
 // Every organization the caller is in, their own among them: an organization is
 // an entry with a role in it, never an id that happens to be theirs.
@@ -203,5 +221,203 @@ describe("createProjectAction — what the dialog is handed to follow the projec
     const r = await createProjectAction("Platform", "org_admin");
     expect(r.error).toBe("problem");
     expect(r.project).toBeUndefined();
+  });
+});
+
+describe("createOrganizationAction", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getServerSession).mockResolvedValue({
+      userId: "user_me",
+      email: "me@example.test",
+    } as never);
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: "org_new", slug: "acme", name: "Acme" }),
+    });
+  });
+
+  const sent = () =>
+    mockFetch.mock.calls[0] as
+      | [string, { method: string; headers: Record<string, string>; body: string }]
+      | undefined;
+
+  // ⚠ **It names no organization.** The new one has no id until auth mints
+  // it, and naming the one on screen would assert a claim the act does not
+  // need, on a chain it does not touch.
+  it("founds it with the person's own headers, naming no organization, and answers its Overview", async () => {
+    const r = await createOrganizationAction("  Acme  ", "");
+    expect(r).toEqual({ error: null, href: "/acme" });
+    const [url, init] = sent()!;
+    expect(url).toBe("http://auth.test/internal/organizations");
+    expect(init.method).toBe("POST");
+    expect(init.headers.authorization).toBe("Bearer at_me");
+    expect(init.headers["content-type"]).toBe("application/json");
+    expect(init.headers).not.toHaveProperty("x-organization-id");
+    expect(mockOrganizationHeaders).not.toHaveBeenCalled();
+    expect(JSON.parse(init.body)).toEqual({ name: "Acme" });
+    expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
+  });
+
+  it("sends a URL when one is given, and leaves a blank one to auth to derive", async () => {
+    await createOrganizationAction("Acme", " acme-labs ");
+    expect(JSON.parse(sent()![1].body)).toEqual({ name: "Acme", slug: "acme-labs" });
+  });
+
+  it("is throttled per person, as project creation is", async () => {
+    await createOrganizationAction("Acme", "");
+    expect(mockSessionKey).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "user_me" }),
+      "organization:create",
+    );
+    expect(mockRateLimit).toHaveBeenCalledWith("k", { limit: 10, windowMs: 60_000 });
+
+    mockFetch.mockClear();
+    mockRateLimit.mockResolvedValueOnce({ status: 429 });
+    const r = await createOrganizationAction("Acme", "");
+    expect(r.error).toMatch(/too many requests/i);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  // The person's other tabs learn of it as they learn of an organization an
+  // ownership transfer hands them, on the person's own channel: no tab is
+  // subscribed to the new organization's yet.
+  it("tells the person's other tabs", async () => {
+    await createOrganizationAction("Acme", "");
+    expect(mockPublishEvent).toHaveBeenCalledWith("user:me@example.test", {
+      type: "ownership:changed",
+      data: { organizationId: "org_new" },
+    });
+  });
+
+  it("refuses a name it cannot take under Name, without a request", async () => {
+    for (const name of ["", "   ", "x".repeat(81)]) {
+      const r = await createOrganizationAction(name, "");
+      expect(r.field, name).toBe("name");
+      expect(r.error, name).toBeTruthy();
+    }
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  // An astral letter is two UTF-16 units: counted by `length`, eighty of
+  // them would read as 160 and be refused.
+  it("counts a name in characters, as auth does", async () => {
+    const r = await createOrganizationAction("\u{1D49C}".repeat(80), "");
+    expect(r.error).toBeNull();
+    expect(mockFetch).toHaveBeenCalled();
+
+    mockFetch.mockClear();
+    const over = await createOrganizationAction("\u{1D49C}".repeat(81), "");
+    expect(over.field).toBe("name");
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("refuses a URL of the wrong shape or a console word under URL, without a request", async () => {
+    for (const slug of ["Acme", "acme--labs", "a".repeat(49), "settings", "console"]) {
+      const r = await createOrganizationAction("Acme", slug);
+      expect(r.field, slug).toBe("slug");
+      expect(r.error, slug).toBeTruthy();
+    }
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("shows a URL another organization holds under URL", async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 409 });
+    mockExtractProblem.mockResolvedValueOnce({
+      message: "conflict: another organization already has that URL",
+      problem: { type: "/errors/auth/conflict", title: "conflict", status: 409 },
+    });
+    const r = await createOrganizationAction("Acme", "acme");
+    expect(r).toEqual({
+      error: "conflict: another organization already has that URL",
+      field: "slug",
+    });
+    expect(mockPublishEvent).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  // A zero-width space passes for a name here, and auth cleans it to nothing.
+  it("shows auth's refusal of the name under Name", async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 400 });
+    mockExtractProblem.mockResolvedValueOnce({
+      message: "bad request: give the organization a name",
+      problem: { type: "/errors/auth/bad-request", title: "bad request", status: 400 },
+    });
+    const r = await createOrganizationAction("\u200B", "");
+    expect(r).toEqual({ error: "bad request: give the organization a name", field: "name" });
+  });
+
+  it("says sign-ups are closed in the flag's own sentence", async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 503 });
+    mockExtractProblem.mockResolvedValueOnce({
+      message: "feature switched off: Sign-ups are closed right now.",
+      problem: {
+        type: "/errors/tenant/feature-off",
+        title: "feature switched off",
+        status: 503,
+        detail: "Sign-ups are closed right now.",
+        flag: "signup",
+      },
+    });
+    const r = await createOrganizationAction("Acme", "");
+    expect(r).toEqual({ error: "Sign-ups are closed right now." });
+  });
+
+  // With no URL asked for, a conflict is about nothing the person typed.
+  it("puts a conflict under no field when no URL was asked for", async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 409 });
+    mockExtractProblem.mockResolvedValueOnce({
+      message: "conflict: That already exists",
+      problem: { type: "/errors/auth/conflict", title: "conflict", status: 409 },
+    });
+    const r = await createOrganizationAction("Acme", "");
+    expect(r).toEqual({ error: "conflict: That already exists" });
+  });
+
+  it("asks for a sign-in when auth no longer takes the session", async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 401 });
+    const r = await createOrganizationAction("Acme", "");
+    expect(r).toEqual({ error: "Your session expired — sign in again." });
+    expect(mockExtractProblem).not.toHaveBeenCalled();
+  });
+
+  it("answers a refusal about neither field with no field", async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 403 });
+    mockExtractProblem.mockResolvedValueOnce({
+      message: "forbidden: account deletion in progress",
+      problem: { type: "/errors/authz/forbidden", title: "forbidden", status: 403 },
+    });
+    const r = await createOrganizationAction("Acme", "");
+    expect(r).toEqual({ error: "forbidden: account deletion in progress" });
+  });
+
+  it("says so when auth cannot be reached", async () => {
+    mockFetch.mockResolvedValue(null);
+    const r = await createOrganizationAction("Acme", "");
+    expect(r.error).toMatch(/unavailable/i);
+    expect(r.field).toBeUndefined();
+  });
+
+  it("asks for a sign-in when the session is gone, without a request", async () => {
+    vi.mocked(getServerSession).mockResolvedValue(null as never);
+    const r = await createOrganizationAction("Acme", "");
+    expect(r.error).toMatch(/session expired/i);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  // Auth spells the new address. An answer that names no slug, or one that is
+  // not a slug's shape, is not followed — `//host` would leave the console.
+  it("follows no address auth's answer does not give as a slug", async () => {
+    for (const body of [
+      { id: "org_new", name: "Acme" },
+      { id: "org_new", slug: "/evil.example", name: "Acme" },
+    ]) {
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 201, json: async () => body });
+      const r = await createOrganizationAction("Acme", "");
+      expect(r).toEqual({ error: null });
+    }
+    expect(mockPublishEvent).not.toHaveBeenCalled();
+    expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
   });
 });

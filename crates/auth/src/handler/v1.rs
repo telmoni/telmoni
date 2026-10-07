@@ -150,14 +150,11 @@ pub async fn require_token(
             if let Err(e) = tx.commit().await {
                 return unavailable(&e, "v1: token validation commit failed");
             }
-            for flag in [
-                telmoni_shared::Flag::BetaAccess,
-                telmoni_shared::Flag::PublicApi,
-            ] {
-                if !flags.is_on(flag) {
-                    return TelmoniError::from(telmoni_shared::TenantError::FeatureOff { flag })
-                        .into_response();
-                }
+            if !flags.is_on(telmoni_shared::Flag::PublicApi) {
+                return TelmoniError::from(telmoni_shared::TenantError::FeatureOff {
+                    flag: telmoni_shared::Flag::PublicApi,
+                })
+                .into_response();
             }
             request.extensions_mut().insert(TokenOrganization {
                 organization_id: v.organization_id,

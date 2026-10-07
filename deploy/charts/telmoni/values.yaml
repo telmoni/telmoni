@@ -18,10 +18,10 @@ config:
   # the rest. The provider's first sign-ins make accounts while
   # oidcAllowSignUp is on; off, it refuses every identity the provider has
   # not brought before, invited or not, so with the form off nobody new gets
-  # in at all. Whether a new person gets an organization is the global
-  # `signup` feature flag, which is what an invitation-only deployment turns
-  # off. verifyEmail has a new account confirm its address from a mail first,
-  # which needs SMTP_URL.
+  # in at all. Whether a new person gets an organization, and whether anyone
+  # may create another, is the global `signup` feature flag, which is what an
+  # invitation-only deployment turns off. verifyEmail has a new account
+  # confirm its address from a mail first, which needs SMTP_URL.
   allowSignUp: false
   verifyEmail: false
   disableLoginForm: false

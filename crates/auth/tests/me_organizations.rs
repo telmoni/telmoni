@@ -770,42 +770,6 @@ async fn somebody_in_no_organization_signs_in_to_their_account_while_sign_ups_ar
     );
 }
 
-/// ⚠ **Beta access is the person's.** An invitee's own new organization lacks
-/// it while the one that let them in has it; walling them in their own would
-/// hide the switcher they need to reach the other.
-#[sqlx::test]
-async fn beta_access_follows_any_organization_the_person_is_in(pool: PgPool) {
-    apply_audit_migrations(&pool).await;
-    let own = sign_in(&pool, "user_me_invitee").await;
-    let beta = sign_in(&pool, "user_me_beta_owner").await;
-    sqlx::query(
-        "INSERT INTO auth.feature_flags (key, enabled, note, actor)
-         VALUES ('beta_access', false, 'closed beta', 'test')",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO auth.organization_flags (organization_id, key, enabled, note, actor)
-         VALUES ($1, 'beta_access', true, 'in the beta', 'test')",
-    )
-    .bind(&beta)
-    .execute(&pool)
-    .await
-    .unwrap();
-
-    let (_, body) = me(&pool, "user_me_invitee", Some(&own)).await;
-    assert_eq!(body["flags"]["beta_access"], false, "{body}");
-
-    join(&pool, &beta, "user_me_beta_owner", "user_me_invitee").await;
-    let (_, body) = me(&pool, "user_me_invitee", Some(&own)).await;
-    assert_eq!(body["activeOrganizationId"], own.as_str());
-    assert_eq!(
-        body["flags"]["beta_access"], true,
-        "a beta member is walled in their own organization: {body}"
-    );
-}
-
 /// ⚠ **A person event lands only on a chain they belong to.** Analytics
 /// consent, session revocation and email changes are audited on the
 /// organization the console names; naming somebody else's must be refused

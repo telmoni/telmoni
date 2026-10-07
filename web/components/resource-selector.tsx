@@ -15,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Kbd } from "@/components/ui/kbd";
+import { CreateOrganizationDialog } from "@/components/create-organization";
 import { CreateProjectDialog, useCreateProjectTargets } from "@/components/create-project";
 import { RoleBadge } from "@/components/role-badge";
 import { resourceUrl, standingResource } from "@/lib/console-trail";
@@ -22,8 +23,10 @@ import { organizationLabel } from "@/lib/identity";
 import { resolveActiveOrganization } from "@/lib/organization-label";
 import type { OrganizationRole } from "@/lib/organization-role";
 import type { ProjectEverywhere } from "@/lib/server/entities/projects";
+import { Flag, flagOn } from "@/lib/flags";
 import {
   useActiveOrganizationId,
+  useFlags,
   useOrganizations,
   useProjects,
   useProjectsElsewhere,
@@ -51,9 +54,15 @@ type OtherOrganization = {
   projects: ProjectEverywhere[];
 };
 
-export function ResourceSelector() {
+export function ResourceSelector({
+  host,
+}: {
+  /// The console's host, shown ahead of a new organization's URL.
+  host: string;
+}) {
   const [open, setOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [newOrganizationOpen, setNewOrganizationOpen] = useState(false);
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const projects = useProjects();
@@ -61,6 +70,7 @@ export function ResourceSelector() {
   // Any organization the caller may create in, not only the active one: the
   // dialog asks which.
   const canCreate = useCreateProjectTargets().length > 0;
+  const signupsOpen = flagOn(useFlags(), Flag.Signup);
   const organizations = useOrganizations();
   const activeOrganizationId = useActiveOrganizationId();
   // A row returns to the page you last had open in that resource.
@@ -374,6 +384,24 @@ export function ResourceSelector() {
             <span className="text-sm font-medium">Create project</span>
           </DropdownMenuItem>
         )}
+        {/* Offered to everyone signed in, whatever their roles: the new
+            organization is theirs. With the `signup` flag off the act is
+            gone, as a switched-off feature is from the rail, rather than a
+            row every use of which is refused; a dialog opened before the
+            switch still hears auth's refusal. */}
+        {signupsOpen && (
+          <DropdownMenuItem
+            className="h-14 cursor-pointer gap-3 rounded-none border-t px-3"
+            onSelect={(e) => {
+              e.preventDefault();
+              setOpen(false);
+              setNewOrganizationOpen(true);
+            }}
+          >
+            <Plus className="size-4 shrink-0" />
+            <span className="text-sm font-medium">New organization</span>
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
 
       {canCreate && (
@@ -383,6 +411,12 @@ export function ResourceSelector() {
           onOpenChange={setCreateOpen}
         />
       )}
+      <CreateOrganizationDialog
+        key={`organization-${newOrganizationOpen}`}
+        open={newOrganizationOpen}
+        onOpenChange={setNewOrganizationOpen}
+        host={host}
+      />
     </DropdownMenu>
   );
 }

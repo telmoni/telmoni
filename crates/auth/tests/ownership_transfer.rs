@@ -1102,9 +1102,9 @@ async fn the_old_owner_stays_as_an_admin_and_may_then_leave(pool: PgPool) {
 /// A transfer moves one owner row and mints nothing. The admin who accepts
 /// keeps the organization they were given at sign-in and now owns both, the
 /// older row still their active one; the previous owner, on the roster as an
-/// admin, belongs somewhere and so is handed no fresh one. A transfer is the
-/// way a person comes to own several organizations, since nothing creates one
-/// on request.
+/// admin, belongs somewhere and so is handed no fresh one. A transfer is one
+/// way a person comes to own several organizations; creating one on request
+/// is another.
 #[sqlx::test]
 async fn a_transfer_moves_one_owner_row_and_mints_no_organization(pool: PgPool) {
     let organization = organization_with_staff(&pool).await;

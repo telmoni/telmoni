@@ -252,16 +252,19 @@ const MUTATIONS: &[Mutation] = &[
         resource_kind: "Member",
         actor_id: ActorPattern::Variable,
     },
+    // A new organization's two rows, whichever way it is founded: provisioned
+    // by `/me` (`provision_first_organization`) or created on request
+    // (`create_organization`).
     Mutation {
-        file: "crates/auth/src/handler/me.rs",
-        fn_name: "provision_first_organization",
+        file: "crates/auth/src/handler/organization.rs",
+        fn_name: "found_organization",
         action: "Created",
         resource_kind: "Organization",
         actor_id: ActorPattern::Variable,
     },
     Mutation {
-        file: "crates/auth/src/handler/me.rs",
-        fn_name: "provision_first_organization",
+        file: "crates/auth/src/handler/organization.rs",
+        fn_name: "found_organization",
         action: "Created",
         resource_kind: "Member",
         actor_id: ActorPattern::Variable,

@@ -105,14 +105,15 @@ GRANT SELECT ON auth.accounts TO auth_maintenance;
 CREATE TABLE auth.organizations (
     id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     external_id           TEXT        NOT NULL UNIQUE,
-    -- The first segment of the console's paths: derived by auth from the name
-    -- the organization was provisioned under (`telmoni_shared::slug`), a
-    -- placeholder when that name gives none, and moved only when an owner or
-    -- admin changes the URL. Unique across every status: a pending
-    -- organization keeps its slug, so a restore never finds it taken.
+    -- The first segment of the console's paths: the one its founder asked for
+    -- when they created it, else derived by auth from the name it was founded
+    -- under (`telmoni_shared::slug`), a placeholder when that name gives none,
+    -- and moved only when an owner or admin changes the URL. Unique across
+    -- every status: a pending organization keeps its slug, so a restore never
+    -- finds it taken.
     slug                  TEXT        NOT NULL,
-    -- Provisioned after its owner ("Ada's organization"), renamed on
-    -- Settings, never cleared.
+    -- The name it was created under, or its owner's when it was provisioned
+    -- ("Ada's organization"); renamed on Settings, never cleared.
     name                  TEXT        NOT NULL,
     status                TEXT        NOT NULL DEFAULT 'active',
     deletion_requested_at TIMESTAMPTZ,

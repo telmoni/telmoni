@@ -36,10 +36,11 @@ pub async fn get<B: Binding>(
 pub const MAX_ORGANIZATION_NAME: usize = 80;
 
 /// Write a new organization called `name`, going by `slug`. `external_id` is
-/// freshly minted by the caller. `None` when another organization took the
-/// slug between the caller's read of it ([`first_free_slug`]) and this write,
-/// which `organizations_slug_key` judges: the caller writes again under
-/// another.
+/// freshly minted by the caller. `None` when another organization goes by the
+/// slug, which `organizations_slug_key` judges: one that took it since the
+/// caller's read of it ([`first_free_slug`]), when the caller writes again
+/// under another, or one that held a URL its founder asked for, which the
+/// caller refuses.
 pub async fn create<B: HasOrganization>(
     tx: &mut Scoped<'_, B>,
     external_id: &OrganizationId,

@@ -1,8 +1,10 @@
-//! The organization itself: its name, its deletion by its owner and the
-//! owner's restore. An operator's termination and restore, and the steps
-//! the deletion sweep drives it through, are [`crate::sweep`]. Its name and
-//! its URL are two settings: provisioning derives the URL from the name the
-//! organization is born with, and after that a rename moves nothing.
+//! The organization itself: its founding — the first one `/me` provisions, or
+//! another a person asks for — its name, its deletion by its owner and the
+//! owner's restore. An operator's termination and restore, and the steps the
+//! deletion sweep drives it through, are [`crate::sweep`]. Its name and its
+//! URL are two settings: a new organization takes the URL asked for, or one
+//! derived from the name it is born with, and after that a rename moves
+//! nothing.
 
 use std::sync::Arc;
 
@@ -17,13 +19,17 @@ use serde_json::json;
 
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
-use telmoni_shared::{AuthError, OrganizationRole, OrganizationStatus, TelmoniError};
+use telmoni_shared::{
+    AuthError, Flag, OrganizationId, OrganizationRole, OrganizationStatus, TelmoniError,
+    TenantError, UserId,
+};
 
 use crate::{
     AppState,
     db::{
+        AuthLane,
         confirmation_codes::{self, Act, Purpose},
-        identities, locks, organization_members, organizations,
+        flags, identities, locks, organization_members, organizations,
     },
     handler::{
         ActingOrganization, account::DeletionRequest, account::wrong_code, acting_organization,
@@ -32,7 +38,9 @@ use crate::{
     model::DeletionKind,
 };
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
-use telmoni_shared::db::tenant_session::{organization_scope, person_scope};
+use telmoni_shared::db::tenant_session::{
+    self, Scoped, maintenance_scope, organization_scope, person_scope,
+};
 use telmoni_shared::{AuditAction, TelmoniResourceKind};
 use telmoni_shared::{AuthzError, slug};
 
@@ -316,6 +324,261 @@ pub async fn restore_organization(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Body of `POST /internal/organizations`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateOrganizationRequest {
+    pub name: String,
+    /// Absent or blank, the URL is derived from the name, as a first
+    /// organization's is.
+    #[serde(default)]
+    pub slug: Option<String>,
+}
+
+/// `POST /internal/organizations` — the caller founds another organization,
+/// as its owner. It names no existing organization, so it reads no
+/// `x-organization-id`. Nothing caps how many a person makes or owns; the
+/// global `signup` flag closes it, as it closes provisioning, and a closed one
+/// is a refusal here, since the person asked.
+///
+/// ⚠ **On the person's lock, which their account's deletion holds while it
+/// reads what they own.** A creation that waited on it is refused once the
+/// deletion lands, rather than adding an organization the deletion never saw.
+///
+/// ⚠ **The person's default organization stays where it was.** With none
+/// chosen it is the oldest they own, else the oldest they belong to, so for
+/// somebody who owns none the one founded here would take it over: their
+/// current one is recorded as chosen instead, under the lock. A choice already
+/// recorded is left alone, even one passed over while its organization waits
+/// out a deletion.
+pub async fn create_organization(
+    State(state): State<Arc<AppState>>,
+    principal: Principal,
+    Json(req): Json<CreateOrganizationRequest>,
+) -> Result<impl IntoResponse, TelmoniError> {
+    let founder = principal.user_id;
+    let name = organization_name(&req.name)?;
+    // A blank URL asks for none, as the console's field reads it: a client
+    // that sends the field empty is not asking for a URL of no letters.
+    let asked = req
+        .slug
+        .as_deref()
+        .map(str::trim)
+        .filter(|asked| !asked.is_empty())
+        .map(asked_url)
+        .transpose()?;
+    if !signups_open(&state).await? {
+        return Err(TenantError::FeatureOff { flag: Flag::Signup }.into());
+    }
+    // ⚠ MINTED: an organization is nobody's id.
+    let organization = OrganizationId::new();
+    let url = match asked {
+        Some(asked) => NewUrl::Chosen(asked),
+        None => {
+            let candidates = slug::candidates(slug::Scope::Organization, &name);
+            NewUrl::Derived(free_url(&state, &organization, &candidates).await?)
+        }
+    };
+
+    let mut tx = person_scope(&state.db, &founder).await?;
+    locks::lock_person(&mut tx, &founder).await?;
+    let person = founder_under_lock(&state, &mut tx, &founder).await?;
+    if person.default_organization_id.is_none()
+        && let Some(current) =
+            organization_members::default_while_owning_none(&mut tx, &founder).await?
+    {
+        identities::set_default_organization(&mut tx, &founder, &current).await?;
+    }
+    let founded =
+        found_organization(tx, organization, &founder, &name, url, Founding::OnRequest).await?;
+
+    tracing::info!(organization_id = %founded.id, user_id = %founder, "organization created");
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({ "id": founded.id, "slug": founded.slug, "name": name })),
+    ))
+}
+
+/// Whether new organizations may be made: the global `signup` flag, read in
+/// the lane before anything is written, since there is no organization yet to
+/// override it on.
+pub(crate) async fn signups_open(state: &AppState) -> Result<bool, TelmoniError> {
+    let mut tx = maintenance_scope(&state.db, AuthLane).await?;
+    let global = flags::resolve_global(&mut tx).await?;
+    tx.commit().await?;
+    Ok(global.is_on(Flag::Signup))
+}
+
+/// The first of `candidates`, best first, that no other organization goes by,
+/// read in the lane, since no binding of the new organization's sees another's
+/// slug. `None` when none is free, or the name gave none.
+///
+/// ⚠ **Read before the person's lock is taken, never under it.** A request
+/// holding the lock must not wait on a second connection: the requests queued
+/// behind it each hold one, and enough of them empty the pool. A slug taken
+/// between this read and the write is settled at the write, by a placeholder.
+pub(crate) async fn free_url(
+    state: &AppState,
+    organization: &OrganizationId,
+    candidates: &[String],
+) -> Result<Option<String>, TelmoniError> {
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+    let mut lane = maintenance_scope(&state.db, AuthLane).await?;
+    let free = organizations::first_free_slug(&mut lane, organization, candidates).await?;
+    lane.commit().await?;
+    Ok(free)
+}
+
+/// The founder, read again under the person's lock, which the caller holds.
+/// Refused once their account's deletion is confirmed: it has read, or is
+/// about to read, what they own. Refused while `VERIFY_EMAIL` waits on their
+/// address, as `/me` refuses them, so nobody unproved comes to own anything.
+/// And refused when their identity is gone, a race with its erasure that the
+/// owner row's foreign key would fail anyway.
+pub(crate) async fn founder_under_lock(
+    state: &AppState,
+    tx: &mut Scoped<'_, tenant_session::Person>,
+    user_id: &UserId,
+) -> Result<identities::Person, TelmoniError> {
+    let Some(person) = identities::get(tx, user_id).await? else {
+        return Err(AuthError::Unauthenticated.into());
+    };
+    if person.deletion_requested_at.is_some() {
+        return Err(AuthzError::Forbidden("account deletion in progress".into()).into());
+    }
+    if state.issuer.verify_email() && !person.email_verified {
+        return Err(AuthzError::Forbidden("verify your email address to continue".into()).into());
+    }
+    Ok(person)
+}
+
+/// The URL a new organization takes, settled before the person's lock.
+pub(crate) enum NewUrl {
+    /// The one its founder asked for: written as asked, or refused as taken.
+    Chosen(String),
+    /// The one [`free_url`] found; with none, a placeholder.
+    Derived(Option<String>),
+}
+
+/// How an organization came to be, as its first two audit events record it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Founding {
+    /// By `/me`, for a person in no organization.
+    Provisioned,
+    /// By its founder's asking (`POST /internal/organizations`).
+    OnRequest,
+}
+
+impl Founding {
+    const fn kind(self) -> &'static str {
+        match self {
+            Self::Provisioned => "auto_provision",
+            Self::OnRequest => "on_request",
+        }
+    }
+}
+
+/// A new organization, as its founder is answered.
+pub(crate) struct Founded {
+    pub(crate) id: OrganizationId,
+    pub(crate) slug: String,
+}
+
+/// Make `founder` the owner of `organization`, minted by the caller and
+/// called `name`: the row, the owner row and both audit events, committed
+/// together on the transaction that holds the person's lock, after the caller
+/// has checked them under it. It takes no second connection: see
+/// [`free_url`].
+pub(crate) async fn found_organization(
+    tx: Scoped<'_, tenant_session::Person>,
+    organization: OrganizationId,
+    founder: &UserId,
+    name: &str,
+    url: NewUrl,
+    founding: Founding,
+) -> Result<Founded, TelmoniError> {
+    // Both GUCs from here: the person's for the check made under their lock,
+    // the new organization's for the rows below, whose policies' WITH CHECK
+    // name it.
+    let mut tx = tx.bind_organization(&organization).await?;
+    let slug = match url {
+        NewUrl::Chosen(asked) => {
+            if organizations::create(&mut tx, &organization, name, &asked)
+                .await?
+                .is_none()
+            {
+                return Err(url_taken());
+            }
+            asked
+        }
+        NewUrl::Derived(free) => {
+            let slug = free.unwrap_or_else(|| slug::placeholder(slug::Scope::Organization));
+            if organizations::create(&mut tx, &organization, name, &slug)
+                .await?
+                .is_some()
+            {
+                slug
+            } else {
+                // Another organization took the slug since the lane read it.
+                // A placeholder is drawn at random, until the owner picks a URL.
+                let placeholder = slug::placeholder(slug::Scope::Organization);
+                if organizations::create(&mut tx, &organization, name, &placeholder)
+                    .await?
+                    .is_none()
+                {
+                    return Err(TelmoniError::Internal(
+                        "a fresh placeholder slug was taken".into(),
+                    ));
+                }
+                placeholder
+            }
+        }
+    };
+    organization_members::insert_owner(&mut tx, &organization, founder).await?;
+    emit_audit(
+        &mut tx,
+        AuditEvent {
+            organization_id: &organization,
+            in_project: None,
+            actor: Actor::User(founder.as_str()),
+            action: AuditAction::Created,
+            resource_kind: TelmoniResourceKind::Organization,
+            resource_id: Some(organization.as_str()),
+            request_id: None,
+            ip_address: None,
+            user_agent: None,
+            metadata: Some(json!({ "kind": founding.kind() })),
+        },
+    )
+    .await?;
+    emit_audit(
+        &mut tx,
+        AuditEvent {
+            organization_id: &organization,
+            in_project: None,
+            actor: Actor::User(founder.as_str()),
+            action: AuditAction::Created,
+            resource_kind: TelmoniResourceKind::Member,
+            resource_id: Some(founder.as_str()),
+            request_id: None,
+            ip_address: None,
+            user_agent: None,
+            metadata: Some(json!({
+                "kind": founding.kind(),
+                "role": OrganizationRole::Owner.to_string(),
+            })),
+        },
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(Founded {
+        id: organization,
+        slug,
+    })
+}
+
 /// Body of `PATCH /internal/organization`: the name, the slug, or both.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -343,39 +606,8 @@ pub async fn update_organization(
     if req.name.is_none() && req.slug.is_none() {
         return Err(AuthError::BadRequest("give a name, a slug, or both".into()).into());
     }
-    let name = match &req.name {
-        None => None,
-        Some(raw) => {
-            let Some(name) = crate::identity::sanitize_organization_name(raw) else {
-                return Err(AuthError::BadRequest("give the organization a name".into()).into());
-            };
-            if name.chars().count() > MAX_ORGANIZATION_NAME {
-                return Err(AuthError::BadRequest(format!(
-                    "an organization name is at most {MAX_ORGANIZATION_NAME} characters"
-                ))
-                .into());
-            }
-            Some(name)
-        }
-    };
-    let asked_slug = match req.slug.as_deref().map(str::trim) {
-        None => None,
-        Some(s) if !slug::is_slug(s) => {
-            return Err(AuthError::BadRequest(format!(
-                "a URL is lowercase letters and digits, in words joined by single hyphens, at \
-                 most {} characters",
-                slug::MAX_LEN
-            ))
-            .into());
-        }
-        Some(s) if slug::Scope::Organization.reserves(s) => {
-            return Err(AuthError::BadRequest(format!(
-                "{s} is a word the console's own paths use — choose another URL"
-            ))
-            .into());
-        }
-        Some(s) => Some(s.to_owned()),
-    };
+    let name = req.name.as_deref().map(organization_name).transpose()?;
+    let asked_slug = req.slug.as_deref().map(asked_url).transpose()?;
 
     let ActingOrganization {
         mut tx,
@@ -429,8 +661,51 @@ pub async fn update_organization(
 fn slug_taken(e: sqlx::Error) -> TelmoniError {
     match e {
         sqlx::Error::Database(ref db) if db.constraint() == Some("organizations_slug_key") => {
-            AuthError::Conflict("another organization already has that URL".into()).into()
+            url_taken()
         }
         other => other.into(),
     }
+}
+
+/// The refusal of a URL another organization goes by, asked for on Settings
+/// or at creation.
+fn url_taken() -> TelmoniError {
+    AuthError::Conflict("another organization already has that URL".into()).into()
+}
+
+/// A name as an organization carries it, or the 400 that says why not: one
+/// rule for a new organization and a rename, so the two cannot drift.
+fn organization_name(raw: &str) -> Result<String, TelmoniError> {
+    let Some(name) = crate::identity::sanitize_organization_name(raw) else {
+        return Err(AuthError::BadRequest("give the organization a name".into()).into());
+    };
+    if name.chars().count() > MAX_ORGANIZATION_NAME {
+        return Err(AuthError::BadRequest(format!(
+            "an organization name is at most {MAX_ORGANIZATION_NAME} characters"
+        ))
+        .into());
+    }
+    Ok(name)
+}
+
+/// A URL asked for, at creation or on Settings: a slug's shape, and no word
+/// the console's own paths use. Whether another organization holds it is the
+/// write's to say.
+fn asked_url(raw: &str) -> Result<String, TelmoniError> {
+    let asked = raw.trim();
+    if !slug::is_slug(asked) {
+        return Err(AuthError::BadRequest(format!(
+            "a URL is lowercase letters and digits, in words joined by single hyphens, at \
+             most {} characters",
+            slug::MAX_LEN
+        ))
+        .into());
+    }
+    if slug::Scope::Organization.reserves(asked) {
+        return Err(AuthError::BadRequest(format!(
+            "{asked} is a word the console's own paths use — choose another URL"
+        ))
+        .into());
+    }
+    Ok(asked.to_owned())
 }

@@ -358,9 +358,11 @@ async fn the_global_set_a_module_reads_carries_the_global_rows_alone(pool: PgPoo
         "an organization row is not global"
     );
 }
-/// A token owned by a walled organization opens no `/v1` lane.
+/// A served read stamps the token's last use, and once its own organization
+/// has the API switched off — its row, not the global one — the same token
+/// opens no `/v1` lane.
 #[sqlx::test]
-async fn a_walled_organizations_token_opens_nothing_and_a_served_read_stamps_last_used(
+async fn a_served_read_stamps_last_used_and_an_organizations_own_switch_refuses_its_token(
     pool: PgPool,
 ) {
     apply_audit_migrations(&pool).await;
@@ -427,8 +429,8 @@ async fn a_walled_organizations_token_opens_nothing_and_a_served_read_stamps_las
             .unwrap();
     assert!(after.is_some(), "the bump committed before the handler ran");
 
-    flip(&pool, Some(&organization), Flag::BetaAccess, false).await;
+    flip(&pool, Some(&organization), Flag::PublicApi, false).await;
     let refused = v1_organization(pool, token).await;
     assert_eq!(refused.status(), StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(json_body(refused).await["flag"], "beta_access");
+    assert_eq!(json_body(refused).await["flag"], "public_api");
 }

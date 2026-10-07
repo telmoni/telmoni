@@ -13,7 +13,12 @@ import { useSidebar } from "./sidebar-context";
 import { PRODUCT_NAME } from "@/lib/site";
 import { cn } from "@/lib/utils";
 
-export function ConsoleHeader() {
+export function ConsoleHeader({
+  host,
+}: {
+  /// The console's host, for the switcher's new organization's URL.
+  host: string;
+}) {
   const header = usePageHeaderValue();
   const { collapsed, toggle } = useSidebar();
 
@@ -60,7 +65,7 @@ export function ConsoleHeader() {
             {back.label}
           </Link>
         )}
-        <ResourceSelector />
+        <ResourceSelector host={host} />
       </div>
       <div className="ml-auto flex shrink-0 items-center justify-end gap-3">
         <SearchButton />

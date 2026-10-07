@@ -263,7 +263,8 @@ impl Default for UserId {
 }
 
 tenant_id_newtype!(
-    /// Organization identifier — minted at provisioning, never a person's id.
+    /// Organization identifier — minted when an organization is founded,
+    /// provisioned or created, never a person's id.
     OrganizationId,
     /// Reasons [`OrganizationId::try_new`] can reject input.
     OrganizationIdError,

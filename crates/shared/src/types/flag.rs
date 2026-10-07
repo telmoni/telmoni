@@ -29,31 +29,26 @@ pub enum Flag {
     /// Adding a member to an organization. The Members page stays readable, and
     /// an existing member keeps their access.
     Members,
-    /// Provisioning a NEW organization at first sign-in. An existing one signs
-    /// in regardless, and so does a person with none: they get their account
-    /// alone — invitations and deletion — rather than a refusal. **Global
-    /// only**: there is no organization yet to override on.
+    /// Making a NEW organization: provisioning one at first sign-in, and
+    /// creating one on request (`POST /internal/organizations`), which off
+    /// refuses. An existing one signs in regardless, and so does a person with
+    /// none: they get their account alone — invitations and deletion — rather
+    /// than a refusal. **Global only**: there is no organization yet to
+    /// override on.
     Signup,
-    /// The console, per PERSON: someone it is off for gets their account alone
-    /// — invitations, deletion, sign-out — and the `/v1` lanes of a walled
-    /// organization's token refuse. On for a person when it is on for ANY
-    /// organization they belong to (`/me`), so an organization in the beta
-    /// admits a guest by inviting them.
-    BetaAccess,
 }
 
 impl Flag {
     /// Every flag, in catalog order — for the resolver, the listing and the
     /// exhaustive tests.
     #[must_use]
-    pub const fn all() -> [Self; 6] {
+    pub const fn all() -> [Self; 5] {
         [
             Self::Connectors,
             Self::PublicApi,
             Self::ApiTokens,
             Self::Members,
             Self::Signup,
-            Self::BetaAccess,
         ]
     }
 
@@ -74,7 +69,6 @@ impl Flag {
             Self::ApiTokens => "api_tokens",
             Self::Members => "members",
             Self::Signup => "signup",
-            Self::BetaAccess => "beta_access",
         }
     }
 
@@ -87,7 +81,6 @@ impl Flag {
             Self::ApiTokens => "API keys are switched off right now.",
             Self::Members => "Adding a member is switched off right now.",
             Self::Signup => "Sign-ups are closed right now.",
-            Self::BetaAccess => "This organization is not in the beta yet.",
         }
     }
 }

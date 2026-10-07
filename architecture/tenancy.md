@@ -38,17 +38,25 @@ flowchart TD
   - A minted id is a prefix plus random base62 characters.
   - Each id type is its own type, so a project id cannot be passed where an organization id is expected.
 - **Slugs spell the console's paths, and nothing else.** An organization and a project each carry one (`crates/shared/src/slug.rs`):
-  - Auth derives a project's from its name, and again whenever the name changes. An organization's it derives once, from the name it is provisioned under; after that the URL is a setting of its own (`PATCH /internal/organization`), and a rename moves nothing. A slug is never the row's identity.
+  - Auth derives a project's from its name, and again whenever the name changes. An organization's is the one asked for when it is created, or else derived once from the name it is created under; after that the URL is a setting of its own (`PATCH /internal/organization`), and a rename moves nothing. A slug is never the row's identity.
   - An organization's is unique across every organization; a project's is unique within its organization. The database holds both.
   - Every lane, header and foreign key names a row by id. Only `/me` takes a slug, as the organization the console asks to act in.
   - `/me` answers each organization's slug beside its id, and `/v1/organization` answers the one a key belongs to. The CLI reads it there, and takes a slug wherever it takes an id, but resolves it itself: what it sends is the id.
   - See [the console's paths](console.md#paths-and-slugs).
 
-**Nobody creates an organization.**
+**A person is given their first organization, and creates any more.**
 - A person's first organization is provisioned the first time `/me` finds them in none (`provision_first_organization`, `crates/auth/src/handler/me.rs`). It writes the organization, named after its owner ("Ada's organization", at the slug that reads as; see [the console's paths](console.md#paths-and-slugs)), its owner row, and their audit rows — and no project. Nothing is asked first: the owner makes the first project from the organization's overview, where `/console` lands everybody, and renames the organization on Settings.
   - Provisioning is gated by the global `Signup` flag. With the flag off, the person gets an answer with no organization, not an error.
   - It takes the person's lock and checks again, so two first page loads at once provision only one organization.
-- There is no route that creates an organization. The only place `insert_owner` runs is provisioning.
+- **Anybody signed in creates another on request** (`POST /internal/organizations`, `create_organization`, `crates/auth/src/handler/organization.rs`), from the switcher's **New organization**, and owns it.
+  - It names no existing organization, so it reads no `x-organization-id`.
+  - The name is held to a rename's rules. The URL is the one asked for, held to a URL change's rules and refused (409) when another organization goes by it; asked for none — the field absent, or blank — it is derived from the name as a first organization's is.
+  - The global `Signup` flag gates it too, read as provisioning reads it. Off, it is a refusal (503, `/errors/tenant/feature-off`), since the person asked, and the console offers no **New organization** at all.
+  - ⚠ **It takes the person's lock, and checks under it that their account is not being deleted.** The deletion holds that lock while it reads what the person owns, so a creation can never add an owned organization after the deletion has read the list. Under the same lock it refuses an address `VERIFY_EMAIL` still waits on, as `/me` does, so nobody unproved comes to own anything.
+  - ⚠ **It leaves the person's default organization where it was** (below). With none chosen, the default of somebody who owns none is the oldest organization they belong to, and the one they found would take it over as the oldest they own; so that one is recorded as their choice, under the lock. A choice already recorded is left alone.
+  - No cap: a person creates and owns as many as they like, each new organization taking a URL from the namespace every organization shares. The console's throttle (ten a minute per person) is the only limit.
+- Both found the organization in one place (`found_organization`): the organization, its owner row, and two audit rows — `Created` for the organization and for the owner's seat, their `kind` saying which way it came (`auto_provision`, `on_request`). The only place `insert_owner` runs is there; a transfer promotes an admin's row rather than writing one.
+  - ⚠ **A request holding the person's lock never waits on a second connection.** The lanes queued behind it each hold one, and enough of them would empty the pool. So the slug is read in the lane before the lock (`free_url`), and one taken between that read and the write is settled at the write, by a placeholder.
 
 **A person opens in their default organization, as Vercel opens on a default team.**
 - It is where the console opens at sign-in, and the organization a request that names none acts in — the CLI's at login among them, which keeps what `/me` answered (`default_organization`, `crates/auth/src/handler/me.rs`; `/me` answers it as `defaultOrganizationId`).
@@ -56,7 +64,7 @@ flowchart TD
 - ⚠ **The choice is stored as the seat** (`auth.accounts.default_membership_id`, a foreign key to `auth.organization_members` that sets itself null), not the organization. Leaving, a removal and the organization's erasure take the choice with the seat, and a later seat in the same organization is not chosen until the person chooses it again — as Vercel picks a new default team for whoever leaves theirs. An organization being deleted is passed over while it waits, and is the default again if restored.
 - Choosing is recorded on the chosen organization's audit chain, as a person's own act on their seat there; another organization's chain has no business with it.
 
-**Invitations are the only way a person joins another organization on their own.** The one other way onto a roster is a project transfer: it enrolls the project's seat holders on the destination organization's roster (see [Transfers](#transfers)).
+**Invitations are the only way a person joins someone else's organization on their own.** The one other way onto a roster is a project transfer: it enrolls the project's seat holders on the destination organization's roster (see [Transfers](#transfers)).
 - An organization invitation never grants `owner`.
 - Accepting a project invitation also puts the person on the organization's roster as `member`.
 - Accepting inserts a role and never rewrites one, so an owner cannot demote themselves by accepting an invitation.
@@ -166,7 +174,7 @@ Rules for the GUCs:
 | `Project` | project | `project_scope` | the feed, emitting notices |
 | `Person` | person | `person_scope` | `/me`, a person's own rows |
 | `ProjectAndPerson` | project, person | `project_and_person_scope` | `acting_project`'s one read |
-| `PersonAndOrganization` | person, organization | `bind_organization` on a person scope | provisioning, export, the agent's conversations |
+| `PersonAndOrganization` | person, organization | `bind_organization` on a person scope | founding an organization (provisioned or created), export, the agent's conversations |
 | `ProjectAndOrganization` | project, organization | `bind_organization` on a project scope | `enter_owner_scope` |
 | `PersonOrganizationProject` | all three | `bind_project` on a person-and-organization scope | the agent's search, the export walk |
 | `Maintenance<L>` | none: a role switch | `maintenance_scope` | lanes, below |
@@ -339,6 +347,7 @@ Every handler suite runs with RLS on, so no test exercises the superuser path th
 | Scopes, bindings, lanes | `crates/shared/src/db/tenant_session.rs` |
 | Rosters | `crates/auth/src/db/{organization_members,members}.rs` |
 | First organization | `crates/auth/src/handler/me.rs` |
+| Creating an organization, and founding one either way | `crates/auth/src/handler/organization.rs` (`create_organization`, `found_organization`) |
 | Invitations | `crates/auth/src/handler/{invite,organization_members}.rs` |
 | Transfers | `crates/auth/src/handler/{ownership,project_transfer}.rs` |
 | Policies | each module's `migrations/*_initial.sql`; `crates/migrator/migrations/*_audit_initial.sql` |

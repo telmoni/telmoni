@@ -124,8 +124,9 @@ export function RealtimeListener() {
         if (ROSTER_PAGES.test(pathnameRef.current)) router.refresh();
       });
 
-      // An offer made to you, withdrawn, declined, or an organization you are
-      // in changing hands: every role on the page may have moved.
+      // An offer made to you, withdrawn, declined, an organization you are in
+      // changing hands, or one you founded in another tab: every role on the
+      // page may have moved, and the switcher's list with them.
       es.addEventListener("ownership:changed", (e: MessageEvent) => {
         const data = payload(e, "ownership:changed");
         // The project on screen was handed to another organization, and this

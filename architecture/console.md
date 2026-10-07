@@ -48,7 +48,7 @@ flowchart LR
 - **Server Components by default.**
   - The `(app)` layout loads the session, `/me`, the projects and the announcement together.
   - With no session, the layout signs the person out.
-  - A person with no organization, or outside the beta, sees an account-only screen.
+  - A person with no organization sees an account-only screen.
 - **`"use client"` only at interactive leaves:** forms, the agent panel, the realtime listener, the session heartbeat.
   - The client store has no module-level fallback object. A client module still evaluates on the server, and one object there would be shared across requests.
 - **Server Actions do the writes.** Each follows the same steps:
@@ -80,10 +80,10 @@ The path names the organization, and the project under it, by slug:
 - **`web/lib/slug.ts` spells the scheme** (`organizationPath`, `projectPath`), and `consolePlace` (`web/lib/console-nav.ts`) reads it back. Nothing else builds or splits a console path.
 
 **Auth mints every slug** (`crates/shared/src/slug.rs`, `crates/auth/src/db/`). The console derives none.
-- **An organization's name and its URL are two settings**, as a Vercel team's are (`PATCH /internal/organization`, `crates/auth/src/handler/organization.rs`). Provisioning gives the organization its slug — the first free one the name it is born with reads as — and from then on a rename moves nothing: the slug changes only when an owner or admin changes the URL on Settings. **A project's slug follows its name**: creation, a rename, and a move into another organization each pick one.
+- **An organization's name and its URL are two settings**, as a Vercel team's are (`PATCH /internal/organization`, `crates/auth/src/handler/organization.rs`). An organization takes its slug when it is made — the one asked for in the switcher's **New organization**, or else the first free one the name it is born with reads as — and from then on a rename moves nothing: the slug changes only when an owner or admin changes the URL on Settings. **A project's slug follows its name**: creation, a rename, and a move into another organization each pick one.
 - ⚠ **An organization is born named, and the console opens straight onto it**, as Vercel and Cloudflare name a new account after its holder. Provisioned at first sign-in, it is called after the first word of its owner's name — "Ada's organization", or "My organization" for somebody who gave none — and never anything read off their address (`default_organization`, `crates/auth/src/identity.rs`); it goes by the slug that name reads as (`adas-organization`). Nothing is asked first: `/console` lands on its overview, which lists the projects and is where the first one is made, since provisioning makes none, as a Vercel team starts empty. The owner renames it, and moves its URL, on Settings. A holder's name with no Latin letter or digit in it gives no slug (the possessive alone would read `s-organization`), so the organization takes a placeholder (`org-` and ten random characters) until a URL is chosen; a project takes a placeholder of its own. A name is never empty (`auth.organizations.name` is `NOT NULL`), so every label is the name: the console's `organizationLabel`, and auth's mail.
 - **An organization's slug is unique across every organization**, pending ones included, so a restore never finds it taken. ⚠ The purge frees it: another organization may take `acme` afterwards, and a link spelled with it lands there. **A project's is unique within its organization.**
-- A name that reads as a slug already taken gets the next number (`slug::candidates`). ⚠ An organization's numbers run out for a common name, its namespace being everybody's: its last candidate is the name with a random tail, so the slug still reads as the name. A URL chosen on Settings is taken as written: another organization's is a 409, a word the console keeps or a string that is no slug a 400.
+- A name that reads as a slug already taken gets the next number (`slug::candidates`). ⚠ An organization's numbers run out for a common name, its namespace being everybody's: its last candidate is the name with a random tail, so the slug still reads as the name. A URL chosen on Settings, or asked for when an organization is created, is taken as written: another organization's is a 409, a word the console keeps or a string that is no slug a 400.
 - **A slug and an id never look alike.** A slug has no underscore and a minted id always has one, so a path segment is never both: the layouts look one up as a slug, then as an id.
 - **Reserved words** (`slug::ORGANIZATION_RESERVED`) are the console's own first path segments, the ones a console built on it serves or may yet, and the ones Next answers itself. No organization goes by one. **A project's** (`slug::PROJECT_RESERVED`) are its organization's own pages, and the ones a console built on it serves there or may yet; a project's name that reads as one gets the next number, as a taken slug does. The console's copies (`RESERVED_ORGANIZATION_SLUGS`, `RESERVED_PROJECT_SLUGS`) are pinned to the wire contract, and `web/app/organization-slugs.test.ts` checks every route under `web/app/` against the first and every page under `[organization]/` against the second.
 
@@ -117,6 +117,13 @@ The path names the organization, and the project under it, by slug:
 **Moving between organizations** is a link like any other. The router keeps the `(app)` layout across it, so two things follow the path:
 - `[organization]/layout.tsx` hands the client store the seed for the organization arrived in (`StoreSeed`, `storeSeed`);
 - `OrganizationSync` refreshes the `(app)` layout when it was rendered for another organization than the path names.
+
+**The switcher** (`web/components/resource-selector.tsx`, in the header) lists the person's organizations and the projects in each. Its foot holds **Create project**, for whoever may create one somewhere, and **New organization**, for everybody while the `signup` flag is on: with it off the row is gone, as a switched-off feature is from the rail, rather than offered and refused.
+- **New organization** (`createOrganizationAction`, `web/app/(app)/actions.ts`) names no organization: the new one has no id until auth mints it, so the action sends the person's own headers, as choosing a default organization does, and moves no default. A blank URL is left to auth to derive.
+- Refusals land as the organization's Settings place them: a taken URL under URL, a 400 under its field, and a `signup` flag switched off while the dialog was open as the flag's sentence.
+- ⚠ **The dialog opens the new organization's Overview, not the action.** The switcher lives in the `(app)` layout, which the move keeps, so a `redirect()` from the action would have left the dialog open over the page it moved to.
+- The person's other tabs list it once they read `/me` again, which `ownership:changed` makes them do, as it does when an organization changes hands. It goes on the person's own channel, as an offer made to them does, since no tab subscribes to the new organization's yet.
+- The host ahead of the URL is `AUTH_URL`'s, as on Settings: the `(app)` layout hands it down through the header.
 
 ## Talking to the server
 
@@ -290,7 +297,7 @@ All logging goes through `@/lib/logger` (pino), never `console.*`:
 
 **The image** (`web/Dockerfile`) builds on Node and runs the standalone `server.js` on a distroless, non-root Node image.
 - ⚠ The build and runtime images must share a Node major version.
-- The console's origin is `AUTH_URL`, read at request time (`robots.ts`, `sitemap.ts`, the structured data, the organization URL form, and `metadataBase` in the root layout's `generateMetadata`, so a social image a console built on this one adds resolves to the deployment rather than to the build host). No `NEXT_PUBLIC_` variable names a host, so the one published image serves every deployment; `robots.txt` and `sitemap.xml` are therefore rendered per request rather than at build.
+- The console's origin is `AUTH_URL`, read at request time (`robots.ts`, `sitemap.ts`, the structured data, the organization URL form and the switcher's New organization, and `metadataBase` in the root layout's `generateMetadata`, so a social image a console built on this one adds resolves to the deployment rather than to the build host). No `NEXT_PUBLIC_` variable names a host, so the one published image serves every deployment; `robots.txt` and `sitemap.xml` are therefore rendered per request rather than at build.
 - ⚠ `.next/cache` is created and handed to the runtime user at build time, because a distroless image cannot `mkdir`.
 
 ## Where it lives

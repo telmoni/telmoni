@@ -127,7 +127,8 @@ services:
       # ADMIN_EMAIL and ADMIN_PASSWORD seed the first account. An OpenID
       # Connect provider sits beside the form when OIDC_ISSUER names one, and
       # its first sign-ins make accounts while OIDC_ALLOW_SIGN_UP is on.
-      # Whether a new person gets an organization is the `signup` feature flag.
+      # Whether a new person gets an organization, and whether anyone may
+      # create another, is the `signup` feature flag.
       ALLOW_SIGN_UP: ${ALLOW_SIGN_UP:-false}
       VERIFY_EMAIL: ${VERIFY_EMAIL:-false}
       DISABLE_LOGIN_FORM: ${DISABLE_LOGIN_FORM:-false}
