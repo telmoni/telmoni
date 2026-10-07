@@ -5,7 +5,11 @@
 #
 # `workflow_run` rather than `push`, so an image never leaves a commit CI
 # refused. The checkout names the run's head SHA, because `github.sha` here is
-# whatever main had moved on to by the time that run finished.
+# whatever main had moved on to by the time that run finished. The `branches`
+# filter alone is not enough: CI also runs for a fork's pull request, under
+# whatever branch the fork used — `main`, often — and a run from there carries
+# the fork's commit, which this job would build and push as `latest`. So the
+# job also asks that the run was a push, to this repository.
 #
 # amd64 only: the server compiles for x86_64 musl (crates/telmoni/Dockerfile),
 # and the console follows it rather than publish a platform the server lacks.
@@ -31,7 +35,10 @@ concurrency:
 jobs:
   publish:
     name: ${{ matrix.image }}
-    if: github.event.workflow_run.conclusion == 'success'
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
