@@ -80,4 +80,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.image }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+          # The image is pushed before the cache is saved, so a cache-service
+          # failure should cost the next build its speed, not this publish.
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }},ignore-error=true
