@@ -58,7 +58,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   # Rustdoc as a gate. A doc comment that links a deleted item is a broken
   # intra-doc link and nothing else here sees one — three post-cut sweeps left
@@ -76,7 +76,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: Swatinem/rust-cache@v2
-      - run: cargo doc --workspace --no-deps --document-private-items
+      - run: cargo doc --workspace --locked --no-deps --document-private-items
 
   # Full Rust workspace suite against a real Postgres. Every migration set runs
   # first, then the dev-role search_path pin (mirrors `make db-dev-setup`) so
@@ -129,11 +129,11 @@ jobs:
       - name: Install extensions (mirrors compose's init script)
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f crates/migrator/sql/dev_extensions.sql
       - name: Run migrations (every schema, as make db-migrate runs them)
-        run: MIGRATOR_DATABASE_URL="$DATABASE_URL" MIGRATION_SETS="$(make -s migration-sets)" cargo run -p telmoni -- migrate
+        run: MIGRATOR_DATABASE_URL="$DATABASE_URL" MIGRATION_SETS="$(make -s migration-sets)" cargo run --locked -p telmoni -- migrate
       - name: Pin dev-role search_path (mirrors make db-dev-setup)
         run: psql "$DATABASE_URL" -c "ALTER ROLE telmoni SET search_path = auth, notifications, agent, audit, public;"
       - name: cargo test
-        run: cargo test --workspace --no-fail-fast -- --test-threads=4
+        run: cargo test --workspace --locked --no-fail-fast -- --test-threads=4
 
   # Supply-chain gate: advisories, licenses, bans, sources (deny.toml). The
   # advisory half also runs daily on a schedule (audit.yml), since a new advisory
@@ -182,7 +182,7 @@ jobs:
         working-directory: web
       - run: npm run lint
         working-directory: web
-      # Dead-code / unused-dependency gate (`AGENTS.md`: "keep knip clean").
+      # Dead-code / unused-dependency gate, as `make web-gate` runs it.
       - run: npm run knip
         working-directory: web
       - run: npm run test

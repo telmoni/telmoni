@@ -67,7 +67,7 @@ help-all:
 
 .PHONY: install
 install:
-	cd $(WEB_DIR) && npm install
+	cd $(WEB_DIR) && npm ci
 	cargo fetch --locked
 	@if [ ! -f $(WEB_DIR)/.env.local ]; then \
 		echo ""; \
@@ -254,14 +254,14 @@ sweep:
 .PHONY: check
 check:
 	cd $(WEB_DIR) && npm run typecheck
-	cargo check --workspace
+	cargo check --workspace --locked
 	cargo fmt --all -- --check
-	cargo clippy --workspace --all-targets -- -D warnings
+	cargo clippy --workspace --all-targets --locked -- -D warnings
 	@$(MAKE) doc
 
 .PHONY: doc
 doc:
-	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items --quiet
+	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --locked --no-deps --document-private-items --quiet
 
 .PHONY: ci
 ci: check lint test web-gate deny typos
@@ -278,7 +278,7 @@ lint:
 .PHONY: test
 test: docker-up db-wait
 	cd $(WEB_DIR) && npm run test
-	cargo test --workspace --no-fail-fast -- --test-threads=$(TEST_THREADS)
+	cargo test --workspace --locked --no-fail-fast -- --test-threads=$(TEST_THREADS)
 
 .PHONY: e2e
 e2e: deps-check docker-up db-wait schema-check
