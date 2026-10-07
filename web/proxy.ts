@@ -137,8 +137,11 @@ export const proxy: NextProxy = async (request) => {
   return response;
 };
 
+// The dots are escaped: the pattern is a regex, and an unescaped one is any
+// character, so `icon.svg` also matched `/icon-svg`, which is a slug an
+// organization may go by, and its pages skipped everything above.
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|icon.svg|apple-icon.png|opengraph-image.png).*)',
+    '/((?!_next/static|_next/image|favicon\\.ico|icon\\.svg|apple-icon\\.png|opengraph-image\\.png).*)',
   ],
 };

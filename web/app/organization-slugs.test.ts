@@ -2,8 +2,11 @@ import { readdirSync } from "node:fs";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
+// @ts-expect-error Next ships no typings for its bundled copy
+import { pathToRegexp } from "next/dist/compiled/path-to-regexp";
 
 import { RESERVED_ORGANIZATION_SLUGS, RESERVED_PROJECT_SLUGS, isSlug } from "@/lib/slug";
+import { config } from "@/proxy";
 
 const APP = __dirname;
 
@@ -48,5 +51,35 @@ describe("an organization's own pages", () => {
         `/{organization}/${page} is served here and is not reserved in crates/shared/src/slug.rs`,
       ).toBe(true);
     }
+  });
+});
+
+// ⚠ The proxy's matcher is a regex, and a dot in one is any character: as
+// `icon.svg`, the exclusion for the icon also matched `/icon-svg`, a slug an
+// organization may go by, and its pages skipped the proxy — no sign-in
+// redirect, no Content Security Policy, no organization read off the path.
+// Compiled here as Next compiles it.
+describe("the proxy's matcher", () => {
+  const compile = pathToRegexp as (pattern: string) => RegExp;
+  const matchers = config.matcher.map(compile);
+  const proxied = (path: string) => matchers.some((matcher) => matcher.test(path));
+
+  it.each(["icon-svg", "favicon-ico", "apple-icon-png", "opengraph-image-png", "acme"])(
+    "runs for an organization that goes by %s",
+    (slug) => {
+      expect(isSlug(slug) && !RESERVED_ORGANIZATION_SLUGS.has(slug)).toBe(true);
+      expect(proxied(`/${slug}`)).toBe(true);
+      expect(proxied(`/${slug}/settings`)).toBe(true);
+    },
+  );
+
+  it.each([
+    "/icon.svg",
+    "/favicon.ico",
+    "/apple-icon.png",
+    "/opengraph-image.png",
+    "/_next/static/chunk.js",
+  ])("skips the asset %s", (path) => {
+    expect(proxied(path)).toBe(false);
   });
 });
