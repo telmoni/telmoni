@@ -169,7 +169,7 @@ services:
       DOCS_CORPUS_URL: ${DOCS_CORPUS_URL:-http://web:3000/llms-full.txt}
 
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.40.1
     profiles: ["agent"]
     restart: unless-stopped
     networks:
