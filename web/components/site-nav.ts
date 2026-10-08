@@ -22,7 +22,7 @@ export type NavItem =
 
 const CORE_PRIMARY_NAV: readonly NavItem[] = [
   { label: "Product", href: "/" },
-  { label: "Docs", href: DOCS_URL, newTab: true },
+  { label: "Docs", href: DOCS_URL },
 ];
 
 /** The core's primary nav with links built on this console joined in. */

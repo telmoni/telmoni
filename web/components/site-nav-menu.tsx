@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 // showing stays filled, so the row says which panel you are reading. Radix
 // sets it, and there is no chevron to turn because the fill already says it.
 const ROW = cn(
-  "inline-flex h-8 cursor-pointer items-center rounded-menu px-3",
+  "inline-flex h-8 cursor-pointer items-center rounded-md px-3",
   "text-sm font-normal whitespace-nowrap transition-colors",
   "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
   "data-[state=open]:bg-accent data-[state=open]:text-accent-foreground",
