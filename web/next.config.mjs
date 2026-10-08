@@ -1,3 +1,4 @@
+import { createMDX } from "fumadocs-mdx/next";
 
 const securityHeaders = [
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
@@ -23,6 +24,9 @@ const nextConfig = {
   // `next dev` re-creates web/AGENTS.md and web/CLAUDE.md whenever an agent
   // runs it.
   agentRules: false,
+  // The rail's toggle sits at the bottom-left, where Next's dev badge floats;
+  // the badge moves to the other corner so the toggle stays under the pointer.
+  devIndicators: { position: "bottom-right" },
   ...(devTunnelHost ? { allowedDevOrigins: [devTunnelHost] } : {}),
   serverExternalPackages: ["pino", "pino-pretty"],
   experimental: {
@@ -35,17 +39,30 @@ const nextConfig = {
         source: "/(.*)",
         headers: securityHeaders,
       },
+      // Behind a dev tunnel, the proxy in front of `next dev` caches scripts
+      // and stylesheets by their extension and tells the browser to keep them
+      // for hours, while a dev chunk keeps its name when its contents change:
+      // the page then runs the last change's HTML on the change before's
+      // code. `no-store` keeps every cache out of the way, as the page's own
+      // header already does. Unset, as on every tier, there is no rule.
+      ...(devTunnelHost
+        ? [
+            {
+              source: "/_next/static/:path*",
+              headers: [{ key: "Cache-Control", value: "no-store" }],
+            },
+          ]
+        : []),
     ];
   },
 
   async redirects() {
     return [
-      { source: "/cookbook", destination: "https://docs.telmoni.com", permanent: false },
-      { source: "/blueprints", destination: "https://docs.telmoni.com", permanent: false },
-      { source: "/docs/cookbook", destination: "https://docs.telmoni.com", permanent: false },
-      { source: "/docs/blueprints", destination: "https://docs.telmoni.com", permanent: false },
-      { source: "/docs", destination: "https://docs.telmoni.com", permanent: false },
-      { source: "/docs/:path*", destination: "https://docs.telmoni.com/:path*", permanent: false },
+      // Old addresses of the book, which now lives at `/docs` (`content/docs`).
+      { source: "/cookbook", destination: "/docs", permanent: false },
+      { source: "/blueprints", destination: "/docs", permanent: false },
+      { source: "/docs/cookbook", destination: "/docs", permanent: false },
+      { source: "/docs/blueprints", destination: "/docs", permanent: false },
 
       // `/legal/*` is `proxy.ts`'s: it redirects to the deployment's own
       // documents at request time, which a build-time rule here could not.
@@ -62,4 +79,5 @@ const nextConfig = {
   },
 };
 
-export default nextConfig;
+// Fumadocs MDX compiles `content/docs` into pages; the Next plugin is how.
+export default createMDX()(nextConfig);

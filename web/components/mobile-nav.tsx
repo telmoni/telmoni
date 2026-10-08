@@ -87,11 +87,12 @@ export function MobileNav({ signedIn }: { signedIn: boolean }) {
 
               <span aria-hidden className="my-2 h-px bg-border" />
 
-              {/* The header's pair, stacked: the way out outlined, the thing
-                  you came to do filled, at the gap every button row uses. */}
+              {/* The header's pair, stacked, at the gap every button row uses: a
+                  visitor's way out outlined and the thing to do filled; a
+                  member's both outlined, as the header has them. */}
               {signedIn ? (
                 <div className="flex flex-col gap-3">
-                  <Button asChild size="sm" className={NAV_TYPE}>
+                  <Button asChild size="sm" variant="outline" className={NAV_TYPE}>
                     <Link href="/console" onClick={() => setOpen(false)}>
                       Console
                     </Link>

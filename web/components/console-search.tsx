@@ -38,7 +38,7 @@ import {
   type SearchKind,
 } from "@/lib/search";
 import { readRecent, type RecentVisit } from "@/lib/search-recent";
-import { DOCS_HOST, DOCS_URL } from "@/lib/site";
+import { DOCS_URL } from "@/lib/site";
 import { cn } from "@/lib/utils";
 
 /**
@@ -138,16 +138,15 @@ export function ConsoleSearch() {
   }, [recent, organization, projects, index, placeOf]);
 
   const docsItem = useMemo<SearchItem>(() => {
-    const typed = query.trim();
     return {
       id: "docs",
       kind: "docs",
-      label: typed ? `Search the docs for “${typed}”` : "Open the documentation",
-      hint: DOCS_HOST,
-      href: typed ? `${DOCS_URL}?q=${encodeURIComponent(typed)}` : DOCS_URL,
-      external: true,
+      label: "Open the documentation",
+      hint: "Docs",
+      href: DOCS_URL,
+      external: false,
     };
-  }, [query]);
+  }, []);
 
   const groups = useMemo(() => groupItems(items, query), [items, query]);
 

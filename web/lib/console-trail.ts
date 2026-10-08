@@ -14,9 +14,8 @@ import { organizationPath, projectPath } from "@/lib/slug";
  * resource replaces its entry rather than stacking on it.
  *
  * Pure on purpose. The store that holds a tab's trail, and the hooks that read
- * it, are in `use-console-trail.ts` — the same split as `corners.ts` and
- * `use-corners.ts`, so that a server component can import these without
- * dragging in a `"use client"` boundary it cannot call through.
+ * it, are in `use-console-trail.ts`, so that a server component can import
+ * these without dragging in a `"use client"` boundary it cannot call through.
  */
 
 export const CONSOLE_TRAIL_KEY = "telmoni-console-trail";

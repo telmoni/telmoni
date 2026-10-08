@@ -58,13 +58,13 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
     <div
       ref={shellRef}
       data-slot="console-shell"
-      // `gap-3.5` is the gutter outside the surfaces, so the page and the
-      // agent panel stand apart by the same width as they stand from the edge.
-      className="relative flex min-h-0 min-w-0 flex-1 gap-3.5 pr-3.5 pl-3.5"
+      // The page and the agent panel stand on the same background as the
+      // header and the rail, one colour with rules between the regions, and
+      // nothing stands between them and the rail's rule but `<main>`'s own
+      // padding: 14px all round, the rail's inset, which the header keeps too.
+      className="relative flex min-h-0 min-w-0 flex-1"
     >
-      {/* `overflow-hidden` so the scrollport can't paint square corners
-          through the rounded top. */}
-      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-t-console-surface bg-console-surface">
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
         {/* Radix wraps the content in `display: table`, which never narrows
             below its widest child; as a block the page can shrink beside the
             agent panel. */}
@@ -77,7 +77,7 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
             <main
               id="console-main"
               tabIndex={-1}
-              className="flex w-full min-w-0 flex-col gap-3 p-4 outline-none"
+              className="flex w-full min-w-0 flex-col gap-3 p-3.5 outline-none"
             >
               {children}
             </main>

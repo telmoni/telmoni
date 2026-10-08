@@ -34,7 +34,7 @@ import {
 let cache: ConsoleTrail | null = null;
 
 // Nothing outside this tab can change `sessionStorage`, so our own write is the
-// only thing to announce — no `storage` listener, unlike `use-corners.ts`.
+// only thing to announce — no `storage` listener.
 let listeners: Array<() => void> = [];
 
 function emit() {

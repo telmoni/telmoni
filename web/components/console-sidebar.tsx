@@ -42,7 +42,7 @@ function NavRow({
         aria-current={item.isActive ? "page" : undefined}
         {...(step ? { ["data-rail-step"]: "" } : {})}
         className={cn(
-          "flex size-8 items-center justify-center rounded-menu [a+&]:mt-1",
+          "flex size-8 items-center justify-center rounded-md [a+&]:mt-1",
           item.isActive
             ? "bg-console-accent-tint text-console-accent-strong"
             : "text-muted-foreground hover:bg-sidebar-accent",
@@ -54,7 +54,7 @@ function NavRow({
     );
   }
   const rowClass = cn(
-    "flex h-8 items-center rounded-menu text-sm [a+&]:mt-1",
+    "flex h-8 items-center rounded-md text-sm [a+&]:mt-1",
     item.isActive
       ? "bg-console-accent-tint font-medium text-console-accent-strong"
       : "text-foreground hover:bg-sidebar-accent",
@@ -111,7 +111,7 @@ function onNavKeyDown(e: KeyboardEvent<HTMLElement>) {
 
 export function ConsoleSidebar() {
   const pathname = usePathname();
-  const { collapsed, closeOnMobile, animating } = useSidebar();
+  const { collapsed, toggle, closeOnMobile, animating } = useSidebar();
   const expanded = !collapsed;
 
   const trail = useConsoleTrail();
@@ -134,21 +134,33 @@ export function ConsoleSidebar() {
   // outage draws the same empty store a dead address does — and the page
   // renders after the rail: a class is right in the server's HTML, where
   // state would correct itself once the console had hydrated.
+  //
+  // The rail is a column under the header's first cell: the same width, and
+  // from `md` the same rule on its right, flush with the window's edge. Its
+  // rows keep one inset, `px-3.5`, so closed, where the column is one 32px
+  // button with that inset on each side, every icon lands on the centre the
+  // header's mark stands on. The control that opens and closes it is the
+  // header's, in the cell above; closed, the whole column is a way to open
+  // it too — the pointer says so, and a press anywhere off a row opens it —
+  // so nobody has to aim at the one button. Below `md` it is a drawer under
+  // the header, opened from the header's hamburger.
   return (
     <aside
       id="console-sidebar"
       className={cn(
-        "flex min-h-0 flex-col overflow-hidden bg-sidebar px-3.5 md:px-0",
-        "fixed top-15 bottom-0 left-0 z-40 w-71",
-        "rounded-r-menu md:rounded-none",
-        collapsed ? "-translate-x-full" : "translate-x-0",
-        "md:static md:shrink-0 md:translate-x-0",
-        collapsed ? "md:w-8" : "md:w-64",
+        "flex min-h-0 flex-col overflow-hidden bg-sidebar",
+        "fixed top-15 bottom-0 left-0 z-40 w-72",
+        collapsed ? "-translate-x-full md:cursor-pointer" : "translate-x-0",
+        "md:static md:shrink-0 md:translate-x-0 md:border-r md:border-sidebar-border",
+        collapsed ? "md:w-15" : "md:w-64",
         animating ? "transition-transform duration-200 md:transition-none" : "transition-none",
       )}
       onClick={(e) => {
-        const link = (e.target as HTMLElement).closest("a[href]");
-        if (link && !link.hasAttribute("a[href]")) closeOnMobile();
+        if ((e.target as HTMLElement).closest("a[href]")) {
+          closeOnMobile();
+        } else if (collapsed) {
+          toggle();
+        }
       }}
       aria-label="Console sidebar"
     >
@@ -159,18 +171,21 @@ export function ConsoleSidebar() {
           collapsed && "**:data-[slot=scroll-area-scrollbar]:hidden",
         )}
       >
-        <nav aria-label="Main" onKeyDown={onNavKeyDown}>
+        <nav aria-label="Main" onKeyDown={onNavKeyDown} className="px-3.5 py-3.5">
           {groups.map((group, i) => (
             <div
               key={group.title}
-              className={cn(expanded && i > 0 && "mt-4")}
+              className={cn(expanded && i > 0 && "mt-6")}
             >
+              {/* A group's title stands a row's height clear of the group
+                  above and a half-row over its own first row, on the icons'
+                  left edge (`w-11` centres a 16px icon at 22px). */}
               {expanded ? (
-                <div className="flex pb-1 pl-3.5 text-xs font-medium text-muted-foreground group-has-[[data-console-not-found]]/console:hidden">
+                <div className="flex pb-2 pl-3.5 text-xs font-medium text-muted-foreground group-has-[[data-console-not-found]]/console:hidden">
                   <span className="whitespace-nowrap">{group.title}</span>
                 </div>
               ) : (
-                i > 0 && <div className="mx-2.5 my-2 border-t border-sidebar-border" />
+                i > 0 && <div className="my-2 border-t border-sidebar-border" />
               )}
               {group.items.map((item) => (
                 <NavRow

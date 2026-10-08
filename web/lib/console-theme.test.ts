@@ -58,16 +58,17 @@ describe("the focus indicator", () => {
 });
 
 // Every control that stands on the console's own background, as opposed to on
-// a card, a popover or a menu. The rail's rows are the reference — they are
-// what the header's four icon buttons have to match — so the list is both
-// halves and the assertion is that they agree.
+// a card, a popover or a menu, and fills on hover. The rail's rows are the
+// reference — they are what the header's four icon buttons have to match —
+// so the list is both halves and the assertion is that they agree. The
+// switcher (`resource-selector.tsx`) is not here: it draws no fill at all,
+// because a fill around the organization's name reads as the name shifting.
 const CHROME = [
   "components/console-header.tsx",
   "components/search-button.tsx",
   "components/notifications-bell.tsx",
   "components/nav-user.tsx",
   "components/console-sidebar.tsx",
-  "components/resource-selector.tsx",
 ].map((file) => ({
   file,
   // Comments discuss the classes they replaced, by name. Reading them as code

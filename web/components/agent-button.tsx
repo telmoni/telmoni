@@ -21,7 +21,7 @@ export function AgentButton() {
       onClick={toggleAgent}
       className={cn(
         "relative flex size-8 shrink-0 items-center justify-center",
-        "rounded-menu text-muted-foreground hover:text-foreground",
+        "rounded-md text-muted-foreground hover:text-foreground",
         "outline-none focus-visible:ring-2 focus-visible:ring-ring",
         "hover:bg-sidebar-accent",
       )}

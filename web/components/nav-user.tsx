@@ -114,7 +114,7 @@ export function NavUser() {
             aria-keyshortcuts="Control+K Meta+K"
             title={name}
             size={null}
-            className="size-8 shrink-0 rounded-menu text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+            className="size-8 shrink-0 rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
           >
             <Avatar>
               <AvatarImage src="" alt="" />
@@ -188,7 +188,7 @@ export function NavUser() {
                 value={theme ?? "system"}
                 onValueChange={setTheme}
                 aria-label="Theme"
-                className="flex items-center overflow-hidden rounded-menu border border-border"
+                className="flex items-center overflow-hidden rounded-md border border-border"
               >
                 {THEMES.map(({ value, label, icon: Icon }) => (
                   <DropdownMenuRadioItem
@@ -217,7 +217,7 @@ export function NavUser() {
                 value={corners ?? CORNERS_DEFAULT}
                 onValueChange={(v) => setCorners(v as Corners)}
                 aria-label="Corners"
-                className="flex items-center overflow-hidden rounded-menu border border-border"
+                className="flex items-center overflow-hidden rounded-md border border-border"
               >
                 {CORNER_CHOICES.map(({ value, label, icon: Icon }) => (
                   <DropdownMenuRadioItem
@@ -233,6 +233,7 @@ export function NavUser() {
                 ))}
               </DropdownMenuRadioGroup>
             </div>
+
 
             {REPO_URL && (
               <DropdownMenuItem asChild className={ROW}>

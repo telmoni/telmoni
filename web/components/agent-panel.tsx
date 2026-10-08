@@ -312,14 +312,14 @@ export function AgentPanel() {
       ref={panelRef}
       tabIndex={-1}
       aria-label="Telmoni Agent"
-      // A surface of its own beside the page's: from `lg` an equal half of
-      // the row (`flex-1`, as the page's surface is), below `lg` a cover laid
-      // exactly over the page's surface (the shell's `px-3.5`), never past its
-      // edge.
+      // Beside the page, ruled off from it: from `lg` an equal half of the
+      // row (`flex-1`, as the page is), below `lg` a cover laid exactly over
+      // the page, on the page's own background so the page shows nothing
+      // through it.
       className={cn(
-        "flex min-h-0 min-w-0 flex-col gap-3 px-4 pt-4 pb-0 outline-none overflow-hidden",
-        "rounded-t-console-surface bg-console-surface",
-        "max-lg:absolute max-lg:inset-y-0 max-lg:inset-x-3.5 max-lg:z-10",
+        "flex min-h-0 min-w-0 flex-col gap-3 px-3.5 pt-3.5 pb-0 outline-none overflow-hidden",
+        "bg-background lg:border-l lg:border-border",
+        "max-lg:absolute max-lg:inset-0 max-lg:z-10",
         "lg:flex-1",
       )}
     >
@@ -419,7 +419,7 @@ export function AgentPanel() {
       >
         <div
           className={cn(
-            "relative flex items-center rounded-menu border border-input bg-transparent",
+            "relative flex items-center rounded-md border border-input bg-transparent",
             "dark:bg-input/30 dark:border-transparent",
             "focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50",
             "transition-[color,box-shadow]",
@@ -452,7 +452,7 @@ export function AgentPanel() {
             title="Send"
             disabled={!canSend || draft.trim() === ""}
             className={cn(
-              "absolute right-2 flex size-6 cursor-pointer items-center justify-center rounded-menu",
+              "absolute right-2 flex size-6 cursor-pointer items-center justify-center rounded-md",
               "text-muted-foreground transition-colors hover:text-foreground",
               "disabled:cursor-not-allowed disabled:opacity-30",
               "outline-none",

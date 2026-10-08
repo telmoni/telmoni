@@ -8,13 +8,13 @@ import { extendTailwindMerge } from "tailwind-merge";
 // winner to CSS source order rather than to the order you wrote them in.
 // Nothing about that failure is visible at the callsite: the class is spelled
 // right, the token is real, and the element takes the other one's radius.
-// Only the two surfaces that sit between the `--radius-*` steps need listing.
+// Only the one token that sits between the `--radius-*` steps needs listing.
 // The steps themselves, `none` and `full` are stock and already understood —
 // listing one of those here would be a guard that passes whether or not this
 // config exists.
 const twMerge = extendTailwindMerge({
   extend: {
-    theme: { radius: ["console-surface", "menu"] },
+    theme: { radius: ["menu"] },
   },
 });
 

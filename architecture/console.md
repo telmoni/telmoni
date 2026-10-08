@@ -36,6 +36,8 @@ flowchart LR
 
 | Path | What |
 |---|---|
+| `page.tsx` | The public splash, in the paper shell: the hero (`components/splash-hero.tsx`: the product's claim as the one heading, with the column beside it kept for a screenshot of the console, still to be taken), then the three goals it is built for, the open platform, developers and agents, why, how to start, and the questions a visitor asks first — numbered sections, each heading with one phrase marked (`components/mark.tsx`, a stroke drawn as the heading comes into view), their cells a hairline grid and the hero on a dotted field (`globals.css`, *The public pages' surfaces*). The hero's blocks rise in on load, and each section head and grid as it scrolls into view, where the browser can time an animation by the viewport (`globals.css`, *The splash's motion*). Its container, `max-w-6xl px-3.5 py-8`, is the one a console built on this one gives its own public pages |
+| `docs/` | The book: every page under `web/content/docs` (MDX, Fumadocs), served by `[[...slug]]` inside the paper shell, with Fumadocs' sidebar and table of contents and its navbar off, since the shell carries one. `lib/source.ts` loads the pages; each folder's `meta.json` orders them and ends in `...`, so a console built on this one lays its own pages — the operator's legal documents, its billing page — into the same tree without replacing a file. `api/search/` answers the sidebar's search; `llms.txt` and `llms-full.txt` serve the book as Markdown, the latter the corpus the console agent reads |
 | `(app)/` | The console shell: `[organization]` (its overview, which lists its projects), `[organization]/…` (its own pages: projects, members, audit log, settings), `[organization]/[project]/…` (a project's overview, API keys, connectors, members, audit log, settings), `account/…`. See [paths and slugs](#paths-and-slugs). |
 | `(auth)/auth/` | Sign-in, sign-up, forgot, reset, verify and device pages, and the sign-in route handlers (`login`, `login/external`, `signup`, `callback`, `logout`) |
 | `console/` | Redirects to the overview of the organization `/me` answers, asking nothing first — never a project, as Vercel opens on a team's overview |
@@ -43,6 +45,12 @@ flowchart LR
 | `connect/[provider]/` | Slack and Discord OAuth: start and callback |
 | `api/` | Route handlers: events, agent turns, heartbeat, health, the Slack relay, the test session |
 | `v1/[...path]`, `cli/[...path]` | Front doors for the public API and the CLI |
+
+**The chrome** (`(app)/layout.tsx`, `components/console-header.tsx`, `console-sidebar.tsx`, `console-shell.tsx`) is one background with rules between its regions, as a product dashboard is drawn:
+- **The header** is three cells across the top, with a rule under it. The first cell is the rail's column — the rail's width, and from `md` the rail's rule on its right, which the rail continues below, so one line runs from the top of the window to the bottom — and holds the brand and the rail's toggle: open, the mark and the name at the left and the control that closes the rail at the right; closed, the mark alone, centred, which is itself the control that opens the rail and shows the panel icon with the pointer anywhere in the cell. Closed, the whole column is a way to open the rail, as Gemini's is: the cell and the rail below show a pointer, and a press anywhere off a control or a row opens it, so nobody has to aim at one button. The second cell is where you stand (the switcher); the third, the search and the account's buttons.
+- **The rail** stands flush with the window's edge, 256px open and 60px closed — one 32px button with the same 14px inset on each side — and keeps that inset for its rows. Below `md` it is a drawer under the header, opened from a hamburger the header's first cell shows there alone.
+- **The page** sits beside the rail with no gutter: `<main>`'s own padding, 14px all round, the rail's inset, is the whole inset, and the header keeps the same one, so the organization's name starts on the pixel the page title does and the account's buttons end where the cards end. The agent panel takes an equal half of the row from `lg`, ruled off on its left, and covers the page below it.
+- **Corners** are the account menu's second switch beside the theme (`lib/corners.ts`, `lib/use-corners.ts`): `sharp` puts `theme-sharp` on `<html>`, which a rule in `globals.css` keys on to square every `rounded` class, and a boot script in `app/layout.tsx` sets it before first paint so a sharp console never renders rounded and snaps.
 
 **What runs where:**
 - **Server Components by default.**
@@ -118,7 +126,7 @@ The path names the organization, and the project under it, by slug:
 - `[organization]/layout.tsx` hands the client store the seed for the organization arrived in (`StoreSeed`, `storeSeed`);
 - `OrganizationSync` refreshes the `(app)` layout when it was rendered for another organization than the path names.
 
-**The switcher** (`web/components/resource-selector.tsx`, in the header) lists the person's organizations and the projects in each. Its foot holds **Create project**, for whoever may create one somewhere, and **New organization**, for everybody while the `signup` flag is on: with it off the row is gone, as a switched-off feature is from the rail, rather than offered and refused.
+**The switcher** (`web/components/resource-selector.tsx`, in the header) is two menus: the organization, with whatever a console built on this one draws beside its name (`components/extension/organization-badge.tsx`: the plan, on the hosted service), and, inside a project, the project after a slash. The organizations menu lists every organization the person can stand in, the active one first, each with a gear to its settings where they are a member of it; the projects menu lists the active organization's projects, each with a gear to its settings. The one you stand in is lit with the menu's own fill, its name in medium, in place of a mark; the rail's tint is not used there, since a menu is lighter than the page and the tint all but vanishes on it in the dark. Each menu's foot holds the one thing it creates: **New project**, for whoever may create one somewhere, and **New organization**, for everybody while the `signup` flag is on: with it off the row is gone, as a switched-off feature is from the rail, rather than offered and refused.
 - **New organization** (`createOrganizationAction`, `web/app/(app)/actions.ts`) names no organization: the new one has no id until auth mints it, so the action sends the person's own headers, as choosing a default organization does, and moves no default. A blank URL is left to auth to derive.
 - Refusals land as the organization's Settings place them: a taken URL under URL, a 400 under its field, and a `signup` flag switched off while the dialog was open as the flag's sentence.
 - ⚠ **The dialog opens the new organization's Overview, not the action.** The switcher lives in the `(app)` layout, which the move keeps, so a `redirect()` from the action would have left the dialog open over the page it moved to.
@@ -271,8 +279,10 @@ A console built on this one overlays a few files with its own copies. All of the
 |---|---|
 | `web/lib/extension/nav.ts` | Extra rail items (`EXTRA_NAV_ITEMS`) |
 | `web/lib/extension/site-nav.ts` | Extra primary navigation |
+| `web/lib/extension/footer.ts` | Extra footer links (`EXTRA_FOOTER_LINKS`), each joining one of the footer's columns by name, before the link it names, or `Legal`, the line at the foot |
 | `web/lib/extension/public-paths.ts` | Extra public path prefixes for the proxy |
 | `web/components/extension/banner.tsx` | A banner in the console shell. It may be an async server component. |
+| `web/components/extension/organization-badge.tsx` | A badge beside the organization's name in the header's switcher. It may be an async server component. |
 
 ⚠ **Overlays import only from `web/lib/extension/ui.ts` (client-safe) and `web/lib/extension/server.ts` (`server-only`).** That keeps the modules behind those two files free to move. `knip` treats `web/lib/extension/*.ts` as entry points.
 
@@ -316,6 +326,8 @@ All logging goes through `@/lib/logger` (pino), never `console.*`:
 | Agent relay, parser, renderer | `web/app/api/agent/turns/`, `web/lib/server/entities/agent.ts`, `web/lib/agent/` |
 | Front doors | `web/app/v1/`, `web/app/cli/`, `web/app/api/webhooks/slack/` |
 | Extension slots | `web/lib/extension/`, `web/components/extension/` |
+| The public splash and the footer | `web/app/page.tsx`, `web/components/site-footer.tsx`, `web/lib/footer.ts` |
+| The book | `web/content/docs/`, `web/lib/source.ts`, `web/components/mdx.tsx`, `web/app/docs/`, `web/app/api/search/`, `web/app/llms.txt/`, `web/app/llms-full.txt/` |
 | Environment | `web/lib/env.ts`, `web/.env.local.example` |
 | Logging | `web/lib/logger.ts`, `web/instrumentation.ts` |
 | Image | `web/Dockerfile` |

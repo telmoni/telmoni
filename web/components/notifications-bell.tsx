@@ -52,7 +52,7 @@ export function NotificationsBell() {
         aria-label={bellLabel(count)}
         className={cn(
           "relative flex size-8 shrink-0 items-center justify-center",
-          "rounded-menu text-muted-foreground hover:text-foreground",
+          "rounded-md text-muted-foreground hover:text-foreground",
           "outline-none focus-visible:ring-2 focus-visible:ring-ring",
           "hover:bg-sidebar-accent",
         )}
@@ -69,11 +69,12 @@ export function NotificationsBell() {
         )}
       </DropdownMenuTrigger>
 
-      {/* ⚠ **The panel keeps its `p-1`.** That inset is what stops a row's
-          `rounded-menu` corners meeting the panel's equal ones, so overriding
-          it to `p-0` would square off every hover in this menu. Anything that
-          needs the full width bleeds back out with `-mx-1` instead — the same
-          trick `DropdownMenuSeparator` uses. */}
+      {/* ⚠ **The panel keeps its `p-1`.** That inset is what sets a row's
+          `rounded-md` corner 4px inside the panel's `rounded-menu` one — the
+          concentric curve — so overriding it to `p-0` would square off every
+          hover in this menu. Anything that needs the full width bleeds back
+          out with `-mx-1` instead — the same trick `DropdownMenuSeparator`
+          uses. */}
       <DropdownMenuContent
         className="w-80 animate-none!"
         align="end"

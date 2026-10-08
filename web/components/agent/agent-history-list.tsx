@@ -6,7 +6,7 @@ import type { AgentConversationSummary } from "@/lib/types/agent";
 import { cn } from "@/lib/utils";
 
 export const ICON_BUTTON =
-  "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-menu text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50";
+  "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50";
 
 export type HistoryState =
   | { kind: "loading" }
@@ -42,7 +42,7 @@ export function HistoryList({
             onClick={() => onOpen(c.id)}
             aria-current={c.id === activeId ? "true" : undefined}
             className={cn(
-              "flex min-w-0 flex-1 cursor-pointer items-center rounded-menu gap-2.5 px-3 py-2 text-left hover:bg-accent",
+              "flex min-w-0 flex-1 cursor-pointer items-center rounded-md gap-2.5 px-3 py-2 text-left hover:bg-accent",
               c.id === activeId && "bg-accent",
             )}
           >

@@ -12,6 +12,7 @@ import { PagePrimaryActionProvider } from "@/components/page-action";
 import { SidebarProvider } from "@/components/sidebar-context";
 import { ProjectBanner } from "@/components/project-banner";
 import { ExtensionBanner } from "@/components/extension/banner";
+import { ExtensionOrganizationBadge } from "@/components/extension/organization-badge";
 import { InviteToastNotifier } from "@/components/invite-toast-notifier";
 import { OrganizationSync } from "@/components/organization-sync";
 import { RealtimeListener } from "@/components/realtime-listener";
@@ -74,7 +75,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           signupsOpen={flagOn(ctx.flags, Flag.Signup)}
           invites={ctx.incomingInvites}
           ownedOrganizations={ownedOrganizationLabels(ctx.organizations)}
-          deletedOrganizations={ctx.deletedOrganizations}
           sessions={sessions}
           currentSessionId={session.sessionRowId}
           expiresAt={session.expiresAt}
@@ -108,9 +108,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               <ProjectBanner notification={projectAnnouncement} />
               <ExtensionBanner />
               {/* The console's host, ahead of a new organization's URL, as
-                  its Settings show it. */}
-              <ConsoleHeader host={new URL(env.AUTH_URL).host} />
-              <div className="flex min-h-0 flex-1 md:pl-3.5">
+                  its Settings show it; the badge beside the organization's
+                  name is a slot, filled by a console built on this one. */}
+              <ConsoleHeader
+                host={new URL(env.AUTH_URL).host}
+                organizationBadge={<ExtensionOrganizationBadge />}
+              />
+              <div className="flex min-h-0 flex-1">
                 <ConsoleSidebar />
                 <ConsoleShell>{children}</ConsoleShell>
               </div>

@@ -37,7 +37,7 @@ export function SegmentedSwitch<T extends string>({
 }) {
   return (
     <div
-      className="flex items-center overflow-hidden rounded-menu border border-border"
+      className="flex items-center overflow-hidden rounded-md border border-border"
       role="group"
       aria-label={label}
     >

@@ -64,7 +64,7 @@ test.describe("Console page title row", () => {
   });
 });
 test.describe("Console chrome row", () => {
-  test("hangs the name and the toggle on the rail's two edges", async ({
+  test("hangs the brand and the toggle on the rail's edges, and the rows between", async ({
     page,
   }, testInfo) => {
     test.skip(
@@ -74,45 +74,45 @@ test.describe("Console chrome row", () => {
     await injectSession(page, testUser(testInfo.project.name));
     await gotoOrganizationMembers(page);
 
-    const mark = page.getByRole("banner").getByText("Telmoni", { exact: true });
-    await expect(mark).toBeVisible();
-    const before = (await mark.boundingBox())!.x;
-
+    const name = page.getByRole("banner").getByText("Telmoni", { exact: true });
+    await expect(name).toBeVisible();
+    const brand = page.getByRole("banner").getByRole("link", { name: "Telmoni" });
     const rail = page.locator("#console-sidebar");
-    const toggle = page.getByRole("button", { name: /navigation$/ });
+    const row = rail.getByRole("link", { name: "Overview" });
 
-    // Expanded, the header's leading box is the rail's own width: the name
-    // opens on the rail's left edge and the toggle closes on its right one.
+    // Open, the header's first cell is the rail's own width and shares its
+    // inset: the brand opens on the edge every row opens on, the control
+    // that closes the rail ends on the edge every row ends on, and the
+    // cell's rule continues as the rail's.
     const railOpen = (await rail.boundingBox())!;
-    const toggleOpen = (await toggle.boundingBox())!;
-    expect(Math.abs(before - railOpen.x)).toBeLessThanOrEqual(1);
-    expect(
-      Math.abs(toggleOpen.x + toggleOpen.width - (railOpen.x + railOpen.width)),
-    ).toBeLessThanOrEqual(1);
+    const brandOpen = (await brand.boundingBox())!;
+    const rowOpen = (await row.boundingBox())!;
+    const close = (await page.getByRole("button", { name: "Collapse navigation" }).boundingBox())!;
+    expect(Math.abs(brandOpen.x - rowOpen.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(rowOpen.x - railOpen.x - 14)).toBeLessThanOrEqual(1);
+    expect(Math.abs(close.x + close.width - (rowOpen.x + rowOpen.width))).toBeLessThanOrEqual(1);
 
     await page.getByRole("button", { name: "Collapse navigation" }).click();
-    await expect(
-      page.getByRole("button", { name: "Expand navigation" }),
-    ).toBeVisible();
+    const open = page.getByRole("button", { name: "Expand navigation" });
+    await expect(open).toBeVisible();
     await page.waitForTimeout(400);
 
-    // ⚠ **Gone, not moved.** Collapsed, the rail is a 32px icon column and the
-    // name is the one piece of chrome wider than it, so it belongs to the open
-    // rail rather than to the header. The toggle takes the whole column and
-    // lands on the centre every rail icon shares.
-    await expect(mark).toBeHidden();
+    // ⚠ **The name goes; the mark stays and becomes the control.** Closed,
+    // the rail is one icon wide with the inset on both sides, and the mark,
+    // now the button that opens the rail, lands on the centre every icon
+    // shares; the name is the one piece of chrome wider than the column.
+    await expect(name).toBeHidden();
     const railShut = (await rail.boundingBox())!;
-    const toggleShut = (await toggle.boundingBox())!;
-    expect(
-      Math.abs(
-        toggleShut.x + toggleShut.width / 2 - (railShut.x + railShut.width / 2),
-      ),
-    ).toBeLessThanOrEqual(1);
+    const centre = railShut.x + railShut.width / 2;
+    for (const piece of [open, row]) {
+      const box = (await piece.boundingBox())!;
+      expect(Math.abs(box.x + box.width / 2 - centre)).toBeLessThanOrEqual(1);
+    }
 
-    await page.getByRole("button", { name: "Expand navigation" }).click();
-    await expect(mark).toBeVisible();
+    await open.click();
+    await expect(name).toBeVisible();
     await page.waitForTimeout(400);
-    expect(Math.abs((await mark.boundingBox())!.x - before)).toBeLessThanOrEqual(1);
+    expect(Math.abs((await brand.boundingBox())!.x - brandOpen.x)).toBeLessThanOrEqual(1);
   });
 });
 

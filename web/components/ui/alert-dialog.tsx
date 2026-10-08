@@ -90,7 +90,7 @@ function AlertDialogHeader({
       {children}
       <AlertDialogPrimitive.Cancel
         data-slot="alert-dialog-close"
-        className="ml-auto flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-menu text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+        className="ml-auto flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
       >
         <XIcon className="size-4" />
         <span className="sr-only">Close</span>

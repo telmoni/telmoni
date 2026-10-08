@@ -3,6 +3,7 @@
 // never from a module path, so the modules behind these names can move
 // without breaking it. Client-safe only: a client component imports this
 // file, so nothing here may reach `server-only` code.
+export { Badge } from "@/components/ui/badge";
 export { Button } from "@/components/ui/button";
 export { Card } from "@/components/ui/card";
 export {
@@ -37,3 +38,4 @@ export {
   projectPath,
 } from "@/lib/slug";
 export { PRIMARY_NAV, withExtraPrimaryNav } from "@/components/site-nav";
+export { footerColumns, footerLegal } from "@/lib/footer";

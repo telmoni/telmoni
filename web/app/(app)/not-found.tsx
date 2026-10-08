@@ -16,7 +16,7 @@ export default function ConsoleNotFound() {
       <div>
         <Link
           href="/console"
-          className="text-sm rounded-menu border border-border px-4 py-2.5 hover:bg-secondary transition-colors"
+          className="text-sm rounded-md border border-border px-4 py-2.5 hover:bg-secondary transition-colors"
         >
           Back to console
         </Link>
