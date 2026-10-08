@@ -375,7 +375,7 @@ async fn a_url_another_organization_holds_is_a_conflict(pool: PgPool) {
     sqlx::query(
         "UPDATE auth.organizations
             SET status = 'pending_deletion', deletion_requested_at = now(),
-                erase_after = now() + interval '14 days', deletion_kind = 'owner'
+                erase_after = now() + interval '15 minutes', deletion_kind = 'owner'
           WHERE external_id = $1",
     )
     .bind(body["id"].as_str().unwrap())

@@ -35,17 +35,17 @@ impl std::fmt::Display for InviteScope {
     }
 }
 
-/// Who asked for an organization's deletion, which decides who may undo it
-/// before `erase_after`. Mirrors `auth.organizations.deletion_kind`.
+/// Who asked for an organization's deletion, as its audit chain records it.
+/// Mirrors `auth.organizations.deletion_kind`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum DeletionKind {
-    /// The owner, from organization settings. The owner restores it.
+    /// The owner, from organization settings.
     Owner,
-    /// The owner's account deletion took it. Nobody restores it.
+    /// The owner's account deletion took it.
     Account,
-    /// Telmoni terminated it. Only an operator restores it.
+    /// Telmoni terminated it.
     Operator,
 }
 

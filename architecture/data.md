@@ -164,7 +164,7 @@ Each kind of data has a window. The windows that are published (in the privacy p
 | Bearers, sign-in codes, device codes | At expiry | `crates/auth/src/db/` |
 | Refresh tokens | At expiry, or `SPENT_RETENTION` after use | `crates/auth/src/db/refresh_tokens.rs` |
 | Confirmation codes | Valid for `CODE_TTL_MINUTES`. Old rows are pruned when the person is issued a new code. | `crates/auth/src/db/confirmation_codes.rs` |
-| An organization pending deletion | ⚠ `RESTORE_WINDOW_SECONDS` for an owner's or operator's deletion (published). `FINALIZE_GRACE_SECONDS` when an account deletion takes it. | `crates/auth/src/handler/deletion.rs` |
+| An organization pending deletion | `FINALIZE_GRACE_SECONDS`, whoever asked: fifteen minutes, then the sweep erases it. | `crates/auth/src/handler/deletion.rs` |
 
 Each module's own sweep applies its windows (see [background work](background.md)):
 - **Notifications' and the agent's sweeps** delete in bounded chunks, because the module role's statement timeout would end an unbounded delete.

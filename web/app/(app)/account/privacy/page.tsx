@@ -10,7 +10,6 @@ import { getServerSession } from "@/lib/server/session";
 
 import { AnalyticsPreference } from "./_analytics";
 import { DeleteAccountForm } from "./_delete-account";
-import { DeletedOrganizations } from "./_deleted-organizations";
 import { ActiveSessions } from "./_sessions";
 
 export const metadata = { title: "Privacy" };
@@ -25,7 +24,6 @@ export default async function AccountPrivacyPage() {
   ]);
 
   const ownedOrganizations = ownedOrganizationLabels(context?.organizations ?? []);
-  const deletedOrganizations = context?.deletedOrganizations ?? [];
 
   return (
     <>
@@ -53,19 +51,10 @@ export default async function AccountPrivacyPage() {
           <ActiveSessions sessions={sessions} currentId={session.sessionRowId} />
         </Section>
 
-        {deletedOrganizations.length > 0 && (
-          <Section
-            title="Deleted organizations"
-            description="Organizations you own that are closed and waiting to be erased. One you deleted yourself can be restored for 14 days, whole."
-          >
-            <DeletedOrganizations organizations={deletedOrganizations} />
-          </Section>
-        )}
-
         <Section
           title="Danger zone"
           danger
-          description="Permanently deletes your account, and every organization you own on your own. Access ends at once and the erasure follows, usually within the hour; an account has no restore window. To delete one organization and keep your account, use that organization's settings."
+          description="Permanently deletes your account, and every organization you own on your own. Access ends at once and the erasure follows, usually within the hour, with no undo. To delete one organization and keep your account, use that organization's settings."
         >
           <Card className="grid gap-3 bg-destructive/5 text-sm">
             <DeleteAccountForm

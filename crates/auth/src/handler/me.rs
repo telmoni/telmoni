@@ -69,10 +69,6 @@ pub struct MeResponse {
     /// Every active organization the person belongs to, oldest membership
     /// first, with their role in each and any ownership offer made to them.
     pub organizations: Vec<organization_members::OrganizationMembership>,
-    /// The organizations the person owns that are being deleted, soonest to
-    /// go first, so the privacy page can offer to restore the ones that still
-    /// can be. Never active, never listed above, never chosen.
-    pub deleted_organizations: Vec<organization_members::DeletedOrganization>,
     /// The organization this request acts in: the one the console asked for
     /// when the person belongs to it, else their default. The console sends it
     /// back as `x-organization-id`.
@@ -189,8 +185,6 @@ pub async fn me(
     // found before this.
     let mut mtx = maintenance_scope(&state.db, AuthLane).await?;
     let organizations = organization_members::organizations_of(&mut mtx, &user_id).await?;
-    let deleted_organizations =
-        organization_members::pending_organizations_owned_by(&mut mtx, &user_id).await?;
     // An invitation is listed only to a verified address: the in-console
     // accept needs one, and an unproven address learns nothing about who
     // invited its holder.
@@ -244,7 +238,6 @@ pub async fn me(
             email_verified: person.email_verified,
         },
         organizations,
-        deleted_organizations,
         active_organization_id: active,
         default_organization_id: default,
         memberships,

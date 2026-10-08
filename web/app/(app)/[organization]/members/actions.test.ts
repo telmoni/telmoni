@@ -137,7 +137,6 @@ function standingAs(
     organizations: [
       { organizationId, slug: "acme", name: "Acme", ownerEmail: "owner@example.test", role },
     ],
-    deletedOrganizations: [],
     activeOrganizationId: organizationId,
     defaultOrganizationId: organizationId,
     organizationNotFound: false,

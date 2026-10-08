@@ -7,12 +7,7 @@ import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { blacklistSession, isSessionBlacklisted } from "@/lib/auth/session-blacklist";
 import { sessionEndKey } from "@/lib/auth/session-end-key";
 import { env } from "@/lib/env";
-import { setActiveOrganizationCookie } from "@/lib/server/cookies";
-import {
-  accountHeaders,
-  personHeaders,
-  sessionHeaders,
-} from "@/lib/server/entities/identity-context";
+import { accountHeaders, personHeaders } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
 
 // The person's own lanes: they act on the account, whichever organization the
@@ -93,43 +88,6 @@ export async function deleteAccountAction(
   await blacklistSession(sessionEndKey(session));
 
   return { ok: true, deleted };
-}
-
-/// Bring back an organization the person deleted, while its restore window
-/// is open. It names its target itself: the organization is closed, so it is
-/// never the one the console is standing in, and `/me` lists it apart from
-/// the live ones. Auth re-reads the owner under the organization's lock and
-/// refuses anybody else, a closed window, or one Telmoni closed.
-///
-/// On success the console is pointed at the restored organization, so the
-/// next full load opens it. That cookie write re-renders the page this
-/// action was called from, which is fine here: the organization has just
-/// moved from the deleted list to the live one.
-export async function restoreOrganizationAction(
-  organizationId: string,
-): Promise<{ error?: string; ok?: boolean }> {
-  const session = await getServerSession();
-  if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) redirect("/auth/login");
-
-  if (!/^org_[A-Za-z0-9]+$/.test(organizationId)) {
-    return { error: "That is not an organization." };
-  }
-
-  const limited = await rateLimit(sessionKey(session, "organization:restore"), {
-    limit: 10,
-    windowMs: 60 * 60 * 1000,
-  });
-  if (limited) return { error: "Too many attempts. Try again in an hour." };
-
-  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/organization/restore`, {
-    method: "POST",
-    headers: sessionHeaders(session, organizationId),
-  });
-  if (!res) return { error: UNREACHABLE };
-  if (!res.ok) return { error: (await extractProblem(res)).message };
-
-  await setActiveOrganizationCookie(organizationId);
-  return { ok: true };
 }
 
 export async function revokeSessionAction(

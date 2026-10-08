@@ -435,7 +435,7 @@ async fn set_pending(pool: &PgPool, organization: &str, pending: bool) {
     let sql = if pending {
         "UPDATE auth.organizations
             SET status = 'pending_deletion', deletion_requested_at = now(),
-                erase_after = now() + interval '14 days', deletion_kind = 'owner'
+                erase_after = now() + interval '15 minutes', deletion_kind = 'owner'
           WHERE external_id = $1"
     } else {
         "UPDATE auth.organizations

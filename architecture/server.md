@@ -186,7 +186,7 @@ Every handler returns `TelmoniError` (`crates/shared/src/error.rs`). Its nested 
 
 **Other conventions:**
 - The `Json` and `Query` extractors turn every rejection into a 400 problem (`crates/shared/src/extract.rs`).
-- **The error catalog.** Every `type` needs a row in the customer docs' `errors.mdx`. `crates/shared/tests/error_catalog.rs` checks the types `error.rs` builds and every `/errors/…` literal in `crates/*/src` against that page both ways, when a docs checkout sits beside this repo. Only the types the console mints itself — its relays' `/errors/method-not-allowed` and `/errors/upstream-unavailable`, and the CLI door's `/errors/not-found` — are beyond the test's reach.
+- **The error catalog.** Every `type` needs a row in the customer docs' `errors.mdx`. `crates/shared/tests/error_catalog.rs` checks the types `error.rs` builds and every `/errors/…` literal in `crates/*/src` against that page, the console's own `web/content/docs/errors.mdx`, both ways. Only the types the console mints itself — its relays' `/errors/method-not-allowed` and `/errors/upstream-unavailable`, and the CLI door's `/errors/not-found` — are beyond the test's reach.
 
 **Panics.**
 - Lints deny `unwrap`, `expect`, `panic!`, indexing and string slicing outside tests, so a panic is a bug the lints missed.
@@ -271,12 +271,11 @@ The sweeps, `terminate` and `restore` are run by hand, or by an operator's own j
 | `serve` | The server, above. The image's default command. |
 | `migrate` | Runs every module's migrations as `MIGRATOR_DATABASE_URL`, then the object grants. It never builds the process. See [data](data.md#migrations). |
 | `rotate` | Creates the partitions ahead of time as the migrator. It drops only partitions whose table has dropping enabled, and none does today. See [data](data.md#partitions). |
-| `sweep deletion` | One leadered deletion tick. Organizations come first: the purge hook for those still in their window, finalize for those past it. Then people whose erasure is pending. |
+| `sweep deletion` | One leadered deletion tick. Organizations come first: the purge hook for those still in their grace, finalize for those past it. Then people whose erasure is pending. |
 | `sweep audit-verify` | Walks every audit chain and logs any break. It never repairs. |
 | `sweep retention` | Auth's retention, once |
 | `sweep agent-reindex` | Re-embeds every passage a different embedding model made |
 | `terminate <org_id>` | Marks an organization for deletion, as the operator, audited as the operator. By id, never by slug. |
-| `restore <org_id>` | Restores a deletion the owner or an operator asked for, for as long as the row stands, even past the window. It refuses an organization taken by an account deletion. |
 
 ## The wire contract
 

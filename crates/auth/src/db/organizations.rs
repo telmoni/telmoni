@@ -188,29 +188,6 @@ pub async fn record_hook_purged(
     Ok(result.rows_affected() > 0)
 }
 
-/// Bring a pending organization back to `active`, clearing every deletion
-/// column. Who may, and until when, is the lane's to decide under the
-/// organization's lock; this only refuses a row that is not pending.
-pub async fn restore(
-    tx: &mut Scoped<'_, tenant_session::Organization>,
-    external_id: &OrganizationId,
-) -> sqlx::Result<bool> {
-    let result = sqlx::query(
-        "UPDATE auth.organizations
-            SET status = 'active',
-                deletion_requested_at = NULL,
-                erase_after = NULL,
-                deletion_kind = NULL,
-                hook_purged_at = NULL,
-                updated_at = now()
-          WHERE external_id = $1 AND status = 'pending_deletion'",
-    )
-    .bind(external_id)
-    .execute(tx.conn())
-    .await?;
-    Ok(result.rows_affected() > 0)
-}
-
 /// The organization's lifecycle status, read under `FOR SHARE`.
 pub async fn status_for_share(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
@@ -241,10 +218,9 @@ pub async fn status<B: Binding>(
 
 /// An organization already `pending_deletion` — its owner deleted it, or an
 /// operator terminated it — taken by its owner's account deletion: the kind
-/// becomes `account`, so neither restore lane hands it back to an owner who
-/// is being erased, and its wait shortens to the finalize grace when the
-/// restore window would outlast it, since nobody is left to use the window.
-/// Answers when the row may go; `None` when the row is not pending.
+/// becomes `account`, so its chain says what took it, and the take never
+/// lengthens its wait: the earlier moment stands. Answers when the row may
+/// go; `None` when the row is not pending.
 pub async fn take_for_account(
     tx: &mut Scoped<'_, PersonAndOrganization>,
     external_id: &OrganizationId,
@@ -268,9 +244,8 @@ pub async fn take_for_account(
 /// The finalize's hard delete: the row and every child that cascades, and
 /// only while the row is still `pending_deletion` and past `erase_after` on
 /// the database's clock. The finalize read the standing before its purges,
-/// which take a sibling round trip each, and an operator's restore is allowed
-/// past the window: one that landed in between matches nothing here, so the
-/// purges that ran are the worst of it and the organization stands.
+/// which take a sibling round trip each; a row that is something else by
+/// now matches nothing here, and stands.
 pub async fn delete_ripe(
     tx: &mut Scoped<'_, tenant_session::Organization>,
     external_id: &OrganizationId,
@@ -316,8 +291,8 @@ pub struct DueOrganization {
 
 /// Pending organizations the sweep has work on, soonest due first: those
 /// whose hook purge never landed, and those past `erase_after`. One that
-/// is purged and still inside its window is nobody's to touch and is left
-/// off, so a fortnight's wait costs no calls.
+/// is purged and still inside its wait is nobody's to touch and is left
+/// off, so the wait costs no calls.
 pub async fn list_due_for_sweep(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     limit: i64,

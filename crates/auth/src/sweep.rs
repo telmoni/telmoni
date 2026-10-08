@@ -1,8 +1,7 @@
 //! The sweeps — the durable retry net behind every inline tail, and the
-//! nightly checks — and the operator's two commands. The `telmoni` binary
-//! runs the sweeps on a timer inside `serve`, and any of them by hand as
-//! `telmoni sweep <name>`; the commands run as `telmoni terminate` and
-//! `telmoni restore`.
+//! nightly checks — and the operator's command. The `telmoni` binary runs
+//! the sweeps on a timer inside `serve`, and any of them by hand as
+//! `telmoni sweep <name>`; the command runs as `telmoni terminate`.
 //!
 //! The deletion and audit-verify sweeps take a transaction-scoped advisory
 //! lock first, so replicas running the same timer cannot both sweep one
@@ -48,7 +47,7 @@ use crate::db::{
     organization_members, organizations, refresh_tokens, sessions, tokens,
 };
 use crate::handler::deletion::{
-    self, ErasureOutcome, FinalizeOutcome, PurgeOutcome, RESTORE_WINDOW_SECONDS, TailOutcome,
+    self, ErasureOutcome, FINALIZE_GRACE_SECONDS, FinalizeOutcome, PurgeOutcome, TailOutcome,
 };
 use crate::model::DeletionKind;
 
@@ -239,8 +238,7 @@ async fn sweep_people(state: &AppState) -> Result<Tally, TelmoniError> {
 
 /// One organization's finalize: every sibling purge, then the hard delete —
 /// and the row never goes before the purges did. A row that is no longer
-/// pending, or was restored under the purges, is an error for the log, not
-/// a step done.
+/// pending is an error for the log, not a step done.
 async fn finalize_one(
     state: &AppState,
     organization_id: &OrganizationId,
@@ -401,14 +399,14 @@ async fn verify_one_chain(
 pub struct Terminated {
     /// The hook purge landed and is recorded; otherwise the sweep retries it.
     pub purged: bool,
-    /// The end of the restore window, when the row may go.
+    /// When the row may go.
     pub erase_after: DateTime<Utc>,
 }
 
 /// An OPERATOR closes an organization without its owner's code: the Terms'
 /// suspension and termination clause. The same mark as the owner's deletion,
-/// the same wait and the same tail; only the owner cannot undo it. Refused
-/// (409) for one already pending; 404 for one that does not exist.
+/// the same wait and the same tail. Refused (409) for one already pending;
+/// 404 for one that does not exist.
 ///
 /// Audited as `service:operator` on the organization's own chain, so the
 /// customer's audit log records that the operator closed it and when.
@@ -431,7 +429,7 @@ pub async fn terminate(
         &mut tx,
         organization,
         DeletionKind::Operator,
-        RESTORE_WINDOW_SECONDS,
+        FINALIZE_GRACE_SECONDS,
     )
     .await?
     else {
@@ -474,62 +472,6 @@ pub async fn terminate(
         purged,
         erase_after,
     })
-}
-
-/// An OPERATOR brings a pending organization back: one they terminated, or
-/// one its owner deleted and asks support to recover. Allowed while the row
-/// stands, window or no window, since the sweep may be what an operator is
-/// correcting. Refused (409) for one an account deletion took: its owner is
-/// being erased, and an active organization with a vanishing owner is the
-/// invariant `erase_person` refuses to work around. 404 for none.
-pub async fn restore(state: &AppState, organization: &OrganizationId) -> Result<(), TelmoniError> {
-    let mut tx = organization_scope(&state.db, organization).await?;
-    locks::lock_organization(&mut tx, organization).await?;
-    let Some(row) = organizations::get(&mut tx, organization).await? else {
-        return Err(AuthError::NotFound("no such organization".into()).into());
-    };
-    if row.status != OrganizationStatus::PendingDeletion {
-        return Err(AuthError::Conflict("this organization is not being deleted".into()).into());
-    }
-    let Some(kind @ (DeletionKind::Owner | DeletionKind::Operator)) = row.deletion_kind else {
-        return Err(AuthError::Conflict(
-            "this organization is being deleted with its owner's account and cannot be restored"
-                .into(),
-        )
-        .into());
-    };
-    if !organizations::restore(&mut tx, organization).await? {
-        return Err(TelmoniError::Internal(format!(
-            "{organization} changed status under its lock"
-        )));
-    }
-
-    emit_audit(
-        &mut tx,
-        AuditEvent {
-            organization_id: organization,
-            in_project: None,
-            actor: Actor::Service("operator"),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Organization,
-            resource_id: Some(organization.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "kind": "organization_deletion",
-                "deletion": "restored",
-                "by": DeletionKind::Operator,
-                "requested_by": kind,
-            })),
-        },
-    )
-    .await?;
-    tx.commit().await?;
-
-    tracing::warn!(organization_id = %organization, requested_by = %kind,
-        "organization restored by an operator");
-    Ok(())
 }
 
 /// The people whose erasure the sweep still owes, for a test or an operator

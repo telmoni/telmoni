@@ -60,7 +60,6 @@ function me(organizations: OrganizationEntry[], activeOrganizationId: string): S
   return {
     person: { userId: "user_me", email: "me@example.test", analyticsOptIn: false },
     organizations,
-    deletedOrganizations: [],
     activeOrganizationId,
     defaultOrganizationId: activeOrganizationId,
     organizationNotFound: false,

@@ -27,11 +27,6 @@ vi.mock("@/lib/env", () => ({
     SERVICE_SECRET: "secret",
   },
 }));
-// Restoring an organization points the console at it; that write is the
-// assertion, so it is a spy rather than a real cookie jar.
-vi.mock("@/lib/server/cookies", () => ({
-  setActiveOrganizationCookie: vi.fn(async () => {}),
-}));
 // `/me` is the one thing stubbed: the real header builders make what reaches
 // auth, and that is the assertion under test.
 vi.mock("@/lib/server/entities/organization", async (importOriginal) => ({
@@ -42,13 +37,11 @@ vi.mock("@/lib/server/entities/organization", async (importOriginal) => ({
 import { getServerSession } from "@/lib/server/session";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { destroySession } from "@/lib/auth/session";
-import { setActiveOrganizationCookie } from "@/lib/server/cookies";
 import { getServerContext } from "@/lib/server/entities/organization";
 
 import {
   deleteAccountAction,
   requestAccountDeletionCodeAction,
-  restoreOrganizationAction,
   revokeSessionAction,
   setAnalyticsPreferenceAction,
 } from "./actions";
@@ -255,64 +248,6 @@ describe("deleteAccountAction", () => {
     expect(await deleteAccountAction("123456")).toEqual({ error: UNREACHABLE });
     expect(blacklistSession).not.toHaveBeenCalled();
     expect(destroySession).not.toHaveBeenCalled();
-  });
-});
-
-describe("restoreOrganizationAction", () => {
-  // The organization named is the closed one being brought back, never the
-  // one the console is standing in: `/me` lists it apart, and auth checks
-  // the owner under its lock.
-  it("asks auth to restore the organization named, and points the console at it", async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-    expect(await restoreOrganizationAction("org_closed")).toEqual({ ok: true });
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://auth.test/internal/organization/restore",
-      expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({
-          authorization: "Bearer at_1",
-          "x-service-secret": "secret",
-          "x-organization-id": "org_closed",
-        }),
-      }),
-    );
-    expect(sentHeaders()).not.toHaveProperty("x-user-id");
-    expect(setActiveOrganizationCookie).toHaveBeenCalledWith("org_closed");
-  });
-
-  // Reachable from the account screen too: whoever just deleted their only
-  // organization stands in none, and the way back must not need one.
-  it("needs no organization to stand in", async () => {
-    standIn(null);
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-    expect(await restoreOrganizationAction("org_closed")).toEqual({ ok: true });
-  });
-
-  it("refuses something that is not an organization id without asking auth", async () => {
-    for (const bad of ["", "user_1", "org_", "org_x;drop", "../me"]) {
-      expect(await restoreOrganizationAction(bad), bad).toEqual({
-        error: "That is not an organization.",
-      });
-    }
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(setActiveOrganizationCookie).not.toHaveBeenCalled();
-  });
-
-  it("surfaces auth's refusal and points the console nowhere", async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 409 }));
-    expect(await restoreOrganizationAction("org_closed")).toEqual({ error: "problem" });
-    expect(setActiveOrganizationCookie).not.toHaveBeenCalled();
-
-    fetchMock.mockResolvedValue(null as never);
-    expect(await restoreOrganizationAction("org_closed")).toEqual({ error: UNREACHABLE });
-  });
-
-  it("refuses a caller over the limit without asking auth", async () => {
-    vi.mocked(rateLimit).mockResolvedValue({ retryAfter: 1 } as never);
-    expect(await restoreOrganizationAction("org_closed")).toEqual({
-      error: "Too many attempts. Try again in an hour.",
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

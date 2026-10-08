@@ -102,10 +102,9 @@ export function DeleteAccountForm({
   return (
     <div className="grid gap-4">
       <p className="text-sm text-muted-foreground">
-        This is permanent. An account has no restore window and no undo: your
-        sign-in is erased, you leave every organization you are in, and they
-        keep everything. To close one organization and keep your account, and
-        keep 14 days to change your mind, delete it from its own settings
+        This is permanent, with no undo: your sign-in is erased, you leave
+        every organization you are in, and they keep everything. To close one
+        organization and keep your account, delete it from its own settings
         instead.
       </p>
       {ownedOrganizations.length > 0 && (

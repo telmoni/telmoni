@@ -3,9 +3,8 @@
 //! person deleting their account (`DELETE /internal/me`), with the sweep's
 //! steps that finish whatever the inline tails do not — and, for an
 //! organization, the hard delete only the sweep performs, once its wait has
-//! passed, with every purge run first. And the two ways back inside the
-//! wait: the owner's restore, and the operator's, beside the operator's
-//! termination.
+//! passed, with every purge run first. And the operator's termination, which
+//! goes the same way.
 //!
 //! The sweep's steps and the operator's commands are `telmoni_auth::sweep`,
 //! called in process. This suite mounts them as the `/internal` lanes they
@@ -98,10 +97,6 @@ fn sweep_lanes(state: Arc<AppState>) -> Router {
             post(terminate_lane),
         )
         .route(
-            "/internal/organizations/{organization_id}/restore",
-            post(restore_lane),
-        )
-        .route(
             "/internal/people/pending-deletion",
             get(pending_people_lane),
         )
@@ -181,14 +176,6 @@ async fn terminate_lane(
             "erase_after": terminated.erase_after,
         })),
     ))
-}
-
-async fn restore_lane(
-    State(state): State<Arc<AppState>>,
-    Path(organization_id): Path<String>,
-) -> Result<StatusCode, TelmoniError> {
-    sweep::restore(&state, &organization_id_of(&organization_id)?).await?;
-    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn pending_people_lane(
@@ -532,15 +519,14 @@ async fn seed_person(pool: &PgPool, user: &str) {
 }
 
 /// An organization, its owner's row on the roster, and one project. Seeded
-/// `pending_deletion` as its owner's deletion leaves it: inside a restore
-/// window that has just opened.
+/// `pending_deletion` as its owner's deletion leaves it: its wait just begun.
 async fn seed_organization(pool: &PgPool, id: &str, owner: &str, status: &str) {
     sqlx::query(
         "INSERT INTO auth.organizations
              (external_id, slug, name, status, deletion_requested_at, erase_after, deletion_kind)
          VALUES ($1, 'org-' || md5($1), 'Acme', $2,
                  CASE WHEN $2 = 'pending_deletion' THEN now() END,
-                 CASE WHEN $2 = 'pending_deletion' THEN now() + interval '14 days' END,
+                 CASE WHEN $2 = 'pending_deletion' THEN now() + interval '15 minutes' END,
                  CASE WHEN $2 = 'pending_deletion' THEN 'owner' END)",
     )
     .bind(id)
@@ -653,13 +639,13 @@ async fn seed_account_deletion_owning_nothing(pool: &PgPool) {
     plant_code(pool, USER, "account_deletion", None).await;
 }
 
-/// Mark `organization` as its owner's deletion does, by hand: pending, inside
-/// a restore window that has just opened.
+/// Mark `organization` as its owner's deletion does, by hand: pending, its
+/// wait just begun.
 async fn mark_pending(pool: &PgPool, organization: &str) {
     sqlx::query(
         "UPDATE auth.organizations
             SET status = 'pending_deletion', deletion_requested_at = now(),
-                erase_after = now() + interval '14 days', deletion_kind = 'owner'
+                erase_after = now() + interval '15 minutes', deletion_kind = 'owner'
           WHERE external_id = $1",
     )
     .bind(organization)
@@ -758,33 +744,6 @@ fn terminate(organization: &str) -> Request<Body> {
         &format!("/internal/organizations/{organization}/terminate"),
         None,
     )
-}
-
-/// An operator's restore of `organization`.
-fn operator_restore(organization: &str) -> Request<Body> {
-    service(
-        "POST",
-        &format!("/internal/organizations/{organization}/restore"),
-        None,
-    )
-}
-
-/// The owner's restore of the organization the console names.
-async fn restore(pool: &PgPool, actor: &str, organization: &str) -> Request<Body> {
-    request(
-        pool,
-        "POST",
-        "/internal/organization/restore",
-        actor,
-        Some(organization),
-        None,
-    )
-    .await
-}
-
-/// `POST /me` as `actor`: what the console renders from.
-async fn me(pool: &PgPool, actor: &str) -> Request<Body> {
-    request(pool, "POST", "/me", actor, None, Some(json!({}))).await
 }
 
 /// Somebody else's organization, with `user` on its roster and a seat at
@@ -975,13 +934,12 @@ async fn assert_no_key_validates(pool: &PgPool, keys: [&str; 3]) {
 
 /// With every sibling healthy, the owner's confirm runs the purge hook in the
 /// same request — whatever it stops, it stops at once — and nothing else: the
-/// row waits out its restore window whole, the sweep lists nothing and
-/// finalize refuses. Past the window, finalize purges notifications for the
-/// first time and the hook again, and only then deletes the row. The identity
-/// provider is never asked for anything, because nobody's account goes with
-/// an organization.
+/// row waits out its grace, the sweep lists nothing and finalize refuses.
+/// Past it, finalize purges notifications for the first time and the hook
+/// again, and only then deletes the row. The identity provider is never
+/// asked for anything, because nobody's account goes with an organization.
 #[sqlx::test]
-async fn confirm_runs_the_hook_inline_and_the_row_waits_out_the_restore_window(pool: PgPool) {
+async fn confirm_runs_the_hook_inline_and_the_row_waits_out_the_grace(pool: PgPool) {
     seed_organization_deletion(&pool, "active").await;
     let (calls, hook, notifications) = siblings();
     let (router, provider) =
@@ -1011,14 +969,14 @@ async fn confirm_runs_the_hook_inline_and_the_row_waits_out_the_restore_window(p
     assert_eq!(
         org_status(&pool, ORGANIZATION).await.as_deref(),
         Some("pending_deletion"),
-        "the row went before the restore window"
+        "the row went before its wait had passed"
     );
     assert_eq!(audit_count(&pool, ORGANIZATION, "updated").await, 1);
     assert_eq!(audit_count(&pool, ORGANIZATION, "deleted").await, 0);
     assert_eq!(
         calls.calls(),
         vec![hook_purge(ORGANIZATION)],
-        "the request purged more than the hook: notifications goes at finalize, so a restore finds every connector and notice in place"
+        "the request purged more than the hook: notifications goes at finalize, after every request in flight"
     );
     assert_eq!(
         person(&pool, USER).await,
@@ -1026,11 +984,11 @@ async fn confirm_runs_the_hook_inline_and_the_row_waits_out_the_restore_window(p
         "the owner's account went with the organization"
     );
 
-    // Inside the window: the owner may still restore it, and a request that
-    // was authorized before the mark may still be landing on a sibling.
+    // Inside the wait: a request that was authorized before the mark may
+    // still be landing on a sibling.
     assert!(
         listed_organizations(&pool).await.is_empty(),
-        "listed for the sweep inside the window with the hook already purged"
+        "listed for the sweep inside the wait with the hook already purged"
     );
     let resp = app().oneshot(finalize(ORGANIZATION)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CONFLICT, "finalized too soon");
@@ -1068,13 +1026,13 @@ async fn confirm_runs_the_hook_inline_and_the_row_waits_out_the_restore_window(p
     );
 }
 
-/// ⚠ **Fourteen days, the number the console, the privacy policy and the
-/// Terms promise the owner.** An owner's deletion sets `erase_after` that far
-/// past the mark, with who asked recorded, and the same for an operator's
-/// termination. Shorter breaks the promise; longer keeps a closed
-/// organization's data past the erasure the policy promises.
+/// ⚠ **Fifteen minutes, whoever asked.** An owner's deletion sets
+/// `erase_after` that far past the mark, with who asked recorded, and so
+/// does an operator's termination: there is no restore, so the wait covers
+/// requests in flight and nothing else. Longer keeps a closed organization's
+/// data past the erasure the privacy policy promises, usually within the hour.
 #[sqlx::test]
-async fn the_restore_window_is_fourteen_days(pool: PgPool) {
+async fn the_wait_is_fifteen_minutes_for_an_owners_deletion_and_a_termination(pool: PgPool) {
     seed_organization_deletion(&pool, "active").await;
     seed_person(&pool, SURVIVOR_OWNER).await;
     seed_organization(&pool, SURVIVOR, SURVIVOR_OWNER, "active").await;
@@ -1089,21 +1047,20 @@ async fn the_restore_window_is_fourteen_days(pool: PgPool) {
     let resp = app.oneshot(terminate(SURVIVOR)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::ACCEPTED);
 
-    let fourteen_days = f64::from(14 * 24 * 60 * 60);
     assert_eq!(
         wait_and_kind(&pool, ORGANIZATION).await,
-        (fourteen_days, "owner".to_owned())
+        (900.0, "owner".to_owned())
     );
     assert_eq!(
         wait_and_kind(&pool, SURVIVOR).await,
-        (fourteen_days, "operator".to_owned())
+        (900.0, "operator".to_owned())
     );
 }
 
-/// ⚠ **Fifteen minutes for an organization an account takes with it.** Nobody
-/// is left who could restore it, so its wait covers requests in flight and
-/// nothing else: longer than a sibling's thirty-second authorize cache, the
-/// console's ten-second fetch and a connector handshake, and no longer.
+/// ⚠ **Fifteen minutes for an organization an account takes with it too.**
+/// The wait covers requests in flight and nothing else: longer than a
+/// sibling's thirty-second authorize cache, the console's ten-second fetch
+/// and a connector handshake, and no longer.
 #[sqlx::test]
 async fn the_finalize_grace_is_fifteen_minutes(pool: PgPool) {
     seed_account_deletion(&pool).await;
@@ -1197,7 +1154,7 @@ async fn a_failed_hook_purge_stops_the_hard_delete(pool: PgPool) {
         "the row waits for the deletion sweep"
     );
 
-    // Inside the window the sweep is owed the hook purge alone, and the
+    // Inside the wait the sweep is owed the hook purge alone, and the
     // interim lane fails as long as the hook does.
     assert_eq!(
         listed_organizations(&pool).await,
@@ -1763,12 +1720,12 @@ async fn a_deletion_request_closes_every_key_without_revoking_it(pool: PgPool) {
     );
 
     // Closed by the organization's status, not by a revoke: the rows are as
-    // they were, so a restore brings every key back with it.
+    // they were, and go with the row at finalize.
     assert_no_key_validates(&pool, keys).await;
     assert_eq!(
         unrevoked_keys(&pool).await,
         3,
-        "an owner's deletion revoked the keys a restore would need"
+        "an owner's deletion revoked keys the row's deletion takes anyway"
     );
     assert_eq!(
         provider_deletes(&provider),
@@ -1841,7 +1798,7 @@ async fn the_sweep_finishes_a_stalled_organization_deletion(pool: PgPool) {
     assert_eq!(
         listed_organizations(&pool).await,
         vec![(ORGANIZATION.to_owned(), false)],
-        "listed for finalize inside the window, or not listed for the purge"
+        "listed for finalize inside the wait, or not listed for the purge"
     );
 
     // The interim purge, with the hook still down: the row stays owed.
@@ -1863,7 +1820,7 @@ async fn the_sweep_finishes_a_stalled_organization_deletion(pool: PgPool) {
     assert_eq!(json_body(resp).await["purged"], true);
     assert!(
         listed_organizations(&pool).await.is_empty(),
-        "a purged organization inside its window is nobody's to touch"
+        "a purged organization inside its wait is nobody's to touch"
     );
     let resp = app().oneshot(purge_lane(ORGANIZATION)).await.unwrap();
     assert_eq!(
@@ -2157,7 +2114,6 @@ async fn an_owned_organization_already_being_deleted_does_not_block_the_account(
     let (app, provider) = app(pool.clone(), None, 8_000);
 
     let resp = app
-        .clone()
         .oneshot(delete_account(&pool, USER, CODE).await)
         .await
         .unwrap();
@@ -2177,30 +2133,18 @@ async fn an_owned_organization_already_being_deleted_does_not_block_the_account(
     assert_eq!(person(&pool, COLLEAGUE).await, Person::Live);
 
     // ⚠ The one already pending is taken with the account: its kind becomes
-    // `account`, the guard both restore lanes read, so an operator cannot
-    // hand it back to an owner who is being erased; and its wait shortens to
-    // the grace, since nobody is left who could use the restore window. Its
-    // chain records the take.
+    // `account`, so its chain says what took it, and the take never lengthens
+    // its wait: the earlier moment stands. Its chain records the take.
     let (wait, kind) = wait_and_kind(&pool, going).await;
     assert_eq!(kind, "account", "the kind still names the owner's request");
     assert!(
         wait > 0.0 && wait <= 900.0 + 5.0,
-        "the wait is the finalize grace, not the restore window: {wait}"
+        "the take lengthened the wait: {wait}"
     );
     assert_eq!(
         audit_count(&pool, going, "updated").await,
         1,
         "the take is audited on the organization's chain"
-    );
-    let resp = app.oneshot(operator_restore(going)).await.unwrap();
-    assert_eq!(
-        resp.status(),
-        StatusCode::CONFLICT,
-        "an operator handed an organization back to an owner being erased"
-    );
-    assert_eq!(
-        org_status(&pool, going).await.as_deref(),
-        Some("pending_deletion")
     );
     assert_eq!(
         provider_deletes(&provider),
@@ -2311,8 +2255,9 @@ async fn a_stalled_account_deletion_has_revoked_every_key_and_spared_the_provide
         0,
         "the provider was asked before the hook purge landed"
     );
-    // Revoked outright, unlike an owner's deletion: nothing will restore
-    // an organization whose owner is being erased.
+    // Revoked outright, unlike an owner's deletion, and counted on the
+    // chain: the person's erasure accounts for the keys their organizations
+    // held.
     assert_no_key_validates(&pool, keys).await;
     assert_eq!(
         unrevoked_keys(&pool).await,
@@ -2705,219 +2650,15 @@ async fn an_invitation_from_an_organization_being_deleted_is_withdrawn_with_it(p
     assert_eq!(rows_in(&pool, ORGANIZATION, COLLEAGUE).await, (0, 0));
 }
 
-// ── Restoring an organization ────────────────────────────────────────────────
-
-/// ⚠ **Inside the window the owner brings it all back.** The organization is
-/// active again with every deletion column cleared, its keys validate as they
-/// did, its chain records the request and the restore, and `/me` offers it
-/// first as a deleted organization the owner can restore, then as one they
-/// are in. Whatever the hook purged at the request is not brought back: the
-/// purge is not asked to undo itself.
-#[sqlx::test]
-async fn the_owner_restores_the_organization_inside_the_window(pool: PgPool) {
-    seed_organization_deletion(&pool, "active").await;
-    name_organization(&pool, ORGANIZATION, "Alpha Robotics").await;
-    let keys = seed_keys(&pool).await;
-    let (calls, hook, _) = siblings();
-    let (router, provider) = app(pool.clone(), Some(hook), 8_000);
-    let app = || router.clone();
-
-    let resp = app()
-        .oneshot(delete_organization(&pool, USER, ORGANIZATION, CODE).await)
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::ACCEPTED);
-    assert_no_key_validates(&pool, keys).await;
-
-    // Left with no organization, the owner is given a fresh one, as anybody
-    // who belongs nowhere is while sign-ups are open; the deleted one is
-    // listed apart, to bring back beside it.
-    let resp = app().oneshot(me(&pool, USER).await).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let body = json_body(resp).await;
-    let listed = |body: &Value| -> Vec<String> {
-        body["organizations"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|o| o["organizationId"].as_str().unwrap().to_owned())
-            .collect()
-    };
-    assert!(
-        !listed(&body).contains(&ORGANIZATION.to_owned()),
-        "a closed organization is offered as one to act in: {body}"
-    );
-    assert_eq!(body["firstLogin"], true, "{body}");
-    let fresh = body["activeOrganizationId"].as_str().unwrap().to_owned();
-    assert_ne!(fresh, ORGANIZATION, "{body}");
-    let deleted = &body["deletedOrganizations"];
-    assert_eq!(deleted.as_array().map(Vec::len), Some(1), "{body}");
-    assert_eq!(deleted[0]["organizationId"], ORGANIZATION, "{body}");
-    assert_eq!(deleted[0]["name"], "Alpha Robotics", "{body}");
-    assert_eq!(deleted[0]["restorable"], true, "{body}");
-    assert!(deleted[0]["eraseAfter"].is_string(), "{body}");
-
-    let resp = app()
-        .oneshot(restore(&pool, USER, ORGANIZATION).await)
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-    assert_eq!(
-        org_status(&pool, ORGANIZATION).await.as_deref(),
-        Some("active")
-    );
-    let cleared: (bool, bool, bool, bool) = sqlx::query_as(
-        "SELECT deletion_requested_at IS NULL, erase_after IS NULL, deletion_kind IS NULL,
-                hook_purged_at IS NULL
-           FROM auth.organizations WHERE external_id = $1",
-    )
-    .bind(ORGANIZATION)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(
-        cleared,
-        (true, true, true, true),
-        "a restored organization still carries its deletion"
-    );
-    assert_eq!(
-        keys_validate(&pool, keys).await,
-        [true, true, true],
-        "the keys did not come back with the organization"
-    );
-    let restored: Option<String> = sqlx::query_scalar(
-        "SELECT metadata->>'deletion' FROM audit.events
-          WHERE organization_id = $1 AND action = 'updated'
-          ORDER BY created_at DESC, id DESC LIMIT 1",
-    )
-    .bind(ORGANIZATION)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(restored.as_deref(), Some("restored"));
-    assert_eq!(audit_count(&pool, ORGANIZATION, "updated").await, 2);
-
-    // Back among the live ones, and active again: the older owner row wins
-    // over the fresh organization's, which stays beside it, owned too. Owning
-    // two this way is kept, as owning two by a transfer or by creating one is:
-    // withholding the fresh one until the window closed would keep the owner
-    // out of the product for fourteen days.
-    let resp = app().oneshot(me(&pool, USER).await).await.unwrap();
-    let body = json_body(resp).await;
-    let mut live = listed(&body);
-    live.sort();
-    let mut both = vec![ORGANIZATION.to_owned(), fresh];
-    both.sort();
-    assert_eq!(live, both, "{body}");
-    assert!(
-        body["organizations"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|o| o["role"] == "owner"),
-        "{body}"
-    );
-    assert_eq!(body["activeOrganizationId"], ORGANIZATION, "{body}");
-    assert_eq!(body["deletedOrganizations"], json!([]), "{body}");
-
-    // Nothing to restore any more.
-    let resp = app()
-        .oneshot(restore(&pool, USER, ORGANIZATION).await)
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::CONFLICT);
-    assert!(
-        listed_organizations(&pool).await.is_empty(),
-        "a restored organization is still listed for the sweep"
-    );
-    assert_eq!(
-        provider_deletes(&provider),
-        0,
-        "an organization's deletion asked the provider to delete somebody"
-    );
-    assert_eq!(
-        hook_purges(&calls),
-        1,
-        "the request's purge, and nothing at the restore"
-    );
-}
-
-/// The restore is the owner's alone, and only for their own deletion inside
-/// its window: an admin and a stranger are refused (the stranger learning
-/// nothing), the window closed is refused, and one Telmoni terminated is
-/// refused with support named. None of those refusals changes the row.
-#[sqlx::test]
-async fn restore_is_refused_to_anybody_but_the_owner_and_past_the_window(pool: PgPool) {
-    seed_organization_deletion(&pool, "pending_deletion").await;
-    seed_person(&pool, COLLEAGUE).await;
-    seat(&pool, ORGANIZATION, COLLEAGUE, "admin").await;
-    seed_person(&pool, SURVIVOR_OWNER).await;
-    let (router, _provider) = app(pool.clone(), None, 8_000);
-    let app = || router.clone();
-
-    for (actor, why) in [(COLLEAGUE, "an admin"), (SURVIVOR_OWNER, "a stranger")] {
-        let resp = app()
-            .oneshot(restore(&pool, actor, ORGANIZATION).await)
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::FORBIDDEN, "{why} restored it");
-    }
-
-    let_the_wait_pass(&pool, ORGANIZATION).await;
-    let resp = app()
-        .oneshot(restore(&pool, USER, ORGANIZATION).await)
-        .await
-        .unwrap();
-    assert_eq!(
-        resp.status(),
-        StatusCode::CONFLICT,
-        "restored past the window"
-    );
-    let detail = json_body(resp).await["detail"].as_str().unwrap().to_owned();
-    assert!(detail.contains("window has closed"), "{detail}");
-
-    sqlx::query(
-        "UPDATE auth.organizations
-            SET erase_after = now() + interval '14 days', deletion_kind = 'operator'
-          WHERE external_id = $1",
-    )
-    .bind(ORGANIZATION)
-    .execute(&pool)
-    .await
-    .unwrap();
-    let resp = app()
-        .oneshot(restore(&pool, USER, ORGANIZATION).await)
-        .await
-        .unwrap();
-    assert_eq!(
-        resp.status(),
-        StatusCode::CONFLICT,
-        "the owner undid a termination"
-    );
-    let detail = json_body(resp).await["detail"].as_str().unwrap().to_owned();
-    assert!(detail.contains("contact support"), "{detail}");
-
-    assert_eq!(
-        org_status(&pool, ORGANIZATION).await.as_deref(),
-        Some("pending_deletion")
-    );
-    assert_eq!(
-        audit_count(&pool, ORGANIZATION, "updated").await,
-        0,
-        "a refused restore wrote onto the chain"
-    );
-}
-
 // ── An operator's termination ────────────────────────────────────────────────
 
 /// ⚠ **An operator closes an organization without its owner's code**, and it
-/// stands where an owner's deletion would — closed to every lane, the hook
-/// purged, its row waiting out the window — except that its owner cannot
-/// bring it back. An operator can, and the chain records both as
+/// stands where an owner's deletion would: closed to every lane, the hook
+/// purged, its row waiting out the grace, and the chain recording it as
 /// `service:operator`. Terminating what is already pending, or does not
 /// exist, is refused.
 #[sqlx::test]
-async fn an_operator_terminates_without_a_code_and_only_an_operator_restores(pool: PgPool) {
+async fn an_operator_terminates_without_a_code(pool: PgPool) {
     seed_organization_deletion(&pool, "active").await;
     let keys = seed_keys(&pool).await;
     let (calls, hook, _) = siblings();
@@ -2947,7 +2688,7 @@ async fn an_operator_terminates_without_a_code_and_only_an_operator_restores(poo
         ("service:operator", Some("operator"))
     );
 
-    // The owner: refused on every lane, the restore included, and told why.
+    // The owner: refused on every lane.
     let resp = app()
         .oneshot(
             request(
@@ -2963,54 +2704,10 @@ async fn an_operator_terminates_without_a_code_and_only_an_operator_restores(poo
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-    let resp = app()
-        .oneshot(restore(&pool, USER, ORGANIZATION).await)
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::CONFLICT);
-    let resp = app().oneshot(me(&pool, USER).await).await.unwrap();
-    let body = json_body(resp).await;
-    assert_eq!(
-        body["deletedOrganizations"][0]["organizationId"], ORGANIZATION,
-        "{body}"
-    );
-    assert_eq!(
-        body["deletedOrganizations"][0]["restorable"], false,
-        "{body}"
-    );
 
     let resp = app().oneshot(terminate(ORGANIZATION)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CONFLICT, "terminated twice");
     let resp = app().oneshot(terminate("org_never_was")).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-
-    let resp = app().oneshot(operator_restore(ORGANIZATION)).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-    assert_eq!(
-        org_status(&pool, ORGANIZATION).await.as_deref(),
-        Some("active")
-    );
-    assert_eq!(keys_validate(&pool, keys).await, [true, true, true]);
-    let operator_rows: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM audit.events
-          WHERE organization_id = $1 AND actor_id = 'service:operator'",
-    )
-    .bind(ORGANIZATION)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(operator_rows, 2, "the termination and the restore");
-
-    let resp = app().oneshot(operator_restore(ORGANIZATION)).await.unwrap();
-    assert_eq!(
-        resp.status(),
-        StatusCode::CONFLICT,
-        "restored what is not pending"
-    );
-    let resp = app()
-        .oneshot(operator_restore("org_never_was"))
-        .await
-        .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     assert_eq!(
         provider_deletes(&provider),
@@ -3020,103 +2717,7 @@ async fn an_operator_terminates_without_a_code_and_only_an_operator_restores(poo
     assert_eq!(
         hook_purges(&calls),
         1,
-        "the termination's purge, and nothing at the refusals or the restore"
-    );
-}
-
-/// An operator can restore what an owner deleted — support's answer to a
-/// mistaken deletion, or to one whose window has closed while the row still
-/// stands — but never an organization going with its owner's account: an
-/// active organization with a vanishing owner is the invariant the erasure
-/// refuses to work around.
-#[sqlx::test]
-async fn an_operator_restores_an_owners_deletion_but_not_an_accounts(pool: PgPool) {
-    seed_organization_deletion(&pool, "pending_deletion").await;
-    seed_person(&pool, SURVIVOR_OWNER).await;
-    seed_organization(&pool, SURVIVOR, SURVIVOR_OWNER, "active").await;
-    plant_code(&pool, SURVIVOR_OWNER, "account_deletion", None).await;
-    let (router, provider) = app(pool.clone(), None, 8_000);
-    let app = || router.clone();
-
-    let_the_wait_pass(&pool, ORGANIZATION).await;
-    let resp = app().oneshot(operator_restore(ORGANIZATION)).await.unwrap();
-    assert_eq!(
-        resp.status(),
-        StatusCode::NO_CONTENT,
-        "an operator is bound by the owner's window"
-    );
-    assert_eq!(
-        org_status(&pool, ORGANIZATION).await.as_deref(),
-        Some("active")
-    );
-
-    let resp = app()
-        .oneshot(delete_account(&pool, SURVIVOR_OWNER, CODE).await)
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::ACCEPTED);
-    let resp = app().oneshot(operator_restore(SURVIVOR)).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::CONFLICT);
-    assert_eq!(
-        org_status(&pool, SURVIVOR).await.as_deref(),
-        Some("pending_deletion")
-    );
-    assert_eq!(person(&pool, SURVIVOR_OWNER).await, Person::Pending);
-    assert_eq!(
-        provider_deletes(&provider),
-        0,
-        "the provider was asked while the owned organization's row still stands"
-    );
-}
-
-/// ⚠ **A restore that lands while the finalize is purging keeps the row.**
-/// The finalize reads the standing before its purges, which take a sibling
-/// round trip each, and an operator's restore is allowed past the window:
-/// one that lands in between must not be followed by the hard delete. The
-/// delete runs under the organization's lock and matches only a row still
-/// pending and ripe, so the finalize answers 409 and the organization
-/// stands — its notifications purged, which its chain records either way.
-#[sqlx::test]
-async fn a_restore_that_lands_during_the_finalizes_purges_keeps_the_row(pool: PgPool) {
-    seed_organization_deletion(&pool, "pending_deletion").await;
-    let_the_wait_pass(&pool, ORGANIZATION).await;
-    let (_, hook, notifications) = siblings();
-    // The finalize's first purge takes long enough for the restore to land.
-    notifications.delaying(Duration::from_millis(1_500));
-    let (router, provider) =
-        app_with_siblings(pool.clone(), Some(hook), Some(notifications), 8_000);
-    let app = || router.clone();
-
-    let (finalized, restored) = tokio::join!(app().oneshot(finalize(ORGANIZATION)), async {
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        app().oneshot(operator_restore(ORGANIZATION)).await
-    });
-    let restored = restored.unwrap();
-    assert_eq!(
-        restored.status(),
-        StatusCode::NO_CONTENT,
-        "the restore did not land during the purges"
-    );
-    let finalized = finalized.unwrap();
-    assert_eq!(
-        finalized.status(),
-        StatusCode::CONFLICT,
-        "a finalize whose row was restored under it must refuse, not delete"
-    );
-    assert_eq!(
-        org_status(&pool, ORGANIZATION).await.as_deref(),
-        Some("active"),
-        "the restored organization went"
-    );
-    assert_eq!(
-        audit_count(&pool, ORGANIZATION, "deleted").await,
-        0,
-        "a finalize audit row for an organization that stands"
-    );
-    assert_eq!(
-        provider_deletes(&provider),
-        0,
-        "a finalize asked the provider to delete somebody"
+        "the termination's purge, and nothing at the refusals"
     );
 }
 

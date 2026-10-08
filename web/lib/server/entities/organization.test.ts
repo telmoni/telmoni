@@ -197,26 +197,6 @@ describe("what getServerContext asks /me to resolve", () => {
     expect(ctx?.flags).toEqual({ api_tokens: false });
   });
 
-  // The organizations the person owns that are on their way out ride beside
-  // the live ones, never among them; an answer without the list reads as
-  // none, since an older auth simply had nothing to offer back.
-  it("reads the organizations being deleted apart from the live ones, and none as none", async () => {
-    const closed = {
-      organizationId: "org_closed",
-      name: "Closed Co",
-      deletionRequestedAt: "2026-09-23T10:00:00Z",
-      eraseAfter: "2026-10-07T10:00:00Z",
-      restorable: true,
-    };
-    meAnswers(me({ deletedOrganizations: [closed] }));
-    const ctx = await getServerContext();
-    expect(ctx?.deletedOrganizations).toEqual([closed]);
-    expect(ctx?.organizations).toEqual([OWNED, JOINED]);
-
-    meAnswers(me());
-    expect((await getServerContext())?.deletedOrganizations).toEqual([]);
-  });
-
   // An offer of a project is auth's row, listed beside the organizations and
   // labelled by the organization it would leave; an answer that carries none
   // reads as none, not as a shape we cannot read.
@@ -311,7 +291,6 @@ describe("defaultOrganization", () => {
     ({
       person: PERSON,
       organizations: [OWNED, JOINED],
-      deletedOrganizations: [],
       activeOrganizationId: "org_1",
       defaultOrganizationId,
       organizationNotFound: false,
@@ -342,7 +321,6 @@ describe("activeOrganization", () => {
     ({
       person: PERSON,
       organizations: [OWNED, JOINED],
-      deletedOrganizations: [],
       activeOrganizationId,
       defaultOrganizationId: "org_1",
       organizationNotFound: false,

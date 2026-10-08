@@ -312,13 +312,13 @@ async fn me_by_slug(pool: &PgPool, user: &str, slug: &str, id: Option<&str>) -> 
     json_body(resp).await
 }
 
-/// Put `organization` into its deletion window, or take it back out, as an
-/// owner's deletion and a restore do.
+/// Mark `organization` pending deletion, as an owner's deletion does, or make
+/// it active again.
 async fn set_pending_deletion(pool: &PgPool, organization: &str, pending: bool) {
     let sql = if pending {
         "UPDATE auth.organizations
             SET status = 'pending_deletion', deletion_requested_at = now(),
-                erase_after = now() + interval '14 days', deletion_kind = 'owner'
+                erase_after = now() + interval '15 minutes', deletion_kind = 'owner'
           WHERE external_id = $1"
     } else {
         "UPDATE auth.organizations
@@ -524,7 +524,7 @@ async fn somebody_who_owns_nothing_lands_where_they_belong(pool: PgPool) {
     sqlx::query(
         "UPDATE auth.organizations
             SET status = 'pending_deletion', deletion_requested_at = now(),
-                erase_after = now() + interval '14 days', deletion_kind = 'owner'
+                erase_after = now() + interval '15 minutes', deletion_kind = 'owner'
           WHERE external_id = $1",
     )
     .bind(&own)
@@ -549,7 +549,7 @@ async fn somebody_who_owns_nothing_lands_where_they_belong(pool: PgPool) {
     sqlx::query(
         "UPDATE auth.organizations
             SET status = 'pending_deletion', deletion_requested_at = now(),
-                erase_after = now() + interval '14 days', deletion_kind = 'owner'
+                erase_after = now() + interval '15 minutes', deletion_kind = 'owner'
           WHERE external_id = $1",
     )
     .bind(&third)
@@ -574,19 +574,6 @@ async fn somebody_who_owns_nothing_lands_where_they_belong(pool: PgPool) {
             .all(|seat| seat["organizationId"] != third.as_str()),
         "a seat in an organization being deleted is still listed: {body}"
     );
-    assert_eq!(
-        body["deletedOrganizations"][0]["organizationId"],
-        own.as_str(),
-        "the organization they own and deleted is offered back: {body}"
-    );
-    assert_eq!(
-        body["deletedOrganizations"][0]["restorable"], true,
-        "{body}"
-    );
-
-    // What they merely belong to is theirs to leave, not to restore.
-    let (_, body) = me(&pool, "user_me_their_owner", None).await;
-    assert_eq!(body["deletedOrganizations"], json!([]), "{body}");
 }
 
 /// Leaving everything is not a way to be locked out. With their own

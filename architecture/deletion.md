@@ -4,7 +4,7 @@ Three things can be deleted, and each goes a different way:
 
 | What | Shape |
 |---|---|
-| **An organization** | Soft first. It is marked pending, with a window in which it can be restored. Then the deletion sweep purges every module's data and deletes the row. |
+| **An organization** | Marked pending first, which closes it to everyone at once. Then, after a short grace, the deletion sweep purges every module's data and deletes the row. There is no restore. |
 | **A project** | Hard, at once. Only the organization's owner can do it. The modules beside auth are cleaned up after. |
 | **A person** (an account) | Confirmed with a code, then erased across every module in a fixed order: inline if it can be, otherwise by the sweep. |
 
@@ -26,7 +26,6 @@ This page also covers **export**, the organization's own record, for its owner a
 stateDiagram-v2
   [*] --> active
   active --> pending: owner confirms a code / operator terminate / account deletion takes it
-  pending --> active: restore (owner inside the window, operator any time; never an account deletion)
   pending --> purging: sweep, once erase_after passes
   purging --> [*]: hook, notifications, agent, hook again, then delete the row
 ```
@@ -38,7 +37,7 @@ The owner first asks for a confirmation code, then sends `DELETE /internal/organ
 1. **Membership is checked before the organization's lock is taken**, so strangers cannot queue on the lock.
 2. **Ownership is read again under the lock.** ⚠ Otherwise a code minted before an ownership transfer could still be used to delete.
 3. **The code is spent.**
-4. **The organization is marked pending** (`mark_pending_deletion`): its status, when deletion was requested, and `erase_after`. The window is `RESTORE_WINDOW_SECONDS`, measured on the database's clock.
+4. **The organization is marked pending** (`mark_pending_deletion`): its status, when deletion was requested, and `erase_after`, `FINALIZE_GRACE_SECONDS` ahead on the database's clock.
 5. **Ownership offers are withdrawn.**
 6. **The request is audited**, and the transaction commits.
 7. **The inline tail runs.** It calls the deployment's `PurgeHook` and records that it ran.
@@ -49,12 +48,9 @@ The answer is a 202, carrying `erase_after`.
 
 **While an organization is pending:**
 - Every lane refuses it (`acting_organization`).
-- Its API keys stop working, since validation requires an active organization. They are not revoked, so a restore brings them back.
+- Its API keys stop working, since validation requires an active organization. They are not revoked: the row's deletion cascades to them.
 
-**Restoring it.**
-- **The owner** can restore an organization they asked to delete, while `erase_after` is still ahead on the database's clock, the same clock the sweep reads. Restoring clears every deletion column and is audited. Whatever the purge hook already dropped is not brought back.
-- **The operator** can run `telmoni terminate <org_id>` and `telmoni restore <org_id>`. These are audited as `service:operator`. An operator's restore works past the window too. They take the organization's id, never its slug: a slug moves when the URL is changed, and may be another organization's by the time the command runs.
-- **An organization taken by an account deletion is never restored.**
+**Nothing restores it**, neither its owner nor an operator: the only wait is the grace below, and the privacy policy promises erasure usually within the hour. The operator's `telmoni terminate <org_id>` closes an organization the same way, audited as `service:operator`. It takes the organization's id, never its slug: a slug moves when the URL is changed, and may be another organization's by the time the command runs.
 
 ### Finalizing it
 
@@ -73,7 +69,6 @@ The deletion sweep (see [background work](background.md#leadership)) lists pendi
    - Then it deletes conversations and passages, a chunk per transaction.
 4. **The purge hook again.**
 5. **The row is deleted**, under the organization's lock, **only if it is still pending and due.**
-   - ⚠ An operator's restore that lands during the purges therefore deletes nothing.
    - The delete cascades to the roster, invitations, projects, seats, API tokens, the organization's codes and its flags.
    - The deletion is audited as `service:auth` in the same transaction.
 
@@ -88,7 +83,7 @@ What stays:
 `DELETE /internal/projects/{id}` (`crates/auth/src/handler/projects.rs`):
 
 - **Only the owner may delete a project.** Admins may do everything else to a project, except offer it for transfer, which is also the owner's alone.
-- **It is immediate.** There is no window and no restore.
+- **It is immediate.** No grace, and nothing left for the sweep.
   - The project row is deleted, and its seats, invitations and API tokens cascade.
   - The deletion is audited in the same transaction, with `in_project`. The project's audit history survives, because `in_project` has no foreign key.
 - **After the commit, notifications purges the project**, best effort, within `PROJECT_PURGE_BUDGET`. A failure is logged. Whatever is left waits for the organization's own purge.
@@ -189,11 +184,11 @@ Hashes and `seq` are not included, so the chain cannot be verified from the file
 
 | Concern | File |
 |---|---|
-| Organization deletion request, restore | `crates/auth/src/handler/organization.rs` |
+| Organization deletion request | `crates/auth/src/handler/organization.rs` |
 | Finalize, the inline tail, `erase_person` | `crates/auth/src/handler/deletion.rs` |
 | Account deletion request | `crates/auth/src/handler/account.rs` |
 | Lock order | `crates/auth/src/db/locks.rs` |
-| The deletion sweep, `terminate`, `restore` | `crates/auth/src/sweep.rs` |
+| The deletion sweep, `terminate` | `crates/auth/src/sweep.rs` |
 | Organization state | `crates/auth/src/db/organizations.rs` |
 | Notifications' purge and redaction | `crates/notifications/src/handler/mod.rs`, `crates/notifications/src/db.rs` |
 | The agent's erasure and purge | `crates/agent/src/seam.rs`, `crates/agent/src/db.rs` |

@@ -98,7 +98,7 @@ export default async function OrganizationSettingsPage() {
           <Section
             title="Danger zone"
             danger
-            description="Closes this organization for everyone in it the moment you confirm: access ends and its API keys stop working. You have 14 days to restore it from your account's Privacy page; after that its projects, keys and everything else it held are erased for good. Your account stays."
+            description="Closes this organization for everyone in it the moment you confirm: access ends, its API keys stop working, and its projects, keys and everything else it held are erased for good within the hour. There is no undo. Your account stays."
           >
             <Card className="grid gap-3 bg-destructive/5 text-sm">
               <DeleteOrganizationForm

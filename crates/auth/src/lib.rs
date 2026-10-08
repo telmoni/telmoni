@@ -354,10 +354,6 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(handler::organization::request_organization_deletion_code),
         )
         .route(
-            "/organization/restore",
-            post(handler::organization::restore_organization),
-        )
-        .route(
             "/organization/owner-transfer",
             post(handler::ownership::offer).delete(handler::ownership::cancel),
         )

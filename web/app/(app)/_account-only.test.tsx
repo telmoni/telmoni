@@ -26,11 +26,6 @@ vi.mock("./account/notifications/_incoming-invites", () => ({
     <div data-testid="invitations" data-count={invites.length} />
   ),
 }));
-vi.mock("./account/privacy/_deleted-organizations", () => ({
-  DeletedOrganizations: ({ organizations }: { organizations: readonly DeletedOrganization[] }) => (
-    <div data-testid="deleted-organizations" data-count={organizations.length} />
-  ),
-}));
 
 vi.mock("./account/privacy/_sessions", () => ({
   ActiveSessions: ({
@@ -66,18 +61,11 @@ vi.mock("./account/privacy/_analytics", () => ({
 const analyticsConfigured = vi.hoisted(() => vi.fn(() => true));
 vi.mock("@/lib/analytics", () => ({ analyticsConfigured }));
 
-import type { ActiveSession, DeletedOrganization } from "@/lib/server/data";
+import type { ActiveSession } from "@/lib/server/data";
 
 import { AccountOnly } from "./_account-only";
 
 const INVITE = { id: "inv_1" } as IncomingInvite;
-const DELETED: DeletedOrganization = {
-  organizationId: "org_mine",
-  name: "Acme",
-  deletionRequestedAt: "2026-09-23T10:00:00Z",
-  eraseAfter: "2026-10-07T10:00:00Z",
-  restorable: true,
-};
 
 function mount(over: Partial<Parameters<typeof AccountOnly>[0]> = {}) {
   return render(
@@ -159,17 +147,6 @@ describe("AccountOnly", () => {
   it("shows no invitations section when none are waiting", () => {
     mount();
     expect(screen.queryByTestId("invitations")).toBeNull();
-  });
-
-  it("offers the organizations they deleted and may restore", () => {
-    mount({ deletedOrganizations: [DELETED] });
-    expect(screen.getByTestId("deleted-organizations")).toHaveAttribute("data-count", "1");
-    expect(screen.getByRole("heading", { name: /deleted organizations/i })).toBeInTheDocument();
-  });
-
-  it("shows no deleted organizations section when none is being deleted", () => {
-    mount();
-    expect(screen.queryByTestId("deleted-organizations")).toBeNull();
   });
 
   it("says sign-ups are closed, and that an invitation is the way in", () => {

@@ -46,7 +46,6 @@ function me(activeOrganizationId: string): ServerContext {
       displayName: null,
       analyticsOptIn: false,
     },
-    deletedOrganizations: [],
     organizations: [
       {
         organizationId: "org_mine",

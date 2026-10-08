@@ -1,7 +1,7 @@
 //! The organization itself: its founding — the first one `/me` provisions, or
-//! another a person asks for — its name, its deletion by its owner and the
-//! owner's restore. An operator's termination and restore, and the steps the
-//! deletion sweep drives it through, are [`crate::sweep`]. Its name and its
+//! another a person asks for — its name, and its deletion by its owner. An
+//! operator's termination, and the steps the deletion sweep drives it
+//! through, are [`crate::sweep`]. Its name and its
 //! URL are two settings: a new organization takes the URL asked for, or one
 //! derived from the name it is born with, and after that a rename moves
 //! nothing.
@@ -20,8 +20,7 @@ use serde_json::json;
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::{
-    AuthError, Flag, OrganizationId, OrganizationRole, OrganizationStatus, TelmoniError,
-    TenantError, UserId,
+    AuthError, Flag, OrganizationId, OrganizationRole, TelmoniError, TenantError, UserId,
 };
 
 use crate::{
@@ -33,14 +32,12 @@ use crate::{
     },
     handler::{
         ActingOrganization, account::DeletionRequest, account::wrong_code, acting_organization,
-        deletion::RESTORE_WINDOW_SECONDS, organization_of, organization_role_or_forbidden,
+        deletion::FINALIZE_GRACE_SECONDS, organization_of, organization_role_or_forbidden,
     },
     model::DeletionKind,
 };
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
-use telmoni_shared::db::tenant_session::{
-    self, Scoped, maintenance_scope, organization_scope, person_scope,
-};
+use telmoni_shared::db::tenant_session::{self, Scoped, maintenance_scope, person_scope};
 use telmoni_shared::{AuditAction, TelmoniResourceKind};
 use telmoni_shared::{AuthzError, slug};
 
@@ -109,15 +106,13 @@ pub async fn request_organization_deletion_code(
 /// `x-organization-id`, gated by the emailed code minted for it. It is marked
 /// `pending_deletion` in one transaction — from which nothing acts in it and
 /// none of its keys validates — then the purge hook runs inline, and the
-/// sweep deletes the row once the restore window has passed. 202 either way,
-/// naming when the row goes. Nobody's account is touched: its members simply
-/// stop being in it.
+/// sweep deletes the row once the grace has passed. 202 either way, naming
+/// when the row goes. There is no restore. Nobody's account is touched: its
+/// members simply stop being in it.
 ///
-/// ⚠ **Its keys are NOT revoked**, unlike an account deletion's. The status
-/// test in `tokens::validate` refuses every key of a pending organization
-/// from the mark, and a restore inside the window brings the organization
-/// back whole, keys included; revoked rows would have been swept by the
-/// retention job before the window closed.
+/// Its keys are not revoked, unlike an account deletion's: the status test
+/// in `tokens::validate` refuses every key of a pending organization from
+/// the mark, and the row's deletion cascades to them.
 ///
 /// ⚠ **The owner is re-read under the organization's lock.** Without it, an
 /// owner who had just handed the organization over could still delete it
@@ -175,7 +170,7 @@ pub async fn delete_organization(
         &mut tx,
         &organization,
         DeletionKind::Owner,
-        RESTORE_WINDOW_SECONDS,
+        FINALIZE_GRACE_SECONDS,
     )
     .await?
     else {
@@ -213,115 +208,6 @@ pub async fn delete_organization(
     tracing::info!(organization_id = %organization, erase_after = %erase_after,
         "organization deletion requested");
     Ok(crate::handler::deletion::deletion_response(&state, &organization, erase_after).await)
-}
-
-/// `POST /internal/organization/restore` — the owner brings back the
-/// organization in `x-organization-id` that they deleted, while its restore
-/// window is open. Everything it held is as it was, its keys included; what
-/// the purge hook dropped at the deletion is not brought back. 204.
-///
-/// No code: undoing a deletion is the safe direction. The owner is read
-/// under the organization's lock, as the deletion reads them, and the window
-/// is judged by the database's clock, the same one the sweep's listing reads.
-/// One Telmoni terminated is refused: only an operator restores that.
-pub async fn restore_organization(
-    State(state): State<Arc<AppState>>,
-    principal: Principal,
-    headers: HeaderMap,
-) -> Result<impl IntoResponse, TelmoniError> {
-    let organization = organization_of(&headers)?;
-    let user_id = principal.user_id;
-
-    let mut tx = organization_scope(&state.db, &organization).await?;
-    // Not `organization_role_or_forbidden`: that refuses a pending
-    // organization, which is the only kind this lane acts on. The membership
-    // is read before the lock, so a stranger neither learns its state nor
-    // queues on its lock, and the owner is read again under it.
-    if organization_members::role_on_organization(&mut tx, &organization, &user_id)
-        .await?
-        .is_none()
-    {
-        return Err(
-            AuthzError::Forbidden("you are not a member of this organization".into()).into(),
-        );
-    }
-    locks::lock_organization(&mut tx, &organization).await?;
-    let role = organization_members::role_on_organization(&mut tx, &organization, &user_id)
-        .await?
-        .ok_or_else(|| -> TelmoniError {
-            AuthzError::Forbidden("you are not a member of this organization".into()).into()
-        })?;
-    if role != OrganizationRole::Owner {
-        return Err(
-            AuthzError::Forbidden("only the organization's owner can restore it".into()).into(),
-        );
-    }
-    let Some(row) = organizations::get(&mut tx, &organization).await? else {
-        return Err(AuthError::NotFound("no such organization".into()).into());
-    };
-    if row.status != OrganizationStatus::PendingDeletion {
-        return Err(AuthError::Conflict("this organization is not being deleted".into()).into());
-    }
-    match row.deletion_kind {
-        Some(DeletionKind::Owner) => {}
-        Some(DeletionKind::Operator) => {
-            return Err(AuthError::Conflict(
-                "this organization was closed by Telmoni; contact support to have it restored"
-                    .into(),
-            )
-            .into());
-        }
-        Some(DeletionKind::Account) | None => {
-            return Err(AuthError::Conflict(
-                "this organization is being deleted with its owner's account".into(),
-            )
-            .into());
-        }
-    }
-    // The window on the database's clock, the one the sweep's listing reads:
-    // a row the sweep has listed for finalize is never restored a second
-    // later by a skewed one. `statement_timestamp()`, not `now()`: the
-    // transaction began before the wait on the organization's lock.
-    let open: bool = sqlx::query_scalar("SELECT $1::timestamptz > statement_timestamp()")
-        .bind(row.erase_after)
-        .fetch_one(&mut *tx)
-        .await?;
-    if !open {
-        return Err(AuthError::Conflict(
-            "this organization's restore window has closed; it is being erased".into(),
-        )
-        .into());
-    }
-    if !organizations::restore(&mut tx, &organization).await? {
-        return Err(TelmoniError::Internal(format!(
-            "{organization} changed status under its lock"
-        )));
-    }
-
-    emit_audit(
-        &mut tx,
-        AuditEvent {
-            organization_id: &organization,
-            in_project: None,
-            actor: Actor::User(user_id.as_str()),
-            action: AuditAction::Updated,
-            resource_kind: TelmoniResourceKind::Organization,
-            resource_id: Some(organization.as_str()),
-            request_id: None,
-            ip_address: None,
-            user_agent: None,
-            metadata: Some(json!({
-                "kind": "organization_deletion",
-                "deletion": "restored",
-                "by": DeletionKind::Owner,
-            })),
-        },
-    )
-    .await?;
-    tx.commit().await?;
-
-    tracing::info!(organization_id = %organization, "organization restored by its owner");
-    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Body of `POST /internal/organizations`.

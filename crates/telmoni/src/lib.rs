@@ -443,12 +443,6 @@ where
             );
             Ok(())
         }
-        Command::Restore(organization) => {
-            let app = build().await?;
-            telmoni_auth::sweep::restore(&app.auth, &organization).await?;
-            tracing::info!(organization_id = %organization, "restore complete");
-            Ok(())
-        }
     }
 }
 

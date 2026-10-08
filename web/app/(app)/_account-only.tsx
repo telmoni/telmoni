@@ -2,13 +2,12 @@ import { PaperShell } from "@/components/paper-shell";
 import { SessionHeartbeat } from "@/components/session-heartbeat";
 import { Card } from "@/components/ui/card";
 import { analyticsConfigured } from "@/lib/analytics";
-import type { ActiveSession, DeletedOrganization } from "@/lib/server/data";
+import type { ActiveSession } from "@/lib/server/data";
 import { canChangeEmail, canResetPassword } from "@/lib/sign-in-method";
 import type { IncomingInvite } from "@/lib/types/incoming-invite";
 
 import { AnalyticsPreference } from "./account/privacy/_analytics";
 import { DeleteAccountForm } from "./account/privacy/_delete-account";
-import { DeletedOrganizations } from "./account/privacy/_deleted-organizations";
 import { ActiveSessions } from "./account/privacy/_sessions";
 import { ChangeEmail } from "./account/settings/_email";
 import { PasswordReset } from "./account/settings/_password";
@@ -21,7 +20,6 @@ export function AccountOnly({
   signupsOpen,
   invites,
   ownedOrganizations,
-  deletedOrganizations = [],
   sessions = null,
   currentSessionId = null,
   expiresAt,
@@ -33,7 +31,6 @@ export function AccountOnly({
   signupsOpen: boolean;
   invites: readonly IncomingInvite[];
   ownedOrganizations: readonly string[];
-  deletedOrganizations?: readonly DeletedOrganization[];
   sessions?: ActiveSession[] | null;
   currentSessionId?: string | null;
   expiresAt: number;
@@ -65,13 +62,6 @@ export function AccountOnly({
           <Card>
             <IncomingInvitesSection invites={invites} />
           </Card>
-        )}
-
-        {deletedOrganizations.length > 0 && (
-          <div className="grid gap-2">
-            <h2 className="text-base font-medium">Deleted organizations</h2>
-            <DeletedOrganizations organizations={deletedOrganizations} />
-          </div>
         )}
 
         {canChangeEmail(authMethod) && (

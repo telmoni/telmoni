@@ -67,8 +67,6 @@ pub enum Command {
     Sweep(Sweep),
     /// Close an organization without its owner's code.
     Terminate(OrganizationId),
-    /// Bring a pending organization back.
-    Restore(OrganizationId),
 }
 
 impl Command {
@@ -76,7 +74,7 @@ impl Command {
     #[must_use]
     pub fn usage() -> String {
         format!(
-            "usage: telmoni serve | migrate | rotate | sweep <{}> | terminate <org_id> | restore <org_id>",
+            "usage: telmoni serve | migrate | rotate | sweep <{}> | terminate <org_id>",
             Sweep::names()
         )
     }
@@ -91,14 +89,10 @@ impl Command {
             ["sweep", sweep] => Sweep::parse(sweep)
                 .map(Self::Sweep)
                 .ok_or_else(|| anyhow::anyhow!("{} (got sweep {sweep:?})", Self::usage())),
-            ["terminate" | "restore", organization] => {
+            ["terminate", organization] => {
                 let id = OrganizationId::try_new(*organization)
                     .map_err(|e| anyhow::anyhow!("{} (bad organization id: {e})", Self::usage()))?;
-                Ok(if words.first() == Some(&"terminate") {
-                    Self::Terminate(id)
-                } else {
-                    Self::Restore(id)
-                })
+                Ok(Self::Terminate(id))
             }
             _ => anyhow::bail!("{} (got {args:?})", Self::usage()),
         }
@@ -128,10 +122,6 @@ mod tests {
             parse(&["terminate", "org_abc"]).unwrap(),
             Command::Terminate(id) if id.as_str() == "org_abc"
         ));
-        assert!(matches!(
-            parse(&["restore", "org_abc"]).unwrap(),
-            Command::Restore(id) if id.as_str() == "org_abc"
-        ));
 
         for bad in [
             vec![],
@@ -141,6 +131,7 @@ mod tests {
             vec!["serve", "now"],
             vec!["terminate"],
             vec!["terminate", "not an id"],
+            vec!["restore", "org_abc"],
         ] {
             let err = parse(&bad).expect_err(&format!("{bad:?} parsed"));
             assert!(err.to_string().starts_with("usage:"), "{err}");

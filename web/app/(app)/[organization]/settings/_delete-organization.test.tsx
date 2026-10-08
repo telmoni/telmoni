@@ -2,7 +2,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-type Answer = { error?: string; ok?: boolean; eraseAfter?: string; purged?: boolean };
+type Answer = { error?: string; ok?: boolean; purged?: boolean };
 
 const requestOrganizationDeletionCodeAction = vi.hoisted(() =>
   vi.fn<(organizationId: string) => Promise<Answer>>(async () => ({ ok: true })),
@@ -72,7 +72,6 @@ describe("DeleteOrganizationForm", () => {
   // form signs out when it is done; this one must not, because the person is
   // still somebody — in whatever organizations they still belong to.
   it("deletes the organization and leaves the owner signed in", async () => {
-    deleteOrganizationAction.mockResolvedValue({ ok: true, eraseAfter: "2026-10-07T12:00:00Z" });
     mount();
     await press(/send confirmation code/i);
     await typeCode("123456");
@@ -81,12 +80,10 @@ describe("DeleteOrganizationForm", () => {
     expect(deleteOrganizationAction).toHaveBeenCalledWith("org_acme", "123456");
     expect(screen.getByText("Acme is deleted")).toBeInTheDocument();
     expect(document.body.textContent).toMatch(/your own account is untouched/i);
-    // What happens to the data, said once and truthfully: the owner has
-    // until the day auth named to restore it, and then the sweep erases it.
-    expect(document.body.textContent).toMatch(/restore it from your account.s privacy page until/i);
-    expect(document.querySelector("time")).toHaveAttribute("dateTime", "2026-10-07T12:00:00Z");
-    expect(document.body.textContent).toMatch(/after that its projects and everything else it held are erased/i);
-    expect(document.body.textContent).not.toMatch(/half an hour/i);
+    // What happens to the data, said once and truthfully: erased within the
+    // hour, with no way back.
+    expect(document.body.textContent).toMatch(/erased from our systems within the hour/i);
+    expect(document.body.textContent).not.toMatch(/restore/i);
     expect(screen.queryByRole("button", { name: /sign out/i })).toBeNull();
 
     // A full navigation, not a router push: everything the console holds —
@@ -97,26 +94,11 @@ describe("DeleteOrganizationForm", () => {
     expect(replace).not.toHaveBeenCalledWith("/auth/logout");
   });
 
-  // Auth always names the day; should its answer ever not, the window is
-  // still stated rather than left out.
-  it("states the window in days when auth names no day", async () => {
-    mount();
-    await press(/send confirmation code/i);
-    await typeCode("123456");
-    await press(/^delete this organization/i);
-    expect(document.body.textContent).toMatch(/privacy page for 14 days/i);
-    expect(document.querySelector("time")).toBeNull();
-  });
-
   // ⚠ Auth answers 202 whether or not the request's purge hook landed; the
   // sweep retries it every ten minutes. The success screen says so only when
   // it did not, and never on a deployment with no hook, which always lands.
   it("says the cleanup is still being retried only when the purge did not land", async () => {
-    deleteOrganizationAction.mockResolvedValue({
-      ok: true,
-      eraseAfter: "2026-10-07T12:00:00Z",
-      purged: false,
-    });
+    deleteOrganizationAction.mockResolvedValue({ ok: true, purged: false });
     const { unmount } = mount();
     await press(/send confirmation code/i);
     await typeCode("123456");
@@ -132,10 +114,10 @@ describe("DeleteOrganizationForm", () => {
     expect(document.body.textContent).not.toMatch(/retries every ten minutes/i);
   });
 
-  it("says before the confirm that there are fourteen days to change one's mind", () => {
+  it("says before the confirm that there is no undo", () => {
     mount();
-    expect(document.body.textContent).toMatch(/14 days to change your mind/i);
-    expect(document.body.textContent).not.toMatch(/no recovery window/i);
+    expect(document.body.textContent).toMatch(/there is no undo/i);
+    expect(document.body.textContent).not.toMatch(/change your mind|restore/i);
   });
 
   // ⚠ Once it is gone, anything that refreshes the page — the realtime

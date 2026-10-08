@@ -607,16 +607,14 @@ pub async fn delete_account(
     confirmation_codes::consume(&mut tx, code_id).await?;
     for organization in &owned {
         let mut otx = tx.bind_organization(organization).await?;
-        // Revoked outright, unlike an organization its owner deletes: nobody
-        // is left who could restore this one, so there is nothing to keep
-        // the keys for.
+        // Revoked outright, unlike an organization its owner deletes, and
+        // the count recorded on the chain: the person's erasure is what the
+        // chain must account for, down to the keys their organizations held.
         let revoked = tokens::revoke_all_in_organization(&mut otx, organization).await?;
         // One already pending — deleted by its owner, or terminated — goes
-        // with the account too: its kind becomes `account`, so no restore
-        // lane hands an organization back to an owner who is being erased,
-        // and its wait shortens to the grace, since nobody is left to use a
-        // restore window. Audited as `taken` rather than `requested`: its
-        // chain already holds the request.
+        // with the account too: its kind becomes `account`, so its chain says
+        // what took it, and its wait is never lengthened. Audited as `taken`
+        // rather than `requested`: its chain already holds the request.
         let marked = match organizations::mark_pending_deletion(
             &mut otx,
             organization,

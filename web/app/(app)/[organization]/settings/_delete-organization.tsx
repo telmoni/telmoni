@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 
-import { LocalTime } from "@/components/local-time";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,8 +13,7 @@ import {
 
 /// Deleting the organization the page rendered. The owner keeps their
 /// account: once it is closed the console takes them to wherever they still
-/// belong, rather than signing them out as deleting an account does — and
-/// their account's Privacy page offers it back for fourteen days.
+/// belong, rather than signing them out as deleting an account does.
 export function DeleteOrganizationForm({
   organizationId,
   organization,
@@ -32,11 +30,7 @@ export function DeleteOrganizationForm({
   // The name is kept with the outcome rather than read from props: anything
   // that refreshes the page from here on renders whichever organization the
   // console fell back to, and the heading must still name the deleted one.
-  const [done, setDone] = useState<{
-    organization: string;
-    eraseAfter?: string;
-    purged?: boolean;
-  } | null>(null);
+  const [done, setDone] = useState<{ organization: string; purged?: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sending, startSending] = useTransition();
   const [deleting, startDeleting] = useTransition();
@@ -66,7 +60,7 @@ export function DeleteOrganizationForm({
           setError(r.error);
           return;
         }
-        setDone({ organization, eraseAfter: r.eraseAfter, purged: r.purged });
+        setDone({ organization, purged: r.purged });
       } catch {
         setError("Network error. Try again.");
       }
@@ -83,16 +77,8 @@ export function DeleteOrganizationForm({
           Everyone in it has lost access and its API keys have stopped working.
           {done.purged === false &&
             " Part of its cleanup could not finish just now; Telmoni retries every ten minutes until it does."}{" "}
-          You can restore it from your account&rsquo;s Privacy page{" "}
-          {done.eraseAfter ? (
-            <>
-              until <LocalTime iso={done.eraseAfter} mode="date" />
-            </>
-          ) : (
-            "for 14 days"
-          )}
-          ; after that its projects and everything else it held are erased
-          from our systems. Your own account is untouched.
+          Its projects and everything else it held are erased from our systems
+          within the hour. Your own account is untouched.
         </p>
         <div>
           <Button onClick={() => window.location.replace("/console")}>
@@ -107,9 +93,8 @@ export function DeleteOrganizationForm({
     <div className="grid gap-4">
       <p className="text-sm text-muted-foreground">
         Everyone in it loses access and its API keys stop working the moment
-        you confirm. You have 14 days to change your mind: restore it, whole,
-        from your account&rsquo;s Privacy page. After that its projects and
-        data are erased for good. Nobody&rsquo;s account is deleted, yours
+        you confirm, and its projects and data are erased for good within the
+        hour. There is no undo. Nobody&rsquo;s account is deleted, yours
         included.
       </p>
 

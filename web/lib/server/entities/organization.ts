@@ -48,21 +48,6 @@ const OrganizationEntrySchema = z.object({
 });
 export type OrganizationEntry = z.infer<typeof OrganizationEntrySchema>;
 
-/// An organization the person OWNS that is being deleted: closed to everyone,
-/// its row waiting to go. `restorable` while it was the owner's own deletion
-/// and the window is open; an organization Telmoni closed is listed and not
-/// restorable, so the page can say so. Never the active one, never listed
-/// among `organizations`.
-const DeletedOrganizationSchema = z.object({
-  organizationId:      z.string(),
-  name:                z.string(),
-  deletionRequestedAt: z.string(),
-  /// When the row goes: the end of the restore window.
-  eraseAfter:          z.string(),
-  restorable:          z.boolean(),
-});
-export type DeletedOrganization = z.infer<typeof DeletedOrganizationSchema>;
-
 /// A project whose owner has offered it to the person, and whose offer is
 /// still open: what is on offer, who is offering, and the organization it
 /// would leave, labelled the way the console labels one (`organizationLabel`).
@@ -97,9 +82,6 @@ export {
 export interface ServerContext {
   person: Person;
   organizations: OrganizationEntry[];
-  /// The organizations the person owns that are being deleted, soonest to go
-  /// first, for the privacy page and the account screen to offer back.
-  deletedOrganizations: DeletedOrganization[];
   /// The organization this request acts in, as AUTH resolved it: the one the
   /// path names — off an organization's path, the one the cookie remembers —
   /// when the person is in it, else their default. The console never decides
@@ -210,7 +192,6 @@ export const getServerContext = cache(
         .object({
           person:                PersonSchema,
           organizations:         z.array(OrganizationEntrySchema),
-          deletedOrganizations:  z.array(DeletedOrganizationSchema).optional(),
           activeOrganizationId:  z.string().nullable(),
           defaultOrganizationId: z.string().nullable(),
           memberships:           z.array(MembershipSchema).optional(),
@@ -231,7 +212,6 @@ export const getServerContext = cache(
       return {
         person:                d.person,
         organizations:         d.organizations,
-        deletedOrganizations:  d.deletedOrganizations ?? [],
         activeOrganizationId:  d.activeOrganizationId,
         defaultOrganizationId: d.defaultOrganizationId,
         organizationNotFound:  named !== null && active?.slug !== named,

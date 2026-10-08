@@ -406,7 +406,7 @@ async fn an_organization_being_deleted_is_not_renamed(pool: PgPool) {
     sqlx::query(
         "UPDATE auth.organizations
             SET status = 'pending_deletion', deletion_requested_at = now(),
-                erase_after = now() + interval '14 days', deletion_kind = 'owner'
+                erase_after = now() + interval '15 minutes', deletion_kind = 'owner'
           WHERE external_id = $1",
     )
     .bind(&organization)

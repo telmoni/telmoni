@@ -56,13 +56,12 @@ export async function requestOrganizationDeletionCodeAction(
 }
 
 /// Delete the organization. Auth answers 202 once it is closed: nobody can act
-/// in it from that moment, and its data is erased by the sweep once the
-/// fourteen-day restore window has passed — `eraseAfter`, which the success
-/// screen shows as the last day to change one's mind.
+/// in it from that moment, and its data is erased by the sweep once a short
+/// grace has passed, with no way back.
 export async function deleteOrganizationAction(
   organizationId: string,
   code: string,
-): Promise<{ error?: string; ok?: boolean; eraseAfter?: string; purged?: boolean }> {
+): Promise<{ error?: string; ok?: boolean; purged?: boolean }> {
   const session = await getServerSession();
   if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) redirect("/auth/login");
 
@@ -106,9 +105,8 @@ export async function deleteOrganizationAction(
 
   const answer = await res
     .json()
-    .then((b: unknown) => b as { erase_after?: unknown; purged?: unknown } | null)
+    .then((b: unknown) => b as { purged?: unknown } | null)
     .catch(() => null);
-  const eraseAfter = typeof answer?.erase_after === "string" ? answer.erase_after : undefined;
   // Whether the request's purge hook landed. It is retried every ten minutes
   // when it did not, and the success screen says so rather than announcing a
   // cleanup that has not happened yet.
@@ -120,5 +118,5 @@ export async function deleteOrganizationAction(
   // so auth answers with another one, and the form still on screen would
   // announce THAT one deleted — or vanish with its danger zone. The success
   // screen's Continue is a full navigation, which re-reads everything.
-  return { ok: true, eraseAfter, purged };
+  return { ok: true, purged };
 }

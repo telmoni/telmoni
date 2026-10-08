@@ -2,10 +2,7 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type {
-  DeletedOrganization,
-  OrganizationEntry,
-} from "@/lib/server/entities/organization";
+import type { OrganizationEntry } from "@/lib/server/entities/organization";
 
 vi.mock("@/components/page-header", () => ({
   PageHeader: ({ title }: { title: string }) => (
@@ -33,19 +30,6 @@ vi.mock("./_delete-account", () => ({
   ),
 }));
 
-vi.mock("./_deleted-organizations", () => ({
-  DeletedOrganizations: ({
-    organizations,
-  }: {
-    organizations: readonly { organizationId: string }[];
-  }) => (
-    <div
-      data-testid="deleted-organizations"
-      data-ids={organizations.map((o) => o.organizationId).join("|")}
-    />
-  ),
-}));
-
 vi.mock("next/navigation", () => ({
   notFound: () => {
     throw new Error("notFound");
@@ -55,7 +39,6 @@ vi.mock("next/navigation", () => ({
 let mockContext: {
   person: { analyticsOptIn: boolean };
   organizations: OrganizationEntry[];
-  deletedOrganizations?: DeletedOrganization[];
 } | null = null;
 vi.mock("@/lib/server/data", () => ({
   fetchActiveSessions: async () => [],
@@ -134,35 +117,6 @@ describe("AccountPrivacyPage", () => {
     expect(screen.queryByTestId("deleted-organizations")).toBeNull();
     expect(screen.queryByText("k@example.com")).toBeNull();
     expect(screen.queryByText("user_1")).toBeNull();
-  });
-
-  // The way back from a deletion, on the page the deletion screen names, and
-  // only while there is something to bring back.
-  it("offers the organizations being deleted, before the danger zone", async () => {
-    mockContext = {
-      person: { analyticsOptIn: false },
-      organizations: [],
-      deletedOrganizations: [
-        {
-          organizationId: "org_closed",
-          name: "Acme",
-          deletionRequestedAt: "2026-09-23T10:00:00Z",
-          eraseAfter: "2026-10-07T10:00:00Z",
-          restorable: true,
-        },
-      ],
-    };
-    render(await AccountPrivacyPage());
-    const headings = screen
-      .getAllByRole("heading", { level: 2 })
-      .map((h) => h.textContent?.toLowerCase() ?? "");
-    expect(headings).toEqual([
-      "data collection",
-      "active sessions",
-      "deleted organizations",
-      "danger zone",
-    ]);
-    expect(screen.getByTestId("deleted-organizations")).toHaveAttribute("data-ids", "org_closed");
   });
 
   // ⚠ Deleting the account takes every organization the person owns on their

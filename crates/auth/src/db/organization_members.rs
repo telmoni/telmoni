@@ -674,44 +674,6 @@ pub async fn organizations_of(
     .await
 }
 
-/// An organization the caller owns that is on its way out, as `/me` lists it
-/// beside the live ones so the privacy page can offer to bring it back.
-#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
-#[serde(rename_all = "camelCase")]
-pub struct DeletedOrganization {
-    pub organization_id: OrganizationId,
-    /// What the organization is called.
-    pub name: String,
-    pub deletion_requested_at: DateTime<Utc>,
-    /// When the row goes. The restore window ends here.
-    pub erase_after: DateTime<Utc>,
-    /// Whether the owner may still bring it back: their own request, and the
-    /// window still open on the database's clock. `false` for one Telmoni
-    /// terminated, which only an operator restores.
-    pub restorable: bool,
-}
-
-/// Every pending organization this person OWNS, soonest to go first. The
-/// ones an account deletion took are never read here, since that person's
-/// bearer is refused before `/me` answers.
-pub async fn pending_organizations_owned_by(
-    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
-    user_id: &UserId,
-) -> sqlx::Result<Vec<DeletedOrganization>> {
-    sqlx::query_as::<_, DeletedOrganization>(
-        "SELECT m.organization_id, o.name, o.deletion_requested_at, o.erase_after,
-                (o.deletion_kind = 'owner' AND o.erase_after > now()) AS restorable
-           FROM auth.organization_members m
-           JOIN auth.organizations o
-             ON o.external_id = m.organization_id AND o.status = 'pending_deletion'
-          WHERE m.user_id = $1 AND m.role = 'owner'
-          ORDER BY o.erase_after ASC, m.organization_id ASC",
-    )
-    .bind(user_id)
-    .fetch_all(tx.conn())
-    .await
-}
-
 /// Whether this person holds a row in any active organization — `/me`'s
 /// cheap question before it considers provisioning, through `member_read`.
 pub async fn belongs_anywhere(tx: &mut Scoped<'_, Person>, user_id: &UserId) -> sqlx::Result<bool> {

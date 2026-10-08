@@ -9,11 +9,9 @@
 //!   once `erase_after` has passed the sweep runs every sibling purge — a
 //!   hook purge nobody has landed first, then notifications, then the hook
 //!   again — and deletes the row, under the organization's lock and only
-//!   while it is still pending and ripe. The wait is the RESTORE WINDOW,
-//!   [`RESTORE_WINDOW_SECONDS`], when the owner asked or an operator
-//!   terminated it, and the FINALIZE GRACE, [`FINALIZE_GRACE_SECONDS`], when
-//!   the owner's account deletion took it. Its members' memberships go with
-//!   it; no person is touched.
+//!   while it is still pending and ripe. The wait is the FINALIZE GRACE,
+//!   [`FINALIZE_GRACE_SECONDS`], whoever asked: there is no restore. Its
+//!   members' memberships go with it; no person is touched.
 //! - **A person's**: the identity provider's user → the notices that named
 //!   them, rewritten by notifications → their conversations with the agent,
 //!   and its copies of what named them → their memberships elsewhere, each
@@ -29,8 +27,7 @@
 //! it writes. A grant stored on a sibling after an early purge would
 //! otherwise outlive the organization with nothing left to sweep it. So the
 //! notifications purge runs only at finalize, the hook's runs again there,
-//! and the row goes only then. The restore window is the same wait made long
-//! enough to be undone in: the organization is closed but whole until it ends.
+//! and the row goes only then.
 //!
 //! **Awaited is load-bearing.** A spawned task outlives nothing: the pod that
 //! ran it can be replaced by the next rollout or drained off its node the
@@ -63,23 +60,16 @@ use crate::{
     db::{AuthLane, identities, invites, locks, members, organization_members, organizations},
 };
 
-/// How long an organization its owner deleted, or an operator terminated,
-/// stays whole and restorable before its row may go: fourteen days.
-///
-/// ⚠ **Published.** The console, the privacy policy and the Terms promise the
-/// owner fourteen days to bring it back, and the policy promises erasure
-/// within thirty days of the window closing. Change them together
-/// (`the_restore_window_is_fourteen_days`).
-pub const RESTORE_WINDOW_SECONDS: u32 = 14 * 24 * 60 * 60;
-
-/// How long an organization an ACCOUNT deletion took stays `pending_deletion`
-/// before its row may go. Nobody is left who could restore it, so the wait
-/// covers requests in flight and nothing else.
+/// How long an organization stays `pending_deletion` before its row may go,
+/// whoever asked for its deletion: fifteen minutes. There is no restore, so
+/// the wait covers requests in flight and nothing else.
 ///
 /// ⚠ **Longer than anything that could still be writing to it.** The console
 /// abandons a fetch at ten seconds, and a connector handshake holds its
 /// answer across a vendor's OAuth exchange and a KMS wrap. Fifteen minutes is
-/// far past both (`the_finalize_grace_is_fifteen_minutes`).
+/// far past both, and well inside the hour the privacy policy promises
+/// (`the_wait_is_fifteen_minutes_for_an_owners_deletion_and_a_termination`,
+/// `the_finalize_grace_is_fifteen_minutes`).
 pub const FINALIZE_GRACE_SECONDS: u32 = 900;
 
 /// Outcome of one inline tail attempt.
@@ -100,9 +90,9 @@ pub enum FinalizeOutcome {
     /// The organization exists and is not `pending_deletion`: finalize follows
     /// a request, never replaces one.
     NotPending,
-    /// `erase_after` has not passed: the owner may still restore it, or a
-    /// request may still be landing on a sibling. The sweep's listing does
-    /// not name it for finalize yet.
+    /// `erase_after` has not passed: a request authorized before the mark
+    /// may still be landing on a sibling. The sweep's listing does not name
+    /// it for finalize yet.
     TooSoon,
 }
 
@@ -253,7 +243,7 @@ async fn finalize_purges(
     purge_hook(state, organization_id).await
 }
 
-/// The sweep's interim step for a pending organization inside its window:
+/// The sweep's interim step for a pending organization inside its wait:
 /// the hook purge the request could not land. Refused for an organization
 /// that is not pending; done for one already gone.
 pub async fn purge_pending_organization(
@@ -273,8 +263,7 @@ pub async fn purge_pending_organization(
         return Ok(PurgeOutcome::Purged);
     }
     // Nothing to record: a request's tail recorded it first, or the row is
-    // no longer pending — restored while the hook was being asked, or gone.
-    // The step answers what stands, not what it set out to do.
+    // gone. The step answers what stands, not what it set out to do.
     Ok(match status_of(state, organization_id).await? {
         None => PurgeOutcome::AlreadyGone,
         Some(OrganizationStatus::PendingDeletion) => PurgeOutcome::Purged,
@@ -315,10 +304,10 @@ pub async fn finalize_organization(
 
     let mut tx = organization_scope(&state.db, organization_id).await?;
     // ⚠ **Under the lock, and only a row still pending and ripe goes.** The
-    // standing was read before the purges, and an operator's restore is
-    // allowed past the window: one that landed in between was audited as
-    // restored and would be deleted a moment later by an unconditional
-    // DELETE. It matches nothing here, and the step answers what stands.
+    // standing was read before the purges, which take a sibling round trip
+    // each; whatever the row became in between, an unconditional DELETE
+    // would take it anyway. This matches nothing then, and the step answers
+    // what stands.
     locks::lock_organization(&mut tx, organization_id).await?;
     if !organizations::delete_ripe(&mut tx, organization_id).await? {
         tx.rollback().await?;
@@ -580,7 +569,7 @@ pub async fn pending_people(
 /// Run an organization's inline tail and answer the deletion lane: 202
 /// either way, since the row waits for `erase_after`; `purged` says whether
 /// the hook purge landed in this request, and `erase_after` when the row
-/// goes — the end of the restore window, when there is one.
+/// goes.
 pub(crate) async fn deletion_response(
     state: &AppState,
     organization: &OrganizationId,

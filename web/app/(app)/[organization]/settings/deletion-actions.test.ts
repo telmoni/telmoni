@@ -310,21 +310,6 @@ describe("deleteOrganizationAction", () => {
     expect(mockRevalidate).not.toHaveBeenCalled();
   });
 
-  // The day the row goes is auth's to name, from its own clock: the success
-  // screen shows it as the last day to restore.
-  it("passes on the day auth names for the erasure", async () => {
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ purged: true, erase_after: "2026-10-07T12:00:00Z" }), {
-        status: 202,
-      }),
-    );
-    expect(await deleteOrganizationAction(ORGANIZATION, "123456")).toEqual({
-      ok: true,
-      eraseAfter: "2026-10-07T12:00:00Z",
-      purged: true,
-    });
-  });
-
   it("surfaces auth's refusal and leaves everything as it was", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 403 }));
     expect(await deleteOrganizationAction(ORGANIZATION, "123456")).toEqual({ error: "problem" });

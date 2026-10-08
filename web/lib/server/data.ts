@@ -9,7 +9,6 @@ export {
   getServerContext,
 } from "./entities/organization";
 export type {
-  DeletedOrganization,
   IncomingInvite,
   Membership,
   OrganizationEntry,

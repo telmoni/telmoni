@@ -7,7 +7,6 @@
 //! telmoni sweep <deletion|audit-verify|retention|agent-reindex>
 //!                                    one sweep, once; exit
 //! telmoni terminate <org_id>         an operator closes an organization
-//! telmoni restore <org_id>           an operator brings one back
 //! ```
 //!
 //! Every command reads the same environment (`.env` on a laptop). `serve`
