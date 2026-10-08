@@ -1,0 +1,264 @@
+---
+title: "Telmoni CLI"
+description: "Installing and using the official Telmoni command-line tool (telmoni): device authentication, CI login, status, organizations, and configuration."
+---
+
+The Telmoni CLI (`telmoni`) is the official command-line interface for interacting with Telmoni from your terminal, scripts, and CI/CD pipelines.
+
+## Installation
+
+<Tabs items={['Shell installer (macOS & Linux)', 'From source (Rust / Cargo)']}>
+  <Tab value="Shell installer (macOS & Linux)">
+    Install the latest release binary:
+
+    ```console
+    $ curl -fsSL https://raw.githubusercontent.com/telmoni/telmoni-cli/main/install.sh | sh
+    ```
+
+    The installer downloads the release archive for your platform, checks it against the release's `SHA256SUMS`, and installs `telmoni` into `/usr/local/bin` when that directory is writable or the installer runs as root, and into `~/.local/bin` otherwise. `https://telmoni.com/install.sh` redirects to the latest release's copy of the same script. `TELMONI_INSTALL_DRY_RUN=1` prints the download, extract, mkdir, mv and chmod commands instead of running them. To pin a version or choose the directory, set `TELMONI_VERSION` or `TELMONI_INSTALL_DIR`. The installer goes through `sudo` or `doas` to create a directory that does not exist yet, the default `~/.local/bin` included, and to write into one your user cannot write to:
+
+    ```console
+    $ curl -fsSL https://raw.githubusercontent.com/telmoni/telmoni-cli/main/install.sh | TELMONI_VERSION=0.0.1 TELMONI_INSTALL_DIR=/usr/local/bin sh
+    ```
+
+    Release binaries are built for Apple silicon macOS and x86_64 Linux; the Linux binary links against glibc. On an Intel Mac or ARM64 Linux the installer stops, and on a musl-based system such as Alpine its binary does not run, so you build from source instead.
+
+    Each release's archives and `install.sh` carry build provenance signed through Sigstore, which the GitHub CLI checks a download against:
+
+    ```console
+    $ gh attestation verify telmoni-linux-x86_64.tar.gz --repo telmoni/telmoni-cli
+    ```
+  </Tab>
+  <Tab value="From source (Rust / Cargo)">
+    Compile and install with the Rust toolchain (Rust 1.98.1 or later). The repository holds more than one package, so the command names the CLI's:
+
+    ```console
+    $ cargo install --git https://github.com/telmoni/telmoni-cli.git --locked telmoni-cli
+    ```
+
+    Or from a local clone of the repository:
+
+    ```console
+    $ cd telmoni-cli
+    $ cargo install --path . --locked
+    ```
+  </Tab>
+</Tabs>
+
+Verify the installation by checking the version:
+
+```console
+$ telmoni --version
+telmoni 0.0.1
+```
+
+---
+
+## Authentication
+
+### 1. Interactive login (Browser & Device Code)
+
+For local development machines, authenticate using the interactive device authorization flow ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)):
+
+```console
+$ telmoni login
+```
+
+The CLI prints a one-time code and the address of the console's device page (`/auth/device`), then opens that page in your browser with the code filled in. It opens the page only when the address is on the endpoint it signs in to; a deployment whose console answers at another address gets `note: the verification page is not on <endpoint>; open it yourself` instead. For headless environments or SSH sessions where a browser cannot be opened, add `--no-browser`:
+
+```console
+$ telmoni login --no-browser
+```
+
+To authenticate against a self-hosted Telmoni instance, supply the `--endpoint` flag (or set `TELMONI_ENDPOINT`):
+
+```console
+$ telmoni login --endpoint https://telmoni.example.com
+```
+
+The endpoint must use HTTPS unless it is this machine (`localhost` or a loopback address): the CLI refuses to send credentials over plain HTTP to any other host. An endpoint given without a scheme gets `https://`, or `http://` for this machine. The CLI follows no redirects, and gives up on a request after 30 seconds.
+
+1. Open the printed address in a browser, on any machine. If you are not signed in to the console there, it asks you to sign in first and returns you to the page.
+2. Check that the code on the page is the one in your terminal. The page the CLI opened already carries it; otherwise, type it in.
+3. Select **Approve**.
+4. The CLI, which has been polling for the decision every five seconds, saves its credentials and prints the address you signed in as and your active organization, which starts as your [default organization](/docs/account/settings#default-organization). The code is good for ten minutes: one nobody approves in time, or that the page's **Deny** refuses, ends `login` with an error, and you run it again.
+
+Your CLI session appears under **Active sessions** on your account's **Privacy** page (`/account/privacy`), labeled by operating system, such as `Telmoni CLI (macOS)`. Ending the session there ends the CLI's: the next command that calls the server, such as `status`, is refused, and the CLI removes its saved credentials. Signing in again, with the browser or a key, replaces the saved credentials without ending the earlier session, which stays under **Active sessions** until it is ended there, or by a password reset or an email change, which end every session; run `telmoni logout` first to end it.
+
+### 2. Programmatic & CI login (API key)
+
+For headless build systems, GitHub Actions, Docker containers, and background automation, authenticate non-interactively using an [API key](/docs/api/api-keys):
+
+```console
+$ telmoni login --key telmoni_your_api_key_here
+```
+
+When `--key` is not given, `telmoni login` takes the key from the `TELMONI_API_KEY` environment variable:
+
+```console
+$ export TELMONI_API_KEY="telmoni_..."
+$ telmoni login
+```
+
+`login` checks only the key's shape (the `telmoni_` prefix with something after it, and no whitespace) and saves it with the endpoint. It does not call the server, so a wrong key is refused by the first command that uses it. Later commands read the key from the saved credentials, not from the variable.
+
+A key opens the [API](/docs/api/reference) and nothing else. With a key, `status` is the one command that calls the server; the `org` commands need a browser session.
+
+---
+
+## Checking session status
+
+To verify your active identity and selected organization context:
+
+```console
+$ telmoni status
+```
+
+`telmoni whoami` is the same command under another name. With a browser session, it prints:
+
+- the address you are signed in as, with your display name when you have one;
+- the active organization: its name, its ID and your role in it;
+- how many organizations you belong to;
+- the endpoint the session belongs to;
+- how many minutes the access token has left.
+
+With an API key, it asks `GET /v1/organization` and prints the ID and name of the key's organization, then the endpoint. Signed out, it prints the endpoint it would sign in to and exits with an error.
+
+With a browser session, `status` also saves the organizations the server answered. If you are no longer in the saved active organization, it replaces it with your [default organization](/docs/account/settings#default-organization), whether or not `TELMONI_ORG` is set.
+
+### JSON output for automation
+
+Add `--json` to produce machine-readable output suitable for `jq` or scripting:
+
+```console
+$ telmoni status --json
+```
+
+With a browser session, the object holds:
+
+| Field | Value |
+|---|---|
+| `authType` | `device` |
+| `endpoint` | The endpoint the session belongs to |
+| `person` | An object: `userId`, `email` and `displayName` |
+| `activeOrganization` | An object: `organizationId`, `slug`, `label` and `role`; `null` when there is none |
+| `organizationCount` | How many organizations you belong to |
+| `tokenExpiresInSecs` | Seconds until the access token expires |
+
+With an API key, it holds `authType` (`api_key`), `endpoint`, and `organization`: an object of `organizationId`, `slug` and `label`. Signed out, `status --json` prints nothing and exits with an error.
+
+---
+
+## Managing organizations
+
+If your account belongs to multiple organizations, use the `org` subcommand to list them and to choose the one the CLI acts in.
+
+### List organizations
+
+```console
+$ telmoni org list
+```
+
+The list has one line per organization: its ID, its slug, its name and your role, with `*` marking the active one. It is the list the CLI saved the last time `login`, `status` or `org switch` asked the server; `org list` itself sends no request.
+
+### Switch active organization
+
+Switch the organization that future commands act in:
+
+```console
+$ telmoni org switch acme
+```
+
+The argument is the organization's ID (`org_...`) or its slug (the first segment of its console URL), matched exactly; a name is not accepted. The CLI looks it up in the list it saved, so one that list does not hold is refused before any request. It then asks the server for your organizations again and saves the answer. It refuses when you are no longer in the organization, or when a [URL change](/docs/workspace/organizations-and-projects#name-and-url) has moved the slug off it; otherwise it saves the organization as the active one and prints it.
+
+To act in another organization for a single command without changing the active one, set `TELMONI_ORG` to its ID or slug. With a browser session, `status` (`whoami`) and `logout` read it; with an API key, they ignore it. Like `org switch`, they look it up in the list the CLI saved and refuse one that list does not hold before any request (`TELMONI_ORG names no organization in the cached list; run telmoni status without it to refresh the list`); a refused `logout` keeps the credentials:
+
+```console
+$ TELMONI_ORG=acme telmoni status
+```
+
+**A script should carry the ID.** Changing an organization's URL moves its slug (a rename does not), and the CLI looks a slug up in the list it saved without asking the server first. The first `status` after a URL change checks the slug against the server's answer, fails rather than report on another organization, and saves the new list; from then on the old slug names whichever of your organizations goes by it now, if any. `telmoni org list` shows the slugs the CLI last saved.
+
+---
+
+## CLI Configuration
+
+The CLI stores local preferences in `config.json`, in the same directory as the [credentials file](#credential-storage-paths).
+
+```console
+$ telmoni config list
+```
+
+To point `telmoni login` at a self-hosted Telmoni instance:
+
+```console
+$ telmoni config set endpoint https://telmoni.internal.company.com
+```
+
+To read back a configuration key:
+
+```console
+$ telmoni config get endpoint
+```
+
+### Configuration keys reference
+
+| Key | Description | Default |
+|---|---|---|
+| `endpoint` | The Telmoni server URL `telmoni login` signs in to | `https://telmoni.com` |
+| `output_format` | Accepted and stored. No command reads it: use `--json` for JSON output. | None (`config list` shows `(default: text)`) |
+
+`config set` checks the key, not the value.
+
+---
+
+## Global options
+
+| Option | Description |
+|---|---|
+| `-v`, `--verbose` | Log to stderr the credentials file the CLI read and wrote (and a missing configuration file), where its endpoint came from, the sign-in and refresh steps it takes, each request's method, address and organization, and each answer's status and content type; no header or body is logged. |
+| `-h`, `--help` | Print help information |
+| `-V`, `--version` | Print version information (`telmoni --version`, before any subcommand) |
+
+---
+
+## Environment variables
+
+The CLI reads the following environment variables:
+
+| Variable | Description |
+|---|---|
+| `TELMONI_ENDPOINT` | The endpoint `telmoni login` signs in to (default: `https://telmoni.com`). It comes after `--endpoint` and ahead of the `endpoint` configuration key. A saved session keeps the endpoint it signed in to. |
+| `TELMONI_API_KEY` | The API key `telmoni login` uses when `--key` is not given, for CI/CD runs. No other command reads it. |
+| `TELMONI_ORG` | With a browser session, the organization `status`, `whoami` and `logout` act in instead of the active one, by ID or slug, from the list the CLI saved. A script should give the ID, which nothing moves. |
+
+Its requests also go through a proxy named by the system proxy variables
+(`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` and `NO_PROXY`), which its HTTP
+library reads.
+
+---
+
+## Logging out & credentials security
+
+To end your CLI session and remove the saved credentials:
+
+```console
+$ telmoni logout
+```
+
+With a browser session, this command:
+1. Asks the Telmoni server to revoke the session.
+2. Removes the local credentials file, whatever the server answered. If the server did not confirm, the CLI says so and tells you to end the session from **Active sessions** in the console.
+
+With an API key, it only removes the file. The key itself stays valid until it expires or you [revoke it](/docs/api/api-keys#revoking-a-key).
+
+### Credential storage paths
+
+The credentials file is written with `0600` permissions (readable and writable only by your OS user) and is not encrypted:
+
+- **macOS**: `~/Library/Application Support/telmoni/credentials.json`
+- **Linux**: `$XDG_CONFIG_HOME/telmoni/credentials.json`, which is `~/.config/telmoni/credentials.json` when `XDG_CONFIG_HOME` is not set
+
+Where that directory cannot be found, such as on a machine with no home directory, the CLI stops with an error rather than keep credentials anywhere else. The file is written as a sibling created with `0600` and renamed over the old one, so a crash mid-write leaves the previous file whole. A directory the CLI creates to save credentials in is `0700`; one that already exists, such as one `telmoni config set` created first, keeps its permissions.
+
+A credentials file the CLI cannot read counts as signed out: the CLI says `note: the saved credentials cannot be read; sign in again` on stderr, and `telmoni login` writes a new file.

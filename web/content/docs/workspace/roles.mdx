@@ -1,0 +1,97 @@
+---
+title: "Roles and permissions"
+description: "The role model in Telmoni: organization roles, project roles, what each allows, and what a permission refusal tells you."
+---
+
+Permissions in Telmoni are governed by three roles: **Owner**, **Admin**, and
+**Member**. Roles operate at two levels: across the **Organization** and within
+individual **Projects**.
+
+## Organization roles
+
+An organization role governs the organization's management: creating projects, managing
+organization settings, invite authority, and organization-wide audit logs.
+
+| Permission | Owner | Admin | Member |
+|---|---|---|---|
+| Open the organization's Settings and Projects pages | Yes | Yes | No |
+| Create new projects | Yes | Yes | No |
+| Delete projects | Yes | No | No |
+| Manage organization settings and rename | Yes | Yes | No |
+| Manage organization members and invites | Yes | Yes | No |
+| View the organization's roster and invitations | Yes | Yes | No |
+| View rolled-up organization audit log | Yes | Yes | No |
+| Transfer organization ownership | Yes | No | No |
+| Delete organization | Yes | No | No |
+
+- **Owner**: Full access to the organization and all its projects. Can create and
+  delete projects, manage settings, invite and remove members, view rolled-up
+  audit logs, transfer ownership to an Admin, or delete the organization.
+- **Admin**: Administrative access across the organization. Can create projects,
+  manage settings, invite members, view rolled-up audit logs, and acts with
+  admin authority in every project. Cannot delete projects, transfer ownership,
+  or delete the organization.
+- **Member**: Default role for invited members. Has no organization-wide
+  management authority. Access is limited strictly to the projects they have
+  been seated in, governed by their project role.
+
+An organization role is a floor no project seat lowers: the Owner is Owner on
+every project, and an Admin is Admin on every project, whatever seat they also
+hold. An organization Member's standing on a project is their seat alone, and
+no seat grants anything on the organization, though a project invitation a
+project Admin sends does put the person it seats on the organization's roster
+as a **Member**.
+
+## Project roles
+
+Inside each project, a project role decides what you can do with project
+resources: API keys, connectors, and project audit events.
+
+| Permission | Owner | Admin | Member |
+|---|---|---|---|
+| View project overview and resources | Yes | Yes | Yes |
+| View API keys (names and dates, never the raw key) | Yes | Yes | Yes |
+| Create, rotate, and revoke API keys | Yes | Yes | No |
+| View connectors and delivery logs | Yes | Yes | Yes |
+| Create, test, update, and disconnect connectors | Yes | Yes | No |
+| Rotate webhook secrets, resend deliveries | Yes | Yes | No |
+| View project members | Yes | Yes | Yes |
+| Invite members to project, change project roles | Yes | Yes | No |
+| Read project audit log | Yes | Yes | **No** |
+| Update project settings and rename | Yes | Yes | No |
+| Transfer project to another organization | Yes | No | No |
+| Delete project | Yes | No | No |
+
+- **Owner**: Full control over the project, including project deletion and
+  transferring the project to another organization. The organization Owner holds
+  Owner privileges across all projects in the organization.
+- **Admin**: Operates the project: creates, rotates, and revokes API keys;
+  manages Slack, Discord, and webhook connectors; manages project seats; and
+  reads the project audit log. Cannot delete or transfer the project.
+- **Member**: Read-only access to project resources. Can inspect active
+  connectors, delivery logs, and API key metadata (name, creation date, last
+  used date). Cannot view the project audit log and cannot mutate any resources.
+
+## What a refusal tells you
+
+When you attempt an action your role does not allow, the API and console refuse
+the request with a `403 Forbidden` problem document. A project's members and
+invitations, and its rename and deletion, answer
+`/errors/authz/insufficient-role`, and `detail` names the least role that would
+do and the one you hold:
+
+```json
+{
+  "type": "/errors/authz/insufficient-role",
+  "title": "insufficient role",
+  "status": 403,
+  "detail": "required admin, have member"
+}
+```
+
+Every other refusal answers `/errors/authz/forbidden`, and `detail` says what
+is refused and to whom: API keys, connectors and the audit log (decided by the
+same role matrix), an organization's name and URL, the console agent, creating
+a project, the organization's roster, its deletion and transfer, a
+project's transfer and, on the hosted service, billing. The server checks every
+request against the caller's roles; nothing is left to the browser.

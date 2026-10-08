@@ -1,6 +1,6 @@
 # Architecture
 
-How Telmoni is built, and why. These pages are for people and agents changing the code. What the product does for a customer is documented in [`telmoni/docs`](https://github.com/telmoni/docs).
+How Telmoni is built, and why. These pages are for people and agents changing the code. What the product does for a customer is documented in the console's own book, `web/content/docs`, served at `/docs`.
 
 Telmoni is a multi-tenant foundation. It provides:
 - organizations and projects;
@@ -143,4 +143,4 @@ deploy/           charts/telmoni (GKE), compose (self-host)
 - **Name the constant, don't copy the value.** Pages name tunables (`TURN_BUDGET`, `FEED_RETENTION_DAYS`) and the file that holds them, so a changed value cannot leave a page wrong.
   - Contract values (the vector width, the default port, the golden vectors) live in code and tests. The customer docs copy those, not these pages.
 - **Say why.** A rule worth writing down here is one whose reason is not obvious from the code: what broke, or what would break. The ⚠ comments in the source are where most of these come from.
-- **Features belong in the customer docs.** These pages explain how the code works and why; [`telmoni/docs`](https://github.com/telmoni/docs) explains what the product does.
+- **Features belong in the customer docs.** These pages explain how the code works and why; `web/content/docs`, served at `/docs`, explains what the product does.

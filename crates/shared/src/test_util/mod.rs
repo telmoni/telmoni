@@ -56,36 +56,52 @@ pub fn project_root() -> std::path::PathBuf {
         .to_path_buf()
 }
 
-/// A page of the customer documentation site, by its path under
-/// `src/content/docs/` (`"errors.mdx"`), read from a checkout inside this
-/// repository or beside it (`../docs`).
+/// A page of the customer documentation, by its path under the book
+/// (`"errors.mdx"`, `"workspace/billing.mdx"`): the console's own
+/// `web/content/docs`. Cargo names the package under test when it runs it, so
+/// a repository built on this one reads its own pages first, the ones it lays
+/// over the console, and this repository's for the rest.
 ///
-/// `None` only when no docs site is here at all, so a test holding the code
-/// to a page passes vacuously where the site is not checked out, as in CI.
-/// ⚠ **A site that is here but lacks the page panics.** That is a page that
-/// moved, and answering `None` for it once let a test check nothing for as
-/// long as its page lived somewhere else.
+/// ⚠ **A page the book lacks panics.** That is a page that moved, and passing
+/// over it once let a test check nothing for as long as its page lived
+/// somewhere else.
 #[must_use]
 #[expect(
     clippy::panic,
-    reason = "a docs site that lacks the page is a failing test, not a skipped one"
+    reason = "a book that lacks the page is a failing test, not a skipped one"
 )]
-pub fn customer_docs_page(page: &str) -> Option<String> {
-    let root = project_root();
-    let site = std::iter::once(root.join("docs/src/content/docs"))
-        .chain(
-            root.parent()
-                .map(|parent| parent.join("docs/src/content/docs")),
-        )
-        .find(|dir| dir.is_dir())?;
-    let path = site.join(page);
-    Some(std::fs::read_to_string(&path).unwrap_or_else(|e| {
+pub fn customer_docs_page(page: &str) -> String {
+    let core = project_root();
+    // `project_root` is fixed when this crate is compiled, so it is this
+    // repository even under another's tests; the package under test is only
+    // known when the test runs.
+    let built_on_it = std::env::var_os("CARGO_MANIFEST_DIR")
+        .and_then(|manifest| {
+            let manifest = std::path::PathBuf::from(manifest);
+            Some(manifest.parent()?.parent()?.to_path_buf())
+        })
+        .filter(|root| *root != core);
+    let homes: Vec<std::path::PathBuf> = built_on_it
+        .into_iter()
+        .chain(std::iter::once(core))
+        .map(|root| root.join("web/content/docs"))
+        .collect();
+    let Some(path) = homes
+        .iter()
+        .map(|home| home.join(page))
+        .find(|path| path.is_file())
+    else {
         panic!(
-            "the docs site at {} has no {page} ({e}): the page moved, so point this test at \
-             its new path",
-            site.display()
-        )
-    }))
+            "no {page} under {}: the page moved, so point this test at its new path",
+            homes
+                .iter()
+                .map(|home| home.display().to_string())
+                .collect::<Vec<_>>()
+                .join(" or ")
+        );
+    };
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{} cannot be read: {e}", path.display()))
 }
 
 /// Recursively walks `dir` and calls `visit(path, content)` for each `.rs` file.

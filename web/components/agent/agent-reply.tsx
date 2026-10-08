@@ -48,7 +48,7 @@ function BlockView({ block, citations }: { block: Block; citations: AgentCitatio
     }
     case "code":
       return (
-        <pre className="overflow-x-auto rounded-menu bg-muted px-3 py-2 font-mono text-xs">
+        <pre className="overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-xs">
           <code>{block.text}</code>
         </pre>
       );
@@ -87,7 +87,7 @@ function InlineView({ node, citations }: { node: Inline; citations: AgentCitatio
       );
     case "link":
       return (
-        <SafeLink href={node.href} external={node.external}>
+        <SafeLink href={node.href}>
           <Inlines nodes={node.children} citations={citations} />
         </SafeLink>
       );
@@ -97,7 +97,7 @@ function InlineView({ node, citations }: { node: Inline; citations: AgentCitatio
       if (!source || !target) return `[${node.index}]`;
       return (
         <sup>
-          <SafeLink href={target.href} external={target.external} label={`Source ${node.index}: ${source.title}`}>
+          <SafeLink href={target} label={`Source ${node.index}: ${source.title}`}>
             [{node.index}]
           </SafeLink>
         </sup>
@@ -106,27 +106,23 @@ function InlineView({ node, citations }: { node: Inline; citations: AgentCitatio
   }
 }
 
-// Only ever handed an href allowedHref passed. A console path is a client
-// navigation, so the panel stays open over the page it links to; the docs
-// open in a tab of their own.
+// Only ever handed an href allowedHref passed: a console path, so it is a
+// client navigation, and the panel stays open over the page it links to.
 export function SafeLink({
   href,
-  external,
   label,
   children,
 }: {
   href: string;
-  external: boolean;
   label?: string;
   children: React.ReactNode;
 }) {
-  const className = "text-primary underline underline-offset-2 hover:no-underline";
-  return external ? (
-    <a href={href} target="_blank" rel="noopener noreferrer" aria-label={label} className={className}>
-      {children}
-    </a>
-  ) : (
-    <Link href={href} aria-label={label} className={className}>
+  return (
+    <Link
+      href={href}
+      aria-label={label}
+      className="text-primary underline underline-offset-2 hover:no-underline"
+    >
       {children}
     </Link>
   );
@@ -144,7 +140,7 @@ export function Sources({ citations }: { citations: AgentCitation[] }) {
             <li key={c.index} className="flex gap-1.5">
               <span className="shrink-0 text-muted-foreground">[{c.index}]</span>
               {target ? (
-                <SafeLink href={target.href} external={target.external}>
+                <SafeLink href={target}>
                   {c.title}
                 </SafeLink>
               ) : (

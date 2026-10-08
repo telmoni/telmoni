@@ -1,5 +1,3 @@
-import { DOCS_URL } from "@/lib/site";
-
 /**
  * The agent's replies, parsed into nodes the panel maps to React elements.
  *
@@ -9,7 +7,7 @@ import { DOCS_URL } from "@/lib/site";
  * put there. So `<script>` stays text (React escapes it), an image is its own
  * literal source rather than an `<img>` whose URL would carry a query string
  * out the moment it rendered, and a link survives only when it points into
- * the console or at the docs. Everything else is text a person can read and
+ * the console, its docs included. Everything else is text a person can read and
  * choose not to follow.
  */
 
@@ -18,7 +16,7 @@ export type Inline =
   | { type: "code"; text: string }
   | { type: "strong"; children: Inline[] }
   | { type: "em"; children: Inline[] }
-  | { type: "link"; href: string; external: boolean; children: Inline[] }
+  | { type: "link"; href: string; children: Inline[] }
   | { type: "citation"; index: number };
 
 export type Block =
@@ -27,18 +25,14 @@ export type Block =
   | { type: "list"; ordered: boolean; start: number; items: Inline[][] }
   | { type: "code"; lang: string | null; text: string };
 
-// `null` when the href may not be a link. A console path is same-origin only
-// when it cannot be read as a host: `//evil.example` is protocol-relative, and
-// browsers read `\` as `/`, so `/\evil.example` is too.
-export function allowedHref(raw: string): { href: string; external: boolean } | null {
+// `null` when the href may not be a link: only a console path is one, the
+// docs' paths included, since the agent's corpus cites them as paths. A path
+// is same-origin only when it cannot be read as a host: `//evil.example` is
+// protocol-relative, and browsers read `\` as `/`, so `/\evil.example` is too.
+export function allowedHref(raw: string): string | null {
   const href = raw.trim();
   if (href === "" || /[\s\\\u0000-\u001f\u007f]/.test(href)) return null;
-  if (href.startsWith("/") && !href.startsWith("//")) {
-    return { href, external: false };
-  }
-  if (href === DOCS_URL || href.startsWith(`${DOCS_URL}/`)) {
-    return { href, external: true };
-  }
+  if (href.startsWith("/") && !href.startsWith("//")) return href;
   return null;
 }
 
@@ -192,9 +186,9 @@ export function parseInline(source: string, inLink = false): Inline[] {
     if (ch === "[") {
       const link = LINK.exec(rest);
       if (link && !inLink) {
-        const allowed = allowedHref(link[2]!);
-        if (allowed) {
-          pushNode({ type: "link", ...allowed, children: parseInline(link[1]!, true) });
+        const href = allowedHref(link[2]!);
+        if (href) {
+          pushNode({ type: "link", href, children: parseInline(link[1]!, true) });
         } else {
           pushText(link[0]);
         }

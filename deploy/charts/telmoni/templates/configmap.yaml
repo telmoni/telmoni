@@ -34,6 +34,6 @@ data:
   EMBEDDINGS_REQUEST_DIMENSIONS: {{ .embeddingsRequestDimensions | quote }}
   RERANK_URL: {{ .rerankUrl | quote }}
   RERANK_MODEL: {{ .rerankModel | quote }}
-  DOCS_CORPUS_URL: {{ .docsCorpusUrl | quote }}
+  DOCS_CORPUS_URL: {{ .docsCorpusUrl | default "http://web:3000/llms-full.txt" | quote }}
   AGENT_MESSAGES_PER_HOUR: {{ .messagesPerHour | quote }}
   {{- end }}

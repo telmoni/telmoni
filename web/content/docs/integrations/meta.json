@@ -1,0 +1,5 @@
+{
+  "title": "Notifications",
+  "defaultOpen": true,
+  "pages": ["notifications", "slack-and-discord", "webhooks", "..."]
+}

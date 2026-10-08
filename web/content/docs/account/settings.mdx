@@ -1,0 +1,99 @@
+---
+title: "Account settings"
+description: "Your name as sign-in recorded it, changing your account email address, resetting your password, your default organization, and interface preferences."
+---
+
+Your account's **Settings** page (`/account/settings`) manages your personal
+account: your credentials, and the organization a sign-in opens. These
+settings belong to your identity alone and apply across all organizations you
+belong to.
+
+## Profile
+
+The **Profile** card shows your **Name**, **Email**, **Sign-in method** (when
+your sign-in reported one, which a self-hosted OpenID Connect sign-in does
+not), and **User ID**, with a copy button on the ID. With no name on your
+account, **Name** shows the part of your address before the `@`. The name is
+the one you gave at sign-up, or the one your identity provider sends with each
+sign-in; the console has no field to change it. It appears on your member row
+and on the invitations you send; the audit log records your user ID. Your
+first sign-in named your organization after its first word ("Ada's
+organization"), or "My organization" when you had none; a different name at a
+later sign-in does not rename it.
+
+## Changing your email address
+
+The **Email** and **Password** sections appear for an account that signs in
+with an email address and a password: a password account on a self-hosted
+deployment or, on the hosted service, an account that signs in to its identity
+provider with a password. An account that signs in any other way, such as
+single sign-on, changes its address with its identity provider, and the
+sections do not appear.
+
+Updating your email requires two 6-digit verification codes:
+
+1. Enter the new email address; the one already on your account is refused.
+2. Two 6-digit codes are sent:
+   - One to your **current** email address.
+   - One to your **new** email address.
+3. Enter both verification codes into the console. Both codes expire after
+   **15 minutes**, and five wrong guesses burn them; **Resend codes** issues a
+   new pair, and **Use a different address** starts over. Codes can be
+   requested five times a day and three times an hour, **Resend codes**
+   included. On the hosted service, the new address's code comes from its
+   identity provider and follows that provider's expiry and attempt limits.
+
+On a self-hosted deployment, an address another account already holds is
+refused with a `409` when you ask for the codes, and again at confirmation if
+another account took it in the meantime. On the hosted service, its identity
+provider decides whether the address is free.
+
+When the email update succeeds:
+- **All active sessions are terminated immediately** (including the current
+  session). You must sign in again with your new email address.
+- On a self-hosted deployment, the new address is recorded as verified: the
+  code it received is the proof. On the hosted service, it is recorded as its
+  identity provider reports it.
+- Any pending deletion codes or sensitive confirmation codes issued to the old
+  email address are invalidated.
+
+## Resetting your password
+
+Select **Email me a password reset link**. On a self-hosted deployment, a
+single-use link valid for **60 minutes** is emailed to you, at most five a
+day. Using it ends all existing sessions, updates the stored Argon2id password
+hash, and records your address as verified, since the link came from it.
+
+On the hosted service, the link comes from its identity provider, which holds
+the password, and follows that provider's rules; using it does not end your
+Telmoni sessions.
+
+## Default organization
+
+The **Default organization** section names the organization a sign-in opens:
+signing in lands on its **Overview** (`/{organization}`), unless a page sent you
+to sign in, which it returns you to. A `telmoni login` through the browser
+saves the same organization as the [CLI's](/docs/api/cli) active one. To change
+it, choose another of the organizations you belong to and select **Save**; the
+choice is recorded in that organization's [audit log](/docs/workspace/audit-log).
+
+Until you choose one, the default is the first organization you joined among
+those you own or, if you own none, the first you joined. A choice belongs to
+your membership, not to the organization:
+
+- Leaving the organization, or being removed from it, clears the choice, and
+  the default falls back as above. Joining it again does not restore it.
+- While the organization waits out its deletion, it is passed over, and it is
+  your default again if it is restored.
+
+## Interface preferences
+
+The user menu in the console header sets display preferences, which this
+browser keeps:
+
+- **Theme**: Select **System theme** (synchronizes with your operating system's
+  appearance), **Light theme**, or **Dark theme**.
+- **Corners**: Choose **Rounded corners** or **Sharp corners** for the console.
+- **Keyboard shortcuts**: Select **Keyboard shortcuts** from the user menu, or
+  press `?` while single-key shortcuts are on, to see the shortcuts and switch
+  single-key navigation on or off.

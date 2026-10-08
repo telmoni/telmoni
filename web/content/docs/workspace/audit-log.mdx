@@ -1,0 +1,78 @@
+---
+title: Audit Log
+description: The append-only, hash-chained record of changes in an organization and its projects, who can read it, what it records, and how it is kept.
+---
+
+The audit log records changes made within your organization and its projects: an append-only, chronologically ordered ledger of who did what, and when.
+
+## Accessing the audit log
+
+Audit logs are read in the web console:
+- **Organization audit log**: the organization's **Audit log** page (`/{organization}/audit-log`). It holds every event in the organization, its projects' included. Open to the organization's **Owner** and **Admins**.
+- **Project audit log**: the project's **Audit log** page (`/{organization}/{project}/audit-log`), with the events written inside that project in its current organization: after a [transfer](/docs/workspace/organizations-and-projects#transferring-a-project), its earlier events stay in the old organization's log. Open to the project's **Owner** and **Admins**. A project **Member** cannot read it.
+
+Each page shows the latest 100 events. The [console agent](/docs/self-host/agent) reads the same events with its `audit_events` tool, under the same roles, without the email addresses their details record.
+
+---
+
+## Logged events
+
+Telmoni records changes to organizations, projects, members, API keys, sessions, and connectors:
+
+| Category | Events |
+| :--- | :--- |
+| **Organization** | Creation, renames and URL changes, ownership transfers, deletion requests, and restorations. |
+| **Members** | Invitations sent, accepted, declined, and withdrawn; role changes; removals and departures. |
+| **API keys** | Creation, rotation, and revocation. |
+| **Sessions** | A session ended from the **Active sessions** panel, and a CLI session ended by `telmoni logout`, recorded in the organization the CLI was acting in. |
+| **Connectors** | Slack, Discord, and webhook connections made (a reconnection is noted as one), a webhook's events or signing secret changed, manual resends, **Disconnect**, and a Slack app's removal from its workspace. A connection Telmoni retires itself (a `410`, ten failed sends, a vendor's refusal) is not recorded. |
+| **Projects** | Creation, deletion, and transfers, which both organizations' logs record. |
+| **Account** | Email address changes and analytics consent changes, recorded in the organization you were working in, and the choice of a [default organization](/docs/account/settings#default-organization), recorded in the organization chosen. |
+
+Sign-ins, signing out of the console, password changes, project renames, and connector test sends are not recorded.
+
+---
+
+## Event structure
+
+Every audit log entry carries:
+
+- **Actor**: The user ID of the person who acted. The platform's own routines act as `service:operator` (an operator's termination of an organization) or `service:deletion-saga` (the memberships an account deletion removes), and a change made from Slack's side as `external:slack`.
+- **Action**: One of `created`, `updated`, or `deleted`.
+- **Resource**: The kind of thing acted on (`organization`, `project`, `member`, `token`, which the console shows as **API key**, `session`, or `connector`) and its identifier, and the project it was written inside, if any.
+- **Details**: Metadata specific to the event, such as the name given or the role granted. The console's **Details** switch shows it under **Changed**, with the project the event was written inside, the request's id when one was recorded, and the row's hash.
+- **Timestamp**: Taken in UTC when the event was written, inside the transaction that made the change. The console shows it in your local time.
+
+Entries are ordered chronologically, newest first.
+
+## Cryptographic hash chaining and integrity verification
+
+Telmoni uses cryptographic hash chaining across audit log rows:
+
+- Each audit log row carries a SHA-256 hash over its id, organization, actor,
+  action, resource, project, details and timestamp, and the hash of the
+  preceding row, forming one chain per organization. The request id shown
+  under **Details** is recorded outside the hash.
+- Audit rows are written inside the transaction that applies the change: if the
+  change fails or rolls back, no audit entry is written.
+- In a deployment with the hardened database roles, the services can insert and
+  read `audit.events` but neither update nor delete it.
+- A verification sweep walks each organization's chain every 24 hours inside
+  `telmoni serve` (unless `RUN_SWEEPS=false`). It recomputes each row's hash
+  and checks its link to the row before it, up to the first break in a chain,
+  which it reports in the server log. On a self-hosted deployment, the
+  operator's `telmoni sweep audit-verify` runs it on demand, or on the
+  operator's own schedule when `RUN_SWEEPS=false`.
+
+## Retention
+
+The platform never deletes audit rows. The table is partitioned into monthly
+tables by `created_at`, and `telmoni rotate` creates the current month's
+partition and the next three ahead of time and drops none. The 730-day window
+for audit events governs only how long the console agent's index keeps its
+copies of them. An organization's chain also outlives the organization's
+deletion.
+
+For self-hosted instances, retention is therefore bounded by your database and
+its backups. See [Production](/docs/self-host/production#audit-log-partition-rotation)
+for scheduling `telmoni rotate`.

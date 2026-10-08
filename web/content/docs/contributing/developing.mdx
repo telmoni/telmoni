@@ -1,0 +1,73 @@
+---
+title: "Developing"
+description: "Running and checking each Telmoni repository on your machine: the platform with these docs in it, and the CLI and SDKs."
+---
+
+One page for the two repositories. The gates named here are what each repository's CI runs.
+
+## The platform
+
+[`telmoni/telmoni`](https://github.com/telmoni/telmoni): the server, the console, the Helm chart and the compose file.
+
+You need Rust at the version `rust-toolchain.toml` pins (`rustup` installs it on the first `cargo` run), Node at the version in `web/.nvmrc` with npm, and Docker for Postgres with `pgvector`, Redis, Mailpit and, on request, Ollama. For `make ci` you also need `cargo install cargo-deny typos-cli`. `make doctor` checks that Rust, Node and npm, Docker with Compose and a running daemon, and `gh` are installed and that both env files exist; it checks no versions, and not `cargo-deny` or `typos`.
+
+```console
+$ make first-run
+$ make up
+```
+
+`make first-run` runs once: it copies `.env` and `web/.env.local` from their examples, installs dependencies, starts Postgres and runs the migrations. `make up` runs the stack: Postgres, Redis, Mailpit, the server on `:8082` and the console on `:3000`. `COMPOSE_PROFILES=ollama` in `.env` starts Ollama with it, and `make server-dev` and `make web-dev` run either process alone.
+
+- The console is at http://localhost:3000. Sign in with the password form; no identity provider is needed, and `OIDC_*` in `.env` adds one.
+- The server is at http://localhost:8082.
+- Mailpit is at http://localhost:8025, where every mail the server sends lands.
+
+`ALLOW_TEST_SESSION=true` also mounts `POST /test/session`, which is how the end-to-end tests sign in; a Kubernetes pod refuses to start with it.
+
+`.env` configures the server and `web/.env.local` the console; their examples, `.env.example` and `web/.env.local.example`, document the variables you set there. The checks:
+
+```console
+$ make check
+$ make lint
+$ make test
+$ make ci
+```
+
+`make check` is types, `cargo check`, fmt, clippy and rustdoc; `make lint` is eslint; `make test` is vitest and then `cargo test` against the local database; `make ci` is everything CI runs. `make fmt` formats the code rather than checking it.
+
+Nothing has shipped, so there are no migration paths. Each module owns one migration under `crates/<module>/migrations/`: edit it, then `make db-reset`. After a change to the wire contract, `make contract` regenerates `contract/`, and `web/lib/types/enums.ts` and `web/lib/slug.ts` follow until `contract.test.ts` passes.
+
+## The CLI and SDKs
+
+[`telmoni/telmoni-cli`](https://github.com/telmoni/telmoni-cli): `telmoni`, and the SDK scaffolds under `sdk/`.
+
+You need Rust at the version `rust-toolchain.toml` pins and `cargo install cargo-deny`. The SDK suites want Node and npm (TypeScript, after `npm ci --prefix sdk/typescript`), Go, and for Python a venv: `python3 -m venv sdk/python/.venv && sdk/python/.venv/bin/pip install -e "sdk/python[dev]"`.
+
+```console
+$ TELMONI_ENDPOINT=http://localhost:3000 cargo run -- login
+$ cargo run -- status
+```
+
+The first signs in to the platform's `make up`; `status` then reports on that session, whose endpoint it saved. A debug build also reads `TELMONI_ENDPOINT`, `TELMONI_API_KEY` and `TELMONI_ORG` from a `.env` in the working directory; a release build never does.
+
+```console
+$ cargo xtask ci
+$ npm test --prefix sdk/typescript
+$ (cd sdk/go && go test ./...)
+$ sdk/python/.venv/bin/pytest sdk/python
+```
+
+`cargo xtask ci` is the Rust gate CI runs: fmt, the toolchain check, clippy, build, test, doc and `cargo deny`. CI also checks the SDKs (TypeScript with `npm ci && npm run verify`, Python with `ruff check`, `ruff format --check`, `mypy` and `pytest`, Go with its tests) and lints its workflows with actionlint. `cargo xtask dist` packages this machine's binary as `dist/telmoni-<os>-<arch>.tar.gz`, with its `SHA256SUMS`; a release is an annotated `v*` tag whose version matches `Cargo.toml`, which `.github/workflows/release.yml` builds for both platforms and publishes with `install.sh` ([architecture/build.md](https://github.com/telmoni/telmoni-cli/blob/main/architecture/build.md)).
+
+## The docs
+
+These pages are the platform's, `web/content/docs` in [`telmoni/telmoni`](https://github.com/telmoni/telmoni): MDX that the console serves at `/docs` with [Fumadocs](https://fumadocs.dev), built and checked with the console, so a deployment serves the docs of the version it runs. What a page may say is the code's business: verify every claim against the platform or the CLI before writing it, and the billing, legal and subprocessors pages against the hosted service's own code. `make up` serves them at http://localhost:3000/docs with live reload.
+
+- A page is an `.mdx` file under `web/content/docs/`, with `title` and `description` in its frontmatter; the title is also its name in the sidebar.
+- Each folder's `meta.json` is the reading order, and the only place that holds it: a new page goes into its folder's `pages`, and the `...` at the end takes in the pages a console built on this one lays over the tree.
+- Links use the served path (`/docs/integrations/webhooks`), never a file path.
+- Shell blocks use the `console` fence with a `$ ` prompt, and show only output a host really produced.
+- Outside a code fence, a bare `<flag>` or `{param}` breaks the build, and HTML comments are invalid.
+- `web/content/docs/errors.mdx` stays where it is: the platform's `error_catalog.rs` test reads it from there.
+
+`npm run build` in `web/` compiles every page and fails on invalid MDX. The same pages are served as Markdown for a model, `/llms.txt` (the index) and `/llms-full.txt` (every page), which is the corpus the console agent indexes.

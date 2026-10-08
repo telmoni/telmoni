@@ -1,0 +1,5 @@
+{
+  "title": "Self-hosting",
+  "defaultOpen": true,
+  "pages": ["overview", "docker-compose", "kubernetes", "agent", "configuration", "production", "..."]
+}

@@ -1,0 +1,212 @@
+---
+title: Docker Compose Quickstart
+description: Run Telmoni on a single host with Docker Compose.
+---
+
+Docker Compose runs a Telmoni instance on a single host, to evaluate it or to serve a small company; it runs every module as one database user, without the per-module roles a [production](/docs/self-host/production) deployment gives them. That user is the database's superuser, which Row-Level Security does not bind, so the database itself does not keep organizations' rows apart here. The stack bundles PostgreSQL 17 with `pgvector`, Redis 7 Alpine, the automated database migrator, the Rust core backend server, and the Next.js web console.
+
+## Prerequisites
+
+Before starting, ensure your host has the following tools installed:
+- [Docker Engine](https://docs.docker.com/engine/install/) with the [Docker Compose](https://docs.docker.com/compose/install/) v2 plugin (`docker compose`)
+- `openssl`, to generate the secrets
+
+---
+
+## Deployment steps
+
+<Steps>
+
+<Step>
+
+**Obtain the Docker Compose configuration**
+
+Clone the Telmoni repository. The compose file works only inside the checkout: it bind-mounts `crates/migrator/sql/dev_extensions.sql` into Postgres's init directory, which creates the `vector` extension the agent's tables need when the database volume is first made.
+
+```bash
+git clone https://github.com/telmoni/telmoni.git
+cd telmoni
+```
+
+The compose file is `deploy/compose/docker-compose.yml`.
+
+</Step>
+
+<Step>
+
+**Generate secrets and configure environment variables**
+
+Compose reads `.env` from the compose file's directory. With `docker compose -f deploy/compose/docker-compose.yml`, the environment file is `deploy/compose/.env`. Create it from scratch with the keys shown below, not from the repository's root `.env.example`: that file is the development stack's, and points mail at a local Mailpit this stack does not run, turns the documentation corpus off, and names hosted model endpoints.
+
+```bash
+touch deploy/compose/.env
+```
+
+Three values have no default, and the stack does not start without them:
+- `SERVICE_SECRET`: A shared secret the web console sends to the backend server as the `x-service-secret` header on every internal call, compared in constant time.
+- `AUTH_SECRET`: A secret of 32 bytes or more used to seal and decrypt session cookies.
+- `POSTGRES_PASSWORD`: The password of the stack's one database user. A default in the compose file would be the same on every install.
+
+A fourth, `CONNECTOR_KEK`, seals connector secrets at rest. The server starts without it unless Slack or Discord credentials are configured, but no connector (webhooks included) is offered without it. It has no default: a key shipped in the compose file would be the same on every install, and a database dump would then open every connector's grant.
+
+Generate random values using `openssl`:
+
+```bash
+# Generate 32-byte hex strings
+openssl rand -hex 32
+```
+
+Update `deploy/compose/.env` with the generated values and set your initial administrator credentials:
+
+```sh
+# Secrets: the first three have no default, and the stack does not start without them
+SERVICE_SECRET=f3b9c7e2a1d4...    # Output from openssl rand -hex 32
+AUTH_SECRET=8e6a1c5d0f2b...       # Output from openssl rand -hex 32
+POSTGRES_PASSWORD=4c7d2e9f1a6b... # Output from openssl rand -hex 32
+CONNECTOR_KEK=local:9a1f...       # local: and the output of openssl rand -hex 32; a secret to back up
+
+# Public application URL: APP_URL and AUTH_URL change with your domain.
+# An AUTH_URL that is not an http:// loopback address (localhost,
+# 127.0.0.1, [::1]) must be https://, behind your TLS proxy
+APP_URL=http://localhost:3000
+AUTH_URL=http://localhost:3000
+
+# Proxies in front of the console that append the client's address to
+# X-Forwarded-For, which its per-address rate limits read. The compose
+# file's default is 1, for the TLS-terminating reverse proxy production
+# needs (Production → Reverse proxy configuration); 0 while the console
+# is reached directly, which leaves those limits to the caller's own header
+TRUSTED_PROXY_HOPS=1
+
+# Database settings: both default to telmoni when left out
+POSTGRES_USER=telmoni
+POSTGRES_DB=telmoni
+
+# Bootstrap initial administrator account (quickstart / setup only)
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=your_super_secret_admin_password
+ALLOW_SIGN_UP=false
+VERIFY_EMAIL=false
+```
+
+<Callout type="info">
+`ADMIN_EMAIL` and `ADMIN_PASSWORD` are intended **only for initial bootstrapping, local evaluation, and offline setups**. For production environments, we strongly recommend configuring an **OpenID Connect (OIDC)** identity provider and, once you have removed `ADMIN_EMAIL` and `ADMIN_PASSWORD`, disabling username/password logins via `DISABLE_LOGIN_FORM=true`. See [Production Hardening & OIDC](/docs/self-host/production#identity--authentication-production-oidc-hardening).
+</Callout>
+</Step>
+
+<Step>
+
+**Start the Telmoni stack**
+
+Run the compose file in detached mode:
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml up -d
+```
+
+Compose starts the services in dependency order:
+1. Starts `postgres` and `redis`, each published on the host's loopback interface only (`127.0.0.1:5432` and `127.0.0.1:6379`), and waits for their healthchecks.
+2. Once Postgres is healthy, runs the one-shot `migrate` container, which applies every schema's DDL and exits `0`. This quickstart runs every module as the one database user, which owns every table, so the object grants for separate roles are skipped with a note in its log.
+3. Starts the `server` container once `migrate` has exited `0`. It listens on port `8082` inside the compose network and publishes nothing to the host.
+4. Starts the `web` container once the server container has started (Compose does not wait for the server to answer) and Redis is healthy, publishing port `3000` on every interface of the host, unlike Postgres and Redis; keep it behind your firewall and TLS proxy.
+
+</Step>
+
+<Step>
+
+**Verify container status**
+
+Check running containers:
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml ps
+```
+
+Postgres and Redis run as `telmoni-postgres` and `telmoni-redis` (`pgvector/pgvector:pg17` and `redis:7-alpine`), and their healthchecks show them `(healthy)`. The `server` and `web` containers (and `ollama` when running with `--profile agent`) take the compose project's name, `telmoni-selfhost-<service>-1`, and run `ghcr.io/telmoni/server:latest` and `ghcr.io/telmoni/web:latest` (built for `linux/amd64` only). Each image is also tagged with the full SHA of the commit it was built from; `TELMONI_IMAGE_SERVER` and `TELMONI_IMAGE_WEB` in `deploy/compose/.env` pin one. They have no healthcheck, so they show `Up` alone. The server image's entrypoint is `/app/telmoni`, so its command reads `/app/telmoni serve`.
+
+The one-shot `migrate` container has exited by then, as `telmoni-selfhost-migrate-1` with `Exited (0)` and the command `/app/telmoni migrate`. It appears only when listing all containers:
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml ps -a
+```
+
+</Step>
+
+<Step>
+
+**Log in to the console**
+
+Open your browser and navigate to `http://localhost:3000`. Log in with the `ADMIN_EMAIL` and `ADMIN_PASSWORD` you configured in `deploy/compose/.env`. At your first login, Telmoni provisions your organization. The seeded account has no name, so the organization is called "My organization", and the console opens on its Overview at `http://localhost:3000/my-organization`, where you create the first project. Rename the organization, or change its URL, on its **Settings** page.
+
+</Step>
+
+</Steps>
+
+---
+
+## Enabling local AI agent search (optional)
+
+Telmoni includes an AI context agent with vector similarity search. You can run embeddings and chat inference on your own host with Ollama. Its models are downloaded from the internet once, by the pulls below. With the model and embeddings URLs below on the `ollama` service, and `DOCS_CORPUS_URL=off` (by default the server fetches this site's documentation to index it), every endpoint the agent calls is on the Compose network; the compose file passes no `RERANK_URL`.
+
+1. Start the stack with the `agent` profile:
+
+   ```bash
+   docker compose -f deploy/compose/docker-compose.yml --profile agent up -d
+   ```
+
+2. Pull the embedding model and the chat model into the persistent `ollama_models` volume:
+
+   ```bash
+   docker compose -f deploy/compose/docker-compose.yml exec ollama ollama pull nomic-embed-text
+   docker compose -f deploy/compose/docker-compose.yml exec ollama ollama pull llama3.2
+   ```
+
+3. Set the agent environment variables in `deploy/compose/.env`:
+
+   ```sh
+   AGENT_MODEL_PROVIDER=openai
+   AGENT_MODEL_URL=http://ollama:11434/v1
+   AGENT_MODEL=llama3.2
+   EMBEDDINGS_URL=http://ollama:11434/v1
+   EMBEDDINGS_MODEL=nomic-embed-text
+   ```
+
+4. Recreate the server container to apply the changes (`restart` keeps the container's old environment):
+
+   ```bash
+   docker compose -f deploy/compose/docker-compose.yml --profile agent up -d server
+   ```
+
+---
+
+## Maintenance commands
+
+### Viewing live service logs
+
+```bash
+# Follow logs for the core backend server
+docker compose -f deploy/compose/docker-compose.yml logs -f server
+
+# Follow logs for the web console
+docker compose -f deploy/compose/docker-compose.yml logs -f web
+```
+
+### Rotating audit partitions
+
+The audit log uses monthly PostgreSQL partitions. To maintain the 4-month forward partition runway, execute:
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml run --rm migrate rotate
+```
+
+### Stopping the stack
+
+```bash
+# Stop containers (keeps the Postgres and Ollama model volumes; Redis keeps
+# nothing on disk, so rate-limit windows, signed-out sessions and the
+# announcement banner key are lost)
+docker compose -f deploy/compose/docker-compose.yml down
+
+# Stop containers and remove all persistent data (destructive)
+docker compose -f deploy/compose/docker-compose.yml down -v
+```

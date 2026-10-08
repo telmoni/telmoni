@@ -66,7 +66,9 @@ config:
     # A rerank endpoint over the top 30 results; its key is `RERANK_API_KEY`.
     rerankUrl: ""
     rerankModel: ""
-    # Empty is https://docs.telmoni.com/llms-full.txt; `off` indexes no docs.
+    # Empty is the console's own `/llms-full.txt`, reached inside the cluster
+    # (the `web` Service), so the docs are the version this release runs;
+    # `off` indexes no docs.
     docsCorpusUrl: ""
     messagesPerHour: 60
 

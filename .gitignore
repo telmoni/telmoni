@@ -36,6 +36,8 @@ target/
 # ── Node / Next.js (web/) ─────────────────────────────────────────────────────
 node_modules/
 .next/
+# Fumadocs MDX writes the book's index here at build (`web/lib/source.ts`).
+web/.source/
 *.tsbuildinfo
 next-env.d.ts
 .eslintcache

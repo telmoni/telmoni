@@ -1,0 +1,191 @@
+---
+title: "Signing up and signing in"
+description: "Authentication methods in Telmoni, what your first sign-in provisions, session lifecycles, and signing out."
+---
+
+How you sign in depends on the deployment. A self-hosted instance offers a
+password form, an OpenID Connect identity provider, or both. The hosted service
+at telmoni.com has the password form switched off and signs you in through its
+identity provider (listed on the [Subprocessors](/legal/subprocessors) page),
+so the native-account sections below do not apply there. The CLI signs in
+through device authorization on either.
+
+## Native accounts
+
+On standalone and self-hosted instances using Telmoni's built-in authentication:
+
+- **Sign up**: Offered where the operator allows it (`ALLOW_SIGN_UP=true`; it
+  is off by default, and then only an address holding an invitation can
+  register). Enter your email address, a password (8 characters at least,
+  256 bytes at most), and, optionally, your first and last name. When the
+  deployment sets `VERIFY_EMAIL=true`, Telmoni emails a confirmation link that
+  expires in 24 hours, and the account cannot sign in until you have opened it
+  and pressed the button on the **Confirm your email address** page. Signing in
+  before that is refused and sends a fresh link; at most five verification
+  links go to an account a day.
+- **Sign in**: Authenticate with your email and password. Five consecutive
+  incorrect attempts lock the account for 5 minutes.
+- **Password reset**: Selecting **Forgot your password?** emails a single-use
+  reset link valid for 60 minutes when the address holds a password account,
+  and the page answers the same either way; at most five links go out a day.
+  Using the link terminates all active sessions and records the address as
+  verified, since the link came from it.
+
+Passwords are salted and hashed using Argon2id.
+
+## Identity providers (OIDC)
+
+A deployment can configure an external OpenID Connect identity provider
+(`OIDC_ISSUER`): one that publishes its discovery document at
+`{issuer}/.well-known/openid-configuration` and signs ID tokens with RS256.
+Telmoni sends you to the provider to sign in, verifies the ID token it returns
+(its signature, issuer, audience and expiry), and creates or links the local
+account; a password, if the provider asks for one, is entered at the provider.
+
+Beside the password form, the sign-in page shows **Continue with** and the
+provider's name (`OIDC_NAME`, "single sign-on" unless set); with
+`DISABLE_LOGIN_FORM=true`, signing in goes straight to the provider. Telmoni
+asks the provider for the `openid`, `profile` and `email` scopes, and takes your name, and whether your address is
+verified, from what it answers; a sign-in the provider shares no address for is
+refused. A first sign-in creates your account while
+`OIDC_ALLOW_SIGN_UP` is on; an address that already holds an account here is
+refused unless the operator has set
+`OIDC_ALLOW_INSECURE_EMAIL_LOOKUP` (see
+[Production](/docs/self-host/production#identity--authentication-production-oidc-hardening)).
+
+## Verified addresses
+
+Your account records whether your address has been proved, and the console
+reads that record rather than the session. An address counts as verified once
+you confirm it on the page a password sign-up's confirmation link opens, use a
+password reset link, confirm an email change with the code the new address
+received (on the hosted service, it is recorded as its identity provider
+reports it), or sign in through an identity provider that vouches for it; the
+seeded `ADMIN_EMAIL` account starts verified. A password sign-up on a
+deployment with `VERIFY_EMAIL` off is not verified, and a provider's sign-in
+records what the provider claims, keeping a proof already recorded for the same
+address.
+
+What the record gates is the inbox's word: the console lists invitations to
+your address, and accepts them with a press, only while it is verified, and its
+live stream carries no invitation to an unverified one. The link in an
+invitation email needs only that you sign in, or register, with the exact
+address it was sent to; the link is itself the proof. With `VERIFY_EMAIL` on,
+an unverified password account cannot use the console at all until its
+address is confirmed on the page its link opens, and a sign-in through an
+identity provider is refused while the address it brings has not been proved,
+by this sign-in or an earlier one.
+
+## Device authentication (CLI)
+
+To sign in from terminal sessions, SSH hosts, or the [Telmoni CLI](/docs/api/cli), Telmoni implements
+the OAuth 2.0 Device Authorization Grant ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)):
+
+1. The CLI initiates the authorization flow via `telmoni login`, displays a one-time code
+   (eight consonants, shown as `XXXX-XXXX`, good for ten minutes) and the address of the
+   console's device page (`/auth/device`), and opens that page in your browser with the
+   code filled in (`/auth/device?code=...`).
+2. Open the page in any browser, on any machine. If you are not signed in there, the console
+   asks you to sign in first and returns you to the page.
+3. Confirm that the code on the page matches what your terminal displays, then select
+   **Approve**, or **Deny** to refuse it.
+4. The CLI, which polls every five seconds, saves its session as soon as you approve. It never
+   asks for your password: you approve it in a browser, and it saves the session its poll
+   receives. A code nobody approves within ten minutes expires, and `telmoni login` stops with
+   an error; you run it again.
+
+See the [Telmoni CLI guide](/docs/api/cli) for full command reference and headless CI login instructions.
+
+## What your first sign-in creates
+
+The first time you sign in, Telmoni provisions **an Organization**, seating
+your account as its **Owner** (unless the operator has switched new
+organizations off; see below). It is named after the first word of your name,
+"Ada's organization" for Ada Lovelace, or "My organization" when your account
+has no name; nothing is taken from your email address. The name is what
+everyone in the organization sees, and its URL is derived from it once
+(`adas-organization`; see [Name and
+URL](/docs/workspace/organizations-and-projects#name-and-url)). Nothing is asked
+first: you can rename the organization, or change its URL, on its
+**Settings** page whenever you like.
+
+Your name is the one your sign-in supplies. On the hosted service, that is the
+first and last name on your profile at its identity provider. On a self-hosted
+deployment, it is the first and last name you gave the sign-up form, or the
+given and family names your OpenID Connect provider sends. The administrator
+a deployment seeds from `ADMIN_EMAIL` has no name, so their organization is
+"My organization", at `/my-organization` unless another organization already
+holds that URL.
+
+Telmoni provisions an organization the same way whenever it finds you in no
+active organization, such as after you leave or delete your last one.
+
+It creates no project. The console opens on the organization's **Overview**,
+which lists its projects and is where you [create the first
+one](/docs/workspace/organizations-and-projects#creating-a-project); API keys and
+connectors are made inside a project. A later sign-in opens the Overview of
+your [default organization](/docs/account/settings#default-organization), or
+returns you to the page that sent you to sign in.
+
+Your account is separate from the organization. You can belong to several
+organizations at once: ones you own, including any you
+[create](/docs/workspace/organizations-and-projects#creating-an-organization), and
+ones you were invited to.
+
+## When an operator closes sign-ups
+
+Three switches are involved, and they do different things:
+
+- **New accounts.** `ALLOW_SIGN_UP=false` closes the password form to new
+  accounts, and `OIDC_ALLOW_SIGN_UP=false` closes first-time sign-in through
+  the identity provider. Existing accounts sign in normally. An invitation
+  still brings a new person in through the password form; with
+  `OIDC_ALLOW_SIGN_UP=false` the identity provider admits nobody new, invited
+  or not.
+- **New organizations.** The `signup` feature flag, a row an operator writes
+  in the server's database (see [closing new
+  organizations](/docs/self-host/production#closing-new-organizations)), stops
+  Telmoni provisioning an organization at first sign-in, and takes **New
+  organization** out of the console's switcher, so nobody creates one.
+  Signed in with no organization (because of that flag, or after leaving or
+  deleting your last one while it is off), you see an account-only screen
+  offering:
+  - **Pending invitations**: Accept or decline invitations to existing
+    organizations and projects, when your address is verified; an unverified
+    address accepts from the link in the invitation email instead.
+  - **Email** and **Password**: Change your address or request a reset link,
+    for a password account.
+  - **Data collection**: Your analytics preference, on a deployment with an
+    analytics provider configured.
+  - **Active sessions**: End any of your other sessions.
+  - **Delete your account**: Permanently delete your account and personal data.
+  - **Sign out**.
+
+## Sessions
+
+Each sign-in generates an active session backed by an HTTP-only cookie. Its
+access token lasts 15 minutes and is renewed in the background while a console
+tab is open, or on your next request, against a refresh token that lasts 30
+days and is replaced at every renewal; a session unused for 30 days ends. Your
+account's **Privacy** page (`/account/privacy`) lists every session not yet
+signed out or revoked, one that lapsed after 30 days unused included, with
+device details and when each was last active. You
+can revoke any other session remotely, and the device signs out within a few
+minutes.
+
+Changing your email address ends all your sessions immediately, and so does
+resetting your password on a self-hosted deployment. A reset at the hosted
+service's identity provider does not.
+
+## Signing out
+
+**Sign out** in the account menu is a form post to `/auth/logout`. It revokes
+the session in the database, so an access token still in flight stops working,
+clears the console's cookies, and sends the browser home, or, for a session
+that began at an identity provider that publishes an `end_session_endpoint`,
+through the provider's sign-out page and back to the home page. On the hosted
+service, it goes through its identity provider's sign-out page, which ends
+your session there too. A post from
+another site, which the browser's Fetch Metadata or `Origin` header gives
+away, is turned back to the home page without signing you out, and so is a
+link to `/auth/logout` from another site.

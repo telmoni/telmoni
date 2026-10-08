@@ -1,0 +1,62 @@
+---
+title: "Notifications"
+description: "What Telmoni records in activity feeds, where notices are displayed, and how notifications are dispatched to external destinations."
+---
+
+A notification is an event record describing an action or status update within
+an organization or one of its projects: a member joining, or a connector state
+change. Telmoni writes each notice to its feed, and queues one delivery for each
+connection that takes it, in one database transaction, and makes no send before
+that transaction commits.
+
+## Notice types
+
+| Kind | Raised when |
+|---|---|
+| `member_added` | Someone accepts an invitation to the project |
+| `member_left` | A member leaves a project or is removed from it, including when they leave or are removed from its organization |
+| `connector_connected` | A Slack, Discord, or webhook connector finishes setup |
+| `connector_disconnected` | A connection stops: the vendor refuses posts to it for good (see [connection states](/docs/integrations/slack-and-discord#connection-states)), a webhook answers `410` or fails ten sends in a row, or Slack reports the Telmoni app removed from a workspace or its tokens revoked |
+| `organization_alert` | A notice for the organization's Owner and Admins, posted to the organization rather than a project; the open core raises none |
+
+## Where you read them
+
+- **Project feed**: The **Recent activity** section of each project's
+  **Overview** page surfaces project notices, the latest 50. Every project role
+  can read the feed.
+- **Invitations and offers**: Invitations to you, and offers of an organization
+  or a project, appear separately in the console header bell and on your
+  account's **Notifications** page (`/account/notifications`).
+
+Selecting **Mark read** marks every unread notice in that feed as read, for
+everyone who reads it.
+
+## Forwarding to external connectors
+
+Projects can forward notifications to third-party endpoints through connectors
+configured on the project's **Connectors** page
+(`/{organization}/{project}/connectors`):
+
+- **[Slack and Discord](/docs/integrations/slack-and-discord)**: Direct channel
+  notifications where the people in your project already read.
+- **[Webhooks](/docs/integrations/webhooks)**: HTTPS POST requests with HMAC-SHA256
+  signatures delivered directly to your own infrastructure.
+
+Connectors deliver notices asynchronously. Each delivery is a queued row of its
+own: a send that fails for a reason a retry can fix (a network error, a timeout,
+a rate limit, a server error) goes back in the queue behind a backoff, up to five
+attempts by default, and the notice on the feed is a separate row that no
+delivery outcome changes. Where the `connectors` feature flag is off for the
+deployment, starting a Slack or Discord handshake, or connecting a webhook, is
+refused (a handshake already under way still completes), and retries wait until
+it is on again. A notice's first attempt is still made as it is raised while
+fewer than 32 first attempts are in flight on that server (past that, it waits
+with the retries), and **Send test** and **Resend** still go out. The flag is
+read for the whole deployment: an organization's own setting for it has no
+effect.
+
+## Retention
+
+- **Feed notices**: Retained for **90 days**.
+- **Connector delivery logs**: Kept for **30 days** after each delivery was
+  last delivered or failed.

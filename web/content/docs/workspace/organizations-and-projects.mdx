@@ -1,0 +1,344 @@
+---
+title: "Organizations and projects"
+description: "How Telmoni organizes work: organizations, projects, their URLs and slugs, moving between them, the name a new organization starts with, creating an organization or a project, and how each is renamed, transferred and deleted."
+---
+
+Telmoni has two tiers: **Organizations** and **Projects**. There are no teams.
+
+An **Organization** is the top level. It holds projects, organization-level
+members, organization settings, and a rolled-up audit log.
+
+A **Project** lives inside an organization. It holds API keys, notification
+connectors (Slack, Discord, webhooks), in-app notifications, and project-specific
+audit records.
+
+A solo developer and an enterprise work the same way: an organization with one
+member and a project, or one with many members across multiple projects.
+
+## Your organizations and projects
+
+When you first sign in, Telmoni provisions **an Organization**, with you as
+its **Owner** (see [Signing in](/docs/getting-started/sign-in) for the switch an
+operator can turn this off with). It arrives named after the first word of
+your name ("Ada's organization"), or "My organization" when your account has
+no name; [Signing in](/docs/getting-started/sign-in#what-your-first-sign-in-creates)
+says where the name comes from. The name is what everyone in it sees, and its
+URL follows from it (see [Name and URL](#name-and-url)). Nothing is asked
+first: you can change both in **Settings** whenever you like.
+
+The organization starts with no projects. The console opens on its
+**Overview** (`/{organization}`), which lists the organization's projects and
+is where you [create the first one](#creating-a-project); API keys and
+connectors belong to a project, so nothing else is there to do until it
+exists.
+
+A sign-in opens the Overview of your
+[default organization](/docs/account/settings#default-organization), or returns
+you to the page that sent you to sign in. Within a session, opening the
+console (`/console`) returns to the Overview of the organization you were last
+in.
+
+You can belong to multiple organizations at once: ones you own, including any
+you [create](#creating-an-organization), and ones you have been invited to.
+Your role in one organization does not dictate your role in another.
+
+### Roles at a glance
+
+Both organizations and projects use three roles: **Owner**, **Admin**, and
+**Member**. See [Roles and permissions](/docs/workspace/roles) for the full
+permissions matrix.
+
+- **Organization Owner**: Full access across all projects, project creation and
+  deletion, member management, organization settings, and organization
+  transfer/deletion.
+- **Organization Admin**: Can create projects, manage members and organization
+  settings, and read the organization's audit log. Operates as an admin across
+  all projects. Cannot delete projects, delete the organization, or transfer
+  ownership.
+- **Organization Member**: Access is restricted to the specific projects they are
+  seated in. No organization-wide management powers.
+
+## Moving between them
+
+The console's address names the organization, and the project under it, by a
+**slug**: a short URL-safe handle, such as `acme`. An organization's is set
+when it is created, as the URL you give it or one derived from its name, and
+changed only in its Settings; a project's follows its name (see [Name and
+URL](#name-and-url)). On these pages,
+`{organization}` and `{project}` stand for those two slugs.
+
+- **An organization's overview** is `/{organization}`, which lists its
+  projects: every one to its Owner and Admins, and to a Member the ones they
+  hold a seat on.
+- **Organization pages** sit beside its projects, at words no project goes by:
+  `/{organization}/projects`, `/{organization}/members`,
+  `/{organization}/audit-log`, and `/{organization}/settings`, with
+  `/{organization}/billing` on the hosted service.
+- **Project pages** sit under the organization: `/{organization}/{project}` is
+  the project's overview, with `/api-keys`, `/connectors`, `/members`,
+  `/audit-log`, and `/settings` under it.
+- **Account pages** live under `/account`, including `/account/settings`,
+  `/account/notifications`, and `/account/privacy`.
+- **Switch between projects and organizations** using the switcher in the
+  console header. It lists your organizations and the projects within each,
+  and ends with **New organization**, below **Create project** when you can
+  create a project somewhere.
+
+### Name and URL
+
+An organization has a **name**, which everyone in it sees, and a **URL**, the
+slug its addresses begin with. They are two settings.
+
+- A slug is lowercase ASCII letters and digits, in words joined by hyphens, at
+  most 48 characters long.
+- **A new organization starts with a URL.** You can give one when you [create
+  the organization](#creating-an-organization); otherwise it is derived from
+  the name it is created with: accents fold and apostrophes
+  drop, so "Zoë's organization" becomes `zoes-organization`, and "My
+  organization" `my-organization`. A URL already in use gets a number, up to `-20`
+  (`zoes-organization-2`); past that it ends in six random characters
+  (`zoes-organization-k3x9qz`). When the first word of your name has no Latin
+  letter or digit ("李明's organization"), the organization gets a placeholder
+  (`org-` and ten random characters) until you choose a URL.
+- **Renaming an organization moves nothing.** Its URL stays as it is, and so
+  does every link to its pages.
+- **Changing the URL** is done on the organization's **Settings** page, under
+  **URL**: any slug not held by another organization and not one of the
+  console's own words. Every page of the organization and of its projects moves
+  to the new address, and the old address answers **Not found**. Pages open in
+  the console follow the change; links made before it do not.
+- **A project's URL follows its name.** Within its organization a project's slug
+  is unique; a name already taken as a slug gets a number. Some words are kept
+  for the organization's own pages (`projects`, `members`, `settings`, and
+  others), and a name that is one gets the numbered form: `Settings` becomes
+  `settings-2`. A name with no Latin letters or digits gets a placeholder
+  (`project-` and ten random characters). Renaming a project moves its pages,
+  and the old address answers **Not found**; a new name that gives no slug
+  leaves the URL as it was.
+- An organization's URL is unique across all organizations, ones awaiting
+  deletion included; once a deleted organization is purged, another may take
+  its URL.
+- **IDs never move.** An organization's ID (`org_...`) and a project's ID
+  (`project_...`) are unchanged by any rename or URL change, and a console path
+  spelled with an ID in place of a slug redirects to the current slugs, keeping
+  the rest of the path. Use the ID in anything you script. An organization's ID
+  is shown on its **Settings** page, which opens for its Owner and Admins
+  (`telmoni org list`, after a browser `telmoni login`, prints it for anyone in
+  it); a project's on its
+  **Settings** page and on the organization's **Projects** page.
+
+### Console navigation and keyboard shortcuts
+
+The web console provides built-in keyboard navigation (`⌘` is `Ctrl` on
+Windows and Linux):
+
+- **Quick search (`⌘K` or `/`)**: Opens the search palette: recently visited
+  pages, projects, documentation, and, on a project's pages, that project's API
+  keys and members.
+- **Ask the agent (`⌘J`)**: Opens the **Telmoni Agent** panel ([the console
+  agent](/docs/self-host/agent)) from any project view. Ask questions about project
+  activity, members, connectors, or audit logs. Responses stream with inline
+  citations and links to referenced sources. Past conversations are saved per
+  person and per project: the history lists the ones you asked from the project
+  you are on, and each can be reopened or deleted.
+- **Account menu (`⌘⇧K`)**: Opens the user menu: your account, the home
+  page, the documentation, the keyboard shortcuts sheet, theme and corners,
+  the platform's GitHub repository, and sign out.
+- **Primary action (`c`)**: Triggers the primary action of the current page:
+  **New project**, **Mint key**, or **Invite member**.
+- **Navigation sequences (`g` followed by a key)**, relative to the project
+  you are in:
+  - `g` `o`: Overview
+  - `g` `k`: API keys
+  - `g` `c`: Connectors
+  - `g` `m`: Members
+  - `g` `l`: Audit log
+  - `g` `p`: Settings
+  - `g` `O`: The organization's overview, from anywhere in the console
+
+  On an organization's own pages, `g` `o`, `g` `m`, `g` `l`, and `g` `p` open
+  the organization's Overview, Members, Audit log, and Settings, and `g` `k`
+  and `g` `c` do nothing.
+- **Keyboard shortcuts cheat sheet (`?`)**: Opens the full shortcuts sheet, with
+  a switch to enable or disable single-key shortcuts.
+
+## Projects
+
+### Creating a project
+
+An organization Owner or Admin can create a new project from the organization's
+**Overview** (`/{organization}`), its **Projects** page
+(`/{organization}/projects`), or the switcher:
+
+1. Select **New project** on the Overview or the Projects page, or **Create
+   project** in the switcher. When you own or administer more than one
+   organization, the dialog asks which one the project lands in, starting from
+   the Overview's own organization when you opened it there.
+2. Provide a project name: up to 100 characters, and not one another project in
+   the organization already has (compared without regard to case).
+3. The project is created immediately. Its API keys and connectors are its own.
+
+### Renaming a project
+
+An Admin or Owner can rename a project from the project's **Settings** page
+(`/{organization}/{project}/settings`). The same limits apply as at creation,
+and the rename moves the project's URL (see [Name and URL](#name-and-url)).
+
+### Deleting a project
+
+Only the **Owner** can delete a project. Deletion is initiated from the
+**Danger zone** on the project's **Settings** page
+(`/{organization}/{project}/settings`):
+
+- The dialog asks you to type the project's name before it deletes anything.
+- It takes effect at once, with no undo.
+- Deleting a project deletes its API keys, member seats, and pending
+  invitations with it, and its connectors, their delivery history, and its
+  activity feed are purged right after (whatever fails then goes when the
+  organization itself is purged). The console agent removes what it holds
+  about the project.
+- Historical audit events for that project remain preserved in the organization's
+  append-only audit chain.
+
+### Transferring a project
+
+An organization Owner can hand a project to one of the project's Admins:
+
+1. The Owner selects **Transfer project** on the Admin's row on the project's
+   **Members** page (`/{organization}/{project}/members`) and confirms with
+   **Send offer**. Only a project Admin can be offered a project.
+2. The Admin is emailed, and the offer appears in their console bell and under
+   **Project offers** on their account's **Notifications** page
+   (`/account/notifications`). It stands for **7 days**, and a project has one
+   live offer at a time: a new offer withdraws the earlier one, and whoever
+   held it is told. The Owner can withdraw it with **Withdraw offer** on the
+   same row; removing the Admin from the project, or their leaving it, ends the
+   offer too. The Owner is emailed a decline, and the Admin a withdrawal.
+3. The Admin accepts the project into an organization they own. The page asks
+   which one when they own several, and offers only **Decline** when they own
+   none.
+4. On acceptance:
+   - The project row moves into the new organization. It keeps its name unless
+     that organization already has a project by it, in which case it arrives
+     with the next free number on the end (`Payments 2`). Its URL changes with
+     the move (see [Name and URL](#name-and-url)).
+   - Its API keys follow into the new organization. The offer on the
+     Notifications page advises the new owner to rotate any key they did not
+     mint.
+   - Project seats and pending invitations stay on the project, and everyone
+     seated is enrolled on the new organization's roster as a **Member**, as a
+     project invitation would enrol them. The accepting Admin's own seat is
+     folded into their ownership.
+   - The former owner stays on the project as an **Admin**, joins the new
+     organization as a **Member**, and is emailed that the project moved.
+   - **Connectors do not follow**: a project's Slack and Discord grants and
+     webhook secrets are the old organization's, so they are removed before
+     the move commits, with their delivery history and the project's activity
+     feed, and a removal that fails moves nothing. The console agent removes
+     what it holds about the project in the old organization.
+   - Both organizations' audit logs record the move; the receiving one also
+     notes the name the project was offered under when a clash renamed it. The
+     project's earlier events stay in the old organization's log, so its
+     **Audit log** page starts at the move.
+
+## Organizations
+
+### Creating an organization
+
+Anyone signed in to the console can create another organization, and becomes
+its **Owner**:
+
+1. Open the switcher in the console header and select **New organization**.
+2. Give it a **Name**: up to 80 characters, the name everyone in it sees.
+3. Give it a **URL**, or leave the field blank to have one derived from the
+   name, as [Name and URL](#name-and-url) describes: "Acme Robotics" becomes
+   `acme-robotics`, with a number on the end when another organization holds
+   that, and a name with no Latin letter or digit gets a placeholder (`org-`
+   and ten random characters) until you choose a URL. A URL you give must be
+   a slug no other organization holds and not one of the console's own words.
+4. Select **Create organization**. The console opens the new organization's
+   **Overview**, where you [create its first project](#creating-a-project).
+
+There is no limit on how many organizations you create or own. Creating one
+leaves your [default organization](/docs/account/settings#default-organization),
+the one a sign-in opens, as it was. An operator who has [closed new
+organizations](/docs/self-host/production#closing-new-organizations) closes this
+too: the switcher offers no **New organization**.
+
+### Renaming an organization
+
+An Owner or Admin can rename an organization from its **Settings** page
+(`/{organization}/settings`). The name can be up to 80 characters. A rename
+moves nothing: the organization's URL is its own setting on the same page (see
+[Name and URL](#name-and-url)).
+
+### Transferring organization ownership
+
+An organization has exactly one Owner. The Owner can transfer ownership to any
+organization Admin:
+
+1. The Owner selects **Transfer ownership** on the Admin's row on the
+   organization's **Members** page (`/{organization}/members`) and confirms
+   with **Send offer**.
+2. The Admin is emailed, and the offer appears in their console bell and on
+   their account's **Notifications** page (`/account/notifications`). It stands
+   for **7 days**, and an organization has one live offer at a time: a new
+   offer withdraws the earlier one, and whoever held it is told. The Owner may
+   withdraw the offer at any time before it is accepted; removing the Admin
+   from the organization, or their leaving it, ends the offer too.
+3. The Admin accepts (confirming with **Become the owner**) or declines on the
+   Notifications page. The Owner is emailed either answer, and the Admin is
+   emailed a withdrawal.
+4. Upon acceptance:
+   - The accepting Admin becomes the new **Owner**. Any project seats they held
+     are removed, since the Owner's standing on every project comes from the
+     organization.
+   - The former owner becomes an **Admin** in the organization, and may then
+     leave it.
+   - All projects, API keys, connectors, and audit histories stay intact. The
+     handover, and each removed seat, is written to the audit log.
+
+### Deleting an organization
+
+Only the **Owner** can delete an organization. Deletion is performed from the
+**Danger zone** in the organization's **Settings** page
+(`/{organization}/settings`):
+
+1. Request a 6-digit confirmation code, which is emailed to the Owner's address
+   and remains valid for 15 minutes. Five wrong guesses burn it; **Resend
+   code** issues another. The console sends at most three codes an hour and
+   takes ten attempts an hour. On a self-hosted deployment, the code goes out
+   only when the operator has configured mail (`SMTP_URL`); without it, the
+   organization cannot be deleted from the console.
+2. Enter the confirmation code.
+3. **Access ends immediately**: the organization is closed, all API keys stop
+   authenticating, and member access ceases. On the hosted service, its
+   billing is closed at once; a part that cannot finish is retried every ten
+   minutes, and the confirmation screen says so when that happens. Your own
+   account is untouched, and if this was your last organization, your next
+   console page provisions a new one while new organizations are allowed, as
+   your [first
+   sign-in](/docs/getting-started/sign-in#what-your-first-sign-in-creates) did.
+4. **Erasure follows, usually within the hour**: the automated deletion sweep
+   permanently purges the organization, its projects, API keys, connectors,
+   notices and console agent data. There is no restore window and no undo.
+
+An organization an operator closed from the server (`telmoni terminate`, on a
+self-hosted instance) goes the same way.
+
+## Leaving an organization or project
+
+- **Leaving an organization**: Anyone but the Owner can leave from the
+  organization's **Overview** page (`/{organization}`), with **Leave
+  organization**. Leaving removes you from the organization and from every
+  project in it.
+- **Leaving a project**: The organization's **Projects** page
+  (`/{organization}/projects`) offers **Leave** on each project you hold a
+  seat on. That page opens only for the organization's Owner and Admins, and
+  leaving gives up the seat alone: they keep their access to every project
+  through their organization role. An organization Member cannot open the
+  page: with a project's Admin seat, they can remove themselves on the
+  project's **Members** page, and with a Member seat they leave a project only
+  by leaving the organization.
+- The **Owner cannot leave** an active organization. To leave, the Owner must
+  either transfer ownership to an Admin or delete the organization.

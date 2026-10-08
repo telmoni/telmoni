@@ -5,7 +5,7 @@
 
 A foundation for organizations and their projects: members and roles, API keys, notifications, a hash-chained audit log and a console agent. One Rust binary runs all of it behind a Next.js console.
 
-Telmoni has not launched yet. The customer documentation is at [docs.telmoni.com](https://docs.telmoni.com) ([`telmoni/docs`](https://github.com/telmoni/docs)); the CLI and SDKs are in [`telmoni/telmoni-cli`](https://github.com/telmoni/telmoni-cli).
+Telmoni has not launched yet. The customer documentation is this repository's, `web/content/docs`, served by the console at [telmoni.com/docs](https://telmoni.com/docs); the CLI and SDKs are in [`telmoni/telmoni-cli`](https://github.com/telmoni/telmoni-cli).
 
 ## Getting started
 
@@ -16,7 +16,7 @@ make first-run   # once: env files, dependencies, Postgres, migrations
 make up          # Postgres, Redis, Mailpit, the server on :8082, the console on :3000
 ```
 
-Sign in with the password form; mail lands in Mailpit at http://localhost:8025. [Developing](https://docs.telmoni.com/contributing/developing/#the-platform) has the rest.
+Sign in with the password form; mail lands in Mailpit at http://localhost:8025. [Developing](https://telmoni.com/docs/contributing/developing#the-platform) has the rest.
 
 ## Layout
 
@@ -28,7 +28,7 @@ crates/
   agent/          the console agent: search over the docs and a project's own data
   migrator/       the migration runner, grants, role hardening, the audit schema
   shared/         errors, RBAC, tenancy, the seams between modules
-web/              the console: a thin proxy in front of the server
+web/              the console, a thin proxy in front of the server, and the docs it serves (`web/content/docs`)
 contract/         the generated wire contract and OpenAPI document
 deploy/           the Helm chart and the self-host compose file
 scripts/          `up.sh` behind `make up`, and the webhook tunnel and receiver for testing a connector
@@ -37,7 +37,7 @@ architecture/     how it is built, and why, one page per area
 
 ## Deploying
 
-Self-hosting is written up at [docs.telmoni.com/self-host](https://docs.telmoni.com/self-host/overview/): Docker Compose from `deploy/compose`, Kubernetes from `deploy/charts/telmoni`. Both pull the images `.github/workflows/publish.yml` publishes to `ghcr.io/telmoni`.
+Self-hosting is written up at [telmoni.com/docs/self-host](https://telmoni.com/docs/self-host/overview): Docker Compose from `deploy/compose`, Kubernetes from `deploy/charts/telmoni`. Both pull the images `.github/workflows/publish.yml` publishes to `ghcr.io/telmoni`.
 
 ## Extending Telmoni
 
@@ -45,7 +45,7 @@ A deployment that needs more builds on these crates instead of forking them: `te
 
 ## Contributing
 
-How to contribute, the AI policy, the Code of Conduct and the security policy are on the docs site: [docs.telmoni.com/contributing](https://docs.telmoni.com/contributing/introduction/).
+How to contribute, the AI policy, the Code of Conduct and the security policy are in the docs: [telmoni.com/docs/contributing](https://telmoni.com/docs/contributing/introduction).
 
 ## License
 

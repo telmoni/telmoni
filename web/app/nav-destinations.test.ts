@@ -1,9 +1,10 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import { PRIMARY_NAV, navLinks } from "@/components/site-nav";
+import { footerColumns } from "@/lib/footer";
 
 const APP = __dirname;
 
@@ -13,12 +14,36 @@ const APP = __dirname;
 // with `Resources` pointing at a page that had never been written, and the only
 // thing that caught it was reading the route list by hand. This walks the nav
 // instead.
+//
+// A catch-all segment answers for everything under it, as `docs/[[...slug]]`
+// answers for every page of the book, so a path reaching one has a route.
+const PAGE_FILES = ["page.tsx", "page.ts", "page.mdx", "route.ts", "route.tsx"];
+
+function hasPage(dir: string): boolean {
+  return PAGE_FILES.some((f) => existsSync(path.join(dir, f)));
+}
+
+function catchAll(dir: string): string | undefined {
+  if (!existsSync(dir)) return undefined;
+  return readdirSync(dir).find((name) => /^\[\[?\.\.\..+\]\]?$/.test(name));
+}
+
 function routeExists(href: string): boolean {
   const clean = href.split(/[?#]/)[0].replace(/\/+$/, "");
-  const dir = clean === "" ? APP : path.join(APP, ...clean.slice(1).split("/"));
-  return ["page.tsx", "page.ts", "route.ts", "route.tsx"].some((f) =>
-    existsSync(path.join(dir, f)),
-  );
+  const segments = clean === "" ? [] : clean.slice(1).split("/");
+  let dir = APP;
+  for (const segment of segments) {
+    const next = path.join(dir, segment);
+    if (existsSync(next)) {
+      dir = next;
+      continue;
+    }
+    const rest = catchAll(dir);
+    return rest !== undefined && hasPage(path.join(dir, rest));
+  }
+  if (hasPage(dir)) return true;
+  const rest = catchAll(dir);
+  return rest !== undefined && rest.startsWith("[[") && hasPage(path.join(dir, rest));
 }
 
 const internal = navLinks().filter((l) => l.href.startsWith("/"));
@@ -63,5 +88,22 @@ describe("every destination the primary nav offers", () => {
       if (!item.panel) continue;
       expect(item.panel.features.length, `${item.label}'s panel leads with nothing`).toBeGreaterThan(0);
     }
+  });
+});
+
+// The footer is the other place a dead link hides. The core's own links,
+// without a console's extras, since those name that console's pages.
+const footerLinks = footerColumns({}, []).flatMap((column) => column.links);
+
+describe("every destination the footer offers", () => {
+  it.each(
+    footerLinks.filter((l) => l.href.startsWith("/")).map((l) => [l.label, l.href] as const),
+  )("%s has a route behind it (%s)", (_label, href) => {
+    expect(routeExists(href), `no page or route file for ${href}`).toBe(true);
+  });
+
+  it("offers each destination once", () => {
+    const hrefs = footerLinks.map((l) => l.href);
+    expect(new Set(hrefs).size, `duplicated: ${hrefs.join(", ")}`).toBe(hrefs.length);
   });
 });

@@ -1,0 +1,165 @@
+---
+title: Configuration Reference
+description: The environment variables of the Telmoni core server and web console.
+---
+
+Telmoni's server and console read their configuration from environment variables; the [feature flags](/docs/self-host/production#the-other-feature-flags) are rows in the database, and the announcement banner can also come from Redis. Compose passes a variable to a container only when its file names it (the `environment:` blocks of `server` and `web` in `deploy/compose/docker-compose.yml`), so a variable on this page that the file leaves out — among them `RUN_SWEEPS`, `LOG_LEVEL`, `DELETION_TAIL_BUDGET_MS`, the `NOTIFICATIONS_DELIVERY_*` settings, the agent's limits, `EMBEDDINGS_REQUEST_DIMENSIONS` and `RERANK_*`, `SERVICE_SECRET_NEXT`, the CA certificates, and the console's `COMPANY_NAME`, `SUPPORT_EMAIL`, `LEGAL_URL`, `ANALYTICS_*` and `TELMONI_ANNOUNCEMENT` — is added there before it has any effect. The Helm chart takes any variable it has no value for through `server.extraEnv` and `web.extraEnv`.
+
+## Core server & networking
+
+These variables configure the Rust backend service (`telmoni serve`).
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `PORT` | `8082` | HTTP listen port for the backend server. |
+| `APP_URL` | *Required* | The public origin of the web console. Used to format invitation links, password reset emails, and OAuth callback URLs. |
+| `SERVICE_SECRET` | *Required* | A random secret (`openssl rand -hex 32`, for example) shared between the web console and the core server; both refuse to start without it. The console sends it as the `x-service-secret` header on every internal call, and the server compares it in constant time. |
+| `SERVICE_SECRET_NEXT` | *Optional* | A second value the server accepts beside `SERVICE_SECRET`. The console sends only its own `SERVICE_SECRET`, so to rotate: set the new value here, move the console's `SERVICE_SECRET` to it, then make it the server's `SERVICE_SECRET` and unset this one. |
+| `DATABASE_CA_CERT` | *Optional* | The PEM of the database's own CA. Required in a Kubernetes pod, optional elsewhere. When set, every connection verifies the server's certificate chain against it (`verify-ca`). |
+| `ALLOW_TEST_SESSION` | `false` | When `true`, exposes the `POST /test/session` route for end-to-end testing. Refused at boot in a Kubernetes pod. |
+| `DELETION_TAIL_BUDGET_MS` | `8000` | How long, in milliseconds, a deletion request runs its purges inline before the deletion sweep takes over the rest. An organization's deletion answers `202 Accepted` either way, with `purged: false` when the purge did not finish in time; an account's answers `200` when the person was erased in time and `202` otherwise. |
+| `RUN_SWEEPS` | `true` | Runs the deletion, retention and audit-verification sweeps inside `telmoni serve`. `false` leaves them to `telmoni sweep <name>` runs you schedule yourself. |
+| `LOG_LEVEL` | `info` | The log filter, in `RUST_LOG` syntax (`debug`, `telmoni_auth=debug`). `RUST_LOG` is read first when both are set. The console reads the same variable as a plain level (`trace`, `debug`, `info`, `warn`, `error`, `fatal` or `silent`) and stops at start on anything else, such as `telmoni_auth=debug`; the Helm chart gives both containers its `config.logLevel`, so set a plain level there. |
+
+---
+
+## Web console (Next.js BFF)
+
+These variables configure the web console container (`telmoni/web`).
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `PORT` | `3000` | HTTP listen port for the Next.js console. |
+| `SERVER_URL` | *Required* | The internal URL of the core backend server (e.g., `http://server:8082`). |
+| `AUTH_SECRET` | *Required* | A secret key of at least 32 bytes (generate with `openssl rand -hex 32`) used to seal, encrypt, and decrypt browser session cookies. |
+| `AUTH_URL` | *Required* | The public URL of the application, read at request time: it is also the origin `robots.txt`, `sitemap.xml` and the structured data's `url` and `@id` use, so no origin is baked into the image. In production, must begin with `https://` (or loopback `http://localhost`). |
+| `REDIS_URL` | *Required* | Connection string for Redis (e.g., `redis://redis:6379`). Used for rate limits, the list of signed-out sessions, the live updates the console passes between its replicas, and the `telmoni:announcement` banner key. |
+| `REDIS_CA_CERT` | *Optional* | PEM-encoded CA certificate for validating TLS connections to Redis (`rediss://`). |
+| `TRUSTED_PROXY_HOPS` | `2` | How many `X-Forwarded-For` entries the proxies in front of the console append, counted from the end. The console's per-address rate limits (sign-in, sign-up, password reset, `/v1`, `/cli`) key on the entry that many back from the end, the first one no caller wrote. Google's load balancer appends two — the client's address and then its own — so the Helm chart's default is `2`; a single TLS-terminating reverse proxy appends one, so the Compose file sets `1` (see [reverse proxy configuration](/docs/self-host/production#reverse-proxy-configuration)); `0` means nothing is in front, the limits then take the caller's own header at its word, and the console says so at boot. A value that is not a whole number from 0 to 99 stops the console at start. |
+| `AUTH_PROVIDER_ORIGINS` | *Optional* | The identity provider's origins, space separated. Signing out from the account menu is a form post that ends in a redirect to the provider, and the console's Content Security Policy (`form-action`) lets the browser follow it only to these origins and the console itself; a provider missing here is a sign-out that stops at the first hop. Sign-in is a link, which the policy does not govern. Empty allows only the console. Each entry must be a bare origin (`https://idp.example.com`, or a wildcard subdomain such as `https://*.idp.example`); an entry with a path, such as an issuer URL, is ignored. |
+| `COMPANY_NAME` | `Telmoni` | The legal entity behind the deployment, shown in the console's copyright line and structured data. |
+| `SUPPORT_EMAIL` | *Optional* | The address of the **Email** contact link in the console's footer. The mails the server sends quote its own `SUPPORT_EMAIL` (see [Outbound email](#outbound-email-smtp)). |
+| `LEGAL_URL` | *Optional* | Where the deployment's legal documents are published. The console's footer links its `privacy-policy` and `terms-of-service`, and the console redirects (`308`) `/legal/<document>` to `<LEGAL_URL>/<document>/`, with `/legal/dpa` going to the privacy policy and `/legal/acceptable-use-policy` to the terms. Unset, the footer has no legal links and those paths answer the console's **Page not found.** |
+| `ANALYTICS_INGEST_URL` | *Optional* | A product-analytics sink. Set together with `ANALYTICS_WRITE_KEY`, it makes the **Data collection** switch appear on the privacy page ([Product analytics](/docs/account/privacy#product-analytics)); unset, no switch is offered. The console sends nothing to the sink today, whatever the switch says: its one analytics event goes to its own operational log, as that page states. |
+| `ANALYTICS_WRITE_KEY` | *Optional* | The provider's write key, for the sink above. |
+| `TELMONI_ANNOUNCEMENT` | *Optional* | A banner shown across the console: plain text, or a JSON object with `message` and optionally `linkText`, `href` and `id`. The Redis key `telmoni:announcement`, in the same two shapes, takes precedence and changes the banner without a restart. |
+
+---
+
+## Database connection pools (Multi-role architecture)
+
+In simple deployments, all database variables can point to the same PostgreSQL connection string. In hardened production environments, each module connects as its own PostgreSQL role, which `role_hardening.sql` makes `NOSUPERUSER`, `NOCREATEROLE`, `NOCREATEDB` and `NOBYPASSRLS`:
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `AUTH_DATABASE_URL` | *Required* | PostgreSQL DSN for identity, accounts, organizations, projects, and RBAC tables (role: `auth`). |
+| `NOTIFICATIONS_DATABASE_URL` | *Required* | PostgreSQL DSN for notification feeds, connectors (Slack, Discord and webhooks), deliveries and their attempts, and connection handshakes (role: `notifications`). |
+| `AGENT_DATABASE_URL` | *Optional* | PostgreSQL DSN for the agent's indexed passages and their embeddings, its conversations and messages (role: `agent`). Required if the AI agent is enabled: `AGENT_MODEL_PROVIDER` without it is refused at boot. |
+| `MIGRATOR_DATABASE_URL` | *Required for `migrate` and `rotate`* | PostgreSQL DSN that `telmoni migrate` and `telmoni rotate` run as: every schema's DDL, the object grants and the audit partitions (role: `migrator`, or the Compose stack's single user). `role_hardening.sql` does not run through it; a superuser applies that file with `psql`. |
+
+---
+
+## Authentication & access control
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `ALLOW_SIGN_UP` | `false` | When `false`, the password form registers no new accounts except for an address holding an invitation from an organization Owner or Admin, or a project Admin. Sign-in through an identity provider is governed by `OIDC_ALLOW_SIGN_UP` below, and making a new organization — provisioning one at first sign-in, or creating one from the switcher — by the `signup` feature flag (see [closing new organizations](/docs/self-host/production#closing-new-organizations)). |
+| `VERIFY_EMAIL` | `false` | When `true`, newly registered users must verify their email address via a confirmation link before accessing the console. The link needs `SMTP_URL` to be sent: the server starts without it, and then sends none. When `false`, a password sign-up's address is taken at its word for signing in but is not recorded as verified (an identity provider's `email_verified` claim, the seeded `ADMIN_EMAIL` and an address confirmed through an email change are), so an invitation to such an address is accepted only from the link in the invitation email — the console's **Accept** needs a verified address — and a password sign-up for an invited address cannot claim the invitation on its own. With an identity provider, `true` refuses a sign-in unless the address is verified, by that sign-in's `email_verified: true` or by an earlier proof of the same address (an earlier such sign-in, a confirmation or reset link, or an email change), and sends no link. |
+| `DISABLE_LOGIN_FORM` | `false` | Disables the email and password form, so that every sign-in goes through OpenID Connect (SSO). Set without `OIDC_ISSUER`, it is refused at boot. |
+| `ADMIN_EMAIL` | *Optional* | Seeds the first administrator's account when the server starts, once (a later start with another `ADMIN_PASSWORD` leaves the account as it was); it is an ordinary password account, and while the `signup` feature flag is on, its organization is provisioned at its first sign-in, as "My organization", since the seeded account has no name. Set together with `ADMIN_PASSWORD` or not at all: one without the other, or either with `DISABLE_LOGIN_FORM=true`, is refused at boot. An `ADMIN_EMAIL` that is not an address, or an `ADMIN_PASSWORD` under 8 characters or over 256 bytes, is refused at every boot, even once the account exists. |
+| `ADMIN_PASSWORD` | *Optional* | Password for the initial administrator account. |
+
+---
+
+## Single Sign-On (OpenID Connect / OIDC)
+
+Telmoni signs in through an OpenID Connect provider that publishes its discovery document at `{issuer}/.well-known/openid-configuration` and signs ID tokens with RS256:
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `OIDC_ISSUER` | *Optional* | The base discovery URL of your OIDC provider (must serve `/.well-known/openid-configuration`). In a Kubernetes pod it must be `https://`. |
+| `OIDC_CLIENT_ID` | *Required with `OIDC_ISSUER`* | The registered OAuth2 client identifier. |
+| `OIDC_CLIENT_SECRET` | *Required with `OIDC_ISSUER`* | The registered OAuth2 client secret. |
+| `OIDC_REDIRECT_URI` | `http://localhost:3000/auth/callback` | The callback URL registered with your identity provider. |
+| `OIDC_NAME` | `"single sign-on"` | The provider's name on the login button (`"Continue with Okta"`). |
+| `OIDC_ALLOW_SIGN_UP` | `true` | Allows first-time OIDC sign-ins to automatically provision a user account. |
+| `OIDC_ALLOW_INSECURE_EMAIL_LOOKUP` | `false` | When `true`, links an OIDC identity to an existing account if the email matches, even if the account was created with a password. |
+
+---
+
+## Outbound email (SMTP)
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `SMTP_URL` | *Optional* | SMTP connection URI: `smtps://user:pass@smtp.example.com:465`, or `smtp://user:pass@smtp.example.com:587?tls=required`. In a Kubernetes pod a plain `smtp://` to a remote host is refused at boot, since the login and every code the mails carry would cross the network in the clear. If unset, nothing is sent: the server logs `mail composed, not sent` once per mail, a line that names no address, subject or contents. |
+| `MAIL_FROM` | `Telmoni <no-reply@localhost>` | RFC 5322 `From:` address for every mail the server sends: invitations, verification and reset links, confirmation codes and transfer offers. With `SMTP_URL` set, a value that is not an address is refused at boot. |
+| `SUPPORT_EMAIL` | *Optional* | The address the server's mails tell a reader to write to, such as about a code they did not ask for. Unset, the mails say "whoever runs this service". |
+
+---
+
+## Connectors & secret encryption
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `CONNECTOR_KEK` | *Required for connectors* | The Key Encryption Key used to seal integration credentials and secrets at rest. `local:` plus 64 hex characters is for a machine you control and is refused in a Kubernetes pod. Otherwise, a Cloud KMS key name (`projects/<p>/locations/<l>/keyRings/<r>/cryptoKeys/<k>`): the key, never one of its versions. Any other spelling is refused at boot. Unset, no connector is offered, and Slack or Discord credentials beside it are refused at boot. |
+| `SLACK_CLIENT_ID` | *Optional* | Client ID of the Slack app you register. Each vendor's `*_CLIENT_ID` and `*_CLIENT_SECRET` are set together; one without the other is refused at boot. |
+| `SLACK_CLIENT_SECRET` | *Optional* | Client Secret of that Slack app. |
+| `SLACK_SIGNING_SECRET` | *Required with `SLACK_CLIENT_ID`* | Secret used to verify HMAC signatures of inbound Slack event webhooks; the server refuses to start with a Slack client and no signing secret. |
+| `DISCORD_CLIENT_ID` | *Optional* | Client ID of your Discord OAuth application. Telmoni posts through the channel webhook the authorization creates; there is no bot. |
+| `DISCORD_CLIENT_SECRET` | *Optional* | Client Secret for Discord OAuth handshakes. |
+
+### Slack and Discord apps
+
+To offer Slack or Discord, register an app with the vendor and set its
+credentials above:
+
+- Allow `{APP_URL}/connect/slack/callback` (Slack) or
+  `{APP_URL}/connect/discord/callback` (Discord) as the app's OAuth redirect
+  URL; the server builds it from `APP_URL`.
+- For Slack, point the app's Event Subscriptions at
+  `{APP_URL}/api/webhooks/slack`, an HTTPS address, and subscribe to
+  `app_uninstalled` and `tokens_revoked`, so that removing the app from a
+  workspace disconnects its channels.
+
+Without a vendor's credentials, its tile on a project's **Connectors** page
+shows **Soon**, with **Connect** turned off; without `CONNECTOR_KEK`, so does
+the webhook tile.
+
+---
+
+## Notification delivery
+
+The queue behind Slack, Discord and webhook deliveries, polled by every server replica. A set value that does not parse, or is below the minimum, refuses boot.
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `NOTIFICATIONS_DELIVERY_POLL_SECS` | `5` | How often the queue is polled for due deliveries, in seconds (at least 1). |
+| `NOTIFICATIONS_DELIVERY_BATCH` | `200` | Deliveries leased per round (at least 1). |
+| `NOTIFICATIONS_DELIVERY_DRAIN_ROUNDS` | `20` | Rounds one poll may run while full batches keep coming, before it waits for the next poll (at least 1). |
+| `NOTIFICATIONS_DELIVERY_CONCURRENCY` | `64` | Deliveries in flight at once within a round (at least 1). |
+| `NOTIFICATIONS_DELIVERY_MAX_ATTEMPTS` | `5` | Attempts at a delivery before it is given up (at least 1). |
+| `NOTIFICATIONS_DELIVERY_BACKOFF_SECS` | `30` | The wait after a first failed attempt, in seconds (0 or more); each later attempt waits four times longer, capped at a day, and an endpoint's `Retry-After` lengthens the wait but never shortens it. |
+
+---
+
+## AI Agent & Vector Search
+
+The embedded AI assistant searches 768-dimensional embeddings of the documentation, the audit log, the activity feed, connector deliveries and each person's own earlier questions, and its other tools read a project's members, connectors, deliveries and audit events, each as the person asking.
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `AGENT_MODEL_PROVIDER` | *Optional* | Model provider protocol: `anthropic` or `openai`. (OpenAI protocol supports OpenAI, Gemini compatible endpoints, Ollama, and vLLM). |
+| `AGENT_MODEL_URL` | `https://api.anthropic.com` (anthropic) / `https://api.openai.com/v1` (openai) | The API's base URL. The server appends `/v1/messages` for `anthropic` and `/chat/completions` for `openai`, so an Anthropic base has no `/v1` and an OpenAI-protocol base ends in it (`http://ollama:11434/v1`). |
+| `AGENT_MODEL` | `claude-sonnet-5` (anthropic) / *Required* (openai) | LLM model identifier. |
+| `AGENT_MODEL_API_KEY` | *Optional* | API key for the model provider. Required when `AGENT_MODEL_URL` is a hosted API (`api.anthropic.com`, `api.openai.com`, `generativelanguage.googleapis.com`); the server refuses to start without it. |
+| `AGENT_MAX_TOKENS` | `8192` | The longest reply one model call may write (at least 1). |
+| `AGENT_MODEL_TIMEOUT_SECS` | `60` | How long, in seconds, one model call may go without sending anything: before its first byte, or between two parts of its answer. It does not limit the whole call. Allowed range is 1 to 100. |
+| `AGENT_MESSAGES_PER_HOUR` | `60` | The most questions a person may ask over the last 60 minutes (at least 1); with the hardened database roles, each organization counts its own. |
+| `EMBEDDINGS_URL` | `http://localhost:11434/v1` | URL for the OpenAI-compatible vector embedding endpoint. (The Compose file sets `http://ollama:11434/v1`). |
+| `EMBEDDINGS_MODEL` | `nomic-embed-text` | Embedding model identifier. Vector columns are fixed at 768 dimensions. |
+| `EMBEDDINGS_API_KEY` | *Optional* | API key for the embeddings provider. Required when `EMBEDDINGS_URL` is a hosted API. |
+| `EMBEDDINGS_REQUEST_DIMENSIONS` | `false` | When `true`, requests 768-wide vectors from hosted models that shorten on request. |
+| `RERANK_URL` | *Optional* | URL of a reranking endpoint (taking `{model, query, documents}` and returning ranked results). Setting it turns reranking on. |
+| `RERANK_MODEL` | *Required if RERANK_URL set* | Reranker model identifier. |
+| `RERANK_API_KEY` | *Optional* | API key for the rerank endpoint. |
+| `DOCS_CORPUS_URL` | `<APP_URL>/llms-full.txt` | The documentation corpus the agent indexes: by default this deployment's own console (the compose file and the chart name its service directly). Set to another corpus's URL, or to `off` to disable documentation indexing. |

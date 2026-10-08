@@ -119,18 +119,17 @@ describe("parseInline", () => {
       {
         type: "link",
         href: "/project_abc/members",
-        external: false,
         children: [{ type: "text", text: "Members" }],
       },
     ]);
   });
 
-  it("keeps a docs link as an external link", () => {
-    expect(parseInline("[webhooks](https://docs.telmoni.com/integrations/webhooks)")).toEqual([
+  // The docs are the console's own pages, cited by path in the agent's corpus.
+  it("keeps a link into the docs as a console link", () => {
+    expect(parseInline("[webhooks](/docs/integrations/webhooks#verifying-signatures)")).toEqual([
       {
         type: "link",
-        href: "https://docs.telmoni.com/integrations/webhooks",
-        external: true,
+        href: "/docs/integrations/webhooks#verifying-signatures",
         children: [{ type: "text", text: "webhooks" }],
       },
     ]);
@@ -149,16 +148,15 @@ describe("parseInline", () => {
     expect(links(blocks)).toEqual([]);
   });
 
-  it("does not let an image dressed as a docs link through either", () => {
-    const source = "![x](https://docs.telmoni.com/logo.png)";
+  it("does not let an image on a console path through either", () => {
+    const source = "![x](/docs/logo.png)";
     expect(parseInline(source)).toEqual([{ type: "text", text: source }]);
   });
 
   it.each([
     "//evil.example/path",
     "/\\evil.example",
-    "http://docs.telmoni.com/x",
-    "https://docs.telmoni.com.evil.example/x",
+    "https://telmoni.com/docs/x",
     "https://evil.example/",
     "data:text/html,<b>hi</b>",
     "javascript:alert(1)",
@@ -169,16 +167,13 @@ describe("parseInline", () => {
 });
 
 describe("allowedHref", () => {
-  it("allows the console and the docs and nothing else", () => {
-    expect(allowedHref("/acme/audit-log")).toEqual({
-      href: "/acme/audit-log",
-      external: false,
-    });
-    expect(allowedHref("https://docs.telmoni.com")).toEqual({
-      href: "https://docs.telmoni.com",
-      external: true,
-    });
-    expect(allowedHref("//docs.telmoni.com/x")).toBeNull();
+  it("allows a console path, the docs' included, and nothing else", () => {
+    expect(allowedHref("/acme/audit-log")).toBe("/acme/audit-log");
+    expect(allowedHref("/docs/integrations/webhooks#verifying-signatures")).toBe(
+      "/docs/integrations/webhooks#verifying-signatures",
+    );
+    expect(allowedHref("https://telmoni.com/docs")).toBeNull();
+    expect(allowedHref("//telmoni.com/docs")).toBeNull();
     expect(allowedHref("/ok path")).toBeNull();
     expect(allowedHref("")).toBeNull();
   });

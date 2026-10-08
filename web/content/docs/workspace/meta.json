@@ -1,0 +1,5 @@
+{
+  "title": "Organizations and projects",
+  "defaultOpen": true,
+  "pages": ["organizations-and-projects", "members", "roles", "audit-log", "..."]
+}

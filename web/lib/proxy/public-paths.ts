@@ -8,6 +8,8 @@ const CORE_PUBLIC_PREFIXES: readonly string[] = [
   // so the redirect happens before the sign-in gate.
   "/legal",
   "/invite",
+  // The book (`app/docs`), read without a session.
+  "/docs",
   "/api/health",
   "/v1",
   // The CLI's door. Bearer-authenticated by auth, never by a cookie, so the
@@ -20,7 +22,14 @@ const PUBLIC_PREFIXES: readonly string[] = [
   ...EXTRA_PUBLIC_PREFIXES,
 ];
 
-const PUBLIC_FILES: readonly string[] = ["/robots.txt", "/sitemap.xml"];
+// The book's search, and the book as Markdown for a model (`lib/source.ts`).
+const PUBLIC_FILES: readonly string[] = [
+  "/robots.txt",
+  "/sitemap.xml",
+  "/api/search",
+  "/llms.txt",
+  "/llms-full.txt",
+];
 
 const TEST_SESSION_PATH = "/api/test/session";
 

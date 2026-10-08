@@ -1,0 +1,148 @@
+---
+title: "API reference"
+description: "The Telmoni read-only API: authentication, rate limits, and the public /v1 routes."
+---
+
+The Telmoni API is a read-only HTTP interface under `/v1`. Authenticated by a
+[project API key](/docs/api/api-keys), it provides programmatic access to
+organization metadata and roster details. It has no write routes.
+
+## Base URL and authentication
+
+```text
+https://telmoni.com/v1
+```
+
+*(On a self-hosted instance, replace `https://telmoni.com` with your deployment's
+configured origin).*
+
+Authenticate all requests by including your project API key as a bearer token:
+
+```http
+Authorization: Bearer telmoni_...
+```
+
+Requests lacking a valid or live key return `401 Unauthorized`, as a problem
+document; a revoked, expired or unknown key, or one whose organization is
+being deleted, answers the same way:
+
+```json
+{
+  "type": "/errors/auth/invalid-token",
+  "title": "invalid token",
+  "status": 401,
+  "detail": "a live telmoni_ API key is required"
+}
+```
+
+## HTTP methods
+
+All routes accept `GET` and `HEAD`. Any other method returns `405 Method Not
+Allowed` with an `Allow` header and a problem document, except `OPTIONS`, which
+answers `204` with `Allow: GET, HEAD, OPTIONS`.
+
+## Rate limits
+
+| Scope | Limit |
+|---|---|
+| Per API key | 600 requests / minute |
+| Per source IP address | 1,200 requests / minute |
+
+Exceeding either rate limit returns `429 Too Many Requests` along with a
+`Retry-After` header. See [Errors](/docs/errors).
+
+## `GET /v1/organization`
+
+Retrieves the organization associated with the presented token.
+
+### Response
+
+`200 OK` `application/json`
+
+```json
+{
+  "organization_id": "org_019a0b8c3f2e7d41",
+  "slug": "acme-corp",
+  "name": "Acme Corp",
+  "owner": {
+    "email": "you@example.com",
+    "display_name": "Sam Rivera"
+  }
+}
+```
+
+- `organization_id`: The unique, immutable identifier of the organization.
+- `slug`: The first segment of the organization's console URLs (`/acme-corp`).
+  It changes only when the organization's URL is changed in its Settings (see
+  [Name and URL](/docs/workspace/organizations-and-projects#name-and-url));
+  `organization_id` never does.
+- `name`: The organization's name.
+- `owner`: The organization Owner's `email` and `display_name` (`null` when
+  they have not set one). `owner` itself is `null` if the organization has no
+  owner on record.
+
+## `GET /v1/members`
+
+Returns the roster of the project the key was minted on: the organization's
+Owner first, then the project's members by join date, newest first. It is the
+same list the project's **Members** page shows, and never the organization's
+roster, which a project Admin cannot see in the console either.
+
+### Response
+
+`200 OK` `application/json`
+
+```json
+{
+  "members": [
+    {
+      "id": "019a0b8c-3f2e-7d41-9c5a-6e2b1f0d8a47",
+      "member_id": "user_7Hq3kZ2mN8vLp4Xs",
+      "email": "you@example.com",
+      "display_name": "Sam Rivera",
+      "role": "owner",
+      "created_at": "2026-08-28T12:00:00Z",
+      "is_owner": true,
+      "transfer_offer_expires_at": null
+    },
+    {
+      "id": "019a3d52-7b10-7c9e-a4f1-2d8e6b0c9a13",
+      "member_id": "user_2bR9tC5wQ1yJm6Fd",
+      "email": "alex@example.com",
+      "display_name": null,
+      "role": "admin",
+      "created_at": "2026-09-01T09:30:00Z",
+      "is_owner": false,
+      "transfer_offer_expires_at": null
+    }
+  ]
+}
+```
+
+- `id`: Unique identifier of the membership record.
+- `member_id`: The person's user ID, `user_` and 16 characters, minted at
+  their first sign-in whichever way they signed in.
+- `email`: Member's email address.
+- `display_name`: User's display name, or `null`.
+- `role`: The seat's role on the project (`admin` or `member`), or `owner` on
+  the organization Owner's row. An organization Admin's standing on every
+  project comes from the organization, not from a seat, so one appears here
+  only with a seat of their own, under that seat's role.
+- `created_at`: ISO-8601 UTC timestamp of when the member took their seat; on
+  the Owner's row, when the project was created.
+- `is_owner`: Boolean flag indicating if this member is the organization Owner.
+- `transfer_offer_expires_at`: UTC timestamp indicating when an open offer to
+  hand the project to this admin expires, or `null` if none is pending.
+
+## Errors
+
+Every error response is an RFC 9457 problem document
+(`application/problem+json`) with a structured error type. A `401` carries a
+`WWW-Authenticate: Bearer` header, and a `429` or a feature-off `503` a
+`Retry-After` header. Full details and status codes are cataloged in
+[Errors](/docs/errors), including the two types the console in front of the server
+answers with.
+
+If the API is switched off for your organization or the deployment, requests
+respond with `503 Service Unavailable` and the `/errors/tenant/feature-off`
+problem type.

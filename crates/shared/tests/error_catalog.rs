@@ -1,6 +1,6 @@
 //! Every problem `type` a service can answer is documented, and nothing more.
-//! The page lives in the sibling docs repository; without the repository the
-//! test passes vacuously, and with it but without the page it fails.
+//! The page is the console's own, `web/content/docs/errors.mdx`; without it
+//! the test fails.
 
 #![expect(clippy::unwrap_used, reason = "test scaffolding")]
 
@@ -69,9 +69,7 @@ fn the_error_page_and_the_error_code_name_the_same_types() {
         in_code.insert(format!("/errors/{prefix}/{slug}"));
     }
 
-    let Some(page) = customer_docs_page("errors.mdx") else {
-        return;
-    };
+    let page = customer_docs_page("errors.mdx");
     let in_page = uris_in(&page, '`');
 
     let undocumented: Vec<_> = in_code.difference(&in_page).collect();

@@ -4,7 +4,7 @@
 //   make webhook-receiver SECRET=whsec_...   behind a named route (:9000)
 //   make webhook-tunnel                      quick tunnel, receiver and all
 //
-// Verifies `Telmoni-Signature` exactly as the docs site's Webhooks page tells a
+// Verifies `Telmoni-Signature` exactly as the docs' Webhooks page tells a
 // customer to (the same steps as `web/lib/webhook-signature.ts`, kept
 // dependency-free so it runs with nothing installed), prints what arrived, and
 // answers 204 on a good signature or 401 on a bad one. The 401 is deliberate:

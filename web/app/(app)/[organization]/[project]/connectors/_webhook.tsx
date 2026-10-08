@@ -72,7 +72,7 @@ export function SigningSecretDialog({
 
 // The receiver's page on the docs site. One address, so the dialog and the
 // docs cannot disagree about where the contract is written down.
-const WEBHOOK_DOCS_URL = `${DOCS_URL}/integrations/webhooks/`;
+const WEBHOOK_DOCS_URL = `${DOCS_URL}/integrations/webhooks`;
 
 function SecretDescription(): ReactNode {
   return (
@@ -86,7 +86,7 @@ function SecretDescription(): ReactNode {
       The receiver&rsquo;s side &mdash; verifying, the replay window and retries &mdash; is
       at{" "}
       <a href={WEBHOOK_DOCS_URL} target="_blank" rel="noreferrer" className="underline">
-        {WEBHOOK_DOCS_URL}
+        the webhooks guide
       </a>
       .
     </>

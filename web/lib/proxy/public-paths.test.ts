@@ -20,6 +20,11 @@ describe("isPublic", () => {
     "/cli",
     "/cli/me",
     "/cli/auth/start",
+    "/docs",
+    "/docs/self-host/overview",
+    "/api/search",
+    "/llms.txt",
+    "/llms-full.txt",
   ])("treats %s as public", (p) => {
     expect(isPublic(p)).toBe(true);
   });
@@ -41,6 +46,9 @@ describe("isPublic", () => {
     "/v1-internal",
     "/client",
     "/cli-internal",
+    "/docsx",
+    "/api/search/x",
+    "/llms.txt/x",
   ])("treats %s as protected", (p) => {
     expect(isPublic(p)).toBe(false);
   });

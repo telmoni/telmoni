@@ -1,0 +1,14 @@
+{
+  "pages": [
+    "index",
+    "getting-started",
+    "self-host",
+    "workspace",
+    "integrations",
+    "api",
+    "errors",
+    "account",
+    "...",
+    "contributing"
+  ]
+}

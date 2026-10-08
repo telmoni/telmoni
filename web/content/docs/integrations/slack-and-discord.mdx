@@ -1,0 +1,111 @@
+---
+title: "Slack and Discord"
+description: "Posting project notifications into Slack or Discord channels: installation, OAuth scopes, retries, and disconnection handling."
+---
+
+A Slack or Discord connector posts project [notifications](/docs/integrations/notifications)
+directly into a specified channel.
+
+Connectors are configured per project. Project **Owners** and **Admins** can
+connect and manage destinations from the project's **Connectors** page
+(`/{organization}/{project}/connectors`). Project **Members** can view the
+project's connectors and their delivery histories.
+
+## Connecting a channel
+
+1. Open your project's **Connectors** page.
+2. Select **Connect Slack** or **Connect Discord**.
+3. You will be directed to Slack or Discord's authorization screen. Choose the
+   destination workspace and target channel.
+4. Once authorized, you are redirected back to the **Connectors** page, where
+   the channel shows as **Connected**. Connecting raises a `connector_connected`
+   notice, which the channel receives as its first message.
+
+Authorization handshakes must be completed within 10 minutes.
+
+**Send test** on a connected channel posts one message, titled "Slack is
+connected" or "Discord is connected", that reads "This is a test from Telmoni.
+Notices for this project will arrive here." The test is not recorded in the
+project's [audit log](/docs/workspace/audit-log) or its delivery log.
+
+Slack shows each notice as a header with its title, its body, and its kind
+below them; Discord shows it as an embed with the title, the body, and the kind
+as its footer.
+
+On a self-hosted deployment, a vendor whose app credentials the operator has
+not configured shows **Soon** on its tile, with **Connect** turned off (see
+[Slack and Discord apps](/docs/self-host/configuration#slack-and-discord-apps)).
+
+## Connection states
+
+The Connectors page shows each channel in one of three states:
+
+- **Connected**: notices are posted as they arrive.
+- **Needs attention** (Slack only): the installation stands, but the channel
+  refuses posts: it was archived or deleted, or Slack refuses posting into the
+  workspace's general channel. Notices queued for it fail.
+- **Disconnected**: the installation itself is gone: the Telmoni app was
+  removed from the Slack workspace or its token revoked, or the Discord webhook
+  was deleted or its token invalidated (Discord answers `401`, `403` or
+  `404`). Notices queued for it fail.
+
+In either failed state, **Reconnect** on the row runs the vendor's
+authorization again. Picking the same channel reconnects it in place, and the
+audit log notes the reconnection; picking another channel makes a new
+connection. No notice is queued for a connection while it is in a failed
+state, so reconnecting does not deliver the notices raised meanwhile.
+
+## Permissions and security
+
+Telmoni requests one scope from each vendor, the one that lets it post into the
+channel you pick:
+- **Slack**: `incoming-webhook`
+- **Discord**: `webhook.incoming`
+
+It requests no scope for reading messages, listing channels, or listing
+workspace members. The grants and webhook targets it receives are stored
+encrypted at rest.
+
+## Delivery and retries
+
+A notice's first attempt starts as soon as the notice is written, unless 32
+first attempts are already in flight on that server; then the delivery loop
+takes it on its next poll. If a delivery attempt fails due to
+a transient network error, a provider rate limit, a server error on the
+provider's side, or, on Slack, a `408` timeout:
+
+- Telmoni makes up to **5 attempts** in all: after 30 seconds, then 2, 8, and 32
+  minutes. These are the defaults, which the hosted service uses and a
+  self-hosted operator can change (`NOTIFICATIONS_DELIVERY_*` in the
+  [configuration reference](/docs/self-host/configuration)).
+- If the provider answers with a `Retry-After` header (or, on Discord, a
+  `retry_after` in the body), Telmoni waits at least that long before the next
+  attempt, up to a day.
+
+A refusal that says the channel or the installation is gone moves the
+connection to **Needs attention** or **Disconnected**, as the
+[states](#connection-states) above describe. On Slack, so does a disabled
+workspace, a revoked token, or an app no longer allowed to post there. Any
+other refusal fails that notice at once, without retries, and leaves the
+connection **Connected**.
+
+## Disconnection
+
+If the vendor answers that the destination is gone (the channel was deleted or
+archived, the incoming webhook was removed, or the Telmoni application was
+uninstalled from the workspace), Telmoni marks the connector **Needs
+attention** or **Disconnected** as the [states](#connection-states) above
+describe, fails the notices still queued for it, and posts a
+`connector_disconnected` notice to the project's feed and its other connectors.
+
+Removing the Telmoni application from a Slack workspace disconnects all channels
+connected to that Slack workspace. The event is recorded in the organization's
+[audit log](/docs/workspace/audit-log) with `external:slack` as the actor.
+
+## Disconnecting manually
+
+To remove a connection, select **Disconnect** on the connector's row on the
+**Connectors** page. Telmoni deletes the connection with its queue and delivery
+log, records the action in the project's audit log, and tells the vendor: a
+Discord webhook is deleted, and the Slack app is uninstalled from the workspace
+once no other connection on the platform uses it.

@@ -3,7 +3,7 @@
 #
 # Quickstart:
 #   1. Write .env beside this file with the keys the docs list
-#      (docs.telmoni.com/self-host/docker-compose) — not a copy of the
+#      (telmoni.com/docs/self-host/docker-compose) — not a copy of the
 #      repository's root .env.example, which is the development stack's and
 #      names services this stack does not run. Three values have no default
 #      and the stack does not start without them:
@@ -163,9 +163,10 @@ services:
       EMBEDDINGS_URL: ${EMBEDDINGS_URL:-http://ollama:11434/v1}
       EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-nomic-embed-text}
       EMBEDDINGS_API_KEY: ${EMBEDDINGS_API_KEY:-}
-      # The docs corpus the agent searches; `off` for a network that cannot
-      # reach docs.telmoni.com, or your own corpus's URL.
-      DOCS_CORPUS_URL: ${DOCS_CORPUS_URL:-}
+      # The docs corpus the agent indexes: this stack's own console, over the
+      # compose network, so it is the version you run; another corpus's URL,
+      # or `off` for none.
+      DOCS_CORPUS_URL: ${DOCS_CORPUS_URL:-http://web:3000/llms-full.txt}
 
   ollama:
     image: ollama/ollama:latest

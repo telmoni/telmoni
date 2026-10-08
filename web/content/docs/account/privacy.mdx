@@ -1,0 +1,113 @@
+---
+title: "Privacy and deletion"
+description: "Managing active sessions, product analytics, organization restoration, and permanent account deletion."
+---
+
+Your account's **Privacy** page (`/account/privacy`) manages your sessions,
+your account's deletion and, where the deployment offers it, your analytics
+preference.
+
+## Active sessions
+
+The **Active sessions** panel lists every session of your account that has not
+been signed out or revoked, one that lapsed after 30 days unused included: a
+device label derived from the browser or CLI (such as `Chrome (macOS)` or
+`Telmoni CLI (Linux)`), when each session started, and when it was last seen.
+
+You can end any session but the current one from here; the device signs out
+within a few minutes. To end your current session, sign out from the user
+menu.
+
+## Product analytics
+
+A **Data collection** switch appears on this page only on a deployment whose
+operator has configured an analytics provider (`ANALYTICS_INGEST_URL` and
+`ANALYTICS_WRITE_KEY` in the [configuration
+reference](/docs/self-host/configuration#web-console-nextjs-bff)). It is **off by
+default** and records your choice. The console sends nothing to that provider,
+whatever the switch says: its one analytics event, written with your user ID at
+every browser sign-in, goes to its own operational log and is not sent on.
+Where no provider is configured, the page has no switch.
+
+## Console agent data
+
+A person's conversations with the console agent (their questions and its answers)
+are visible only to them, and are kept for 90 days after the conversation was
+last used.
+
+The agent's search index holds copies of the audit log, activity feed notices,
+connector deliveries, each person's own answered questions and, where the
+deployment indexes it, the documentation. A self-hosted deployment indexes
+this site's documentation unless `DOCS_CORPUS_URL` is `off`; the hosted
+service indexes none. Each copy is kept no longer than its source's own
+retention window:
+- **Audit log**: 730 days
+- **Activity feed notices**: 90 days
+- **Connector deliveries**: 30 days
+- **Conversations**: 90 days, visible to their author only
+- **Documentation**: Retained until updated or removed from the published corpus
+
+Each question is sent to the model provider configured for the deployment,
+together with the earlier turns of the conversation (up to 20 messages) and
+whatever the agent's tools read to answer it: the passages it retrieved, and the
+member roster, connectors, delivery logs, or audit events it looked up. Search
+queries and the indexed text go to the configured embeddings endpoint, and to
+the rerank endpoint if one is set. On the hosted service, the model and the
+embeddings are Google's Gemini API, on Google's paid terms, as the
+[Subprocessors](/legal/subprocessors) page states.
+
+## Deleting an organization
+
+Only an organization **Owner** can delete an organization. Deletion is initiated
+from the **Danger zone** in the organization's **Settings** page
+(`/{organization}/settings`):
+
+1. Request a 6-digit confirmation code, which is emailed to your address and
+   remains valid for 15 minutes.
+2. Enter the confirmation code to confirm deletion.
+3. Access ends immediately for all members, and all API keys stop functioning.
+
+The automated deletion sweep then permanently erases the organization, its
+projects, its agent conversations and search index, and everything else it
+held, usually within the hour. There is no restore window and no undo. Its
+audit chain is kept.
+
+## Deleting your account
+
+Account deletion is permanent and performed from the **Danger zone** on your
+account's **Privacy** page (`/account/privacy`).
+
+### Ownership check
+
+**Account deletion is refused while you own an organization that has other
+members.** You must first either:
+- [Transfer ownership](/docs/workspace/organizations-and-projects#transferring-organization-ownership)
+  to an Admin.
+- Remove all other members from the organization.
+- Or delete the organization from its settings page.
+
+### Deletion procedure
+
+1. Select **Send confirmation code** to receive a 6-digit code by email (valid
+   for 15 minutes). Five wrong guesses burn it; **Resend code** issues another.
+2. Enter the code and select **Permanently delete my account**. The ownership
+   check above is made at this step. Your access ends at once, and the erasure
+   follows, usually within the hour.
+
+### What happens when your account is deleted
+
+- **Organizations you exclusively own**: Marked for deletion at once, with their
+  API keys revoked, and purged by the deletion sweep after the same 15-minute
+  grace as any organization's deletion.
+- **Other organizations you belong to**: You are removed from all other
+  organizations and projects. Their audit logs record your departure.
+- **Console agent**: Deletes your conversations with the agent and your own
+  index rows, deletes the index passages that quoted your address or your name,
+  and rewrites you to "a former member" in other people's conversations. A
+  one-word display name is not searched for, since it would match other people.
+- **Notifications**: Feed notices referencing your account are anonymized
+  (e.g., "A former member joined the project").
+- **Authentication**: Your user record is purged and all your sessions end
+  immediately. On a self-hosted deployment, a password account's hash goes
+  with it, while an OpenID Connect provider keeps its own record of you; on
+  the hosted service, your account at its identity provider is deleted too.

@@ -20,8 +20,15 @@ pub const DEFAULT_EMBEDDINGS_MODEL: &str = "nomic-embed-text";
 /// otherwise refuse every write, or a truncated vector would search nonsense.
 pub const EMBEDDING_DIMENSIONS: usize = 768;
 
-/// The docs corpus, one text file with every page.
-pub const DEFAULT_DOCS_CORPUS_URL: &str = "https://docs.telmoni.com/llms-full.txt";
+/// The docs corpus when `DOCS_CORPUS_URL` is unset: the console's own
+/// `/llms-full.txt` under `APP_URL`, every page of the docs at the version
+/// this deployment runs. The compose file and the chart name the console
+/// service directly instead, so the fetch stays inside the deployment.
+fn default_docs_corpus_url() -> String {
+    let app_url =
+        optional_base_url("APP_URL").unwrap_or_else(|| "http://localhost:3000".to_owned());
+    format!("{app_url}/llms-full.txt")
+}
 
 /// Which wire protocol the model endpoint speaks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -112,7 +119,8 @@ pub struct Config {
     pub model: Option<ModelConfig>,
     pub embeddings: EmbeddingsConfig,
     pub rerank: Option<RerankConfig>,
-    /// `DOCS_CORPUS_URL`; `off` indexes no docs.
+    /// `DOCS_CORPUS_URL`: unset, the console's own corpus; `off` indexes no
+    /// docs.
     pub docs_corpus_url: Option<String>,
     /// `AGENT_MESSAGES_PER_HOUR`: the questions one person may ask in an hour.
     pub messages_per_hour: i64,
@@ -137,7 +145,7 @@ impl Config {
         let docs_corpus_url = match optional_base_url("DOCS_CORPUS_URL") {
             Some(off) if off == "off" => None,
             Some(url) => Some(url),
-            None => Some(DEFAULT_DOCS_CORPUS_URL.to_owned()),
+            None => Some(default_docs_corpus_url()),
         };
         let config = Self {
             database_url,

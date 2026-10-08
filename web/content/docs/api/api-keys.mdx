@@ -1,0 +1,101 @@
+---
+title: "API keys"
+description: "Creating, rotating, and revoking API keys that authenticate requests to the Telmoni API, with rotation grace periods and security practices."
+---
+
+An API key (token) authenticates scripts, services, background workers, and the
+[Telmoni CLI](/docs/api/cli) to the [Telmoni API](/docs/api/reference). API keys belong
+to a **Project** and are managed from the project's **API keys** page
+(`/{organization}/{project}/api-keys`).
+
+## Creating a key
+
+Project **Owners** and **Admins** can mint, rotate, and revoke API keys.
+
+1. Navigate to your project's **API keys** page.
+2. Select **Mint key**.
+3. Provide a name describing what service uses the key (up to 100 characters),
+   and optionally a description (up to 500).
+4. Choose when it expires: 30 days, 90 days (the default), 1 year, or **Never
+   (not recommended)**.
+
+Where the `api_tokens` feature flag is off, for the deployment or for the
+organization, minting and rotating are refused with "API keys are switched off
+right now."; revoking always works. The console
+lets each person mint 5 keys, rotate 10 and revoke 20 a minute.
+
+**The raw token is displayed exactly once upon creation.** Copy and store it in
+your secret manager immediately. Telmoni stores only a SHA-256 hash of the
+token; the plaintext appears in the mint or rotate answer alone.
+
+Every key begins with the prefix `telmoni_`.
+
+## Using a key
+
+Include the key as a bearer token in the HTTP `Authorization` header:
+
+```console
+$ curl -H "Authorization: Bearer $TELMONI_API_KEY" https://telmoni.com/v1/organization
+```
+
+You can also sign the [Telmoni CLI](/docs/api/cli) in with it, by flag or from the
+`TELMONI_API_KEY` environment variable:
+
+```console
+$ telmoni login --key $TELMONI_API_KEY
+```
+
+The [client SDKs](/docs/api/sdks) hold a key in their configuration and make no API
+calls:
+
+```ts
+import { Telmoni } from 'telmoni';
+
+const client = new Telmoni({ apiKey: process.env.TELMONI_API_KEY });
+```
+
+A key is minted in a project, is deleted with it, and follows it if the project
+is transferred to another organization. On `/v1` it reads its project's
+organization (`GET /v1/organization`) and its project's roster
+(`GET /v1/members`), never the organization's whole roster: a key reads no more
+than the project Admin who minted it can see. A key remains active regardless
+of whether the individual user who created it leaves the project.
+
+## Who can see keys
+
+Anyone on the project (Owner, Admin, or Member) can view the list of active
+keys: each key's name, creation date, last-used date (written at most once a
+minute, so a busy key is not a write per request), and expiration date. The
+secret itself is never visible after creation.
+
+## Rotating a key
+
+To replace a key while the old one keeps working for a day, select **Rotate**
+on its row on the **API keys** page.
+
+Rotating a key produces a new `telmoni_` token (shown once) and keeps the
+previous token valid for a **24-hour grace period**, or until its own expiry if
+that comes sooner. Both tokens authenticate during that window; after it, the
+old one is refused like a revoked key. The replacement keeps the key's name and
+description, is recorded as minted by whoever rotated it, and expires 90 days
+after rotation, whatever the old key's expiry was.
+
+Minting, rotating and revoking a key are each recorded in the project's
+[audit log](/docs/workspace/audit-log).
+
+## Revoking a key
+
+To immediately terminate a compromised or decommissioned key, select **Revoke**
+on its row. Revocation takes effect immediately: subsequent requests using that
+token fail with `401 Unauthorized`. The record of a revoked or expired key is
+deleted seven days later by the retention sweep.
+
+## Key security best practices
+
+- **Isolate by workload**: Create distinct API keys for each service or
+  automation rather than sharing a single key across multiple tasks.
+- **Rotate with grace windows**: Rotate rather than revoke a key in use: the
+  old key keeps authenticating for up to 24 hours while you deploy the new one.
+- **Server-side only**: Keep API keys in environment variables or secure vault
+  systems on servers. Never embed API keys into client-side code, frontend
+  browsers, or mobile applications.

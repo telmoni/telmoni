@@ -1,9 +1,11 @@
-//! The customer docs, from the one text file the docs site publishes
-//! (`DOCS_CORPUS_URL`, `llms-full.txt`): every page, each opening with its
-//! `# Title` line and a `Source: <url>` line under it. A page is split at
-//! its headings and each passage links to its own anchor. Only passages
-//! whose text changed are embedded again, and pages that left the file
-//! leave the index.
+//! The customer docs, from the one text file the console publishes
+//! (`/llms-full.txt`, or whatever `DOCS_CORPUS_URL` names): every page, each
+//! opening with its `# Title` line and a `Source: <url>` line under it. The
+//! console writes a path there (`/docs/...`), which is kept as it is, so an
+//! answer's link stays on the console's own origin whichever host serves it.
+//! A page is split at its headings and each passage links to its own anchor.
+//! Only passages whose text changed are embedded again, and pages that left
+//! the file leave the index.
 
 use std::collections::HashSet;
 use std::time::Duration;
@@ -20,7 +22,7 @@ use crate::model::{error_kind, unavailable};
 
 const SOURCE: Source = Source::Docs;
 
-/// The largest corpus taken: a docs site is a few hundred kilobytes, and a
+/// The largest corpus taken: the docs are a few hundred kilobytes, and a
 /// misconfigured URL must not stream a gigabyte into memory.
 const MAX_BYTES: usize = 16 * 1024 * 1024;
 
@@ -128,7 +130,7 @@ async fn fetch(url: &str) -> Result<String, TelmoniError> {
     Ok(String::from_utf8_lossy(&body).into_owned())
 }
 
-/// The site's origin, for a page that names no source of its own.
+/// The corpus's origin, for a page that names no source of its own.
 fn site_of(corpus_url: &str) -> String {
     corpus_url.split_once("://").map_or_else(
         || corpus_url.to_owned(),
@@ -139,7 +141,24 @@ fn site_of(corpus_url: &str) -> String {
     )
 }
 
-/// The anchor a docs heading renders with: lowercase, words joined by `-`.
+/// A heading's text and its anchor. The console writes each heading's own id
+/// after it, as the page renders it (`## Active sessions [#active-sessions]`),
+/// and that is the anchor; a heading with none gets the id a heading renders
+/// with by default.
+fn heading_parts(heading: &str) -> (String, String) {
+    let heading = heading.trim();
+    if let Some((text, rest)) = heading.rsplit_once("[#")
+        && let Some(id) = rest.strip_suffix(']')
+        && !id.is_empty()
+        && !id.contains(['[', ']', ' '])
+    {
+        return (text.trim_end().to_owned(), id.to_owned());
+    }
+    (heading.to_owned(), slug(heading))
+}
+
+/// The anchor a docs heading renders with when it names none: lowercase,
+/// words joined by `-`.
 fn slug(heading: &str) -> String {
     let mut out = String::new();
     for c in heading.trim().chars() {
@@ -199,16 +218,19 @@ pub(crate) fn entries(corpus: &str, site: &str) -> Vec<Entry> {
         let page_url = url.unwrap_or_else(|| site.to_owned());
         let passages: Vec<Passage> = chunk::split(&text)
             .into_iter()
-            .map(|p| Passage {
-                url: Some(match &p.heading {
-                    Some(heading) => format!("{page_url}#{}", slug(heading)),
-                    None => page_url.clone(),
-                }),
-                title: match &p.heading {
-                    Some(heading) => format!("{title} — {heading}"),
-                    None => title.clone(),
-                },
-                body: p.text,
+            .map(|p| {
+                let heading = p.heading.as_deref().map(heading_parts);
+                Passage {
+                    url: Some(match &heading {
+                        Some((_, anchor)) => format!("{page_url}#{anchor}"),
+                        None => page_url.clone(),
+                    }),
+                    title: match &heading {
+                        Some((text, _)) => format!("{title} — {text}"),
+                        None => title.clone(),
+                    },
+                    body: p.text,
+                }
             })
             .collect();
         let source_id = format!("{page_url}|{title}");
@@ -237,47 +259,58 @@ mod tests {
     fn pages_split_at_their_titles_and_link_to_their_anchors() {
         let corpus = "\
 # Webhooks
-Source: https://docs.telmoni.com/integrations/webhooks/
+Source: /docs/integrations/webhooks
 
 Signed deliveries.
 
 ## Verifying signatures
 Compute the HMAC.
 
+## Rotating the secret [#rotate]
+Mint another.
+
 # Errors
 The catalog.
 ";
-        let entries = entries(corpus, "https://docs.telmoni.com");
+        let entries = entries(corpus, "http://localhost:3000");
         assert_eq!(entries.len(), 2);
         let webhooks = &entries[0];
-        assert_eq!(webhooks.passages.len(), 2);
+        assert_eq!(webhooks.passages.len(), 3);
+        // The console's path, kept as it is: the link stays on its origin.
         assert_eq!(
             webhooks.passages[1].url.as_deref(),
-            Some("https://docs.telmoni.com/integrations/webhooks#verifying-signatures")
+            Some("/docs/integrations/webhooks#verifying-signatures")
         );
         assert_eq!(
             webhooks.passages[1].title,
             "Webhooks — Verifying signatures"
         );
+        // The id the page writes after its heading is the anchor, and is not
+        // the title's.
+        assert_eq!(
+            webhooks.passages[2].url.as_deref(),
+            Some("/docs/integrations/webhooks#rotate")
+        );
+        assert_eq!(webhooks.passages[2].title, "Webhooks — Rotating the secret");
         assert!(!webhooks.passages[0].body.contains("Source:"));
         assert_eq!(
             entries[1].passages[0].url.as_deref(),
-            Some("https://docs.telmoni.com")
+            Some("http://localhost:3000")
         );
     }
 
     #[test]
     fn a_shell_comment_in_a_code_block_is_not_a_page() {
-        let corpus = "# Install\nSource: https://docs.telmoni.com/install/\n\n```console\n# install the binary\n$ make up\n```\n";
-        let entries = entries(corpus, "https://docs.telmoni.com");
+        let corpus = "# Install\nSource: /docs/install\n\n```console\n# install the binary\n$ make up\n```\n";
+        let entries = entries(corpus, "http://localhost:3000");
         assert_eq!(entries.len(), 1);
         assert!(entries[0].passages[0].body.contains("# install the binary"));
     }
 
     #[test]
     fn an_unclosed_fence_does_not_swallow_the_next_page() {
-        let corpus = "# One\nSource: https://docs.telmoni.com/one/\n\n```bash\nmake up\n\n# Two\nSource: https://docs.telmoni.com/two/\n\nSecond page.\n";
-        let entries = entries(corpus, "https://docs.telmoni.com");
+        let corpus = "# One\nSource: /docs/one\n\n```bash\nmake up\n\n# Two\nSource: /docs/two\n\nSecond page.\n";
+        let entries = entries(corpus, "http://localhost:3000");
         assert_eq!(entries.len(), 2);
         assert!(entries[1].passages[0].body.contains("Second page."));
     }
@@ -285,22 +318,22 @@ The catalog.
     #[test]
     fn a_page_is_taken_once_by_the_key_it_is_stored_under() {
         let corpus = "# Same\nFirst.\n\n# Same\nSecond.\n";
-        let entries = entries(corpus, "https://docs.telmoni.com");
+        let entries = entries(corpus, "http://localhost:3000");
         assert_eq!(entries.len(), 1);
         assert!(entries[0].passages[0].body.contains("First."));
     }
 
     #[test]
     fn a_corpus_with_no_pages_has_no_entries() {
-        assert!(entries("<!doctype html><html></html>", "https://docs.telmoni.com").is_empty());
-        assert!(entries("", "https://docs.telmoni.com").is_empty());
+        assert!(entries("<!doctype html><html></html>", "http://localhost:3000").is_empty());
+        assert!(entries("", "http://localhost:3000").is_empty());
     }
 
     #[test]
     fn the_site_is_the_corpus_origin() {
         assert_eq!(
-            site_of("https://docs.telmoni.com/llms-full.txt"),
-            "https://docs.telmoni.com"
+            site_of("http://localhost:3000/llms-full.txt"),
+            "http://localhost:3000"
         );
     }
 }

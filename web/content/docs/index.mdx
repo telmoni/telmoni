@@ -1,0 +1,63 @@
+---
+title: "Introduction"
+description: "What Telmoni is today, core architecture, and navigation guide."
+---
+
+Telmoni is a foundation for organizations and their projects: members and
+roles, API keys, notifications and a hash-chained audit log, with a console, a
+CLI and an HTTP API. These documentation pages describe the open core platform,
+hosted cloud service, console interface, developer tools, and HTTP API as
+implemented today.
+
+## Platform capabilities
+
+Telmoni is available both as a hosted cloud service and as an open core
+platform deployed on your own infrastructure:
+
+- **[Hosted cloud service](https://telmoni.com)**: Run for you on Google Cloud,
+  with sign-in through an identity provider and the free
+  [Hobby plan](https://telmoni.com/plans).
+- **[Self-hosted deployment](/docs/self-host/overview)**: Run the complete platform
+  on your own infrastructure using [Docker Compose](/docs/self-host/docker-compose) or
+  the [Kubernetes Helm chart](/docs/self-host/kubernetes), backed by PostgreSQL 17
+  with `pgvector` and Redis 7.
+- **[Organizations and projects](/docs/workspace/organizations-and-projects)**: Two
+  tiers. An organization holds projects, its own settings and a rolled-up audit
+  log; a project holds API keys and notification connectors.
+- **[Members and roles](/docs/workspace/roles)**: Role-based access control with
+  three roles, **Owner**, **Admin**, and **Member**, governing both
+  organization administration and project resources.
+- **[Audit log](/docs/workspace/audit-log)**: Append-only audit logging linking
+  each recorded event into a SHA-256 hash chain, verified every 24 hours by a
+  background sweep.
+- **[Notifications and connectors](/docs/integrations/notifications)**: Project
+  activity feeds, and fan-out delivery to
+  [Slack, Discord](/docs/integrations/slack-and-discord), and signed
+  [Webhooks](/docs/integrations/webhooks).
+- **[AI Context Agent](/docs/self-host/agent)**: Embedded context assistant that,
+  where the deployment configures a model, answers questions about a project's
+  activity, members, connectors, and audit log in the console (`⌘J`), with
+  numbered citations.
+- **[Telmoni CLI](/docs/api/cli)**: The official command-line interface with interactive
+  device code authorization ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)),
+  organization switching, and JSON output from `telmoni status --json`.
+- **[Client SDKs](/docs/api/sdks)**: Configuration-only SDK scaffolds for TypeScript /
+  JavaScript, Python, Go, and Rust, installed from the repository.
+- **[API keys and /v1 API](/docs/api/api-keys)**: Project-owned `telmoni_` tokens,
+  with a 24-hour grace period on rotation, authenticating the read-only
+  [API](/docs/api/reference).
+
+## Where to start
+
+1. [Signing up and signing in](/docs/getting-started/sign-in): How you sign in,
+   the organization your first sign-in creates, and your first project.
+2. [Telmoni CLI](/docs/api/cli): Installing the CLI and signing in via device code or API key.
+3. [Client SDKs](/docs/api/sdks): The configuration-only scaffolds for TypeScript, Python, Go and Rust.
+4. [Organizations and projects](/docs/workspace/organizations-and-projects): Organizations
+   and projects, their URLs, keyboard shortcuts, and their lifecycle.
+5. [Members and invitations](/docs/workspace/members): Inviting collaborators
+   and managing roles.
+6. [Self-hosting overview](/docs/self-host/overview): Architecture, requirements,
+   and deployment models.
+7. [Docker Compose quickstart](/docs/self-host/docker-compose): Running the server,
+   the console, PostgreSQL and Redis on a single machine.

@@ -1,0 +1,153 @@
+---
+title: "Client SDKs"
+description: "The Telmoni client SDK scaffolds for TypeScript / JavaScript, Python, Go, and Rust: configuration only, installed from the repository."
+---
+
+The SDKs are scaffolds. Each one holds configuration (the endpoint, an API
+key, and an organization) and makes no request to the platform. None is
+published to a package registry, so each installs from the
+[`telmoni/telmoni-cli`](https://github.com/telmoni/telmoni-cli) repository.
+
+| Language | Package / Module | Source |
+|---|---|---|
+| **TypeScript / JavaScript** | `telmoni` | [`sdk/typescript`](https://github.com/telmoni/telmoni-cli/tree/main/sdk/typescript) |
+| **Python** | `telmoni` (Python 3.9 or later) | [`sdk/python`](https://github.com/telmoni/telmoni-cli/tree/main/sdk/python) |
+| **Go** | `github.com/telmoni/telmoni-cli/sdk/go` | [`sdk/go`](https://github.com/telmoni/telmoni-cli/tree/main/sdk/go) |
+| **Rust** | `telmoni-sdk` | [`sdk/rust`](https://github.com/telmoni/telmoni-cli/tree/main/sdk/rust) |
+
+---
+
+## Installation
+
+<Tabs items={['TypeScript', 'Python', 'Go', 'Rust']}>
+  <Tab value="TypeScript">
+    Build it in a checkout of the repository, then add that directory to your project's dependencies; the built package declares Node.js 18 or later:
+
+    ```console
+    $ git clone https://github.com/telmoni/telmoni-cli.git
+    $ cd telmoni-cli/sdk/typescript
+    $ npm ci && npm run build
+    ```
+  </Tab>
+  <Tab value="Python">
+    Install it from a checkout of the repository (Python 3.9 or later):
+
+    ```console
+    $ git clone https://github.com/telmoni/telmoni-cli.git
+    $ pip install ./telmoni-cli/sdk/python
+    ```
+  </Tab>
+  <Tab value="Go">
+    Go 1.22 or later:
+
+    ```console
+    $ go get github.com/telmoni/telmoni-cli/sdk/go
+    ```
+  </Tab>
+  <Tab value="Rust">
+    Depend on it from the repository in `Cargo.toml` (Rust 1.98.1 or later):
+
+    ```toml
+    [dependencies]
+    telmoni-sdk = { git = "https://github.com/telmoni/telmoni-cli" }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Configuration
+
+<Tabs items={['TypeScript', 'Python', 'Go', 'Rust']}>
+  <Tab value="TypeScript">
+    ```ts
+    import { Telmoni } from 'telmoni';
+
+    const fromEnv = Telmoni.fromEnv();
+
+    const custom = new Telmoni({
+      endpoint: 'https://telmoni.com',
+      apiKey: process.env.TELMONI_API_KEY,
+      organizationId: 'org_019a0b8c3f2e7d41',
+    });
+    ```
+  </Tab>
+  <Tab value="Python">
+    ```python
+    from telmoni import Config, Telmoni
+
+    from_env = Telmoni.from_env()
+
+    custom = Telmoni(
+        Config(
+            endpoint="https://telmoni.com",
+            api_key="telmoni_...",
+            organization_id="org_019a0b8c3f2e7d41",
+        )
+    )
+    ```
+  </Tab>
+  <Tab value="Go">
+    ```go
+    package main
+
+    import (
+    	telmoni "github.com/telmoni/telmoni-cli/sdk/go"
+    )
+
+    func main() {
+    	fromEnv := telmoni.NewFromEnv()
+
+    	custom := telmoni.New(telmoni.Config{
+    		Endpoint:       "https://telmoni.com",
+    		APIKey:         "telmoni_...",
+    		OrganizationID: "org_019a0b8c3f2e7d41",
+    	})
+
+    	_, _ = fromEnv, custom
+    }
+    ```
+  </Tab>
+  <Tab value="Rust">
+    ```rust
+    use telmoni_sdk::{Config, Telmoni};
+
+    fn main() {
+        let from_env = Telmoni::from_env();
+
+        let custom = Telmoni::new(Config::new(
+            "https://telmoni.com",
+            Some("org_019a0b8c3f2e7d41".to_string()),
+            Some("telmoni_...".to_string()),
+        ));
+
+        let _ = (from_env, custom);
+    }
+    ```
+  </Tab>
+</Tabs>
+
+Each SDK keeps the API key out of the configuration's printed form: Rust's
+`Debug` shows `<redacted>` in its place and serialization skips it; Python's
+`repr` leaves it out; Go's `String` and `GoString` redact it and JSON skips it;
+TypeScript holds `apiKey` as a non-enumerable property, which `console.log` and
+`JSON.stringify` pass over.
+
+---
+
+## Environment variables
+
+`fromEnv` / `from_env` / `NewFromEnv` read:
+
+| Variable | Description | Default |
+|---|---|---|
+| `TELMONI_ENDPOINT` | The Telmoni platform endpoint | `https://telmoni.com` when unset or empty |
+| `TELMONI_API_KEY` | An [API key](/docs/api/api-keys), created on a project's API keys page | None |
+| `TELMONI_ORG` | The organization's ID (`org_...`) | None |
+
+Every SDK reads these three and no others, as the CLI does.
+
+An SDK holds the organization exactly as the variable gives it, checks nothing
+and sends it nowhere; unlike the [CLI](/docs/api/cli#managing-organizations), it has
+no saved list to look a [slug](/docs/workspace/organizations-and-projects#name-and-url)
+up in.
