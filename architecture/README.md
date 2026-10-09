@@ -12,14 +12,17 @@ Telmoni is a multi-tenant foundation. It provides:
 
 It is **one Rust binary**, `telmoni`, and a **Next.js console** beside it, deployed together to GKE with one Helm chart.
 
+Start with [ARCHITECTURE.md](ARCHITECTURE.md), the high-level design: the whole system on one page, linking down to the area pages below.
+
 ## Pages
 
 | Page | Covers |
 |---|---|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | The high-level design: purpose, goals, context, building blocks, how a request moves, identity and access, data, notifications, the agent, background work, deployment, extending the core, failure, scale, where it goes next, decisions, known gaps |
 | [server.md](server.md) | The binary: modules in one process, assembly, boot, routing, seams, errors, logging, configuration, shutdown, subcommands, the wire contract |
 | [identity.md](identity.md) | Sign-in (password, OIDC, device), the opaque-token sessions, the console's cookie, API tokens, abuse limits, mail |
 | [tenancy.md](tenancy.md) | Organizations and projects, roles, the permission matrix, `Acting`, scoped transactions, row-level security, maintenance lanes, database roles, transfers |
-| [data.md](data.md) | Schemas, migrations, audit partitions, the audit hash chain, retention windows |
+| [data.md](data.md) | Schemas, migrations, audit partitions, the audit hash chain and its exports by range, retention windows |
 | [background.md](background.md) | Every loop and job, and how replicas share them: leader locks, leases, chunks |
 | [deletion.md](deletion.md) | Organization, project and person deletion across modules, and the organization export |
 | [notifications.md](notifications.md) | Feeds, the delivery queue, connectors, envelope encryption, webhook signatures, the egress guard |
@@ -98,7 +101,7 @@ These are the load-bearing decisions. Each page explains its part.
 crates/
   telmoni/        the binary: App, Module, serve, subcommands, the sweeps' timers
   auth/           sign-in, sessions, tenancy, invitations, transfers, tokens, flags,
-                  export, deletion, the sweeps, /v1
+                  export, audit exports, deletion, the sweeps, /v1
     src/issuer.rs, person.rs, seam.rs, sweep.rs, handler/, db/, password/, oidc/
   notifications/  feeds, connectors, delivery, retention
     src/delivery.rs, connector/, handler/, db.rs
