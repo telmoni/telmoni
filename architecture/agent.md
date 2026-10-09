@@ -144,7 +144,8 @@ The handler resolves the asker through `seam::Auth`, which needs a project, and 
 3. Stores the question.
 4. Reads the database's clock as `asked_at`. The erasure fence compares against this, so it must be the database's time, not the process's.
 
-It then spawns `run_turn` and answers at once with an SSE stream. The stream carries `text`, `tool`, `citation`, `done` and `error` events, in the shape `web/lib/agent/stream.ts` parses. The console's route handler (`web/app/api/agent/turns/route.ts`) relays the stream as it is. It holds it open no longer than `AGENT_STREAM_TIMEOUT_MS` (`web/lib/server/entities/agent.ts`).
+It then spawns `run_turn` and answers at once with an SSE stream, in the shape `web/lib/agent/stream.ts` parses. The stream opens with a `conversation` event naming the conversation, then carries `text`, `tool`, `citation`, `done` and `error` events.
+- ⚠ **The conversation comes first, not only with `done`.** A new conversation exists from step 2. A first question stopped, or cut off, before `done` used to leave the console without its id, so the next question started a second conversation, and history split one thread in two. The console's route handler (`web/app/api/agent/turns/route.ts`) relays the stream as it is. It holds it open no longer than `AGENT_STREAM_TIMEOUT_MS` (`web/lib/server/entities/agent.ts`).
 
 ### `turn::converse`, the loop
 
@@ -161,7 +162,7 @@ It then spawns `run_turn` and answers at once with an SSE stream. The stream car
 | `Truncated` | The reply hit the token ceiling (`AGENT_MAX_TOKENS`). | What was written, plus a note. |
 | `TimedOut` | `TURN_BUDGET` passed. Model calls and tool lookups both count. | What was written, plus a note. |
 | `Interrupted` | The model's stream broke off after writing something. | What was written, plus a note. |
-| `Cancelled` | The panel went away, or the asker is no longer who began the turn. | Nothing more is written, and nothing is saved. When the asker is no longer who began the turn, an `error` event says so. |
+| `Cancelled` | The person stopped the answer or closed the agent's window, or the asker is no longer who began the turn. | Nothing more is written, and nothing is saved. When the asker is no longer who began the turn, an `error` event says so. |
 
 How the loop treats the text and the clock:
 
@@ -446,7 +447,7 @@ sequenceDiagram
 | Auth cannot answer a recheck | That lookup is refused. The turn goes on. |
 | The asker is gone | The turn ends. Nothing more is sent or saved. |
 | An erasure overlaps the turn | The answer is withheld from storage and the index. The person asking has already seen it streamed. |
-| The panel closes mid-answer | The loop stops at its next check. The question stays saved; the answer is not. |
+| The person stops the answer, or closes the window, mid-answer | The loop stops at its next check. The question stays saved; the answer is not. The next question continues the same conversation, which the stream named first. |
 | The docs fetch fails | Retried after `DOCS_RETRY`. |
 
 ## Where it lives
@@ -471,3 +472,4 @@ sequenceDiagram
 | Retention | `crates/agent/src/retention.rs` |
 | Schema | `crates/agent/migrations/20261001100000_agent_initial.sql` |
 | Console relay, stream parser, renderer | `web/app/api/agent/turns/route.ts`, `web/lib/agent/` |
+| The console's window | `web/components/agent-panel.tsx`, `web/components/agent/` |

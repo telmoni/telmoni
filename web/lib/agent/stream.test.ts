@@ -111,6 +111,14 @@ describe("agentEvents", () => {
     expect(events).toEqual([{ type: "text", delta: "kept" }]);
   });
 
+  it("reads the turn's conversation, sent before anything else", () => {
+    expect(parseAgentEvent("conversation", '{"conversation_id":"c1"}')).toEqual({
+      type: "conversation",
+      conversationId: "c1",
+    });
+    expect(parseAgentEvent("conversation", '{"conversation_id":null}')).toBeNull();
+  });
+
   it("reads a mid-stream error", () => {
     expect(
       parseAgentEvent(
@@ -191,6 +199,37 @@ describe("agentReducer", () => {
     expect(s.error).toEqual({ title: "model unavailable", detail: null });
   });
 
+  it("learns its conversation from the turn's first event", () => {
+    let s = sent();
+    s = agentReducer(s, { type: "event", event: { type: "conversation", conversationId: "c1" } });
+    expect(s.conversationId).toBe("c1");
+    expect(s.streaming).toBe(true);
+  });
+
+  // A first question stopped before `done` still belongs to the conversation
+  // the server made for it, so the next one continues it.
+  it("stops a reply, keeping what it wrote and its conversation", () => {
+    let s = sent();
+    s = agentReducer(s, { type: "event", event: { type: "conversation", conversationId: "c1" } });
+    s = agentReducer(s, { type: "event", event: { type: "tool", name: "search" } });
+    s = agentReducer(s, { type: "event", event: { type: "text", delta: "So far" } });
+    s = agentReducer(s, { type: "stop" });
+    expect(s.streaming).toBe(false);
+    expect(s.stopped).toBe(true);
+    expect(s.tool).toBeNull();
+    expect(s.error).toBeNull();
+    expect(s.conversationId).toBe("c1");
+    expect(s.messages[1]!.content).toBe("So far");
+    const next = agentReducer(s, { type: "send", userId: "u2", assistantId: "a2", message: "And?" });
+    expect(next.stopped).toBe(false);
+  });
+
+  it("drops an empty reply when stopped before it began, and ignores a stop when idle", () => {
+    const stopped = agentReducer(sent(), { type: "stop" });
+    expect(stopped.messages.map((m) => m.role)).toEqual(["user"]);
+    expect(agentReducer(stopped, { type: "stop" })).toBe(stopped);
+  });
+
   it("keeps a partial reply when a turn fails", () => {
     let s = sent();
     s = agentReducer(s, { type: "event", event: { type: "text", delta: "Partial" } });
@@ -258,6 +297,23 @@ describe("describeRefusal", () => {
     });
     expect(describeRefusal(500, "garbage").detail).toMatch(/500/);
     expect(describeRefusal(401, null).title).toMatch(/session/);
+  });
+
+  // The server's own not-found, which a retry would only meet again. The
+  // relay's bare 404 is not that: an auth that did not answer gives it too,
+  // so it is worded as any other failure.
+  it("sends a person whose conversation is gone to a new conversation, and only them", () => {
+    const gone = describeRefusal(404, {
+      type: "/errors/auth/not-found",
+      title: "not found",
+      status: 404,
+      detail: "no such conversation",
+    });
+    expect(gone.title).toMatch(/no longer there/);
+    expect(gone.detail).toMatch(/new conversation/);
+    const relayed = describeRefusal(404, { error: "unknown project" });
+    expect(relayed.title).not.toBe(gone.title);
+    expect(relayed.detail).toMatch(/404/);
   });
 
   it("words every tool, and one it does not know", () => {

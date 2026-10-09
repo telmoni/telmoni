@@ -9,6 +9,7 @@ import {
 } from "@/lib/types/agent";
 
 export type AgentEvent =
+  | { type: "conversation"; conversationId: string }
   | { type: "text"; delta: string }
   | { type: "tool"; name: string }
   | { type: "citation"; citation: AgentCitation }
@@ -21,6 +22,7 @@ export type AgentEvent =
       detail: string | null;
     };
 
+const ConversationData = z.object({ conversation_id: z.string() });
 const TextData = z.object({ delta: z.string() });
 const ToolData = z.object({ name: z.string() });
 // A citation as the server sends it, streamed and stored alike.
@@ -48,6 +50,10 @@ export function parseAgentEvent(name: string, data: string): AgentEvent | null {
     return null;
   }
   switch (name) {
+    case "conversation": {
+      const p = ConversationData.safeParse(body);
+      return p.success ? { type: "conversation", conversationId: p.data.conversation_id } : null;
+    }
     case "text": {
       const p = TextData.safeParse(body);
       return p.success ? { type: "text", delta: p.data.delta } : null;
@@ -187,6 +193,9 @@ export interface AgentState {
   streaming: boolean;
   tool: string | null;
   error: AgentProblem | null;
+  /** The person stopped the last reply, or closed the window on it: what it
+   *  had written stays on screen, marked as stopped, and is not saved. */
+  stopped: boolean;
 }
 
 export const initialAgentState: AgentState = {
@@ -195,12 +204,14 @@ export const initialAgentState: AgentState = {
   streaming: false,
   tool: null,
   error: null,
+  stopped: false,
 };
 
 export type AgentAction =
   | { type: "send"; userId: string; assistantId: string; message: string }
   | { type: "event"; event: AgentEvent }
   | { type: "fail"; problem: AgentProblem }
+  | { type: "stop" }
   | { type: "load"; conversation: AgentConversation }
   | { type: "reset" };
 
@@ -236,6 +247,7 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
         streaming: true,
         tool: null,
         error: null,
+        stopped: false,
       };
     case "fail":
       // Only a turn in progress can fail. One already reset away (another
@@ -248,6 +260,15 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
         streaming: false,
         tool: null,
         error: action.problem,
+      };
+    case "stop":
+      if (!state.streaming) return state;
+      return {
+        ...state,
+        messages: dropEmptyReply(state.messages),
+        streaming: false,
+        tool: null,
+        stopped: true,
       };
     case "load":
       return {
@@ -265,6 +286,12 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
 function applyEvent(state: AgentState, event: AgentEvent): AgentState {
   if (!state.streaming) return state;
   switch (event.type) {
+    // ⚠ **The turn's conversation is known from its first event, not its
+    // last.** A first question stopped, or cut off, before `done` left the
+    // window without the conversation the server had already made for it, so
+    // the next question started another and history split one thread in two.
+    case "conversation":
+      return { ...state, conversationId: event.conversationId };
     case "text":
       return {
         ...state,
@@ -324,6 +351,10 @@ export function toolStatus(name: string): string {
     : "Looking something up…";
 }
 
+// Auth's not-found, which the agent answers for a conversation that is not the
+// person's on this project, or not there at all (`crates/agent/src/handler.rs`).
+const NOT_FOUND = "/errors/auth/not-found";
+
 const RefusalBody = z.object({
   type: z.string().optional(),
   title: z.string().optional(),
@@ -374,6 +405,18 @@ export function describeRefusal(
   }
   if (status === 429) {
     return { title: "Too many requests.", detail: "Slow down a moment, then try again." };
+  }
+  // The server's own not-found: the conversation was deleted (in another tab,
+  // say), or its project is no longer the person's. Trying again asks the
+  // same thing and gets the same answer, so the way on is a new conversation.
+  // ⚠ **Not the relay's bare 404**, which an auth that did not answer gives
+  // too (`agentHeaders` in `lib/server/entities/agent.ts`): worded as gone, a
+  // passing outage sent people away from conversations that were still there.
+  if (problem.type === NOT_FOUND) {
+    return {
+      title: "This conversation or its project is no longer there.",
+      detail: "It may have been deleted. Start a new conversation to keep asking.",
+    };
   }
   if (problem.title) {
     return { title: problem.title, detail: problem.detail ?? null };

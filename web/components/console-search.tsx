@@ -60,6 +60,13 @@ export function ConsoleSearch() {
 
   const { searchOpen: open, setSearchOpen: setOpen } = useConsoleUi();
   const [query, setQuery] = useState("");
+  // A closed palette keeps no query, however it was closed: ⌘J closes it from
+  // the agent's window (`agent-panel.tsx`), past the palette's own ways out.
+  const [shownOpen, setShownOpen] = useState(open);
+  if (shownOpen !== open) {
+    setShownOpen(open);
+    if (!open) setQuery("");
+  }
   const [recent, setRecent] = useState<RecentVisit[]>([]);
   const { index, indexError, loading } = useSearchIndex(open, projectId);
   const [active, setActive] = useState(0);

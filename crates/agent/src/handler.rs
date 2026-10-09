@@ -161,6 +161,10 @@ pub async fn post_turn(
     let transcript = alternating(history, &message);
 
     let (sender, receiver) = mpsc::unbounded_channel::<Event>();
+    // First, so a person who stops the turn, or loses the stream, before
+    // `done` still knows the conversation it was asked in: a new one exists
+    // from here, and the next question must continue it, not start another.
+    let _ = sender.send(TurnEvent::Conversation { conversation_id }.into_sse());
     tokio::spawn(run_turn(
         state.clone(),
         Asker { acting, asked_at },
@@ -183,6 +187,9 @@ pub async fn post_turn(
 
 /// One event of a turn's stream, as `web/lib/agent/stream.ts` parses it.
 enum TurnEvent<'a> {
+    Conversation {
+        conversation_id: Uuid,
+    },
     Text(&'a str),
     Tool(&'a str),
     Citation(&'a Citation),
@@ -199,6 +206,10 @@ enum TurnEvent<'a> {
 impl TurnEvent<'_> {
     fn into_sse(self) -> Event {
         let (name, data) = match self {
+            Self::Conversation { conversation_id } => (
+                "conversation",
+                json!({ "conversation_id": conversation_id }),
+            ),
             Self::Text(delta) => ("text", json!({ "delta": delta })),
             Self::Tool(name) => ("tool", json!({ "name": name })),
             Self::Citation(citation) => ("citation", json!(citation)),

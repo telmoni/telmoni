@@ -6,17 +6,18 @@ import { useConsoleUi } from "@/components/console-ui-context";
 import { cn } from "@/lib/utils";
 
 /**
- * The agent entry point, beside the bell. It toggles the agent panel
+ * The agent entry point, beside the bell. It toggles the agent's window
  * via ConsoleUiContext, so a second press closes what the first opened, as ⌘J does.
  */
 export function AgentButton() {
-  const { toggleAgent } = useConsoleUi();
+  const { agentOpen, toggleAgent } = useConsoleUi();
   return (
     <button
       type="button"
       data-testid="agent-button"
       aria-label="Agent"
       aria-controls="agent-panel"
+      aria-expanded={agentOpen}
       title="Agent (⌘J)"
       onClick={toggleAgent}
       className={cn(

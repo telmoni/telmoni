@@ -24,6 +24,7 @@ import { useIsMac } from "@/lib/use-platform";
 import {
   AGENT_MODIFIER_KEY,
   goSequences,
+  MODAL_SELECTOR,
   PAGE_ACTION_KEY,
   resolveSequence,
   SEQUENCE_TIMEOUT_MS,
@@ -84,11 +85,7 @@ export function KeyboardShortcuts() {
         )
       )
         return;
-      if (
-        document.querySelector(
-          '[role="dialog"], [role="alertdialog"], [role="menu"]',
-        )
-      ) {
+      if (document.querySelector(MODAL_SELECTOR)) {
         clearPending();
         return;
       }

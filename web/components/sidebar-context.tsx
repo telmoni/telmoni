@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { NAV_COLLAPSED_COOKIE } from "@/lib/console-nav";
+import { MODAL_SELECTOR } from "@/lib/keys";
 
 const useIsomorphicLayoutEffect =
   typeof window === "undefined" ? useEffect : useLayoutEffect;
@@ -24,11 +25,6 @@ interface SidebarContextValue {
 export const MOBILE_BREAKPOINT_PX = 768;
 
 export const DRAWER_SLIDE_MS = 200;
-
-// Something the drawer must yield to, because it opened on top of the drawer.
-// One list, two readers — Escape and the outside press below dismiss for the
-// same reason and must agree about what counts as "something else is in front".
-const OVERLAY_SELECTOR = '[role="dialog"], [role="alertdialog"], [role="menu"]';
 
 function useIsMobile(): boolean | null {
   const [isMobile, setIsMobile] = useState<boolean | null>(null);
@@ -102,7 +98,8 @@ export function SidebarProvider({
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if (e.defaultPrevented) return;
-      if (document.querySelector(OVERLAY_SELECTOR)) return;
+      // Something in front opened on top of the drawer, and Escape is its.
+      if (document.querySelector(MODAL_SELECTOR)) return;
       move(false);
       // Focus in the drawer goes back to the control that opened it, rather
       // than staying on a row that slides away and is hidden.
@@ -138,7 +135,7 @@ export function SidebarProvider({
       // names the relationship, so nothing new has to be marked up for this.
       if (target.closest('[aria-controls="console-sidebar"]')) return;
       // The same yield Escape makes: whatever is in front gets the press.
-      if (document.querySelector(OVERLAY_SELECTOR)) return;
+      if (document.querySelector(MODAL_SELECTOR)) return;
       move(false);
     };
     document.addEventListener("pointerdown", onPointerDown);

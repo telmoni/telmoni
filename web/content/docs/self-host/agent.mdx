@@ -53,7 +53,7 @@ The agent has access to five internal inspection tools:
 
 - A question is at most 4,000 characters, and a person may ask 60 an hour (`AGENT_MESSAGES_PER_HOUR`).
 - A turn has 100 seconds and up to 8 rounds of lookups. An answer cut short by either, one the model stopped writing, or one that ran out of room says so in its last lines.
-- The model rereads the last 20 messages of the conversation each turn. A conversation is titled by the first 80 characters of its first question; the panel lists the 50 most recently used conversations asked from the project, and an opened one shows its last 200 messages.
+- The model rereads the last 20 messages of the conversation each turn. A conversation is titled by the first 80 characters of its first question; the agent's history lists the 50 most recently used conversations asked from the project, and an opened one shows its last 200 messages.
 - `search` returns 6 passages unless the model asks for up to 10; `connector_deliveries` 10, up to 20; `audit_events` 20, up to 50.
 - Conversations are kept for 90 days after they were last used, and are visible to their author only.
 
@@ -61,7 +61,7 @@ The agent has access to five internal inspection tools:
 
 - **No `AGENT_DATABASE_URL`**: the server runs without the agent module.
 - **`AGENT_DATABASE_URL` without `AGENT_MODEL_PROVIDER`**: the module loads and its retention sweep runs, but nothing is indexed and nobody can ask anything.
-- **Both**: the indexer runs (every 60 seconds, from 30 seconds after boot) and the panel answers. `AGENT_MODEL_PROVIDER` without `AGENT_DATABASE_URL` is refused at boot.
+- **Both**: the indexer runs (every 60 seconds, from 30 seconds after boot) and the agent answers. `AGENT_MODEL_PROVIDER` without `AGENT_DATABASE_URL` is refused at boot.
 
 ---
 

@@ -11,6 +11,8 @@
  * choose not to follow.
  */
 
+import { consolePlace } from "@/lib/console-nav";
+
 export type Inline =
   | { type: "text"; text: string }
   | { type: "code"; text: string }
@@ -34,6 +36,13 @@ export function allowedHref(raw: string): string | null {
   if (href === "" || /[\s\\\u0000-\u001f\u007f]/.test(href)) return null;
   if (href.startsWith("/") && !href.startsWith("//")) return href;
   return null;
+}
+
+// Whether an allowed href is a page of the console, which the window stays
+// open over, rather than one outside its layout — the docs — which would
+// unmount the window if followed in place.
+export function opensInConsole(href: string): boolean {
+  return consolePlace(href.split(/[?#]/, 1)[0]!) !== null;
 }
 
 const FENCE = /^\s*(`{3,}|~{3,})\s*([\w+#.-]*)\s*$/;

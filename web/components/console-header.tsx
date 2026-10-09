@@ -55,7 +55,10 @@ export function ConsoleHeader({
       ? { href: header.backHref, label: header.backLabel }
       : null;
   return (
-    <header className="relative z-50 flex h-15 shrink-0 items-stretch border-b border-border bg-background">
+    <header
+      data-slot="console-header"
+      className="relative z-50 flex h-15 shrink-0 items-stretch border-b border-border bg-background"
+    >
       <div
         className={cn(
           "flex shrink-0 items-center gap-3 px-3.5 md:border-r md:border-sidebar-border",

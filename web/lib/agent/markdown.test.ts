@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { allowedHref, parseInline, parseMarkdown, type Block, type Inline } from "./markdown";
+import {
+  allowedHref,
+  opensInConsole,
+  parseInline,
+  parseMarkdown,
+  type Block,
+  type Inline,
+} from "./markdown";
 
 function textOf(nodes: Inline[]): string {
   return nodes
@@ -176,5 +183,16 @@ describe("allowedHref", () => {
     expect(allowedHref("//telmoni.com/docs")).toBeNull();
     expect(allowedHref("/ok path")).toBeNull();
     expect(allowedHref("")).toBeNull();
+  });
+});
+
+describe("opensInConsole", () => {
+  it("keeps the console's pages in place and sends the docs to a new tab", () => {
+    expect(opensInConsole("/acme/web/members")).toBe(true);
+    expect(opensInConsole("/acme/audit-log?page=2")).toBe(true);
+    expect(opensInConsole("/acme#top")).toBe(true);
+    expect(opensInConsole("/account/privacy")).toBe(true);
+    expect(opensInConsole("/docs/integrations/webhooks#verifying-signatures")).toBe(false);
+    expect(opensInConsole("/docs")).toBe(false);
   });
 });

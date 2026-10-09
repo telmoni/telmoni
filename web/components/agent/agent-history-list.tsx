@@ -1,6 +1,7 @@
 "use client";
 
 import { MessageSquare, Trash2 } from "lucide-react";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { LocalTime } from "@/components/local-time";
 import type { AgentConversationSummary } from "@/lib/types/agent";
 import { cn } from "@/lib/utils";
@@ -35,36 +36,50 @@ export function HistoryList({
   }
   return (
     <ul aria-label="Your conversations" className="grid gap-1">
-      {history.conversations.map((c) => (
-        <li key={c.id} className="flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={() => onOpen(c.id)}
-            aria-current={c.id === activeId ? "true" : undefined}
-            className={cn(
-              "flex min-w-0 flex-1 cursor-pointer items-center rounded-md gap-2.5 px-3 py-2 text-left hover:bg-accent",
-              c.id === activeId && "bg-accent",
-            )}
-          >
-            <MessageSquare aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-            <span className="grid min-w-0 gap-0.5">
-              <span className="truncate text-sm">{c.title || "Untitled conversation"}</span>
-              <span className="truncate text-xs text-muted-foreground">
-                <LocalTime iso={c.updatedAt} />
+      {history.conversations.map((c) => {
+        const title = c.title || "Untitled conversation";
+        return (
+          <li key={c.id} className="flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => onOpen(c.id)}
+              aria-current={c.id === activeId ? "true" : undefined}
+              className={cn(
+                "flex min-w-0 flex-1 cursor-pointer items-center rounded-md gap-2.5 px-3 py-2 text-left hover:bg-accent",
+                c.id === activeId && "bg-accent",
+              )}
+            >
+              <MessageSquare aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+              <span className="grid min-w-0 gap-0.5">
+                <span className="truncate text-sm">{title}</span>
+                <span className="truncate text-xs text-muted-foreground">
+                  <LocalTime iso={c.updatedAt} />
+                </span>
               </span>
-            </span>
-          </button>
-          <button
-            type="button"
-            aria-label={`Delete “${c.title || "Untitled conversation"}”`}
-            title="Delete"
-            onClick={() => onDelete(c.id)}
-            className={ICON_BUTTON}
-          >
-            <Trash2 className="size-4" />
-          </button>
-        </li>
-      ))}
+            </button>
+            {/* Asked first, as every other delete in the console is: the
+                button sits beside the row it deletes, one slip from a press
+                meant for the row. */}
+            <ConfirmDialog
+              trigger={
+                <button
+                  type="button"
+                  aria-label={`Delete “${title}”`}
+                  title="Delete"
+                  className={ICON_BUTTON}
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              }
+              title="Delete this conversation?"
+              description={`“${title}” and everything asked and answered in it are deleted for good.`}
+              confirmLabel="Delete"
+              destructive
+              onConfirm={() => onDelete(c.id)}
+            />
+          </li>
+        );
+      })}
     </ul>
   );
 }

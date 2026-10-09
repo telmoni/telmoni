@@ -12,8 +12,18 @@ export const SEARCH_KEY = "/";
 // The account menu uses ⌘⇧K — see `nav-user.tsx`.
 export const SEARCH_MODIFIER_KEY = "k";
 
-// The header's agent button: opens the panel, or closes it when it is open.
+// The header's agent button: opens the agent's window, or closes it when it is open.
 export const AGENT_TOGGLE_EVENT = "telmoni:agent-toggle";
+
+// What stands in front of the page and takes its keys and its presses: a
+// modal dialog, an alert, a menu. One list for every reader — the letter keys,
+// the rail's drawer, ⌘J — which must agree about what counts as in front.
+// ⚠ **The agent's window is a dialog that does not count**: it floats beside
+// the page without shutting it off, and says so with `aria-modal="false"`
+// (`components/agent/agent-window.tsx`), so the page keeps its keys while it
+// is open. A dialog that shuts the page off never says that.
+export const MODAL_SELECTOR =
+  '[role="dialog"]:not([aria-modal="false"]), [role="alertdialog"], [role="menu"]';
 
 // ⌘J, beside ⌘K: the two are the console's ways to ask it something, and a
 // hand on one finds the other.

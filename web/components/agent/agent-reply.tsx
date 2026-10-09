@@ -2,7 +2,13 @@
 
 import { Fragment, useMemo } from "react";
 import Link from "next/link";
-import { allowedHref, parseMarkdown, type Block, type Inline } from "@/lib/agent/markdown";
+import {
+  allowedHref,
+  opensInConsole,
+  parseMarkdown,
+  type Block,
+  type Inline,
+} from "@/lib/agent/markdown";
 import type { AgentCitation } from "@/lib/types/agent";
 
 export function Reply({ content, citations }: { content: string; citations: AgentCitation[] }) {
@@ -106,8 +112,14 @@ function InlineView({ node, citations }: { node: Inline; citations: AgentCitatio
   }
 }
 
-// Only ever handed an href allowedHref passed: a console path, so it is a
-// client navigation, and the panel stays open over the page it links to.
+// Only ever handed an href allowedHref passed: a path on this origin. One into
+// the console is a client navigation, and the window stays open over the page
+// it links to.
+//
+// ⚠ **A path out of the console opens in a new tab** — the docs, which the
+// agent cites as paths. Followed in place, it left the console's layout, which
+// unmounted the window and the conversation with it, a reply still streaming
+// included.
 export function SafeLink({
   href,
   label,
@@ -117,10 +129,13 @@ export function SafeLink({
   label?: string;
   children: React.ReactNode;
 }) {
+  const inConsole = opensInConsole(href);
   return (
     <Link
       href={href}
       aria-label={label}
+      target={inConsole ? undefined : "_blank"}
+      rel={inConsole ? undefined : "noopener"}
       className="text-primary underline underline-offset-2 hover:no-underline"
     >
       {children}

@@ -1,6 +1,5 @@
 "use client";
 
-import { Empty } from "@/components/agent/agent-history-list";
 import { Reply, Sources } from "@/components/agent/agent-reply";
 import { AgentThinking } from "@/components/agent/agent-thinking";
 import { toolStatus, type AgentProblem } from "@/lib/agent/stream";
@@ -11,20 +10,17 @@ export function Conversation({
   streaming,
   tool,
   error,
+  stopped,
 }: {
   messages: AgentMessage[];
   streaming: boolean;
   tool: string | null;
   error: AgentProblem | null;
+  stopped: boolean;
 }) {
+  const partial = stopped && messages[messages.length - 1]?.role === "assistant";
   return (
     <div role="log" aria-live="polite" aria-busy={streaming} className="grid gap-4">
-      {messages.length === 0 && !error && (
-        <Empty>
-          Ask about this project: who its members are, how its connectors are delivering, or what
-          the audit log shows.
-        </Empty>
-      )}
       {messages.map((m, i) =>
         m.role === "user" ? (
           <p
@@ -46,6 +42,13 @@ export function Conversation({
       {streaming && tool && (
         <p role="status" className="text-xs text-muted-foreground">
           {toolStatus(tool)}
+        </p>
+      )}
+      {/* The server keeps the question and drops a reply it never finished,
+          so a stopped one is gone once the conversation is opened again. */}
+      {stopped && (
+        <p className="text-xs text-muted-foreground">
+          {partial ? "Stopped. This reply isn’t saved." : "Stopped."}
         </p>
       )}
       {error && (

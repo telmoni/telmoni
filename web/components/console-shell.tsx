@@ -58,16 +58,19 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
     <div
       ref={shellRef}
       data-slot="console-shell"
-      // The page and the agent panel stand on the same background as the
-      // header and the rail, one colour with rules between the regions, and
-      // nothing stands between them and the rail's rule but `<main>`'s own
-      // padding: 14px all round, the rail's inset, which the header keeps too.
+      // The page stands on the same background as the header and the rail,
+      // one colour with rules between the regions, and nothing stands between
+      // it and the rail's rule but `<main>`'s own padding: 14px all round, the
+      // rail's inset, which the header keeps too. The agent's window floats
+      // over all of it (`components/agent/agent-window.tsx`); it comes after
+      // the page so that it is reached after the page from the keyboard, and
+      // drawn over the header.
       className="relative flex min-h-0 min-w-0 flex-1"
     >
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
         {/* Radix wraps the content in `display: table`, which never narrows
-            below its widest child; as a block the page can shrink beside the
-            agent panel. */}
+            below its widest child; as a block the page narrows with the
+            window. */}
         <ScrollArea
           ref={rootRef}
           type="scroll"
