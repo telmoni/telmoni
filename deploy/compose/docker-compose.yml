@@ -19,7 +19,8 @@
 #   2. Run: docker compose -f deploy/compose/docker-compose.yml up -d
 #
 # The server runs its own sweeps on a timer (the deletion saga, retention, the
-# nightly audit walk), so nothing here schedules them. The audit partitions
+# daily audit walk, the audit exports' retries and expiry), so nothing here
+# schedules them. The audit partitions
 # are rotated by hand, or from your own cron:
 #   docker compose -f deploy/compose/docker-compose.yml run --rm migrate rotate
 #

@@ -157,6 +157,18 @@ const PERSON_ROUTES: &[(&str, &str)] = &[
     ("POST", "/internal/tokens/{token_id}/rotate"),
     ("GET", "/internal/audit/projects/{project_id}"),
     ("GET", "/internal/audit/organizations/{organization_id}"),
+    (
+        "GET",
+        "/internal/audit/organizations/{organization_id}/exports",
+    ),
+    (
+        "POST",
+        "/internal/audit/organizations/{organization_id}/exports",
+    ),
+    (
+        "GET",
+        "/internal/audit/organizations/{organization_id}/exports/{export_id}",
+    ),
     ("POST", "/me"),
 ];
 
@@ -169,6 +181,7 @@ fn fill(pattern: &str, organization: &str, project: &str) -> String {
         .replace("{member_id}", "user_somebody_else")
         .replace("{invite_id}", "00000000-0000-0000-0000-000000000000")
         .replace("{token_id}", "00000000-0000-0000-0000-000000000000")
+        .replace("{export_id}", "00000000-0000-0000-0000-000000000000")
         .replace("{id}", "00000000-0000-0000-0000-000000000000")
 }
 

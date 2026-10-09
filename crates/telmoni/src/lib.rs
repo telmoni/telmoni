@@ -429,6 +429,14 @@ where
                     let redone = telmoni_agent::index::reindex(agent).await?;
                     tracing::info!(redone, "agent reindex complete");
                 }
+                Sweep::AuditExports => {
+                    let swept = telmoni_auth::audit_export::sweep(&app.auth).await?;
+                    tracing::info!(
+                        finished = swept.finished,
+                        expired = swept.expired,
+                        "audit exports sweep complete"
+                    );
+                }
             }
             Ok(())
         }

@@ -782,7 +782,73 @@ GRANT SELECT ON auth.organization_flags TO auth_maintenance;
 
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- 15. CROSS-ENTITY POLICIES
+-- 15. AUDIT EXPORTS
+-- ══════════════════════════════════════════════════════════════════════════════
+-- An export of the organization's audit chain, built in the background: asked
+-- for by an owner or admin (`user_id`), built from `[range_from, range_to)`
+-- widened to the whole stretch of the chain it touches, and kept for them
+-- alone until `expires_at`. The file is the chain's rows again, so it goes with
+-- the organization (the cascade), with its requester (their erasure) and at
+-- `expires_at` (the exports' sweep), whichever comes first.
+CREATE TABLE auth.audit_exports (
+    id              UUID        PRIMARY KEY,
+    organization_id TEXT        NOT NULL REFERENCES auth.organizations (external_id) ON DELETE CASCADE,
+    user_id         TEXT        NOT NULL,
+    format          TEXT        NOT NULL,
+    range_from      TIMESTAMPTZ,
+    range_to        TIMESTAMPTZ NOT NULL,
+    status          TEXT        NOT NULL DEFAULT 'queued',
+    attempts        INTEGER     NOT NULL DEFAULT 0,
+    lease_until     TIMESTAMPTZ,
+    failure         TEXT,
+    row_count       BIGINT,
+    file            BYTEA,
+    finished_at     TIMESTAMPTZ,
+    expires_at      TIMESTAMPTZ,
+    downloaded_at   TIMESTAMPTZ,
+    shard_key       UUID        NOT NULL DEFAULT gen_random_uuid(),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT audit_exports_format_check   CHECK (format IN ('json', 'csv')),
+    CONSTRAINT audit_exports_status_check   CHECK (status IN ('queued', 'running', 'ready', 'failed')),
+    CONSTRAINT audit_exports_range_check    CHECK (range_from IS NULL OR range_from < range_to),
+    CONSTRAINT audit_exports_ready_check    CHECK ((status = 'ready') = (file IS NOT NULL AND row_count IS NOT NULL)),
+    CONSTRAINT audit_exports_failure_check  CHECK ((status = 'failed') = (failure IS NOT NULL)
+                                                   AND (failure IS NULL OR failure IN ('too_large', 'error'))),
+    CONSTRAINT audit_exports_finished_check CHECK ((status IN ('ready', 'failed')) = (expires_at IS NOT NULL))
+);
+
+CREATE INDEX audit_exports_requester_idx ON auth.audit_exports (organization_id, user_id, created_at DESC);
+-- The erasure's delete, across every organization.
+CREATE INDEX audit_exports_user_idx ON auth.audit_exports (user_id);
+-- The retry sweep's listing: only the few still being built.
+CREATE INDEX audit_exports_unfinished_idx ON auth.audit_exports (created_at)
+    WHERE status IN ('queued', 'running');
+CREATE INDEX audit_exports_expires_idx ON auth.audit_exports (expires_at)
+    WHERE expires_at IS NOT NULL;
+CREATE INDEX audit_exports_shard_key_idx ON auth.audit_exports (shard_key);
+
+ALTER TABLE auth.audit_exports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE auth.audit_exports FORCE ROW LEVEL SECURITY;
+
+-- Its requester's alone, as a conversation is: the organization's scope reads
+-- no export unless the person is bound too and is the one who asked, so
+-- another admin of the same organization never sees one, nor its file.
+CREATE POLICY tenant_isolation ON auth.audit_exports
+    USING      (user_id = current_setting('app.user_id', true) AND organization_id = current_setting('app.organization_id', true))
+    WITH CHECK (user_id = current_setting('app.user_id', true) AND organization_id = current_setting('app.organization_id', true));
+
+CREATE POLICY maintenance_access ON auth.audit_exports
+    TO auth_maintenance
+    USING      (current_user = 'auth_maintenance')
+    WITH CHECK (current_user = 'auth_maintenance');
+
+-- The lane lists what to retry and deletes what is due; the claim and the
+-- build run in the organization's scope with the requester bound.
+GRANT SELECT, DELETE ON auth.audit_exports TO auth_maintenance;
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 16. CROSS-ENTITY POLICIES
 -- Each reads a table created after the one it guards, so it must come last.
 -- ══════════════════════════════════════════════════════════════════════════════
 CREATE POLICY organization_member_read ON auth.identities

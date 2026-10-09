@@ -4,7 +4,7 @@
 //! telmoni serve                      listen on PORT (8082); every module, every loop
 //! telmoni migrate                    every pending migration, then the grants; exit
 //! telmoni rotate                     the audit partitions: create ahead (drops are off); exit
-//! telmoni sweep <deletion|audit-verify|retention|agent-reindex>
+//! telmoni sweep <deletion|audit-verify|retention|agent-reindex|audit-exports>
 //!                                    one sweep, once; exit
 //! telmoni terminate <org_id>         an operator closes an organization
 //! ```

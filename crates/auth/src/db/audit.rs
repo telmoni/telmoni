@@ -113,6 +113,83 @@ pub async fn list<B: HasOrganization>(
     sql.build_query_as::<AuditRow>().fetch_all(tx.conn()).await
 }
 
+/// One row of an export: every field the row hash covers
+/// (`telmoni_shared::db::audit_hash::row_hash`), both hashes, and `seq`, the
+/// chain's own order. `created_at` is the exact string the hash read, UTC to
+/// the microsecond with a `Z`, so a verifier recomputes each hash from the
+/// file alone. Never the address, the user agent or the request id, which the
+/// hash does not cover and a file a customer forwards must not carry.
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct ExportRow {
+    pub seq: i64,
+    pub id: Uuid,
+    pub created_at: String,
+    pub actor_id: String,
+    pub action: String,
+    pub resource_kind: String,
+    pub resource_id: Option<String>,
+    pub in_project: Option<String>,
+    pub metadata: Option<serde_json::Value>,
+    pub prev_hash: Option<String>,
+    pub row_hash: String,
+}
+
+/// The stretch of the chain a time range touches: the first and the last
+/// `seq` written in `[from, to)`, `None` when nothing was. An export takes
+/// every row between the two, so its file is one unbroken run of the chain
+/// that verifies on its own.
+/// ⚠ **By `seq`, never `created_at` alone.** A row's `created_at` is its
+/// transaction's start and its `seq` the order the chain's lock minted, so a
+/// row can carry a time just before the row ahead of it in the chain. A range
+/// cut on time alone dropped that row from inside the window, and the file
+/// broke where its neighbour named a `prev_hash` it did not hold.
+pub async fn seq_bounds<B: HasOrganization>(
+    tx: &mut Scoped<'_, B>,
+    organization_id: &OrganizationId,
+    from: Option<DateTime<Utc>>,
+    to: DateTime<Utc>,
+) -> sqlx::Result<Option<(i64, i64)>> {
+    let mut sql = QueryBuilder::<Postgres>::new(
+        "SELECT min(seq), max(seq) FROM audit.events WHERE organization_id = ",
+    );
+    sql.push_bind(organization_id);
+    sql.push(" AND created_at < ").push_bind(to);
+    if let Some(from) = from {
+        sql.push(" AND created_at >= ").push_bind(from);
+    }
+    let (first, last): (Option<i64>, Option<i64>) =
+        sql.build_query_as().fetch_one(tx.conn()).await?;
+    Ok(first.zip(last))
+}
+
+/// Up to `limit` chain rows after `seq` `after` and up to `last`, oldest
+/// first: an export's stretch, a page at a time.
+pub async fn export_page<B: HasOrganization>(
+    tx: &mut Scoped<'_, B>,
+    organization_id: &OrganizationId,
+    after: i64,
+    last: i64,
+    limit: i64,
+) -> sqlx::Result<Vec<ExportRow>> {
+    sqlx::query_as::<_, ExportRow>(
+        "SELECT seq, id,
+                to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')
+                  AS created_at,
+                actor_id, action, resource_kind, resource_id, in_project, metadata,
+                prev_hash, row_hash
+           FROM audit.events
+          WHERE organization_id = $1 AND seq > $2 AND seq <= $3
+          ORDER BY seq
+          LIMIT $4",
+    )
+    .bind(organization_id)
+    .bind(after)
+    .bind(last)
+    .bind(limit)
+    .fetch_all(tx.conn())
+    .await
+}
+
 /// One audit row as the agent's index reads it: no hashes, and never the
 /// address or the user agent.
 #[derive(Debug, sqlx::FromRow)]

@@ -17,15 +17,19 @@ pub enum Sweep {
     /// Embed again every passage of the agent's index that a model other
     /// than `EMBEDDINGS_MODEL` embedded.
     AgentReindex,
+    /// Build again the audit exports a restart dropped, and delete every
+    /// export's file past its week.
+    AuditExports,
 }
 
 impl Sweep {
     /// Every sweep, in the order the usage line lists them.
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::Deletion,
         Self::AuditVerify,
         Self::Retention,
         Self::AgentReindex,
+        Self::AuditExports,
     ];
 
     fn parse(arg: &str) -> Option<Self> {
@@ -49,6 +53,7 @@ impl Sweep {
             Self::AuditVerify => "audit-verify",
             Self::Retention => "retention",
             Self::AgentReindex => "agent-reindex",
+            Self::AuditExports => "audit-exports",
         }
     }
 }

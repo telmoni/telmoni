@@ -57,7 +57,10 @@ use telmoni_shared::{
 
 use crate::{
     AppState,
-    db::{AuthLane, identities, invites, locks, members, organization_members, organizations},
+    db::{
+        AuthLane, audit_exports, identities, invites, locks, members, organization_members,
+        organizations,
+    },
 };
 
 /// How long an organization stays `pending_deletion` before its row may go,
@@ -496,6 +499,13 @@ pub async fn erase_person(
             ));
         }
     }
+    // The audit exports they asked for: nobody else may download one, and
+    // each is a copy of the chain they were reading. Here, between the locks:
+    // after each organization's, as an organization's own erasure takes its
+    // lock before its cascade reaches these rows, and before the chain is
+    // written below, as a build finishing one holds the export's row before
+    // the chain's lock.
+    let exports = audit_exports::delete_of_person(&mut mtx, user_id).await?;
     for (organization, in_project, role) in &removed {
         emit_audit(
             &mut mtx,
@@ -519,7 +529,12 @@ pub async fn erase_person(
     // accepted is the sender's to revoke, and it expires.
     let forgotten = invites::forget_accepted_by(&mut mtx, user_id).await?;
     mtx.commit().await?;
-    tracing::info!(user_id = %user_id, invitations = forgotten, "accepted invitations deleted");
+    tracing::info!(
+        user_id = %user_id,
+        invitations = forgotten,
+        exports,
+        "accepted invitations and audit exports deleted"
+    );
 
     // Again, before the identity: a notice that named them since the first
     // pass, while they were still a member, is rewritten too (the pass is

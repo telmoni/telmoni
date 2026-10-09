@@ -185,7 +185,11 @@ pub async fn export_organization(
             request_id: None,
             ip_address: None,
             user_agent: None,
-            metadata: Some(json!({ "export": true, "audit_truncated": audit_truncated })),
+            // `export` names what left, as the audit log's own export's does.
+            metadata: Some(json!({
+                "export": "organization",
+                "audit_truncated": audit_truncated,
+            })),
         },
     )
     .await?;

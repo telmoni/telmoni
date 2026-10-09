@@ -17,8 +17,9 @@
 //!
 //! **The person's lock** is taken by every lane that changes what they own or
 //! belong to, or writes their own rows: `/me`'s provisioning, both invite
-//! accepts, ownership accept, account deletion and erasure, and the
-//! self-service lanes (`acting_person_in`). The accepts take it because the
+//! accepts, ownership accept, account deletion and erasure, the self-service
+//! lanes (`acting_person_in`), and an audit export's start, which counts the
+//! person's own exports before it adds one. The accepts take it because the
 //! self-service lanes decide under it whether the person is in any
 //! organization at all.
 //!

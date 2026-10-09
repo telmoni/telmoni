@@ -341,6 +341,10 @@ async fn every_person_table_is_forced_and_isolated_on_the_person() {
 const PERSON_IN_TENANT_TABLES: &[&str] = &[
     // The organization's roster: every member sees who else is on it.
     "auth.organization_members",
+    // An audit log export, its requester's alone: `tenant_isolation` compares
+    // `user_id` to `app.user_id` as well as the organization, as a
+    // conversation's does, so another admin of it reads none of them.
+    "auth.audit_exports",
     // A project's roster: every seat holder sees who else holds one.
     "auth.project_members",
     // One handshake's CSRF token. `user_id` is checked against whoever

@@ -41,7 +41,7 @@ help:
 	@echo "    make docker-up            run postgres + redis in Docker (headless)"
 	@echo "    make server-dev           run the server alone (telmoni serve)"
 	@echo "    make web-dev              run the console alone"
-	@echo "    make sweep SWEEP=deletion run one sweep by hand (deletion, audit-verify, retention, agent-reindex)"
+	@echo "    make sweep SWEEP=deletion run one sweep by hand (deletion, audit-verify, retention, agent-reindex, audit-exports)"
 	@echo "    make webhook-receiver SECRET=whsec_...   receive an outbound webhook behind a named Cloudflare route"
 	@echo "    make webhook-tunnel       the same, with no dashboard: a quick tunnel prints a throwaway URL (needs cloudflared)"
 	@echo "    make db-migrate           apply every migration set to the local DB"
@@ -246,7 +246,7 @@ server-dev:
 
 .PHONY: sweep
 sweep:
-	@test -n "$(SWEEP)" || { echo "usage: make sweep SWEEP=<deletion|audit-verify|retention|agent-reindex>"; exit 2; }
+	@test -n "$(SWEEP)" || { echo "usage: make sweep SWEEP=<deletion|audit-verify|retention|agent-reindex|audit-exports>"; exit 2; }
 	cargo run -p telmoni -- sweep $(SWEEP)
 
 # ── Quality & Verification ─────────────────────────────────────

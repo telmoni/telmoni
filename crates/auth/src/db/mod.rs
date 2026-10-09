@@ -1,5 +1,6 @@
 pub mod access_tokens;
 pub mod audit;
+pub mod audit_exports;
 pub mod authorization_codes;
 pub mod confirmation_codes;
 pub mod credentials;

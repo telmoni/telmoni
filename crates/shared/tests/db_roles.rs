@@ -416,6 +416,14 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
         ),
         ("auth_maintenance", "auth.feature_flags", &["SELECT"]),
         ("auth_maintenance", "auth.organization_flags", &["SELECT"]),
+        // The exports sweep lists the ones still being built and deletes the
+        // ones past their week, and an erasure deletes a person's; the
+        // organization's own scope claims and builds each.
+        (
+            "auth_maintenance",
+            "auth.audit_exports",
+            &["SELECT", "DELETE"],
+        ),
         (
             "notifications_maintenance",
             "notifications.feed",

@@ -6,6 +6,7 @@
 
 #![deny(missing_docs)]
 
+pub mod audit_export;
 pub mod boot;
 #[expect(missing_docs, reason = "internal wiring exposed for integration tests")]
 pub mod config;
@@ -453,6 +454,14 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/audit/organizations/{organization_id}",
             get(handler::audit::list_organization_audit),
+        )
+        .route(
+            "/audit/organizations/{organization_id}/exports",
+            get(handler::audit::list_audit_exports).post(handler::audit::start_audit_export),
+        )
+        .route(
+            "/audit/organizations/{organization_id}/exports/{export_id}",
+            get(handler::audit::download_audit_export),
         );
     // The device grant's two person lanes: a device's code is approved or
     // refused by whoever is signed in, however they signed in.

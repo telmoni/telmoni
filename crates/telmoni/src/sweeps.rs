@@ -2,7 +2,8 @@
 //!
 //! The deletion and audit-verify sweeps take a leader lock for their tick
 //! ([`telmoni_auth::sweep`]), so replicas running the same timers cannot both
-//! sweep one tick; retention needs none, its DELETEs being idempotent. Every
+//! sweep one tick; retention needs none, its DELETEs being idempotent, nor the
+//! audit exports' retry, each build claiming its export first. Every
 //! step is idempotent, so a tick cut short by a rollout is finished by the
 //! next. A failed tick is logged and the next one runs. `telmoni sweep
 //! <name>` runs any of them once by hand.
@@ -26,12 +27,27 @@ const RETENTION_EVERY: Duration = Duration::from_hours(24);
 /// How often every organization's audit chain is walked.
 const AUDIT_VERIFY_EVERY: Duration = Duration::from_hours(24);
 
-/// Start the three sweeps as tasks of this process.
+/// How often the audit exports' sweep runs: the retry net behind the build
+/// each request starts, so one a restart dropped waits at most this, and the
+/// deletion of every file past its week, so none outlives it by more.
+const AUDIT_EXPORTS_EVERY: Duration = Duration::from_mins(5);
+
+/// Whether a tick logs its start: a sweep on a timer of minutes leaves it to
+/// the ticks that did something, or a quiet day is three hundred lines a
+/// replica of nothing happening.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Start {
+    Logged,
+    Quiet,
+}
+
+/// Start the four sweeps as tasks of this process.
 pub fn spawn(auth: Arc<AppState>) {
     tokio::spawn(every(
         auth.clone(),
         "deletion",
         DELETION_EVERY,
+        Start::Logged,
         |auth| async move {
             let swept = telmoni_auth::sweep::deletion(&auth).await?;
             tracing::info!(
@@ -47,20 +63,46 @@ pub fn spawn(auth: Arc<AppState>) {
         auth.clone(),
         "retention",
         RETENTION_EVERY,
+        Start::Logged,
         |auth| async move { telmoni_auth::sweep::retention(&auth).await.map(|_| ()) },
     ));
     tokio::spawn(every(
-        auth,
+        auth.clone(),
         "audit-verify",
         AUDIT_VERIFY_EVERY,
+        Start::Logged,
         |auth| async move { telmoni_auth::sweep::audit_verify(&auth).await },
+    ));
+    tokio::spawn(every(
+        auth,
+        "audit-exports",
+        AUDIT_EXPORTS_EVERY,
+        Start::Quiet,
+        |auth| async move {
+            let swept = telmoni_auth::audit_export::sweep(&auth).await?;
+            // Most ticks find nothing to do; a tick that did something is the
+            // one worth a line.
+            if swept != telmoni_auth::audit_export::ExportsSwept::default() {
+                tracing::info!(
+                    finished = swept.finished,
+                    expired = swept.expired,
+                    "audit exports sweep complete"
+                );
+            }
+            Ok(())
+        },
     ));
 }
 
 /// One sweep on its timer, forever. The first tick waits [`START_DELAY`];
 /// a tick that overruns delays the next rather than stacking.
-async fn every<F, Fut>(auth: Arc<AppState>, name: &'static str, period: Duration, tick: F)
-where
+async fn every<F, Fut>(
+    auth: Arc<AppState>,
+    name: &'static str,
+    period: Duration,
+    start: Start,
+    tick: F,
+) where
     F: Fn(Arc<AppState>) -> Fut,
     Fut: Future<Output = Result<(), telmoni_shared::TelmoniError>>,
 {
@@ -69,7 +111,9 @@ where
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         ticker.tick().await;
-        tracing::info!(sweep = name, "sweep starting");
+        if start == Start::Logged {
+            tracing::info!(sweep = name, "sweep starting");
+        }
         if let Err(e) = tick(auth.clone()).await {
             tracing::warn!(sweep = name, error = %e, "sweep failed; the next tick retries");
         }
