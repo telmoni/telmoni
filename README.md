@@ -32,7 +32,8 @@ web/              the console, a thin proxy in front of the server, and the docs
 contract/         the generated wire contract and OpenAPI document
 deploy/           the Helm chart and the self-host compose file
 scripts/          `up.sh` behind `make up`, and the webhook tunnel and receiver for testing a connector
-architecture/     how it is built, and why, one page per area
+docs/             how it is built, and why, one page per area
+ARCHITECTURE.md   the whole of it on one page, linking down to docs/
 ```
 
 ## Deploying
@@ -41,7 +42,7 @@ Self-hosting is written up at [telmoni.com/docs/self-host](https://telmoni.com/d
 
 ## Extending Telmoni
 
-A deployment that needs more builds on these crates instead of forking them: `telmoni::App::assemble` takes its own identity provider, mail transport and purge hook; a `telmoni::Module` mounts beside the built-in ones; a console built on this one replaces the slot files under `web/lib/extension/` and `web/components/extension/`, and imports the core only through `lib/extension/ui.ts` and `lib/extension/server.ts`. [architecture/](architecture/README.md) describes the seams.
+A deployment that needs more builds on these crates instead of forking them: `telmoni::App::assemble` takes its own identity provider, mail transport and purge hook; a `telmoni::Module` mounts beside the built-in ones; a console built on this one replaces the slot files under `web/lib/extension/` and `web/components/extension/`, and imports the core only through `lib/extension/ui.ts` and `lib/extension/server.ts`. [docs/](docs/README.md) describes the seams.
 
 ## Contributing
 

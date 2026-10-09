@@ -1,4 +1,4 @@
-# Architecture
+# Docs
 
 How Telmoni is built, and why. These pages are for people and agents changing the code. What the product does for a customer is documented in the console's own book, `web/content/docs`, served at `/docs`.
 
@@ -12,13 +12,13 @@ Telmoni is a multi-tenant foundation. It provides:
 
 It is **one Rust binary**, `telmoni`, and a **Next.js console** beside it, deployed together to GKE with one Helm chart.
 
-Start with [ARCHITECTURE.md](ARCHITECTURE.md), the high-level design: the whole system on one page, linking down to the area pages below.
+Start with [ARCHITECTURE.md](../ARCHITECTURE.md), at the repository's root: the whole system on one page, linking down to the area pages below.
 
 ## Pages
 
 | Page | Covers |
 |---|---|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | The high-level design: purpose, goals, context, building blocks, how a request moves, identity and access, data, notifications, the agent, background work, deployment, extending the core, failure, scale, where it goes next, decisions, known gaps |
+| [ARCHITECTURE.md](../ARCHITECTURE.md) | The whole system on one page: purpose, goals, context, building blocks, how a request moves, identity and access, data, notifications, the agent, background work, deployment, extending the core, conventions, failure, scale, where it goes next, decisions, known gaps |
 | [server.md](server.md) | The binary: modules in one process, assembly, boot, routing, seams, errors, logging, configuration, shutdown, subcommands, the wire contract |
 | [identity.md](identity.md) | Sign-in (password, OIDC, device), the opaque-token sessions, the console's cookie, API tokens, abuse limits, mail |
 | [tenancy.md](tenancy.md) | Organizations and projects, roles, the permission matrix, `Acting`, scoped transactions, row-level security, maintenance lanes, database roles, transfers |

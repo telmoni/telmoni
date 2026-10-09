@@ -69,7 +69,7 @@ sequenceDiagram
   C->>A: POST /internal/auth/exchange
   A-->>C: bearer, refresh token, session id
   C->>A: POST /me (bearer, user agent)
-  A-->>C: who they are; the session row is written
+  A-->>C: who they are, and the session row is written
   C->>B: seal telmoni_session, redirect to returnTo
 ```
 
