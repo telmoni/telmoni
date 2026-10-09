@@ -11,10 +11,12 @@ const NAV_TYPE = "text-sm font-normal";
 
 // The letter a button answers to (`header-shortcuts.tsx`), drawn as a keycap
 // inside it. It takes its ink from the button's own text, so it reads on a
-// filled button and on an outlined one alike.
+// filled button and on an outlined one alike, and hides while letter-key
+// shortcuts are off (`data-letter-key`, `globals.css`).
 function Keycap({ children }: { children: string }) {
   return (
     <kbd
+      data-letter-key=""
       aria-hidden="true"
       className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-sm border border-current/30 bg-current/10 px-1 font-mono text-[11px] leading-none"
     >
@@ -29,20 +31,24 @@ function Keycap({ children }: { children: string }) {
 // loses.
 //
 // The bar is a row of three cells, as a product site draws one: the brand,
-// the navigation centred, and the two buttons, each cell ruled off from the
-// next and the row ruled off from the page. A panel, when one returns,
-// hangs from that rule.
+// the navigation centred, and the two buttons, with the row ruled off from
+// the page and no rule between the cells — nothing continues one below, and
+// under `lg`, where the buttons go, a rule would stand beside an empty cell.
+// A panel, when one returns, hangs from the row's rule. The brand stands on
+// the console header's pixels — the same 60px row, the mark at the same x
+// (`px-3.5` on the cell and `pl-1.5` on the link, as there), the same 17px
+// name — so signing in moves nothing but the page under it.
 export function SiteHeader({ signedIn }: { signedIn: boolean }) {
   return (
-    <header className="relative z-50 shrink-0 border-b border-border bg-background">
-      <div className="relative grid h-14 grid-cols-[auto_minmax(0,1fr)_auto] divide-x divide-border">
-        <div className="flex items-center px-4">
+    <header className="relative z-50 h-15 shrink-0 border-b border-border bg-background">
+      <div className="relative grid h-full grid-cols-[auto_minmax(0,1fr)_auto]">
+        <div className="flex items-center px-3.5">
           <Link
             href="/"
-            className="flex items-center gap-2 text-[20px] leading-none font-bold tracking-tight hover:text-muted-foreground"
+            className="flex min-w-0 items-center gap-2 pl-1.5 text-[17px] leading-none font-bold tracking-tight hover:text-muted-foreground"
           >
-            <TelmoniMark className="size-5" />
-            {PRODUCT_NAME}
+            <TelmoniMark className="size-5 shrink-0" />
+            <span className="truncate">{PRODUCT_NAME}</span>
           </Link>
         </div>
 

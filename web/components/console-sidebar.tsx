@@ -6,7 +6,12 @@ import { usePathname } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { buildConsoleNav, consolePlace, type ConsoleNavItem } from "@/lib/console-nav";
+import {
+  buildConsoleNav,
+  consolePlace,
+  navBlocks,
+  type ConsoleNavItem,
+} from "@/lib/console-nav";
 import { resolveReturnUrl } from "@/lib/console-trail";
 import { PRODUCT_NAME } from "@/lib/site";
 import { useFlags } from "@/lib/store";
@@ -30,8 +35,15 @@ function NavRow({
       document.title = `${item.title} · ${PRODUCT_NAME}`;
     }
   };
-  // Closed, a row is an icon button in the header's hamburger's 32 × 32 box,
-  // and the rail is one button wide, so the two share a column.
+  // A row is the docs sidebar's (Fumadocs, `/docs`): 36px tall, 2px apart, 8px
+  // corners, muted at rest, the sidebar accent at half under the pointer, and
+  // the primary colour at a tenth behind primary text when it is where you
+  // are. Closed, it is a 36px square in a column 12px in on each side; open,
+  // its icon keeps a 32px box at the row's left edge, 14px in. Both put the
+  // icon's centre 30px from the window's edge, where the header's mark
+  // stands, at the same height row for row, so nothing slides when the rail
+  // toggles — Gemini's rail is the reference; the label then starts where the
+  // header's name does.
   if (!showLabel) {
     return (
       <Link
@@ -42,10 +54,10 @@ function NavRow({
         aria-current={item.isActive ? "page" : undefined}
         {...(step ? { ["data-rail-step"]: "" } : {})}
         className={cn(
-          "flex size-8 items-center justify-center rounded-md [a+&]:mt-1",
+          "flex size-9 items-center justify-center rounded-md [a+&]:mt-0.5",
           item.isActive
-            ? "bg-console-accent-tint text-console-accent-strong"
-            : "text-muted-foreground hover:bg-sidebar-accent",
+            ? "bg-primary/10 text-primary"
+            : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground/80",
           className,
         )}
       >
@@ -54,16 +66,16 @@ function NavRow({
     );
   }
   const rowClass = cn(
-    "flex h-8 items-center rounded-md text-sm [a+&]:mt-1",
+    "flex h-9 items-center gap-0.5 rounded-md text-sm [a+&]:mt-0.5",
     item.isActive
-      ? "bg-console-accent-tint font-medium text-console-accent-strong"
-      : "text-foreground hover:bg-sidebar-accent",
+      ? "bg-primary/10 text-primary"
+      : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground/80",
     className,
   );
   const icon = (
-    <span className="flex w-11 shrink-0 justify-center">
+    <span className="flex w-8 shrink-0 justify-center">
       <item.icon
-        className={cn("size-4", !item.isActive && "text-muted-foreground")}
+        className="size-4"
       />
     </span>
   );
@@ -136,12 +148,13 @@ export function ConsoleSidebar() {
   // state would correct itself once the console had hydrated.
   //
   // The rail is a column under the header's first cell: the same width, and
-  // from `md` the same rule on its right, flush with the window's edge. Its
-  // rows keep one inset, `px-3.5`, so closed, where the column is one 32px
-  // button with that inset on each side, every icon lands on the centre the
+  // from `md` the same rule on its right, flush with the window's edge. Open,
+  // its rows keep the `px-3.5` inset; closed, the column is one 36px square
+  // 12px in on each side (`px-3`), so every icon lands on the centre the
   // header's mark stands on. The control that opens and closes it is the
   // header's, in the cell above; closed, the whole column is a way to open
-  // it too — the pointer says so, and a press anywhere off a row opens it —
+  // it too — the cursor says so, a bar and an arrow (`cursor-expand`) as
+  // Gemini draws it, and a press anywhere off a row opens it —
   // so nobody has to aim at the one button. Below `md` it is a drawer under
   // the header, opened from the header's hamburger.
   return (
@@ -150,10 +163,21 @@ export function ConsoleSidebar() {
       className={cn(
         "flex min-h-0 flex-col overflow-hidden bg-sidebar",
         "fixed top-15 bottom-0 left-0 z-40 w-72",
-        collapsed ? "-translate-x-full md:cursor-pointer" : "translate-x-0",
+        // The drawer's edge, open only: closed, it waits just off the
+        // screen's left edge, where a shadow cast right would show. Closed
+        // below `md` it is hidden as well, or Tab would walk its rows unseen;
+        // the visibility moves with the slide, so it goes once the slide ends.
+        collapsed
+          ? "-translate-x-full max-md:invisible md:cursor-expand"
+          : "translate-x-0 shadow-drawer md:shadow-none",
         "md:static md:shrink-0 md:translate-x-0 md:border-r md:border-sidebar-border",
         collapsed ? "md:w-15" : "md:w-64",
-        animating ? "transition-transform duration-200 md:transition-none" : "transition-none",
+        // `translate`, the property Tailwind's `-translate-x-full` sets, not
+        // `transform`; `visibility` beside it holds the drawer visible until
+        // the slide ends.
+        animating
+          ? "transition-[translate,visibility] duration-200 md:transition-none"
+          : "transition-none",
       )}
       onClick={(e) => {
         if ((e.target as HTMLElement).closest("a[href]")) {
@@ -171,39 +195,67 @@ export function ConsoleSidebar() {
           collapsed && "**:data-[slot=scroll-area-scrollbar]:hidden",
         )}
       >
-        <nav aria-label="Main" onKeyDown={onNavKeyDown} className="px-3.5 py-3.5">
+        <nav
+          aria-label="Main"
+          onKeyDown={onNavKeyDown}
+          className={cn("py-3.5", expanded ? "px-3.5" : "px-3")}
+        >
           {groups.map((group, i) => (
             <div
               key={group.title}
               className={cn(expanded && i > 0 && "mt-6")}
             >
-              {/* A group's title stands a row's height clear of the group
-                  above and a half-row over its own first row, on the icons'
-                  left edge (`w-11` centres a 16px icon at 22px). */}
-              {expanded ? (
-                <div className="flex pb-2 pl-3.5 text-xs font-medium text-muted-foreground group-has-[[data-console-not-found]]/console:hidden">
-                  <span className="whitespace-nowrap">{group.title}</span>
+              {/* The rows come in blocks (`navBlocks`). An unheaded block
+                  after the first stands 24px clear of the one above; a
+                  headed one takes the shape sidebars commonly give a
+                  section — 16px clear of the rows above, its heading a row of
+                  its own, 32px with the label centred, and its first row
+                  straight under — so the label sits closer to its rows than to
+                  the block before, which is what groups them. The label stands
+                  on the icons' left edge (`w-8` centres a 16px icon at 16px,
+                  so its edge is 8px in).
+                  Closed, a rule stands between blocks instead. A project's
+                  Observability and Project blocks are headed, and an
+                  organization's own rows are headed Organization under its
+                  Overview; Account's rail is one unheaded block, the way back
+                  under it saying what it is. A page that is not found hides
+                  every block but the first, as it hides the rows, so no gap
+                  stands over the way back. */}
+              {navBlocks(group.items).map((block, k) => (
+                <div
+                  key={k}
+                  className={cn(
+                    k > 0 && expanded && (block.heading ? "mt-4" : "mt-6"),
+                    k > 0 && "group-has-[[data-console-not-found]]/console:hidden",
+                  )}
+                >
+                  {expanded ? (
+                    block.heading && (
+                      <div className="flex h-8 items-center pl-2 text-xs font-medium text-muted-foreground group-has-[[data-console-not-found]]/console:hidden">
+                        <span className="whitespace-nowrap">{block.heading}</span>
+                      </div>
+                    )
+                  ) : (
+                    k > 0 && <div className="my-2 border-t border-sidebar-border" />
+                  )}
+                  {block.items.map((item) => (
+                    <NavRow
+                      key={item.title}
+                      item={item}
+                      showLabel={expanded}
+                      className="group-has-[[data-console-not-found]]/console:hidden"
+                    />
+                  ))}
                 </div>
-              ) : (
-                i > 0 && <div className="my-2 border-t border-sidebar-border" />
-              )}
-              {group.items.map((item) => (
-                <NavRow
-                  key={item.title}
-                  item={item}
-                  showLabel={expanded}
-                  className="group-has-[[data-console-not-found]]/console:hidden"
-                />
               ))}
               <NavRow
                 item={{ title: returnLabel, url: returnUrl, icon: ArrowLeft, isActive: false }}
                 showLabel={expanded}
                 step
-                className={
-                  steppedIn
-                    ? undefined
-                    : "hidden group-has-[[data-console-not-found]]/console:flex"
-                }
+                className={cn(
+                  "mt-0.5",
+                  !steppedIn && "hidden group-has-[[data-console-not-found]]/console:flex",
+                )}
               />
             </div>
           ))}

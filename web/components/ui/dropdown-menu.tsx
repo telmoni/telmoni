@@ -31,6 +31,10 @@ function DropdownMenuTrigger({
   )
 }
 
+// No border on a menu: its own surface (`bg-menu`, the light theme's a hair
+// lighter than the page, as Langfuse's sidebar is) and a soft shadow
+// (`shadow-menu`, set per theme in `globals.css`) lift it off the page. The
+// owner asked for the outlines to go (2026-10-08); the sub-menu is drawn the same.
 function DropdownMenuContent({
   className,
   sideOffset = 4,
@@ -45,7 +49,7 @@ function DropdownMenuContent({
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
         className={cn(
-          "z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-32 origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-menu border bg-popover p-1 text-popover-foreground data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
+          "z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-32 origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-menu bg-menu p-1 text-popover-foreground shadow-menu data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
           className
         )}
         {...props}
@@ -62,6 +66,11 @@ function DropdownMenuGroup({
   )
 }
 
+// An item is the docs sidebar's row (Fumadocs, `/docs`): 36px tall, 2px
+// apart, 8px corners, and a fill at half strength under the pointer or the
+// keyboard. Half the accent, not the sidebar accent the rail takes: a menu
+// stands on its own surface, and the dark sidebar accent is that surface's
+// own colour, so a fill of it would not show.
 function DropdownMenuItem({
   className,
   inset,
@@ -77,10 +86,11 @@ function DropdownMenuItem({
       data-inset={inset}
       data-variant={variant}
       className={cn(
-        "relative flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 text-sm outline-hidden select-none transition-colors",
-        // An item after an item stands 4px off it, the separator's `my-1`.
-        "[[data-slot=dropdown-menu-item]+&]:mt-1",
-        "focus:bg-accent focus:text-accent-foreground",
+        "relative flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-sm outline-hidden select-none transition-colors",
+        // An item after an item stands 2px off it, as a rail row stands off
+        // the one above it (`console-sidebar.tsx`).
+        "[[data-slot=dropdown-menu-item]+&]:mt-0.5",
+        "focus:bg-accent/50 focus:text-accent-foreground",
         "data-disabled:cursor-not-allowed data-disabled:opacity-50",
         "data-inset:pl-8",
         "data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive dark:data-[variant=destructive]:focus:bg-destructive/20",
@@ -103,8 +113,8 @@ function DropdownMenuCheckboxItem({
     <DropdownMenuPrimitive.CheckboxItem
       data-slot="dropdown-menu-checkbox-item"
       className={cn(
-        "relative flex h-8 cursor-pointer items-center gap-2 rounded-md py-1.5 pr-2 pl-8 text-sm outline-hidden select-none transition-colors",
-        "focus:bg-accent focus:text-accent-foreground",
+        "relative flex h-9 cursor-pointer items-center gap-2 rounded-md py-1.5 pr-2 pl-8 text-sm outline-hidden select-none transition-colors",
+        "focus:bg-accent/50 focus:text-accent-foreground",
         "data-disabled:cursor-not-allowed data-disabled:opacity-50",
         "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4",
         className
@@ -142,8 +152,8 @@ function DropdownMenuRadioItem({
     <DropdownMenuPrimitive.RadioItem
       data-slot="dropdown-menu-radio-item"
       className={cn(
-        "relative flex h-8 cursor-pointer items-center gap-2 rounded-md py-1.5 pr-2 pl-8 text-sm outline-hidden select-none transition-colors",
-        "focus:bg-accent focus:text-accent-foreground",
+        "relative flex h-9 cursor-pointer items-center gap-2 rounded-md py-1.5 pr-2 pl-8 text-sm outline-hidden select-none transition-colors",
+        "focus:bg-accent/50 focus:text-accent-foreground",
         "data-disabled:cursor-not-allowed data-disabled:opacity-50",
         "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4",
         className
@@ -180,6 +190,12 @@ function DropdownMenuLabel({
   )
 }
 
+// A border, not a filled box, so the rule is drawn as the header's and the
+// rail's rules are: Chrome floors a border's width to whole device pixels, one
+// at 1.5× as at 1×, where a filled 1px box is snapped by its edges and came
+// out two pixels on some rows. The rule's block is 8px — 4 above, the pixel,
+// 3 below — whole pixels, so the 36px rows under a rule stay on whole pixels
+// too.
 function DropdownMenuSeparator({
   className,
   ...props
@@ -187,7 +203,7 @@ function DropdownMenuSeparator({
   return (
     <DropdownMenuPrimitive.Separator
       data-slot="dropdown-menu-separator"
-      className={cn("-mx-1 my-1 h-px bg-border", className)}
+      className={cn("-mx-1 mt-1 mb-[3px] border-t border-border", className)}
       {...props}
     />
   )
@@ -228,8 +244,8 @@ function DropdownMenuSubTrigger({
       data-slot="dropdown-menu-sub-trigger"
       data-inset={inset}
       className={cn(
-        "flex h-8 cursor-pointer items-center rounded-md px-2 text-sm outline-hidden select-none transition-colors",
-        "focus:bg-accent focus:text-accent-foreground",
+        "flex h-9 cursor-pointer items-center rounded-md px-2 text-sm outline-hidden select-none transition-colors",
+        "focus:bg-accent/50 focus:text-accent-foreground",
         "data-[state=open]:bg-accent data-[state=open]:text-accent-foreground",
         "data-inset:pl-8",
         "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4",
@@ -251,7 +267,7 @@ function DropdownMenuSubContent({
     <DropdownMenuPrimitive.SubContent
       data-slot="dropdown-menu-sub-content"
       className={cn(
-        "z-50 min-w-32 origin-(--radix-dropdown-menu-content-transform-origin) overflow-hidden rounded-menu border bg-popover p-1 text-popover-foreground shadow-lg data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
+        "z-50 min-w-32 origin-(--radix-dropdown-menu-content-transform-origin) overflow-hidden rounded-menu bg-menu p-1 text-popover-foreground shadow-menu data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
         className
       )}
       {...props}

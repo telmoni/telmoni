@@ -2,7 +2,8 @@
 
 import { useConsoleUi } from "@/components/console-ui-context";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
 import {
@@ -16,41 +17,18 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { usePagePrimaryAction } from "@/components/page-action";
-import { useActiveOrganization } from "@/lib/store";
+import { useActiveOrganization, useFlags } from "@/lib/store";
+import { letterKeysOn, useLetterKeys } from "@/lib/use-accessibility";
 import { useIsMac } from "@/lib/use-platform";
 import {
   AGENT_MODIFIER_KEY,
-  GO_SEQUENCES,
+  goSequences,
   PAGE_ACTION_KEY,
   resolveSequence,
   SEQUENCE_TIMEOUT_MS,
   SEARCH_KEY,
-  SHORTCUTS_DISABLED_KEY,
 } from "@/lib/keys";
-
-let inMemoryDisabled = false;
-
-function singleKeysDisabled() {
-  try {
-    inMemoryDisabled =
-      window.localStorage.getItem(SHORTCUTS_DISABLED_KEY) === "1";
-    return inMemoryDisabled;
-  } catch {
-    return inMemoryDisabled;
-  }
-}
-
-function setSingleKeysDisabled(next: boolean) {
-  inMemoryDisabled = next;
-  try {
-    if (next) window.localStorage.setItem(SHORTCUTS_DISABLED_KEY, "1");
-    else window.localStorage.removeItem(SHORTCUTS_DISABLED_KEY);
-  } catch {
-  }
-}
 
 export function KeyboardShortcuts() {
   const router = useRouter();
@@ -60,16 +38,16 @@ export function KeyboardShortcuts() {
   // path names none.
   const pathname = usePathname();
   const organization = useActiveOrganization()?.slug ?? null;
+  const flags = useFlags();
   const pageAction = usePagePrimaryAction();
   const isMac = useIsMac();
 
   const { shortcutsOpen: sheetOpen, setShortcutsOpen: setSheetOpen, openSearch } = useConsoleUi();
   const [filter, setFilter] = useState("");
-  const [disabled, setDisabled] = useState(false);
-  const openSheet = useCallback(() => {
-    setDisabled(singleKeysDisabled());
-    setSheetOpen(true);
-  }, [setSheetOpen]);
+  // Letter-key shortcuts are an Accessibility setting (`lib/accessibility.ts`):
+  // off, the handler below ignores bare keys and the sheet lists only chords.
+  const letterKeys = useLetterKeys();
+  const openSheet = useCallback(() => setSheetOpen(true), [setSheetOpen]);
 
   const pendingG = useRef(false);
   const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -86,14 +64,14 @@ export function KeyboardShortcuts() {
   // it as a dependency would re-add a document-level listener on every render.
   // Ref-sync effect with no dependency array, as in realtime-listener.tsx.
   const pageActionRef = useRef(pageAction);
-  // Six of the seven sequences are project-relative, so where you ARE decides
-  // where `g k` goes. Through a ref for the same reason as the page action:
-  // naming the path as a dependency re-binds a document listener on every
-  // navigation, and this one has to survive them.
-  const placeRef = useRef({ pathname, organization });
+  // Every sequence but `g O` is a row of the rail you stand in, so where you
+  // ARE decides where `g k` goes. Through a ref for the same reason as the
+  // page action: naming the path as a dependency re-binds a document listener
+  // on every navigation, and this one has to survive them.
+  const placeRef = useRef({ pathname, organization, flags });
   useEffect(() => {
     pageActionRef.current = pageAction;
-    placeRef.current = { pathname, organization };
+    placeRef.current = { pathname, organization, flags };
   });
 
   useEffect(() => {
@@ -114,7 +92,7 @@ export function KeyboardShortcuts() {
         clearPending();
         return;
       }
-      if (singleKeysDisabled()) return;
+      if (!letterKeysOn()) return;
       if (e.key.length > 1) return;
       if (e.repeat) return;
       const k = e.shiftKey ? e.key : e.key.toLowerCase();
@@ -125,6 +103,7 @@ export function KeyboardShortcuts() {
           k,
           placeRef.current.pathname,
           placeRef.current.organization,
+          placeRef.current.flags,
         );
         if (href) {
           e.preventDefault();
@@ -144,14 +123,18 @@ export function KeyboardShortcuts() {
         action.run();
         return;
       }
-      if (k === SEARCH_KEY) {
-        e.preventDefault();
-        openSearch();
-        return;
-      }
+      // The sheet is the `?` the keyboard types and Search the `/`, whatever
+      // Shift took to type them: on a German, Nordic, Spanish, Italian or
+      // French keyboard `/` is itself a shifted key, and reading Shift as the
+      // sheet's left those people no `/` for Search at all.
       if (k === "?") {
         e.preventDefault();
         openSheet();
+        return;
+      }
+      if (k === SEARCH_KEY) {
+        e.preventDefault();
+        openSearch();
       }
     };
     document.addEventListener("keydown", onKeyDown);
@@ -161,27 +144,26 @@ export function KeyboardShortcuts() {
 
   const q = filter.trim().toLowerCase();
   const modifier = isMac ? "\u2318" : "Ctrl";
-  // ⚠ **The same missing argument as the handler, and here it silently
-  // widened the sheet instead of breaking a key.** This filter is meant to
-  // hide the sequences that have no destination from where you stand; with
-  // nowhere to stand every one of them resolved to something, so it hid
-  // nothing and the sheet promised `g k` on the organization pages, where it
-  // does not go. Straight from the path rather than the ref: the sheet
-  // re-renders.
-  const rows = GO_SEQUENCES.filter(
-    (s) =>
-      resolveSequence(s.key, pathname, organization) !== null &&
-      s.label.toLowerCase().includes(q),
-  );
+  // The rail you stand in, straight from the path rather than the ref, since
+  // the sheet re-renders: it lists exactly the rows a sequence reaches here.
+  const rows = letterKeys
+    ? goSequences(pathname, organization, flags).filter((s) => s.label.toLowerCase().includes(q))
+    : [];
+  // One row per thing you can do, with every chord that does it, so Search is
+  // listed once under both of its keys.
+  // With letter keys off, only the chords held with a modifier are listed:
+  // the sheet shows what works where you are, never a key that does nothing.
   const extras = [
-    ...(pageAction
-      ? [{ label: pageAction.label, keys: [PAGE_ACTION_KEY.toUpperCase()] }]
+    ...(pageAction && letterKeys
+      ? [{ label: pageAction.label, chords: [[PAGE_ACTION_KEY.toUpperCase()]] }]
       : []),
-    { label: "Search", keys: [modifier, "K"] },
-    { label: "Search", keys: [SEARCH_KEY] },
-    { label: "Ask the agent", keys: [modifier, AGENT_MODIFIER_KEY.toUpperCase()] },
-    { label: "Open the account menu", keys: [modifier, "Shift", "K"] },
-    { label: "This sheet", keys: ["?"] },
+    { label: "Search", chords: letterKeys ? [[modifier, "K"], [SEARCH_KEY]] : [[modifier, "K"]] },
+    { label: "Ask the agent", chords: [[modifier, AGENT_MODIFIER_KEY.toUpperCase()]] },
+    { label: "Open the account menu", chords: [[modifier, "Shift", "K"]] },
+    // Shown as the `?` it is, since the keys that type one differ from one
+    // keyboard to the next: Shift and `/` on a US one, Shift and `ß` on a
+    // German one.
+    ...(letterKeys ? [{ label: "This sheet", chords: [["?"]] }] : []),
   ].filter((c) => c.label.toLowerCase().includes(q));
 
   return (
@@ -209,7 +191,9 @@ export function KeyboardShortcuts() {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           />
-          <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
+          {/* `pr-1`: the keys stand off the scrollbar by the gap between two
+              keys, instead of touching it. */}
+          <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-1">
             {rows.map((s) => (
               <div
                 key={s.key}
@@ -223,18 +207,20 @@ export function KeyboardShortcuts() {
               </div>
             ))}
             {extras.map((c) => (
-              <div
-                // The label alone repeats: Search is listed under both of
-                // its keys.
-                key={`${c.label}:${c.keys.join("+")}`}
-                className="flex h-8 items-center justify-between text-sm"
-              >
+              <div key={c.label} className="flex h-8 items-center justify-between text-sm">
                 <span>{c.label}</span>
-                <KbdGroup>
-                  {c.keys.map((k) => (
-                    <Kbd key={k}>{k}</Kbd>
+                <span className="flex items-center gap-1.5">
+                  {c.chords.map((chord, i) => (
+                    <Fragment key={chord.join("+")}>
+                      {i > 0 && <span className="text-xs text-muted-foreground">or</span>}
+                      <KbdGroup>
+                        {chord.map((k) => (
+                          <Kbd key={k}>{k}</Kbd>
+                        ))}
+                      </KbdGroup>
+                    </Fragment>
                   ))}
-                </KbdGroup>
+                </span>
               </div>
             ))}
             {rows.length === 0 && extras.length === 0 && (
@@ -246,18 +232,25 @@ export function KeyboardShortcuts() {
         </DialogBody>
         {/* The sheet's one control is its footer, where every modal keeps
             what it lets you act on. */}
-        <DialogFooter className="justify-between">
-          <Label htmlFor="single-key-shortcuts" className="font-normal">
-            Single-key shortcuts
-          </Label>
-          <Switch
-            id="single-key-shortcuts"
-            checked={!disabled}
-            onCheckedChange={(on) => {
-              setDisabled(!on);
-              setSingleKeysDisabled(!on);
-            }}
-          />
+        {/* The setting lives in Accessibility; the sheet says which way it
+            stands and leads there. */}
+        {/* `pb-2.5`: the note is text, whose line spacing puts its baseline
+            about 4px above its box, so the box sits 10px up for the words to
+            read 14px from the edge, as the sides do. */}
+        <DialogFooter className="justify-start pb-2.5 text-xs text-muted-foreground">
+          <p>
+            {letterKeys
+              ? "Use voice control or a screen reader? Letter-key shortcuts can be turned off in "
+              : "Letter-key shortcuts are off, so only the shortcuts above work. Turn them on in "}
+            <Link
+              href="/account/accessibility"
+              onClick={() => setSheetOpen(false)}
+              className="underline underline-offset-2 hover:text-foreground"
+            >
+              Accessibility
+            </Link>
+            .
+          </p>
         </DialogFooter>
       </DialogContent>
     </Dialog>

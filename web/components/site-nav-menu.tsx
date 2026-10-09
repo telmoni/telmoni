@@ -10,13 +10,13 @@ import { cn } from "@/lib/utils";
 // ⚠ **A trigger and a plain link have to be the same shape, so neither is a
 // `Button`.** A Button would give the link its pill and the trigger nothing,
 // and the two sit side by side in one row. This is `size="sm"`'s geometry
-// written out once — `h-8 px-3` — with the ghost variant's fill.
+// written out once — `h-9 px-3` — with the ghost variant's fill.
 //
 // `data-[state=open]` is what borrows the open look: the item whose panel is
 // showing stays filled, so the row says which panel you are reading. Radix
 // sets it, and there is no chevron to turn because the fill already says it.
 const ROW = cn(
-  "inline-flex h-8 cursor-pointer items-center rounded-md px-3",
+  "inline-flex h-9 cursor-pointer items-center rounded-md px-3",
   "text-sm font-normal whitespace-nowrap transition-colors",
   "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
   "data-[state=open]:bg-accent data-[state=open]:text-accent-foreground",
@@ -131,12 +131,12 @@ export function SiteNavMenu() {
       delayDuration={100}
     >
       <NavigationMenu.List
-        className="flex h-8 list-none items-center gap-3"
+        className="flex h-9 list-none items-center gap-3"
       >
         {PRIMARY_NAV.map((item) => (
           <NavigationMenu.Item
             key={item.label}
-            className="relative flex h-8 items-center"
+            className="relative flex h-9 items-center"
           >
             {item.panel ? (
               <>

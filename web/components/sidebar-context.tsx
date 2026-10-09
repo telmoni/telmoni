@@ -104,16 +104,21 @@ export function SidebarProvider({
       if (e.defaultPrevented) return;
       if (document.querySelector(OVERLAY_SELECTOR)) return;
       move(false);
+      // Focus in the drawer goes back to the control that opened it, rather
+      // than staying on a row that slides away and is hidden.
+      if (document.activeElement?.closest("#console-sidebar")) {
+        document.querySelector<HTMLElement>('[aria-controls="console-sidebar"]')?.focus();
+      }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [isMobile, collapsed]);
 
   // ⚠ **A press outside closes the drawer, and there is deliberately no scrim
-  // to catch it.** The usual way to do this is a full-page overlay, and
-  // `console-sidebar.test.tsx` pins that this drawer draws none — the page
-  // behind stays visible and undimmed, which is the reason the rail slides
-  // over it rather than covering it. So the press is caught on the document.
+  // to catch it.** The usual way to do this is a full-page overlay, and this
+  // drawer draws none — the page behind stays visible and undimmed, which is
+  // the reason the rail slides over it rather than covering it. So the press
+  // is caught on the document.
   //
   // `pointerdown` and not `click`: one listener covers mouse, touch and pen,
   // and it lands before focus moves, so a press aimed at something in the page

@@ -126,8 +126,16 @@ test.describe("Console rail on a dead address", () => {
     await injectSession(page, testUser(testInfo.project.name));
     const [, organization] = (await landOnProject(page)).split("/");
     const rail = page.locator("#console-sidebar");
+    // On a phone the closed drawer is hidden, rows and all, so it is opened
+    // first: a hidden row is no row to a person, nor to `getByRole`.
+    const openDrawer = async () => {
+      if (testInfo.project.name !== "mobile-chromium") return;
+      await page.getByRole("button", { name: "Expand navigation" }).click();
+      await expect(rail).toBeVisible();
+    };
 
     // A project's page: its own rows, and no way back to step out by.
+    await openDrawer();
     await expect(rail.getByRole("link", { name: "API keys" })).toBeAttached();
     await expect(rail.getByRole("link", { name: /^Back to / })).toHaveCount(0);
 
@@ -140,6 +148,7 @@ test.describe("Console rail on a dead address", () => {
         page.getByRole("heading", { name: "Not found.", level: 1 }),
         dead,
       ).toBeVisible();
+      await openDrawer();
       await expect(rail.getByRole("link", { name: "Settings" }), dead).toHaveCount(0);
       await expect(rail.getByRole("link", { name: /^Back to / }), dead).toHaveCount(1);
     }

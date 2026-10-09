@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist_Mono, Inter } from "next/font/google";
 import { headers } from "next/headers";
 import "./globals.css";
+import { ACCESSIBILITY_BOOT_SCRIPT } from "@/lib/accessibility";
 import { CORNERS_BOOT_SCRIPT } from "@/lib/corners";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
@@ -49,11 +50,12 @@ export default async function RootLayout({
     >
       <head>
         {/* Before first paint, so a sharp console never renders rounded and
-            snaps. Carries the nonce because `proxy.ts` serves
+            snaps, and the accessibility settings hold from the first frame.
+            Carries the nonce because `proxy.ts` serves
             `script-src 'self' 'nonce-…'` and would otherwise refuse it. */}
         <script
           nonce={nonce}
-          dangerouslySetInnerHTML={{ __html: CORNERS_BOOT_SCRIPT }}
+          dangerouslySetInnerHTML={{ __html: CORNERS_BOOT_SCRIPT + ACCESSIBILITY_BOOT_SCRIPT }}
         />
       </head>
       <body>

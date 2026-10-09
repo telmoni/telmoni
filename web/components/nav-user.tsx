@@ -34,7 +34,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Kbd } from "@/components/ui/kbd";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { CORNERS_DEFAULT, type Corners } from "@/lib/corners";
 import { setCorners, useCorners } from "@/lib/use-corners";
 import { ACCOUNT_MENU_EVENT } from "@/lib/keys";
@@ -49,7 +49,7 @@ const THEMES = [
   { value: "dark", label: "Dark theme", icon: Moon },
 ] as const;
 
-const ROW = "h-8 gap-2 px-2 cursor-pointer";
+const ROW = "h-9 gap-2 px-2 cursor-pointer";
 
 const CORNER_CHOICES = [
   { value: "rounded", label: "Rounded corners", icon: SquareRoundCorner },
@@ -111,10 +111,10 @@ export function NavUser() {
           <Button
             variant="ghost"
             aria-label={`Account: ${name}`}
-            aria-keyshortcuts="Control+K Meta+K"
+            aria-keyshortcuts="Control+Shift+K Meta+Shift+K"
             title={name}
             size={null}
-            className="size-8 shrink-0 rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+            className="size-9 shrink-0 rounded-md text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground"
           >
             <Avatar>
               <AvatarImage src="" alt="" />
@@ -128,17 +128,15 @@ export function NavUser() {
           className="w-64 animate-none!"
           side="bottom"
           align="end"
-          sideOffset={14}
+          // Right under the header's rule, as the switchers' menus open
+          // (`resource-selector.tsx`).
+          sideOffset={12.5}
         >
-          <DropdownMenuLabel className="p-0 font-normal">
-            <div className="flex h-12 items-center gap-2 px-2">
-              <div className="grid min-w-0 flex-1 leading-tight">
-                <span className="truncate text-sm font-medium">{name}</span>
-                <span className="truncate text-xs text-muted-foreground">
-                  {user.email}
-                </span>
-              </div>
-            </div>
+          {/* The head is the address alone, a row the foot's height, as the
+              switchers head their menus with one line: the name is the
+              account page's to show, not the menu's. */}
+          <DropdownMenuLabel className="flex h-9 items-center px-2 py-0 text-xs font-normal text-muted-foreground">
+            <span className="truncate">{user.email}</span>
           </DropdownMenuLabel>
 
           <DropdownMenuSeparator />
@@ -164,6 +162,16 @@ export function NavUser() {
               </a>
             </DropdownMenuItem>
 
+            {/* Beside Docs, the other way out to what is written down. */}
+            {REPO_URL && (
+              <DropdownMenuItem asChild className={ROW}>
+                <a href={REPO_URL} target="_blank" rel="noreferrer">
+                  <GithubIcon />
+                  <span>GitHub</span>
+                </a>
+              </DropdownMenuItem>
+            )}
+
             <DropdownMenuItem
               className={ROW}
               onSelect={() =>
@@ -172,13 +180,18 @@ export function NavUser() {
             >
               <Keyboard />
               <span className="flex-1">Keyboard shortcuts</span>
-              <Kbd>?</Kbd>
+              {/* The `?` it is, as the sheet lists it: the keys that type one
+                  differ from keyboard to keyboard. Hidden while letter-key
+                  shortcuts are off, when it does nothing. */}
+              <KbdGroup data-letter-key="">
+                <Kbd>?</Kbd>
+              </KbdGroup>
             </DropdownMenuItem>
 
             <DropdownMenuSeparator />
             <div
               data-slot="dropdown-menu-item"
-              className="flex h-8 items-center justify-between gap-2 px-2"
+              className="flex h-9 items-center justify-between gap-2 px-2"
             >
               <span className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Palette className="size-4" />
@@ -207,7 +220,7 @@ export function NavUser() {
 
             <div
               data-slot="dropdown-menu-item"
-              className="mt-1 flex h-8 items-center justify-between gap-2 px-2"
+              className="mt-0.5 flex h-9 items-center justify-between gap-2 px-2"
             >
               <span className="flex items-center gap-2 text-sm text-muted-foreground">
                 <SquareRoundCorner className="size-4" />
@@ -235,14 +248,6 @@ export function NavUser() {
             </div>
 
 
-            {REPO_URL && (
-              <DropdownMenuItem asChild className={ROW}>
-                <a href={REPO_URL} target="_blank" rel="noreferrer">
-                  <GithubIcon />
-                  <span>GitHub</span>
-                </a>
-              </DropdownMenuItem>
-            )}
             {STATUS_URL && (
               <DropdownMenuItem asChild className={ROW}>
                 <a href={STATUS_URL} target="_blank" rel="noreferrer">
@@ -253,10 +258,11 @@ export function NavUser() {
             )}
           </DropdownMenuGroup>
 
-          {/* The `border-t` is the rule; the negative margins cancel the
-              panel's `p-1` so the row reaches the edges. */}
+          {/* The foot is the switchers' foot: a rule, then one 36px row, so
+              every menu in the header ends the same way. */}
+          <DropdownMenuSeparator />
           <DropdownMenuItem
-            className="-mx-1 mt-1 -mb-1 h-14 cursor-pointer gap-3 rounded-none border-t px-3"
+            className="h-9 cursor-pointer gap-2 px-2"
             onSelect={(event) => {
               event.preventDefault();
               const form = document.createElement("form");
@@ -266,8 +272,8 @@ export function NavUser() {
               form.submit();
             }}
           >
-            <LogOut className="size-4 shrink-0" />
-            <span className="text-sm font-medium">Sign out</span>
+            <LogOut className="size-4 shrink-0 text-muted-foreground" />
+            Sign out
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

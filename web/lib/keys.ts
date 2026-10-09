@@ -1,7 +1,6 @@
-import { consolePlace } from "./console-nav";
-import { organizationPath, projectPath } from "./slug";
-
-export const SHORTCUTS_DISABLED_KEY = "telmoni-shortcuts-disabled";
+import { buildConsoleNav, consolePlace, type ConsoleNavItem } from "./console-nav";
+import type { FlagSet } from "./flags";
+import { organizationPath } from "./slug";
 
 export const SHORTCUTS_SHEET_EVENT = "telmoni:shortcuts-sheet";
 
@@ -26,59 +25,57 @@ export const SEQUENCE_TIMEOUT_MS = 1000;
 
 export const PAGE_ACTION_KEY = "c";
 
-interface GoSequence {
+/** `g` then this reaches the organization's overview from anywhere, Account
+ *  included: the one sequence that is not a row of the rail you stand in. */
+export const ORGANIZATION_KEY = "O";
+
+export interface GoSequence {
   key: string;
   label: string;
   href: string;
-  // Goes to the organization's overview, whatever the path stands in.
-  organization?: boolean;
 }
 
-export const GO_SEQUENCES: GoSequence[] = [
-  { key: "k", label: "API keys", href: "/api-keys" },
-  // `c` is also `PAGE_ACTION_KEY`, and that is safe rather than a collision:
-  // the handler takes the pending-`g` branch and returns before it ever reaches
-  // the page-action check, so the two readings of the key never meet. It is the
-  // only key in this table with a bare meaning as well, so the ordering there is
-  // load-bearing — `keyboard-shortcuts.test.tsx` pins both halves.
-  { key: "c", label: "Connectors", href: "/connectors" },
-  { key: "m", label: "Members", href: "/members" },
-  { key: "l", label: "Audit log", href: "/audit-log" },
-  { key: "p", label: "Project settings", href: "/settings" },
-  { key: "o", label: "Overview", href: "" },
-  { key: "O", label: "Organization", href: "", organization: true },
-];
-
-const ORGANIZATION_PAGES = new Set(["", "/members", "/audit-log", "/settings"]);
-
-// Where a sequence goes from `pathname`. All but `g O` are relative to the
-// resource the path stands in: a project has every one of them, the
-// organization has its own spellings of Overview, Members, Audit log and
-// Settings, and Account has none. `organization` is the slug of the
-// organization the console stands in, for `g O` from a path that names none.
+// The `g` sequences are the rail's rows: each row that carries a `key` in
+// `lib/console-nav.ts` is reached by `g` and that key, so a row added to the
+// rail — a console built on this one adds its own through
+// `lib/extension/nav.ts` — is reached the day it lands, and the sheet lists
+// exactly the rail you stand in, which keeps a sequence from ever promising
+// a page the rail does not have. Account's rows are reached the same way.
+// `c` is also `PAGE_ACTION_KEY`, and that is safe rather than a collision:
+// the handler takes the pending-`g` branch and returns before it ever reaches
+// the page-action check, so the two readings of the key never meet.
 //
-// ⚠ **Returning a bare `seq.href` with nowhere to stand was a 404 generator.**
-// `/api-keys` unprefixed reads as an organization of that name, and its layout
-// answers `notFound()`. A shortcut with nowhere to go must do nothing instead.
+// ⚠ **A sequence with nowhere to go must do nothing.** A bare project-relative
+// href — `/api-keys` — reads as an organization of that name and 404s. Off
+// the console's paths the rail is empty, so nothing resolves there but `g O`
+// with an organization to go to.
+export function goSequences(
+  pathname: string,
+  organization?: string | null,
+  flags: FlagSet = {},
+): GoSequence[] {
+  const rows = buildConsoleNav(pathname, flags)
+    .flatMap((g) => g.items)
+    .filter((item): item is ConsoleNavItem & { key: string } => item.key !== undefined)
+    .map((item) => ({ key: item.key, label: item.title, href: item.url }));
+  const place = consolePlace(pathname);
+  const slug = place !== null && place.kind !== "account" ? place.organization : organization;
+  if (slug) {
+    rows.push({
+      key: ORGANIZATION_KEY,
+      label: "The organization's overview",
+      href: organizationPath(slug),
+    });
+  }
+  return rows;
+}
+
+/** Where `g` and `key` go from `pathname`; `null` is nowhere, and nothing. */
 export function resolveSequence(
   key: string,
   pathname: string,
   organization?: string | null,
+  flags: FlagSet = {},
 ): string | null {
-  const seq = GO_SEQUENCES.find((s) => s.key === key);
-  if (seq === undefined) return null;
-
-  const place = consolePlace(pathname);
-  const standing = place !== null && place.kind !== "account" ? place : null;
-  if (seq.organization) {
-    const slug = standing?.organization ?? organization;
-    return slug ? organizationPath(slug) : null;
-  }
-  if (standing === null) return null;
-  if (standing.kind === "organization") {
-    return ORGANIZATION_PAGES.has(seq.href)
-      ? organizationPath(standing.organization, seq.href)
-      : null;
-  }
-  return projectPath(standing.organization, standing.project, seq.href);
+  return goSequences(pathname, organization, flags).find((s) => s.key === key)?.href ?? null;
 }

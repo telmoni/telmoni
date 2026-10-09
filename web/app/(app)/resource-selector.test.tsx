@@ -16,11 +16,12 @@ vi.mock("next/navigation", () => ({
 }));
 
 // The dialogs are the create flows' own concern; here they only have to be
-// offered, so each is a stub, and the targets are set per test.
-let targets: { id: string; label: string }[] = [];
+// offered, so each is a stub, and whether the caller may create is set per
+// test.
+let canCreate = true;
 vi.mock("@/components/create-project", () => ({
   CreateProjectDialog: () => null,
-  useCreateProjectTargets: () => targets,
+  useCanCreateProjects: () => canCreate,
 }));
 vi.mock("@/components/create-organization", () => ({
   CreateOrganizationDialog: () => null,
@@ -41,7 +42,10 @@ const elsewhere: ProjectEverywhere = {
   organizationName: "Initech",
 };
 
-function renderSelector(badge?: React.ReactNode) {
+function renderSelector(
+  badge?: React.ReactNode,
+  projects: Project[] = [project("p1", "Atlas"), project("p2", "Beacon")],
+) {
   return render(
     <StoreProvider
       user={null}
@@ -51,7 +55,7 @@ function renderSelector(badge?: React.ReactNode) {
       activeOrganizationId="org_acme"
       flags={{ [Flag.Signup]: true }}
       roles={{}}
-      projects={[project("p1", "Atlas"), project("p2", "Beacon")]}
+      projects={projects}
       projectsElsewhere={[elsewhere]}
     >
       <ResourceSelector host="console.test" organizationBadge={badge} />
@@ -66,15 +70,37 @@ function open(trigger: HTMLElement): HTMLElement {
 
 beforeEach(() => {
   pathname = "/acme";
-  targets = [{ id: "org_acme", label: "acme" }];
+  canCreate = true;
   window.localStorage.clear();
 });
 
 describe("the switcher", () => {
-  it("names the organization alone at the organization level", () => {
-    renderSelector();
+  // A project is a click away from the organization's own pages, not a trip
+  // to Projects: the slash is there, with a prompt where a name would be —
+  // muted, so it never reads as a project called that.
+  it("asks for a project after the organization at the organization level", () => {
+    const { container } = renderSelector();
     expect(screen.getByRole("button", { name: "Select an organization" })).toHaveTextContent("acme");
-    expect(screen.queryByRole("button", { name: "Select a project" })).toBeNull();
+    const prompt = screen.getByRole("button", { name: "Select a project" });
+    expect(within(prompt).getByTestId("project-prompt")).toHaveTextContent("Select a project");
+    expect(within(prompt).getByTestId("project-prompt")).toHaveClass("text-muted-foreground");
+    expect(container).toHaveTextContent("/");
+  });
+
+  it("lists the projects to pick at the organization level, none of them checked", () => {
+    renderSelector();
+    const menu = open(screen.getByRole("button", { name: "Select a project" }));
+    expect(within(menu).getByRole("menuitem", { name: "Atlas" })).toHaveAttribute("href", "/acme/atlas");
+    expect(within(menu).getByRole("menuitem", { name: "Atlas" })).not.toHaveAttribute("aria-current");
+    expect(within(menu).getByRole("menuitem", { name: "Beacon" })).not.toHaveAttribute("aria-current");
+    expect(within(menu).getByRole("menuitem", { name: "New project" })).toBeInTheDocument();
+  });
+
+  it("says there are no projects yet, and offers a new one", () => {
+    renderSelector(undefined, []);
+    const menu = open(screen.getByRole("button", { name: "Select a project" }));
+    expect(menu).toHaveTextContent("No projects yet");
+    expect(within(menu).getByRole("menuitem", { name: "New project" })).toBeInTheDocument();
   });
 
   it("names the project after a slash inside one", () => {
@@ -123,7 +149,7 @@ describe("the switcher", () => {
 
   it("offers no new project to somebody who may create none", () => {
     pathname = "/acme/atlas";
-    targets = [];
+    canCreate = false;
     renderSelector();
     const menu = open(screen.getByRole("button", { name: "Select a project" }));
     expect(within(menu).queryByRole("menuitem", { name: "New project" })).toBeNull();

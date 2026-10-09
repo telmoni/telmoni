@@ -7,6 +7,7 @@ import {
   consolePlace,
   isAccountPath,
   movedPath,
+  navBlocks,
   organizationToRemember,
   projectAt,
   rootSegment,
@@ -36,6 +37,7 @@ describe("buildConsoleNav", () => {
     expect(account?.items.map((i) => i.url)).toEqual([
       "/account/settings",
       "/account/notifications",
+      "/account/accessibility",
       "/account/privacy",
     ]);
     const [organization] = buildConsoleNav("/acme");
@@ -90,10 +92,15 @@ describe("buildConsoleNav", () => {
   it("draws the organization's rail on the pairing page", () => {
   });
 
-  it("leads the project run with Overview, then the organization's objects, and Settings last", () => {
+  it("leads the project run with Overview, then observability, then the organization's objects, and Settings last", () => {
     const [project] = buildConsoleNav("/acme/web/api-keys");
     expect(project?.items.map((i) => i.url)).toEqual([
       "/acme/web",
+      "/acme/web/traces",
+      "/acme/web/sessions",
+      "/acme/web/users",
+      "/acme/web/alerts",
+      "/acme/web/dashboards",
       "/acme/web/api-keys",
       "/acme/web/connectors",
       "/acme/web/members",
@@ -192,6 +199,11 @@ describe("buildConsoleNav", () => {
     );
     expect(project).toEqual([
       "/acme/web",
+      "/acme/web/traces",
+      "/acme/web/sessions",
+      "/acme/web/users",
+      "/acme/web/alerts",
+      "/acme/web/dashboards",
       "/acme/web/api-keys",
       "/acme/web/connectors",
       "/acme/web/members",
@@ -216,8 +228,36 @@ describe("buildConsoleNav", () => {
   });
 });
 
+describe("the blocks of a run", () => {
+  // A project's observability rows are headed because they are the product
+  // and its housekeeping rows because they are the project's own; an
+  // organization's own rows are headed the same way under its Overview; the
+  // person's rail is one unheaded block, its way back saying what it is.
+  it("heads a project's observability and housekeeping rows and the organization's own rows, and nothing else", () => {
+    const [project] = buildConsoleNav("/acme/web/api-keys");
+    expect(
+      navBlocks(project?.items ?? []).map((b) => [b.heading, b.items.map((i) => i.title)]),
+    ).toEqual([
+      [undefined, ["Overview"]],
+      ["Observability", ["Traces", "Sessions", "Users", "Alerts", "Dashboards"]],
+      ["Project", ["API keys", "Connectors", "Members", "Audit log", "Settings"]],
+    ]);
+    const [organization] = buildConsoleNav("/acme/settings");
+    expect(
+      navBlocks(organization?.items ?? []).map((b) => [b.heading, b.items.map((i) => i.title)]),
+    ).toEqual([
+      [undefined, ["Overview"]],
+      ["Organization", ["Projects", "Members", "Audit log", "Settings"]],
+    ]);
+    const [account] = buildConsoleNav("/account/settings");
+    expect(navBlocks(account?.items ?? []).map((b) => [b.heading, b.items.length])).toEqual([
+      [undefined, 4],
+    ]);
+  });
+});
+
 describe("the retired rows", () => {
-  it("draws no observability row", () => {
+  it("draws none of the retired observability rows", () => {
     const urls = [
       ...buildConsoleNav("/acme/web/api-keys"),
       ...buildConsoleNav("/acme/settings"),
@@ -225,10 +265,8 @@ describe("the retired rows", () => {
     for (const gone of [
       "/acme/web/services",
       "/acme/web/slos",
-      "/acme/web/alerts",
       "/acme/web/metrics",
       "/acme/web/logs",
-      "/acme/web/traces",
     ]) {
       expect(urls).not.toContain(gone);
     }
@@ -254,6 +292,11 @@ describe("the whole destination set", () => {
       ].flatMap((g) => g.items.map((i) => i.url)),
     ).toEqual([
       "/acme/web",
+      "/acme/web/traces",
+      "/acme/web/sessions",
+      "/acme/web/users",
+      "/acme/web/alerts",
+      "/acme/web/dashboards",
       "/acme/web/api-keys",
       "/acme/web/connectors",
       "/acme/web/members",
@@ -266,6 +309,7 @@ describe("the whole destination set", () => {
       "/acme/settings",
       "/account/settings",
       "/account/notifications",
+      "/account/accessibility",
       "/account/privacy",
     ]);
   });

@@ -21,10 +21,10 @@ export function SearchButton() {
       title={`Search (${chord})`}
       onClick={openSearch}
       className={cn(
-        "flex size-8 shrink-0 items-center justify-center",
+        "flex size-9 shrink-0 items-center justify-center",
         "rounded-md text-muted-foreground hover:text-foreground",
         "outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        "hover:bg-sidebar-accent",
+        "hover:bg-sidebar-accent/50",
       )}
     >
       <Search className="size-4" />

@@ -13,6 +13,9 @@ export interface ExtraNavItem {
   icon: LucideIcon;
   /** The row it goes above, by title; last in the group when absent. */
   before?: string;
+  /** The letter after `g` that reaches the row; none, and no sequence does.
+   *  Single, and not one the group's rows already use (`lib/console-nav.ts`). */
+  key?: string;
 }
 
 export const EXTRA_NAV_ITEMS: readonly ExtraNavItem[] = [];

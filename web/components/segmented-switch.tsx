@@ -40,6 +40,8 @@ export function SegmentedSwitch<T extends string>({
       className="flex items-center overflow-hidden rounded-md border border-border"
       role="group"
       aria-label={label}
+      // Its frame clips the segments, so Show focus draws their ring inside.
+      data-segmented=""
     >
       {options.map(({ value: option, label: optionLabel, Icon }) => {
         const active = value === option;

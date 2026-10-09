@@ -1,7 +1,8 @@
 "use client";
 
-import { ArrowLeft, Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { ArrowLeft, Menu, PanelLeft } from "lucide-react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 import { AgentButton } from "./agent-button";
 import { ResourceSelector } from "./resource-selector";
@@ -12,6 +13,8 @@ import { usePageHeaderValue } from "./page-header-context";
 import { useSidebar } from "./sidebar-context";
 import { TelmoniMark } from "./telmoni-mark";
 import { PRODUCT_NAME } from "@/lib/site";
+import { organizationPath } from "@/lib/slug";
+import { useActiveOrganization } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 // The bar across the top, in three cells. The first is the rail's column —
@@ -19,8 +22,10 @@ import { cn } from "@/lib/utils";
 // rail continues below so one line runs from the top of the window to the
 // bottom — and holds the brand and the rail's toggle. Open, the mark and the
 // name stand at the left and the control that closes the rail at the right.
-// Closed, the mark alone stands centred in the column, as every rail icon
-// is, and is itself the control that opens it: with the pointer anywhere in
+// Closed, the mark alone stands on the column's centre, as every rail icon
+// does — at the rail's own inset rather than centred in the cell, whose
+// border would put it half a pixel off — and is itself the control that
+// opens it: with the pointer anywhere in
 // the cell, or focused, it shows the panel icon instead, and a press on the
 // cell around it opens the rail as the rail's own space does below. Below
 // `md` the rail is a drawer, so the cell holds a hamburger there. The second
@@ -37,6 +42,13 @@ export function ConsoleHeader({
 }) {
   const header = usePageHeaderValue();
   const { collapsed, toggle } = useSidebar();
+  const organization = useActiveOrganization();
+  const pathname = usePathname();
+
+  // Where `/console` would send you — the overview of the organization the
+  // console stands in, or the account's notifications in none — linked
+  // straight, without the redirect's round trip.
+  const home = organization ? organizationPath(organization.slug) : "/account/notifications";
 
   const back =
     header?.backHref && header.backLabel
@@ -48,7 +60,9 @@ export function ConsoleHeader({
         className={cn(
           "flex shrink-0 items-center gap-3 px-3.5 md:border-r md:border-sidebar-border",
           collapsed
-            ? "group/brand md:w-15 md:cursor-pointer md:justify-center"
+            ? // 12px in, as the closed rail's squares are: the 36px control
+              // then centres its mark 30px from the edge, on the rail's icons.
+              "group/brand md:w-15 md:cursor-expand md:justify-start md:px-3"
             : "md:w-64 md:justify-between",
         )}
         onClick={(e) => {
@@ -61,15 +75,29 @@ export function ConsoleHeader({
           aria-label={collapsed ? "Expand navigation" : "Collapse navigation"}
           aria-expanded={!collapsed}
           aria-controls="console-sidebar"
-          className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground md:hidden"
+          className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground md:hidden"
         >
           <Menu className="size-4" />
         </button>
+        {/* `pl-1.5`: open, the mark's centre is the closed column's — the
+            centre every rail icon keeps in both states — so the mark rests
+            while the rail toggles, as Gemini's does, and only the name and
+            the control come and go. The link's own box still opens on the
+            rows' edge. Below `md` there is no brand at all: the bar is a
+            phone's width, and the switcher's names need it more than the
+            product's own does. */}
         <Link
-          href="/console"
+          href={home}
+          // Already there, a click would only run the page again — the
+          // server's round trip, and the page flashing back — for nothing.
+          // On the navigation rather than the click, so a ⌘- or Ctrl-click,
+          // which Next leaves to the browser, still opens a new tab.
+          onNavigate={(e) => {
+            if (pathname === home) e.preventDefault();
+          }}
           aria-label={PRODUCT_NAME}
           className={cn(
-            "flex min-w-0 items-center gap-2 text-[17px] leading-none font-bold tracking-tight hover:text-muted-foreground",
+            "hidden min-w-0 items-center gap-2 pl-1.5 text-[17px] leading-none font-bold tracking-tight hover:text-muted-foreground md:flex",
             collapsed && "md:hidden",
           )}
         >
@@ -84,10 +112,10 @@ export function ConsoleHeader({
             aria-expanded={false}
             aria-controls="console-sidebar"
             title="Open sidebar"
-            className="group hidden size-8 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-sidebar-accent md:flex"
+            className="group hidden size-9 shrink-0 cursor-expand items-center justify-center rounded-md hover:bg-sidebar-accent/50 md:flex"
           >
             <TelmoniMark className="size-5 group-hover/brand:hidden group-focus-visible:hidden" />
-            <PanelLeftOpen className="hidden size-4 text-muted-foreground group-hover/brand:block group-focus-visible:block" />
+            <PanelLeft className="hidden size-4 text-muted-foreground group-hover/brand:block group-focus-visible:block" />
           </button>
         ) : (
           <button
@@ -97,9 +125,9 @@ export function ConsoleHeader({
             aria-expanded={true}
             aria-controls="console-sidebar"
             title="Close sidebar"
-            className="hidden size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground md:flex"
+            className="hidden size-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground md:flex"
           >
-            <PanelLeftClose className="size-4" />
+            <PanelLeft className="size-4" />
           </button>
         )}
       </div>

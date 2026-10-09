@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronDown, Plus, Settings } from "lucide-react";
+import { Check, ChevronDown, Plus, Settings } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -16,7 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { CreateOrganizationDialog } from "@/components/create-organization";
-import { CreateProjectDialog, useCreateProjectTargets } from "@/components/create-project";
+import { CreateProjectDialog, useCanCreateProjects } from "@/components/create-project";
 import { resourceUrl, standingResource } from "@/lib/console-trail";
 import { organizationLabel } from "@/lib/identity";
 import { resolveActiveOrganization } from "@/lib/organization-label";
@@ -39,15 +39,16 @@ import { cn } from "@/lib/utils";
 // does, and a fill drawn around it reads as the name shifting; the chevron
 // answers the pointer instead.
 const TRIGGER = cn(
-  "group h-8 min-w-0 shrink justify-start gap-1.5 overflow-hidden rounded-md font-normal",
+  "group h-9 min-w-0 shrink justify-start gap-1.5 overflow-hidden rounded-md font-normal",
   "transition-none hover:bg-transparent data-[state=open]:bg-transparent",
 );
 const CHEVRON =
   "size-4 shrink-0 opacity-50 transition-opacity group-hover:opacity-100 group-data-[state=open]:opacity-100";
 
-// 14 = the header's `py-3.5`, so a menu opens on the header's bottom edge,
+// A 36px trigger centred in the 59px above the header's 1px rule ends 12.5px
+// short of the header's bottom edge, so a menu opens right under the rule,
 // like the bell's and the account's.
-const MENU_OFFSET = 14;
+const MENU_OFFSET = 12.5;
 
 type Row = {
   key: string;
@@ -60,34 +61,38 @@ type Row = {
 };
 
 // A row with two targets, each a menu item of its own so both are reached
-// from the keyboard: the name opens the resource, the gear its settings. The
-// one you stand in is lit with the menu's own fill, in place of a mark — the
-// whole row, the gear being the row's too, and its name in medium — and a
-// half under the pointer or focused darkens over that fill, so the row never
-// reads as two. The rail's tint is not used: a menu is lighter than the page,
-// and the tint all but vanishes on it in the dark.
+// from the keyboard: the name opens the resource, the gear its settings.
+// Under the pointer, or with either target focused, the whole row fills —
+// one fill across the name and the gear, since the row is one thing — and
+// the gear's own small box, set 4px in from the row's top, bottom and right
+// as Langfuse sets its own, darkens a step more under the pointer. The one
+// you stand in carries a check after its name rather than a fill, so hover
+// and current never look alike. Neither item fills on its own: the menu's
+// per-item fill is turned off here and the row carries it.
 function ResourceRow({ row, settingsLabel }: { row: Row; settingsLabel: string }) {
   return (
-    <div
-      className={cn(
-        "flex items-center gap-0.5 rounded-md",
-        row.active &&
-          "bg-accent text-accent-foreground [&_[data-slot=dropdown-menu-item]:focus]:bg-foreground/5",
-      )}
-    >
-      <DropdownMenuItem asChild className="h-8 min-w-0 flex-1 cursor-pointer gap-2 px-2">
+    <div className="flex items-center gap-0.5 rounded-md hover:bg-accent/50 focus-within:bg-accent/50">
+      <DropdownMenuItem
+        asChild
+        className="h-9 min-w-0 flex-1 cursor-pointer gap-2 px-2 focus:bg-transparent [&_svg]:size-3.5"
+      >
         <Link href={row.href} aria-current={row.active ? "true" : undefined}>
-          <span className={cn("min-w-0 flex-1 truncate", row.active && "font-medium")}>
-            {row.label}
-          </span>
+          <span className="min-w-0 flex-1 truncate">{row.label}</span>
+          {row.active && <Check className="shrink-0" />}
         </Link>
       </DropdownMenuItem>
       {row.settingsHref && (
         <DropdownMenuItem
           asChild
           className={cn(
-            "size-8 shrink-0 cursor-pointer justify-center p-0",
-            !row.active && "text-muted-foreground",
+            // `mt-0!`: an item that follows another gets `mt-0.5` from the
+            // menu's own rule, meant for stacked rows; this one stands beside
+            // its sibling, and the margin would drop the gear 2px. The box
+            // is 28px, 4px in from a 36px row, its icon 14px, a step under the menu's 16px rule,
+            // since it is a secondary target beside the name.
+            "mt-0! mr-1 size-7 shrink-0 cursor-pointer justify-center p-0 [&_svg]:size-3.5",
+            "text-muted-foreground focus:bg-transparent hover:bg-foreground/10 hover:text-foreground",
+            "focus-visible:bg-foreground/10 focus-visible:text-foreground",
           )}
         >
           <Link href={row.settingsHref} aria-label={settingsLabel} title={settingsLabel}>
@@ -105,7 +110,7 @@ function NewRow({ onSelect, children }: { onSelect: () => void; children: string
     <>
       <DropdownMenuSeparator />
       <DropdownMenuItem
-        className="h-8 cursor-pointer gap-2 px-2"
+        className="h-9 cursor-pointer gap-2 px-2"
         onSelect={(e) => {
           e.preventDefault();
           onSelect();
@@ -119,11 +124,12 @@ function NewRow({ onSelect, children }: { onSelect: () => void; children: string
 }
 
 // Where you stand, as two menus: the organization, with whatever a console
-// built on this one draws beside its name, and, inside a project, the
-// project after a slash. Each menu lists its own kind alone — the
-// organizations the person can stand in, the projects of the one they are
-// in — with a gear to each one's settings, and the one thing it creates at
-// its foot.
+// built on this one draws beside its name, and the project after a slash —
+// inside one, its name; at the organization's own pages, a prompt to pick
+// one, so a project is a click away from anywhere in it rather than a trip
+// to Projects. Each menu lists its own kind alone — the organizations the
+// person can stand in, the projects of the one they are in — with a gear to
+// each one's settings, and the one thing it creates at its foot.
 export function ResourceSelector({
   host,
   organizationBadge,
@@ -143,9 +149,9 @@ export function ResourceSelector({
   const projects = useProjects();
   const elsewhere = useProjectsElsewhere();
   const activeOrganizationId = useActiveOrganizationId();
-  // Any organization the caller may create in, not only the active one: the
-  // dialog asks which, and opens on the active one when it is among them.
-  const targets = useCreateProjectTargets();
+  // The dialog creates in the organization the switcher stands in, whose
+  // projects its menu lists, so the row is offered to whoever may create there.
+  const canCreate = useCanCreateProjects();
   const signupsOpen = flagOn(useFlags(), Flag.Signup);
   // A row returns to the page you last had open in that resource.
   const trail = useConsoleTrail();
@@ -163,6 +169,10 @@ export function ResourceSelector({
   const here = active && standing?.organization === active.slug ? standing : null;
   const activeProject =
     here?.kind === "project" ? projects.find((p) => p.slug === here.project) : undefined;
+  // The slash and its menu: a project's name inside one, the prompt at the
+  // organization level. A project page naming one the listing lacks draws
+  // neither, rather than a prompt that would say you stand in none.
+  const projectSlot = activeProject !== undefined || here?.kind === "organization";
 
   // Every organization the person can stand in, the active one first: the
   // ones they are in, then the ones they reach through a project alone.
@@ -204,8 +214,6 @@ export function ResourceSelector({
       }))
     : [];
 
-  const canCreate = targets.length > 0;
-  const createIn = active && targets.some((t) => t.id === active.organizationId) ? active.organizationId : undefined;
 
   return (
     <div className="flex min-w-0 items-center gap-1">
@@ -214,8 +222,8 @@ export function ResourceSelector({
           <Button
             variant="ghost"
             size="default"
-            // `px-2`, with the header cell's `pl-4`: the name starts where the
-            // page's title does.
+            // `px-2`, with the header cell's `pl-1.5`: the name starts where
+            // the page's title does.
             className={cn(TRIGGER, "px-2 has-[>svg]:px-2")}
             aria-label="Select an organization"
           >
@@ -251,7 +259,7 @@ export function ResourceSelector({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {activeProject && (
+      {projectSlot && (
         <>
           <span aria-hidden="true" className="shrink-0 text-muted-foreground/50">
             /
@@ -261,10 +269,31 @@ export function ResourceSelector({
               <Button
                 variant="ghost"
                 size="default"
-                className={cn(TRIGGER, "px-2.5 has-[>svg]:px-2.5")}
+                className={cn(
+                  TRIGGER,
+                  "px-2.5 has-[>svg]:px-2.5",
+                  // The chevron alone on a phone: a whole square to tap,
+                  // never squeezed by the organization's name beside it.
+                  !activeProject && "max-md:shrink-0",
+                )}
                 aria-label="Select a project"
               >
-                <span className="truncate font-medium">{activeProject.name}</span>
+                {activeProject ? (
+                  <span className="truncate font-medium">{activeProject.name}</span>
+                ) : (
+                  // A prompt, not a name: muted and at the body's weight, as a
+                  // field's placeholder is, so a project that happens to be
+                  // called this never reads as the one you stand in. Below
+                  // `md` the words go and the chevron stays: on a phone's bar
+                  // they and the organization's name cut each other to a
+                  // letter apiece.
+                  <span
+                    className="hidden truncate text-muted-foreground md:block"
+                    data-testid="project-prompt"
+                  >
+                    Select a project
+                  </span>
+                )}
                 <ChevronDown className={CHEVRON} />
               </Button>
             </DropdownMenuTrigger>
@@ -273,6 +302,11 @@ export function ResourceSelector({
                 <DropdownMenuLabel className="px-2 py-1.5 text-xs font-normal text-muted-foreground">
                   Projects
                 </DropdownMenuLabel>
+                {projectRows.length === 0 && (
+                  <p className="flex h-9 items-center px-2 text-sm text-muted-foreground">
+                    {canCreate ? "No projects yet" : "No projects you can open"}
+                  </p>
+                )}
                 {projectRows.map((row) => (
                   <ResourceRow key={row.key} row={row} settingsLabel={`${row.label} settings`} />
                 ))}
@@ -297,7 +331,6 @@ export function ResourceSelector({
           key={`project-${createOpen}`}
           open={createOpen}
           onOpenChange={setCreateOpen}
-          organizationId={createIn}
         />
       )}
       <CreateOrganizationDialog

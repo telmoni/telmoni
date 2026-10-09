@@ -1,8 +1,13 @@
 import {
+  Accessibility,
   Activity,
   Bell,
+  BellRing,
   History,
   KeyRound,
+  LayoutDashboard,
+  ListTree,
+  MessagesSquare,
   Plug,
   Settings,
   ShieldCheck,
@@ -10,6 +15,7 @@ import {
   User,
   type LucideIcon,
   Users,
+  UsersRound,
 } from "lucide-react";
 
 import { EXTRA_NAV_ITEMS, type ExtraNavItem } from "@/lib/extension/nav";
@@ -129,16 +135,47 @@ export function organizationToRemember(
   return organizations.find((o) => o.slug === place.organization)?.organizationId ?? null;
 }
 
+/**
+ * A row that opens a block of the rail: the rows from it to the next such row
+ * stand together, clear of the block above, under `heading` when there is
+ * one. A run's first row opens its first block whether it says so or not.
+ */
+export interface NavBlock {
+  heading?: string;
+}
+
 export interface ConsoleNavItem {
   title: string;
   url: string;
   icon: LucideIcon;
   isActive: boolean;
+  block?: NavBlock;
+  /** The letter after `g` that reaches the row (`lib/keys.ts`). */
+  key?: string;
 }
 
 export interface ConsoleNavGroup {
   title: string;
   items: ConsoleNavItem[];
+}
+
+export interface ConsoleNavBlock {
+  heading?: string;
+  items: ConsoleNavItem[];
+}
+
+/** A run's rows in their blocks, for the rail to draw. */
+export function navBlocks(items: readonly ConsoleNavItem[]): ConsoleNavBlock[] {
+  const blocks: ConsoleNavBlock[] = [];
+  let current: ConsoleNavBlock | undefined;
+  for (const item of items) {
+    if (item.block || !current) {
+      current = { heading: item.block?.heading, items: [] };
+      blocks.push(current);
+    }
+    current.items.push(item);
+  }
+  return blocks;
 }
 
 interface GroupSpec {
@@ -148,37 +185,63 @@ interface GroupSpec {
     path: string;
     icon: LucideIcon;
     flags?: readonly Flag[];
+    block?: NavBlock;
+    key?: string;
   }[];
 }
+
+// `key` is the letter after `g` that reaches a row, so the `g` sequences are
+// the rail itself and a row added here is reached the day it lands. Single,
+// unique within a rail (two rails may share one: `p` is Projects on an
+// organization's and Privacy on Account's), never `g`, `?` or shift-`O`, the
+// one sequence that crosses rails (`lib/keys.ts`). `,` reaches Settings on
+// every rail, as `⌘,` opens preferences on a Mac; `c` is Connectors and also
+// the page's action, which `lib/keys.ts` explains is no collision.
 
 const CORE_GROUPS: GroupSpec[] = [
   {
     title: "Project",
+    // Dashboards, Traces, Sessions, Users and Alerts stand in the rail before
+    // their pages exist, so the console shows the product's shape while
+    // telemetry is built: each opens a placeholder that the real page
+    // replaces. The Observability
+    // block is headed because its five rows are the product, and the Project
+    // block because the rest of the rail is the project's own housekeeping;
+    // Overview stands alone above both.
     items: [
-      { title: "Overview", path: "", icon: Activity },
-      { title: "API keys", path: "/api-keys", icon: KeyRound },
-      { title: "Connectors", path: "/connectors", icon: Plug },
-      { title: "Members", path: "/members", icon: Users },
-      { title: "Audit log", path: "/audit-log", icon: History },
-      { title: "Settings", path: "/settings", icon: Settings },
+      { title: "Overview", path: "", icon: Activity, key: "o" },
+      { title: "Traces", path: "/traces", icon: ListTree, block: { heading: "Observability" }, key: "t" },
+      { title: "Sessions", path: "/sessions", icon: MessagesSquare, key: "s" },
+      { title: "Users", path: "/users", icon: UsersRound, key: "u" },
+      { title: "Alerts", path: "/alerts", icon: BellRing, key: "a" },
+      { title: "Dashboards", path: "/dashboards", icon: LayoutDashboard, key: "d" },
+      { title: "API keys", path: "/api-keys", icon: KeyRound, block: { heading: "Project" }, key: "k" },
+      { title: "Connectors", path: "/connectors", icon: Plug, key: "c" },
+      { title: "Members", path: "/members", icon: Users, key: "m" },
+      { title: "Audit log", path: "/audit-log", icon: History, key: "l" },
+      { title: "Settings", path: "/settings", icon: Settings, key: "," },
     ],
   },
   {
     title: "Organization",
+    // Overview stands alone; the organization's own rows are headed, as a
+    // project's housekeeping is headed Project.
     items: [
-      { title: "Overview", path: "", icon: Activity },
-      { title: "Projects", path: "/projects", icon: SquareStack },
-      { title: "Members", path: "/members", icon: Users },
-      { title: "Audit log", path: "/audit-log", icon: History },
-      { title: "Settings", path: "/settings", icon: Settings },
+      { title: "Overview", path: "", icon: Activity, key: "o" },
+      { title: "Projects", path: "/projects", icon: SquareStack, block: { heading: "Organization" }, key: "p" },
+      { title: "Members", path: "/members", icon: Users, key: "m" },
+      { title: "Audit log", path: "/audit-log", icon: History, key: "l" },
+      { title: "Settings", path: "/settings", icon: Settings, key: "," },
     ],
   },
   {
     title: "Account",
+    // One unheaded block: the way back under it says what this rail is.
     items: [
-      { title: "Settings", path: "/settings", icon: User },
-      { title: "Notifications", path: "/notifications", icon: Bell },
-      { title: "Privacy", path: "/privacy", icon: ShieldCheck },
+      { title: "Settings", path: "/settings", icon: User, key: "," },
+      { title: "Notifications", path: "/notifications", icon: Bell, key: "n" },
+      { title: "Accessibility", path: "/accessibility", icon: Accessibility, key: "a" },
+      { title: "Privacy", path: "/privacy", icon: ShieldCheck, key: "p" },
     ],
   },
 ];
@@ -192,7 +255,12 @@ export function withExtraItems(
     const items = [...group.items];
     for (const extra of extras) {
       if (extra.group !== group.title) continue;
-      const row = { title: extra.title, path: extra.path, icon: extra.icon };
+      const row = {
+        title: extra.title,
+        path: extra.path,
+        icon: extra.icon,
+        ...(extra.key ? { key: extra.key } : {}),
+      };
       const at = extra.before
         ? items.findIndex((item) => item.title === extra.before)
         : -1;
@@ -237,6 +305,8 @@ export function buildConsoleNav(pathname: string, flags: FlagSet = {}): ConsoleN
             title: s.title,
             url,
             icon: s.icon,
+            ...(s.block ? { block: s.block } : {}),
+            ...(s.key ? { key: s.key } : {}),
             isActive:
               s.path === ""
                 ? pathname === overview || pathname === `${overview}/`

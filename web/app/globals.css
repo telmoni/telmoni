@@ -10,6 +10,11 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  /* The cursor over a closed rail: a bar and an arrow, as Gemini draws
+     its own, black with a white outline as the system pointer is, the same
+     in both themes so it reads as a cursor and never as a theme's icon.
+     Drawn as an SVG data URL, hotspot at its centre. */
+  --cursor-expand: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cg%20stroke='%23ffffff'%20stroke-width='4'%3E%3Cpath%20d='M5%205v14'/%3E%3Cpath%20d='M9%2012h10'/%3E%3Cpath%20d='M15%208l4%204-4%204'/%3E%3C/g%3E%3Cg%20stroke='%23000000'%20stroke-width='2'%3E%3Cpath%20d='M5%205v14'/%3E%3Cpath%20d='M9%2012h10'/%3E%3Cpath%20d='M15%208l4%204-4%204'/%3E%3C/g%3E%3C/svg%3E") 12 12, pointer;
   --radius: 0.625rem;
 
   --background: oklch(0.9762 0.0011 286);
@@ -20,6 +25,16 @@
 
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.245 0.005 260);
+  /* A dropdown menu's own surface and shadow: in the light, the grey
+     Langfuse gives its sidebar (#fcfcfc), a hair off white — lighter than the
+     docs' grey page, darker than the console's white one — and a soft shadow
+     in both themes, since the menus carry no border. */
+  --menu: oklch(0.991 0 0);
+  --menu-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.08);
+  /* The rail's edge when it is a drawer over the page, below `md`: the menus'
+     soft shadow, cast to the right alone — the negative spread keeps it off
+     the drawer's other sides — so the drawer reads as on top without a rule. */
+  --drawer-shadow: 8px 0 24px -8px rgb(0 0 0 / 0.08);
 
   --primary: oklch(0.2 0 0);
   --primary-foreground: oklch(0.99 0 0);
@@ -74,6 +89,9 @@
 
   --popover: oklch(0.2352 0.0045 285);
   --popover-foreground: oklch(0.93 0.003 250);
+  --menu: oklch(0.2352 0.0045 285);
+  --menu-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.5);
+  --drawer-shadow: 8px 0 24px -8px rgb(0 0 0 / 0.5);
 
   --primary: oklch(0.92 0 0);
   --primary-foreground: oklch(0.2 0 0);
@@ -199,10 +217,6 @@
 
   --primary: oklch(0.2 0 0);
   --primary-foreground: oklch(0.99 0 0);
-  --console-accent-strong: oklch(0.2 0 0);
-  --console-accent-tint: oklch(
-    0.9043 0 0
-  );
   --console-field: oklch(0.9363 0.0015 286);
 
   --secondary: oklch(0.955 0.002 286);
@@ -250,8 +264,6 @@
 
   --primary: oklch(0.92 0 0);
   --primary-foreground: oklch(0.2 0 0);
-  --console-accent-strong: oklch(0.92 0 0);
-  --console-accent-tint: oklch(0.245 0 0);
   --console-field: oklch(0.2652 0.0045 285);
 
   --secondary: oklch(0.262 0.004 285);
@@ -295,10 +307,12 @@
   background: transparent;
 }
 
-/* ⚠ **NOTHING MARKS FOCUS, ANYWHERE — an accessibility cost taken on purpose.**
-   A keyboard user has no way to see where they are. WCAG 2.1 AA §2.4.7 asks
-   for an indicator, and `e2e/accessibility.spec.ts` will not catch its absence
-   because axe has no automated rule for focus visibility. To restore one, put
+/* ⚠ **NOTHING MARKS FOCUS BY DEFAULT — an accessibility cost taken on purpose.**
+   A keyboard user sees where they are only once they turn on **Show focus**
+   (Account › Accessibility, the `a11y-focus-rings` rule below), which is how
+   the console meets WCAG 2.1 AA §2.4.7's indicator: as a person's choice.
+   `e2e/accessibility.spec.ts` will not catch a missing one, because axe has no
+   automated rule for focus visibility. To draw one for everybody, put
    `outline: 2px solid var(--color-ring)` back below — components need no
    change, because none of their rings ever reach the screen through this.
 
@@ -310,10 +324,9 @@
    covers all six, and the next component too, without editing shadcn
    primitives that regenerate.
 
-   This also retires the rail's own indicator: `#console-sidebar` is
-   `overflow-hidden` for the drawer slide, so a ring drawn inside it was shaved
-   flat at both ends and an inset outline was the workaround. With nothing
-   drawn there is nothing left to clip. */
+   `#console-sidebar` is `overflow-hidden` for the drawer slide, so a ring
+   drawn around a row there is shaved flat at both ends: Show focus draws its
+   ring inside the row there, as in a menu, a list and a row of segments. */
 /* ── The sharp corner theme (`lib/corners.ts`) ────────────────────────────────
    ⚠ **A utility override, not a token override, and that is forced.** The
    radius tokens cannot carry this:
@@ -361,6 +374,117 @@
   --tw-ring-offset-shadow: 0 0 #0000;
 }
 
+/* ── Accessibility settings (`lib/accessibility.ts`, Account › Accessibility) ──
+   Classes on `<html>`, set before first paint by the boot script in
+   `app/layout.tsx`. Unlayered, as the focus rule above is, so they beat
+   Tailwind's utilities whatever their specificity. */
+
+/* Show focus: the one way focus is drawn, for whoever asks. A ring in the
+   text's own colour, past WCAG 2.4.13's 3:1 on either theme, where the browser
+   marks focus visible: from the keyboard, and in a text field however it was
+   reached, never on a click on a button or a link. In the rail, a menu or a
+   list, and a row of joined segments, each of which clips what overflows, it
+   is drawn inside the element. */
+html.a11y-focus-rings *:focus-visible {
+  outline: 2px solid var(--color-foreground);
+  outline-offset: 2px;
+  /* Drawn at once: a control that transitions every property (a button's
+     `transition-all`) would otherwise grow the ring in from the default
+     3px over its duration. */
+  transition-property: color, background-color, border-color, opacity, box-shadow;
+}
+html.a11y-focus-rings :is(#console-sidebar, [role="menu"], [role="listbox"], [data-segmented]) *:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Reduce motion: every animation and transition finishes at once rather than
+   being removed, so anything that waits on one's end still hears it. Chosen,
+   or asked for by the device while the choice follows it. */
+html.a11y-reduce-motion *,
+html.a11y-reduce-motion *::before,
+html.a11y-reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  html:not(.a11y-allow-motion) *,
+  html:not(.a11y-allow-motion) *::before,
+  html:not(.a11y-allow-motion) *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Increase contrast: secondary text past 9:1 against the page and 6.5:1 on
+   every surface it sits on (measured: the least is 6.7:1, on the dark paper
+   palette's accent), and every edge — a field's, a card's, a rule's — past
+   WCAG 1.4.11's 3:1 against the page and the cards it sits on, in all four
+   palettes (measured: light 3.4:1 on the page and 3.6:1 on a card; dark 4.1:1
+   on the page, 3.4:1 on a card, 3.6:1 on paper and 3.05:1 on a paper card; a
+   dark field's edge is the border more contrast gives it, below). Set on
+   `<html>` and again on the palette classes, which redefine the tokens lower
+   down; a card's half-pixel edge, which a display draws as a half-tone line,
+   becomes a whole pixel. Chosen, or asked for by the device while the choice
+   follows it. */
+html.a11y-more-contrast,
+html.a11y-more-contrast :is(.theme-console, .theme-paper) {
+  --muted-foreground: oklch(0.38 0.008 260);
+  --border: oklch(0.62 0.004 286);
+  --input: oklch(0.62 0.004 286);
+  --sidebar-border: oklch(0.62 0.004 286);
+  --ring: oklch(0.35 0 0);
+}
+html.a11y-more-contrast.dark,
+html.a11y-more-contrast.dark :is(.theme-console, .theme-paper) {
+  --muted-foreground: oklch(0.82 0.006 250);
+  --border: oklch(0.55 0.004 285);
+  --input: oklch(0.55 0.004 285);
+  --sidebar-border: oklch(0.55 0.004 285);
+  --ring: oklch(0.92 0 0);
+}
+html.a11y-more-contrast [data-slot="card"] {
+  --tw-ring-shadow: 0 0 0 1px var(--border);
+}
+/* A field in the dark theme draws no border of its own, only a fill, and a
+   fill is no 3:1 edge: more contrast gives it the border it lacks. */
+html.a11y-more-contrast.dark [data-slot="input"] {
+  border-color: var(--input);
+}
+@media (prefers-contrast: more) {
+  html:not(.a11y-standard-contrast),
+  html:not(.a11y-standard-contrast) :is(.theme-console, .theme-paper) {
+    --muted-foreground: oklch(0.38 0.008 260);
+    --border: oklch(0.62 0.004 286);
+    --input: oklch(0.62 0.004 286);
+    --sidebar-border: oklch(0.62 0.004 286);
+    --ring: oklch(0.35 0 0);
+  }
+  html.dark:not(.a11y-standard-contrast),
+  html.dark:not(.a11y-standard-contrast) :is(.theme-console, .theme-paper) {
+    --muted-foreground: oklch(0.82 0.006 250);
+    --border: oklch(0.55 0.004 285);
+    --input: oklch(0.55 0.004 285);
+    --sidebar-border: oklch(0.55 0.004 285);
+    --ring: oklch(0.92 0 0);
+  }
+  html:not(.a11y-standard-contrast) [data-slot="card"] {
+    --tw-ring-shadow: 0 0 0 1px var(--border);
+  }
+  html.dark:not(.a11y-standard-contrast) [data-slot="input"] {
+    border-color: var(--input);
+  }
+}
+
+/* Letter-key shortcuts off: a keycap that advertises a bare key
+   (`data-letter-key`) hides, rather than promising a key that does nothing. */
+html.a11y-no-letter-keys [data-letter-key] {
+  display: none !important;
+}
+
 .theme-console
   [data-slot="card"]
   table
@@ -392,6 +516,9 @@
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
+  --color-menu: var(--menu);
+  --shadow-menu: var(--menu-shadow);
+  --shadow-drawer: var(--drawer-shadow);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
@@ -409,8 +536,6 @@
   --color-brand-negative: var(--brand-negative);
   --color-highlight: var(--highlight);
   --color-highlight-foreground: var(--highlight-foreground);
-  --color-console-accent-strong: var(--console-accent-strong);
-  --color-console-accent-tint: var(--console-accent-tint);
   --color-console-field: var(--console-field);
 
   /* ⚠ **Vendor marks — the one set of colours that must NOT follow a theme.**
@@ -494,6 +619,12 @@
   --color-sidebar-foreground: var(--sidebar-foreground);
 
   --color-sidebar: var(--sidebar);
+}
+
+/* `cursor-expand`: the open-rail cursor above, falling back to the pointer
+   where a custom cursor is refused. */
+@utility cursor-expand {
+  cursor: var(--cursor-expand);
 }
 
 @utility text-2xs {

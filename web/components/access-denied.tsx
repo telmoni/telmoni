@@ -37,7 +37,7 @@ export function AccessDenied({
     >
       {/* The height of `PageHeader`'s row, so the refusal starts where every
           other page's title does. */}
-      <p className="flex min-h-8 items-center text-xs tracking-label text-brand-negative uppercase">
+      <p className="flex min-h-9 items-center text-xs tracking-label text-brand-negative uppercase">
         access denied
       </p>
       <h1 className="text-xl font-light tracking-tight">

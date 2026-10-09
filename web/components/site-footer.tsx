@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { CornersToggle } from "@/components/corners-toggle";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 import { footerColumns, footerLegal, type FooterLink } from "@/lib/footer";
@@ -58,6 +59,7 @@ export function SiteFooter() {
         </div>
         <div className="flex items-center gap-3">
           <ThemeToggle />
+          <CornersToggle />
         </div>
       </div>
     </footer>

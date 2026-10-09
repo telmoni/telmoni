@@ -233,7 +233,9 @@ export function ConsoleSearch() {
           through them and Enter to open one.
         </DialogDescription>
 
-        <DialogHeader className="gap-2.5">
+        {/* The palette's header is its input row: the field and the close
+            button on one row, inside the same 14px every modal keeps. */}
+        <DialogHeader className="items-center gap-2.5 pb-3.5">
           <Search aria-hidden className="size-4 shrink-0 text-muted-foreground" />
           <input
             ref={inputRef}
@@ -259,23 +261,23 @@ export function ConsoleSearch() {
         </DialogHeader>
 
         {/* The chassis's body, unpadded at the sides: a result row's
-            highlight runs edge to edge, and each row keeps the 16px inset
-            inside itself. */}
+            highlight runs edge to edge, and each row keeps the 14px inset
+            inside itself, the field's, as every modal's edge is. */}
         <DialogBody id={PANEL_ID} className="block p-0 py-1.5">
           {projectId && loading && (
-            <p className="px-4 py-3 text-sm text-muted-foreground">
+            <p className="px-3.5 py-3 text-sm text-muted-foreground">
               Looking through this project&rsquo;s resources…
             </p>
           )}
           {indexError && (
-            <p className="px-4 py-3 text-sm text-muted-foreground" role="status">
+            <p className="px-3.5 py-3 text-sm text-muted-foreground" role="status">
               {indexError}
             </p>
           )}
           {index && <IndexNotices index={index} />}
 
           {groups.length === 0 && query.trim() !== "" && (
-            <p className="px-4 py-3 text-sm text-muted-foreground">
+            <p className="px-3.5 py-3 text-sm text-muted-foreground">
               Nothing here matches “{query.trim()}”.
             </p>
           )}
@@ -335,7 +337,7 @@ function GroupLabel({ id, children }: { id: string; children: string }) {
   return (
     <p
       id={id}
-      className="px-4 pt-3 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase"
+      className="px-3.5 pt-3 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase"
     >
       {children}
     </p>
@@ -378,7 +380,7 @@ function Row({
       }}
       onMouseEnter={onHover}
       className={cn(
-        "flex w-full items-center gap-2.5 px-4 py-2 text-left",
+        "flex w-full items-center gap-2.5 px-3.5 py-2 text-left",
         item.id === activeId && "bg-accent",
       )}
     >
@@ -422,7 +424,7 @@ function IndexNotices({ index }: { index: SearchIndex }) {
   const broken = SECTIONS.filter(([, pick]) => pick(index).unavailable);
   if (refused.length === 0 && broken.length === 0) return null;
   return (
-    <div className="border-b border-border px-4 py-2">
+    <div className="border-b border-border px-3.5 py-2">
       {refused.length > 0 && (
         <p className="text-xs text-muted-foreground">
           Not searched — your role on this project cannot list{" "}
