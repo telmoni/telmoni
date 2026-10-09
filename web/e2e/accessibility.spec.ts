@@ -36,6 +36,11 @@ test.describe("Accessibility Audit (WCAG 2.1 AA)", () => {
       buildConsoleNav(pathname).flatMap((group) => group.items.map((item) => item.url));
     const routesToAudit = [...rows(landing), ...rows(`/${organization}`)];
     expect(routesToAudit.length, "the rail is the list").toBeGreaterThan(4);
+    // Under `next dev` a route compiles on its first visit, while the suite's
+    // other workers load pages too, so the budget grows with the rail: the
+    // minute above for the way in, and a share per route, rather than one
+    // figure that runs out as rows are added.
+    test.setTimeout(60_000 + routesToAudit.length * 20_000);
 
     for (const route of routesToAudit) {
       const response = await page.goto(route);

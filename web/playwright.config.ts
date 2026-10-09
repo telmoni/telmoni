@@ -63,6 +63,12 @@ export default defineConfig({
         SERVICE_SECRET,
         SERVER_URL: "http://localhost:8082",
         REDIS_URL: "redis://localhost:6379",
+        // A deployment that published no legal documents, whatever
+        // web/.env.local names: `/legal/*` then answers the console's own Page
+        // not found, as on a checkout with no env file, rather than a redirect
+        // off this machine. Next never lets an env file override a variable
+        // the process already has; a console Playwright reuses keeps its own.
+        LEGAL_URL: "",
       },
     },
   ],

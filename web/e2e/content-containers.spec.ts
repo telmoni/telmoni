@@ -188,7 +188,7 @@ test.describe("Console content containers", () => {
   test("every page draws its content on the standard containers, at every width", async ({
     page,
   }, testInfo) => {
-    test.setTimeout(150_000);
+    test.setTimeout(90_000);
     const mobile = testInfo.project.name === "mobile-chromium";
     const user = testUser(testInfo.project.name);
     await injectSession(page, user);
@@ -214,6 +214,9 @@ test.describe("Console content containers", () => {
       "/account/privacy",
     ];
     expect(routes.length).toBeGreaterThan(8);
+    // As in accessibility.spec.ts: the way in above, then a share per route,
+    // since each compiles on its first visit under `next dev`.
+    test.setTimeout(90_000 + routes.length * 20_000);
 
     const seen = new Map<string, Snapshot>();
     for (const route of routes) {

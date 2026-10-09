@@ -42,6 +42,12 @@ test.describe("Unauthenticated navigation", () => {
 });
 
 test.describe("Accessibility (public pages)", () => {
+  // The splash's blocks rise in as they scroll into view, timed by the
+  // viewport, so the block at the fold is caught part-way, at an opacity the
+  // window's height decides. Each page is audited settled, as reduced motion
+  // draws it.
+  test.use({ contextOptions: { reducedMotion: "reduce" } });
+
   for (const path of ["/", "/about", "/security", "/invite/invalid-token", "/legal/privacy-policy", "/legal/terms-of-service"]) {
     test(`${path} has no WCAG A/AA violations`, async ({ page }) => {
       await page.goto(path);
