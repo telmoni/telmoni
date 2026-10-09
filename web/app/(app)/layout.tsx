@@ -29,7 +29,7 @@ import { storeSeed } from "@/lib/server/store-seed";
 import { Flag, flagOn } from "@/lib/flags";
 import { StoreProvider } from "@/lib/store/provider";
 import { accountOnly } from "@/lib/account-only";
-import { ownedOrganizationLabels } from "@/lib/identity";
+import { ownedOrganizationCount } from "@/lib/identity";
 import { SessionHeartbeat } from "@/components/session-heartbeat";
 import { ConsoleTrailRecorder } from "@/components/console-trail-recorder";
 import { ConsoleSearch } from "@/components/console-search";
@@ -74,7 +74,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           analyticsOptIn={ctx.person.analyticsOptIn}
           signupsOpen={flagOn(ctx.flags, Flag.Signup)}
           invites={ctx.incomingInvites}
-          ownedOrganizations={ownedOrganizationLabels(ctx.organizations)}
+          ownedOrganizations={ownedOrganizationCount(ctx.organizations)}
           sessions={sessions}
           currentSessionId={session.sessionRowId}
           expiresAt={session.expiresAt}

@@ -27,10 +27,10 @@ URL follows from it (see [Name and URL](#name-and-url)). Nothing is asked
 first: you can change both in **Settings** whenever you like.
 
 The organization starts with no projects. The console opens on its
-**Overview** (`/{organization}`), which lists the organization's projects and
-is where you [create the first one](#creating-a-project); API keys and
-connectors belong to a project, so nothing else is there to do until it
-exists.
+**Overview** (`/{organization}`), titled by the organization's name;
+[create the first project](#creating-a-project) from the **Projects** page or
+the switcher. API keys and connectors belong to a project, so there is little
+else to do until one exists.
 
 A sign-in opens the Overview of your
 [default organization](/docs/account/settings#default-organization), or returns
@@ -67,22 +67,28 @@ changed only in its Settings; a project's follows its name (see [Name and
 URL](#name-and-url)). On these pages,
 `{organization}` and `{project}` stand for those two slugs.
 
-- **An organization's overview** is `/{organization}`, which lists its
-  projects: every one to its Owner and Admins, and to a Member the ones they
-  hold a seat on.
+- **An organization's overview** is `/{organization}`, titled by the
+  organization's name. It shows the organization's notices to its Owner and
+  Admins when there are any, and **Leave organization** to everyone but the
+  Owner. Its projects are in the switcher, and on the **Projects** page for
+  its Owner and Admins.
 - **Organization pages** sit beside its projects, at words no project goes by:
   `/{organization}/projects`, `/{organization}/members`,
   `/{organization}/audit-log`, and `/{organization}/settings`, with
   `/{organization}/billing` on the hosted service.
 - **Project pages** sit under the organization: `/{organization}/{project}` is
-  the project's overview, with `/api-keys`, `/connectors`, `/members`,
-  `/audit-log`, and `/settings` under it.
+  the project's overview, with `/traces`, `/sessions`, `/users`, `/alerts` and
+  `/dashboards`, which say what each will show until a project's telemetry
+  reaches them, and `/api-keys`, `/connectors`, `/members`, `/audit-log`, and
+  `/settings` under it.
 - **Account pages** live under `/account`, including `/account/settings`,
-  `/account/notifications`, and `/account/privacy`.
+  `/account/notifications`, `/account/accessibility`, and `/account/privacy`.
 - **Switch between projects and organizations** using the switcher in the
-  console header. It lists your organizations and the projects within each,
-  and ends with **New organization**, below **Create project** when you can
-  create a project somewhere.
+  console header: two menus side by side. The organization's name opens your
+  organizations, ending with **New organization**. Beside it, the project's
+  name — or **Select a project** on the organization's own pages — opens that
+  organization's projects, ending with **New project** for its Owner and
+  Admins.
 
 ### Name and URL
 
@@ -99,20 +105,23 @@ slug its addresses begin with. They are two settings.
   (`zoes-organization-2`); past that it ends in six random characters
   (`zoes-organization-k3x9qz`). When the first word of your name has no Latin
   letter or digit ("李明's organization"), the organization gets a placeholder
-  (`org-` and ten random characters) until you choose a URL.
+  (`org-` and ten random characters) until you choose a URL. So does a name
+  whose URL would hold profanity or a slur, which no URL may: the name itself
+  is kept as given.
 - **Renaming an organization moves nothing.** Its URL stays as it is, and so
   does every link to its pages.
 - **Changing the URL** is done on the organization's **Settings** page, under
-  **URL**: any slug not held by another organization and not one of the
-  console's own words. Every page of the organization and of its projects moves
+  **URL**: any slug not held by another organization, not one of the console's
+  own words, and holding no profanity or slur. Every page of the organization and of its projects moves
   to the new address, and the old address answers **Not found**. Pages open in
   the console follow the change; links made before it do not.
 - **A project's URL follows its name.** Within its organization a project's slug
   is unique; a name already taken as a slug gets a number. Some words are kept
   for the organization's own pages (`projects`, `members`, `settings`, and
   others), and a name that is one gets the numbered form: `Settings` becomes
-  `settings-2`. A name with no Latin letters or digits gets a placeholder
-  (`project-` and ten random characters). Renaming a project moves its pages,
+  `settings-2`. A name with no Latin letters or digits, or one whose URL would
+  hold profanity or a slur, gets a placeholder (`project-` and ten random
+  characters). Renaming a project moves its pages,
   and the old address answers **Not found**; a new name that gives no slug
   leaves the URL as it was.
 - An organization's URL is unique across all organizations, ones awaiting
@@ -124,8 +133,7 @@ slug its addresses begin with. They are two settings.
   the rest of the path. Use the ID in anything you script. An organization's ID
   is shown on its **Settings** page, which opens for its Owner and Admins
   (`telmoni org list`, after a browser `telmoni login`, prints it for anyone in
-  it); a project's on its
-  **Settings** page and on the organization's **Projects** page.
+  it); a project's on its **Settings** page.
 
 ### Console navigation and keyboard shortcuts
 
@@ -145,35 +153,41 @@ Windows and Linux):
   page, the documentation, the keyboard shortcuts sheet, theme and corners,
   the platform's GitHub repository, and sign out.
 - **Primary action (`c`)**: Triggers the primary action of the current page:
-  **New project**, **Mint key**, or **Invite member**.
-- **Navigation sequences (`g` followed by a key)**, relative to the project
-  you are in:
+  **New project**, **Mint key**, **Invite member**, or **Export** on the
+  organization's audit log; on the hosted service's **Billing** page,
+  **Plans** or **Manage billing**.
+- **Navigation sequences (`g` followed by a key)**: every row of the sidebar
+  you are in has one, and the sheet (`?`) lists the rows of that sidebar. On a
+  project's pages:
   - `g` `o`: Overview
-  - `g` `k`: API keys
-  - `g` `c`: Connectors
-  - `g` `m`: Members
-  - `g` `l`: Audit log
-  - `g` `p`: Settings
-  - `g` `O`: The organization's overview, from anywhere in the console
+  - `g` `t`: Traces, `g` `s`: Sessions, `g` `u`: Users, `g` `a`: Alerts,
+    `g` `d`: Dashboards
+  - `g` `k`: API keys, `g` `c`: Connectors, `g` `m`: Members, `g` `l`: Audit log
+  - `g` `,`: Settings, as `⌘,` opens preferences on a Mac
 
-  On an organization's own pages, `g` `o`, `g` `m`, `g` `l`, and `g` `p` open
-  the organization's Overview, Members, Audit log, and Settings, and `g` `k`
-  and `g` `c` do nothing.
-- **Keyboard shortcuts cheat sheet (`?`)**: Opens the full shortcuts sheet, with
-  a switch to enable or disable single-key shortcuts.
+  On an organization's pages: `g` `o` Overview, `g` `p` Projects, `g` `m`
+  Members, `g` `l` Audit log, `g` `,` Settings, and on the hosted service
+  `g` `b` Billing. On your account's pages: `g` `,` Settings, `g` `n`
+  Notifications, `g` `a` Accessibility, `g` `p` Privacy. A row that is not
+  on the sidebar you are in has no sequence there, so `g` `k` on an
+  organization's pages does nothing. A console built on this one can add rows
+  of its own, each with a key of its own.
+  - `g` `O` (shift): The organization's overview, from anywhere in the console
+- **Keyboard shortcuts cheat sheet (`?`, `Shift` `/` on a US keyboard)**: Opens the full shortcuts sheet.
+  Letter-key shortcuts can be turned off on the
+  [Accessibility](/docs/account/accessibility) page; the sheet then lists the
+  `⌘` shortcuts alone.
 
 ## Projects
 
 ### Creating a project
 
 An organization Owner or Admin can create a new project from the organization's
-**Overview** (`/{organization}`), its **Projects** page
-(`/{organization}/projects`), or the switcher:
+**Projects** page (`/{organization}/projects`) or the switcher's project menu:
 
-1. Select **New project** on the Overview or the Projects page, or **Create
-   project** in the switcher. When you own or administer more than one
-   organization, the dialog asks which one the project lands in, starting from
-   the Overview's own organization when you opened it there.
+1. Select **New project** on the Projects page, or **New project** in the
+   switcher's project menu. The project lands in the
+   organization you are in; the dialog asks only for a name.
 2. Provide a project name: up to 100 characters, and not one another project in
    the organization already has (compared without regard to case).
 3. The project is created immediately. Its API keys and connectors are its own.
@@ -255,9 +269,11 @@ its **Owner**:
    `acme-robotics`, with a number on the end when another organization holds
    that, and a name with no Latin letter or digit gets a placeholder (`org-`
    and ten random characters) until you choose a URL. A URL you give must be
-   a slug no other organization holds and not one of the console's own words.
+   a slug no other organization holds, not one of the console's own words, and
+   holding no profanity or slur.
 4. Select **Create organization**. The console opens the new organization's
-   **Overview**, where you [create its first project](#creating-a-project).
+   **Overview**; [create its first project](#creating-a-project) from its
+   **Projects** page or the switcher.
 
 There is no limit on how many organizations you create or own. Creating one
 leaves your [default organization](/docs/account/settings#default-organization),

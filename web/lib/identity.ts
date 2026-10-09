@@ -43,21 +43,10 @@ export function organizationLabel(org: { name: string }): string {
   return org.name;
 }
 
-/// The organizations a person owns, as the account deletion names them:
-/// counted by label, not listed, since two may carry one name.
-export function ownedOrganizationLabels(
-  organizations: readonly {
-    name: string;
-    role: string;
-  }[],
-): string[] {
-  const byLabel = new Map<string, number>();
-  for (const o of organizations) {
-    if (o.role !== "owner") continue;
-    const label = organizationLabel(o);
-    byLabel.set(label, (byLabel.get(label) ?? 0) + 1);
-  }
-  return [...byLabel].map(([label, count]) =>
-    count > 1 ? `${label} (${count} organizations)` : label,
-  );
+/// How many organizations a person owns, as the account deletion counts them:
+/// a count, not their names, which read as a list past a few.
+export function ownedOrganizationCount(
+  organizations: readonly { role: string }[],
+): number {
+  return organizations.filter((o) => o.role === "owner").length;
 }

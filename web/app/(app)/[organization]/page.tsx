@@ -1,33 +1,38 @@
-import Link from "next/link";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
-import { CreateProjectAction } from "@/components/create-project";
 import { LocalTime } from "@/components/local-time";
-import { RoleBadge } from "@/components/role-badge";
 import { Row, Rows } from "@/components/rows";
 import { ServiceUnavailable } from "@/components/service-unavailable";
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
 import { organizationLabel } from "@/lib/identity";
 import { eventKindLabel } from "@/lib/notification-kinds";
 import {
   activeOrganization,
   fetchNotifications,
-  fetchProjectListing,
   getServerContext,
   type FeedItem,
   type NotificationFeed,
-  type ProjectListing,
 } from "@/lib/server/data";
-import { projectPath } from "@/lib/slug";
 import { cn } from "@/lib/utils";
 
 import { Overview } from "../_overview";
 import { LeaveOrganization } from "./_leave-organization";
 import { MarkOrganizationRead } from "./_organization-notices";
 
-export const metadata = { title: "Overview" };
+// The tab is titled as the page is, by the organization's name. The context
+// is read again for it, a second call auth answers from its cache.
+export async function generateMetadata(): Promise<Metadata> {
+  const gate = await getServerContext();
+  const organization = gate && !gate.organizationNotFound ? activeOrganization(gate) : null;
+  return { title: organization ? organizationLabel(organization) : "Overview" };
+}
 
+// The organization's name and nothing else, for now: the owner cleared its
+// sections (projects, members, recent activity, the hosted plan) on
+// 2026-10-08 while the page is rethought. Two things stay because they have
+// no other home: the organization's own notices, a failed payment among them,
+// for its owner and admins when there are any; and the way out, for anybody
+// but the owner. Projects are reached from the switcher and the rail.
 export default async function OrganizationOverviewPage() {
   const gate = await getServerContext();
   // The path names the organization: not found unless auth answered with it.
@@ -44,10 +49,7 @@ export default async function OrganizationOverviewPage() {
   // The organization's own feed — the notices that name no project, such as
   // an `organization_alert` a service beside this one raises — answers its
   // owner and admins, so nobody else is sent to ask for it.
-  const [notices, projects] = await Promise.all([
-    isAdmin ? fetchNotifications() : null,
-    fetchProjectListing(),
-  ]);
+  const notices = isAdmin ? await fetchNotifications() : null;
 
   // Anybody but the owner may leave. The owner hands the organization to an
   // admin first — the organization cannot be left with nobody holding it.
@@ -60,91 +62,17 @@ export default async function OrganizationOverviewPage() {
 
   return (
     <Overview
-      action={
-        markRead || isAdmin ? (
-          <div className="flex items-center gap-2">
-            {markRead}
-            {isAdmin && <CreateProjectAction organizationId={organization.organizationId} />}
-          </div>
-        ) : undefined
-      }
+      title={name}
+      action={markRead ?? undefined}
       sections={
         <>
-          <OrganizationProjects
-            organization={organization.slug}
-            listing={projects}
-            canCreate={isAdmin}
-          />
           {notices && notices.items.length > 0 && <OrganizationNotices feed={notices} />}
           {canLeave && (
             <LeaveOrganization organizationId={organization.organizationId} name={name} />
           )}
         </>
       }
-    >
-      <h2 className="text-base font-semibold">{name}</h2>
-    </Overview>
-  );
-}
-
-// ⚠ **The overview is where the console opens, so it carries the projects**,
-// as a Vercel team's overview does: each opens from here, and the first is made
-// from here. The listing is auth's — every project for an owner or admin, the
-// ones a member holds a seat in — so it is shown as answered, with no filter.
-function OrganizationProjects({
-  organization,
-  listing,
-  canCreate,
-}: {
-  organization: string;
-  listing: ProjectListing;
-  canCreate: boolean;
-}) {
-  return (
-    <section className="grid gap-3" aria-label="Projects">
-      <div className="flex items-center gap-2">
-        <h3 className="text-sm font-medium">Projects</h3>
-        {listing.kind === "ok" && (
-          <Badge variant="secondary" className="text-xs">
-            {listing.projects.length}
-          </Badge>
-        )}
-      </div>
-      {listing.kind === "unavailable" ? (
-        <Card className="p-4 text-sm text-muted-foreground">
-          The projects could not be loaded. Try again in a moment.
-        </Card>
-      ) : listing.projects.length === 0 ? (
-        <Card className="overflow-hidden p-0 gap-0">
-          <div className="grid gap-1 p-4">
-            <p className="text-sm font-medium">No projects yet.</p>
-            <p className="text-sm text-muted-foreground">
-              {canCreate
-                ? "Create the first one with New project, above."
-                : "An owner or admin adds you to a project."}
-            </p>
-          </div>
-        </Card>
-      ) : (
-        <Rows>
-          {listing.projects.map((project) => (
-            <Row
-              key={project.id}
-              label={
-                <Link
-                  href={projectPath(organization, project.slug)}
-                  className="block min-w-0 truncate hover:underline"
-                >
-                  {project.name}
-                </Link>
-              }
-            >
-              <RoleBadge role={project.role} />
-            </Row>
-          ))}
-        </Rows>
-      )}
-    </section>
+    />
   );
 }
 

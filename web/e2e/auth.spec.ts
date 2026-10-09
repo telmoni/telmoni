@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import type { SessionData } from "@/lib/auth/session";
-import { landOnProject } from "./helpers";
+import { expectProjectOverview, landOnProject } from "./helpers";
 
 async function injectSession(page: Page, data: Partial<SessionData>) {
   const res = await page.request.post("/api/test/session", { data });
@@ -43,9 +43,7 @@ test.describe("Authentication", () => {
   test("the portal is reachable after injecting a test session", async ({ page }, testInfo) => {
     await injectSession(page, testUser(testInfo.project.name));
     const landing = await landOnProject(page);
-    await expect(
-      page.getByRole("heading", { name: "Overview", level: 1 }),
-    ).toBeVisible();
+    await expectProjectOverview(page);
     // A project's overview: its slug under its organization's.
     expect(landing).toMatch(/^\/[a-z0-9-]+\/[a-z0-9-]+$/);
   });
@@ -63,9 +61,7 @@ test.describe("Authentication", () => {
   test("clearing the session re-gates protected routes", async ({ page }, testInfo) => {
     await injectSession(page, testUser(testInfo.project.name));
     await landOnProject(page);
-    await expect(
-      page.getByRole("heading", { name: "Overview", level: 1 }),
-    ).toBeVisible();
+    await expectProjectOverview(page);
 
     await clearSession(page);
     const location = await gateFor(page, "/console");

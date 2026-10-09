@@ -40,10 +40,7 @@ export type {
 
 export { fetchActiveSessions } from "./entities/sessions";
 export type { ActiveSession } from "./entities/sessions";
-export {
-  fetchNotifications,
-  fetchProjectNotifications,
-} from "./entities/notification-feed";
+export { fetchNotifications } from "./entities/notification-feed";
 export type { FeedItem, NotificationFeed } from "./entities/notification-feed";
 export { fetchProjectAnnouncement } from "./entities/announcement";
 

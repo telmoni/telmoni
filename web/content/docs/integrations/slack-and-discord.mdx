@@ -96,7 +96,8 @@ archived, the incoming webhook was removed, or the Telmoni application was
 uninstalled from the workspace), Telmoni marks the connector **Needs
 attention** or **Disconnected** as the [states](#connection-states) above
 describe, fails the notices still queued for it, and posts a
-`connector_disconnected` notice to the project's feed and its other connectors.
+`connector_disconnected` notice to the project's other connectors (see
+[where you read notices](/docs/integrations/notifications#where-you-read-them)).
 
 Removing the Telmoni application from a Slack workspace disconnects all channels
 connected to that Slack workspace. The event is recorded in the organization's

@@ -25,8 +25,8 @@ const analyticsConfigured = vi.hoisted(() => vi.fn(() => true));
 vi.mock("@/lib/analytics", () => ({ analyticsConfigured }));
 
 vi.mock("./_delete-account", () => ({
-  DeleteAccountForm: ({ ownedOrganizations }: { ownedOrganizations: readonly string[] }) => (
-    <div data-testid="delete-account" data-owned={ownedOrganizations.join("|")} />
+  DeleteAccountForm: ({ ownedOrganizations }: { ownedOrganizations: number }) => (
+    <div data-testid="delete-account" data-owned={String(ownedOrganizations)} />
   ),
 }));
 
@@ -120,10 +120,11 @@ describe("AccountPrivacyPage", () => {
   });
 
   // ⚠ Deleting the account takes every organization the person owns on their
-  // own, and is refused over one anybody else is in — so the form names the
-  // ones they OWN, by what the console calls them, and none they merely
-  // belong to. Deleting one organization is its own settings page's job.
-  it("names every organization the account owns, and none it only belongs to", async () => {
+  // own, and is refused over one anybody else is in — so the form counts the
+  // ones they OWN, and none they merely belong to. A count rather than their
+  // names, since twenty names would bury the form. Deleting one organization
+  // is its own settings page's job.
+  it("counts every organization the account owns, and none it only belongs to", async () => {
     mockContext = {
       person: { analyticsOptIn: false },
       organizations: [
@@ -134,13 +135,12 @@ describe("AccountPrivacyPage", () => {
       ],
     };
     render(await AccountPrivacyPage());
-    expect(screen.getByTestId("delete-account")).toHaveAttribute("data-owned", "Acme|Two");
+    expect(screen.getByTestId("delete-account")).toHaveAttribute("data-owned", "2");
   });
 
   // Two organizations may carry one name — one made at sign-up, one handed
-  // over — and would otherwise read as the same organization named twice, and
-  // collide as keys.
-  it("counts owned organizations that share a label instead of repeating it", async () => {
+  // over — and each is still one organization the deletion takes.
+  it("counts owned organizations that share a name once each", async () => {
     mockContext = {
       person: { analyticsOptIn: false },
       organizations: [
@@ -150,16 +150,13 @@ describe("AccountPrivacyPage", () => {
       ],
     };
     render(await AccountPrivacyPage());
-    expect(screen.getByTestId("delete-account")).toHaveAttribute(
-      "data-owned",
-      "Acme (2 organizations)|Globex",
-    );
+    expect(screen.getByTestId("delete-account")).toHaveAttribute("data-owned", "3");
   });
 
-  it("names nothing when it cannot tell what the account owns", async () => {
+  it("counts nothing when it cannot tell what the account owns", async () => {
     mockContext = null;
     render(await AccountPrivacyPage());
-    expect(screen.getByTestId("delete-account")).toHaveAttribute("data-owned", "");
+    expect(screen.getByTestId("delete-account")).toHaveAttribute("data-owned", "0");
   });
 
   it("points at the organization's own settings to delete one and keep the account", async () => {

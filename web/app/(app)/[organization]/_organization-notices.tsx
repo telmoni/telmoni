@@ -23,7 +23,7 @@ export function MarkOrganizationRead({
     <Button
       variant="outline"
       size="sm"
-      className="h-8 text-xs"
+      className="h-9 text-xs"
       disabled={pending}
       onClick={() =>
         start(async () => {

@@ -25,16 +25,17 @@ export default async function ConsoleEntry() {
   }
 
   // ⚠ The organization's overview, never a project of it: as Vercel opens on
-  // a team's overview, which lists the projects and is open to everybody in
-  // the organization, where the projects page refuses a member. Nothing is
-  // asked first: an organization is provisioned already named after its owner,
-  // as Vercel and Cloudflare name a new account, and renamed on Settings.
-  // Which organization is auth's answer: the one the cookie remembers, else
-  // the person's default — and a sign-in clears the cookie (`auth/callback`),
-  // so signing in opens the default, while within a session this returns to
-  // where the console stood: after a restore, an accepted invitation, a slug
-  // that moved under an open tab. Somebody in no organization has no overview
-  // to land on; their account names what is there for them.
+  // a team's overview, the one page every member of the organization may
+  // open, where the projects page refuses a member; their projects are a
+  // press away in the header's switcher. Nothing is asked first: an
+  // organization is provisioned already named after its owner, as Vercel and
+  // Cloudflare name a new account, and renamed on Settings. Which
+  // organization is auth's answer: the one the cookie remembers, else the
+  // person's default — and a sign-in clears the cookie (`auth/callback`), so
+  // signing in opens the default, while within a session this returns to
+  // where the console stood: after an accepted invitation, or a slug that
+  // moved under an open tab. Somebody in no organization has no overview to
+  // land on; their account names what is there for them.
   const organization = activeOrganization(ctx);
   redirect(organization ? organizationPath(organization.slug) : "/account/notifications");
 }

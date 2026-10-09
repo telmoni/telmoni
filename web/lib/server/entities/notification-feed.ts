@@ -5,12 +5,7 @@ import { fetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 
-import {
-  identityContext,
-  organizationHeaders,
-  projectHeaders,
-} from "./identity-context";
-import { fetchProject } from "./projects";
+import { identityContext, organizationHeaders } from "./identity-context";
 
 const FeedItemSchema = z.object({
   id: z.string(),
@@ -28,58 +23,16 @@ const FeedSchema = z.object({
 });
 export type NotificationFeed = z.infer<typeof FeedSchema>;
 
+// The organization's own feed: the rows that name no project, answered to its
+// owner and admins alone — the only way to read an `organization_alert`.
+// ⚠ **A project's feed is a DIFFERENT SET**, not a filtered view of this one:
+// the service picks its scope from the presence of `x-project-id`, and with a
+// project it answers that project's rows — `member_added`, the `connector_*`
+// kinds. Their reader, `fetchProjectNotifications`, left with the project
+// Overview's activity section (2026-10-08) and is in git for its rebuild.
 export const fetchNotifications = cache(
   async (): Promise<NotificationFeed | null> => read(),
 );
-
-// ⚠ **The project's feed is a DIFFERENT SET from the organization's**, not a
-// filtered view of it. The service picks its scope from the presence of
-// `x-project-id`: with a project it answers that project's rows, without one
-// it answers the rows that name no project and refuses anybody but the
-// organization's owner and admins. So this is the only way to read a
-// `member_added` or a `connector_*` notice, and `fetchNotifications` is the
-// only way to read an `organization_alert`.
-export const fetchProjectNotifications = cache(
-  async (projectId: string): Promise<NotificationFeed | null> => readProject(projectId),
-);
-
-async function readProject(projectId: string): Promise<NotificationFeed | null> {
-  const [ctx, project] = await Promise.all([identityContext(), fetchProject(projectId)]);
-  // No membership row means the service would refuse the project anyway.
-  // Nothing to show is the right answer.
-  if (!ctx || !project) return null;
-  try {
-    const res = await fetchWithTimeout(
-      `${env.SERVER_URL}/internal/notifications/feed`,
-      {
-        headers: projectHeaders(ctx, projectId),
-        cache: "no-store",
-      },
-    );
-    if (!res.ok) {
-      logger.warn(
-        { fetcher: "fetchProjectNotifications", status: res.status },
-        "entities: upstream refused",
-      );
-      return null;
-    }
-    const parsed = FeedSchema.safeParse(await res.json());
-    if (!parsed.success) {
-      logger.warn(
-        { fetcher: "fetchProjectNotifications", issues: parsed.error.issues },
-        "entities: upstream shape mismatch",
-      );
-      return null;
-    }
-    return parsed.data;
-  } catch {
-    logger.warn(
-      { fetcher: "fetchProjectNotifications" },
-      "entities: upstream error",
-    );
-    return null;
-  }
-}
 
 async function read(): Promise<NotificationFeed | null> {
   {

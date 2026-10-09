@@ -20,9 +20,10 @@ export function DeleteAccountForm({
   ownedOrganizations,
 }: {
   email: string;
-  /// The organizations this person owns, by label: they go with the account
-  /// when nobody else is in them, and block it when somebody is.
-  ownedOrganizations: readonly string[];
+  /// How many organizations this person owns: they go with the account when
+  /// nobody else is in them, and block it when somebody is. Counted, not
+  /// named: twenty names read as a list, and the switcher has them all.
+  ownedOrganizations: number;
 }) {
   const [codeSent, setCodeSent] = useState(false);
   const [code, setCode] = useState("");
@@ -107,16 +108,13 @@ export function DeleteAccountForm({
         organization and keep your account, delete it from its own settings
         instead.
       </p>
-      {ownedOrganizations.length > 0 && (
+      {ownedOrganizations > 0 && (
         <div className="grid gap-1">
           <p className="text-sm">
             You own{" "}
-            {ownedOrganizations.map((name, i) => (
-              <span key={name}>
-                {i > 0 && (i === ownedOrganizations.length - 1 ? " and " : ", ")}
-                <span className="font-medium">{name}</span>
-              </span>
-            ))}
+            <span className="font-medium">
+              {ownedOrganizations} {ownedOrganizations === 1 ? "organization" : "organizations"}
+            </span>
             .
           </p>
           <p className="text-sm text-muted-foreground">

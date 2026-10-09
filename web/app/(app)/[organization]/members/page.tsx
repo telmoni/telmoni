@@ -84,6 +84,7 @@ export default async function OrganizationMembersPage() {
     <>
       <PageHeader
         title="Members"
+        count={listing.members.length}
         action={
           canManage ? <AddOrganizationMember organizationId={organizationId} /> : undefined
         }

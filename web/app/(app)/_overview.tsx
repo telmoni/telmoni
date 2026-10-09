@@ -1,30 +1,25 @@
 import type { ReactNode } from "react";
 
 import { PageHeader } from "@/components/page-header";
-import { Card } from "@/components/ui/card";
 
 // One content wrapper under <main>, and it is main's last child — the shape
-// every console page keeps (content-containers.spec.ts). Anything a page
-// shows below the summary card goes in `sections`, INSIDE the wrapper, rather
-// than after it.
+// every console page keeps (content-containers.spec.ts). An overview is titled
+// by what it stands in — the organization's name or the project's — and
+// anything it shows under the title goes in `sections`, INSIDE the wrapper,
+// rather than after it.
 export function Overview({
-  children,
+  title,
   sections,
   action,
 }: {
-  children: ReactNode;
+  title: string;
   sections?: ReactNode;
   action?: ReactNode;
 }) {
   return (
     <>
-      <PageHeader title="Overview" action={action} />
-      <div className="grid gap-3">
-        <section className="grid gap-3">
-          <Card>{children}</Card>
-        </section>
-        {sections}
-      </div>
+      <PageHeader title={title} action={action} />
+      <div className="grid gap-3">{sections}</div>
     </>
   );
 }

@@ -30,7 +30,7 @@ export function AccountOnly({
   analyticsOptIn?: boolean;
   signupsOpen: boolean;
   invites: readonly IncomingInvite[];
-  ownedOrganizations: readonly string[];
+  ownedOrganizations: number;
   sessions?: ActiveSession[] | null;
   currentSessionId?: string | null;
   expiresAt: number;

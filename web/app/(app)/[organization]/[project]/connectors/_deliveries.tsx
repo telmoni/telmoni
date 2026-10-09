@@ -112,7 +112,7 @@ export function DeliveriesButton({
       <Button
         variant="outline"
         size="sm"
-        className="h-8 text-xs"
+        className="h-9 text-xs"
         aria-label={`Show deliveries to ${label}`}
         onClick={() => {
           setOpen(true);
@@ -152,7 +152,7 @@ export function DeliveriesButton({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-8 w-fit text-xs"
+                  className="h-9 w-fit text-xs"
                   onClick={() => void loadFirst()}
                 >
                   Try again
@@ -185,7 +185,7 @@ export function DeliveriesButton({
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-8 w-fit text-xs"
+                    className="h-9 w-fit text-xs"
                     disabled={loadingOlder}
                     onClick={loadOlder}
                   >
@@ -262,7 +262,7 @@ function DeliveryRow({
         <Button
           variant="outline"
           size="sm"
-          className="h-8 w-fit text-xs"
+          className="h-9 w-fit text-xs"
           disabled={busy}
           aria-label={`Resend ${entry.subject}`}
           onClick={onResend}

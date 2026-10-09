@@ -13,10 +13,11 @@ const leaveOrganizationAction = vi.hoisted(() =>
 );
 vi.mock("./members/actions", () => ({ leaveOrganizationAction }));
 
+// The title as the real header draws it, the page's one `h1`.
 vi.mock("@/components/page-header", () => ({
   PageHeader: ({ title, action }: { title?: string; action?: React.ReactNode }) => (
     <div data-testid="page-header">
-      {title}
+      <h1>{title}</h1>
       {action}
     </div>
   ),
@@ -31,11 +32,10 @@ vi.mock("./notice-actions", () => ({
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {} }) }));
 
-// Which organization the action is aimed at is the assertion; the dialog is
-// its own.
+// A stand-in for the create flow, so a test can say the overview offers none.
 vi.mock("@/components/create-project", () => ({
-  CreateProjectAction: ({ organizationId }: { organizationId?: string }) => (
-    <div data-testid="create-project-action" data-organization-id={organizationId} />
+  CreateProjectAction: () => (
+    <div data-testid="create-project-action" />
   ),
 }));
 
@@ -48,16 +48,6 @@ const fetchNotifications = vi.hoisted(() =>
   vi.fn<() => Promise<{ items: FeedItem[]; unread: number } | null>>(async () => null),
 );
 
-type Listing =
-  | {
-      kind: "ok";
-      projects: { id: string; slug: string; name: string; role: string | null }[];
-    }
-  | { kind: "unavailable" };
-
-const fetchProjectListing = vi.hoisted(() =>
-  vi.fn<() => Promise<Listing>>(async () => ({ kind: "ok", projects: [] })),
-);
 
 type FeedItem = {
   id: string;
@@ -76,7 +66,6 @@ vi.mock("@/lib/server/data", async () => {
   return {
     activeOrganization,
     fetchNotifications,
-    fetchProjectListing,
     getServerContext: async () => mockContext,
   };
 });
@@ -99,9 +88,9 @@ const OWNED: OrganizationEntry = {
 beforeEach(() => {
   vi.clearAllMocks();
   fetchNotifications.mockResolvedValue(null);
-  fetchProjectListing.mockResolvedValue({ kind: "ok", projects: [] });
   mockContext = { organizations: [OWNED], activeOrganizationId: "org_1" };
 });
+
 
 describe("OrganizationOverviewPage", () => {
   it("shows the outage card when the context is unavailable", async () => {
@@ -119,8 +108,10 @@ describe("OrganizationOverviewPage", () => {
   it("names the organization, and says nothing else about it", async () => {
     await renderPage();
 
-    expect(screen.getByTestId("page-header")).toHaveTextContent("Overview");
-    expect(screen.getByText("Ada Works")).toBeInTheDocument();
+    // The page is titled by the organization, with no card repeating it.
+    expect(screen.getByTestId("page-header")).toHaveTextContent("Ada Works");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Ada Works");
+    expect(screen.queryAllByRole("heading", { level: 2 })).toHaveLength(0);
     expect(screen.queryByText("ada@example.test")).toBeNull();
     expect(screen.queryByText("Ada")).toBeNull();
     expect(screen.queryByText("org_1")).toBeNull();
@@ -148,7 +139,7 @@ describe("OrganizationOverviewPage", () => {
     // ⚠ The organization's NAME, never its owner's name or address. `Alex
     // Founder` is a human; this heading names an organization, and the two are
     // only ever the same by coincidence.
-    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Founder Labs");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Founder Labs");
     expect(screen.queryByText("Alex Founder")).toBeNull();
     expect(screen.queryByText("alex@example.test")).toBeNull();
     expect(screen.queryByText("Ada Works")).toBeNull();
@@ -223,31 +214,10 @@ describe("OrganizationOverviewPage", () => {
     expect(fetchNotifications).not.toHaveBeenCalled();
   });
 
-  // ⚠ The console opens here, so the projects are here: each opens its own
-  // page, by the slugs the path is spelled with.
-  it("lists the organization's projects, each opening its own page", async () => {
-    fetchProjectListing.mockResolvedValue({
-      kind: "ok",
-      projects: [
-        { id: "proj_1", slug: "web", name: "Web", role: "admin" },
-        { id: "proj_2", slug: "billing-2", name: "Billing", role: null },
-      ],
-    });
-    await renderPage();
-
-    expect(screen.getByRole("link", { name: "Web" })).toHaveAttribute("href", "/ada-works/web");
-    expect(screen.getByRole("link", { name: "Billing" })).toHaveAttribute(
-      "href",
-      "/ada-works/billing-2",
-    );
-    expect(screen.getByText("Admin")).toBeInTheDocument();
-    expect(screen.queryByText("No projects yet.")).toBeNull();
-  });
-
-  // A project is made in the organization this page names, by whoever may
-  // make one there.
+  // A project is made on the Projects page or from the switcher; the overview
+  // is for seeing the organization, so it offers nobody New project.
   it.each(["owner", "admin"] as const)(
-    "offers an organization %s New project, in the organization it names",
+    "offers an organization %s no New project here, and no card for none",
     async (role) => {
       mockContext = {
         organizations: [{ ...OWNED, role }],
@@ -255,36 +225,10 @@ describe("OrganizationOverviewPage", () => {
       };
       await renderPage();
 
-      expect(screen.getByTestId("create-project-action")).toHaveAttribute(
-        "data-organization-id",
-        "org_1",
-      );
-      expect(
-        screen.getByText("Create the first one with New project, above."),
-      ).toBeInTheDocument();
+      expect(screen.queryByTestId("create-project-action")).toBeNull();
+      expect(screen.queryByText(/No projects yet/)).toBeNull();
     },
   );
-
-  it("offers a member no New project, and says who adds them to one", async () => {
-    mockContext = {
-      organizations: [{ ...OWNED, role: "member" }],
-      activeOrganizationId: "org_1",
-    };
-    await renderPage();
-
-    expect(screen.queryByTestId("create-project-action")).toBeNull();
-    expect(screen.getByText("An owner or admin adds you to a project.")).toBeInTheDocument();
-  });
-
-  // An unread listing is not an empty one: saying "no projects yet" would
-  // invite somebody to make a second of one they already have.
-  it("says the projects could not be loaded, not that there are none", async () => {
-    fetchProjectListing.mockResolvedValue({ kind: "unavailable" });
-    await renderPage();
-
-    expect(screen.getByText(/could not be loaded/)).toBeInTheDocument();
-    expect(screen.queryByText("No projects yet.")).toBeNull();
-  });
 
   // ⚠ The button names the organization this page rendered, so the leave has
   // to be aimed at that one — the action refuses any other, including the

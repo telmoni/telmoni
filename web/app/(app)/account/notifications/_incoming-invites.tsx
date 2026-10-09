@@ -111,7 +111,7 @@ function IncomingInviteRow({ invite }: { invite: IncomingInvite }) {
           {error && <span className="text-xs text-destructive mr-2">{error}</span>}
           <Button
             size="sm"
-            className="h-8 text-xs gap-1"
+            className="h-9 text-xs gap-1"
             disabled={pending}
             onClick={() =>
               settle(
@@ -128,7 +128,7 @@ function IncomingInviteRow({ invite }: { invite: IncomingInvite }) {
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 text-xs gap-1 text-muted-foreground hover:text-foreground"
+                className="h-9 text-xs gap-1 text-muted-foreground hover:text-foreground"
                 disabled={pending}
               >
                 <X className="size-3.5" />

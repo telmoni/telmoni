@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/page-header";
 import { Section } from "@/components/section";
 import { Card } from "@/components/ui/card";
 import { analyticsConfigured } from "@/lib/analytics";
-import { ownedOrganizationLabels } from "@/lib/identity";
+import { ownedOrganizationCount } from "@/lib/identity";
 import { fetchActiveSessions, getServerContext } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
 
@@ -23,7 +23,7 @@ export default async function AccountPrivacyPage() {
     getServerContext(),
   ]);
 
-  const ownedOrganizations = ownedOrganizationLabels(context?.organizations ?? []);
+  const ownedOrganizations = ownedOrganizationCount(context?.organizations ?? []);
 
   return (
     <>

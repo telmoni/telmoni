@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ownedOrganizationLabels, ownerContact } from "./identity";
+import { ownedOrganizationCount, ownerContact } from "./identity";
 
 describe("ownerContact", () => {
   it("names the owner, as a member row would", () => {
@@ -27,29 +27,20 @@ describe("ownerContact", () => {
 });
 
 
-describe("ownedOrganizationLabels", () => {
-  it("names the organizations the person owns, and only those", () => {
+describe("ownedOrganizationCount", () => {
+  it("counts the organizations the person owns, and only those", () => {
     expect(
-      ownedOrganizationLabels([
-        { name: "Acme", role: "owner" },
-        { name: "Theirs", role: "admin" },
-        { name: "Ours", role: "member" },
+      ownedOrganizationCount([
+        { role: "owner" },
+        { role: "admin" },
+        { role: "member" },
+        { role: "owner" },
       ]),
-    ).toEqual(["Acme"]);
+    ).toBe(2);
   });
 
-  // Two organizations may carry one name, and must not read as one.
-  it("counts the ones that share a label instead of repeating it", () => {
-    expect(
-      ownedOrganizationLabels([
-        { name: "Acme", role: "owner" },
-        { name: "Globex", role: "owner" },
-        { name: "Acme", role: "owner" },
-      ]),
-    ).toEqual(["Acme (2 organizations)", "Globex"]);
-  });
-
-  it("is empty for somebody who owns nothing", () => {
-    expect(ownedOrganizationLabels([])).toEqual([]);
+  it("is nothing for somebody who owns nothing", () => {
+    expect(ownedOrganizationCount([])).toBe(0);
+    expect(ownedOrganizationCount([{ role: "admin" }])).toBe(0);
   });
 });

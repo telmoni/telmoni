@@ -136,7 +136,8 @@ export async function deleteProjectAction(projectId: string): Promise<ActionResu
     data: { organizationId: ctx.organizationId, projectId },
   });
 
-  // Every console page lists the organization's projects in its rail.
+  // Every console page lists the organization's projects in its header's
+  // switcher.
   revalidatePath("/", "layout");
   return { error: null };
 }

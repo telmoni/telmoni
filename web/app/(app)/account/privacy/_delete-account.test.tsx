@@ -27,7 +27,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const mount = (ownedOrganizations: readonly string[] = []) =>
+const mount = (ownedOrganizations = 0) =>
   render(<DeleteAccountForm email="dev@example.com" ownedOrganizations={ownedOrganizations} />);
 
 const press = async (name: RegExp) => {
@@ -53,15 +53,21 @@ describe("DeleteAccountForm", () => {
     ).toBeEnabled();
   });
 
-  // What goes with the account, named before anything is sent: the ones owned
+  // What goes with the account, said before anything is sent: the ones owned
   // alone are deleted with it, and one with anybody else in it blocks it.
-  it("names the organizations the account owns before a code is sent", () => {
-    mount(["Acme", "k@example.com"]);
-    expect(document.body.textContent).toContain("You own Acme and k@example.com.");
+  // Counted, not named, so twenty read as one sentence and not a list.
+  it("counts the organizations the account owns before a code is sent", () => {
+    mount(2);
+    expect(document.body.textContent).toContain("You own 2 organizations.");
     expect(requestAccountDeletionCodeAction).not.toHaveBeenCalled();
   });
 
-  it("says nothing of owning when the account owns nothing it can name", () => {
+  it("says one organization in the singular", () => {
+    mount(1);
+    expect(document.body.textContent).toContain("You own 1 organization.");
+  });
+
+  it("says nothing of owning when the account owns nothing", () => {
     mount();
     expect(document.body.textContent).not.toMatch(/you own/i);
   });
@@ -86,7 +92,7 @@ describe("DeleteAccountForm", () => {
       error:
         "conflict: you own organizations other people are in: Acme. Transfer ownership of each, or remove everyone else from it, then delete your account.",
     });
-    mount(["Acme"]);
+    mount(1);
     await press(/send confirmation code/i);
     await typeCode("123456");
     await press(/permanently delete my account/i);

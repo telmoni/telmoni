@@ -56,7 +56,7 @@ describe("ConsoleEntry", () => {
   });
 
   // ⚠ The overview, never a project: Vercel opens on a team's overview, and
-  // the overview is where the projects are listed. Which organization is
+  // the overview is the one page every member may open. Which organization is
   // auth's to say — the one the cookie remembers, else the person's default,
   // which a sign-in leaves it to by forgetting the cookie.
   it("lands on the overview of the organization auth answered", async () => {

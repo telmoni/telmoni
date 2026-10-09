@@ -189,7 +189,7 @@ export function InviteRow({
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 text-xs"
+                className="h-9 text-xs"
                 disabled={pending}
                 aria-label={`Withdraw the invitation to ${invite.email}`}
               >
@@ -289,7 +289,7 @@ export function MemberRow({
             }
           >
             <SelectTrigger
-              className="h-8 w-32 text-xs"
+              className="h-9 w-32 text-xs"
               aria-label={`Role for ${member.email}`}
             >
               <SelectValue />
@@ -315,7 +315,7 @@ export function MemberRow({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-8 text-xs"
+                  className="h-9 text-xs"
                   disabled={pending}
                   aria-label={`Transfer project to ${member.email}`}
                 >
@@ -334,7 +334,7 @@ export function MemberRow({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-8 text-xs"
+                  className="h-9 text-xs"
                   disabled={pending}
                   aria-label={`Withdraw the project offer to ${member.email}`}
                 >
@@ -353,7 +353,7 @@ export function MemberRow({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-8 text-xs"
+                  className="h-9 text-xs"
                   disabled={pending}
                   aria-label={`Remove ${member.email}`}
                 >

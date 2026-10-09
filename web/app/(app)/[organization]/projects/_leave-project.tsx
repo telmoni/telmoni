@@ -27,7 +27,7 @@ export function LeaveProject({
           <Button
             variant="outline"
             size="sm"
-            className="h-8 text-xs"
+            className="h-9 text-xs"
             disabled={pending}
             aria-label={`Leave ${name}`}
           >

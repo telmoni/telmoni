@@ -202,7 +202,7 @@ export function OrganizationMemberRow({
     <Button
       variant="outline"
       size="sm"
-      className="h-8 text-xs"
+      className="h-9 text-xs"
       disabled={pending}
       aria-label={`Transfer ownership to ${member.email}`}
     >
@@ -251,7 +251,7 @@ export function OrganizationMemberRow({
             }
           >
             <SelectTrigger
-              className="h-8 w-32 text-xs"
+              className="h-9 w-32 text-xs"
               aria-label={`Role for ${member.email}`}
             >
               <SelectValue />
@@ -290,7 +290,7 @@ export function OrganizationMemberRow({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-8 text-xs"
+                  className="h-9 text-xs"
                   disabled={pending}
                   aria-label={`Withdraw the ownership offer to ${member.email}`}
                 >
@@ -309,7 +309,7 @@ export function OrganizationMemberRow({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-8 text-xs"
+                  className="h-9 text-xs"
                   disabled={pending}
                   aria-label={`Remove ${member.email}`}
                 >
@@ -360,7 +360,7 @@ export function OrganizationInviteRow({
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 text-xs"
+                className="h-9 text-xs"
                 disabled={pending}
                 aria-label={`Withdraw the invitation to ${invite.email}`}
               >

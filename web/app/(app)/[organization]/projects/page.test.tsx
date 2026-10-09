@@ -29,6 +29,7 @@ vi.mock("@/components/service-unavailable", () => ({
 
 let mockContext: unknown;
 let mockProjects: unknown[] = [];
+let mockListingUnavailable = false;
 let mockIdent: IdentityContext | null = null;
 
 // The real `activeOrganization`: the owner each shared row credits comes off it.
@@ -39,7 +40,8 @@ vi.mock("@/lib/server/data", async () => {
   return {
     activeOrganization,
     getServerContext: async () => mockContext,
-    fetchProjects: async () => mockProjects,
+    fetchProjectListing: async () =>
+      mockListingUnavailable ? { kind: "unavailable" } : { kind: "ok", projects: mockProjects },
     identityContext: async () => mockIdent,
   };
 });
@@ -90,6 +92,7 @@ describe("OrganizationProjectsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     standingIn("user_owner", OWNED);
+    mockListingUnavailable = false;
     mockProjects = [
       {
         id: "project_own_1",
@@ -108,7 +111,7 @@ describe("OrganizationProjectsPage", () => {
     expect(screen.getByTestId("outage")).toBeInTheDocument();
   });
 
-  it("renders owned projects with ID and Open links", async () => {
+  it("renders owned projects as tiles that open them", async () => {
     render(
       await OrganizationProjectsPage(),
     );
@@ -116,12 +119,35 @@ describe("OrganizationProjectsPage", () => {
     expect(screen.getByTestId("page-header")).toHaveTextContent("Projects");
     expect(screen.getByTestId("create-project-action")).toBeInTheDocument();
     expect(screen.getByText("Personal Project")).toBeInTheDocument();
-    expect(screen.getByText("project_own_1")).toBeInTheDocument();
     expect(screen.getByText("Owner")).toBeInTheDocument();
 
-    const openLink = screen.getByRole("link", { name: /open/i });
-    // By the slugs the server gave, the project's under its organization's.
-    expect(openLink.getAttribute("href")).toBe("/owned/personal-project");
+    // The tile is the link, named by the project; by the slugs the server
+    // gave, it opens under its organization's.
+    const tile = screen.getByRole("link", { name: /^Personal Project/ });
+    expect(tile.getAttribute("href")).toBe("/owned/personal-project");
+  });
+
+  it("says there are no projects yet, and how to make the first", async () => {
+    mockProjects = [];
+    render(
+      await OrganizationProjectsPage(),
+    );
+
+    expect(screen.getByText("No projects yet.")).toBeInTheDocument();
+    expect(screen.getByText("Create the first one with New project, above.")).toBeInTheDocument();
+    expect(screen.queryAllByRole("link")).toHaveLength(0);
+  });
+
+  // An unread listing is not an empty one: saying "no projects yet" would
+  // invite somebody to make a second of one they already have.
+  it("says the projects could not be loaded, not that there are none", async () => {
+    mockListingUnavailable = true;
+    render(
+      await OrganizationProjectsPage(),
+    );
+
+    expect(screen.getByText("The projects could not be loaded.")).toBeInTheDocument();
+    expect(screen.queryByText("No projects yet.")).toBeNull();
   });
 
   it("draws no shared section for somebody who administers the organization", async () => {
@@ -133,7 +159,6 @@ describe("OrganizationProjectsPage", () => {
     expect(
       screen.queryByText("No project in this organization has been shared with you."),
     ).toBeNull();
-    expect(screen.getByText("Owned by this organization")).toBeInTheDocument();
     expect(screen.getByText("Personal Project")).toBeInTheDocument();
   });
 
@@ -192,7 +217,7 @@ describe("OrganizationProjectsPage", () => {
     expect(screen.queryByText("project_elsewhere")).not.toBeInTheDocument();
     expect(screen.queryByTestId("projects-shared-with-you")).toBeNull();
     expect(
-      screen.getAllByRole("link", { name: /open/i }).map((l) => l.getAttribute("href")),
+      screen.getAllByRole("link").map((l) => l.getAttribute("href")),
     ).toEqual(["/owned/personal-project"]);
   });
 

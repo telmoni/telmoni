@@ -16,9 +16,9 @@ vi.mock("./account/privacy/_delete-account", () => ({
     ownedOrganizations,
   }: {
     email: string;
-    ownedOrganizations: readonly string[];
+    ownedOrganizations: number;
   }) => (
-    <div data-testid="delete-account" data-email={email} data-owned={ownedOrganizations.join("|")} />
+    <div data-testid="delete-account" data-email={email} data-owned={ownedOrganizations} />
   ),
 }));
 vi.mock("./account/notifications/_incoming-invites", () => ({
@@ -73,7 +73,7 @@ function mount(over: Partial<Parameters<typeof AccountOnly>[0]> = {}) {
       email="ada@example.test"
       signupsOpen={false}
       invites={[]}
-      ownedOrganizations={[]}
+      ownedOrganizations={0}
       expiresAt={Date.now() + 60_000}
       {...over}
     />,
@@ -85,8 +85,8 @@ function mount(over: Partial<Parameters<typeof AccountOnly>[0]> = {}) {
 // deletion, and sign-out.
 describe("AccountOnly", () => {
   it("offers the account's deletion and sign-out", () => {
-    mount({ ownedOrganizations: ["Acme"] });
-    expect(screen.getByTestId("delete-account")).toHaveAttribute("data-owned", "Acme");
+    mount({ ownedOrganizations: 1 });
+    expect(screen.getByTestId("delete-account")).toHaveAttribute("data-owned", "1");
     expect(screen.getByTestId("delete-account")).toHaveAttribute(
       "data-email",
       "ada@example.test",
