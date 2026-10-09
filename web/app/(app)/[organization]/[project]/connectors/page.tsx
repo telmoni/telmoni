@@ -89,45 +89,47 @@ export default async function ConnectorsPage({
   return (
     <>
       <PageHeader title="Connectors" />
-      <div className="grid gap-3">
-        <p className="text-sm text-muted-foreground">
-          Connect this project to the places it already talks. A Slack or Discord
-          channel gets every notice this project raises; a webhook gets the events
-          you choose for it.
-        </p>
-
-        {notice && (
-          <p
-            role="status"
-            className={
-              connected
-                ? "text-sm text-brand-positive"
-                : "text-sm text-destructive"
-            }
-          >
-            {notice}
+      <div className="grid gap-6">
+        <section className="grid gap-3">
+          <p className="text-sm text-muted-foreground">
+            Connect this project to the places it already talks. A Slack or Discord
+            channel gets every notice this project raises; a webhook gets the events
+            you choose for it.
           </p>
-        )}
 
-        {/* Two to a row from `sm` up, one below it: a tile holds a mark, a
-            name and a sentence, and three of those across a phone is a
-            column of initials. */}
-        <div className="grid gap-3 sm:grid-cols-2">
-          {PROVIDERS.map((provider) => (
-            <Tile
-              key={provider}
-              provider={provider}
-              projectId={projectId}
-              canManage={canManage}
-              // No listing — the service is unreachable, or not configured —
-              // renders the tile exactly as it did before the lane existed.
-              enabled={listing?.enabled[provider] ?? false}
-              connections={(listing?.connections ?? []).filter(
-                (c) => c.provider === provider,
-              )}
-            />
-          ))}
-        </div>
+          {notice && (
+            <p
+              role="status"
+              className={
+                connected
+                  ? "text-sm text-brand-positive"
+                  : "text-sm text-destructive"
+              }
+            >
+              {notice}
+            </p>
+          )}
+
+          {/* Two to a row from `sm` up, one below it: a tile holds a mark, a
+              name and a sentence, and three of those across a phone is a
+              column of initials. */}
+          <div className="grid gap-3 sm:grid-cols-2">
+            {PROVIDERS.map((provider) => (
+              <Tile
+                key={provider}
+                provider={provider}
+                projectId={projectId}
+                canManage={canManage}
+                // No listing — the service is unreachable, or not configured —
+                // renders the tile exactly as it did before the lane existed.
+                enabled={listing?.enabled[provider] ?? false}
+                connections={(listing?.connections ?? []).filter(
+                  (c) => c.provider === provider,
+                )}
+              />
+            ))}
+          </div>
+        </section>
       </div>
     </>
   );

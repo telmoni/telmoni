@@ -90,7 +90,7 @@ export default async function OrganizationMembersPage() {
         }
       />
 
-      <div className="grid gap-3">
+      <div className="grid gap-6">
         <section className="grid gap-3 lg:grid-cols-3">
           <Card className="gap-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
