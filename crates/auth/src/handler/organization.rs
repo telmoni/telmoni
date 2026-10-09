@@ -574,13 +574,15 @@ fn organization_name(raw: &str) -> Result<String, TelmoniError> {
     Ok(name)
 }
 
-/// A URL asked for, at creation or on Settings: a slug's shape, and no word
-/// the console's own paths use. Whether another organization holds it is the
+/// A URL asked for, at creation or on Settings: a slug's shape, no word the
+/// console's own paths use, and no [`slug::BLOCKED`] word, each refusal typed
+/// as the URL's (`/errors/auth/bad-url`) so the console's form puts it under
+/// the URL rather than the name. Whether another organization holds it is the
 /// write's to say.
 fn asked_url(raw: &str) -> Result<String, TelmoniError> {
     let asked = raw.trim();
     if !slug::is_slug(asked) {
-        return Err(AuthError::BadRequest(format!(
+        return Err(AuthError::BadUrl(format!(
             "a URL is lowercase letters and digits, in words joined by single hyphens, at \
              most {} characters",
             slug::MAX_LEN
@@ -588,9 +590,17 @@ fn asked_url(raw: &str) -> Result<String, TelmoniError> {
         .into());
     }
     if slug::Scope::Organization.reserves(asked) {
-        return Err(AuthError::BadRequest(format!(
+        return Err(AuthError::BadUrl(format!(
             "{asked} is a word the console's own paths use — choose another URL"
         ))
+        .into());
+    }
+    // Not echoed back: the refusal is about the word, and repeating a slur in
+    // an error is no kinder than taking it.
+    if slug::offends(asked) {
+        return Err(AuthError::BadUrl(
+            "that URL holds a word no URL here may hold — choose another URL".into(),
+        )
         .into());
     }
     Ok(asked.to_owned())

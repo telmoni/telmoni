@@ -265,6 +265,13 @@ pub enum AuthError {
     #[error("bad request: {0}")]
     BadRequest(String),
 
+    /// A URL asked for an organization that none may go by: not a slug's
+    /// shape, a word the console's own paths use, or a blocked word. A type
+    /// of its own, so a form asking for a name and a URL at once can say which
+    /// of the two was refused. Maps to 400.
+    #[error("bad url: {0}")]
+    BadUrl(String),
+
     /// Auth-scoped state conflict (duplicate slug, conflicting email). Maps to 409.
     #[error("conflict: {0}")]
     Conflict(String),
@@ -290,10 +297,13 @@ impl AuthError {
             ),
             Self::NotFound(_) => ("not-found", 404, "not found"),
             Self::BadRequest(_) => ("bad-request", 400, "bad request"),
+            Self::BadUrl(_) => ("bad-url", 400, "bad url"),
             Self::Conflict(_) => ("conflict", 409, "conflict"),
         };
         let detail = match self {
-            Self::NotFound(m) | Self::BadRequest(m) | Self::Conflict(m) => Some(m.clone()),
+            Self::NotFound(m) | Self::BadRequest(m) | Self::BadUrl(m) | Self::Conflict(m) => {
+                Some(m.clone())
+            }
             _ => None,
         };
         ProblemDetails {
@@ -469,6 +479,12 @@ mod tests {
                 "/errors/auth/bad-request",
                 400,
                 "bad request",
+            ),
+            (
+                AuthError::BadUrl("not a slug".into()),
+                "/errors/auth/bad-url",
+                400,
+                "bad url",
             ),
             (
                 AuthError::Conflict("slug taken".into()),

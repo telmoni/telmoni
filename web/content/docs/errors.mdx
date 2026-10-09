@@ -38,6 +38,7 @@ your code can branch on.
 | `/errors/auth/identity-unavailable` | 503 | Telmoni could not check who you are right now, because the identity provider's keys or its own identity service could not be reached. Try again shortly. | |
 | `/errors/auth/not-found` | 404 | The thing you named does not exist, or is not yours to see. `detail` says what kind of thing. | |
 | `/errors/auth/bad-request` | 400 | A value was not acceptable, such as a malformed email address. `detail` says which. | |
+| `/errors/auth/bad-url` | 400 | The URL asked for an organization is not one it may go by: not lowercase letters and digits in words joined by single hyphens, longer than 48 characters, a word the console's own pages use, or a word no URL may hold. `detail` says which, without repeating a word no URL may hold. A URL another organization holds is a `409` instead. | |
 | `/errors/auth/conflict` | 409 | It already exists, conflicts with something that does, or something is not in the state the request needs, such as deleting your account while you own an organization other people are in. `detail` says what. | |
 | `/errors/authz/forbidden` | 403 | You are signed in and this is not allowed. `detail` says why. | |
 | `/errors/authz/insufficient-role` | 403 | Your role does not allow this. `detail` names the least role that would, such as `required admin, have member`. | |

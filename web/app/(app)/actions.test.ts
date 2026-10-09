@@ -347,6 +347,21 @@ describe("createOrganizationAction", () => {
     expect(r).toEqual({ error: "bad request: give the organization a name", field: "name" });
   });
 
+  // The console keeps no list of the words no URL may hold, so auth's refusal
+  // of one is the first word of it, and belongs under URL, not Name.
+  it("shows auth's refusal of the URL under URL", async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 400 });
+    mockExtractProblem.mockResolvedValueOnce({
+      message: "bad url: that URL holds a word no URL here may hold \u2014 choose another URL",
+      problem: { type: "/errors/auth/bad-url", title: "bad url", status: 400 },
+    });
+    const r = await createOrganizationAction("Acme", "acme-labs");
+    expect(r).toEqual({
+      error: "bad url: that URL holds a word no URL here may hold \u2014 choose another URL",
+      field: "slug",
+    });
+  });
+
   it("says sign-ups are closed in the flag's own sentence", async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 503 });
     mockExtractProblem.mockResolvedValueOnce({

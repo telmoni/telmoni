@@ -58,11 +58,11 @@ export async function createProjectAction(
   const ctx = await identityContext();
   if (!ctx) return { error: await unplacedOrganization() };
 
-  // ⚠ **The organization is the caller's to CHOOSE and ours to CHECK.** The
-  // project used to land wherever the active-organization cookie pointed, which
-  // is wrong for somebody who administers more than one: the only place to
-  // decide is the dialog, and the dialog can only offer a choice if this
-  // accepts one.
+  // ⚠ **The organization is the caller's to NAME and ours to CHECK.** The
+  // project used to land wherever the active-organization cookie pointed,
+  // which is wrong for somebody who administers more than one: the cookie
+  // follows the last tab that moved, and the dialog names the organization
+  // its own page stands in.
   //
   // The console names `x-organization-id`, so naming one the caller may not
   // act in would be asserting a claim on their behalf. Auth checks
@@ -197,11 +197,16 @@ export async function createOrganizationAction(
     // The one conflict a creation meets is the URL asked for; one with no URL
     // asked for belongs under neither field.
     if (res.status === 409) return url ? { error: message, field: "slug" } : { error: message };
-    // Every URL auth refuses for its shape or its word is refused above by
-    // the same rules (`lib/slug.ts`, whose words and length `contract.test.ts`
-    // pins to auth's), so a 400 that gets this far is the name's: one auth
-    // cleans to nothing.
-    if (res.status === 400) return { error: message, field: "name" };
+    // Auth types a URL's refusal as the URL's: one for a word no URL may
+    // hold, which this console keeps no list of — its shape and the console's
+    // own words are refused above, by rules `contract.test.ts` pins to
+    // auth's. Any other 400 is the name's: one auth cleans to nothing.
+    if (res.status === 400) {
+      return {
+        error: message,
+        field: problem?.type === "/errors/auth/bad-url" ? "slug" : "name",
+      };
+    }
     return { error: message };
   }
 

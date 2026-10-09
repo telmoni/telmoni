@@ -58,6 +58,7 @@ export const RESERVED_ORGANIZATION_SLUGS: ReadonlySet<string> = new Set([
   "docs",
   "download",
   "enterprise",
+  "errors",
   "favicon",
   "health",
   "help",
@@ -80,6 +81,9 @@ export const RESERVED_ORGANIZATION_SLUGS: ReadonlySet<string> = new Set([
   "org",
   "organization",
   "organizations",
+  "otlp",
+  "ping",
+  "pings",
   "plans",
   "pricing",
   "privacy",
@@ -108,6 +112,7 @@ export const RESERVED_ORGANIZATION_SLUGS: ReadonlySet<string> = new Set([
   "users",
   "v1",
   "v2",
+  "webhooks",
   "www",
 ]);
 

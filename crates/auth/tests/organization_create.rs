@@ -310,6 +310,13 @@ async fn the_url_is_derived_from_the_name_unless_one_is_asked_for(pool: PgPool) 
     assert_eq!(body["name"], "株式会社", "{body}");
     assert!(body["slug"].as_str().unwrap().starts_with("org-"), "{body}");
 
+    // A name is the organization's to choose, and keeps; its URL is carried
+    // into every link, so a blocked word in it gives a placeholder instead.
+    let (status, body) = create(&pool, "user_url_first", json!({ "name": "Shit Show" })).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["name"], "Shit Show", "{body}");
+    assert!(body["slug"].as_str().unwrap().starts_with("org-"), "{body}");
+
     for blank in ["", "   "] {
         let (status, body) = create(
             &pool,
@@ -415,12 +422,35 @@ async fn a_bad_name_or_url_is_refused_and_makes_nothing(pool: PgPool) {
         json!({ "name": "Acme", "slug": "a".repeat(49) }),
         json!({ "name": "Acme", "slug": "settings" }),
         json!({ "name": "Acme", "slug": "console" }),
+        json!({ "name": "Acme", "slug": "acme-sh1t" }),
         json!({ "slug": "acme" }),
         json!({ "name": "Acme", "owner": "user_somebody_else" }),
     ] {
         let (status, body) = create(&pool, "user_careless", refused.clone()).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}: {body}");
     }
+
+    // A URL's refusal is typed as the URL's and a name's as a bad request, so
+    // a form asking for both can say which was refused; the name is checked
+    // first, and a blocked word is never echoed back.
+    let (_, body) = create(
+        &pool,
+        "user_careless",
+        json!({ "name": "Acme", "slug": "acme-sh1t" }),
+    )
+    .await;
+    assert_eq!(body["type"], "/errors/auth/bad-url", "{body}");
+    assert!(
+        !body.to_string().contains("sh1t"),
+        "the word is not echoed back: {body}"
+    );
+    let (_, body) = create(
+        &pool,
+        "user_careless",
+        json!({ "name": "\u{200B}\u{202E}", "slug": "acme-labs" }),
+    )
+    .await;
+    assert_eq!(body["type"], "/errors/auth/bad-request", "{body}");
     assert_eq!(owned_by(&pool, "user_careless").await, vec![own]);
     let after: i64 = sqlx::query_scalar("SELECT count(*) FROM auth.organizations")
         .fetch_one(&pool)

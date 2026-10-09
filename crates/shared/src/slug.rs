@@ -15,6 +15,12 @@
 //!
 //! An organization's slug is unique across every organization, being the
 //! path's first segment; a project's only within its organization.
+//!
+//! And no slug of either holds a [`BLOCKED`] word ([`offends`]): a URL is
+//! carried into every link, invitation and address bar it is shared to, so a
+//! name that would make one takes a placeholder when its row is made, a
+//! project renamed to one keeps the URL it had, and a URL asked for with one
+//! is refused.
 
 use uuid::Uuid;
 
@@ -57,6 +63,7 @@ pub const ORGANIZATION_RESERVED: &[&str] = &[
     "docs",
     "download",
     "enterprise",
+    "errors",
     "favicon",
     "health",
     "help",
@@ -79,6 +86,9 @@ pub const ORGANIZATION_RESERVED: &[&str] = &[
     "org",
     "organization",
     "organizations",
+    "otlp",
+    "ping",
+    "pings",
     "plans",
     "pricing",
     "privacy",
@@ -107,6 +117,7 @@ pub const ORGANIZATION_RESERVED: &[&str] = &[
     "users",
     "v1",
     "v2",
+    "webhooks",
     "www",
 ];
 
@@ -133,6 +144,166 @@ pub const PROJECT_RESERVED: &[&str] = &[
     "support",
     "usage",
 ];
+
+/// Words no slug of either scope may hold: profanity and slurs. Matched as
+/// whole words — one of a slug's hyphen-separated runs, the slug with its
+/// hyphens taken out (with or without the number on its end), or single
+/// letters spelled apart within it ([`offends`]) — never inside a longer word,
+/// so "Scunthorpe", "assessment" and "Dickens" pass. A word that is also a name, a place or an
+/// ordinary word ("dick", "cock", "ass", "dyke", "niger", "retard", which is
+/// French for a delay) is left off: a person called Dick still gets their own
+/// organization's name as its URL. English, plurals and endings spelled out.
+/// Sorted.
+pub const BLOCKED: &[&str] = &[
+    "arsehole",
+    "arseholes",
+    "asshole",
+    "assholes",
+    "beaner",
+    "beaners",
+    "bitch",
+    "bitches",
+    "bullshit",
+    "chink",
+    "chinks",
+    "cocksucker",
+    "cocksuckers",
+    "cunt",
+    "cunts",
+    "dickhead",
+    "dickheads",
+    "fag",
+    "faggot",
+    "faggots",
+    "fags",
+    "fuck",
+    "fucked",
+    "fucker",
+    "fuckers",
+    "fuckface",
+    "fuckin",
+    "fucking",
+    "fuckoff",
+    "fucks",
+    "fuckyou",
+    "gook",
+    "gooks",
+    "jizz",
+    "kaffir",
+    "kike",
+    "kikes",
+    "motherfucker",
+    "motherfuckers",
+    "motherfucking",
+    "nigga",
+    "niggas",
+    "niggaz",
+    "nigger",
+    "niggers",
+    "paki",
+    "pakis",
+    "raghead",
+    "ragheads",
+    "retarded",
+    "shit",
+    "shithead",
+    "shitheads",
+    "shithole",
+    "shits",
+    "shitting",
+    "shitty",
+    "slut",
+    "sluts",
+    "spic",
+    "spics",
+    "towelhead",
+    "towelheads",
+    "trannies",
+    "tranny",
+    "twat",
+    "twats",
+    "wanker",
+    "wankers",
+    "wetback",
+    "wetbacks",
+    "whore",
+    "whores",
+];
+
+/// Whether `slug` holds a [`BLOCKED`] word: as one of its runs; as the whole
+/// of it with the hyphens out (`f-u-c-k`), and again without the number on its
+/// end (`f-u-c-k-2`), since numbering is how a taken slug is told apart and
+/// must not unblock one; or as single letters spelled apart inside it
+/// (`my-f-u-c-k`), with or without that number too — each read as written
+/// and with the digits a word is
+/// disguised with read as the letters they stand in for (`sh1t`, `5lut`).
+#[must_use]
+pub fn offends(slug: &str) -> bool {
+    let runs: Vec<&str> = slug.split('-').collect();
+    let numbered = runs
+        .iter()
+        .rev()
+        .take_while(|run| run.bytes().all(|b| b.is_ascii_digit()))
+        .count();
+    let unnumbered = runs
+        .get(..runs.len().saturating_sub(numbered))
+        .unwrap_or_default();
+    let mut words = vec![runs.concat(), unnumbered.concat()];
+    words.extend(runs.iter().map(|run| (*run).to_owned()));
+    words.extend(spelled_apart(&runs));
+    words.extend(spelled_apart(unnumbered));
+    words
+        .iter()
+        .any(|word| BLOCKED.iter().any(|blocked| reads_as(word, blocked)))
+}
+
+/// Each stretch of two or more single-letter runs in `runs`, joined: the word
+/// they spell apart (`my-f-u-c-k`). A digit counts as a letter here, since one
+/// stands in for a letter in a stretch as in a word (`s-h-1-t`).
+fn spelled_apart(runs: &[&str]) -> Vec<String> {
+    let mut stretches = Vec::new();
+    let mut letters = String::new();
+    for run in runs {
+        if run.len() == 1 {
+            letters.push_str(run);
+        } else if letters.len() > 1 {
+            stretches.push(std::mem::take(&mut letters));
+        } else {
+            letters.clear();
+        }
+    }
+    if letters.len() > 1 {
+        stretches.push(letters);
+    }
+    stretches
+}
+
+/// Whether `word` spells `blocked`, letter for letter, or with a digit in the
+/// place of the letter it stands in for — a one for an `i` or an `l`, each in
+/// its own place (`bu11sh1t`). A word mostly of digits is a number rather than
+/// a word in disguise (`600k`, `n1994`), so its digits stay digits.
+fn reads_as(word: &str, blocked: &str) -> bool {
+    if word.len() != blocked.len() {
+        return false;
+    }
+    let digits = word.bytes().filter(u8::is_ascii_digit).count();
+    let disguised = digits.saturating_mul(2) <= word.len();
+    word.bytes().zip(blocked.bytes()).all(|(w, b)| {
+        w == b
+            || (disguised
+                && match w {
+                    b'0' => b == b'o',
+                    b'1' => b == b'i' || b == b'l',
+                    b'3' => b == b'e',
+                    b'4' => b == b'a',
+                    b'5' => b == b's',
+                    b'6' | b'9' => b == b'g',
+                    b'7' => b == b't',
+                    b'8' => b == b'b',
+                    _ => false,
+                })
+    })
+}
 
 /// How many numbered slugs follow a name's own. Within an organization names
 /// collide only through punctuation and accents ("Web App", "web-app",
@@ -211,15 +382,17 @@ pub fn slugify(name: &str) -> Option<String> {
         slug.push_str(piece);
     }
     if slug.len() > MAX_LEN {
+        let inside_a_word = slug.as_bytes().get(MAX_LEN).is_some_and(|&b| b != b'-');
         slug.truncate(MAX_LEN);
-        slug.truncate(slug.trim_end_matches('-').len());
+        slug.truncate(whole_words(&slug, inside_a_word).len());
     }
     (!slug.is_empty()).then_some(slug)
 }
 
 /// The slugs a row called `name` may take, best first: the name's own, then
 /// numbered from `-2`. The caller writes the first no other row in `scope`
-/// holds. Empty when the name gives no slug.
+/// holds. Empty when the name gives no slug, or only one that [`offends`]:
+/// numbering a blocked word does not unblock it.
 ///
 /// An organization's end with the name and a random tail. Its namespace is
 /// everybody's, so the numbers of a common name ("Personal", "Test") run out,
@@ -229,6 +402,12 @@ pub fn candidates(scope: Scope, name: &str) -> Vec<String> {
     let Some(base) = slugify(name) else {
         return Vec::new();
     };
+    // Checked on the base, not only on each candidate: a word spelled apart
+    // (`f-u-c-k`) reads whole only while nothing follows it, so its numbers
+    // and its random tail would otherwise slip past.
+    if offends(&base) {
+        return Vec::new();
+    }
     let tail = match scope {
         Scope::Organization => Some(suffixed(&base, &random(TAIL_LEN))),
         Scope::Project => None,
@@ -236,7 +415,7 @@ pub fn candidates(scope: Scope, name: &str) -> Vec<String> {
     std::iter::once(base.clone())
         .chain((2..=NUMBERED).map(|n| suffixed(&base, &n.to_string())))
         .chain(tail)
-        .filter(|slug| !scope.reserves(slug))
+        .filter(|slug| !scope.reserves(slug) && !offends(slug))
         .collect()
 }
 
@@ -277,8 +456,21 @@ fn random(len: usize) -> String {
 /// [`MAX_LEN`].
 fn suffixed(base: &str, suffix: &str) -> String {
     let room = MAX_LEN.saturating_sub(suffix.len() + 1);
-    let cut = base.get(..room).unwrap_or(base).trim_end_matches('-');
+    let inside_a_word = base.as_bytes().get(room).is_some_and(|&b| b != b'-');
+    let cut = whole_words(base.get(..room).unwrap_or(base), inside_a_word);
     format!("{cut}-{suffix}")
+}
+
+/// A slug cut short, without a dangling hyphen, and back to its last whole
+/// word when the cut fell `inside_a_word`: half a word can read as another,
+/// a blocked one among them. A cut inside the first word keeps what it cut.
+fn whole_words(cut: &str, inside_a_word: bool) -> &str {
+    let whole = if inside_a_word {
+        cut.rfind('-').and_then(|at| cut.get(..at)).unwrap_or(cut)
+    } else {
+        cut
+    };
+    whole.trim_end_matches('-')
 }
 
 /// What a Latin letter with a mark reads as in a slug; ligatures and the sharp
@@ -469,5 +661,115 @@ mod tests {
                 && !Scope::Project.reserves(&project)
         );
         assert_ne!(org, placeholder(Scope::Organization));
+    }
+
+    #[test]
+    fn the_blocked_words_are_sorted_single_words() {
+        assert!(BLOCKED.windows(2).all(|w| w[0] < w[1]));
+        assert!(
+            BLOCKED
+                .iter()
+                .all(|w| !w.is_empty() && w.bytes().all(|b| b.is_ascii_lowercase()))
+        );
+    }
+
+    #[test]
+    fn a_blocked_word_offends_however_it_is_spelled() {
+        for bad in [
+            "fuck",
+            "acme-shit",
+            "shit-show",
+            "motherfucker-inc",
+            "sh1t-show",
+            "5lut",
+            "s1ut",
+            "f-u-c-k",
+            "sh-it",
+            // A number on the end, as a taken slug is numbered, unblocks nothing.
+            "f-u-c-k-2",
+            "ass-hole-2",
+            // Letters spelled apart inside a longer slug, numbered or not.
+            "my-f-u-c-k",
+            "my-f-u-c-k-2",
+            "acme-s-h-1-t-2",
+            // A one for an `i` in one place and an `l` in another.
+            "bu11sh1t",
+            "sh1tho1e",
+        ] {
+            assert!(offends(bad), "{bad}");
+        }
+    }
+
+    // A run mostly of digits is a number, not a word in disguise, and a
+    // single letter beside words spells nothing.
+    #[test]
+    fn a_number_or_a_lone_letter_does_not_offend() {
+        for fine in [
+            "600k",
+            "road-to-600k",
+            "600-k",
+            "n1994",
+            "model-f465",
+            "go-ok-labs",
+            "s-hit-records",
+            "a-team",
+            "j-k-rowling",
+        ] {
+            assert!(!offends(fine), "{fine}");
+        }
+    }
+
+    // A cut that falls inside a word goes back to the last whole one: half a
+    // word can read as another, a blocked one among them.
+    #[test]
+    fn a_long_name_is_cut_back_to_a_whole_word() {
+        assert_eq!(
+            slugify("Engineering Council and Software Houses of Pakistan").as_deref(),
+            Some("engineering-council-and-software-houses-of")
+        );
+        assert_eq!(
+            suffixed("abcdefghij-abcdefghij-abcdefghij-abcdefghij-abcd", "20"),
+            "abcdefghij-abcdefghij-abcdefghij-abcdefghij-20"
+        );
+    }
+
+    // Whole words only: the Scunthorpe problem is a filter matching inside
+    // words, and a name or a place that is also slang is somebody's own.
+    #[test]
+    fn a_word_inside_another_or_a_name_does_not_offend() {
+        for fine in [
+            "acme",
+            "scunthorpe-united",
+            "assessment",
+            "class-act",
+            "cocktail-bar",
+            "shiitake",
+            "dickens-and-sons",
+            "dicks-organization",
+            "hancock",
+            "van-dyke",
+            "niger-delta",
+            "gestion-du-retard",
+            "the-sh-it",
+            "web-app-2",
+        ] {
+            assert!(!offends(fine), "{fine}");
+        }
+    }
+
+    #[test]
+    fn a_name_with_a_blocked_word_gives_no_slug_of_its_own() {
+        assert!(candidates(Scope::Project, "Shit Tracker").is_empty());
+        assert!(candidates(Scope::Organization, "Fuck this").is_empty());
+        // Spelled apart, the word reads whole only with nothing after it:
+        // neither its numbers nor an organization's random tail get through.
+        assert!(candidates(Scope::Project, "F U C K").is_empty());
+        assert!(candidates(Scope::Organization, "Ass Hole").is_empty());
+        assert_eq!(
+            candidates(Scope::Organization, "Dick's organization")
+                .first()
+                .map(String::as_str),
+            Some("dicks-organization")
+        );
     }
 }

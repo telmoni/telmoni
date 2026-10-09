@@ -264,6 +264,27 @@ async fn the_url_is_a_setting_of_its_own(pool: PgPool) {
     }
     let (status, body) = update(&pool, owner, &organization, json!({ "slug": "account" })).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "a reserved word: {body}");
+    assert_eq!(
+        body["type"], "/errors/auth/bad-url",
+        "the URL's refusal: {body}"
+    );
+    let (status, body) = update(&pool, owner, &organization, json!({ "slug": "acme-sh1t" })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "a blocked word: {body}");
+    assert_eq!(
+        body["type"], "/errors/auth/bad-url",
+        "the URL's refusal: {body}"
+    );
+    assert!(
+        !body.to_string().contains("sh1t"),
+        "the word is not echoed back: {body}"
+    );
+    // A number on the end, as a taken slug is numbered, unblocks nothing.
+    let (status, body) = update(&pool, owner, &organization, json!({ "slug": "ass-hole-2" })).await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "a word spelled apart and numbered: {body}"
+    );
     assert_eq!(stored_slug(&pool, &organization).await, "acme");
 
     let (status, _) = update(&pool, owner, &organization, json!({})).await;
