@@ -76,7 +76,7 @@ To authenticate against a self-hosted Telmoni instance, supply the `--endpoint` 
 $ telmoni login --endpoint https://telmoni.example.com
 ```
 
-The endpoint must use HTTPS unless it is this machine (`localhost` or a loopback address): the CLI refuses to send credentials over plain HTTP to any other host. A proxy named by the system proxy variables still receives a plain-HTTP request to this machine, in the clear, unless `NO_PROXY` lists its host (`localhost,127.0.0.1,::1`). An endpoint given without a scheme gets `https://`, or `http://` for this machine. The CLI follows no redirects, and gives up on a request after 30 seconds.
+The endpoint must use HTTPS unless it is this machine (`localhost` or a loopback address): the CLI refuses to send credentials over plain HTTP to any other host. A request to this machine never goes through a proxy, whatever the system proxy variables name. An endpoint given without a scheme gets `https://`, or `http://` for this machine. The CLI follows no redirects, and gives up on a request after 30 seconds.
 
 1. Open the printed address in a browser, on any machine. If you are not signed in to the console there, it asks you to sign in first and returns you to the page.
 2. Check that the code on the page is the one in your terminal. The page the CLI opened already carries it; otherwise, type it in.
@@ -232,9 +232,9 @@ The CLI reads the following environment variables:
 | `TELMONI_API_KEY` | The API key `telmoni login` uses when `--key` is not given, for CI/CD runs. No other command reads it. |
 | `TELMONI_ORG` | With a browser session, the organization `status`, `whoami` and `logout` act in instead of the active one, by ID or slug, from the list the CLI saved. A script should give the ID, which nothing moves. |
 
-Its requests also go through a proxy named by the system proxy variables
-(`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` and `NO_PROXY`), which its HTTP
-library reads.
+Its requests to any host but this machine also go through a proxy named by
+the system proxy variables (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` and
+`NO_PROXY`), which its HTTP library reads.
 
 ---
 
