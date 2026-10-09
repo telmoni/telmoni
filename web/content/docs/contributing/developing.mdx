@@ -1,9 +1,9 @@
 ---
 title: "Developing"
-description: "Running and checking each Telmoni repository on your machine: the platform with these docs in it, and the CLI and SDKs."
+description: "Running and checking each Telmoni repository on your machine: the platform with these docs in it, the CLI and SDKs, and the agent skills."
 ---
 
-One page for the two repositories. The gates named here are what each repository's CI runs.
+One page for the three repositories. The gates named here are what each repository's CI runs.
 
 ## The platform
 
@@ -57,11 +57,24 @@ $ (cd sdk/go && go test ./...)
 $ sdk/python/.venv/bin/pytest sdk/python
 ```
 
-`cargo xtask ci` is the Rust gate CI runs: fmt, the toolchain check, clippy, build, test, doc and `cargo deny`. CI also checks the SDKs (TypeScript with `npm ci && npm run verify`, Python with `ruff check`, `ruff format --check`, `mypy` and `pytest`, Go with its tests) and lints its workflows with actionlint. `cargo xtask dist` packages this machine's binary as `dist/telmoni-<os>-<arch>.tar.gz`, with its `SHA256SUMS`; a release is an annotated `v*` tag whose version matches `Cargo.toml`, which `.github/workflows/release.yml` builds for both platforms and publishes with `install.sh` ([architecture/build.md](https://github.com/telmoni/telmoni-cli/blob/main/architecture/build.md)).
+`cargo xtask ci` is the Rust gate CI runs: fmt, the toolchain check, clippy, build, test, doc and `cargo deny`. CI also checks the SDKs (TypeScript with `npm ci && npm run verify`, Python with `ruff check`, `ruff format --check`, `mypy` and `pytest`, Go with its tests) and lints its workflows with actionlint. `cargo xtask dist` packages this machine's binary as `dist/telmoni-<os>-<arch>.tar.gz`, with its `SHA256SUMS`; a release is an annotated `v*` tag whose version matches `Cargo.toml`, which `.github/workflows/release.yml` builds for both platforms and publishes with `install.sh` ([docs/build.md](https://github.com/telmoni/telmoni-cli/blob/main/docs/build.md)).
+
+## The skills
+
+[`telmoni/skills`](https://github.com/telmoni/skills): the agent skills, packaged as a plugin for Claude Code and the other agents that read them.
+
+You need `uv` and Claude Code.
+
+```console
+$ make check
+$ claude --plugin-dir .
+```
+
+`make check` is the gate CI runs: it validates each skill against the Agent Skills spec, `plugin.json` against the Agent Plugins schema, and the plugin and its marketplace with `claude plugin validate .`. `claude --plugin-dir .` starts a Claude Code session with your checkout's plugin loaded. `make eval` runs the eval suite, each case with and without the plugin, and spends model usage; on Linux its runs need `bubblewrap` and `socat`. The repository's `AGENTS.md` says what a skill may say and how to test a change.
 
 ## The docs
 
-These pages are the platform's, `web/content/docs` in [`telmoni/telmoni`](https://github.com/telmoni/telmoni): MDX that the console serves at `/docs` with [Fumadocs](https://fumadocs.dev), built and checked with the console, so a deployment serves the docs of the version it runs. What a page may say is the code's business: verify every claim against the platform or the CLI before writing it, and the billing, legal and subprocessors pages against the hosted service's own code. `make up` serves them at http://localhost:3000/docs with live reload.
+These pages are the platform's, `web/content/docs` in [`telmoni/telmoni`](https://github.com/telmoni/telmoni): MDX that the console serves at `/docs` with [Fumadocs](https://fumadocs.dev), built and checked with the console, so a deployment serves the docs of the version it runs. What a page may say is the code's business: verify every claim against the platform or the CLI before writing it. `make up` serves them at http://localhost:3000/docs with live reload.
 
 - A page is an `.mdx` file under `web/content/docs/`, with `title` and `description` in its frontmatter; the title is also its name in the sidebar.
 - Each folder's `meta.json` is the reading order, and the only place that holds it: a new page goes into its folder's `pages`, and the `...` at the end takes in the pages a console built on this one lays over the tree.
