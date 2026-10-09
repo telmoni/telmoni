@@ -145,7 +145,7 @@ TypeScript holds `apiKey` as a non-enumerable property, which `console.log` and
 | `TELMONI_API_KEY` | An [API key](/docs/api/api-keys), created on a project's API keys page | None |
 | `TELMONI_ORG` | The organization's ID (`org_...`) | None |
 
-Every SDK reads these three and no others, as the CLI does.
+Every SDK reads these three and no others: the same three `TELMONI_*` variables the CLI reads.
 
 An SDK holds the organization exactly as the variable gives it, checks nothing
 and sends it nowhere; unlike the [CLI](/docs/api/cli#managing-organizations), it has
