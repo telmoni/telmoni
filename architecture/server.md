@@ -165,7 +165,7 @@ The premise is that in one process there is nothing to secure or cache between m
 | `Auth` | `crates/auth/src/seam.rs` | `resolve`: notifications' and the agent's lanes. `resolve_again`: the agent, mid-turn. `project_homes`: the agent's retention and citations, and notifications' document links. `organization_slugs`: notifications' document links, and a deployment's modules. `global_flags`: the delivery loop and connector lanes. `members`, `audit_events`: the agent's tools. `audit_documents`: the agent's indexer. `organization_standing`: for a deployment's modules. |
 | `Notifications` | `Notifier`, `crates/notifications/src/seam.rs` | `emit`, `purge_organization`, `purge_project`, `redact_person`: auth. `activity_documents`, `connectors`, `connector_deliveries`: the agent. |
 | `Agent` | `AgentSeam`, `crates/agent/src/seam.rs` | `erase_person`, `purge_organization`: auth's deletion |
-| `PurgeHook` | A deployment's own code | Called when an organization's deletion is confirmed (in the request's inline tail), again by the sweep until a run is recorded, and again at finalize. The row is kept until the hook answers `Ok`. ⚠ It runs while the organization can still be restored, and a restore undoes nothing it did. |
+| `PurgeHook` | A deployment's own code | Called when an organization's deletion is confirmed (in the request's inline tail), again by the sweep until a run is recorded, and again at finalize. The row is kept until the hook answers `Ok`. ⚠ It runs during the grace, before the organization is erased, and nothing brings an organization back, so what it purges stays purged. |
 | `AgentObserver` | Nothing yet: the telemetry module, once it exists, set on `AgentParts::observer` | `observe`: the agent, as each question ends (`crates/agent/src/observe.rs`). A record carries ids, timings and token counts, never what anyone wrote ([agent](agent.md#recording-the-agents-own-questions)). |
 
 Rules the seams follow:
@@ -264,7 +264,7 @@ See [background work](background.md) for every loop's cadence and leadership.
 - `migrate` is a hook Job;
 - `rotate` is a CronJob.
 
-The sweeps, `terminate` and `restore` are run by hand, or by an operator's own jobs.
+The sweeps and `terminate` are run by hand, or by an operator's own jobs.
 
 | Command | Does |
 |---|---|
@@ -275,6 +275,7 @@ The sweeps, `terminate` and `restore` are run by hand, or by an operator's own j
 | `sweep audit-verify` | Walks every audit chain and logs any break. It never repairs. |
 | `sweep retention` | Auth's retention, once |
 | `sweep agent-reindex` | Re-embeds every passage a different embedding model made |
+| `sweep audit-exports` | Deletes every audit export's file past its week, then builds again the exports a restart dropped |
 | `terminate <org_id>` | Marks an organization for deletion, as the operator, audited as the operator. By id, never by slug. |
 
 ## The wire contract

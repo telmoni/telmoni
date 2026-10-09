@@ -3,8 +3,8 @@
 #   docker build -f crates/telmoni/Dockerfile -t telmoni .
 #
 # One binary, every job: the image's default command is `serve`; a Job
-# overrides it with `migrate`, `rotate`, `sweep <name>`, `terminate <org>` or
-# `restore <org>` as the container's `args`.
+# overrides it with `migrate`, `rotate`, `sweep <name>` or `terminate <org>`
+# as the container's `args`.
 #
 # Required env at runtime, `serve` and the sweeps:
 #   AUTH_DATABASE_URL, NOTIFICATIONS_DATABASE_URL, SERVICE_SECRET, APP_URL

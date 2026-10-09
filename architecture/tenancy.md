@@ -45,7 +45,7 @@ flowchart TD
   - See [the console's paths](console.md#paths-and-slugs).
 
 **A person is given their first organization, and creates any more.**
-- A person's first organization is provisioned the first time `/me` finds them in none (`provision_first_organization`, `crates/auth/src/handler/me.rs`). It writes the organization, named after its owner ("Ada's organization", at the slug that reads as; see [the console's paths](console.md#paths-and-slugs)), its owner row, and their audit rows — and no project. Nothing is asked first: the owner makes the first project from the organization's overview, where `/console` lands everybody, and renames the organization on Settings.
+- A person's first organization is provisioned the first time `/me` finds them in none (`provision_first_organization`, `crates/auth/src/handler/me.rs`). It writes the organization, named after its owner ("Ada's organization", at the slug that reads as; see [the console's paths](console.md#paths-and-slugs)), its owner row, and their audit rows — and no project. Nothing is asked first: `/console` lands everybody on the organization's overview, and the owner makes the first project from its Projects page or the switcher's project menu, and renames the organization on Settings.
   - Provisioning is gated by the global `Signup` flag. With the flag off, the person gets an answer with no organization, not an error.
   - It takes the person's lock and checks again, so two first page loads at once provision only one organization.
 - **Anybody signed in creates another on request** (`POST /internal/organizations`, `create_organization`, `crates/auth/src/handler/organization.rs`), from the switcher's **New organization**, and owns it.
@@ -61,7 +61,7 @@ flowchart TD
 **A person opens in their default organization, as Vercel opens on a default team.**
 - It is where the console opens at sign-in, and the organization a request that names none acts in — the CLI's at login among them, which keeps what `/me` answered (`default_organization`, `crates/auth/src/handler/me.rs`; `/me` answers it as `defaultOrganizationId`).
 - It is the one the person chose on Account Settings (`PUT /internal/me/default-organization`), while they hold its seat and it is active; else the oldest they own; else the oldest they belong to. So the first organization is the default until another is chosen.
-- ⚠ **The choice is stored as the seat** (`auth.accounts.default_membership_id`, a foreign key to `auth.organization_members` that sets itself null), not the organization. Leaving, a removal and the organization's erasure take the choice with the seat, and a later seat in the same organization is not chosen until the person chooses it again — as Vercel picks a new default team for whoever leaves theirs. An organization being deleted is passed over while it waits, and is the default again if restored.
+- ⚠ **The choice is stored as the seat** (`auth.accounts.default_membership_id`, a foreign key to `auth.organization_members` that sets itself null), not the organization. Leaving, a removal and the organization's erasure take the choice with the seat, and a later seat in the same organization is not chosen until the person chooses it again — as Vercel picks a new default team for whoever leaves theirs. An organization being deleted is passed over while it waits, and goes with its erasure.
 - Choosing is recorded on the chosen organization's audit chain, as a person's own act on their seat there; another organization's chain has no business with it.
 
 **Invitations are the only way a person joins someone else's organization on their own.** The one other way onto a roster is a project transfer: it enrolls the project's seat holders on the destination organization's roster (see [Transfers](#transfers)).
@@ -74,7 +74,7 @@ flowchart TD
 
 | Level | Rows |
 |---|---|
-| Organization | `auth.organizations`, `organization_members`, `organization_invites`, `organization_flags`; the audit chain `audit.events` (with an optional `in_project`); the organization's own feed (`project_id IS NULL`); the agent's conversations and erasure fences |
+| Organization | `auth.organizations`, `organization_members`, `organization_invites`, `organization_flags`, `audit_exports` (each its requester's alone: its policy compares `user_id` to `app.user_id` too); the audit chain `audit.events` (with an optional `in_project`); the organization's own feed (`project_id IS NULL`); the agent's conversations and erasure fences |
 | Project | `auth.projects`, `project_members`, `member_invites`, `api_tokens`; notifications' connections, deliveries and attempts; the project's feed |
 | Person | identities, accounts, sessions, credentials, tokens and confirmation codes |
 

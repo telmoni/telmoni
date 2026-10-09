@@ -552,8 +552,8 @@ fn handler_emit_set_matches_manifest() {
     };
     for svc in SCANNED_SERVICES {
         visit_rust_files(&root.join(format!("crates/{svc}/src/handler")), &mut scan);
-        // The one-shot subcommands (`terminate`, `restore`) mutate outside a
-        // handler, and are audited all the same.
+        // The one-shot subcommand (`terminate`) mutates outside a handler,
+        // and is audited all the same.
         let sweeps = root.join(format!("crates/{svc}/src/sweep.rs"));
         if let Ok(contents) = std::fs::read_to_string(&sweeps) {
             scan(&sweeps, &contents);

@@ -74,9 +74,9 @@ The ids are UUIDv7, minted in Rust.
 - **A read returns a page, newest first,** and counts the unread total separately, rather than from the capped page.
 
 **In the console:**
-- The project feed is the project overview's recent activity.
+- ⚠ The project feed has no reader in the console for now: the project overview was reduced to the project's name on 2026-10-08, and its recent activity went with the rest (the section and `markProjectReadAction` are in git). Project notices still reach every connected channel.
 - The organization feed is on the organization overview.
-- The header's bell is not the feed: it shows invitations and ownership offers.
+- The header's bell is not the feed: it shows invitations, ownership and project offers, and the person's own audit log exports of the organization they are in, building or ready to take ([data](data.md#the-audit-log)).
 
 ## Raising a notice
 

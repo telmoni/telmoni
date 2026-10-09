@@ -53,7 +53,7 @@ flowchart LR
 - **The runtime image** is `distroless/static`, non-root.
 - **The allocator.** The binary uses mimalloc, because musl's allocator serializes threads on one lock.
 - **The migrations.** The image copies every module's migrations into `/app/migrations/<schema>`. An image built `FROM` this one adds its own module's set beside them.
-- **One image runs every command.** The default command is `serve`. A Job overrides it with `migrate`, `rotate`, `sweep …`, `terminate` or `restore`.
+- **One image runs every command.** The default command is `serve`. A Job overrides it with `migrate`, `rotate`, `sweep …` or `terminate`.
 
 **The console** (`web/Dockerfile`):
 - It builds the standalone Next.js server and runs it on a distroless, non-root Node image on port 3000.

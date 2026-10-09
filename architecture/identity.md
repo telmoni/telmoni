@@ -191,7 +191,7 @@ There is no lane that signs a person out of every session but the current one.
 | `telmoni_session` | The person's id, address and names; the bearer, the refresh token, the sid, the session row's id, the expiry, the provider's id token, the sign-in method | `SESSION_TTL_SECONDS`. `httpOnly`, `SameSite=Lax`, `secure` in production. |
 | `telmoni_pkce` | The sign-in's `state`, where to return, and the chosen provider | One sign-in |
 | `telmoni_connect` | A connector handshake's `state`, organization, project and vendor, each by id | One handshake |
-| `telmoni-organization` | Plain, not sealed, and not `httpOnly`: the id of the organization of the last page on screen, for the paths that name none. ⚠ The browser writes it, never the proxy; two Server Actions set it for an organization no page has shown yet (an organization's restore, an invitation's accept). | It claims nothing. Auth honours it only for a member. See [the console's paths](console.md#paths-and-slugs). |
+| `telmoni-organization` | Plain, not sealed, and not `httpOnly`: the id of the organization of the last page on screen, for the paths that name none. ⚠ The browser writes it, never the proxy; one Server Action sets it for an organization no page has shown yet, an invitation's accept. | It claims nothing. Auth honours it only for a member. See [the console's paths](console.md#paths-and-slugs). |
 
 Rotating `AUTH_SECRET` voids every console session.
 
@@ -261,7 +261,7 @@ API tokens are for the public `/v1` API (`crates/auth/src/handler/tokens.rs`, `c
   - Revoked and expired rows are deleted later by retention.
 - **Validation on `/v1`.**
   - The service secret first, then `require_token`.
-  - The token must be live, and its organization must be active. While an organization is pending deletion its keys stop working, and they come back if it is restored. An account deletion revokes the keys of the organizations it takes.
+  - The token must be live, and its organization must be active. While an organization is pending deletion its keys stop working, and they go with it when it is erased. An account deletion revokes the keys of the organizations it takes.
   - The `PublicApi` flag must be on for the token's organization: its own row, else the global one.
   - `last_used_at` is updated at most once an interval.
 - **`/v1` resolves the organization and reads at the project.** A token names its organization and the project it was minted on. `GET /v1/members` answers that project's roster — what every member of the project sees in the console — and never the organization's, which a project admin's seat is refused there; a key reads no further than whoever minted it could.
