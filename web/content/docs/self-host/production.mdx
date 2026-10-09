@@ -227,7 +227,7 @@ The `telmoni` binary includes administrative commands for cluster operators.
 
 ### Background maintenance sweeps
 
-Inside `telmoni serve`, the deletion sweep runs every ten minutes and the retention and audit-verification sweeps every 24 hours, each first a minute after boot. The deletion and audit-verification sweeps take a leader lock for each tick, so replicas on the same timers do not run one tick twice; the retention sweep takes none, since its deletes are safe to repeat. Every step is idempotent, so a tick cut short by a rollout is finished by the next. `RUN_SWEEPS=false` leaves them to runs you schedule. You can also trigger individual maintenance jobs on demand:
+Inside `telmoni serve`, the deletion sweep runs every ten minutes, the audit-export sweep every five, and the retention and audit-verification sweeps every 24 hours, each first a minute after boot. The deletion and audit-verification sweeps take a leader lock for each tick, so replicas on the same timers do not run one tick twice; the retention and audit-export sweeps take none, since their deletes are safe to repeat and each export they build is claimed first. Every step is idempotent, so a tick cut short by a rollout is finished by the next. `RUN_SWEEPS=false` leaves them to runs you schedule; schedule the audit-export sweep every few minutes, since it is the only retry for an export a restart cut short — without it one shows **Preparing** for good, and three such hold its owner off starting another — and what deletes a file past its 7 days. You can also trigger individual maintenance jobs on demand:
 
 ```bash
 # Finish pending deletions: erase each organization past its wait (15 minutes
@@ -244,6 +244,10 @@ telmoni sweep retention
 
 # Re-embed every agent passage that a previous EMBEDDINGS_MODEL embedded
 telmoni sweep agent-reindex
+
+# Delete every audit log export past its 7 days, then finish building the
+# exports a restart left unfinished
+telmoni sweep audit-exports
 ```
 
 ### Emergency organization management

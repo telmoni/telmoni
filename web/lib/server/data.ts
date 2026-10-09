@@ -79,5 +79,11 @@ export type {
   DeliveryLogPage,
 } from "./entities/connectors";
 
-export { fetchAuditEvents, fetchOrganizationAudit } from "./entities/audit";
+export {
+  auditExportFile,
+  fetchAuditEvents,
+  fetchOrganizationAudit,
+  listAuditExports,
+  startAuditExport,
+} from "./entities/audit";
 export type { AuditEvent } from "./entities/audit";

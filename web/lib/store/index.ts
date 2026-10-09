@@ -2,6 +2,7 @@
 
 import { createContext, useContext } from "react";
 import { createStore as createZustandStore, useStore as useZustandStore, type StoreApi as ZustandStoreApi } from "zustand";
+import { createAuditExportsSlice } from "./slices/audit-exports";
 import { createIdentitySlice } from "./slices/identity";
 import type { AppStore, StoreInitial } from "./types";
 
@@ -12,6 +13,7 @@ type StoreApi = ZustandStoreApi<AppStore>;
 export function createStore(initial: StoreInitial): StoreApi {
   return createZustandStore<AppStore>()((...a) => ({
     ...createIdentitySlice(initial)(...a),
+    ...createAuditExportsSlice()(...a),
   }));
 }
 
@@ -64,4 +66,12 @@ export const useAddProject = () => useStore((s) => s.addProject);
 export const useAddIncomingInvite = () => useStore((s) => s.addIncomingInvite);
 export const useRemoveIncomingInvite = () =>
   useStore((s) => s.removeIncomingInvite);
+
+export const useAuditExports = () => useStore((s) => s.auditExports);
+export const useAuditExportsStarted = () => useStore((s) => s.auditExportsStarted);
+export const useReplaceAuditExports = () => useStore((s) => s.replaceAuditExports);
+export const useAddAuditExport = () => useStore((s) => s.addAuditExport);
+export const useMarkAuditExportDownloaded = () =>
+  useStore((s) => s.markAuditExportDownloaded);
+export const useForgetAuditExport = () => useStore((s) => s.forgetAuditExport);
 

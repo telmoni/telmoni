@@ -21,7 +21,7 @@ Telmoni records changes to organizations, projects, members, API keys, sessions,
 
 | Category | Events |
 | :--- | :--- |
-| **Organization** | Creation, renames and URL changes, ownership transfers, deletion requests, and restorations. |
+| **Organization** | Creation, renames and URL changes, ownership transfers, deletion requests, and exports of the audit log or the organization's records. |
 | **Members** | Invitations sent, accepted, declined, and withdrawn; role changes; removals and departures. |
 | **API keys** | Creation, rotation, and revocation. |
 | **Sessions** | A session ended from the **Active sessions** panel, and a CLI session ended by `telmoni logout`, recorded in the organization the CLI was acting in. |
@@ -38,7 +38,7 @@ Sign-ins, signing out of the console, password changes, project renames, and con
 Every audit log entry carries:
 
 - **Actor**: The user ID of the person who acted. The platform's own routines act as `service:operator` (an operator's termination of an organization) or `service:deletion-saga` (the memberships an account deletion removes), and a change made from Slack's side as `external:slack`.
-- **Action**: One of `created`, `updated`, or `deleted`.
+- **Action**: One of `created`, `updated`, `deleted`, or `exported`, which records an export. Its details name what was exported under `export`: `audit_log`, with the file's format, range and number of events, or `organization`, the organization's records.
 - **Resource**: The kind of thing acted on (`organization`, `project`, `member`, `token`, which the console shows as **API key**, `session`, or `connector`) and its identifier, and the project it was written inside, if any.
 - **Details**: Metadata specific to the event, such as the name given or the role granted. The console's **Details** switch shows it under **Changed**, with the project the event was written inside, the request's id when one was recorded, and the row's hash.
 - **Timestamp**: Taken in UTC when the event was written, inside the transaction that made the change. The console shows it in your local time.
@@ -64,6 +64,137 @@ Telmoni uses cryptographic hash chaining across audit log rows:
   operator's `telmoni sweep audit-verify` runs it on demand, or on the
   operator's own schedule when `RUN_SWEEPS=false`.
 
+## Exporting and verifying
+
+The organization's **Audit log** page has an **Export** button, for its
+**Owner** and **Admins**, which you can also press `c` for. It asks two things:
+
+- **Range**: the last 7, 30 or 90 days, all time, or a custom range of days,
+  from the start of the first day to the end of the last in your own time zone.
+- **Format**: **JSON**, which holds every field each event's hash covers and
+  verifies with the script below, or **CSV**, the same events for a
+  spreadsheet.
+
+The file is built in the background, so you can keep working. While it builds,
+the notifications bell shows it whenever you are in that organization. When it
+is ready, a message says so in the tab you started it from: at once if you are
+still in that organization, or when you come back to it. Either way, the bell
+holds the file until you download it, `{organization}-audit-log-{date}.json` or
+`.csv`. The export dialog lists your three latest exports too, each
+downloadable again until it expires.
+
+- Only the person who started an export can see it or download it, and only
+  while they are still an **Owner** or **Admin**. Other admins of the same
+  organization cannot see or download it, though the log records each file
+  built. An export still being built when the person who started it stops
+  being an **Owner** or **Admin** is dropped, and recorded nowhere.
+- A finished file is kept for 7 days and then deleted. It is deleted sooner if
+  the organization is deleted or you delete your account.
+- You keep your ten newest exports in an organization: starting another
+  deletes your oldest finished one.
+- One file holds up to 25,000 events and 24 MiB. An export of a range that
+  holds more fails and says so; export a shorter range instead.
+- You can have up to three exports building at once in an organization, and,
+  across every organization, start up to 20 and download up to 10 in an hour.
+- Each file is recorded in the log itself when it is built, after the events
+  the file holds, with its range, format and number of events.
+
+A range takes whole stretches of the chain: every event from the first written
+in the range to the last, so the file has no gaps and verifies on its own.
+
+The JSON file holds, under `events` and oldest first, every field each row's
+hash covers and both hashes, so you can check it without trusting Telmoni:
+
+| Field | What it is |
+| :--- | :--- |
+| `seq` | The row's place in the organization's chain |
+| `id` | The row's id |
+| `created_at` | The time the hash covers, in UTC to the microsecond: `2026-10-08T19:24:59.123456Z` |
+| `actor_id`, `action`, `resource_kind`, `resource_id`, `in_project` | As stored, ids and words where the console shows names and labels |
+| `metadata` | The event's details |
+| `prev_hash` | The previous row's `row_hash`; `null` for the organization's first row |
+| `row_hash` | SHA-256, as hex, over the row's fields |
+
+The file also carries `organization_id`, `exported_at`, and the range you asked
+for, as `from` (`null` for all time) and `to`. It never holds the IP address,
+user agent or request id, which the hash does not cover.
+
+The CSV file starts with a byte order mark, so a spreadsheet reads it as
+UTF-8, then has a header row and one line for each event, with the same fields
+in the same order and `metadata` as JSON in its cell. A cell that a
+spreadsheet would run as a formula, one starting with `=`, `+`, `-`, `@`, a tab
+or a carriage return, starts with `'` instead. Verify with the JSON file, which
+holds each value as it was hashed.
+
+`row_hash` is SHA-256 over these segments, in this order: `id`,
+`organization_id`, `actor_id`, `action`, `resource_kind`, `resource_id`, the
+canonical `metadata`, `created_at`, `prev_hash`, and `in_project` last, only
+when the row has one. Each segment is its UTF-8 bytes preceded by their
+length as an unsigned 64-bit little-endian integer; a `null` segment is the
+length `2^64 - 1` alone. Canonical `metadata` is its JSON with the keys of
+every object sorted and no whitespace, and an empty string when there is none.
+
+This script checks a file with Node.js 18 or later and nothing else
+installed. It recomputes every row's hash and checks every row follows the one
+before it:
+
+```js title="verify-audit.mjs"
+// node verify-audit.mjs ada-works-audit-log-2026-10-08.json
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+
+const file = JSON.parse(readFileSync(process.argv[2], "utf8"));
+
+const canonical = (v) =>
+  v === null || typeof v !== "object"
+    ? JSON.stringify(v)
+    : Array.isArray(v)
+      ? `[${v.map(canonical).join(",")}]`
+      : `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(",")}}`;
+
+function rowHash(organization, row) {
+  const hash = createHash("sha256");
+  const segment = (text) => {
+    const length = Buffer.alloc(8);
+    if (text === null || text === undefined) {
+      length.writeBigUInt64LE(2n ** 64n - 1n);
+      hash.update(length);
+      return;
+    }
+    const bytes = Buffer.from(text, "utf8");
+    length.writeBigUInt64LE(BigInt(bytes.length));
+    hash.update(length);
+    hash.update(bytes);
+  };
+  const metadata = row.metadata === null || row.metadata === undefined ? "" : canonical(row.metadata);
+  for (const text of [row.id, organization, row.actor_id, row.action, row.resource_kind,
+    row.resource_id, metadata, row.created_at, row.prev_hash]) segment(text);
+  if (row.in_project) segment(row.in_project);
+  return hash.digest("hex");
+}
+
+let previous = null;
+let intact = true;
+for (const row of file.events) {
+  if (rowHash(file.organization_id, row) !== row.row_hash) {
+    console.log(`row ${row.seq}: its hash does not match its fields`);
+    intact = false;
+  }
+  if (previous !== null && row.prev_hash !== previous) {
+    console.log(`row ${row.seq}: it does not follow the row before it`);
+    intact = false;
+  }
+  previous = row.row_hash;
+}
+console.log(intact ? `${file.events.length} rows verify.` : "The file does not verify.");
+process.exit(intact ? 0 : 1);
+```
+
+A file's first row links to the row before it, which the file does not hold
+unless it starts at the organization's first event. An export of the range
+before it holds that row, so files of adjacent ranges check against each other.
+The chain's daily verification covers the whole chain.
+
 ## Retention
 
 The platform never deletes audit rows. The table is partitioned into monthly
@@ -71,7 +202,7 @@ tables by `created_at`, and `telmoni rotate` creates the current month's
 partition and the next three ahead of time and drops none. The 730-day window
 for audit events governs only how long the console agent's index keeps its
 copies of them. An organization's chain also outlives the organization's
-deletion.
+deletion. An export's file is the exception: it is a copy, kept 7 days.
 
 For self-hosted instances, retention is therefore bounded by your database and
 its backups. See [Production](/docs/self-host/production#audit-log-partition-rotation)

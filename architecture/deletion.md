@@ -143,6 +143,7 @@ flowchart TD
    - See [the agent's erasure](agent.md#erasure).
 4. **Memberships removed**, under the person's lock and each organization's lock:
    - seats, organization memberships and stray seats;
+   - the audit log exports they started, in every organization: after each organization's lock, as an organization's own erasure takes its lock before its cascade reaches them, and before the chain is written, as a build finishing one holds the export before the chain's lock;
    - each removal audited on that organization's chain, as the deletion saga;
    - invitations they accepted, which hold their address.
 5. **Notifications, redacted again.** This catches notices written while they were still a member.

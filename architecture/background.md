@@ -28,17 +28,19 @@ Every piece of this work is safe for several replicas to run at once, and safe t
 | Deletion sweep | `serve` (auth) | `DELETION_EVERY`, first after `START_DELAY` | Leader lock + heartbeat + budget | [deletion](deletion.md) |
 | Audit verification | `serve` (auth) | `AUDIT_VERIFY_EVERY` | Leader lock + heartbeat + budget | [data](data.md#the-audit-log) |
 | Auth retention | `serve` (auth) | `RETENTION_EVERY` | Nothing: one idempotent transaction | [data](data.md#retention) |
+| Audit exports sweep | `serve` (auth) | `AUDIT_EXPORTS_EVERY` | Row leases, each write fenced on its attempt; the deletes are idempotent | [data](data.md#the-audit-log) |
 | Delivery loop | `serve` (notifications) | `NOTIFICATIONS_DELIVERY_POLL_SECS` | Row leases, `SKIP LOCKED` | [notifications](notifications.md#the-delivery-queue) |
 | Notifications retention | `serve` (notifications) | Hourly | An advisory lock per chunk | [notifications](notifications.md#retention) |
 | Agent indexer | `serve` (agent, when on) | `EVERY`, first after its own `START_DELAY` | Cursor leases | [agent](agent.md#the-index) |
 | Agent retention | `serve` (agent, whenever linked) | Hourly | Advisory locks per pass | [agent](agent.md#retention) |
 | First delivery attempts | Spawned after an emit commits | Per notice | The delivery row's lease | [notifications](notifications.md#raising-a-notice) |
+| Audit export builds | Spawned after a request queues one | Per export, two at once a process | The export row's lease | [data](data.md#the-audit-log) |
 | Migrations | `telmoni migrate`, a Helm hook Job | Each install or upgrade | One Job | [data](data.md#migrations) |
 | Partition rotation | `telmoni rotate`, a CronJob | Daily | `concurrencyPolicy: Forbid` | [data](data.md#partitions) |
-| On demand | `telmoni sweep deletion\|audit-verify\|retention\|agent-reindex` | By hand or by a scheduler | `deletion` and `audit-verify` take the loops' leader locks. `retention` and `agent-reindex` take none. | [server](server.md#subcommands) |
+| On demand | `telmoni sweep deletion\|audit-verify\|retention\|agent-reindex\|audit-exports` | By hand or by a scheduler | `deletion` and `audit-verify` take the loops' leader locks. `retention`, `agent-reindex` and `audit-exports` take none. | [server](server.md#subcommands) |
 
 Notes on the map:
-- **Auth's three sweeps start unless `RUN_SWEEPS=false`.** A deployment that sets it schedules `telmoni sweep …` runs elsewhere instead (`crates/telmoni/src/sweeps.rs`).
+- **Auth's four sweeps start unless `RUN_SWEEPS=false`.** A deployment that sets it schedules `telmoni sweep …` runs elsewhere instead (`crates/telmoni/src/sweeps.rs`); without `audit-exports` among them, a file outlives its week and a build a restart dropped is never finished.
 - **Most timers delay rather than stack.** Auth's sweeps, the delivery loop and the indexer push the next tick back after a slow one. The two hourly retention loops use tokio's default, so ticks missed during a slow sweep run back to back. A failed tick is logged, and the next one retries.
 - **Notifications' loops always start.** The agent's retention starts whenever the agent has a database (`AGENT_DATABASE_URL`). Its indexer starts only when the agent is on.
 - **Agent retention runs even with the model off**, so what an earlier configuration indexed still ages out, and erasures still reach it.
@@ -114,6 +116,7 @@ The same image runs these commands:
 | Auth's sweeps | The leader lock dies with its connection, and every step is idempotent. |
 | Retention sweeps | Notifications' and the agent's committed chunks stay committed. Auth's single transaction rolls back and runs again next time. |
 | Agent indexer | The cursor moves only when a page is written, and the lease lapses. |
+| Audit export builds | A build cut short leaves its export `running` until its 10-minute lease lapses; the exports sweep after it builds it again, on one of its three attempts. The file and its `exported` record commit together, so nothing is half written. |
 
 ⚠ **The delivery loop is raced against the HTTP server.** If the loop ever ends, the process exits, and the restart is the recovery. A Ready pod whose delivery loop had died would leave every delivery pending. The retention sweeps are left detached on purpose: a stalled sweep only keeps rows longer than it should.
 

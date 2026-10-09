@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, Check, ChevronRight, X } from "lucide-react";
+import { Bell, Check, ChevronRight, Download, Loader2, X } from "lucide-react";
 import { useState, useTransition } from "react";
 
+import { downloadExport, useAuditExportsWatcher } from "@/components/audit-exports";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { exportSummary } from "@/lib/audit-exports";
 import { NOTIFICATIONS_HREF } from "@/lib/console-nav";
 import {
   badgeCount,
@@ -23,13 +25,20 @@ import {
   inviterText,
 } from "@/lib/notifications";
 import { organizationLabel } from "@/lib/identity";
+import { administersOrganization } from "@/lib/organization-role";
+import { organizationPath } from "@/lib/slug";
 import type { OrganizationEntry, ProjectOffer } from "@/lib/server/entities/organization";
 import {
+  useActiveOrganization,
+  useAuditExports,
+  useForgetAuditExport,
   useIncomingInvites,
+  useMarkAuditExportDownloaded,
   useOrganizations,
   useProjectOffers,
   useRemoveIncomingInvite,
 } from "@/lib/store";
+import { isBuilding, isWaiting, type AuditExport } from "@/lib/types/audit-export";
 import type { IncomingInvite } from "@/lib/types/incoming-invite";
 import { cn } from "@/lib/utils";
 
@@ -39,10 +48,23 @@ import {
 } from "@/app/(app)/account/notifications/invite-actions";
 
 export function NotificationsBell() {
+  useAuditExportsWatcher();
   const invites = useIncomingInvites() ?? [];
   const offers = useOrganizations().filter((o) => o.ownershipOfferExpiresAt);
   const projectOffers = useProjectOffers() ?? [];
-  const count = invites.length + offers.length + projectOffers.length;
+  // The person's audit log exports of the organization the console stands
+  // in, while they still administer it: a file waiting to be taken counts,
+  // one still building only shows.
+  const organization = useActiveOrganization();
+  const auditExports = useAuditExports();
+  const exportsHere =
+    organization && administersOrganization(organization.role)
+      ? (auditExports[organization.organizationId] ?? [])
+      : [];
+  const exportsWaiting = exportsHere.filter(isWaiting);
+  const exportsBuilding = exportsHere.filter(isBuilding);
+  const count =
+    invites.length + offers.length + projectOffers.length + exportsWaiting.length;
   const badge = badgeCount(count);
 
   return (
@@ -51,10 +73,10 @@ export function NotificationsBell() {
         data-testid="notifications-bell"
         aria-label={bellLabel(count)}
         className={cn(
-          "relative flex size-8 shrink-0 items-center justify-center",
+          "relative flex size-9 shrink-0 items-center justify-center",
           "rounded-md text-muted-foreground hover:text-foreground",
           "outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          "hover:bg-sidebar-accent",
+          "hover:bg-sidebar-accent/50",
         )}
       >
         <Bell className="size-4" />
@@ -78,7 +100,9 @@ export function NotificationsBell() {
       <DropdownMenuContent
         className="w-80 animate-none!"
         align="end"
-        sideOffset={14}
+        // Right under the header's rule, as the switchers' menus open
+        // (`resource-selector.tsx`).
+        sideOffset={12.5}
         data-testid="notifications-menu"
       >
         {/* `h-12` + the panel's `p-1` + the separator's `mt-1` = 56 to the
@@ -93,7 +117,7 @@ export function NotificationsBell() {
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
 
-        {count === 0 ? (
+        {count === 0 && exportsBuilding.length === 0 ? (
           <p
             className="px-2 py-6 text-center text-sm text-muted-foreground"
             data-testid="notifications-menu-empty"
@@ -106,6 +130,14 @@ export function NotificationsBell() {
           // horizontal scrollbar, since a box scrolling on one axis cannot keep
           // the other visible.
           <div className="-mx-1 max-h-96 overflow-y-auto">
+            {organization &&
+              exportsWaiting.map((entry) => (
+                <ExportReadyRow key={entry.id} entry={entry} organization={organization.slug} />
+              ))}
+            {organization &&
+              exportsBuilding.map((entry) => (
+                <ExportBuildingRow key={entry.id} entry={entry} organization={organization.slug} />
+              ))}
             {offers.map((offer) => (
               <OfferRow key={offer.organizationId} offer={offer} />
             ))}
@@ -139,10 +171,66 @@ export function NotificationsBell() {
   );
 }
 
+// A finished export of the audit log, taken from here: selecting the row
+// downloads the file, and once the browser has it the bell stops offering it,
+// as it does at once for one no longer kept. A taken file stays for the rest
+// of its week, in the export dialog's list.
+function ExportReadyRow({ entry, organization }: { entry: AuditExport; organization: string }) {
+  const markDownloaded = useMarkAuditExportDownloaded();
+  const forget = useForgetAuditExport();
+  const [now] = useState(() => new Date());
+  return (
+    <DropdownMenuItem
+      className="h-auto cursor-pointer rounded-none border-b border-border px-3 py-3 last:border-b-0"
+      data-testid="notifications-menu-export"
+      onSelect={() => {
+        void downloadExport(organization, entry.id).then((result) => {
+          if (result === "taken") markDownloaded(entry.id);
+          if (result === "gone") forget(entry.id);
+        });
+      }}
+    >
+      <span className="grid flex-1 gap-0.5">
+        <span className="truncate text-sm font-medium">Audit log export ready</span>
+        <span className="truncate text-xs text-muted-foreground">
+          {exportSummary(entry, now)}
+        </span>
+      </span>
+      <Download className="size-4 shrink-0 text-muted-foreground" />
+    </DropdownMenuItem>
+  );
+}
+
+// One still building: an item like the others, so the arrow keys reach it and
+// a screen reader says it, and it opens the audit log page, where the export
+// dialog lists it.
+function ExportBuildingRow({ entry, organization }: { entry: AuditExport; organization: string }) {
+  const [now] = useState(() => new Date());
+  return (
+    <DropdownMenuItem
+      asChild
+      className="h-auto rounded-none border-b border-border px-3 py-3 last:border-b-0"
+    >
+      <Link
+        href={organizationPath(organization, "/audit-log")}
+        data-testid="notifications-menu-export-building"
+      >
+        <span className="grid flex-1 gap-0.5">
+          <span className="truncate text-sm font-medium">Preparing your audit log export</span>
+          <span className="truncate text-xs text-muted-foreground">
+            {exportSummary(entry, now)}
+          </span>
+        </span>
+        <Loader2 aria-hidden className="size-4 shrink-0 animate-spin text-muted-foreground" />
+      </Link>
+    </DropdownMenuItem>
+  );
+}
+
 // ⚠ **An offer is answered on the page, not from here.** Taking an
 // organization over hands you its roster and its deletion, and the page says
 // so before the button that does it; the bell only points there.
-// `h-auto` undoes the menu item's fixed `h-8`: these rows hold two lines, and
+// `h-auto` undoes the menu item's fixed `h-9`: these rows hold two lines, and
 // a row clipped to one line's height overflowed the list into a scrollbar.
 // The last row drops its rule, which would double the footer's `border-t`.
 function OfferRow({ offer }: { offer: OrganizationEntry }) {

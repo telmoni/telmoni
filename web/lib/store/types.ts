@@ -1,4 +1,5 @@
 import type { FlagSet } from "@/lib/flags";
+import type { AuditExport } from "@/lib/types/audit-export";
 import type { AuthUser } from "@/lib/types/domain";
 import type { Role } from "@/lib/types/enums";
 import type { Project, ProjectEverywhere } from "@/lib/server/entities/projects";
@@ -51,7 +52,43 @@ export interface IdentitySlice extends Seed {
   setSeed: (seed: StoreInitial) => void;
 }
 
-export type AppStore = IdentitySlice;
+/// The person's exports of one organization's audit log. Never in the seed:
+/// the bell asks for them once the console is on screen, so no page render
+/// waits on them.
+export interface AuditExportsSlice {
+  /// Their latest exports in each organization the bell has asked about,
+  /// newest first. Kept per organization, so one still building when the
+  /// person moves to another is announced when they come back.
+  auditExports: Readonly<Record<string, readonly AuditExport[]>>;
+
+  /// How many exports were started from this tab: the mark a read of the
+  /// list is held to, since a list read before the latest start lacks it.
+  auditExportsStarted: number;
+
+  /// Lay a list auth answered over the store's, unless an export was started
+  /// here after the read left (`startedBefore` is the count it left with):
+  /// that list would drop it, and with it the polling that announces it.
+  /// Answers what the store held for the organization before, or `null` when
+  /// it kept its own.
+  replaceAuditExports: (
+    organizationId: string,
+    exports: readonly AuditExport[],
+    startedBefore: number,
+  ) => readonly AuditExport[] | null;
+
+  /// One just started, ahead of the list's next read.
+  addAuditExport: (organizationId: string, entry: AuditExport) => void;
+
+  /// Taken: the bell stops offering it, as auth will say on the next read.
+  markAuditExportDownloaded: (id: string) => void;
+
+  /// No longer kept — past its week, or deleted to make room for a newer
+  /// one — as a download just learned: gone from every list now, as auth
+  /// will say on the next read, rather than offered again until then.
+  forgetAuditExport: (id: string) => void;
+}
+
+export type AppStore = IdentitySlice & AuditExportsSlice;
 
 export interface StoreInitial {
   user: AuthUser | null;
