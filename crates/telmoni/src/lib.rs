@@ -106,8 +106,8 @@ pub struct App {
     modules: Vec<Arc<dyn Module>>,
 }
 
-/// Auth as notifications holds it before auth is built. The two modules
-/// each hold the other, so one of them is handed a slot that is filled a
+/// Auth as notifications, telemetry and the agent hold it before auth is
+/// built. Auth holds each of them, so they are handed a slot that is filled a
 /// moment later; a call before that answers as an auth that is not there.
 #[derive(Default)]
 struct LateAuth(OnceLock<Arc<telmoni_auth::AppState>>);
@@ -222,6 +222,8 @@ impl App {
         let telemetry = Arc::new(telmoni_telemetry::boot::state(
             parts.telemetry_config,
             parts.telemetry_pool,
+            secrets.clone(),
+            late_auth.clone(),
         )?);
         let agent = parts
             .agent
@@ -328,6 +330,7 @@ impl App {
             .merge(log_level)
             .merge(telmoni_auth::router(self.auth.clone()))
             .merge(telmoni_notifications::router(self.notifications.clone()))
+            .merge(telmoni_telemetry::router(self.telemetry.clone()))
             .merge(match &self.agent {
                 Some(agent) => telmoni_agent::router(agent.clone()),
                 None => telmoni_agent::absent_router(self.secrets.clone()),

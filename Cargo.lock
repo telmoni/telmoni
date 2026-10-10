@@ -2511,8 +2511,10 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum",
  "chrono",
  "clickhouse",
+ "http-body-util",
  "reqwest",
  "serde",
  "serde_json",
@@ -2520,6 +2522,7 @@ dependencies = [
  "sqlx",
  "telmoni-shared",
  "tokio",
+ "tower",
  "tracing",
  "uuid",
 ]

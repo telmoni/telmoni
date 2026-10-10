@@ -15,7 +15,9 @@
 //! which `telmoni rotate` runs: both as the migrator's user, whom
 //! `tenant_isolation` does not hold. Auth reaches it through
 //! [`telmoni_shared::seam::Telemetry`] ([`seam`]) to purge an organization's
-//! or a project's settings and to move a project's.
+//! or a project's settings and to move a project's, and the console through
+//! its lanes under `/internal/telemetry` ([`handler`], [`router`]), which ask
+//! auth who is acting through [`telmoni_shared::seam::Auth`].
 //!
 //! ⚠ **Its readiness reads Postgres alone.** The server is one process for
 //! every module: a ClickHouse outage must leave sign-in, and every console
@@ -25,11 +27,17 @@
     reason = "service-crate baseline: error conditions are documented on the callers"
 )]
 
+use std::sync::Arc;
+
+use axum::{Router, middleware, routing::get};
 use sqlx::PgPool;
+
+use telmoni_shared::middleware::service_auth::{ServiceSecrets, require_service_secret};
 
 pub mod boot;
 pub mod config;
 pub mod db;
+pub mod handler;
 pub mod retention;
 pub mod schema;
 pub mod seam;
@@ -37,7 +45,7 @@ pub mod store;
 
 pub use config::Config;
 
-/// Shared module state, handed to the seam.
+/// Shared module state, handed to the seam and to every handler.
 pub struct AppState {
     /// Postgres pool, as the `telemetry` role: each project's settings.
     pub db: PgPool,
@@ -45,6 +53,11 @@ pub struct AppState {
     pub config: Config,
     /// ClickHouse, as the `telemetry` user: the spans and their rollup.
     pub store: store::Store,
+    /// Constant-time-comparable service secrets gating `/internal/*`.
+    pub service_secrets: ServiceSecrets,
+    /// Auth, in process: who is behind a lane's bearer, and what role they
+    /// hold on the project it names.
+    pub auth: Arc<dyn telmoni_shared::seam::Auth>,
 }
 
 impl AppState {
@@ -59,4 +72,21 @@ impl AppState {
             .await
             .map(|_| ())
     }
+}
+
+/// The module's router: the console's lanes under `/internal`, behind the
+/// service secret. The binary mounts it beside the other modules' and adds
+/// the health probes and the request layers once.
+pub fn router(state: Arc<AppState>) -> Router {
+    let internal = Router::new()
+        .route(
+            "/telemetry/content-mode",
+            get(handler::content_mode::get_content_mode)
+                .put(handler::content_mode::put_content_mode),
+        )
+        .layer(middleware::from_fn_with_state(
+            state.service_secrets.clone(),
+            require_service_secret,
+        ));
+    Router::new().nest("/internal", internal).with_state(state)
 }

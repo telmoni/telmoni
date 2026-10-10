@@ -5,29 +5,22 @@
 //! name and no others.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
+mod common;
+
 use std::sync::Arc;
 
 use sqlx::PgPool;
 
 use telmoni_shared::db::tenant_session::{organization_scope, project_scope};
 use telmoni_shared::seam::Telemetry;
-use telmoni_shared::test_util::service_pool;
 use telmoni_shared::{ContentMode, OrganizationId, ProjectId};
 use telmoni_telemetry::seam::TelemetrySeam;
-use telmoni_telemetry::store::Store;
-use telmoni_telemetry::{AppState, Config, db};
+use telmoni_telemetry::{AppState, db};
 
-/// The module over `pool` connected as its own role. ClickHouse is named
-/// and never dialled: nothing here reads a span.
+/// The module over `pool` connected as its own role, with nobody seated:
+/// nothing here asks who is acting.
 fn state(pool: &PgPool) -> Arc<AppState> {
-    Arc::new(AppState {
-        db: service_pool(pool, "telemetry"),
-        config: Config {
-            database_url: "".into(),
-            clickhouse_url: "http://telemetry:telemetry@127.0.0.1:1".into(),
-        },
-        store: Store::connect("http://telemetry:telemetry@127.0.0.1:1").expect("a ClickHouse URL"),
-    })
+    common::state(pool, common::AuthStub::new())
 }
 
 /// A settings row, written as the owner, as the content switch will.

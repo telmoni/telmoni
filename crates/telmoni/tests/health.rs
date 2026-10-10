@@ -1,5 +1,5 @@
 //! The composed process: the readiness probe reports every module's
-//! database and the liveness probe none; both modules' routes are mounted
+//! database and the liveness probe none; every module's routes are mounted
 //! under one listener, each behind its own gates.
 #![expect(clippy::unwrap_used, clippy::expect_used, reason = "test scaffolding")]
 
@@ -134,11 +134,11 @@ async fn liveness_ignores_the_databases() {
 }
 
 /// Every module's routes answer under one listener, each behind its own
-/// gate: auth's `/me` and notifications' feed both refuse a request with no
-/// bearer, and the log-level lane refuses one with no service secret —
-/// before any of them reaches a table it could not.
+/// gate: auth's `/me`, notifications' feed and telemetry's content mode all
+/// refuse a request with no bearer, and the log-level lane refuses one with
+/// no service secret — before any of them reaches a table it could not.
 #[tokio::test]
-async fn both_modules_are_mounted_behind_their_gates() {
+async fn the_modules_are_mounted_behind_their_gates() {
     let me = Request::post("/me")
         .header("x-service-secret", SECRET)
         .header("content-type", "application/json")
@@ -152,6 +152,14 @@ async fn both_modules_are_mounted_behind_their_gates() {
         .body(Body::empty())
         .unwrap();
     assert_eq!(status(feed).await, StatusCode::UNAUTHORIZED);
+
+    let content_mode = Request::get("/internal/telemetry/content-mode")
+        .header("x-service-secret", SECRET)
+        .header("x-organization-id", "org_1")
+        .header("x-project-id", "project_1")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(status(content_mode).await, StatusCode::UNAUTHORIZED);
 
     assert_eq!(
         status(get("/internal/log-level")).await,

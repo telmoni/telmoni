@@ -111,6 +111,13 @@ const MUTATIONS: &[Mutation] = &[
         actor_id: ActorPattern::External("slack"),
     },
     Mutation {
+        file: "crates/telemetry/src/handler/content_mode.rs",
+        fn_name: "switch_content_mode",
+        action: "Updated",
+        resource_kind: "Project",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
         file: "crates/auth/src/handler/organization.rs",
         fn_name: "delete_organization",
         action: "Updated",
@@ -451,7 +458,7 @@ fn every_listed_mutation_emits_expected_tuple() {
 }
 
 /// Crates whose `src/handler` tree this gate scans.
-const SCANNED_SERVICES: &[&str] = &["auth", "notifications"];
+const SCANNED_SERVICES: &[&str] = &["auth", "notifications", "telemetry"];
 
 /// Every crate that HAS a `src/handler` tree must be in [`SCANNED_SERVICES`].
 #[test]
@@ -789,7 +796,14 @@ fn every_emit_propagates_its_error() {
     let root = project_root();
     let mut violations = Vec::new();
 
-    for svc in ["auth", "notifications", "telmoni", "shared", "migrator"] {
+    for svc in [
+        "auth",
+        "notifications",
+        "telemetry",
+        "telmoni",
+        "shared",
+        "migrator",
+    ] {
         let dir = root.join(format!("crates/{svc}/src"));
         visit_rust_files(&dir, &mut |path, contents| {
             let rel = path
