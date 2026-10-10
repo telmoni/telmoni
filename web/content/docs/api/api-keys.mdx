@@ -38,11 +38,13 @@ Include the key as a bearer token in the HTTP `Authorization` header:
 $ curl -H "Authorization: Bearer $TELMONI_API_KEY" https://telmoni.com/v1/organization
 ```
 
-You can also sign the [Telmoni CLI](/docs/api/cli) in with it, by flag or from the
-`TELMONI_API_KEY` environment variable:
+The [Telmoni CLI](/docs/api/cli) uses it from the `TELMONI_API_KEY` environment
+variable, for each command and without saving it, or saves it with
+`telmoni login --with-key`, which reads it from standard input:
 
 ```console
-$ telmoni login --key $TELMONI_API_KEY
+$ telmoni status          # with TELMONI_API_KEY set
+$ telmoni login --with-key < key.txt
 ```
 
 The [client SDKs](/docs/api/sdks) hold a key in their configuration and make no API

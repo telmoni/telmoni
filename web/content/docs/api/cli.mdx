@@ -87,22 +87,24 @@ Your CLI session appears under **Active sessions** on your account's **Privacy**
 
 ### 2. Programmatic & CI login (API key)
 
-For headless build systems, GitHub Actions, Docker containers, and background automation, authenticate non-interactively using an [API key](/docs/api/api-keys):
-
-```console
-$ telmoni login --key telmoni_your_api_key_here
-```
-
-When `--key` is not given, `telmoni login` takes the key from the `TELMONI_API_KEY` environment variable:
+For headless build systems, GitHub Actions, Docker containers, and background automation, use an [API key](/docs/api/api-keys). Put it in the `TELMONI_API_KEY` environment variable, and every command that acts with a key uses it, ahead of any saved login, without saving it:
 
 ```console
 $ export TELMONI_API_KEY="telmoni_..."
-$ telmoni login
+$ telmoni status
 ```
 
-`login` checks only the key's shape (the `telmoni_` prefix with something after it, and no whitespace) and saves it with the endpoint. It does not call the server, so a wrong key is refused by the first command that uses it. Later commands read the key from the saved credentials, not from the variable.
+A blank `TELMONI_API_KEY` counts as unset. To save a key instead, pipe it to `telmoni login --with-key`, which reads it from standard input, so it never sits on the command line, in your shell history or in the process list. Typed at a terminal, it is refused:
 
-A key opens the [API](/docs/api/reference) and nothing else. With a key, `status` is the one command that calls the server; the `org` commands need a browser session.
+```console
+$ telmoni login --with-key < key.txt
+```
+
+`login --with-key` checks only the key's shape (the `telmoni_` prefix with something after it, and no whitespace) and saves it with the endpoint. It does not call the server, so a wrong key is refused by the first command that uses it.
+
+To fetch the key from a secret manager for each command instead, set [`api_key_helper`](#configuration-keys-reference) to a command that prints it. It runs through `sh` when `TELMONI_API_KEY` is unset, with 30 seconds to answer; what it prints is the key, never shown or saved, and its error output is shown as it is.
+
+A key opens the [API](/docs/api/reference) and nothing else. With a key, `status` is the one command that calls the server; the `org` commands need a browser session. While `TELMONI_API_KEY` is set, `login`, `logout` and the `org` commands, which manage the saved login, say on stderr that the variable comes first.
 
 ---
 
@@ -122,7 +124,7 @@ $ telmoni status
 - the endpoint the session belongs to;
 - how many minutes the access token has left.
 
-With an API key, it asks `GET /v1/organization` and prints the ID and name of the key's organization, then the endpoint. Signed out, it prints the endpoint it would sign in to and exits with an error.
+With an API key, it asks `GET /v1/organization` and prints the ID and name of the key's organization, then the endpoint. A key from `TELMONI_API_KEY` or `api_key_helper` is named as such (`API key from TELMONI_API_KEY for …`), and asks at the endpoint `TELMONI_ENDPOINT`, the configuration file or the default names. Signed out, it prints the endpoint it would sign in to and exits with an error.
 
 With a browser session, `status` also saves the organizations the server answered. If you are no longer in the saved active organization, it replaces it with your [default organization](/docs/account/settings#default-organization), whether or not `TELMONI_ORG` is set.
 
@@ -145,7 +147,7 @@ With a browser session, the object holds:
 | `organizationCount` | How many organizations you belong to |
 | `tokenExpiresInSecs` | Seconds until the access token expires |
 
-With an API key, it holds `authType` (`api_key`), `endpoint`, and `organization`: an object of `organizationId`, `slug` and `label`. Signed out, `status --json` prints nothing and exits with an error.
+With an API key, it holds `authType` (`api_key`), `keySource` (`environment`, `helper` or `saved`), `endpoint`, and `organization`: an object of `organizationId`, `slug` and `label`. Signed out, `status --json` prints nothing and exits with an error.
 
 ---
 
@@ -183,7 +185,7 @@ $ TELMONI_ORG=acme telmoni status
 
 ## CLI Configuration
 
-The CLI stores local preferences in `config.json`, in the same directory as the [credentials file](#credential-storage-paths).
+The CLI stores local preferences in `config.json`, in the same directory as the [credentials file](#credential-storage-paths), even on a Mac whose login is in the Keychain.
 
 ```console
 $ telmoni config list
@@ -206,6 +208,7 @@ $ telmoni config get endpoint
 | Key | Description | Default |
 |---|---|---|
 | `endpoint` | The Telmoni server URL `telmoni login` signs in to | `https://telmoni.com` |
+| `api_key_helper` | A shell command that prints an API key, such as a secret manager's read, run for each command that acts with a key while `TELMONI_API_KEY` is unset. The file holds the command, never the key. | None |
 | `output_format` | Accepted and stored. No command reads it: use `--json` for JSON output. | None (`config list` shows `(default: text)`) |
 
 `config set` checks the key, not the value.
@@ -216,7 +219,7 @@ $ telmoni config get endpoint
 
 | Option | Description |
 |---|---|
-| `-v`, `--verbose` | Log to stderr the credentials file the CLI read and wrote (and a missing configuration file), where its endpoint came from, the sign-in and refresh steps it takes, each request's method, address and organization, and each answer's status and content type; no header or body is logged. |
+| `-v`, `--verbose` | Log to stderr where the CLI read and wrote the saved login (and a missing configuration file), where its endpoint came from, the sign-in and refresh steps it takes, each request's method, address and organization, and each answer's status and content type; no header or body is logged. |
 | `-h`, `--help` | Print help information |
 | `-V`, `--version` | Print version information (`telmoni --version`, before any subcommand) |
 
@@ -229,7 +232,7 @@ The CLI reads the following environment variables:
 | Variable | Description |
 |---|---|
 | `TELMONI_ENDPOINT` | The endpoint `telmoni login` signs in to (default: `https://telmoni.com`). It comes after `--endpoint` and ahead of the `endpoint` configuration key. A saved session keeps the endpoint it signed in to. |
-| `TELMONI_API_KEY` | The API key `telmoni login` uses when `--key` is not given, for CI/CD runs. No other command reads it. |
+| `TELMONI_API_KEY` | An API key for each command that acts with one, ahead of any saved login and never saved, for CI/CD runs. A blank value counts as unset. |
 | `TELMONI_ORG` | With a browser session, the organization `status`, `whoami` and `logout` act in instead of the active one, by ID or slug, from the list the CLI saved. A script should give the ID, which nothing moves. |
 
 Its requests to any host but this machine also go through a proxy named by
@@ -248,11 +251,13 @@ $ telmoni logout
 
 With a browser session, this command:
 1. Asks the Telmoni server to revoke the session.
-2. Removes the local credentials file, whatever the server answered. If the server did not confirm, the CLI says so and tells you to end the session from **Active sessions** in the console.
+2. Removes the saved credentials, from the Keychain on a Mac and from the credentials file, whatever the server answered. If the server did not confirm, the CLI says so and tells you to end the session from **Active sessions** in the console.
 
-With an API key, it only removes the file. The key itself stays valid until it expires or you [revoke it](/docs/api/api-keys#revoking-a-key).
+With a saved API key, it only removes the key. The key itself stays valid until it expires or you [revoke it](/docs/api/api-keys#revoking-a-key). A key in `TELMONI_API_KEY` was never saved: unset the variable yourself.
 
 ### Credential storage paths
+
+On macOS the CLI keeps its saved login in your login Keychain, as a password item for the service `telmoni`, which macOS encrypts and asks you about before another program reads it. Where the Keychain refuses it, as a locked one does over SSH, the CLI writes the credentials file instead and says so on stderr; with a copy in each, it reads the newer, and the next save the Keychain takes removes the file. On Linux it always writes the file.
 
 The credentials file is written with `0600` permissions (readable and writable only by your OS user) and is not encrypted:
 
@@ -261,4 +266,4 @@ The credentials file is written with `0600` permissions (readable and writable o
 
 Where that directory cannot be found, such as on a machine with no home directory, the CLI stops with an error rather than keep credentials anywhere else. The file is written as a sibling created with `0600` and renamed over the old one, so a crash mid-write leaves the previous file whole. A directory the CLI creates to save credentials in is `0700`; one that already exists, such as one `telmoni config set` created first, keeps its permissions.
 
-A credentials file the CLI cannot read counts as signed out: the CLI says `note: the saved credentials cannot be read; sign in again` on stderr, and `telmoni login` writes a new file.
+Saved credentials the CLI cannot read count as signed out: the CLI says `note: the saved credentials cannot be read; sign in again` on stderr, and `telmoni login` saves new ones.
