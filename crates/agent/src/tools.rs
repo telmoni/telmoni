@@ -356,7 +356,8 @@ async fn search(
 /// use, as every link a person is shown is: auth is asked where the project is
 /// now, since `Acting` names it by id alone. A conversation keeps its citations
 /// as spelled, so a URL changed on Settings afterwards leaves them behind,
-/// which is the choice made for every link (console.md, "Paths and slugs").
+/// which is the choice made for every link (`ARCHITECTURE.md`, "Ids name rows,
+/// slugs spell links").
 /// `None` when the request names no project, or auth cannot say where it is.
 async fn project_path(state: &AppState, acting: &Acting, page: &str) -> Option<String> {
     let project = acting.project.as_ref()?;

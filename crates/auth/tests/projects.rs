@@ -26,6 +26,11 @@ use telmoni_shared::test_util::{apply_audit_migrations, seed_identity, service_p
 const SERVICE_SECRET: &str = "test-service-secret";
 
 fn app(pool: PgPool) -> Router {
+    app_with(pool, telmoni_auth::Siblings::default())
+}
+
+/// The router with the modules beside auth a test records.
+fn app_with(pool: PgPool, siblings: telmoni_auth::Siblings) -> Router {
     let config = Config {
         database_url: String::new(),
         service_secret: SERVICE_SECRET.into(),
@@ -46,7 +51,7 @@ fn app(pool: PgPool) -> Router {
         ))),
         db,
         config,
-        siblings: telmoni_auth::Siblings::default(),
+        siblings,
         mailer: Arc::new(telmoni_auth::mailer::ComposingMailer::new(Arc::new(
             telmoni_shared::mail::NoopSender,
         ))),
@@ -539,6 +544,81 @@ async fn deleting_a_project_takes_its_keys_and_its_seats(pool: PgPool) {
                 .await
                 .expect("count");
         assert_eq!(left, 0, "{table} still holds rows for the deleted project");
+    }
+}
+
+/// A deleted project's connectors and telemetry settings are purged after
+/// the delete commits, and a purge that fails leaves the delete standing:
+/// what it missed goes with its organization's purge.
+#[sqlx::test]
+async fn deleting_a_project_purges_its_connectors_and_its_telemetry(pool: PgPool) {
+    use telmoni_auth::test_provider::{
+        RecordingNotifications, RecordingTelemetry, SiblingCall, SiblingCalls,
+    };
+
+    apply_audit_migrations(&pool).await;
+    let organization = sign_in(&pool, "user_del_purge", "del-purge@example.com").await;
+    let calls = SiblingCalls::default();
+    let notifications = Arc::new(RecordingNotifications::new(calls.clone()));
+    let telemetry = Arc::new(RecordingTelemetry::new(calls.clone()));
+    let recorded = || {
+        app_with(
+            pool.clone(),
+            telmoni_auth::Siblings {
+                notifications: Some(notifications.clone()),
+                telemetry: Some(telemetry.clone()),
+                agent: None,
+                purge_hook: None,
+            },
+        )
+    };
+
+    for failing in [false, true] {
+        let (status, created) = call(
+            &pool,
+            "POST",
+            "/internal/projects",
+            "user_del_purge",
+            &organization,
+            Some(json!({ "name": format!("Doomed {failing}") })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{created}");
+        let project_id = created["id"].as_str().expect("id").to_owned();
+        if failing {
+            telemetry.failing_project_purges(1);
+        }
+        calls.reset();
+
+        let req = as_person(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/internal/projects/{project_id}"))
+                .header("x-service-secret", SERVICE_SECRET)
+                .header("x-organization-id", &organization),
+            &pool,
+            "user_del_purge",
+        )
+        .await
+        .body(Body::empty())
+        .unwrap();
+        let resp = recorded().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "a failing purge: {failing}");
+        assert_eq!(
+            calls.calls(),
+            [
+                SiblingCall::PurgeProject(project_id.clone()),
+                SiblingCall::TelemetryPurgeProject(project_id.clone()),
+            ],
+            "the delete did not purge both modules, in order, once"
+        );
+        let left: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM auth.projects WHERE external_id = $1")
+                .bind(&project_id)
+                .fetch_one(&pool)
+                .await
+                .expect("count");
+        assert_eq!(left, 0, "the project outlived a purge that failed");
     }
 }
 

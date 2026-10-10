@@ -28,6 +28,7 @@ use std::time::Duration;
 
 use serde_json::{Map, Value};
 use tracing::field::{Field, Visit};
+use tracing_subscriber::filter::{LevelFilter, Targets};
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::reload;
@@ -57,6 +58,17 @@ fn lock<T>(m: &'static Mutex<T>) -> std::sync::MutexGuard<'static, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// ⚠ **A ceiling on the layer that writes, which no directive and no raise
+/// can lift.** The `clickhouse` client logs a failed query's error at
+/// `debug`, and the error ClickHouse answers can carry a value the query
+/// bound, unquoted. A directive pinned in the filter would not hold it: one
+/// narrower than the crate — a module, a field, a span — wins over it.
+fn ceiling() -> Targets {
+    Targets::new()
+        .with_default(LevelFilter::TRACE)
+        .with_target("clickhouse", LevelFilter::INFO)
+}
+
 /// The boot directive: `RUST_LOG`, else `LOG_LEVEL`, else `info`.
 fn boot_directive() -> String {
     for name in ["RUST_LOG", "LOG_LEVEL"] {
@@ -79,10 +91,16 @@ pub fn init() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let json = !std::io::stdout().is_terminal();
     let registry = Registry::default().with(layer);
     if json {
-        registry.with(CloudLoggingLayer).try_init()?;
+        registry
+            .with(CloudLoggingLayer.with_filter(ceiling()))
+            .try_init()?;
     } else {
         registry
-            .with(tracing_subscriber::fmt::layer().with_target(true))
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_target(true)
+                    .with_filter(ceiling()),
+            )
             .try_init()?;
     }
 
@@ -398,6 +416,42 @@ mod tests {
     #[test]
     fn a_padded_directive_still_parses() {
         assert!(EnvFilter::try_new("info   ".trim()).is_ok());
+    }
+
+    /// ⚠ No directive gets the `clickhouse` client written past `info`, a
+    /// raise's included, nor one narrower than the crate, which would win
+    /// over a directive pinned beside it: its `debug` carries ClickHouse's
+    /// errors, which can carry a query's values.
+    #[test]
+    fn the_clickhouse_client_is_never_written_below_info() {
+        struct Written(std::sync::Arc<AtomicU64>);
+        impl<S: tracing::Subscriber> Layer<S> for Written {
+            fn on_event(&self, _event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        for directives in [
+            "trace",
+            "clickhouse=debug",
+            "info,clickhouse::error=debug",
+            "clickhouse::error=trace",
+        ] {
+            let written = std::sync::Arc::new(AtomicU64::new(0));
+            let subscriber = Registry::default()
+                .with(EnvFilter::try_new(directives).unwrap())
+                .with(Written(written.clone()).with_filter(ceiling()));
+            tracing::subscriber::with_default(subscriber, || {
+                tracing::debug!(target: "clickhouse::error", "a failed query's error");
+                tracing::info!(target: "clickhouse::error", "kept");
+            });
+            assert_eq!(
+                written.load(Ordering::SeqCst),
+                1,
+                "{directives}: the client's debug line was written, or its info line was not"
+            );
+        }
+        assert!(ceiling().would_enable("telmoni_auth::handler", &tracing::Level::TRACE));
     }
 
     /// The five `tracing` levels, in the four spellings GCP reserves.

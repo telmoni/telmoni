@@ -27,18 +27,19 @@ const OBJECT_GRANTS_SQL: &str = include_str!(concat!(
 ));
 
 /// The roles `object_grants.sql` names as a grantee, plus `migrator`, whose
-/// `ALTER DEFAULT PRIVILEGES` fails without it, plus the two lanes, which
-/// their modules' migrations grant on and whose memberships [`prepare`]
-/// issues. Must equal `GRANTEE_ROLES` in `crates/migrator/src/lib.rs` plus
-/// those three.
+/// `ALTER DEFAULT PRIVILEGES` fails without it, plus the lanes, which their
+/// modules' migrations grant on and whose memberships [`prepare`] issues.
+/// Must equal `GRANTEE_ROLES` in `crates/migrator/src/lib.rs` plus those.
 const REQUIRED_ROLES: &[&str] = &[
     "auth",
     "notifications",
     "agent",
+    "telemetry",
     "migrator",
     "auth_maintenance",
     "notifications_maintenance",
     "agent_maintenance",
+    "telemetry_maintenance",
 ];
 
 /// Each module's lane membership, as the role hardening grants it: its own
@@ -47,11 +48,12 @@ const LANE_MEMBERSHIPS: &[&str] = &[
     "GRANT auth_maintenance TO auth WITH INHERIT FALSE, SET TRUE",
     "GRANT notifications_maintenance TO notifications WITH INHERIT FALSE, SET TRUE",
     "GRANT agent_maintenance TO agent WITH INHERIT FALSE, SET TRUE",
+    "GRANT telemetry_maintenance TO telemetry WITH INHERIT FALSE, SET TRUE",
 ];
 
 /// The roles a module's pool may connect as. One binary holds one pool per
 /// module, each as that module's own role.
-const SERVICE_ROLES: &[&str] = &["auth", "notifications", "agent"];
+const SERVICE_ROLES: &[&str] = &["auth", "notifications", "agent", "telemetry"];
 
 /// A service beside this repository's that runs under the same rules: its
 /// login role, the lane role only it may enter, and the owner-issued grants

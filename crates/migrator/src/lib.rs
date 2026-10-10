@@ -1,9 +1,16 @@
-//! The migration runner — `telmoni migrate` — and the audit partition
-//! rotation — `telmoni rotate`. Each runs once and returns, as the migrator's
-//! own database role (`MIGRATOR_DATABASE_URL`): a Kubernetes Job before the
-//! server rolls, `make db-migrate` on a laptop, one command either way. Files
-//! are fully qualified, so one connection runs every set without relying on
+//! The migration runner — `telmoni migrate` — and the nightly rotation —
+//! `telmoni rotate`. Each runs once and returns, as the migrator's own
+//! database role (`MIGRATOR_DATABASE_URL`) and ClickHouse user
+//! (`MIGRATOR_CLICKHOUSE_URL`): a Kubernetes Job before the server rolls,
+//! `make db-migrate` on a laptop, one command either way. Files are fully
+//! qualified, so one connection runs every set without relying on
 //! `search_path`.
+//!
+//! ClickHouse's half is telemetry's: its one file, applied after the
+//! Postgres sets ([`telmoni_telemetry::schema`]), and its expired days and
+//! months, dropped the same night as Postgres's partitions are rotated
+//! ([`telmoni_telemetry::retention`]). Both read their URL before Postgres
+//! is touched, so a missing one changes nothing.
 //!
 //! The sets are the directories under `MIGRATIONS_ROOT` — `/app/migrations`
 //! unless set, one directory per schema, as the image lays them out — or the
@@ -22,22 +29,53 @@ mod rotate;
 
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
+
 use telmoni_shared::config::{optional, require};
 
-/// Run every pending migration of every set, then the object grants.
+/// Run every pending migration of every set, then the object grants, then
+/// ClickHouse's file.
 pub async fn migrate_from_env() -> anyhow::Result<()> {
     let options = migrator_options()?;
+    let clickhouse = telmoni_telemetry::store::client(&require(CLICKHOUSE_URL_VAR)?)
+        .with_context(|| format!("{CLICKHOUSE_URL_VAR} is not a ClickHouse URL"))?;
     for set in sets_from_env()? {
         run_migrations(&options, &set).await?;
     }
-    apply_object_grants(&options).await
+    apply_object_grants(&options).await?;
+    let statements = telmoni_telemetry::schema::apply(&clickhouse).await?;
+    tracing::info!(statements, "clickhouse migration applied");
+    Ok(())
 }
 
-/// Rotate every partitioned table once: create the months ahead, and drop
-/// the expired ones where the registry allows it (nowhere today).
+/// Rotate every partitioned Postgres table once — create the months ahead,
+/// and drop the expired ones where the registry allows it (nowhere today) —
+/// then drop ClickHouse's days and months past retention, whether the first
+/// failed or not. The first failure is the answer.
 pub async fn rotate_from_env() -> anyhow::Result<()> {
-    rotate::rotate(&migrator_options()?).await
+    let options = migrator_options()?;
+    let clickhouse = telmoni_telemetry::store::client(&require(CLICKHOUSE_URL_VAR)?)
+        .with_context(|| format!("{CLICKHOUSE_URL_VAR} is not a ClickHouse URL"))?;
+    // Both stores every night, whichever fails: a Postgres rotation that
+    // fails must not hold back every night's purge behind it.
+    let rotated = rotate::rotate(&options).await;
+    let purged = telmoni_telemetry::retention::purge(&clickhouse, chrono::Utc::now()).await;
+    if let Ok(purged) = &purged {
+        tracing::info!(
+            span_days = purged.span_days,
+            rollup_months = purged.rollup_months,
+            "rotate: clickhouse purged"
+        );
+    }
+    rotated?;
+    purged?;
+    Ok(())
 }
+
+/// The variable naming the migrator's ClickHouse user, its user and password
+/// carried as a DSN carries them. Read before anything runs; nothing is
+/// dialled until the first statement.
+const CLICKHOUSE_URL_VAR: &str = "MIGRATOR_CLICKHOUSE_URL";
 
 /// The migrator's connection: `MIGRATOR_DATABASE_URL`, and the CA a pod
 /// verifies the database with.
@@ -234,7 +272,7 @@ const OBJECT_GRANTS_SQL: &str = include_str!("../sql/object_grants.sql");
 /// A deployment that runs everything as one role has none of them, and
 /// nothing to grant; a missing one is otherwise an error the file's own
 /// guards cannot catch.
-const GRANTEE_ROLES: &[&str] = &["auth", "notifications", "agent"];
+const GRANTEE_ROLES: &[&str] = &["auth", "notifications", "agent", "telemetry"];
 
 /// Apply `object_grants.sql` as the owner, then every file in
 /// [`GRANTS_DIR`], each skipped loudly — naming what is missing — when its

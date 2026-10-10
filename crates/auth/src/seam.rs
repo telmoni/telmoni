@@ -296,8 +296,9 @@ fn audit_document(e: audit::IndexedEvent) -> SourceDocument {
     }
     // By slug, as every link a person is shown: a URL changed on Settings
     // afterwards leaves this citation behind, which is the choice made for
-    // every link (console.md, "Paths and slugs"). An event of a project since
-    // deleted cites the organization's log, where the event still is.
+    // every link (`ARCHITECTURE.md`, "Ids name rows, slugs spell links"). An
+    // event of a project since deleted cites the organization's log, where the
+    // event still is.
     let (audience, url) = match (&e.in_project, &e.project_slug) {
         (Some(_), Some(project)) => (
             Audience::Audit,

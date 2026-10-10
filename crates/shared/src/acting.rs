@@ -58,6 +58,23 @@ impl Acting {
         Ok(self)
     }
 
+    /// A project lane its organization's owner alone may use, such as a
+    /// project's content mode, which changes what the organization is liable
+    /// for. The matrix lets an admin update a project, so this reads the
+    /// organization role; the refusal names the owner, the project role that
+    /// would do, as the matrix's refusals name theirs.
+    pub fn require_project_owner(&self) -> Result<&ActingProject, TelmoniError> {
+        let project = self.project_or_bad_request()?;
+        if self.organization_role != Some(OrganizationRole::Owner) {
+            return Err(AuthzError::InsufficientRole {
+                required: Role::Owner,
+                actual: project.role,
+            }
+            .into());
+        }
+        Ok(project)
+    }
+
     /// Organization admin or owner lanes, such as organization feeds.
     pub fn require_organization_admin(&self) -> Result<&Self, TelmoniError> {
         match self.organization_role {
@@ -148,5 +165,45 @@ mod tests {
                 .require_project(Verb::Read, Resource::Connector)
                 .is_ok()
         );
+    }
+
+    /// ⚠ The organization's owner alone, though an admin may update a
+    /// project: the refusal names the owner and the role held.
+    #[test]
+    fn require_project_owner_admits_the_organization_owner_alone() {
+        let owner: Acting = serde_json::from_value(answer(0)).unwrap();
+        assert!(owner.require_project_owner().is_ok());
+
+        for (organization_role, role) in [
+            (OrganizationRole::Admin, Role::Admin),
+            (OrganizationRole::Member, Role::Admin),
+            (OrganizationRole::Member, Role::Member),
+        ] {
+            let below = Acting {
+                organization_role: Some(organization_role),
+                project: Some(ActingProject {
+                    project_id: ProjectId::try_new("proj_1").unwrap(),
+                    role,
+                }),
+                ..owner.clone()
+            };
+            let refused = below.require_project_owner().unwrap_err();
+            assert!(
+                matches!(
+                    &refused,
+                    TelmoniError::Authz(AuthzError::InsufficientRole {
+                        required: Role::Owner,
+                        actual,
+                    }) if *actual == role
+                ),
+                "{organization_role:?} seated as {role} was not refused as below the owner: {refused:?}"
+            );
+        }
+
+        let no_project = Acting {
+            project: None,
+            ..owner
+        };
+        assert!(no_project.require_project_owner().is_err());
     }
 }

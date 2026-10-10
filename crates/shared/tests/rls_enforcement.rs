@@ -396,6 +396,15 @@ async fn a_maintenance_lane_cannot_reach_a_sibling_services_schema() {
         (MaintenanceLane::Agent, "audit.events"),
         (MaintenanceLane::Agent, "auth.identities"),
         (MaintenanceLane::Agent, "notifications.deliveries"),
+        (MaintenanceLane::Agent, "telemetry.project_settings"),
+        (MaintenanceLane::Auth, "telemetry.project_settings"),
+        (MaintenanceLane::Notifications, "telemetry.project_settings"),
+        // Telemetry writes nothing a chain records, and reads no sibling's
+        // table: what it needs of one comes through the seams.
+        (MaintenanceLane::Telemetry, "audit.events"),
+        (MaintenanceLane::Telemetry, "auth.projects"),
+        (MaintenanceLane::Telemetry, "notifications.feed"),
+        (MaintenanceLane::Telemetry, "agent.chunks"),
     ] {
         let mut tx = enter(&pool, lane).await.expect("enter the lane");
         let denied = sqlx::query(&format!("SELECT count(*) FROM {foreign}"))

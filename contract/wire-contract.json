@@ -1,6 +1,11 @@
 {
   "$generated": "by `make contract` from crates/shared/src/types and slug.rs — do not edit by hand",
   "enums": {
+    "ContentMode": [
+      "off",
+      "on",
+      "sealed"
+    ],
     "Flag": [
       "connectors",
       "public_api",
@@ -24,6 +29,18 @@
       "owner",
       "admin",
       "member"
+    ],
+    "SpanKind": [
+      "run",
+      "step",
+      "model_call",
+      "tool_call",
+      "span"
+    ],
+    "SpanStatus": [
+      "ok",
+      "error",
+      "cancelled"
     ]
   },
   "flags": {

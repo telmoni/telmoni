@@ -108,8 +108,12 @@ spec:
           port: 6379
 ---
 # The server and the jobs leave the cluster for everything they use: the
-# database, the mail and sign-in vendors, the KMS key, and a customer's
-# webhook on whatever port it names. The server's own URL guard
+# database, ClickHouse, the mail and sign-in vendors, the KMS key, and a
+# customer's webhook on whatever port it names. A ClickHouse inside the
+# cluster needs policies of its own: egress to it by pod and namespace
+# selector, since an address block is not matched against a pod's address
+# everywhere, and, in this namespace, ingress to it, which
+# `default-deny-all` refuses. The server's own URL guard
 # (crates/shared/src/net_guard.rs) refuses private addresses, which a policy
 # cannot tell from the database's.
 kind: NetworkPolicy

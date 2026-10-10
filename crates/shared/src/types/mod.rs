@@ -1,6 +1,7 @@
 //! Value types shared by every Telmoni service.
 
 pub mod audit_action;
+pub mod content_mode;
 pub mod flag;
 pub mod notification_kind;
 
@@ -10,9 +11,12 @@ pub mod parse_error;
 pub mod redacted;
 pub mod resource_kind;
 pub mod role;
+pub mod span_kind;
+pub mod span_status;
 pub mod tenant_id;
 
 pub use audit_action::AuditAction;
+pub use content_mode::ContentMode;
 pub use flag::{Flag, FlagSet};
 pub use notification_kind::NotificationKind;
 pub use organization_role::OrganizationRole;
@@ -21,6 +25,8 @@ pub use parse_error::ParseEnumError;
 pub use redacted::Redacted;
 pub use resource_kind::TelmoniResourceKind;
 pub use role::Role;
+pub use span_kind::SpanKind;
+pub use span_status::SpanStatus;
 pub use tenant_id::{
     API_TOKEN_PREFIX, OrganizationId, OrganizationIdError, ProjectId, ProjectIdError, UserId,
     UserIdError,

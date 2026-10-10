@@ -149,6 +149,10 @@ pub enum MaintenanceLane {
     /// `agent_maintenance`: the agent schema alone. Its sources are read
     /// through the seams, in their own modules' lanes.
     Agent,
+    /// `telemetry_maintenance`: the telemetry schema alone, for the purges
+    /// that span a deleted organization's projects and a transfer's move of
+    /// a project's settings to the organization that takes it.
+    Telemetry,
 }
 
 impl MaintenanceLane {
@@ -159,6 +163,7 @@ impl MaintenanceLane {
             Self::Auth => "auth_maintenance",
             Self::Notifications => "notifications_maintenance",
             Self::Agent => "agent_maintenance",
+            Self::Telemetry => "telemetry_maintenance",
         }
     }
 
@@ -169,6 +174,7 @@ impl MaintenanceLane {
             Self::Auth => "SET LOCAL ROLE auth_maintenance",
             Self::Notifications => "SET LOCAL ROLE notifications_maintenance",
             Self::Agent => "SET LOCAL ROLE agent_maintenance",
+            Self::Telemetry => "SET LOCAL ROLE telemetry_maintenance",
         }
     }
 }

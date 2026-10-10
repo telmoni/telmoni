@@ -7,8 +7,9 @@
 //!   module of the deployment's own holds for the organization outside this
 //!   database — a subscription, say — goes now, not when the wait ends); and
 //!   once `erase_after` has passed the sweep runs every sibling purge — a
-//!   hook purge nobody has landed first, then notifications, then the hook
-//!   again — and deletes the row, under the organization's lock and only
+//!   hook purge nobody has landed first, then notifications, telemetry and
+//!   the agent, then the hook again — and deletes the row, under the
+//!   organization's lock and only
 //!   while it is still pending and ripe. The wait is the FINALIZE GRACE,
 //!   [`FINALIZE_GRACE_SECONDS`], whoever asked: there is no restore. Its
 //!   members' memberships go with it; no person is touched.
@@ -140,15 +141,18 @@ pub async fn run_inline_tail(state: &AppState, organization_id: &OrganizationId)
     }
 }
 
-/// Notifications' and the agent's teardown for one organization, before its
-/// row goes. A module not linked is nothing to purge; an error stops the
-/// tail it is part of.
+/// Notifications', telemetry's and the agent's teardown for one
+/// organization, before its row goes. A module not linked is nothing to
+/// purge; an error stops the tail it is part of.
 pub(crate) async fn purge_organization_siblings(
     state: &AppState,
     organization_id: &OrganizationId,
 ) -> Result<(), TelmoniError> {
     if let Some(notifications) = state.siblings.notifications.as_ref() {
         notifications.purge_organization(organization_id).await?;
+    }
+    if let Some(telemetry) = state.siblings.telemetry.as_ref() {
+        telemetry.purge_organization(organization_id).await?;
     }
     if let Some(agent) = state.siblings.agent.as_ref() {
         agent.purge_organization(organization_id).await?;
@@ -160,6 +164,12 @@ pub(crate) async fn purge_organization_siblings(
 /// calls it inside its transaction, holding two organizations' locks, so it
 /// cannot be allowed the console's whole ten seconds.
 const PROJECT_PURGE_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The longest telemetry's project purge or move may take: one statement on
+/// one row. The transfer's accept calls the move before notifications'
+/// purge, while its own transaction holds both organizations' locks, and the
+/// two together stay under the console's ten seconds.
+const TELEMETRY_PROJECT_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Notifications' teardown for one project — its connectors, their
 /// deliveries, its feed and any handshake in flight — before it is handed
@@ -184,6 +194,55 @@ pub(crate) async fn purge_project_connectors(
     {
         Ok(done) => done.map(|_| ()),
         Err(_) => Err(TelmoniError::Internal("the project purge timed out".into())),
+    }
+}
+
+/// Telemetry's teardown for one project after it is deleted: its settings.
+/// No telemetry module is nothing to purge. Its spans carry the project
+/// alone, and go with their day at the retention line.
+pub(crate) async fn purge_project_telemetry(
+    state: &AppState,
+    project_id: &ProjectId,
+) -> Result<(), TelmoniError> {
+    let Some(telemetry) = state.siblings.telemetry.as_ref() else {
+        return Ok(());
+    };
+    match tokio::time::timeout(
+        TELEMETRY_PROJECT_BUDGET,
+        telemetry.purge_project(project_id),
+    )
+    .await
+    {
+        Ok(done) => done.map(|_| ()),
+        Err(_) => Err(TelmoniError::Internal(
+            "telemetry's project purge timed out".into(),
+        )),
+    }
+}
+
+/// Telemetry's half of a transfer: the project's settings move to the
+/// organization that now holds it, so that its purge, never the old
+/// organization's, is what removes them. No telemetry module is nothing to
+/// move; a failure or a move over budget is an `Err`, which the transfer
+/// treats as a refusal to move, and settles.
+pub(crate) async fn move_project_telemetry(
+    state: &AppState,
+    project_id: &ProjectId,
+    organization_id: &OrganizationId,
+) -> Result<(), TelmoniError> {
+    let Some(telemetry) = state.siblings.telemetry.as_ref() else {
+        return Ok(());
+    };
+    match tokio::time::timeout(
+        TELEMETRY_PROJECT_BUDGET,
+        telemetry.move_project(project_id, organization_id),
+    )
+    .await
+    {
+        Ok(done) => done,
+        Err(_) => Err(TelmoniError::Internal(
+            "telemetry's project move timed out".into(),
+        )),
     }
 }
 

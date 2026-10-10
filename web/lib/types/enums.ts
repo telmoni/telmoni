@@ -2,6 +2,14 @@
 // `contract.test.ts` fails if any differs from contract/wire-contract.json,
 // which `make contract` writes from the Rust enums in crates/shared/src/types.
 
+/** Wire vocabulary of the Rust `ContentMode`: what a project keeps of its spans' content. */
+export const ContentMode = {
+  Off:    "off",
+  On:     "on",
+  Sealed: "sealed",
+} as const;
+export type ContentMode = typeof ContentMode[keyof typeof ContentMode];
+
 /** Wire vocabulary of the Rust `Flag`. */
 export const Flag = {
   Connectors: "connectors",
@@ -37,6 +45,24 @@ export const Role = {
   Member: "member",
 } as const;
 export type Role = typeof Role[keyof typeof Role];
+
+/** Wire vocabulary of the Rust `SpanKind`: what one span of a run is. */
+export const SpanKind = {
+  Run:       "run",
+  Step:      "step",
+  ModelCall: "model_call",
+  ToolCall:  "tool_call",
+  Span:      "span",
+} as const;
+export type SpanKind = typeof SpanKind[keyof typeof SpanKind];
+
+/** Wire vocabulary of the Rust `SpanStatus`: how a span ended. */
+export const SpanStatus = {
+  Ok:        "ok",
+  Error:     "error",
+  Cancelled: "cancelled",
+} as const;
+export type SpanStatus = typeof SpanStatus[keyof typeof SpanStatus];
 
 /** The sentence a switched-off feature answers with, by flag — the Rust `Flag::off_detail`. */
 export const FlagOffDetail = {

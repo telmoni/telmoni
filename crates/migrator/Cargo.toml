@@ -14,6 +14,9 @@ path = "src/lib.rs"
 
 [dependencies]
 telmoni-shared = { path = "../shared" }
+# The ClickHouse half of both commands: its one file, applied after the
+# Postgres sets, and its partitions dropped the same night as Postgres's.
+telmoni-telemetry = { path = "../telemetry" }
 sqlx    = { workspace = true }
 tracing = { workspace = true }
 anyhow  = { workspace = true }

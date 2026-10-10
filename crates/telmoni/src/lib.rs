@@ -1,12 +1,13 @@
 //! The Telmoni server: one process, and the modules it is made of.
 //!
-//! Auth, notifications and the agent are libraries. This crate links them,
-//! hands each the others through the seams in [`telmoni_shared::seam`],
-//! mounts their routers under one listener, and runs their background loops
-//! — the delivery loop, the retention sweeps, the agent's indexer, the
-//! deletion sweep and the nightly audit walk — as tasks of the same process. Each module still
-//! connects as its own database role, so row-level security and the grants
-//! stand exactly as they did across services.
+//! Auth, notifications, telemetry and the agent are libraries. This crate
+//! links them, hands each the others through the seams in
+//! [`telmoni_shared::seam`], mounts their routers under one listener, and
+//! runs their background loops — the delivery loop, the retention sweeps,
+//! the agent's indexer, the deletion sweep and the nightly audit walk — as
+//! tasks of the same process. Each module still connects as its own database
+//! role, so row-level security and the grants stand exactly as they did
+//! across services.
 //!
 //! The binary is the command line over this: `telmoni serve`, and the
 //! migrator and each sweep as a subcommand run as a Job. A binary built for
@@ -77,6 +78,11 @@ pub struct Parts {
     pub notifications_config: telmoni_notifications::Config,
     /// Notifications' pool, opened as the `notifications` role.
     pub notifications_pool: PgPool,
+    /// Telemetry's configuration. Required, as its pool is: a binary without
+    /// telemetry is not one that can keep a run.
+    pub telemetry_config: telmoni_telemetry::Config,
+    /// Telemetry's pool, opened as the `telemetry` role.
+    pub telemetry_pool: PgPool,
     /// The agent, or `None` for a deployment without one, whose agent lanes
     /// then answer that it is not configured.
     pub agent: Option<AgentParts>,
@@ -91,6 +97,8 @@ pub struct App {
     pub auth: Arc<telmoni_auth::AppState>,
     /// Notifications.
     pub notifications: Arc<telmoni_notifications::AppState>,
+    /// Telemetry.
+    pub telemetry: Arc<telmoni_telemetry::AppState>,
     /// The agent, when the deployment has one.
     pub agent: Option<Arc<telmoni_agent::AppState>>,
     secrets: ServiceSecrets,
@@ -177,7 +185,7 @@ pub struct AgentParts {
     pub pool: PgPool,
     /// What records each of the agent's questions
     /// ([`telmoni_shared::seam::AgentObserver`]): the telemetry module, once
-    /// it exists; `None` until then.
+    /// it records them; `None` until then.
     pub observer: Option<Arc<dyn telmoni_shared::seam::AgentObserver>>,
 }
 
@@ -211,6 +219,10 @@ impl App {
         )?);
         let notifier: Arc<dyn telmoni_shared::seam::Notifications> =
             Arc::new(telmoni_notifications::seam::Notifier(notifications.clone()));
+        let telemetry = Arc::new(telmoni_telemetry::boot::state(
+            parts.telemetry_config,
+            parts.telemetry_pool,
+        )?);
         let agent = parts
             .agent
             .map(|agent| {
@@ -231,6 +243,9 @@ impl App {
             parts.providers,
             telmoni_auth::Siblings {
                 notifications: Some(notifier),
+                telemetry: Some(Arc::new(telmoni_telemetry::seam::TelemetrySeam(
+                    telemetry.clone(),
+                ))),
                 agent: agent.clone().map(|agent| {
                     Arc::new(telmoni_agent::seam::AgentSeam(agent))
                         as Arc<dyn telmoni_shared::seam::Agent>
@@ -244,6 +259,7 @@ impl App {
         Ok(Self {
             auth,
             notifications,
+            telemetry,
             agent,
             secrets,
             modules: Vec::new(),
@@ -259,17 +275,19 @@ impl App {
         self.modules.push(module);
     }
 
-    /// The process as the environment describes it: both pools as their own
-    /// roles, auth's providers from the `OIDC_*` and `SMTP_URL` variables
+    /// The process as the environment describes it: each module's pool as its
+    /// own role, auth's providers from the `OIDC_*` and `SMTP_URL` variables
     /// ([`telmoni_auth::boot`]), and no purge hook.
     pub async fn from_env() -> anyhow::Result<Self> {
         let auth_config = telmoni_auth::Config::from_env()?;
         let notifications_config = telmoni_notifications::Config::from_env()?;
+        let telemetry_config = telmoni_telemetry::Config::from_env()?;
         let http = telmoni_auth::http_client()?;
         let mail = telmoni_auth::smtp::transport_from_env(&auth_config)?;
         let auth_pool = telmoni_auth::open_pool(&auth_config).await?;
         let notifications_pool =
             telmoni_notifications::boot::open_pool(&notifications_config).await?;
+        let telemetry_pool = telmoni_telemetry::boot::open_pool(&telemetry_config).await?;
         let agent = AgentParts::from_env().await?;
         let providers =
             telmoni_auth::boot::providers_from_env(&auth_config, &http, auth_pool.clone(), mail)
@@ -280,6 +298,8 @@ impl App {
             providers,
             notifications_config,
             notifications_pool,
+            telemetry_config,
+            telemetry_pool,
             agent,
             purge_hook: None,
         })
@@ -379,9 +399,9 @@ impl App {
 
 /// Run one command over the process `build` assembles: a binary's whole
 /// `main` once the arguments are parsed. `migrate` and `rotate` never build
-/// the process — they run as the migrator's role against the database alone
-/// — and every other command builds it once, with every module the binary
-/// mounted, then serves or runs the one sweep.
+/// the process — they run as the migrator, against Postgres and ClickHouse
+/// alone — and every other command builds it once, with every module the
+/// binary mounted, then serves or runs the one sweep.
 pub async fn run<F, Fut>(command: Command, build: F) -> anyhow::Result<()>
 where
     F: FnOnce() -> Fut,
@@ -468,6 +488,7 @@ async fn health(
     };
     report("auth", app.auth.ready().await);
     report("notifications", app.notifications.ready().await);
+    report("telemetry", app.telemetry.ready().await);
     if let Some(agent) = &app.agent {
         report("agent", agent.ready().await);
     }

@@ -1,0 +1,51 @@
+<!--
+  The two users of the LOCAL docker ClickHouse, as a tier has them: mounted
+  into the server's users.d by the development Compose file and by CI. The
+  passwords are the ones .env.example carries, and the server listens on
+  127.0.0.1 alone; a tier writes the same users from its secrets.
+
+  - `migrator`: `telmoni migrate` and `telmoni rotate`. It makes the database,
+    the tables, the view and the row policies: `tenant_isolation`, `TO ALL
+    EXCEPT CURRENT_USER`, does not hold it, and its own, `migrator_reads_all`,
+    admits it to every row whatever the server's default, so the view, which
+    runs as it, and the nightly purge, which lists its partitions from the
+    rows, see every project's. It drops those partitions (`ALTER DELETE`).
+    Its rights are named one by one, never `ALL ON telemetry.*`: ClickHouse
+    grants `ALL` on the name `telemetry` too, and with it the right to
+    alter, drop and act as the user `telemetry`.
+  - `telemetry`: the module. It writes spans and reads them and their
+    totals, and the row policy holds it to the projects each read names.
+    It is granted those two tables and nothing else in the database: the
+    view reads as its definer, so a grant on it would answer every
+    project's totals past the policy, and the rollup is the view's alone to
+    write.
+
+  An edit here lands with a restart of the container.
+-->
+<clickhouse>
+    <users>
+        <migrator>
+            <password>migrator_dev</password>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <profile>default</profile>
+            <quota>default</quota>
+            <grants>
+                <query>GRANT CREATE DATABASE, CREATE TABLE, CREATE VIEW, CREATE ROW POLICY, SELECT, INSERT, ALTER DELETE ON telemetry.*</query>
+            </grants>
+        </migrator>
+        <telemetry>
+            <password>telemetry_dev</password>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <profile>default</profile>
+            <quota>default</quota>
+            <grants>
+                <query>GRANT SELECT, INSERT ON telemetry.spans</query>
+                <query>GRANT SELECT ON telemetry.spans_hourly</query>
+            </grants>
+        </telemetry>
+    </users>
+</clickhouse>

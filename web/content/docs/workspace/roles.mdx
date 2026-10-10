@@ -59,16 +59,19 @@ resources: API keys, connectors, and project audit events.
 | View project members | Yes | Yes | Yes |
 | Invite members to project, change project roles | Yes | Yes | No |
 | Read project audit log | Yes | Yes | **No** |
-| Update project settings and rename | Yes | Yes | No |
+| Rename the project | Yes | Yes | No |
+| Change the project's [content mode](/docs/workspace/organizations-and-projects#a-projects-content-mode) | Yes | No | No |
 | Transfer project to another organization | Yes | No | No |
 | Delete project | Yes | No | No |
 
-- **Owner**: Full control over the project, including project deletion and
-  transferring the project to another organization. The organization Owner holds
-  Owner privileges across all projects in the organization.
+- **Owner**: Full control over the project, including its content mode, project
+  deletion, and transferring the project to another organization. The
+  organization Owner holds Owner privileges across all projects in the
+  organization.
 - **Admin**: Operates the project: creates, rotates, and revokes API keys;
   manages Slack, Discord, and webhook connectors; manages project seats; and
-  reads the project audit log. Cannot delete or transfer the project.
+  reads the project audit log. Cannot change the project's content mode, or
+  delete or transfer the project.
 - **Member**: Read-only access to project resources. Can inspect active
   connectors, delivery logs, and API key metadata (name, creation date, last
   used date). Cannot view the project audit log and cannot mutate any resources.
@@ -77,7 +80,7 @@ resources: API keys, connectors, and project audit events.
 
 When you attempt an action your role does not allow, the API and console refuse
 the request with a `403 Forbidden` problem document. A project's members and
-invitations, and its rename and deletion, answer
+invitations, its rename and deletion, and its content mode, answer
 `/errors/authz/insufficient-role`, and `detail` names the least role that would
 do and the one you hold:
 

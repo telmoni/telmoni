@@ -36,6 +36,25 @@ pub async fn seed_identity(pool: &sqlx::PgPool, user: &str, email: &str) {
     .expect("seed the identity an exchange records");
 }
 
+/// Whether some other session holds `organization`'s audit chain lock, the
+/// key [`crate::audit::lock_chain`] takes, asked from a session of `pool`'s:
+/// a try that fails is a lock held, and one that succeeds lets it go at once.
+/// For a suite pinning that a change is decided, or a move made, under it.
+pub async fn chain_lock_held(
+    pool: &sqlx::PgPool,
+    organization: &crate::types::OrganizationId,
+) -> bool {
+    let mut tx = pool.begin().await.expect("a probe transaction");
+    let taken: bool =
+        sqlx::query_scalar("SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(organization)
+            .fetch_one(&mut *tx)
+            .await
+            .expect("try the chain lock");
+    tx.rollback().await.expect("let the probe's try go");
+    !taken
+}
+
 /// A pool whose connections can never be established: port 1 is reserved and
 /// refuses. `connect_lazy` succeeds anyway, the production behaviour that once
 /// let `/health` report Ready without ever reaching Postgres.

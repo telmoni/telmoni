@@ -14,7 +14,9 @@
 //! not come with it: they are the old organization's vendor grants and webhook
 //! secrets, purged in notifications before the move commits; the agent finds
 //! what it holds of the project under the old organization and removes it
-//! within the hour. The audit chains
+//! within the hour. Its telemetry does come with it: a span carries its
+//! project and nothing above it, and the project's settings, its content mode
+//! among them, move to the new organization before the commit. The audit chains
 //! stay where they are — the old organization's keeps the project's history
 //! and the new one's starts with its arrival — because a chain cannot be
 //! spliced. A withdrawal, a replacement and an answer are mailed to whoever
@@ -41,7 +43,9 @@ use serde::Deserialize;
 use serde_json::json;
 
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
-use telmoni_shared::db::tenant_session::{ProjectAndOrganization, maintenance_scope};
+use telmoni_shared::db::tenant_session::{
+    Maintenance, ProjectAndOrganization, Scoped, maintenance_scope,
+};
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::{
@@ -687,11 +691,16 @@ async fn lock_transfer_organizations(
 /// project in an organization whose owner can never sign in to hand it on.
 /// Under the lock, somebody on their way out is refused.
 ///
-/// ⚠ **Notifications' purge runs inside the transaction, before the commit,
-/// and a purge that fails moves nothing.** The project's connectors are the
-/// old organization's Slack and Discord grants and webhook secrets; a project
-/// arriving with them would post the new owner's events into the old owner's
-/// channels. Only a purge that answered 2xx is followed by the move.
+/// ⚠ **Telemetry's move, then notifications' purge, then the commit, and a
+/// step that fails moves nothing.** Telemetry's move of the project's
+/// settings comes first because it can be undone, so a refused move leaves
+/// everything as it was. Notifications' purge cannot be: the project's
+/// connectors are the old organization's Slack and Discord grants and
+/// webhook secrets, and a project arriving with them would post the new
+/// owner's events into the old owner's channels. Only a purge that answered
+/// `Ok` is followed by the commit. Until the commit answers, a guard
+/// (`SettleTelemetry`) puts telemetry's settings back with the project,
+/// wherever auth then holds it.
 pub async fn accept(
     State(state): State<Arc<AppState>>,
     Path(project_id): Path<String>,
@@ -854,8 +863,12 @@ pub async fn accept(
     let previous_contact = identities::get(&mut tx, &previous).await?;
     let new_owner = crate::identity::display_for(person.display_name.as_deref(), &person.email);
 
-    crate::handler::deletion::purge_project_connectors(&state, &project_id).await?;
-    tx.commit().await?;
+    let settle = SettleTelemetry::arm(&state, &project_id, &source, &destination);
+    if let Err(e) = move_purge_and_commit(&state, tx, &project_id, &destination).await {
+        settle.settle().await;
+        return Err(e);
+    }
+    settle.disarm();
 
     if let Some(previous_contact) = previous_contact
         && let Err(e) = state
@@ -888,6 +901,167 @@ pub async fn accept(
         "previousOwner": previous,
         "name": name,
     })))
+}
+
+/// The accept's last steps, in order: telemetry's move, the one that can be
+/// undone, then notifications' purge, which cannot, then the commit. The
+/// transaction ends here whatever happens, rolled back before a refusal is
+/// answered rather than when its connection goes back to the pool, so the
+/// settling after finds its locks free.
+async fn move_purge_and_commit(
+    state: &AppState,
+    tx: Scoped<'_, Maintenance<AuthLane>>,
+    project_id: &ProjectId,
+    destination: &OrganizationId,
+) -> Result<(), TelmoniError> {
+    let ready = match crate::handler::deletion::move_project_telemetry(
+        state,
+        project_id,
+        destination,
+    )
+    .await
+    {
+        Ok(()) => crate::handler::deletion::purge_project_connectors(state, project_id).await,
+        Err(e) => Err(e),
+    };
+    if let Err(e) = ready {
+        // A rollback that fails is a connection gone, whose close undoes it.
+        if tx.rollback().await.is_err() {
+            tracing::warn!(
+                project_id = %project_id,
+                "a refused transfer's rollback failed; its connection's close undoes it"
+            );
+        }
+        return Err(e);
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Telemetry's settings put back with their project, unless the accept
+/// commits: armed before telemetry's move, disarmed once the commit answers.
+///
+/// ⚠ **Two stores cannot commit together.** The move may have landed before
+/// a step after it failed, one over its budget may still land, and a commit
+/// may land with its answer lost. So the settling reads where auth holds the
+/// project, under both organizations' locks, as an accept takes them, and
+/// moves the settings there — right whichever happened, a retry's accept in
+/// between included; a project moved on since, beyond both, is the later
+/// accept's to settle. The
+/// request settles them itself before it answers, so a rollout that waits for
+/// it waits for that too; a settling that fails, or a request dropped before
+/// it could, leaves the guard armed, and its drop tries again in a task of
+/// its own ([`SETTLE_RETRIES`]).
+struct SettleTelemetry(Option<Settle>);
+
+struct Settle {
+    state: Arc<AppState>,
+    project_id: ProjectId,
+    source: OrganizationId,
+    destination: OrganizationId,
+}
+
+/// The waits before each try of the task settling them: at once, then past
+/// the locks' and the move's two seconds a few times over, since what failed
+/// it is most often an accept or a commit still holding them; and last past
+/// two minutes, the `idle_in_transaction_session_timeout` that frees the
+/// locks of an accept whose connection died mid-commit.
+const SETTLE_RETRIES: [std::time::Duration; 4] = [
+    std::time::Duration::ZERO,
+    std::time::Duration::from_secs(5),
+    std::time::Duration::from_secs(30),
+    std::time::Duration::from_secs(150),
+];
+
+impl SettleTelemetry {
+    /// Armed, unless no telemetry module holds settings to settle.
+    fn arm(
+        state: &Arc<AppState>,
+        project_id: &ProjectId,
+        source: &OrganizationId,
+        destination: &OrganizationId,
+    ) -> Self {
+        Self(state.siblings.telemetry.is_some().then(|| Settle {
+            state: state.clone(),
+            project_id: project_id.clone(),
+            source: source.clone(),
+            destination: destination.clone(),
+        }))
+    }
+
+    fn disarm(mut self) {
+        self.0 = None;
+    }
+
+    /// Settle them in the request, once its transaction is spent; armed
+    /// still if that fails, for the drop to try again.
+    async fn settle(mut self) {
+        if let Some(settle) = &self.0
+            && settle.run().await.is_ok()
+        {
+            self.0 = None;
+        }
+    }
+}
+
+impl Drop for SettleTelemetry {
+    fn drop(&mut self) {
+        let Some(settle) = self.0.take() else {
+            return;
+        };
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            tracing::error!(
+                project_id = %settle.project_id,
+                "telemetry's settings could not be settled after a transfer that did not finish: no runtime"
+            );
+            return;
+        };
+        runtime.spawn(settle.run_until_settled());
+    }
+}
+
+impl Settle {
+    async fn run_until_settled(self) {
+        let mut failure = None;
+        for wait in SETTLE_RETRIES {
+            tokio::time::sleep(wait).await;
+            match self.run().await {
+                Ok(()) => return,
+                Err(e) => failure = Some(e),
+            }
+        }
+        if let Some(e) = failure {
+            tracing::error!(
+                project_id = %self.project_id,
+                retries = SETTLE_RETRIES.len(),
+                error = %e,
+                "telemetry's settings could not be settled after a transfer that did not finish"
+            );
+        }
+    }
+
+    async fn run(&self) -> Result<(), TelmoniError> {
+        let mut tx = maintenance_scope(&self.state.db, AuthLane).await?;
+        lock_transfer_organizations(&mut tx, &self.source, &self.destination).await?;
+        // A project deleted since: its settings are its delete's to purge.
+        let Some(standing) = projects::standing(&mut tx, &self.project_id).await? else {
+            return Ok(());
+        };
+        // Moved on since, to an organization whose lock this does not hold:
+        // the accept that moved it moved the settings too, and settles them
+        // itself if it did not finish.
+        if standing.organization_id != self.source && standing.organization_id != self.destination {
+            return Ok(());
+        }
+        crate::handler::deletion::move_project_telemetry(
+            &self.state,
+            &self.project_id,
+            &standing.organization_id,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

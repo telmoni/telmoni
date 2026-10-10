@@ -52,7 +52,7 @@ import { getServerContext } from "@/lib/server/entities/organization";
 import { fetchProject } from "@/lib/server/entities/projects";
 import { getServerSession } from "@/lib/server/session";
 
-import { deleteProjectAction, updateProjectNameAction } from "./actions";
+import { deleteProjectAction, updateContentModeAction, updateProjectNameAction } from "./actions";
 
 const fetchMock = vi.mocked(tryFetchWithTimeout);
 
@@ -200,6 +200,92 @@ describe("updateProjectNameAction", () => {
     } as Awaited<ReturnType<typeof getServerContext>>);
     const res = await updateProjectNameAction(PROJECT, "Marketing Site");
     expect(res.error).toMatch(/URL was changed, or you're no longer in it/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateContentModeAction", () => {
+  // The project id rides in a header, not the path, and is still refused
+  // before the server hears of it: a header names the tenant the request
+  // acts in.
+  it("refuses anything but a project id before asking the server", async () => {
+    for (const id of [
+      "../organization",
+      "",
+      "project_1\r\nx-organization-id: org_other",
+      // Posted as an array: `RegExp.test` alone would read it as its string.
+      ["project_1"],
+    ]) {
+      expect(await updateContentModeAction(id as string, "off")).toEqual({
+        error: "Couldn't resolve that project. Reload and try again.",
+      });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // A Server Action is a public endpoint: its argument is whatever was posted.
+  it("refuses anything but a content mode before asking the server", async () => {
+    for (const mode of ["plain", "Off", "", "true"]) {
+      expect(await updateContentModeAction(PROJECT, mode as never)).toEqual({
+        error: "That is not a content mode.",
+      });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("sets the mode on the project the request acts in, and draws the settings again", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ content_mode: "off", offered: ["off"] }), { status: 200 }),
+    );
+    expect(await updateContentModeAction(PROJECT, "off")).toEqual({ error: null });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://auth.test/internal/telemetry/content-mode",
+      expect.objectContaining({
+        method: "PUT",
+        headers: expect.objectContaining({
+          authorization: "Bearer at_1",
+          "x-organization-id": ORGANIZATION,
+          "x-project-id": PROJECT,
+          "content-type": "application/json",
+        }),
+        body: JSON.stringify({ content_mode: "off" }),
+      }),
+    );
+    expect(mockRevalidate).toHaveBeenCalledWith("/(app)/[organization]/[project]/settings", "page");
+  });
+
+  // Who may, and which modes are open, are the server's to say: an admin, or
+  // a mode it does not offer yet, is refused there and the refusal shown.
+  it("surfaces the server's refusal, and draws nothing again", async () => {
+    for (const status of [403, 409]) {
+      fetchMock.mockResolvedValueOnce(new Response(null, { status }));
+      expect(await updateContentModeAction(PROJECT, "on")).toEqual({ error: "problem" });
+    }
+    expect(mockRevalidate).not.toHaveBeenCalled();
+  });
+
+  // No answer at all: the server down, or slower than the console waits.
+  it("says the change failed when the server cannot be reached, and draws nothing again", async () => {
+    fetchMock.mockResolvedValue(null);
+    expect(await updateContentModeAction(PROJECT, "off")).toEqual({
+      error: "Failed to change the content mode. Please try again.",
+    });
+    expect(mockRevalidate).not.toHaveBeenCalled();
+  });
+
+  it("refuses without asking the server when the session has ended", async () => {
+    vi.mocked(getServerSession).mockResolvedValue(null);
+    expect(await updateContentModeAction(PROJECT, "off")).toEqual({
+      error: "Your session expired — sign in again.",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses without asking the server when it cannot tell where the caller stands", async () => {
+    vi.mocked(identityContext).mockResolvedValue(null);
+    expect(await updateContentModeAction(PROJECT, "off")).toEqual({
+      error: "Couldn't resolve your organization right now. Try again in a moment.",
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

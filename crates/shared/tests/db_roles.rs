@@ -17,10 +17,11 @@ const SERVICE_ROLES: &[(&str, &str)] = &[
     ("auth", "auth"),
     ("notifications", "notifications"),
     ("agent", "agent"),
+    ("telemetry", "telemetry"),
 ];
 
 /// Every service's schema, so each role is checked against each sibling.
-const CROSS_SCHEMAS: &[&str] = &["auth", "notifications", "agent"];
+const CROSS_SCHEMAS: &[&str] = &["auth", "notifications", "agent", "telemetry"];
 
 /// Roles the grants file names, plus `migrator`, which its default
 /// privileges need, plus the lanes, which their modules' migrations grant on.
@@ -28,19 +29,24 @@ const REQUIRED_ROLES: &[&str] = &[
     "auth",
     "notifications",
     "agent",
+    "telemetry",
     "migrator",
     "auth_maintenance",
     "notifications_maintenance",
     "agent_maintenance",
+    "telemetry_maintenance",
 ];
 
 /// Each maintenance lane → its own schema, and whether it reaches `audit`.
 /// The agent's does not: it reads the chain through auth's seam, in auth's
-/// lane, and writes nothing to it.
+/// lane, and writes nothing to it. Nor does telemetry's: the purges and a
+/// transfer's move it runs are auth's to record, and a content mode is
+/// changed under a project's scope, never the lane.
 const LANES: &[(&str, &str, bool)] = &[
     ("auth_maintenance", "auth", true),
     ("notifications_maintenance", "notifications", true),
     ("agent_maintenance", "agent", false),
+    ("telemetry_maintenance", "telemetry", false),
 ];
 
 /// ⚠ **A lane reaches its own service's schema, and no sibling's.** There was
@@ -105,9 +111,16 @@ const OPERATOR_ONLY: &[&str] = &["auth.feature_flags", "auth.organization_flags"
 /// by nothing a request does.
 const LANE_WRITTEN: &[&str] = &["notifications.delivery_attempts", "agent.erasures"];
 
-/// The runtime roles that write audit rows: every module's, since each
-/// audits its own writes on the organization's chain.
-const AUDIT_WRITERS: &[&str] = &["auth", "notifications"];
+/// The tables the runtime role writes but never deletes from: its
+/// maintenance lane purges them with their project or organization. A
+/// project's settings row removed by a request would set its content mode
+/// back with no audit row.
+const LANE_DELETED: &[&str] = &["telemetry.project_settings"];
+
+/// The runtime roles that write audit rows, each auditing its own writes on
+/// the organization's chain: every module's but the agent's, which changes
+/// nothing a chain records. Telemetry's is a project's content mode.
+const AUDIT_WRITERS: &[&str] = &["auth", "notifications", "telemetry"];
 
 #[tokio::test]
 async fn object_grants_give_each_role_its_own_schema_and_no_siblings() {
@@ -161,6 +174,14 @@ async fn object_grants_give_each_role_its_own_schema_and_no_siblings() {
                     );
                     checks += 1;
                 }
+            }
+            if LANE_DELETED.contains(&table.as_str()) {
+                assert!(
+                    !has_table_privilege(&pool, role, &table, "DELETE").await,
+                    "role `{role}` can DELETE `{table}` — the lane purges it and a \
+                     request only writes it; object_grants.sql revokes the rest"
+                );
+                checks += 1;
             }
         }
 
@@ -475,6 +496,14 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             "agent.erasures",
             &["SELECT", "INSERT", "UPDATE", "DELETE"],
         ),
+        // The purges delete a project's or an organization's settings; the
+        // project's own scope writes them. (A transfer rewrites
+        // `organization_id` alone: a column grant, not this.)
+        (
+            "telemetry_maintenance",
+            "telemetry.project_settings",
+            &["SELECT", "DELETE"],
+        ),
     ];
     for (lane, table, allowed) in NARROWED {
         for verb in ["SELECT", "INSERT", "UPDATE", "DELETE"] {
@@ -604,7 +633,7 @@ async fn revoke_service_privileges(conn: &mut sqlx::PgConnection) -> Result<(), 
         .map(|(r, _)| *r)
         .collect::<Vec<_>>()
         .join(", ");
-    for schema in ["auth", "notifications", "agent", "audit"] {
+    for schema in ["auth", "notifications", "agent", "telemetry", "audit"] {
         for stmt in [
             format!("REVOKE ALL ON ALL TABLES IN SCHEMA {schema} FROM {roles}"),
             format!("REVOKE ALL ON ALL SEQUENCES IN SCHEMA {schema} FROM {roles}"),
@@ -709,7 +738,7 @@ async fn no_table_uses_a_legacy_serial_surrogate_key() {
            JOIN pg_namespace n ON n.oid = c.relnamespace
            JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0
           WHERE c.relkind = 'r'
-            AND n.nspname IN ('auth','notifications','agent','audit')
+            AND n.nspname IN ('auth','notifications','agent','telemetry','audit')
             AND a.attidentity = ''
             AND pg_get_serial_sequence((c.oid::regclass)::text, a.attname) IS NOT NULL
           ORDER BY 1, 2",
@@ -730,7 +759,7 @@ async fn no_table_uses_a_legacy_serial_surrogate_key() {
         "SELECT count(*) FROM pg_class c
            JOIN pg_namespace n ON n.oid = c.relnamespace
           WHERE c.relkind = 'r'
-            AND n.nspname IN ('auth','notifications','agent','audit')",
+            AND n.nspname IN ('auth','notifications','agent','telemetry','audit')",
     )
     .fetch_one(&pool)
     .await

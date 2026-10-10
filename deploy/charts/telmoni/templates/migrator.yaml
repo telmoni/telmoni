@@ -1,6 +1,7 @@
 {{- if .Values.migrator.enabled }}
 # The server image, run once as the migrator role: every schema's DDL and the
-# object grants, before the server rolls.
+# object grants, then ClickHouse's database and tables as its migrator user,
+# before the server rolls.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -58,7 +59,8 @@ spec:
                 - ALL
 ---
 # The audit partitions: create the months ahead, and drop the expired where
-# the registry allows it (nowhere today). DDL as the migrator role, so a Job
+# the registry allows it (nowhere today); then ClickHouse's days and months
+# of telemetry past retention. DDL as the migrator role and user, so a Job
 # of its own rather than a task of the server's.
 apiVersion: batch/v1
 kind: CronJob

@@ -11,8 +11,9 @@ use std::path::{Path, PathBuf};
 const PROBE_PREFIX: &str = "\"SELECT 1 FROM ";
 
 /// Below this, the scanner has stopped finding probes rather than found them
-/// clean: one per service that holds tables (auth and notifications).
-const MIN_PROBES: usize = 2;
+/// clean: one per service that holds tables (auth, notifications, the agent
+/// and telemetry).
+const MIN_PROBES: usize = 4;
 
 fn project_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

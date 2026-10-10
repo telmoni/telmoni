@@ -49,6 +49,11 @@ serde_json = "1"
 
 # Database
 sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "macros", "migrate"] }
+# ClickHouse's own client, for the spans and their rollups: typed rows over
+# HTTP, each result's names and types checked against its Rust row. Pinned to
+# 0.15, so a breaking 0.16 is an upgrade taken on purpose; TLS on the `ring`
+# the rest of the tree uses, for a self-hoster's ClickHouse behind https.
+clickhouse = { version = "0.15", features = ["uuid", "chrono", "rustls-tls-ring", "rustls-tls-webpki-roots"] }
 
 # Utilities
 uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }

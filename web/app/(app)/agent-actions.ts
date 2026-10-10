@@ -31,7 +31,7 @@ async function admit(action: string, limit: number, projectId: string): Promise<
   if (!session) return EXPIRED;
   const limited = await rateLimit(sessionKey(session, action), { limit, windowMs: 60_000 });
   if (limited) return SLOW_DOWN;
-  if (typeof projectId !== "string" || !isProjectId(projectId)) return UNKNOWN_PROJECT;
+  if (!isProjectId(projectId)) return UNKNOWN_PROJECT;
   return null;
 }
 

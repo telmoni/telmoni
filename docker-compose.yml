@@ -1,6 +1,6 @@
 # Local development services for Telmoni.
 #
-#   make docker-up       # start postgres, redis and mailpit
+#   make docker-up       # start postgres, clickhouse, redis and mailpit
 #   make web-dev         # Next.js dev server
 #   make up              # the whole stack: these, then the server and the console
 #   make down            # stop containers (volumes survive)
@@ -26,7 +26,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # Run once, when the volume is first created: the `vector` extension,
-      # the four login roles, then the hardening a tier applies, so the
+      # the five login roles, then the hardening a tier applies, so the
       # server runs here under the same grants and row-level security it
       # runs under there. `make db-reset` recreates the volume, which is what
       # applies an edit to any of them.
@@ -35,6 +35,32 @@ services:
       - ./crates/migrator/sql/role_hardening.sql:/docker-entrypoint-initdb.d/20-role-hardening.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U telmoni -d telmoni"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # Telemetry's spans and their hourly rollup. The image a tier will run,
+  # kept small by the settings this repository gives every ClickHouse it
+  # runs, with the two users a tier will have: `migrator`, whom
+  # `tenant_isolation` does not hold, and `telemetry`, the module, held to
+  # the projects each read names. `make db-reset` recreates its volume with Postgres's.
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8.19.9
+    container_name: telmoni-clickhouse
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8123:8123"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./crates/telemetry/clickhouse/low-memory.xml:/etc/clickhouse-server/config.d/low-memory.xml:ro
+      - ./crates/telemetry/clickhouse/dev-users.xml:/etc/clickhouse-server/users.d/telmoni.xml:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:8123/ping"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -89,5 +115,7 @@ services:
 volumes:
   postgres_data:
     name: telmoni-postgres-data
+  clickhouse_data:
+    name: telmoni-clickhouse-data
   ollama_models:
     name: telmoni-ollama-models

@@ -35,6 +35,29 @@ vi.mock("./_rename-project", () => ({
   ),
 }));
 
+vi.mock("./_content-mode", () => ({
+  ContentModeForm: ({
+    projectId,
+    mode,
+    offered,
+    canEdit,
+  }: {
+    projectId: string;
+    mode: string;
+    offered: readonly string[];
+    canEdit: boolean;
+  }) => (
+    <div
+      data-testid="content-mode-form"
+      data-project-id={projectId}
+      data-mode={mode}
+      data-offered={offered.join(",")}
+    >
+      {canEdit ? "editable" : "readonly"}
+    </div>
+  ),
+}));
+
 vi.mock("./_delete-project", () => ({
   DeleteProjectForm: ({ projectId, projectName }: { projectId: string; projectName: string }) => (
     <div data-testid="delete-form" data-project-id={projectId}>
@@ -52,9 +75,11 @@ vi.mock("next/navigation", () => ({
 
 let mockContext: unknown;
 let mockProject: unknown;
+let mockContentMode: unknown;
 vi.mock("@/lib/server/data", () => ({
   getServerContext: async () => mockContext,
   fetchProjectBySlug: async () => mockProject,
+  fetchContentMode: async () => mockContentMode,
 }));
 
 vi.mock("@/lib/server/session", () => ({
@@ -94,6 +119,7 @@ beforeEach(() => {
     name: "My Project",
     role: Role.Owner,
   };
+  mockContentMode = { content_mode: "off", offered: ["off"] };
 });
 
 describe("SettingsPage", () => {
@@ -154,6 +180,38 @@ describe("SettingsPage", () => {
       mockContext = null;
       render(await SettingsPage({ params: PARAMS }));
       expect(screen.getByTestId("outage")).toBeInTheDocument();
+    });
+  });
+
+  // ⚠ What a project keeps changes what its organization is liable for: the
+  // organization's owner sets it and nobody below, and every role sees it.
+  describe("content mode", () => {
+    it("lets the owner change it, with the mode and the modes the server offers", async () => {
+      render(await SettingsPage({ params: PARAMS }));
+      const form = screen.getByTestId("content-mode-form");
+      expect(form).toHaveAttribute("data-project-id", "project_7bQx2mNv9BcK4dLp");
+      expect(form).toHaveAttribute("data-mode", "off");
+      expect(form).toHaveAttribute("data-offered", "off");
+      expect(form).toHaveTextContent("editable");
+    });
+
+    it("shows an admin and a member the mode, and lets neither change it", async () => {
+      for (const role of [Role.Admin, Role.Member]) {
+        mockProject = { id: "project_7bQx2mNv9BcK4dLp", slug: "my-project", name: "My Project", role };
+        const { unmount } = render(await SettingsPage({ params: PARAMS }));
+        expect(screen.getByTestId("content-mode-form")).toHaveTextContent("readonly");
+        unmount();
+      }
+    });
+
+    // An outage of the mode's read is not the page's: the rest of the
+    // settings still render.
+    it("says the mode could not be read, and still draws the rest", async () => {
+      mockContentMode = null;
+      render(await SettingsPage({ params: PARAMS }));
+      expect(screen.queryByTestId("content-mode-form")).toBeNull();
+      expect(screen.getByText(/content mode could not be read/i)).toBeInTheDocument();
+      expect(screen.getByTestId("rename-form")).toBeInTheDocument();
     });
   });
 });

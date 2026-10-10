@@ -1,0 +1,36 @@
+[package]
+name        = "telmoni-telemetry"
+description = "Telemetry — each project's settings in Postgres, and its spans and their hourly rollup in ClickHouse, read only under a row policy naming the reader's projects."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+publish                = false
+
+# A library: the `telmoni` binary links it beside auth and notifications, and
+# the migrator applies its ClickHouse file and purges its partitions.
+[lib]
+name = "telmoni_telemetry"
+path = "src/lib.rs"
+
+[dependencies]
+telmoni-shared = { path = "../shared" }
+
+anyhow      = { workspace = true }
+async-trait = { workspace = true }
+chrono      = { workspace = true }
+clickhouse  = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+# The digest of the ClickHouse file's statements, which a store keeps.
+sha2        = { workspace = true }
+sqlx        = { workspace = true }
+# A read's deadline on the client's side, beside the server's own.
+tokio       = { workspace = true }
+tracing     = { workspace = true }
+uuid        = { workspace = true }
+# Its `Url` parses a ClickHouse URL's user and password out of it, as a DSN
+# carries them; the client sends them as headers, never in the URL.
+reqwest     = { workspace = true }
+
+[lints]
+workspace = true

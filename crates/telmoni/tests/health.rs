@@ -69,6 +69,11 @@ fn assemble() -> App {
         providers,
         notifications_config,
         notifications_pool: unreachable_pool(),
+        telemetry_config: telmoni_telemetry::Config {
+            database_url: "".into(),
+            clickhouse_url: "http://telemetry:telemetry@127.0.0.1:1".into(),
+        },
+        telemetry_pool: unreachable_pool(),
         agent: None,
         purge_hook: None,
     })

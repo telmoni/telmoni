@@ -5,11 +5,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   asRole,
+  ContentMode,
   Flag,
   FlagOffDetail,
   NotificationKind,
   OrganizationStatus,
   Role,
+  SpanKind,
+  SpanStatus,
 } from "./enums";
 import { RESERVED_ORGANIZATION_SLUGS, RESERVED_PROJECT_SLUGS, SLUG_MAX_LENGTH } from "../slug";
 
@@ -27,10 +30,13 @@ const contract = JSON.parse(
 // Every enum the server publishes, and the console's copy of it. A new one
 // in the contract fails the first test until it is added here.
 const CONSOLE: Record<string, Record<string, string>> = {
+  ContentMode,
   Flag,
   NotificationKind,
   OrganizationStatus,
   Role,
+  SpanKind,
+  SpanStatus,
 };
 
 describe("wire contract", () => {

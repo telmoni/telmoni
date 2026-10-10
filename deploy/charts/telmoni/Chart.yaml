@@ -1,6 +1,6 @@
 apiVersion: v2
 name: telmoni
-description: Telmoni, open source — the server (auth, notifications and the console agent in one process, with its sweeps), the console, and the migration job
+description: Telmoni, open source — the server (auth, notifications, telemetry and the console agent in one process, with its sweeps), the console, and the migration job
 type: application
 version: 0.1.0
 appVersion: "0.0.0"

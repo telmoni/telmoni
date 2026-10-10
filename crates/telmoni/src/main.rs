@@ -2,18 +2,21 @@
 //!
 //! ```text
 //! telmoni serve                      listen on PORT (8082); every module, every loop
-//! telmoni migrate                    every pending migration, then the grants; exit
-//! telmoni rotate                     the audit partitions: create ahead (drops are off); exit
+//! telmoni migrate                    every pending migration, the grants, ClickHouse's file; exit
+//! telmoni rotate                     the audit partitions: create ahead (drops are off);
+//!                                    telemetry's: drop days and months past retention; exit
 //! telmoni sweep <deletion|audit-verify|retention|agent-reindex|audit-exports>
 //!                                    one sweep, once; exit
 //! telmoni terminate <org_id>         an operator closes an organization
 //! ```
 //!
 //! Every command reads the same environment (`.env` on a laptop). `serve`
-//! and the sweeps need each module's DSN and the service secret; `migrate`
-//! and `rotate` need the migrator's. The commands themselves are
-//! [`telmoni::run`]; this binary hands it the process as the environment
-//! describes it. A deployment's own binary hands it its own.
+//! and the sweeps need each module's DSN, telemetry's ClickHouse URL and the
+//! service secret; `migrate`
+//! and `rotate` need the migrator's Postgres DSN and its ClickHouse URL. The
+//! commands themselves are [`telmoni::run`]; this binary hands it the process
+//! as the environment describes it. A deployment's own binary hands it its
+//! own.
 
 use telmoni::App;
 use telmoni::cli::Command;

@@ -131,7 +131,9 @@ pub trait Auth: Send + Sync {
     /// tables: their session still live, their role on it now, and the
     /// organization that holds it now. For a module still working on a
     /// request it resolved a while ago — the agent's tool calls, up to a
-    /// minute and a half into a turn. The bearer is not presented again, so
+    /// minute and a half into a turn — or one deciding under a lock what it
+    /// resolved before taking it, as telemetry's content switch does under
+    /// the organization's chain lock. The bearer is not presented again, so
     /// one that merely ran out since does not end the request.
     async fn resolve_again(&self, acting: &Acting) -> Result<Acting, TelmoniError> {
         let _ = acting;
@@ -326,6 +328,36 @@ pub trait Agent: Send + Sync {
         &self,
         organization_id: &OrganizationId,
     ) -> Result<u64, TelmoniError>;
+}
+
+/// What telemetry does for the modules beside it: forget what it holds of an
+/// organization or a project when it goes, and follow a project to the
+/// organization it moves to. Each call is idempotent; each purge answers how
+/// many rows went.
+///
+/// What it holds here is each project's settings, in Postgres. A span in
+/// ClickHouse carries its project and nothing above it, so a transfer leaves
+/// every span where it is, and a purge leaves them to the nightly purge that
+/// drops their day's partition at the retention line.
+#[async_trait]
+pub trait Telemetry: Send + Sync {
+    /// Everything held for an organization's projects, before its row goes.
+    async fn purge_organization(
+        &self,
+        organization_id: &OrganizationId,
+    ) -> Result<u64, TelmoniError>;
+
+    /// Everything held for one project, after it is deleted.
+    async fn purge_project(&self, project_id: &ProjectId) -> Result<u64, TelmoniError>;
+
+    /// A project handed to another organization: its settings — its content
+    /// mode among them — go with it, so the new organization's purge, and
+    /// never the old one's, is what removes them.
+    async fn move_project(
+        &self,
+        project_id: &ProjectId,
+        organization_id: &OrganizationId,
+    ) -> Result<(), TelmoniError>;
 }
 
 /// A module of the deployment's own that holds something of an

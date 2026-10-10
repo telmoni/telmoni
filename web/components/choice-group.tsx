@@ -7,6 +7,9 @@ import { cn } from "@/lib/utils";
 export interface Choice<T extends string> {
   value: T;
   label: string;
+  /** Shown, and never chosen: a choice this person may not make, or that is
+   *  not open yet. The arrow keys pass over it, as they do a disabled radio. */
+  disabled?: boolean;
 }
 
 /**
@@ -18,32 +21,51 @@ export interface Choice<T extends string> {
  */
 export function ChoiceGroup<T extends string>({
   labelledBy,
+  describedBy,
   options,
   value,
   onChange,
 }: {
   /** The id of the element that names the group. */
   labelledBy: string;
+  /** The id of what a screen reader should read after the name, if anything. */
+  describedBy?: string;
   options: readonly Choice<T>[];
   value: T;
   onChange: (value: T) => void;
 }) {
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   const at = options.findIndex((o) => o.value === value);
+  // The one Tab stop: the checked segment, or the first open one when the
+  // checked segment cannot take the focus.
+  const stop = at >= 0 && !options[at]?.disabled ? at : options.findIndex((o) => !o.disabled);
+
+  /** The nearest open choice `step` away from `from`, wrapping; -1 for none. */
+  function nextOpen(from: number, step: 1 | -1): number {
+    const n = options.length;
+    for (let k = 1; k <= n; k++) {
+      const i = (((from + step * k) % n) + n) % n;
+      if (!options[i]?.disabled) return i;
+    }
+    return -1;
+  }
 
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
-    const last = options.length - 1;
+    // From the focused segment, which is the checked one unless the checked
+    // one is closed and the focus sits on the Tab stop instead.
+    const focused = buttons.current.findIndex((b) => b !== null && b === e.target);
+    const from = focused >= 0 ? focused : at;
     const forward = e.key === "ArrowRight" || e.key === "ArrowDown";
     const back = e.key === "ArrowLeft" || e.key === "ArrowUp";
     const to =
       e.key === "Home"
-        ? 0
+        ? options.findIndex((o) => !o.disabled)
         : e.key === "End"
-          ? last
+          ? options.findLastIndex((o) => !o.disabled)
           : forward
-            ? (at + 1) % options.length
+            ? nextOpen(from, 1)
             : back
-              ? (at - 1 + options.length) % options.length
+              ? nextOpen(from, -1)
               : -1;
     if (to < 0) return;
     e.preventDefault();
@@ -57,6 +79,7 @@ export function ChoiceGroup<T extends string>({
     <div
       role="radiogroup"
       aria-labelledby={labelledBy}
+      aria-describedby={describedBy}
       onKeyDown={onKeyDown}
       // Its frame clips the segments, so Show focus draws their ring inside.
       data-segmented=""
@@ -73,13 +96,16 @@ export function ChoiceGroup<T extends string>({
             type="button"
             role="radio"
             aria-checked={checked}
-            tabIndex={checked || (at === -1 && i === 0) ? 0 : -1}
+            disabled={option.disabled}
+            tabIndex={i === stop ? 0 : -1}
             onClick={() => onChange(option.value)}
             className={cn(
-              "h-7 cursor-pointer px-2.5 text-xs font-medium transition-colors",
+              "h-7 cursor-pointer px-2.5 text-xs font-medium transition-colors disabled:cursor-not-allowed",
+              // The checked segment is never dimmed: closed or not, it is the
+              // answer the group gives.
               checked
                 ? "bg-secondary text-foreground"
-                : "text-muted-foreground hover:text-foreground",
+                : "text-muted-foreground enabled:hover:text-foreground disabled:opacity-50",
             )}
           >
             {option.label}

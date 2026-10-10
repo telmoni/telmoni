@@ -1,6 +1,6 @@
 ---
 title: "Organizations and projects"
-description: "How Telmoni organizes work: organizations, projects, their URLs and slugs, moving between them, the name a new organization starts with, creating an organization or a project, and how each is renamed, transferred and deleted."
+description: "How Telmoni organizes work: organizations, projects, their URLs and slugs, moving between them, the name a new organization starts with, creating an organization or a project, a project's content mode, and how each is renamed, transferred and deleted."
 ---
 
 Telmoni has two tiers: **Organizations** and **Projects**. There are no teams.
@@ -9,8 +9,8 @@ An **Organization** is the top level. It holds projects, organization-level
 members, organization settings, and a rolled-up audit log.
 
 A **Project** lives inside an organization. It holds API keys, notification
-connectors (Slack, Discord, webhooks), in-app notifications, and project-specific
-audit records.
+connectors (Slack, Discord, webhooks), in-app notifications, project-specific
+audit records, and its [content mode](#a-projects-content-mode).
 
 A solo developer and an enterprise work the same way: an organization with one
 member and a project, or one with many members across multiple projects.
@@ -203,6 +203,29 @@ An Admin or Owner can rename a project from the project's **Settings** page
 (`/{organization}/{project}/settings`). The same limits apply as at creation,
 and the rename moves the project's URL (see [Name and URL](#name-and-url)).
 
+### A project's content mode
+
+A project's **content mode** says what it keeps of the content its spans
+carry: the prompts and completions of an agent's model calls, the inputs and
+outputs of its tool calls, error messages, a person's name or email address,
+and anything else a person or a model wrote. A span's name, its tags, a
+customer id and an error's type (its class, never its message) are metadata
+you choose to send, and the content mode does not decide what happens to
+them. Everyone on the project sees the mode under **Content** on the
+project's **Settings** page (`/{organization}/{project}/settings`).
+
+- **Off**, the mode every project starts in, keeps none of it: each piece of
+  content is dropped as its span arrives, and the span is kept without it.
+- **On** and **Sealed** are not available yet. The Owner sees them on the page,
+  closed.
+- Only the organization's **Owner** can change a project's mode, because what
+  a project keeps changes what the organization is responsible for. Admins and
+  Members see the mode and cannot change it.
+- Every change is recorded in the [audit log](/docs/workspace/audit-log).
+
+Telmoni does not record spans yet, so a project's mode has nothing to act on
+today.
+
 ### Deleting a project
 
 Only the **Owner** can delete a project. Deletion is initiated from the
@@ -244,6 +267,8 @@ An organization Owner can hand a project to one of the project's Admins:
    - Its API keys follow into the new organization. The offer on the
      Notifications page advises the new owner to rotate any key they did not
      mint.
+   - Its [content mode](#a-projects-content-mode) follows it, for the new
+     organization's Owner to change.
    - Project seats and pending invitations stay on the project, and everyone
      seated is enrolled on the new organization's roster as a **Member**, as a
      project invitation would enrol them. The accepting Admin's own seat is

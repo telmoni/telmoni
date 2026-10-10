@@ -108,12 +108,18 @@ web:
     limits:
       memory: 1Gi
 
-# The server: auth, notifications and the agent in one process, with the
-# deletion, retention and audit sweeps on its own timers (`RUN_SWEEPS=false`
-# in `extraEnv` leaves them to jobs of your own). It reads its secrets from a
-# Secret named `server-secrets` the operator creates beside the chart:
-# `AUTH_DATABASE_URL`, `NOTIFICATIONS_DATABASE_URL` and, for the agent,
-# `AGENT_DATABASE_URL` (one DSN per module, each as its own role), the
+# The server: auth, notifications, telemetry and the agent in one process,
+# with the deletion, retention and audit sweeps on its own timers
+# (`RUN_SWEEPS=false` in `extraEnv` leaves them to jobs of your own). It reads
+# its secrets from a Secret named `server-secrets` the operator creates beside
+# the chart: `AUTH_DATABASE_URL`, `NOTIFICATIONS_DATABASE_URL`,
+# `TELEMETRY_DATABASE_URL` and, for the agent, `AGENT_DATABASE_URL` (one DSN
+# per module, each as its own role), `TELEMETRY_CLICKHOUSE_URL` (ClickHouse's
+# HTTP interface, as the module's own user, carrying its user and password
+# as a DSN does: `https://telemetry:password@clickhouse.example.com:8443`,
+# or `http://` to a Service in the cluster by its name and namespace, which
+# a pod requires of plain http, and which needs NetworkPolicies of your own:
+# templates/network-policies.yaml), the
 # agent's `AGENT_MODEL_API_KEY`, `EMBEDDINGS_API_KEY` and `RERANK_API_KEY`
 # when its endpoints need them, `SERVICE_SECRET`, `ADMIN_EMAIL` and `ADMIN_PASSWORD`
 # for the first account, `OIDC_ISSUER`, `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` for an
@@ -133,9 +139,14 @@ server:
     limits:
       memory: 512Mi
 
-# The migration Job and the partition-rotation CronJob run the server's image
-# as the migrator role, from a Secret named `migrator-secrets` holding
-# `MIGRATOR_DATABASE_URL` and `DATABASE_CA_CERT`.
+# The migration Job and the nightly rotation CronJob — Postgres's audit
+# partitions, and ClickHouse's days of spans and months of totals past
+# retention — run the server's image as the migrator, from a Secret named
+# `migrator-secrets` holding `MIGRATOR_DATABASE_URL`, `MIGRATOR_CLICKHOUSE_URL`
+# (its ClickHouse user, the one `tenant_isolation` does not hold) and
+# `DATABASE_CA_CERT`. ClickHouse is the operator's, as Postgres is: one node,
+# and the chart runs none (`crates/telemetry/clickhouse/low-memory.xml` is
+# the configuration to give it).
 migrator:
   enabled: true
   hook:

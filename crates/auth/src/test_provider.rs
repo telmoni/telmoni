@@ -1,9 +1,9 @@
 //! In-process test doubles for the integration suites: a scripted
 //! [`AuthProvider`] whose every call is recorded and every answer scripted
 //! or a sensible default, the issuer a suite mints sessions with and the
-//! bearers it signs people in by, and the two modules beside auth —
-//! notifications and the purge hook — as recorders a suite scripts the same
-//! way.
+//! bearers it signs people in by, and the modules beside auth —
+//! notifications, telemetry and the purge hook — as recorders a suite
+//! scripts the same way.
 //!
 //! The router's tests exercise the lanes around the provider — the exchange
 //! cache, the session rows, the deletion saga, the email-change pair — and
@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 
 use telmoni_shared::db::tenant_session::person_scope;
-use telmoni_shared::seam::{Emitted, Notice, Notifications, PurgeHook};
+use telmoni_shared::seam::{Emitted, Notice, Notifications, PurgeHook, Telemetry};
 use telmoni_shared::{OrganizationId, ProjectId, TelmoniError, UserId};
 
 use crate::db::access_tokens;
@@ -50,6 +50,17 @@ pub enum SiblingCall {
     PurgeProject(String),
     /// `Notifications::redact_person`.
     RedactPerson(String),
+    /// `Telemetry::purge_organization`.
+    TelemetryPurgeOrganization(String),
+    /// `Telemetry::purge_project`.
+    TelemetryPurgeProject(String),
+    /// `Telemetry::move_project`.
+    TelemetryMove {
+        /// The project moved.
+        project_id: String,
+        /// The organization its settings were moved to.
+        organization_id: String,
+    },
     /// `PurgeHook::purge_organization`.
     HookPurge(String),
 }
@@ -286,6 +297,144 @@ impl Notifications for RecordingNotifications {
         self.redact_person
             .take()
             .unwrap_or_else(|| self.default_answer())
+    }
+}
+
+/// Telemetry as auth holds it, recording every call. Unscripted, every purge
+/// answers `Ok(1)` and every move lands; a suite scripts the failures it
+/// wants and a move held past its budget.
+pub struct RecordingTelemetry {
+    calls: SiblingCalls,
+    purge_organization: Answers<u64>,
+    purge_project: Answers<u64>,
+    move_project: Answers<()>,
+    move_delays: Mutex<VecDeque<Duration>>,
+    /// A pool to ask from, and the organization whose chain lock to ask about
+    /// at each move.
+    chain_probe: Mutex<Option<(PgPool, OrganizationId)>>,
+    /// For each move since probing began, whether that lock was held.
+    chain_held: Mutex<Vec<bool>>,
+}
+
+impl RecordingTelemetry {
+    /// A recorder writing its calls to `calls`.
+    #[must_use]
+    pub fn new(calls: SiblingCalls) -> Self {
+        Self {
+            calls,
+            purge_organization: Answers::default(),
+            purge_project: Answers::default(),
+            move_project: Answers::default(),
+            move_delays: Mutex::new(VecDeque::new()),
+            chain_probe: Mutex::new(None),
+            chain_held: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// At each move from now on, ask from a session of `pool`'s whether
+    /// `organization`'s audit chain lock is held: the lock telemetry's
+    /// content switch takes to learn where a project went, which an accept
+    /// must hold while it moves the project's settings.
+    pub fn probing_chain_lock(&self, pool: PgPool, organization: OrganizationId) -> &Self {
+        *self
+            .chain_probe
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((pool, organization));
+        self
+    }
+
+    /// Whether the probed chain lock was held at each move, in order.
+    #[must_use]
+    pub fn chain_held_at_moves(&self) -> Vec<bool> {
+        self.chain_held
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Fail the next `n` organization purges.
+    pub fn failing_purges(&self, n: usize) -> &Self {
+        for _ in 0..n {
+            self.purge_organization.push(Err(sibling_down("telemetry")));
+        }
+        self
+    }
+
+    /// Fail the next `n` project purges.
+    pub fn failing_project_purges(&self, n: usize) -> &Self {
+        for _ in 0..n {
+            self.purge_project.push(Err(sibling_down("telemetry")));
+        }
+        self
+    }
+
+    /// Fail the next `n` moves.
+    pub fn failing_moves(&self, n: usize) -> &Self {
+        for _ in 0..n {
+            self.move_project.push(Err(sibling_down("telemetry")));
+        }
+        self
+    }
+
+    /// Hold the next move for `delay` before answering: one over the
+    /// caller's budget is given up on, as a slow database's would be.
+    pub fn delaying_next_move(&self, delay: Duration) -> &Self {
+        self.move_delays
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push_back(delay);
+        self
+    }
+}
+
+#[async_trait]
+impl Telemetry for RecordingTelemetry {
+    async fn purge_organization(
+        &self,
+        organization_id: &OrganizationId,
+    ) -> Result<u64, TelmoniError> {
+        self.calls.record(SiblingCall::TelemetryPurgeOrganization(
+            organization_id.to_string(),
+        ));
+        self.purge_organization.take().unwrap_or(Ok(1))
+    }
+
+    async fn purge_project(&self, project_id: &ProjectId) -> Result<u64, TelmoniError> {
+        self.calls
+            .record(SiblingCall::TelemetryPurgeProject(project_id.to_string()));
+        self.purge_project.take().unwrap_or(Ok(1))
+    }
+
+    async fn move_project(
+        &self,
+        project_id: &ProjectId,
+        organization_id: &OrganizationId,
+    ) -> Result<(), TelmoniError> {
+        self.calls.record(SiblingCall::TelemetryMove {
+            project_id: project_id.to_string(),
+            organization_id: organization_id.to_string(),
+        });
+        let probe = self
+            .chain_probe
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some((pool, organization)) = probe {
+            let held = telmoni_shared::test_util::chain_lock_held(&pool, &organization).await;
+            self.chain_held
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(held);
+        }
+        let delay = self
+            .move_delays
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .pop_front();
+        if let Some(delay) = delay {
+            tokio::time::sleep(delay).await;
+        }
+        self.move_project.take().unwrap_or(Ok(()))
     }
 }
 

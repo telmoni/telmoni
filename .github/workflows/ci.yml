@@ -1,6 +1,7 @@
 # CI — the full quality gate: format, clippy (workspace deny lints), typos,
 # cargo-deny (advisories/licenses/bans/sources), web typecheck/lint/knip/test/
-# build, and the Rust test suite against a fully migrated Postgres.
+# build, and the Rust test suite against a fully migrated Postgres and
+# ClickHouse.
 # `make ci` runs this same set locally — that is the contract, and the two
 # halves are checked against each other whenever either changes.
 # Intentionally absent: benchmarks, fuzzing, OS matrix, browser e2e, and any
@@ -78,11 +79,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --workspace --locked --no-deps --document-private-items
 
-  # Full Rust workspace suite against a real Postgres. Every migration set runs
-  # first, then the dev-role search_path pin (mirrors `make db-dev-setup`) so
-  # sqlx::test pools resolve unqualified table names. Thread count bounded for
-  # the same reason as the Makefile: unbounded sqlx::test DBs exhaust the
-  # connection cap.
+  # Full Rust workspace suite against a real Postgres and ClickHouse. Every
+  # migration set runs first, then the dev-role search_path pin (mirrors
+  # `make db-dev-setup`) so sqlx::test pools resolve unqualified table names.
+  # Thread count bounded for the same reason as the Makefile: unbounded
+  # sqlx::test DBs exhaust the connection cap.
   test-rust:
     name: Rust tests
     runs-on: ubuntu-24.04
@@ -90,6 +91,10 @@ jobs:
     env:
       DATABASE_URL: postgresql://telmoni:telmoni_dev@localhost:5432/telmoni
       AUTH_DATABASE_URL: postgresql://telmoni:telmoni_dev@localhost:5432/telmoni
+      # The compose file's ClickHouse users
+      # (crates/telemetry/clickhouse/dev-users.xml).
+      MIGRATOR_CLICKHOUSE_URL: http://migrator:migrator_dev@localhost:8123
+      TELEMETRY_CLICKHOUSE_URL: http://telemetry:telemetry_dev@localhost:8123
     services:
       postgres:
         image: pgvector/pgvector:pg17
@@ -109,6 +114,12 @@ jobs:
         with:
           persist-credentials: false
       - uses: Swatinem/rust-cache@v2
+      # ClickHouse as `make docker-up` runs it — the compose file's own
+      # service, image, settings and two users, so the row policy holds the
+      # module's user here as on a tier — started after the checkout its
+      # files come from, which a job's `services` start before.
+      - name: Start ClickHouse (the compose file's service)
+        run: docker compose up -d --wait clickhouse
       # EVERY set, in one run of the same command `make db-migrate` and a
       # tier's Job run. `tenancy_boundary` enumerates every tenant-keyed table
       # across every app schema and asserts each is FORCE'd + isolated —
@@ -131,7 +142,7 @@ jobs:
       - name: Run migrations (every schema, as make db-migrate runs them)
         run: MIGRATOR_DATABASE_URL="$DATABASE_URL" MIGRATION_SETS="$(make -s migration-sets)" cargo run --locked -p telmoni -- migrate
       - name: Pin dev-role search_path (mirrors make db-dev-setup)
-        run: psql "$DATABASE_URL" -c "ALTER ROLE telmoni SET search_path = auth, notifications, agent, audit, public;"
+        run: psql "$DATABASE_URL" -c "ALTER ROLE telmoni SET search_path = auth, notifications, agent, telemetry, audit, public;"
       - name: cargo test
         run: cargo test --workspace --locked --no-fail-fast -- --test-threads=4
 

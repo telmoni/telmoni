@@ -26,7 +26,7 @@ Telmoni records changes to organizations, projects, members, API keys, sessions,
 | **API keys** | Creation, rotation, and revocation. |
 | **Sessions** | A session ended from the **Active sessions** panel, and a CLI session ended by `telmoni logout`, recorded in the organization the CLI was acting in. |
 | **Connectors** | Slack, Discord, and webhook connections made (a reconnection is noted as one), a webhook's events or signing secret changed, manual resends, **Disconnect**, and a Slack app's removal from its workspace. A connection Telmoni retires itself (a `410`, ten failed sends, a vendor's refusal) is not recorded. |
-| **Projects** | Creation, deletion, and transfers, which both organizations' logs record. |
+| **Projects** | Creation, deletion, transfers, which both organizations' logs record, and every change to a project's [content mode](/docs/workspace/organizations-and-projects#a-projects-content-mode). |
 | **Account** | Email address changes and analytics consent changes, recorded in the organization you were working in, and the choice of a [default organization](/docs/account/settings#default-organization), recorded in the organization chosen. |
 
 Sign-ins, signing out of the console, password changes, project renames, and connector test sends are not recorded.
@@ -40,7 +40,7 @@ Every audit log entry carries:
 - **Actor**: The user ID of the person who acted. The platform's own routines act as `service:operator` (an operator's termination of an organization) or `service:deletion-saga` (the memberships an account deletion removes), and a change made from Slack's side as `external:slack`.
 - **Action**: One of `created`, `updated`, `deleted`, or `exported`, which records an export. Its details name what was exported under `export`: `audit_log`, with the file's format, range and number of events, or `organization`, the organization's records.
 - **Resource**: The kind of thing acted on (`organization`, `project`, `member`, `token`, which the console shows as **API key**, `session`, or `connector`) and its identifier, and the project it was written inside, if any.
-- **Details**: Metadata specific to the event, such as the name given or the role granted. The console's **Details** switch shows it under **Changed**, with the project the event was written inside, the request's id when one was recorded, and the row's hash.
+- **Details**: Metadata specific to the event, such as the name given, the role granted or a content mode's change, from and to. The console's **Details** switch shows it under **Changed**, with the project the event was written inside, the request's id when one was recorded, and the row's hash.
 - **Timestamp**: Taken in UTC when the event was written, inside the transaction that made the change. The console shows it in your local time.
 
 Entries are ordered chronologically, newest first.
@@ -205,5 +205,5 @@ copies of them. An organization's chain also outlives the organization's
 deletion. An export's file is the exception: it is a copy, kept 7 days.
 
 For self-hosted instances, retention is therefore bounded by your database and
-its backups. See [Production](/docs/self-host/production#audit-log-partition-rotation)
+its backups. See [Production](/docs/self-host/production#partition-rotation)
 for scheduling `telmoni rotate`.

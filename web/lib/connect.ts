@@ -32,8 +32,11 @@ export const PROVIDER_LABEL: Record<Provider, string> = {
 // target this route builds: no separators a path could misread.
 const PROJECT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
-export function isProjectId(value: string): boolean {
-  return PROJECT_ID_RE.test(value);
+/** A Server Action takes whatever was posted, whatever its parameter's type
+ *  says, and `RegExp.test` would read `["project_1"]` as its string. Not a
+ *  type guard: a caller's `string` refused here would narrow to `never`. */
+export function isProjectId(value: unknown): boolean {
+  return typeof value === "string" && PROJECT_ID_RE.test(value);
 }
 
 export function connectStartPath(provider: OAuthProvider, projectId: string): string {

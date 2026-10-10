@@ -7,9 +7,12 @@
 # as the container's `args`.
 #
 # Required env at runtime, `serve` and the sweeps:
-#   AUTH_DATABASE_URL, NOTIFICATIONS_DATABASE_URL, SERVICE_SECRET, APP_URL
+#   AUTH_DATABASE_URL, NOTIFICATIONS_DATABASE_URL, TELEMETRY_DATABASE_URL,
+#   TELEMETRY_CLICKHOUSE_URL, SERVICE_SECRET, APP_URL
 # Required, `migrate` and `rotate`:
 #   MIGRATOR_DATABASE_URL (the migrator role; every set under /app/migrations)
+#   and MIGRATOR_CLICKHOUSE_URL (its ClickHouse user; telemetry's ClickHouse
+#   file is compiled into the binary)
 # Optional:
 #   PORT (default 8082), LOG_LEVEL (default info), RUN_SWEEPS (default true),
 #   the OIDC_* provider, SMTP_URL, MAIL_FROM, the SLACK_* and DISCORD_* apps,
@@ -49,6 +52,7 @@ COPY --from=builder /app/crates/migrator/migrations      /app/migrations/audit
 COPY --from=builder /app/crates/auth/migrations          /app/migrations/auth
 COPY --from=builder /app/crates/notifications/migrations /app/migrations/notifications
 COPY --from=builder /app/crates/agent/migrations         /app/migrations/agent
+COPY --from=builder /app/crates/telemetry/migrations     /app/migrations/telemetry
 EXPOSE 8082
 ENTRYPOINT ["/app/telmoni"]
 CMD ["serve"]

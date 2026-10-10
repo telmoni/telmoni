@@ -39,7 +39,7 @@ pub use error::{AuthError, AuthzError, TelmoniError, TenantError};
 pub use error_schema::ProblemDetails;
 pub use extract::correlation_id;
 pub use types::{
-    AuditAction, Flag, FlagSet, NotificationKind, OrganizationId, OrganizationIdError,
+    AuditAction, ContentMode, Flag, FlagSet, NotificationKind, OrganizationId, OrganizationIdError,
     OrganizationRole, OrganizationStatus, ParseEnumError, ProjectId, ProjectIdError, Redacted,
-    Role, TelmoniResourceKind, UserId, UserIdError,
+    Role, SpanKind, SpanStatus, TelmoniResourceKind, UserId, UserIdError,
 };

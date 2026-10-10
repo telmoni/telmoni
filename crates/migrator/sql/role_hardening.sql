@@ -7,10 +7,10 @@
 --
 --   psql "$SUPERUSER_DATABASE_URL" -v ON_ERROR_STOP=1 -f crates/migrator/sql/role_hardening.sql
 --
--- The four login roles must exist first, each with its own password: `auth`,
--- `notifications` and `agent`, which the server's pools connect as, and
--- `migrator`. This file creates only the maintenance lanes, which nobody logs
--- in as.
+-- The five login roles must exist first, each with its own password: `auth`,
+-- `notifications`, `agent` and `telemetry`, which the server's pools connect
+-- as, and `migrator`. This file creates only the maintenance lanes, which
+-- nobody logs in as.
 --
 -- The agent's tables need the `vector` extension, which only a superuser
 -- installs; it is not this file's (see crates/agent/migrations).
@@ -24,16 +24,16 @@ DO $$
 DECLARE
     svc text;
 BEGIN
-    IF current_user IN ('auth', 'notifications', 'agent', 'migrator') THEN
+    IF current_user IN ('auth', 'notifications', 'agent', 'telemetry', 'migrator') THEN
         RAISE EXCEPTION 'run this as a superuser of your own, not as %', current_user;
     END IF;
-    FOREACH svc IN ARRAY ARRAY['auth', 'notifications', 'agent', 'migrator'] LOOP
+    FOREACH svc IN ARRAY ARRAY['auth', 'notifications', 'agent', 'telemetry', 'migrator'] LOOP
         IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = svc) THEN
             RAISE EXCEPTION 'role % does not exist; create it, with a password, before this file runs', svc;
         END IF;
         EXECUTE format('ALTER ROLE %I NOSUPERUSER NOCREATEROLE NOCREATEDB', svc);
     END LOOP;
-    FOREACH svc IN ARRAY ARRAY['auth', 'notifications', 'agent'] LOOP
+    FOREACH svc IN ARRAY ARRAY['auth', 'notifications', 'agent', 'telemetry'] LOOP
         EXECUTE format('ALTER ROLE %I NOBYPASSRLS', svc);
     END LOOP;
 END $$;
@@ -48,6 +48,8 @@ ALTER ROLE notifications SET statement_timeout = '5s';
 ALTER ROLE notifications SET lock_timeout      = '2s';
 ALTER ROLE agent         SET statement_timeout = '5s';
 ALTER ROLE agent         SET lock_timeout      = '2s';
+ALTER ROLE telemetry     SET statement_timeout = '5s';
+ALTER ROLE telemetry     SET lock_timeout      = '2s';
 
 -- A leaked transaction would hold its row and advisory locks (an organization's
 -- audit chain among them) until the pool recycled it. Auth's sweeps hold their
@@ -58,11 +60,13 @@ ALTER ROLE agent         SET lock_timeout      = '2s';
 ALTER ROLE auth          SET idle_in_transaction_session_timeout = '2min';
 ALTER ROLE notifications SET idle_in_transaction_session_timeout = '2min';
 ALTER ROLE agent         SET idle_in_transaction_session_timeout = '2min';
+ALTER ROLE telemetry     SET idle_in_transaction_session_timeout = '2min';
 
 ALTER ROLE auth          SET search_path = auth;
 ALTER ROLE notifications SET search_path = notifications;
 -- `public` too: the `vector` type and its operators live there.
 ALTER ROLE agent         SET search_path = agent, public;
+ALTER ROLE telemetry     SET search_path = telemetry;
 
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -97,7 +101,7 @@ DO $$
 DECLARE
     lane text;
 BEGIN
-    FOREACH lane IN ARRAY ARRAY['auth_maintenance', 'notifications_maintenance', 'agent_maintenance'] LOOP
+    FOREACH lane IN ARRAY ARRAY['auth_maintenance', 'notifications_maintenance', 'agent_maintenance', 'telemetry_maintenance'] LOOP
         BEGIN
             IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = lane) THEN
                 EXECUTE format('CREATE ROLE %I NOLOGIN', lane);
@@ -112,3 +116,4 @@ END $$;
 GRANT auth_maintenance TO auth WITH INHERIT FALSE, SET TRUE;
 GRANT notifications_maintenance TO notifications WITH INHERIT FALSE, SET TRUE;
 GRANT agent_maintenance TO agent WITH INHERIT FALSE, SET TRUE;
+GRANT telemetry_maintenance TO telemetry WITH INHERIT FALSE, SET TRUE;

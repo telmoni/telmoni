@@ -144,7 +144,8 @@ const DELIVERIES_TOOL_MAX: i64 = 20;
 /// The slugs the console's paths spell a page of documents' rows with, read
 /// from auth once per page. A document links by slug, as every link a person
 /// is shown does; a URL changed on Settings afterwards leaves it behind, which
-/// is the choice made for every link (console.md, "Paths and slugs").
+/// is the choice made for every link (`ARCHITECTURE.md`, "Ids name rows, slugs
+/// spell links").
 struct Addresses {
     organizations: HashMap<OrganizationId, String>,
     projects: HashMap<ProjectId, ProjectHome>,

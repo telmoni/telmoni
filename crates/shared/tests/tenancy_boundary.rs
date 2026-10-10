@@ -10,7 +10,7 @@ use telmoni_shared::test_util::tenancy::{database_url_or_skip, probe_schemas_mig
 use telmoni_shared::types::OrganizationId;
 
 /// Every service schema that owns database state; a new service adds its schema here.
-const APP_SCHEMAS: &[&str] = &["auth", "notifications", "agent", "audit"];
+const APP_SCHEMAS: &[&str] = &["auth", "notifications", "agent", "telemetry", "audit"];
 
 /// The ephemeral NOLOGIN probe role used for the behavioural read test.
 const PROBE_ROLE: &str = "telmoni_tenancy_boundary_probe";

@@ -67,6 +67,9 @@ export type {
 export { fetchTokens } from "./entities/token";
 export type { ApiToken, TokenAccess } from "./entities/token";
 
+export { fetchContentMode } from "./entities/content-mode";
+export type { ContentModeSetting } from "./entities/content-mode";
+
 export { fetchConnectors } from "./entities/connectors";
 export type {
   Connection,

@@ -98,6 +98,23 @@ async fn newest_link(
     .await
 }
 
+/// Wait for `organization_id`'s chain lock, held to the end of the caller's
+/// transaction. [`emit_audit`] takes it for every row it writes, so every
+/// audited change in the organization — a transfer, an ownership hand-over, a
+/// deletion — holds it from its audit row to its commit. A writer takes it
+/// before reading what its change depends on, so that what it read cannot
+/// move under it before it commits.
+pub async fn lock_chain(
+    conn: &mut PgConnection,
+    organization_id: &OrganizationId,
+) -> sqlx::Result<()> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(organization_id)
+        .execute(conn)
+        .await?;
+    Ok(())
+}
+
 /// Write one row to `audit.events`, linked into the organization's
 /// tamper-evident hash chain. Pass the connection running the handler's
 /// transaction (`&mut *tx`), so the row, the chain lock and the link read all
@@ -132,11 +149,9 @@ pub async fn emit_audit(conn: &mut PgConnection, evt: AuditEvent<'_>) -> sqlx::R
 
     // Per ORGANIZATION, because the chain is: locking per project would let
     // two projects take the same `MAX(seq) + 1` and fork the chain this lock
-    // keeps linear. Released at the caller's commit or rollback.
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-        .bind(evt.organization_id)
-        .execute(&mut *conn)
-        .await?;
+    // keeps linear. Released at the caller's commit or rollback; a caller
+    // already holding it takes it again without waiting.
+    lock_chain(&mut *conn, evt.organization_id).await?;
 
     // Sampled from the app clock, not `now()` in SQL: `created_at` is a hash
     // input and must be the exact value the verifier recomputes. The chain

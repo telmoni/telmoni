@@ -218,6 +218,9 @@ pub async fn delete_project(
     if let Err(e) = super::deletion::purge_project_connectors(&state, &project_id).await {
         tracing::warn!(project_id = %project_id, error = %e, "the connectors' project purge failed after the delete");
     }
+    if let Err(e) = super::deletion::purge_project_telemetry(&state, &project_id).await {
+        tracing::warn!(project_id = %project_id, error = %e, "telemetry's project purge failed after the delete");
+    }
     Ok(Json(json!({ "status": "deleted", "id": project_id })))
 }
 

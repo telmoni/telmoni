@@ -4,9 +4,10 @@ import { Section } from "@/components/section";
 import { SettingsRow } from "@/components/settings-row";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { Card } from "@/components/ui/card";
-import { fetchProjectBySlug, getServerContext } from "@/lib/server/data";
+import { fetchContentMode, fetchProjectBySlug, getServerContext } from "@/lib/server/data";
 import { Role } from "@/lib/types/enums";
 
+import { ContentModeForm } from "./_content-mode";
 import { DeleteProjectForm } from "./_delete-project";
 import { RenameProjectForm } from "./_rename-project";
 
@@ -26,7 +27,9 @@ export default async function SettingsPage({
     fetchProjectBySlug(slug),
   ]);
   if (!gate || !project) return <ServiceUnavailable />;
+  const contentMode = await fetchContentMode(project.id);
 
+  // A project's Owner is its organization's: no seat makes anyone else one.
   const isOwner = project.role === Role.Owner;
   const canEdit = isOwner || project.role === Role.Admin;
 
@@ -58,6 +61,26 @@ export default async function SettingsPage({
               initialName={project.name}
               canEdit={canEdit}
             />
+          </Card>
+        </Section>
+
+        <Section
+          title="Content"
+          description="What this project keeps of the content its spans carry: prompts and completions, tool inputs and outputs, error messages, a person's name or email address, and anything else a person or a model wrote. Off keeps none of it: content is dropped as each span arrives, and the span is kept without it."
+        >
+          <Card>
+            {contentMode ? (
+              <ContentModeForm
+                projectId={project.id}
+                mode={contentMode.content_mode}
+                offered={contentMode.offered}
+                canEdit={isOwner}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                This project&apos;s content mode could not be read. Reload to try again.
+              </p>
+            )}
           </Card>
         </Section>
 

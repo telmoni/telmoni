@@ -63,10 +63,12 @@ impl Sweep {
 pub enum Command {
     /// Listen: every module's routes and loops, until told to stop.
     Serve,
-    /// Run every pending migration, then the object grants, and exit.
+    /// Run every pending migration, then the object grants, then the
+    /// ClickHouse file, and exit.
     Migrate,
     /// Rotate the audit partitions: create the months ahead, drop the
-    /// expired where the registry allows it (nowhere today), and exit.
+    /// expired where the registry allows it (nowhere today). Then drop
+    /// telemetry's days and months past retention, and exit.
     Rotate,
     /// One sweep, once, and exit.
     Sweep(Sweep),

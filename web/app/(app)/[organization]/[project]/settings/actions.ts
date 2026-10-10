@@ -16,12 +16,14 @@ import { activeOrganization, getServerContext } from "@/lib/server/entities/orga
 import { fetchProject } from "@/lib/server/entities/projects";
 import { unplacedOrganization } from "@/lib/server/identity";
 import { getServerSession } from "@/lib/server/session";
+import { ContentMode } from "@/lib/types/enums";
 
 interface ActionResult {
   error: string | null;
 }
 
 const Renamed = z.object({ slug: z.string() });
+const Mode = z.enum(ContentMode);
 
 const UNRESOLVED_PROJECT = "Couldn't resolve that project. Reload and try again.";
 
@@ -97,6 +99,47 @@ export async function updateProjectNameAction(
     return { error: null, movedTo: renamed.data.slug };
   }
   revalidatePath("/(app)/[organization]/[project]", "layout");
+  return { error: null };
+}
+
+/// The server decides who may (the organization's owner alone) and which modes
+/// are open; this only refuses what could never reach it.
+export async function updateContentModeAction(
+  projectId: string,
+  mode: ContentMode,
+): Promise<ActionResult> {
+  const session = await getServerSession();
+  if (!session) return { error: "Your session expired — sign in again." };
+  const limited = await rateLimit(sessionKey(session, "project:content-mode"), {
+    limit: 10,
+    windowMs: 60_000,
+  });
+  if (limited) return { error: "Too many requests — slow down a moment." };
+  if (!isProjectId(projectId)) return { error: UNRESOLVED_PROJECT };
+  // A Server Action takes whatever a caller posts, whatever its type says.
+  const chosen = Mode.safeParse(mode);
+  if (!chosen.success) return { error: "That is not a content mode." };
+
+  const ctx = await identityContext();
+  if (!ctx) return { error: await unplacedOrganization() };
+
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/telemetry/content-mode`, {
+    method: "PUT",
+    headers: {
+      ...projectHeaders(ctx, projectId),
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ content_mode: chosen.data }),
+  });
+
+  if (!res || !res.ok) {
+    const error = res
+      ? (await extractProblem(res)).message
+      : "Failed to change the content mode. Please try again.";
+    return { error };
+  }
+
+  revalidatePath("/(app)/[organization]/[project]/settings", "page");
   return { error: null };
 }
 

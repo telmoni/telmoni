@@ -25,7 +25,8 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 
 use telmoni_auth::test_provider::{
-    RecordingNotifications, ScriptedProvider, SiblingCall, as_person,
+    RecordingNotifications, RecordingTelemetry, ScriptedProvider, SiblingCall, SiblingCalls,
+    as_person,
 };
 use telmoni_auth::{AppState, Config, Siblings, router};
 use telmoni_shared::mail::{Mail, MailError, MailSender, NoopSender};
@@ -59,19 +60,21 @@ impl MailSender for Outbox {
 }
 
 fn app(pool: PgPool) -> Router {
-    build(pool, Arc::new(NoopSender), None)
+    build(pool, Arc::new(NoopSender), None, None)
 }
 
 fn app_mailing(pool: PgPool, sender: Arc<dyn MailSender>) -> Router {
-    build(pool, sender, None)
+    build(pool, sender, None, None)
 }
 
 /// The router, with its mail transport and, when given, a notifications
-/// module to purge a moved project's connectors in.
+/// module to purge a moved project's connectors in and a telemetry module
+/// to move its settings in.
 fn build(
     pool: PgPool,
     sender: Arc<dyn MailSender>,
     notifications: Option<Arc<RecordingNotifications>>,
+    telemetry: Option<Arc<RecordingTelemetry>>,
 ) -> Router {
     let config = Config {
         database_url: String::new(),
@@ -97,6 +100,7 @@ fn build(
         exchange_cache: telmoni_auth::ExchangeCache::new(),
         siblings: Siblings {
             notifications: notifications.map(|n| n as Arc<dyn telmoni_shared::seam::Notifications>),
+            telemetry: telemetry.map(|t| t as Arc<dyn telmoni_shared::seam::Telemetry>),
             agent: None,
             purge_hook: None,
         },
@@ -1486,6 +1490,7 @@ async fn the_connectors_are_purged_before_the_move_and_a_refused_purge_moves_not
             pool.clone(),
             Arc::new(NoopSender),
             Some(notifications.clone()),
+            None,
         )
     };
     let accept_path = format!("/internal/projects/{}/transfer/accept", h.project);
@@ -1547,4 +1552,217 @@ async fn the_connectors_are_purged_before_the_move_and_a_refused_purge_moves_not
         "the purge ran before the move"
     );
     assert_eq!(organization_of_project(&pool, &h.project).await, h.admins);
+}
+
+/// The calls as the transfer answered, held a moment to be sure no more
+/// land: a transfer settles telemetry's settings before it answers, so a
+/// call that lands after — a settling left to a task, run twice, or run
+/// after a commit — is one that should not have been made then.
+async fn calls_at_the_answer(calls: &SiblingCalls) -> Vec<SiblingCall> {
+    let answered = calls.calls();
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert_eq!(
+        calls.calls(),
+        answered,
+        "a call landed after the transfer answered"
+    );
+    answered
+}
+
+/// ⚠ **The project's telemetry settings move with it, first, and a step that
+/// fails moves nothing.** They name the organization whose purge removes
+/// them and whose members may read them. The move comes before
+/// notifications' purge, which cannot be undone, so a refused move leaves
+/// the connectors where they were; and a transfer that does not finish
+/// settles the settings back with the project, where auth still holds it.
+#[sqlx::test]
+async fn the_settings_move_first_and_a_transfer_that_does_not_finish_settles_them(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let calls = SiblingCalls::default();
+    let notifications = Arc::new(RecordingNotifications::new(calls.clone()));
+    let telemetry = Arc::new(RecordingTelemetry::new(calls.clone()));
+    let both = || {
+        build(
+            pool.clone(),
+            Arc::new(NoopSender),
+            Some(notifications.clone()),
+            Some(telemetry.clone()),
+        )
+    };
+    let accept_path = format!("/internal/projects/{}/transfer/accept", h.project);
+    let moved_to = |organization: &str| SiblingCall::TelemetryMove {
+        project_id: h.project.clone(),
+        organization_id: organization.to_owned(),
+    };
+    let purged = SiblingCall::PurgeProject(h.project.clone());
+    assert_eq!(
+        offer(&pool, &h, OWNER, &h.source, ADMIN).await.0,
+        StatusCode::OK
+    );
+
+    telemetry.failing_moves(1);
+    let (status, body) = send(
+        both(),
+        &pool,
+        "POST",
+        &accept_path,
+        ADMIN,
+        Some(&h.admins),
+        None,
+        None,
+    )
+    .await;
+    assert!(
+        status.is_server_error(),
+        "the project moved past a refused move: {status} {body}"
+    );
+    assert_eq!(
+        calls_at_the_answer(&calls).await,
+        [moved_to(&h.admins), moved_to(&h.source)],
+        "a refused move reached the connectors, or was not settled where the project stays \
+         before the answer"
+    );
+    assert_eq!(organization_of_project(&pool, &h.project).await, h.source);
+    assert_eq!(
+        seat_of(&pool, &h.project, ADMIN).await,
+        Some(("admin".to_owned(), true)),
+        "the refused accept spent the offer"
+    );
+    calls.reset();
+
+    notifications.on_purge_project(Err(telmoni_shared::TelmoniError::Internal(
+        "notifications is down".into(),
+    )));
+    let (status, body) = send(
+        both(),
+        &pool,
+        "POST",
+        &accept_path,
+        ADMIN,
+        Some(&h.admins),
+        None,
+        None,
+    )
+    .await;
+    assert!(
+        status.is_server_error(),
+        "the project moved past a refused purge: {status} {body}"
+    );
+    assert_eq!(
+        calls_at_the_answer(&calls).await,
+        [moved_to(&h.admins), purged.clone(), moved_to(&h.source)],
+        "the settings moved ahead of a refused purge were not settled back before the answer"
+    );
+    assert_eq!(organization_of_project(&pool, &h.project).await, h.source);
+    calls.reset();
+
+    let (status, body) = send(
+        both(),
+        &pool,
+        "POST",
+        &accept_path,
+        ADMIN,
+        Some(&h.admins),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        calls_at_the_answer(&calls).await,
+        [moved_to(&h.admins), purged],
+        "the accepted transfer did not move the settings and purge the connectors once each"
+    );
+    assert_eq!(organization_of_project(&pool, &h.project).await, h.admins);
+}
+
+/// ⚠ **The accept holds the source organization's chain lock while it moves
+/// the settings**, from its audit rows to its commit. Telemetry's content
+/// switch takes that lock before it asks auth again where the project is, so
+/// a change resolved before the accept committed is refused, never written
+/// under the organization the project left: an accept that moved the
+/// settings first would reopen that race.
+#[sqlx::test]
+async fn the_accept_holds_the_source_chain_while_the_settings_move(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let calls = SiblingCalls::default();
+    let telemetry = Arc::new(RecordingTelemetry::new(calls.clone()));
+    telemetry.probing_chain_lock(
+        pool.clone(),
+        OrganizationId::try_new(h.source.as_str()).expect("the source organization's id"),
+    );
+    assert_eq!(
+        offer(&pool, &h, OWNER, &h.source, ADMIN).await.0,
+        StatusCode::OK
+    );
+
+    let (status, body) = send(
+        build(
+            pool.clone(),
+            Arc::new(NoopSender),
+            None,
+            Some(telemetry.clone()),
+        ),
+        &pool,
+        "POST",
+        &format!("/internal/projects/{}/transfer/accept", h.project),
+        ADMIN,
+        Some(&h.admins),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        telemetry.chain_held_at_moves(),
+        [true],
+        "the accept moved the settings without holding the chain lock the content switch waits on"
+    );
+}
+
+/// A move over its budget is given up on, though it may land late: the
+/// transfer is refused, and the settings are settled where the project
+/// stays.
+#[sqlx::test]
+async fn a_move_over_its_budget_refuses_the_transfer_and_is_settled(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let calls = SiblingCalls::default();
+    let telemetry = Arc::new(RecordingTelemetry::new(calls.clone()));
+    // Far past the budget, so no stall of the test's own can let it land.
+    telemetry.delaying_next_move(std::time::Duration::from_secs(30));
+    assert_eq!(
+        offer(&pool, &h, OWNER, &h.source, ADMIN).await.0,
+        StatusCode::OK
+    );
+
+    let (status, body) = send(
+        build(
+            pool.clone(),
+            Arc::new(NoopSender),
+            None,
+            Some(telemetry.clone()),
+        ),
+        &pool,
+        "POST",
+        &format!("/internal/projects/{}/transfer/accept", h.project),
+        ADMIN,
+        Some(&h.admins),
+        None,
+        None,
+    )
+    .await;
+    assert!(
+        status.is_server_error(),
+        "the project moved past a move over its budget: {status} {body}"
+    );
+    let moved_to = |organization: &str| SiblingCall::TelemetryMove {
+        project_id: h.project.clone(),
+        organization_id: organization.to_owned(),
+    };
+    assert_eq!(
+        calls_at_the_answer(&calls).await,
+        [moved_to(&h.admins), moved_to(&h.source)],
+        "the move given up on was not settled where the project stays before the answer"
+    );
+    assert_eq!(organization_of_project(&pool, &h.project).await, h.source);
 }

@@ -1,18 +1,20 @@
-# Telmoni self-hosted, with Docker Compose: the server, the console, Postgres
-# and Redis — four containers, plus the one-shot migration that runs first.
+# Telmoni self-hosted, with Docker Compose: the server, the console, Postgres,
+# ClickHouse and Redis — five containers, plus the one-shot migration that
+# runs first.
 #
 # Quickstart:
 #   1. Write .env beside this file with the keys the docs list
 #      (telmoni.com/docs/self-host/docker-compose) — not a copy of the
 #      repository's root .env.example, which is the development stack's and
-#      names services this stack does not run. Three values have no default
+#      names services this stack does not run. Four values have no default
 #      and the stack does not start without them:
 #      SERVICE_SECRET (any random string; both processes get the same one),
-#      AUTH_SECRET (the console's cookie seal, 32 bytes or more) and
-#      POSTGRES_PASSWORD (the one database user's; a default here would be
-#      the same on every install):
+#      AUTH_SECRET (the console's cookie seal, 32 bytes or more),
+#      POSTGRES_PASSWORD and CLICKHOUSE_PASSWORD (each store's one user's; a
+#      default here would be the same on every install, and each goes into a
+#      URL, so hex):
 #        openssl rand -hex 32
-#      Connectors (Slack, Discord, webhooks) stay off until a fourth is set,
+#      Connectors (Slack, Discord, webhooks) stay off until a fifth is set,
 #      CONNECTOR_KEK=local:<openssl rand -hex 32>, which seals their grants
 #      at rest: a secret to back up beside the database, since a dump
 #      restored without it leaves every grant unreadable.
@@ -20,8 +22,8 @@
 #
 # The server runs its own sweeps on a timer (the deletion saga, retention, the
 # daily audit walk, the audit exports' retries and expiry), so nothing here
-# schedules them. The audit partitions
-# are rotated by hand, or from your own cron:
+# schedules them. The audit partitions are rotated, and the days of spans
+# past retention dropped, by hand or from your own cron, nightly:
 #   docker compose -f deploy/compose/docker-compose.yml run --rm migrate rotate
 #
 # The console's agent is off until AGENT_MODEL_PROVIDER is set. Its
@@ -38,10 +40,14 @@ networks:
 
 volumes:
   postgres_data:
+  clickhouse_data:
   ollama_models:
 
 x-database-url: &database_url
   postgres://${POSTGRES_USER:-telmoni}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/compose/.env}@postgres:5432/${POSTGRES_DB:-telmoni}
+
+x-clickhouse-url: &clickhouse_url
+  http://${CLICKHOUSE_USER:-telmoni}:${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD in deploy/compose/.env}@clickhouse:8123
 
 services:
   postgres:
@@ -69,6 +75,41 @@ services:
       retries: 10
       start_period: 5s
 
+  # Telemetry's spans and their hourly rollup: one node, kept small by the
+  # settings every ClickHouse here runs (`crates/telemetry/clickhouse/low-memory.xml`)
+  # and capped at the memory below, which ClickHouse takes as its ceiling;
+  # raise it on a bigger host. One user, as Postgres has one, running the
+  # migration and the server both, so the row policy holds nobody here, as
+  # no row-level security holds Postgres's one user, and each read's own
+  # WHERE is the lock. It creates the database's row policies and view as
+  # `migrate` runs, which needs access management.
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8.19.9
+    container_name: telmoni-clickhouse
+    restart: unless-stopped
+    mem_limit: 1536m
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-telmoni}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD in deploy/compose/.env}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "127.0.0.1:8123:8123"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ../../crates/telemetry/clickhouse/low-memory.xml:/etc/clickhouse-server/config.d/low-memory.xml:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    networks:
+      - telmoni-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   redis:
     image: redis:7-alpine
     container_name: telmoni-redis
@@ -86,10 +127,10 @@ services:
       start_period: 5s
 
   # The same image as the server, run once with `migrate`: every schema's
-  # DDL before the server starts. This quickstart runs everything as the one
-  # database user, which owns every table and needs no grant; a deployment
-  # that gives each module its own role (`role_hardening.sql`) gets the
-  # object grants from the same run.
+  # DDL before the server starts, then ClickHouse's database and tables. This
+  # quickstart runs everything as the one database user, which owns every
+  # table and needs no grant; a deployment that gives each module its own
+  # role (`role_hardening.sql`) gets the object grants from the same run.
   migrate:
     image: ${TELMONI_IMAGE_SERVER:-ghcr.io/telmoni/server:latest}
     command: ["migrate"]
@@ -97,10 +138,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      clickhouse:
+        condition: service_healthy
     networks:
       - telmoni-net
     environment:
       MIGRATOR_DATABASE_URL: *database_url
+      MIGRATOR_CLICKHOUSE_URL: *clickhouse_url
 
   server:
     image: ${TELMONI_IMAGE_SERVER:-ghcr.io/telmoni/server:latest}
@@ -120,6 +164,8 @@ services:
       AUTH_DATABASE_URL: *database_url
       NOTIFICATIONS_DATABASE_URL: *database_url
       AGENT_DATABASE_URL: *database_url
+      TELEMETRY_DATABASE_URL: *database_url
+      TELEMETRY_CLICKHOUSE_URL: *clickhouse_url
       SERVICE_SECRET: ${SERVICE_SECRET}
       APP_URL: ${APP_URL:-http://localhost:3000}
       # The login form is on unless DISABLE_LOGIN_FORM; password sign-ups are

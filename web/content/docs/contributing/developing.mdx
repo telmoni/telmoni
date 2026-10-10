@@ -9,14 +9,14 @@ One page for the three repositories. The gates named here are what each reposito
 
 [`telmoni/telmoni`](https://github.com/telmoni/telmoni): the server, the console, the Helm chart and the compose file.
 
-You need Rust at the version `rust-toolchain.toml` pins (`rustup` installs it on the first `cargo` run), Node at the version in `web/.nvmrc` with npm, and Docker for Postgres with `pgvector`, Redis, Mailpit and, on request, Ollama. For `make ci` you also need `cargo install cargo-deny typos-cli`. `make doctor` checks that Rust, Node and npm, Docker with Compose and a running daemon, and `gh` are installed and that both env files exist; it checks no versions, and not `cargo-deny` or `typos`.
+You need Rust at the version `rust-toolchain.toml` pins (`rustup` installs it on the first `cargo` run), Node at the version in `web/.nvmrc` with npm, and Docker for Postgres with `pgvector`, ClickHouse, Redis, Mailpit and, on request, Ollama. For `make ci` you also need `cargo install cargo-deny typos-cli`. `make doctor` checks that Rust, Node and npm, Docker with Compose and a running daemon, and `gh` are installed and that both env files exist; it checks no versions, and not `cargo-deny` or `typos`.
 
 ```console
 $ make first-run
 $ make up
 ```
 
-`make first-run` runs once: it copies `.env` and `web/.env.local` from their examples, installs dependencies, starts Postgres and runs the migrations. `make up` runs the stack: Postgres, Redis, Mailpit, the server on `:8082` and the console on `:3000`. `COMPOSE_PROFILES=ollama` in `.env` starts Ollama with it, and `make server-dev` and `make web-dev` run either process alone.
+`make first-run` runs once: it copies `.env` and `web/.env.local` from their examples, installs dependencies, starts Postgres and ClickHouse and runs the migrations. `make up` runs the stack: Postgres, ClickHouse, Redis, Mailpit, the server on `:8082` and the console on `:3000`. `COMPOSE_PROFILES=ollama` in `.env` starts Ollama with it, and `make server-dev` and `make web-dev` run either process alone.
 
 - The console is at http://localhost:3000. Sign in with the password form; no identity provider is needed, and `OIDC_*` in `.env` adds one.
 - The server is at http://localhost:8082.
@@ -33,9 +33,9 @@ $ make test
 $ make ci
 ```
 
-`make check` is types, `cargo check`, fmt, clippy and rustdoc; `make lint` is eslint; `make test` is vitest and then `cargo test` against the local database; `make ci` is everything CI runs. `make fmt` formats the code rather than checking it.
+`make check` is types, `cargo check`, fmt, clippy and rustdoc; `make lint` is eslint; `make test` starts the local Postgres and ClickHouse, then runs vitest and `cargo test` against them; `make ci` is everything CI runs. `make fmt` formats the code rather than checking it.
 
-Nothing has shipped, so there are no migration paths. Each module owns one migration under `crates/<module>/migrations/`: edit it, then `make db-reset`. After a change to the wire contract, `make contract` regenerates `contract/`, and `web/lib/types/enums.ts` and `web/lib/slug.ts` follow until `contract.test.ts` passes.
+Nothing has shipped, so there are no migration paths. Each module owns one migration under `crates/<module>/migrations/`, and telemetry one more for ClickHouse under `crates/telemetry/clickhouse/`: edit it, then `make db-reset`. After a change to the wire contract, `make contract` regenerates `contract/`, and `web/lib/types/enums.ts` and `web/lib/slug.ts` follow until `contract.test.ts` passes.
 
 ## The CLI and SDKs
 
@@ -57,7 +57,7 @@ $ (cd sdk/go && go test ./...)
 $ sdk/python/.venv/bin/pytest sdk/python
 ```
 
-`cargo xtask ci` is the Rust gate CI runs: fmt, the toolchain check, clippy, build, test, doc and `cargo deny`. CI also checks the SDKs (TypeScript with `npm ci && npm run verify`, Python with `ruff check`, `ruff format --check`, `mypy` and `pytest`, Go with its tests) and lints its workflows with actionlint. `cargo xtask dist` packages this machine's binary as `dist/telmoni-<os>-<arch>.tar.gz`, with its `SHA256SUMS`; a release is an annotated `v*` tag whose version matches `Cargo.toml`, which `.github/workflows/release.yml` builds for both platforms and publishes with `install.sh` ([docs/build.md](https://github.com/telmoni/telmoni-cli/blob/main/docs/build.md)).
+`cargo xtask ci` is the Rust gate CI runs: fmt, the toolchain check, clippy, build, test, doc and `cargo deny`. CI also checks the SDKs (TypeScript with `npm ci && npm run verify`, Python with `ruff check`, `ruff format --check`, `mypy` and `pytest`, Go with its tests) and lints its workflows with actionlint. `cargo xtask dist` packages this machine's binary as `dist/telmoni-<os>-<arch>.tar.gz`, with its `SHA256SUMS`; a release is an annotated `v*` tag whose version matches `Cargo.toml`, which `.github/workflows/release.yml` builds for both platforms and publishes with `install.sh` ([`ARCHITECTURE.md`](https://github.com/telmoni/telmoni-cli/blob/main/ARCHITECTURE.md#distribution)).
 
 ## The skills
 
@@ -70,7 +70,7 @@ $ make check
 $ claude --plugin-dir .
 ```
 
-`make check` is the gate CI runs: it validates each skill against the Agent Skills spec, `plugin.json` against the Agent Plugins schema, and the plugin and its marketplace with `claude plugin validate .`. `claude --plugin-dir .` starts a Claude Code session with your checkout's plugin loaded. `make eval` runs the eval suite, each case with and without the plugin, and spends model usage; on Linux its runs need `bubblewrap` and `socat`. The repository's `AGENTS.md` says what a skill may say and how to test a change.
+`make check` is the gate CI runs: it validates each skill against the Agent Skills spec, `plugin.json` against the Agent Plugins schema, `.cursor-plugin/plugin.json` against Cursor's, and the plugin and its marketplace with `claude plugin validate .`. `claude --plugin-dir .` starts a Claude Code session with your checkout's plugin loaded. `make eval` runs the eval suite, each case with and without the plugin, and spends model usage; on Linux its runs need `bubblewrap` and `socat`. The repository's `AGENTS.md` says what a skill may say and how to test a change.
 
 ## The docs
 

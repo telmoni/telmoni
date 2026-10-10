@@ -5,6 +5,10 @@ const SERVICE_SECRET = "e2e-service-secret-do-not-use-in-production";
 // suite runs under the same grants and row-level security.
 const AUTH_DB = "postgresql://auth:auth_dev@localhost:5432/telmoni";
 const NOTIFICATIONS_DB = "postgresql://notifications:notifications_dev@localhost:5432/telmoni";
+const TELEMETRY_DB = "postgresql://telemetry:telemetry_dev@localhost:5432/telmoni";
+// The dev ClickHouse, as the module's own user. No page the suite opens reads
+// a span, and the server dials ClickHouse at its first query, never at boot.
+const TELEMETRY_CLICKHOUSE = "http://telemetry:telemetry_dev@localhost:8123";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -37,6 +41,8 @@ export default defineConfig({
       env: {
         AUTH_DATABASE_URL: AUTH_DB,
         NOTIFICATIONS_DATABASE_URL: NOTIFICATIONS_DB,
+        TELEMETRY_DATABASE_URL: TELEMETRY_DB,
+        TELEMETRY_CLICKHOUSE_URL: TELEMETRY_CLICKHOUSE,
         PORT: "8082",
         SERVICE_SECRET,
         // Never reached: every e2e person is signed in through the test door.

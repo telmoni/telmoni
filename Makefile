@@ -16,7 +16,7 @@ SERVER_PORT ?= 8082
 WEB_PORT    ?= 3000
 TEST_THREADS ?= 2
 
-MIGRATION_SETS := audit=$(CRATES_DIR)/migrator/migrations,auth=$(CRATES_DIR)/auth/migrations,notifications=$(CRATES_DIR)/notifications/migrations,agent=$(CRATES_DIR)/agent/migrations
+MIGRATION_SETS := audit=$(CRATES_DIR)/migrator/migrations,auth=$(CRATES_DIR)/auth/migrations,notifications=$(CRATES_DIR)/notifications/migrations,agent=$(CRATES_DIR)/agent/migrations,telemetry=$(CRATES_DIR)/telemetry/migrations
 
 export KEY ON WHY ORG BY
 FLAG_DATABASE_URL ?= $(MIGRATOR_DATABASE_URL)
@@ -36,16 +36,16 @@ help:
 	@echo "    make doctor               audit the dev toolchain (rust/node/docker/...)"
 	@echo ""
 	@echo "  Develop locally"
-	@echo "    make up                   run the whole stack: Postgres, Redis, the server, the console"
+	@echo "    make up                   run the whole stack: Postgres, ClickHouse, Redis, the server, the console"
 	@echo "    make down                 stop docker containers"
-	@echo "    make docker-up            run postgres + redis in Docker (headless)"
+	@echo "    make docker-up            run postgres, clickhouse + redis in Docker (headless)"
 	@echo "    make server-dev           run the server alone (telmoni serve)"
 	@echo "    make web-dev              run the console alone"
 	@echo "    make sweep SWEEP=deletion run one sweep by hand (deletion, audit-verify, retention, agent-reindex, audit-exports)"
 	@echo "    make webhook-receiver SECRET=whsec_...   receive an outbound webhook behind a named Cloudflare route"
 	@echo "    make webhook-tunnel       the same, with no dashboard: a quick tunnel prints a throwaway URL (needs cloudflared)"
-	@echo "    make db-migrate           apply every migration set to the local DB"
-	@echo "    make db-reset             wipe and rebuild the local DB"
+	@echo "    make db-migrate           apply every migration set to the local Postgres, then ClickHouse's file"
+	@echo "    make db-reset             wipe and rebuild the local DBs (Postgres and ClickHouse)"
 	@echo "    make db-shell             psql into local postgres"
 	@echo "    make flag KEY=connectors ON=false WHY=\"...\" BY=<who>   flip a feature flag (ORG=<id> for one organization; make flags lists)"
 	@echo ""
@@ -142,7 +142,7 @@ deps-check:
 .PHONY: schema-check
 schema-check:
 	@if ! missing=$$(docker compose exec -T postgres psql -U telmoni -d telmoni -tAc \
-		"SELECT coalesce(string_agg(t, ' '), '') FROM unnest(ARRAY['audit.events','auth.organizations','notifications.feed','agent.cursors']) AS t WHERE to_regclass(t) IS NULL" \
+		"SELECT coalesce(string_agg(t, ' '), '') FROM unnest(ARRAY['audit.events','auth.organizations','notifications.feed','agent.cursors','telemetry.project_settings']) AS t WHERE to_regclass(t) IS NULL" \
 		2>/dev/null); then \
 		echo "· schema-check skipped (postgres not reachable)"; \
 	elif [ -n "$$missing" ]; then \
@@ -153,13 +153,13 @@ schema-check:
 		echo "    make db-reset      # wipe and rebuild it from scratch"; \
 		exit 1; \
 	else \
-		echo "✓ schema present — audit, auth, notifications, agent."; \
+		echo "✓ schema present — audit, auth, notifications, agent, telemetry."; \
 	fi
 
 .PHONY: env-check-services
 env-check-services:
 	@missing=""; \
-	for var in AUTH_DATABASE_URL NOTIFICATIONS_DATABASE_URL MIGRATOR_DATABASE_URL SERVICE_SECRET; do \
+	for var in AUTH_DATABASE_URL NOTIFICATIONS_DATABASE_URL TELEMETRY_DATABASE_URL MIGRATOR_DATABASE_URL TELEMETRY_CLICKHOUSE_URL MIGRATOR_CLICKHOUSE_URL SERVICE_SECRET; do \
 		eval val=\$$$$var; \
 		if [ -n "$$val" ]; then continue; fi; \
 		if [ -f .env ] && grep -qE "^$$var=[^[:space:]]+" .env; then continue; fi; \
@@ -197,7 +197,7 @@ env-check-web:
 # ── Development ────────────────────────────────────────────────
 
 .PHONY: up-preflight
-up-preflight: env-scaffold env-check port-check deps-check docker-up db-wait roles-check schema-check
+up-preflight: env-scaffold env-check port-check deps-check docker-up db-wait clickhouse-wait roles-check schema-check
 
 .PHONY: up
 up: up-preflight
@@ -213,7 +213,7 @@ first-run: env-scaffold
 	@$(MAKE) first-run-steps
 
 .PHONY: first-run-steps
-first-run-steps: install env-check docker-up db-wait db-migrate db-dev-setup
+first-run-steps: install env-check docker-up db-wait clickhouse-wait db-migrate db-dev-setup
 	@echo ""
 	@echo "  ✓ bootstrap complete."
 	@echo "    Next: make up   (the server and the console in one terminal)"
@@ -275,13 +275,18 @@ web-gate:
 lint:
 	cd $(WEB_DIR) && npm run lint
 
+# The docker ClickHouse's two users, for the telemetry suites alone, so the
+# env checks still catch a .env without them; .env's win.
+test test-svc: export MIGRATOR_CLICKHOUSE_URL := $(or $(MIGRATOR_CLICKHOUSE_URL),http://migrator:migrator_dev@localhost:8123)
+test test-svc: export TELEMETRY_CLICKHOUSE_URL := $(or $(TELEMETRY_CLICKHOUSE_URL),http://telemetry:telemetry_dev@localhost:8123)
+
 .PHONY: test
-test: docker-up db-wait
+test: docker-up db-wait clickhouse-wait
 	cd $(WEB_DIR) && npm run test
 	cargo test --workspace --locked --no-fail-fast -- --test-threads=$(TEST_THREADS)
 
 .PHONY: e2e
-e2e: deps-check docker-up db-wait schema-check
+e2e: deps-check docker-up db-wait clickhouse-wait schema-check
 	cargo build -p telmoni
 	cd $(WEB_DIR) && npm run test:e2e
 
@@ -317,7 +322,7 @@ migration-sets:
 .PHONY: roles-check
 roles-check:
 	@if ! missing=$$(docker compose exec -T postgres psql -U telmoni -d telmoni -tAc \
-		"SELECT coalesce(string_agg(r, ' '), '') FROM unnest(ARRAY['auth','notifications','agent','migrator']) AS r WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r)" \
+		"SELECT coalesce(string_agg(r, ' '), '') FROM unnest(ARRAY['auth','notifications','agent','telemetry','migrator']) AS r WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r)" \
 		2>/dev/null); then \
 		echo "· roles-check skipped (postgres not reachable)"; \
 	elif [ -n "$$missing" ]; then \
@@ -327,7 +332,7 @@ roles-check:
 		echo "    make db-reset"; \
 		exit 1; \
 	else \
-		echo "✓ roles present — auth, notifications, agent, migrator."; \
+		echo "✓ roles present — auth, notifications, agent, telemetry, migrator."; \
 	fi
 
 .PHONY: db-rotate
@@ -341,8 +346,8 @@ db-migrate: roles-check
 .PHONY: db-dev-setup
 db-dev-setup:
 	@docker compose exec -T postgres psql -U telmoni -d telmoni \
-		-c "ALTER ROLE telmoni SET search_path = auth, notifications, agent, audit, public;"
-	@echo "✓ dev role search_path pinned (auth, notifications, agent, audit, public)"
+		-c "ALTER ROLE telmoni SET search_path = auth, notifications, agent, telemetry, audit, public;"
+	@echo "✓ dev role search_path pinned (auth, notifications, agent, telemetry, audit, public)"
 
 .PHONY: db-shell
 db-shell:
@@ -368,22 +373,36 @@ db-wait:
 	done; \
 	echo "✗ postgres did not become ready within 90s"; exit 1
 
+.PHONY: clickhouse-wait
+clickhouse-wait:
+	@echo "▶ Waiting for clickhouse..."
+	@n=0; \
+	while [ $$n -lt 60 ]; do \
+		if docker compose exec -T clickhouse wget --spider -q http://127.0.0.1:8123/ping >/dev/null 2>&1; then \
+			echo "✓ clickhouse ready"; exit 0; \
+		fi; \
+		n=$$((n + 1)); \
+		sleep 1; \
+	done; \
+	echo "✗ clickhouse did not become ready within 60s"; exit 1
+
 .PHONY: db-reset
 db-reset:
 	docker compose down -v
 	@$(MAKE) docker-up
-	@echo "postgres + redis recreated — all local data wiped"
+	@echo "postgres, clickhouse + redis recreated — all local data wiped"
 	$(MAKE) db-wait
+	$(MAKE) clickhouse-wait
 	$(MAKE) db-migrate
 	$(MAKE) db-dev-setup
-	@echo "✓ db-reset complete — postgres + redis fresh, schema migrated, dev role search_path pinned"
+	@echo "✓ db-reset complete — postgres, clickhouse + redis fresh, schema migrated, dev role search_path pinned"
 
 # ── Docker ─────────────────────────────────────────────────────
 
 .PHONY: docker-up
 docker-up:
 	docker compose up -d
-	@echo "postgres :5432  redis :6379  mailpit :8025$$(docker compose ps --status running --services 2>/dev/null | grep -qx ollama && echo '  ollama :11434')"
+	@echo "postgres :5432  clickhouse :8123  redis :6379  mailpit :8025$$(docker compose ps --status running --services 2>/dev/null | grep -qx ollama && echo '  ollama :11434')"
 
 .PHONY: down
 down:

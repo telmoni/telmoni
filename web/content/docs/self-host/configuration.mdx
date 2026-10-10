@@ -48,14 +48,17 @@ These variables configure the web console container (`telmoni/web`).
 
 ## Database connection pools (Multi-role architecture)
 
-In simple deployments, all database variables can point to the same PostgreSQL connection string. In hardened production environments, each module connects as its own PostgreSQL role, which `role_hardening.sql` makes `NOSUPERUSER`, `NOCREATEROLE`, `NOCREATEDB` and `NOBYPASSRLS`:
+In simple deployments, all the PostgreSQL variables can point to the same connection string, and both ClickHouse URLs to the same user. In hardened production environments, each module connects as its own PostgreSQL role, which `role_hardening.sql` makes `NOSUPERUSER`, `NOCREATEROLE`, `NOCREATEDB` and `NOBYPASSRLS`:
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `AUTH_DATABASE_URL` | *Required* | PostgreSQL DSN for identity, accounts, organizations, projects, and RBAC tables (role: `auth`). |
 | `NOTIFICATIONS_DATABASE_URL` | *Required* | PostgreSQL DSN for notification feeds, connectors (Slack, Discord and webhooks), deliveries and their attempts, and connection handshakes (role: `notifications`). |
 | `AGENT_DATABASE_URL` | *Optional* | PostgreSQL DSN for the agent's indexed passages and their embeddings, its conversations and messages (role: `agent`). Required if the AI agent is enabled: `AGENT_MODEL_PROVIDER` without it is refused at boot. |
+| `TELEMETRY_DATABASE_URL` | *Required* | PostgreSQL DSN for each project's telemetry settings, its content mode among them (role: `telemetry`). |
+| `TELEMETRY_CLICKHOUSE_URL` | *Required* | ClickHouse's HTTP interface, as the user the server reads and writes spans as, its user and password in the URL as a DSN carries them (`http://telemetry:<password>@clickhouse:8123`, the password percent-encoded). The row policy holds this user to the projects each read names, so it must not be the migrator's, except in the Compose quickstart, whose one user is both and whose reads are held by their own `WHERE`. The server does not connect at boot, and a ClickHouse outage leaves it ready. |
 | `MIGRATOR_DATABASE_URL` | *Required for `migrate` and `rotate`* | PostgreSQL DSN that `telmoni migrate` and `telmoni rotate` run as: every schema's DDL, the object grants and the audit partitions (role: `migrator`, or the Compose stack's single user). `role_hardening.sql` does not run through it; a superuser applies that file with `psql`. |
+| `MIGRATOR_CLICKHOUSE_URL` | *Required for `migrate` and `rotate`* | ClickHouse's HTTP interface, as the user `telmoni migrate` creates the `telemetry` database and its tables as, and `telmoni rotate` drops days of spans and months of totals past retention as (`migrator`, or the Compose stack's single user). Read before anything runs, so a missing one changes nothing. In a Kubernetes pod, plain `http` is refused but to loopback or a Service's name with its namespace (`clickhouse.<namespace>.svc`), for both URLs. |
 
 ---
 

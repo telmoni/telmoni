@@ -68,6 +68,7 @@ fn state(
         exchange_cache: telmoni_auth::ExchangeCache::new(),
         siblings: Siblings {
             notifications: Some(notifications),
+            telemetry: None,
             agent: None,
             purge_hook: Some(hook),
         },

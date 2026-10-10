@@ -122,7 +122,7 @@ In a production cluster, each module connects as its own role, granted its own s
 
 ### Role separation
 
-The database tier is split into four distinct roles:
+The database tier is split into five distinct roles:
 
 ```text
 ┌─────────────────┬────────────────────────────────────────────────────────┐
@@ -132,10 +132,11 @@ The database tier is split into four distinct roles:
 │ auth            │ CRUD on accounts, orgs, projects, and RBAC tables.     │
 │ notifications   │ CRUD on delivery queues, feeds, and connector records. │
 │ agent           │ CRUD on chunks, conversations, messages and cursors.   │
+│ telemetry       │ Reads and writes each project's settings; no deletes.  │
 └─────────────────┴────────────────────────────────────────────────────────┘
 ```
 
-The audit chain is the one surface shared across roles: `auth` and `notifications` may read and append `audit.events`, and neither they nor the maintenance lanes may update or delete a row; `agent` has no audit grant at all. The owner role, `migrator`, keeps every privilege. Each module role is also kept from the writes the owner or a maintenance lane makes: `auth` may not write `feature_flags` or `organization_flags`, `notifications` may not write `delivery_attempts`, and `agent` may not write `erasures`.
+The audit chain is the one surface shared across roles: `auth`, `notifications` and `telemetry` may read and append `audit.events`, each to record its own changes (telemetry's are a project's content mode), and neither they nor the maintenance lanes may update or delete a row; `agent` has no audit grant at all. The spans are not in Postgres: ClickHouse keeps them, under users of its own (see [Kubernetes](/docs/self-host/kubernetes)). The owner role, `migrator`, keeps every privilege. Each module role is also kept from the writes the owner or a maintenance lane makes: `auth` may not write `feature_flags` or `organization_flags`, `notifications` may not write `delivery_attempts`, `agent` may not write `erasures`, and `telemetry` may not delete from `project_settings`.
 
 ### Applying role hardening
 
@@ -154,6 +155,7 @@ CREATE ROLE migrator WITH LOGIN PASSWORD '<migrator password>';
 CREATE ROLE auth WITH LOGIN PASSWORD '<auth password>';
 CREATE ROLE notifications WITH LOGIN PASSWORD '<notifications password>';
 CREATE ROLE agent WITH LOGIN PASSWORD '<agent password>';
+CREATE ROLE telemetry WITH LOGIN PASSWORD '<telemetry password>';
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
@@ -169,12 +171,12 @@ Apply `crates/migrator/sql/role_hardening.sql`:
 psql "$SUPERUSER_DATABASE_URL" -v ON_ERROR_STOP=1 -f crates/migrator/sql/role_hardening.sql
 ```
 
-This script, which refuses to run as one of the four roles and stops if any of them is missing:
-- Strips `SUPERUSER`, `CREATEROLE`, and `CREATEDB` from all four roles.
-- Enforces `NOBYPASSRLS` across `auth`, `notifications`, and `agent` so that application pools cannot bypass PostgreSQL Row-Level Security policies; `migrator` gets `BYPASSRLS` and `CREATE` on the database, since it owns every schema.
+This script, which refuses to run as one of the five roles and stops if any of them is missing:
+- Strips `SUPERUSER`, `CREATEROLE`, and `CREATEDB` from all five roles.
+- Enforces `NOBYPASSRLS` across `auth`, `notifications`, `agent` and `telemetry` so that application pools cannot bypass PostgreSQL Row-Level Security policies; `migrator` gets `BYPASSRLS` and `CREATE` on the database, since it owns every schema.
 - Sets each module role's session defaults: `statement_timeout` 5 s, `lock_timeout` 2 s, `idle_in_transaction_session_timeout` 2 min, and a `search_path` of its own schema (`agent, public` for the agent, whose `vector` type lives in `public`); the migrator gets 5 min and 30 s.
 - Revokes `CREATE` on the `public` schema and `TEMPORARY` on the database from `PUBLIC`.
-- Creates the three `*_maintenance` lanes, `NOLOGIN` roles each module enters with `SET ROLE` for its cross-tenant work (the sweeps, the delivery loop, sign-in lookups, the `/v1` key check), and grants each to its module's role.
+- Creates the four `*_maintenance` lanes, `NOLOGIN` roles each module enters with `SET ROLE` for its cross-tenant work (the sweeps, the delivery loop, sign-in lookups, the `/v1` key check, telemetry's purges and a transfer's move), and grants each to its module's role.
 
 </Step>
 
@@ -182,14 +184,15 @@ This script, which refuses to run as one of the four roles and stops if any of t
 
 **Run migrations and apply object grants**
 
-Execute the migrator as the `migrator` user:
+Execute the migrator as the `migrator` user, in Postgres and in ClickHouse:
 
 ```bash
 MIGRATOR_DATABASE_URL="postgres://migrator:<migrator password>@postgres:5432/telmoni" \
+MIGRATOR_CLICKHOUSE_URL="http://migrator:<ClickHouse migrator password>@clickhouse:8123" \
   telmoni migrate
 ```
 
-After every run the migrator applies `object_grants.sql`, which grants each module's role `SELECT`, `INSERT`, `UPDATE` and `DELETE` on its own schema, `SELECT` and `INSERT` on `audit.events` for `auth` and `notifications`, and takes back the module roles' writes to the tables only the owner or a maintenance lane writes (the feature-flag tables, the delivery log, the agent's erasure fences). When any of the three roles is missing, as in the Compose quickstart, the grants are skipped with a warning naming it.
+After every run the migrator applies `object_grants.sql`, which grants each module's role `SELECT`, `INSERT`, `UPDATE` and `DELETE` on its own schema, `SELECT` and `INSERT` on `audit.events` for `auth`, `notifications` and `telemetry`, and takes back the module roles' writes to the tables only the owner or a maintenance lane writes (the feature-flag tables, the delivery log, the agent's erasure fences), and `telemetry`'s deletes from the project settings its maintenance lane purges. When any of the four module roles is missing, as in the Compose quickstart, the grants are skipped with a warning naming it. Then it creates ClickHouse's `telemetry` database, its tables and their row policies, every statement `IF NOT EXISTS`, so a second run changes nothing. The database records the digest of the statements it was made from, and a release whose statements differ refuses to run over it rather than skip the difference: before Telmoni's first release, that means recreating ClickHouse's volume.
 
 </Step>
 
@@ -197,9 +200,9 @@ After every run the migrator applies `object_grants.sql`, which grants each modu
 
 ---
 
-## Audit log partition rotation
+## Partition rotation
 
-Telmoni's audit log uses range-partitioned tables partitioned monthly by timestamp (`created_at`). An audit row for a month with no partition fails its insert, and the change it records fails with it, so `telmoni migrate` creates the current month and the next three, and the rotation command keeps that runway ahead of the calendar:
+Telmoni's audit log uses range-partitioned tables partitioned monthly by timestamp (`created_at`). An audit row for a month with no partition fails its insert, and the change it records fails with it, so `telmoni migrate` creates the current month and the next three, and the rotation command keeps that runway ahead of the calendar. The same command drops ClickHouse's spans past retention:
 
 ```bash
 telmoni rotate
@@ -208,15 +211,16 @@ telmoni rotate
 ### Rotation behavior
 
 - **Forward Runway**: `telmoni rotate` creates the current calendar month and the next three months of partitions ahead of time (`{table}_YYYY_MM`). It never drops audit partitions.
+- **Spans**: It drops each day of spans in ClickHouse once every span in it arrived more than 360 days ago, and each month of hourly totals once it is 13 months behind. A night it misses is caught up by the next.
 - **Idempotency**: Safe to run continuously; if partitions exist, no changes are made.
 
 ### Scheduling
 
-The Helm chart runs it daily as the `rotate` CronJob (`migrator.rotateSchedule`, default `"0 2 * * *"`). On Compose, schedule it yourself, once a week or once a day:
+The Helm chart runs it daily as the `rotate` CronJob (`migrator.rotateSchedule`, default `"0 2 * * *"`). On Compose, schedule it yourself, once a day, so spans go when their retention ends:
 
 ```bash
 # /etc/cron.d/telmoni-rotate
-0 3 * * 0 root docker compose -f /opt/telmoni/deploy/compose/docker-compose.yml run --rm migrate rotate
+0 3 * * * root docker compose -f /opt/telmoni/deploy/compose/docker-compose.yml run --rm migrate rotate
 ```
 
 ---
@@ -275,7 +279,8 @@ telmoni terminate org_019a0b8c3f2e7d41
 - An `SMTP_URL` that is not a connection URL, or, with `SMTP_URL` set, a `MAIL_FROM` that is not an address.
 - `AGENT_MODEL_PROVIDER` without `AGENT_DATABASE_URL`, or with a value other than `anthropic` and `openai`; `openai` without `AGENT_MODEL`; `RERANK_URL` without `RERANK_MODEL`; a hosted `AGENT_MODEL_URL` or `EMBEDDINGS_URL` without its key; `AGENT_MODEL_TIMEOUT_SECS` outside 1 to 100; an embeddings endpoint that answers with a width other than 768 (one not answering yet is allowed, and checked at its first answer).
 - A set value that does not parse (`PORT=eight`), or a count below its minimum: the `NOTIFICATIONS_DELIVERY_*` settings, `AGENT_MESSAGES_PER_HOUR` and `AGENT_MAX_TOKENS` must be at least 1, except `NOTIFICATIONS_DELIVERY_BACKOFF_SECS`, which may be 0. A blank value reads as unset and takes the default.
-- In a Kubernetes pod only: an `OIDC_ISSUER` that is not `https://`, an `SMTP_URL` that is neither TLS nor loopback, a `local:` `CONNECTOR_KEK`, `ALLOW_TEST_SESSION`, and a missing `DATABASE_CA_CERT`.
+- A `TELEMETRY_CLICKHOUSE_URL` that is not an `http` or `https` URL with a host, or that carries a query string or a fragment: settings are the server's to choose, never the URL's. The reason names the fault, never the URL, which holds a password. ClickHouse itself being down is no refusal: the server starts, and reaches it at the first read or write of a span.
+- In a Kubernetes pod only: an `OIDC_ISSUER` that is not `https://`, an `SMTP_URL` that is neither TLS nor loopback, a `local:` `CONNECTOR_KEK`, `ALLOW_TEST_SESSION`, a missing `DATABASE_CA_CERT`, and a ClickHouse URL over plain `http` to anything but loopback or a Service's name with its namespace (`clickhouse.<namespace>.svc`, `….svc.cluster.local`), which `telmoni migrate` and `telmoni rotate` refuse too.
 
 ---
 
@@ -354,7 +359,7 @@ The console's live updates (server-sent events) and the agent's streamed answers
 
 ### PostgreSQL backups
 
-Telmoni stores all persistent state in PostgreSQL. Create periodic logical backups with `pg_dump`. Every tenant table forces row-level security, so run it as a role that bypasses it: a superuser, such as the Compose stack's single database user, or `migrator` with separate roles.
+Telmoni keeps its persistent state in two stores: everything but the spans in PostgreSQL, and the spans with their hourly totals in ClickHouse ([below](#clickhouse-backups)). Create periodic logical backups of PostgreSQL with `pg_dump`. Every tenant table forces row-level security, so run it as a role that bypasses it: a superuser, such as the Compose stack's single database user, or `migrator` with separate roles.
 
 ```bash
 # Logical database dump, from the Compose host (Postgres listens on 127.0.0.1)
@@ -370,3 +375,26 @@ pg_restore -h 127.0.0.1 -U telmoni -d telmoni --clean --if-exists "/backups/telm
 <Callout type="warn">
 Connector credentials are sealed with `CONNECTOR_KEK`, and a dump restored without the matching key leaves them permanently unreadable. A `local:` key is a secret: back it up alongside your dumps. A Cloud KMS key cannot be dumped: never disable or destroy it while a dump that needs it exists.
 </Callout>
+
+### ClickHouse backups
+
+ClickHouse holds the `telemetry` database: every span, the hourly totals, and the digest of the statements its tables were made from. Losing it loses that history but not the server: `telmoni migrate` makes an empty store again. Back it up with ClickHouse's own `BACKUP`, as a user allowed to write backups, such as the Compose stack's single ClickHouse user. The image allows backups under `backups/` in its data directory, so on the Compose host the archive lands in ClickHouse's volume, from where you copy it off:
+
+```bash
+# The container's own CLICKHOUSE_USER and CLICKHOUSE_PASSWORD sign the client in
+docker compose -f deploy/compose/docker-compose.yml exec clickhouse \
+  clickhouse-client --query "BACKUP DATABASE telemetry TO File('telemetry_20270101.zip')"
+docker compose -f deploy/compose/docker-compose.yml cp \
+  clickhouse:/var/lib/clickhouse/backups/telemetry_20270101.zip /backups/
+```
+
+To restore, copy the archive back into the same directory, drop what is there, and restore it. The row policies are not part of the database: they stay on the server, and `telmoni migrate` makes them again on a new one, finding its own digest in the restored store:
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml cp \
+  /backups/telemetry_20270101.zip clickhouse:/var/lib/clickhouse/backups/
+docker compose -f deploy/compose/docker-compose.yml exec clickhouse \
+  clickhouse-client --query "DROP DATABASE IF EXISTS telemetry SYNC"
+docker compose -f deploy/compose/docker-compose.yml exec clickhouse \
+  clickhouse-client --query "RESTORE DATABASE telemetry FROM File('telemetry_20270101.zip')"
+```

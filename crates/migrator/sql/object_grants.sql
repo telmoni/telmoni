@@ -11,8 +11,8 @@
 -- On the parent only: a query naming a child partition bypasses the parent's policies.
 DO $$
 BEGIN
-    EXECUTE 'GRANT USAGE ON SCHEMA audit TO auth, notifications';
-    EXECUTE 'GRANT SELECT, INSERT ON audit.events TO auth, notifications';
+    EXECUTE 'GRANT USAGE ON SCHEMA audit TO auth, notifications, telemetry';
+    EXECUTE 'GRANT SELECT, INSERT ON audit.events TO auth, notifications, telemetry';
 EXCEPTION
     WHEN invalid_schema_name THEN
         RAISE NOTICE 'audit schema not yet created — grants land on next re-apply';
@@ -89,4 +89,32 @@ BEGIN
 EXCEPTION
     WHEN invalid_schema_name THEN
         RAISE NOTICE 'agent schema not yet created — agent own-schema grants land on next re-apply';
+END $$;
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 5. TELEMETRY
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Its audit grant is section 1's: a project's content mode is changed by the
+-- module's own lane, and recorded in the same transaction. Its spans are
+-- ClickHouse's, whose user and grants are the ClickHouse server's own.
+DO $$
+BEGIN
+    EXECUTE 'GRANT USAGE ON SCHEMA telemetry TO telemetry';
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA telemetry TO telemetry';
+    EXECUTE 'ALTER DEFAULT PRIVILEGES FOR ROLE migrator IN SCHEMA telemetry '
+         || 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO telemetry';
+    IF to_regclass('telemetry._sqlx_migrations') IS NOT NULL THEN
+        EXECUTE 'REVOKE ALL ON telemetry._sqlx_migrations FROM telemetry';
+    END IF;
+    -- A project's settings row goes with its project or its organization, by
+    -- the lane's purge; a request that removed one would set the project's
+    -- content mode back with no audit row. Revoked here, after the
+    -- schema-wide grant, which is reissued on every run.
+    IF to_regclass('telemetry.project_settings') IS NOT NULL THEN
+        EXECUTE 'REVOKE DELETE ON telemetry.project_settings FROM telemetry';
+    END IF;
+EXCEPTION
+    WHEN invalid_schema_name THEN
+        RAISE NOTICE 'telemetry schema not yet created — telemetry own-schema grants land on next re-apply';
 END $$;

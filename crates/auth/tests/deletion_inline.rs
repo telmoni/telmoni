@@ -30,8 +30,8 @@ use tower::ServiceExt;
 use telmoni_auth::handler::deletion::{self, FinalizeOutcome, PurgeOutcome};
 use telmoni_auth::sweep;
 use telmoni_auth::test_provider::{
-    Call, RecordingHook, RecordingNotifications, ScriptedProvider, SiblingCall, SiblingCalls,
-    as_person, bearer,
+    Call, RecordingHook, RecordingNotifications, RecordingTelemetry, ScriptedProvider, SiblingCall,
+    SiblingCalls, as_person, bearer,
 };
 use telmoni_auth::{AppState, AuthProvider, Authenticated, Config, Siblings, router};
 use telmoni_shared::seam::Auth as _;
@@ -203,14 +203,15 @@ async fn erase_lane(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// The real auth router around `provider`: the purge hook and notifications
-/// as recorders when given, and mail at `sender`. The state comes back
-/// beside the router, for the seams a test asks directly.
+/// The real auth router around `provider`: the purge hook, notifications
+/// and telemetry as recorders when given, and mail at `sender`. The state
+/// comes back beside the router, for the seams a test asks directly.
 fn build_around(
     pool: PgPool,
     provider: Arc<dyn AuthProvider>,
     hook: Option<Arc<RecordingHook>>,
     notifications: Option<Arc<RecordingNotifications>>,
+    telemetry: Option<Arc<RecordingTelemetry>>,
     tail_budget_ms: u64,
     sender: Arc<dyn telmoni_shared::mail::MailSender>,
 ) -> (Router, Arc<AppState>) {
@@ -236,6 +237,7 @@ fn build_around(
         exchange_cache: telmoni_auth::ExchangeCache::new(),
         siblings: Siblings {
             notifications: notifications.map(|n| n as Arc<dyn telmoni_shared::seam::Notifications>),
+            telemetry: telemetry.map(|t| t as Arc<dyn telmoni_shared::seam::Telemetry>),
             agent: None,
             purge_hook: hook.map(|h| h as Arc<dyn telmoni_shared::seam::PurgeHook>),
         },
@@ -262,6 +264,7 @@ fn build(
         provider.clone(),
         hook,
         notifications,
+        None,
         tail_budget_ms,
         sender,
     );
@@ -410,6 +413,7 @@ fn app_with_hung_provider(pool: PgPool, delay: Duration, tail_budget_ms: u64) ->
             inner: ScriptedProvider::new(),
             delay,
         }),
+        None,
         None,
         None,
         tail_budget_ms,
@@ -1240,6 +1244,70 @@ async fn a_failed_notifications_purge_stops_the_finalize_before_the_hook(pool: P
         calls.calls(),
         vec![hook_purge(ORGANIZATION), notifications_purge(ORGANIZATION)],
         "the request's hook purge, then the finalize's notifications purge, and no second hook purge"
+    );
+}
+
+/// Telemetry's purge runs in the finalize, after notifications' and before
+/// the hook's second, and one that fails stops the finalize there: the row
+/// survives for the retry, which purges every sibling again, in order.
+#[sqlx::test]
+async fn the_finalize_purges_telemetry_and_a_failed_purge_stops_it(pool: PgPool) {
+    seed_organization_deletion(&pool, "active").await;
+    let (calls, hook, notifications) = siblings();
+    let telemetry = Arc::new(RecordingTelemetry::new(calls.clone()));
+    telemetry.failing_purges(1);
+    let (router, _state) = build_around(
+        pool.clone(),
+        Arc::new(ScriptedProvider::new()),
+        Some(hook),
+        Some(notifications),
+        Some(telemetry),
+        8_000,
+        Arc::new(telmoni_shared::mail::NoopSender),
+    );
+    let app = || router.clone();
+    let telemetry_purge = SiblingCall::TelemetryPurgeOrganization(ORGANIZATION.to_owned());
+
+    let resp = app()
+        .oneshot(delete_organization(&pool, USER, ORGANIZATION, CODE).await)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+    let_the_wait_pass(&pool, ORGANIZATION).await;
+    calls.reset();
+
+    let resp = app().oneshot(finalize(ORGANIZATION)).await.unwrap();
+    assert!(
+        resp.status().is_server_error(),
+        "finalize answered {} with telemetry failing",
+        resp.status()
+    );
+    assert_eq!(
+        org_status(&pool, ORGANIZATION).await.as_deref(),
+        Some("pending_deletion")
+    );
+    assert_eq!(
+        calls.calls(),
+        vec![notifications_purge(ORGANIZATION), telemetry_purge.clone()],
+        "the finalize went past a failed telemetry purge"
+    );
+    calls.reset();
+
+    let resp = app().oneshot(finalize(ORGANIZATION)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        org_status(&pool, ORGANIZATION).await,
+        None,
+        "the row is gone"
+    );
+    assert_eq!(
+        calls.calls(),
+        vec![
+            notifications_purge(ORGANIZATION),
+            telemetry_purge,
+            hook_purge(ORGANIZATION),
+        ],
+        "the retry did not purge every sibling, in order, before the row went"
     );
 }
 

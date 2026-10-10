@@ -1,0 +1,92 @@
+<!--
+  ClickHouse kept small, for one node beside Postgres on a host of 4 GB, and
+  kept from writing a customer's values to its own log: mounted into the
+  server's config.d by every Compose file that runs ClickHouse here, and to
+  be copied by a tier's chart (the hosted tier's 1.12), so a laptop, a
+  self-hoster and a tier run one configuration. The memory settings follow
+  Altinity's guide to small hosts (kb.altinity.com, "Configure ClickHouse
+  for low memory environments").
+
+  What it costs: the system's own `*_log` tables, which nothing in Telmoni
+  reads; the server's log past its warnings, and every query's error, so a
+  slow or failing query is found from its caller's log of the error's code,
+  or by lifting these on a laptop, rather than from `system.query_log`; every
+  quoted literal in an error or a log line, masked; and merges two at a
+  time, which a node taking one asynchronous insert a second keeps up with.
+-->
+<clickhouse>
+    <!-- Warnings and errors alone, and none from the three loggers that write
+         a query's error: an error quotes the query it failed in, its
+         parameters filled in, and often the value it failed on, quoted or not
+         (a UUID or a number that does not parse), and a customer's ids are
+         not the log's to keep. The query's caller has the error and its
+         code. At the image's level, trace, the log would also write every
+         request's parameters. -->
+    <logger>
+        <level>warning</level>
+        <levels>
+            <logger>
+                <name>executeQuery</name>
+                <level>none</level>
+            </logger>
+            <logger>
+                <name>DynamicQueryHandler</name>
+                <level>none</level>
+            </logger>
+            <logger>
+                <name>TCPHandler</name>
+                <level>none</level>
+            </logger>
+        </levels>
+    </logger>
+
+    <!-- Every quoted literal, masked, in what any other log line quotes and in
+         the error a query is answered with. A value the error prints
+         unquoted is not, so the server never logs an error's text. -->
+    <query_masking_rules>
+        <rule>
+            <name>string literals</name>
+            <regexp>'(?:[^'\\]|\\.)*'</regexp>
+            <replace>'***'</replace>
+        </rule>
+    </query_masking_rules>
+
+    <!-- 5 GiB by default, and resident once warm. -->
+    <mark_cache_size>268435456</mark_cache_size>
+
+    <!-- Merges, two at a time: they, not queries, are what runs a small node
+         out of memory. The pool then holds four entries, and the server will
+         not start while a MergeTree threshold asks for more free than that. -->
+    <background_pool_size>2</background_pool_size>
+    <merge_tree>
+        <number_of_free_entries_in_pool_to_lower_max_size_of_merge>2</number_of_free_entries_in_pool_to_lower_max_size_of_merge>
+        <number_of_free_entries_in_pool_to_execute_mutation>2</number_of_free_entries_in_pool_to_execute_mutation>
+        <number_of_free_entries_in_pool_to_execute_optimize_entire_partition>2</number_of_free_entries_in_pool_to_execute_optimize_entire_partition>
+    </merge_tree>
+
+    <!-- Every system log table the image turns on writes all day, to disk,
+         through memory. -->
+    <aggregated_zookeeper_log remove="1"/>
+    <asynchronous_insert_log remove="1"/>
+    <asynchronous_metric_log remove="1"/>
+    <background_schedule_pool_log remove="1"/>
+    <backup_log remove="1"/>
+    <blob_storage_log remove="1"/>
+    <crash_log remove="1"/>
+    <delta_lake_metadata_log remove="1"/>
+    <error_log remove="1"/>
+    <iceberg_metadata_log remove="1"/>
+    <instrumentation_trace_log remove="1"/>
+    <metric_log remove="1"/>
+    <opentelemetry_span_log remove="1"/>
+    <part_log remove="1"/>
+    <processors_profile_log remove="1"/>
+    <query_log remove="1"/>
+    <query_metric_log remove="1"/>
+    <query_thread_log remove="1"/>
+    <query_views_log remove="1"/>
+    <text_log remove="1"/>
+    <trace_log remove="1"/>
+    <zookeeper_connection_log remove="1"/>
+    <zookeeper_log remove="1"/>
+</clickhouse>
