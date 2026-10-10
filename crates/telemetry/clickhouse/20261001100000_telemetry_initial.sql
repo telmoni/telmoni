@@ -150,9 +150,9 @@ CREATE ROW POLICY IF NOT EXISTS tenant_isolation ON telemetry.spans_hourly
 -- The one this file runs as reads every row by a policy of its own: the
 -- nightly purge lists the partitions it drops from the rows, and the view
 -- runs as the same user. A user no policy names reads rows only while the
--- server keeps `users_without_row_policies_can_read_rows` on, and with it
--- off the purge would list nothing and drop nothing, night after night, in
--- silence.
+-- server keeps `users_without_row_policies_can_read_rows` on; with it off
+-- the purge would list and drop nothing, night after night, and the view
+-- would total no span, both in silence.
 CREATE ROW POLICY IF NOT EXISTS migrator_reads_all ON telemetry.spans
     USING 1
     TO CURRENT_USER;

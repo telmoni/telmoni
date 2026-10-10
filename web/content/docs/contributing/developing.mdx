@@ -33,7 +33,7 @@ $ make test
 $ make ci
 ```
 
-`make check` is types, `cargo check`, fmt, clippy and rustdoc; `make lint` is eslint; `make test` starts the local Postgres and ClickHouse, then runs vitest and `cargo test` against them; `make ci` is everything CI runs. `make fmt` formats the code rather than checking it.
+`make check` is types, `cargo check`, fmt, clippy and rustdoc; `make lint` is eslint; `make test` starts the docker stack and waits for Postgres and ClickHouse, then runs vitest, and `cargo test` against the two; `make ci` is everything CI runs. `make fmt` formats the code rather than checking it.
 
 Nothing has shipped, so there are no migration paths. Each module owns one migration under `crates/<module>/migrations/`, and telemetry one more for ClickHouse under `crates/telemetry/clickhouse/`: edit it, then `make db-reset`. After a change to the wire contract, `make contract` regenerates `contract/`, and `web/lib/types/enums.ts` and `web/lib/slug.ts` follow until `contract.test.ts` passes.
 

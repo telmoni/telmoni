@@ -44,7 +44,8 @@ services:
   # kept small by the settings this repository gives every ClickHouse it
   # runs, with the two users a tier will have: `migrator`, whom
   # `tenant_isolation` does not hold, and `telemetry`, the module, held to
-  # the projects each read names. `make db-reset` recreates its volume with Postgres's.
+  # the projects each read names. `make db-reset` recreates its volume with
+  # Postgres's.
   clickhouse:
     image: clickhouse/clickhouse-server:26.8.19.9
     container_name: telmoni-clickhouse

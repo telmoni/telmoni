@@ -23,7 +23,8 @@
 # The server runs its own sweeps on a timer (the deletion saga, retention, the
 # daily audit walk, the audit exports' retries and expiry), so nothing here
 # schedules them. The audit partitions are rotated, and the days of spans
-# past retention dropped, by hand or from your own cron, nightly:
+# and months of totals past retention dropped, by hand or from your own
+# cron, nightly:
 #   docker compose -f deploy/compose/docker-compose.yml run --rm migrate rotate
 #
 # The console's agent is off until AGENT_MODEL_PROVIDER is set. Its
@@ -76,13 +77,14 @@ services:
       start_period: 5s
 
   # Telemetry's spans and their hourly rollup: one node, kept small by the
-  # settings every ClickHouse here runs (`crates/telemetry/clickhouse/low-memory.xml`)
-  # and capped at the memory below, which ClickHouse takes as its ceiling;
-  # raise it on a bigger host. One user, as Postgres has one, running the
-  # migration and the server both, so the row policy holds nobody here, as
-  # no row-level security holds Postgres's one user, and each read's own
-  # WHERE is the lock. It creates the database's row policies and view as
-  # `migrate` runs, which needs access management.
+  # settings every ClickHouse here runs
+  # (`crates/telemetry/clickhouse/low-memory.xml`) and capped at the memory
+  # below, which ClickHouse takes as its ceiling; raise it on a bigger host.
+  # One user, as Postgres has one, running the migration and the server
+  # both, so `tenant_isolation` holds nobody here, as no row-level security
+  # holds Postgres's one user, and each read's own WHERE is the lock. It
+  # creates the database's row policies and view as `migrate` runs, which
+  # needs access management.
   clickhouse:
     image: clickhouse/clickhouse-server:26.8.19.9
     container_name: telmoni-clickhouse

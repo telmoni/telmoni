@@ -192,7 +192,7 @@ MIGRATOR_CLICKHOUSE_URL="http://migrator:<ClickHouse migrator password>@clickhou
   telmoni migrate
 ```
 
-After every run the migrator applies `object_grants.sql`, which grants each module's role `SELECT`, `INSERT`, `UPDATE` and `DELETE` on its own schema, `SELECT` and `INSERT` on `audit.events` for `auth`, `notifications` and `telemetry`, and takes back the module roles' writes to the tables only the owner or a maintenance lane writes (the feature-flag tables, the delivery log, the agent's erasure fences), and `telemetry`'s deletes from the project settings its maintenance lane purges. When any of the four module roles is missing, as in the Compose quickstart, the grants are skipped with a warning naming it. Then it creates ClickHouse's `telemetry` database, its tables and their row policies, every statement `IF NOT EXISTS`, so a second run changes nothing. The database records the digest of the statements it was made from, and a release whose statements differ refuses to run over it rather than skip the difference: before Telmoni's first release, that means recreating ClickHouse's volume.
+After every run the migrator applies `object_grants.sql`. It grants each module's role `SELECT`, `INSERT`, `UPDATE` and `DELETE` on its own schema, and `SELECT` and `INSERT` on `audit.events` to `auth`, `notifications` and `telemetry`. It takes back the module roles' writes to the tables only the owner or a maintenance lane writes (the feature-flag tables, the delivery log, the agent's erasure fences), and `telemetry`'s deletes from the project settings its maintenance lane purges. When any of the four module roles is missing, as in the Compose quickstart, the grants are skipped with a warning naming it. Then it creates ClickHouse's `telemetry` database, its tables and their row policies, every statement `IF NOT EXISTS`, so a second run changes nothing. The database records the digest of the statements it was made from, and a release whose statements differ refuses to run over it rather than skip the difference: before Telmoni's first release, that means recreating ClickHouse's volume.
 
 </Step>
 
@@ -211,8 +211,8 @@ telmoni rotate
 ### Rotation behavior
 
 - **Forward Runway**: `telmoni rotate` creates the current calendar month and the next three months of partitions ahead of time (`{table}_YYYY_MM`). It never drops audit partitions.
-- **Spans**: It drops each day of spans in ClickHouse once every span in it arrived more than 360 days ago, and each month of hourly totals once it is 13 months behind. A night it misses is caught up by the next.
-- **Idempotency**: Safe to run continuously; if partitions exist, no changes are made.
+- **Spans**: It drops each day of spans in ClickHouse once every span in it arrived more than 360 days ago, and each month of hourly totals once it is more than 13 months behind. A night it misses is caught up by the next.
+- **Idempotency**: Safe to run any number of times: a run creates only the audit partitions that are missing and drops only the days and months past retention, so a second run the same night changes nothing.
 
 ### Scheduling
 

@@ -149,7 +149,7 @@ flowchart TB
 | `shared` | Errors and problems, RBAC, `Acting`, scoped transactions, the seams, the audit writer and verifier, envelope encryption, the egress guard, logging, configuration, `Redacted`, slugs | — |
 | `migrator` | The migration runner, `rotate`, the `audit` schema, role hardening and grants; ClickHouse's file and purge, run as its user there | The `audit` schema |
 | `web/` | The console: pages, the session, the edge's rate limits, the relays; no database access and no business logic | Nothing but what Redis holds |
-| Postgres | One database: a schema per module, each written by its own role alone | Everything durable but the spans |
+| Postgres | One database: a schema per module, each written by its own role alone | Everything durable but the spans and their totals |
 | ClickHouse | One node: telemetry's spans and their hourly totals, metadata alone, read under a row policy | The spans, until the retention line, and their hourly totals for 13 months |
 | Redis | The console's alone: rate-limit windows, the session blacklist, live events, the announcement — all of it losable | Nothing that must survive |
 
@@ -286,7 +286,7 @@ Most of it runs inside `serve`, in every replica, and all of it is safe for repl
 | Migrations | `telmoni migrate`, a Helm hook Job | One Job |
 | Partition rotation, and ClickHouse's purge | `telmoni rotate`, a daily CronJob | `Forbid` |
 
-- **Work a request starts** is awaited where losing it would matter — the deletion tail, the agent's erase — or left for a lease or a sweep to finish. Two are bare tasks a rollout can lose: the password-reset mail, so that its timing reveals nothing, and the retries that settle telemetry's settings after a transfer whose own try failed (*Known gaps*).
+- **Work a request starts** is awaited where losing it would matter — the deletion tail, the agent's erase — or left for a lease or a sweep to finish. Two are bare tasks a rollout can lose: the password-reset mail, so that its timing reveals nothing, and the retries that settle telemetry's settings after a transfer that could not settle them itself (*Known gaps*).
 - **No loop is told to stop.** Leases lapse, locks die with their connections, and committed chunks stay committed, so a loop cut short loses nothing.
 - **The delivery loop is raced against the HTTP server**: if it ends, the process exits, and the restart is the recovery.
 
@@ -366,7 +366,7 @@ A deployment that needs more builds on the core rather than forking it, and the 
 
 ## Where it goes next
 
-Telmoni is for telemetry from AI agents, and that is built on this foundation in the open. What is built: **the `telemetry` module**, a module like the others, with its own schema and role, its seam, and its two stores — Postgres for what must be transactional or private, ClickHouse for the spans and their hourly totals, metadata alone, read under a row policy and purged a day at a time. Self-hosting runs both. And the switch a project's content mode is set with: the organization's owner's alone, audited, and offering `off` alone until content has somewhere to be kept. What is settled, and not built:
+Telmoni is for telemetry from AI agents, and that is built on this foundation in the open. What is built: **the `telemetry` module**, a module like the others, with its own schema and role, its seam, and its two stores — Postgres for what must be transactional or private, ClickHouse for the spans and their hourly totals, metadata alone, read under a row policy and purged a day at a time, their totals a month at a time. Self-hosting runs both. And the switch a project's content mode is set with: the organization's owner's alone, audited, and offering `off` alone until content has somewhere to be kept. What is settled, and not built:
 - **Ingest over OpenTelemetry's own protocol**, with content kept out unless an organization's owner turns it on for a project, written through the module's one query module.
 - **The console agent as the first agent recorded**, through the `AgentObserver` the agent already calls.
 - **A host for machines**, routed straight to the server, apart from the console's. The console's `/v1`, `/cli` and Slack relays go, and their limits move into the server.

@@ -26,8 +26,10 @@ crates/
   auth/           sign-in, organizations and projects, members, invitations, API keys
   notifications/  the feed, the Slack, Discord and webhook connectors, delivery
   agent/          the console agent: search over the docs and a project's own data
-  telemetry/      each project's settings, the spans and their hourly totals in ClickHouse, its ClickHouse file and nightly purge, and ClickHouse's configuration and local users
-  migrator/       the migration runner, grants, role hardening, the audit schema; runs telemetry's ClickHouse file and purge
+  telemetry/      each project's settings, the spans and their hourly totals in ClickHouse,
+                  its ClickHouse file and nightly purge, ClickHouse's configuration and local users
+  migrator/       the migration runner, grants, role hardening, the audit schema;
+                  runs telemetry's ClickHouse file and purge
   shared/         errors, RBAC, tenancy, the seams between modules
 web/              the console, a thin proxy in front of the server, and the docs it serves (`web/content/docs`)
 contract/         the generated wire contract and OpenAPI document

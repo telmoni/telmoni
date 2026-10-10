@@ -11,8 +11,6 @@ target/
 # ── Trees the server image never needs ────────────────────────────────────────
 web/
 deploy/
-sdk/
-mobile/
 .github/
 
 # ── Git ───────────────────────────────────────────────────────────────────────
@@ -52,7 +50,6 @@ application_default_credentials.json
 Makefile
 docker-compose.yml
 .pre-commit-config.yaml
-ENGINE_VERSION
 
 # ── Documentation ─────────────────────────────────────────────────────────────
 *.md

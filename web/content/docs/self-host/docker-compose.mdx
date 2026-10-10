@@ -36,7 +36,7 @@ The compose file is `deploy/compose/docker-compose.yml`.
 
 **Generate secrets and configure environment variables**
 
-Compose reads `.env` from the compose file's directory. With `docker compose -f deploy/compose/docker-compose.yml`, the environment file is `deploy/compose/.env`. Create it from scratch with the keys shown below, not from the repository's root `.env.example`: that file is the development stack's, and points mail at a local Mailpit this stack does not run and names hosted model endpoints.
+Compose reads `.env` from the compose file's directory. With `docker compose -f deploy/compose/docker-compose.yml`, the environment file is `deploy/compose/.env`. Create it from scratch with the keys shown below, not from the repository's root `.env.example`: that file is the development stack's. It points mail at a local Mailpit, which this stack does not run, and names hosted model endpoints.
 
 ```bash
 touch deploy/compose/.env
@@ -149,7 +149,7 @@ Open your browser and navigate to `http://localhost:3000`. Log in with the `ADMI
 
 ## Enabling local AI agent search (optional)
 
-Telmoni includes an AI context agent with vector similarity search. You can run embeddings and chat inference on your own host with Ollama. Its models are downloaded from the internet once, by the pulls below. With the model and embeddings URLs below on the `ollama` service, and `DOCS_CORPUS_URL=off` (by default the server fetches this site's documentation to index it), every endpoint the agent calls is on the Compose network; the compose file passes no `RERANK_URL`.
+Telmoni includes an AI context agent with vector similarity search. You can run embeddings and chat inference on your own host with Ollama. Its models are downloaded from the internet once, by the pulls below. With the model and embeddings URLs below on the `ollama` service, every endpoint the agent calls is on the Compose network: the documentation it indexes is this stack's own console's (`http://web:3000/llms-full.txt`), and the compose file passes no `RERANK_URL`.
 
 1. Start the stack with the `agent` profile:
 

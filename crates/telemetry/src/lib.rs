@@ -11,9 +11,9 @@
 //!   on each read the projects its row policy may admit.
 //!
 //! Its ClickHouse tables are made by [`schema`], which `telmoni migrate` runs
-//! after the Postgres sets, and their days are dropped by [`retention`],
-//! which `telmoni rotate` runs: both as the migrator's user, whom
-//! `tenant_isolation` does not hold. Auth reaches it through
+//! after the Postgres sets, and their expired days and months are dropped by
+//! [`retention`], which `telmoni rotate` runs: both as the migrator's user,
+//! whom `tenant_isolation` does not hold. Auth reaches it through
 //! [`telmoni_shared::seam::Telemetry`] ([`seam`]) to purge an organization's
 //! or a project's settings and to move a project's, and the console through
 //! its lanes under `/internal/telemetry` ([`handler`], [`router`]), which ask
