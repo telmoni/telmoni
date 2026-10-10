@@ -138,13 +138,13 @@ async fn prepare(conn: &mut sqlx::PgConnection, database: &str, sibling: Option<
 
     if !core_done {
         create_role(conn, MIGRATOR_ROLE).await;
-        for role in ServiceRole::all() {
-            let (login, lane) = (role.name(), role.lane().role());
-            create_role(conn, login).await;
+        for service in ServiceRole::all() {
+            let (role, lane) = (service.name(), service.lane().role());
+            create_role(conn, role).await;
             create_role(conn, lane).await;
             // As the role hardening grants it: its own lane only, and never
             // inherited.
-            let membership = format!("GRANT {lane} TO {login} WITH INHERIT FALSE, SET TRUE");
+            let membership = format!("GRANT {lane} TO {role} WITH INHERIT FALSE, SET TRUE");
             conn.execute(membership.as_str())
                 .await
                 .expect("grant a maintenance lane membership");

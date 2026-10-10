@@ -43,12 +43,12 @@ const VALIDATED: &[(&str, &str, &str)] = &[
     (
         "crates/shared/src/test_util/service_role.rs",
         "role",
-        "asserted against the service role names, or a bare identifier for a sibling's, first",
+        "`MIGRATOR_ROLE`, a `ServiceRole`'s name or lane, or a sibling's, asserted bare first",
     ),
     (
         "crates/shared/src/test_util/service_role.rs",
         "lane",
-        "a sibling's lane, which `sibling_pool` refuses unless a bare identifier",
+        "a `ServiceRole`'s lane, or a sibling's, which `sibling_pool` refuses unless bare",
     ),
     (
         "crates/auth/src/handler/export.rs",
