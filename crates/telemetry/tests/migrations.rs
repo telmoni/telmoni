@@ -148,20 +148,25 @@ fn every_reader_but_the_migrator_is_held_and_the_view_runs_as_its_definer() {
                 ))
             })
             .unwrap_or_else(|| panic!("{table} has no policy of the migrator's own"));
-        // Permissive, as a policy is unless it says otherwise: a restrictive
-        // one would leave the migrator to the server's default again.
-        assert!(
-            own.contains("USING 1\n")
-                && own.ends_with(" TO CURRENT_USER")
-                && !own.contains("RESTRICTIVE"),
-            "{table}'s migrator policy admits other rows or users, or restricts: {own}"
+        // Pinned whole: permissive, as a policy is unless it says otherwise,
+        // since a restrictive one would leave the migrator to the server's
+        // default again; every row; and its own user alone.
+        assert_eq!(
+            *own,
+            format!(
+                "CREATE ROW POLICY IF NOT EXISTS migrator_reads_all ON {table}\n    \
+                 USING 1\n    TO CURRENT_USER"
+            ),
+            "{table}'s migrator policy admits other rows or users, or restricts"
         );
-        let policies = all
-            .iter()
-            .filter(|s| s.starts_with("CREATE ROW POLICY") && s.contains(&format!(" ON {table}\n")))
-            .count();
-        assert_eq!(policies, 2, "{table} has a row policy beside its two");
     }
+    // However laid out, and on whatever it names: a third permissive policy
+    // would be OR-ed into what the module's user reads.
+    let policies = all
+        .iter()
+        .filter(|s| s.to_ascii_uppercase().contains("ROW POLICY"))
+        .count();
+    assert_eq!(policies, 4, "a row policy beside each table's two");
     let view = all
         .iter()
         .find(|s| s.contains("MATERIALIZED VIEW"))
