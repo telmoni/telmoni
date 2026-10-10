@@ -21,7 +21,7 @@ use telmoni_auth::db::confirmation_codes::{self, Act};
 use telmoni_auth::provider::ConfirmedEmail;
 use telmoni_auth::test_provider::{Call, ScriptedProvider, as_person};
 use telmoni_auth::{AppState, Config, router};
-use telmoni_shared::test_util::{apply_audit_migrations, seed_identity, service_pool};
+use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, seed_identity, service_pool};
 use telmoni_shared::{AuthError, OrganizationId, TelmoniError, UserId};
 
 const SERVICE_SECRET: &str = "test-service-secret";
@@ -87,7 +87,7 @@ fn app(
         deletion_tail_budget_ms: 8_000,
     };
     let provider = Arc::new(ScriptedProvider::new());
-    let db = service_pool(&pool, "auth");
+    let db = service_pool(&pool, ServiceRole::Auth);
     let router = router(Arc::new(AppState {
         issuer: telmoni_auth::test_provider::test_issuer(db.clone()),
         password: None,

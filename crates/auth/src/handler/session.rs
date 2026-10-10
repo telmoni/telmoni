@@ -22,8 +22,15 @@ use crate::AppState;
 use crate::db::AuthLane;
 use crate::provider::{DevicePoll, TokenResponse};
 
-/// The one provider a caller may name beside the accounts held here.
-const EXTERNAL: &str = "external";
+/// The one provider a caller may name beside the accounts held here. Any
+/// other name is refused as the body is read, before anything is asked of a
+/// provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SignInProvider {
+    /// The external identity provider, whichever this deployment configured.
+    External,
+}
 
 /// `POST /internal/auth/start` request. `state` is the CSRF token the BFF
 /// sealed into its PKCE cookie, echoed so the callback can be cross-checked.
@@ -44,7 +51,7 @@ pub struct StartRequest {
     /// console's own: the sign-in page's "Continue with…". Absent, the
     /// console's page while the login form is on, the provider's otherwise.
     #[serde(default)]
-    pub provider: Option<String>,
+    pub provider: Option<SignInProvider>,
 }
 
 /// `POST /internal/auth/start` response.
@@ -65,7 +72,7 @@ pub struct ExchangeRequest {
     /// `external` when the code is the external provider's; absent, it is
     /// one a sign-in here minted.
     #[serde(default)]
-    pub provider: Option<String>,
+    pub provider: Option<SignInProvider>,
 }
 
 impl std::fmt::Debug for ExchangeRequest {
@@ -135,7 +142,18 @@ pub struct DeviceDecisionRequest {
 /// a 202 carrying the RFC's own word for why.
 #[derive(Debug, Serialize)]
 struct DevicePending {
-    status: &'static str,
+    status: PendingStatus,
+}
+
+/// Why a poll is not granted yet, in RFC 8628's words (§ 3.5), which the CLI
+/// compares exactly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum PendingStatus {
+    /// The person has not answered yet.
+    AuthorizationPending,
+    /// The poll came before the last one's interval was out.
+    SlowDown,
 }
 
 /// `POST /internal/auth/refresh` request.
@@ -297,15 +315,6 @@ impl std::fmt::Debug for AuthnResult {
     }
 }
 
-/// Whether a request named the external provider, refusing any other name.
-fn wants_external(provider: Option<&str>) -> Result<bool, TelmoniError> {
-    match provider {
-        None => Ok(false),
-        Some(EXTERNAL) => Ok(true),
-        Some(_) => Err(AuthError::BadRequest(format!("provider must be \"{EXTERNAL}\"")).into()),
-    }
-}
-
 /// The refusal for a lane the external provider serves when none is
 /// configured.
 fn no_external() -> TelmoniError {
@@ -331,7 +340,7 @@ pub async fn start(
     State(state): State<Arc<AppState>>,
     Json(req): Json<StartRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let external = wants_external(req.provider.as_deref())?;
+    let external = req.provider == Some(SignInProvider::External);
     let url = match (&state.password, &state.external) {
         (Some(_), _) if !external => {
             let page = if req.sign_up {
@@ -395,14 +404,14 @@ pub async fn device_poll(
         DevicePoll::Pending => Ok((
             axum::http::StatusCode::ACCEPTED,
             Json(DevicePending {
-                status: "authorization_pending",
+                status: PendingStatus::AuthorizationPending,
             }),
         )
             .into_response()),
         DevicePoll::SlowDown => Ok((
             axum::http::StatusCode::ACCEPTED,
             Json(DevicePending {
-                status: "slow_down",
+                status: PendingStatus::SlowDown,
             }),
         )
             .into_response()),
@@ -455,7 +464,7 @@ pub async fn exchange(
     // external provider unasked, and the console's cookie names no provider.
     // Only the form mints codes here, so without it every code is the
     // provider's.
-    if wants_external(req.provider.as_deref())? || state.password.is_none() {
+    if req.provider == Some(SignInProvider::External) || state.password.is_none() {
         let Some(external) = state.external.as_ref() else {
             return Err(no_external());
         };
@@ -592,6 +601,7 @@ pub async fn logout_url(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn authn_result_debug_masks_every_token() {
@@ -652,10 +662,54 @@ mod tests {
         assert!(!rendered.contains("live_device_code"), "leaked: {rendered}");
     }
 
+    /// The one name either lane takes, in its one spelling; any other is a
+    /// body refused as it is read, which the lane answers with a 400.
     #[test]
     fn only_the_external_provider_may_be_named() {
-        assert!(!wants_external(None).unwrap());
-        assert!(wants_external(Some("external")).unwrap());
-        assert!(wants_external(Some("google")).is_err());
+        let start = serde_json::from_value::<StartRequest>;
+        let exchange = serde_json::from_value::<ExchangeRequest>;
+        assert_eq!(start(json!({ "state": "s" })).unwrap().provider, None);
+        assert_eq!(exchange(json!({ "code": "c" })).unwrap().provider, None);
+        assert_eq!(
+            start(json!({ "state": "s", "provider": "external" }))
+                .unwrap()
+                .provider,
+            Some(SignInProvider::External)
+        );
+        assert_eq!(
+            exchange(json!({ "code": "c", "provider": "external" }))
+                .unwrap()
+                .provider,
+            Some(SignInProvider::External)
+        );
+        for name in ["google", "External", ""] {
+            assert!(
+                start(json!({ "state": "s", "provider": name })).is_err(),
+                "{name:?}"
+            );
+            assert!(
+                exchange(json!({ "code": "c", "provider": name })).is_err(),
+                "{name:?}"
+            );
+        }
+    }
+
+    /// The CLI compares these words exactly, as RFC 8628 spells them.
+    #[test]
+    fn a_poll_not_yet_granted_says_why_in_the_rfcs_words() {
+        assert_eq!(
+            serde_json::to_value(DevicePending {
+                status: PendingStatus::AuthorizationPending,
+            })
+            .unwrap(),
+            json!({ "status": "authorization_pending" })
+        );
+        assert_eq!(
+            serde_json::to_value(DevicePending {
+                status: PendingStatus::SlowDown,
+            })
+            .unwrap(),
+            json!({ "status": "slow_down" })
+        );
     }
 }

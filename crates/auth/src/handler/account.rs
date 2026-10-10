@@ -43,7 +43,7 @@ use crate::{
         acting_person_in, deletion::FINALIZE_GRACE_SECONDS, log_act_outside_every_organization,
         parse_organization_id, recording_organization_of,
     },
-    model::DeletionKind,
+    model::{AuditKind, DeletionKind},
 };
 
 /// How many email-change codes one person may be issued in a day.
@@ -322,7 +322,7 @@ pub async fn confirm_email_change(
     let revoked = provider_sids.len();
 
     let metadata = json!({
-        "kind": "email_change",
+        "kind": AuditKind::EmailChange,
         "email": new_email,
         "sessions_revoked": revoked,
     });
@@ -642,7 +642,7 @@ pub async fn delete_account(
                     ip_address: None,
                     user_agent: None,
                     metadata: Some(json!({
-                        "kind": "organization_deletion",
+                        "kind": AuditKind::OrganizationDeletion,
                         "deletion": deletion,
                         "by": DeletionKind::Account,
                         "with": "account_deletion",

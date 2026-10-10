@@ -80,6 +80,9 @@ pub enum TelmoniError {
     AgentModelUnavailable {
         /// What failed, for the log.
         context: String,
+        /// Whether asking again later could cure it, which the agent's
+        /// retries read.
+        failure: ModelFailure,
     },
 
     /// The person asked more than `AGENT_MESSAGES_PER_HOUR` questions in the
@@ -89,6 +92,34 @@ pub enum TelmoniError {
         /// Seconds until the oldest question in the window leaves it.
         retry_after_secs: u64,
     },
+}
+
+/// How a model endpoint failed, for whether to ask it again. It rides beside
+/// the log's context, never inside it: read back out of the text, an error
+/// code the provider chose could pass for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelFailure {
+    /// It answered, and the answer may be about what it was sent: a refusal,
+    /// a 500, a body that does not parse.
+    Answered,
+    /// The endpoint's state, never what it was sent: no answer in time, no
+    /// connection, a body cut short, or an answer that says "not now".
+    NotNow,
+    /// "Not now" as a rate limit, after the retries: waiting out its window
+    /// may lift it.
+    RateLimited,
+}
+
+impl ModelFailure {
+    /// The word the log gives it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Answered => "answered",
+            Self::NotNow => "not_now",
+            Self::RateLimited => "rate_limited",
+        }
+    }
 }
 
 impl TelmoniError {
@@ -612,6 +643,7 @@ mod tests {
 
         let pd = TelmoniError::AgentModelUnavailable {
             context: "anthropic 401: invalid x-api-key sk-ant-abc".into(),
+            failure: ModelFailure::Answered,
         }
         .to_problem_details();
         assert_eq!(

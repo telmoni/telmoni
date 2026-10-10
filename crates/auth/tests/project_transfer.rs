@@ -30,7 +30,7 @@ use telmoni_auth::test_provider::{
 };
 use telmoni_auth::{AppState, Config, Siblings, router};
 use telmoni_shared::mail::{Mail, MailError, MailSender, NoopSender};
-use telmoni_shared::test_util::{apply_audit_migrations, seed_identity, service_pool};
+use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, seed_identity, service_pool};
 use telmoni_shared::{OrganizationId, UserId};
 
 const SERVICE_SECRET: &str = "test-service-secret";
@@ -87,7 +87,7 @@ fn build(
         support_email: None,
         deletion_tail_budget_ms: 8_000,
     };
-    let db = service_pool(&pool, "auth");
+    let db = service_pool(&pool, ServiceRole::Auth);
     let state = Arc::new(AppState {
         issuer: telmoni_auth::test_provider::test_issuer(db.clone()),
         password: None,

@@ -260,23 +260,50 @@ pub async fn delete_ripe(
     Ok(result.rows_affected() > 0)
 }
 
-/// Where a finalize stands: the organization's status, whether its
-/// `erase_after` has passed, and whether its hook purge is recorded —
-/// `None` when there is no such row. Ripeness is judged by the database's
-/// clock, the same one [`list_due_for_sweep`] reads, so an organization the
-/// sweep lists is never refused as too soon by a skewed one.
+/// Where a finalize stands on an organization that exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FinalizeStanding {
+    /// Not `pending_deletion`: finalize follows a request, never replaces one.
+    NotPending,
+    /// Pending, and inside its wait.
+    Waiting,
+    /// Pending, and past `erase_after`: the row may go.
+    Ripe {
+        /// Whether its hook purge is recorded.
+        hook_purged: bool,
+    },
+}
+
+impl FinalizeStanding {
+    /// The standing of a row in `status`, `ripe` once its `erase_after` has
+    /// passed. The wait is read only of a pending row and the hook only of a
+    /// ripe one: nothing the finalize decides turns on them otherwise.
+    const fn of(status: OrganizationStatus, ripe: bool, hook_purged: bool) -> Self {
+        match (status, ripe) {
+            (OrganizationStatus::PendingDeletion, false) => Self::Waiting,
+            (OrganizationStatus::PendingDeletion, true) => Self::Ripe { hook_purged },
+            (OrganizationStatus::Active | OrganizationStatus::Deleted, _) => Self::NotPending,
+        }
+    }
+}
+
+/// Where a finalize stands — `None` when there is no such row. Ripeness is
+/// judged by the database's clock, the same one [`list_due_for_sweep`] reads,
+/// so an organization the sweep lists is never refused as too soon by a
+/// skewed one.
 pub async fn finalize_standing(
     tx: &mut Scoped<'_, tenant_session::Organization>,
     external_id: &OrganizationId,
-) -> sqlx::Result<Option<(OrganizationStatus, bool, bool)>> {
-    sqlx::query_as(
+) -> sqlx::Result<Option<FinalizeStanding>> {
+    let row: Option<(OrganizationStatus, bool, bool)> = sqlx::query_as(
         "SELECT status, COALESCE(erase_after <= now(), false), hook_purged_at IS NOT NULL
            FROM auth.organizations
           WHERE external_id = $1",
     )
     .bind(external_id)
     .fetch_optional(tx.conn())
-    .await
+    .await?;
+    Ok(row.map(|(status, ripe, hook_purged)| FinalizeStanding::of(status, ripe, hook_purged)))
 }
 
 /// One pending organization the sweep owes a step.
@@ -309,4 +336,32 @@ pub async fn list_due_for_sweep(
     .bind(limit)
     .fetch_all(tx.conn())
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_standing_turns_on_the_status_then_the_wait_then_the_hook() {
+        for ripe in [false, true] {
+            for hook_purged in [false, true] {
+                for status in [OrganizationStatus::Active, OrganizationStatus::Deleted] {
+                    assert_eq!(
+                        FinalizeStanding::of(status, ripe, hook_purged),
+                        FinalizeStanding::NotPending,
+                        "{status:?}, ripe {ripe}, hook purged {hook_purged}"
+                    );
+                }
+                let pending =
+                    FinalizeStanding::of(OrganizationStatus::PendingDeletion, ripe, hook_purged);
+                let expected = if ripe {
+                    FinalizeStanding::Ripe { hook_purged }
+                } else {
+                    FinalizeStanding::Waiting
+                };
+                assert_eq!(pending, expected, "ripe {ripe}, hook purged {hook_purged}");
+            }
+        }
+    }
 }

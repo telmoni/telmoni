@@ -1,6 +1,8 @@
 //! `notifications.feed`, `notifications.deliveries` and a webhook's chosen
 //! kinds must accept exactly the kinds Rust can emit: a drift is a 500 at the
-//! first emit, or at the first choice.
+//! first emit, or at the first choice. Every other column read back through
+//! an enum — a provider, a status, a send's trigger and outcome — must admit
+//! exactly the words its enum spells.
 #![expect(
     clippy::indexing_slicing,
     clippy::string_slice,
@@ -8,10 +10,16 @@
 )]
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use telmoni_shared::NotificationKind;
+use telmoni_notifications::connector::{
+    ConnectionStatus, Connectors, Provider, discord, slack, webhook,
+};
+use telmoni_notifications::db::{AttemptOutcome, AttemptTrigger, DeliveryStatus};
+use telmoni_shared::{NotificationKind, Redacted};
 
 /// The crate's single pre-launch migration.
 fn initial_migration() -> String {
@@ -72,6 +80,19 @@ fn check_body<'a>(sql: &'a str, constraint: &str) -> &'a str {
 /// Every `'quoted'` literal in a CHECK body.
 fn literals(body: &str) -> Vec<&str> {
     body.split('\'').skip(1).step_by(2).collect()
+}
+
+/// The words a CHECK admits.
+fn admitted(sql: &str, constraint: &str) -> BTreeSet<String> {
+    literals(check_body(sql, constraint))
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The words an enum spells.
+fn spelled<T: ToString>(values: impl IntoIterator<Item = T>) -> BTreeSet<String> {
+    values.into_iter().map(|value| value.to_string()).collect()
 }
 
 /// The kind-bearing columns: the feed, the delivery queue, and the kinds a
@@ -175,4 +196,61 @@ fn every_kind_has_a_producer_that_raises_it() {
              is not true."
         );
     }
+}
+
+/// Exact both ways: a word only the enum spells is a write the CHECK refuses,
+/// and a word only the CHECK admits is a row that fails every read decoding
+/// it, the delivery loop's whole batch included.
+#[test]
+fn each_vocabulary_check_admits_exactly_its_enum() {
+    let sql = initial_migration();
+    let pins = [
+        ("connections_provider_check", spelled(Provider::all())),
+        ("connections_status_check", spelled(ConnectionStatus::all())),
+        ("deliveries_status_check", spelled(DeliveryStatus::all())),
+        (
+            "delivery_attempts_trigger_check",
+            spelled(AttemptTrigger::all()),
+        ),
+        (
+            "delivery_attempts_outcome_check",
+            spelled(AttemptOutcome::all()),
+        ),
+    ];
+    for (constraint, words) in pins {
+        assert_eq!(
+            admitted(&sql, constraint),
+            words,
+            "{constraint} and its enum spell different words"
+        );
+    }
+}
+
+/// A handshake state is minted only for a provider with an install dialog,
+/// which the webhook, connected by its URL, does not have.
+#[test]
+fn the_handshake_check_admits_exactly_the_providers_with_a_grant() {
+    let every_connector = Connectors {
+        slack: Some(Arc::new(slack::SlackConnector::new(
+            "client",
+            Redacted::from("secret"),
+            "http://localhost",
+        ))),
+        discord: Some(Arc::new(discord::DiscordConnector::new(
+            "client",
+            Redacted::from("secret"),
+            "http://localhost",
+        ))),
+        webhook: Some(Arc::new(webhook::WebhookConnector)),
+    };
+    let with_a_grant = spelled(
+        Provider::all()
+            .into_iter()
+            .filter(|provider| every_connector.grant(*provider).is_some()),
+    );
+    assert_eq!(
+        admitted(&initial_migration(), "oauth_states_provider_check"),
+        with_a_grant,
+        "oauth_states_provider_check must admit exactly the providers with a grant"
+    );
 }

@@ -70,7 +70,7 @@ fn window(source: Source) -> Option<i32> {
 
 /// Every source with a window, and the window.
 fn windows() -> impl Iterator<Item = (Source, i32)> {
-    Source::ALL
+    Source::all()
         .into_iter()
         .filter_map(|source| Some((source, window(source)?)))
 }

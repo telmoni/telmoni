@@ -16,6 +16,7 @@ use uuid::Uuid;
 use telmoni_shared::db::tenant_session::{Maintenance, PersonAndOrganization, Scoped};
 use telmoni_shared::{OrganizationId, UserId};
 
+use crate::audit_export::{ExportFailure, ExportFormat, ExportStatus};
 use crate::db::AuthLane;
 
 /// The columns of an [`ExportEntry`], in its order.
@@ -27,13 +28,12 @@ const ENTRY: &str = "id, format, range_from, range_to, status, failure, row_coun
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct ExportEntry {
     pub id: Uuid,
-    pub format: String,
+    pub format: ExportFormat,
     pub range_from: Option<DateTime<Utc>>,
     pub range_to: DateTime<Utc>,
-    /// `queued`, `running`, `ready` or `failed`.
-    pub status: String,
-    /// Why a `failed` one failed: `too_large` or `error`.
-    pub failure: Option<String>,
+    pub status: ExportStatus,
+    /// Why a failed one failed; `None` for any other.
+    pub failure: Option<ExportFailure>,
     pub row_count: Option<i64>,
     /// The file's size, once there is one.
     pub bytes: Option<i64>,
@@ -46,7 +46,7 @@ pub struct ExportEntry {
 /// What a build needs of the export it claimed.
 #[derive(Debug, sqlx::FromRow)]
 pub struct Claimed {
-    pub format: String,
+    pub format: ExportFormat,
     pub range_from: Option<DateTime<Utc>>,
     pub range_to: DateTime<Utc>,
     /// This claim's attempt, the fence every later write checks: a build
@@ -57,7 +57,7 @@ pub struct Claimed {
 /// A finished file, as the download reads it.
 #[derive(Debug, sqlx::FromRow)]
 pub struct ExportFile {
-    pub format: String,
+    pub format: ExportFormat,
     pub file: Vec<u8>,
 }
 
@@ -75,7 +75,7 @@ pub async fn create(
     id: Uuid,
     organization_id: &OrganizationId,
     user_id: &UserId,
-    format: &str,
+    format: ExportFormat,
     range_from: Option<DateTime<Utc>>,
     range_to: DateTime<Utc>,
 ) -> sqlx::Result<ExportEntry> {
@@ -259,7 +259,7 @@ pub async fn finish_failed(
     organization_id: &OrganizationId,
     user_id: &UserId,
     attempts: i32,
-    failure: &str,
+    failure: ExportFailure,
     keep_secs: i32,
 ) -> sqlx::Result<bool> {
     let done = sqlx::query(

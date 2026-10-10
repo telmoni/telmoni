@@ -252,7 +252,7 @@ pub async fn start_audit_export(
         Uuid::now_v7(),
         &organization_id,
         &principal.user_id,
-        body.format.as_str(),
+        body.format,
         body.from,
         to,
     )
@@ -311,10 +311,10 @@ pub async fn download_audit_export(
         .await?;
     tx.commit().await?;
 
-    let format = ExportFormat::parse(&file.format).ok_or_else(|| {
-        TelmoniError::Internal(format!("export {export_id} names no known format"))
-    })?;
-    Ok(([(header::CONTENT_TYPE, format.content_type())], file.file))
+    Ok((
+        [(header::CONTENT_TYPE, file.format.content_type())],
+        file.file,
+    ))
 }
 
 /// One page of a chain, as both lists answer it.

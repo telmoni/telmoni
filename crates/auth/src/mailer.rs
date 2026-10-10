@@ -23,18 +23,19 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use telmoni_shared::mail::{Mail, MailSender};
+use telmoni_shared::{OrganizationRole, Role};
 
 pub use telmoni_shared::mail::MailError;
 
-/// Which roster an invitation seats somebody on. The two ladders spell their
-/// roles the same, so the role alone cannot say what an admin may do; the
-/// level can.
+/// Which roster an invitation seats somebody on, at which role there. The two
+/// ladders spell their roles the same, so the role alone cannot say what an
+/// admin may do; the level can.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InvitedTo {
     /// A seat on one project (`auth.project_members`).
-    Project,
+    Project(Role),
     /// A row on the organization's roster (`auth.organization_members`).
-    Organization,
+    Organization(OrganizationRole),
 }
 
 /// The mail auth sends directly.
@@ -61,15 +62,14 @@ pub trait Mailer: Send + Sync {
         new_email: &str,
     ) -> Result<(), MailError>;
 
-    /// Invite somebody to an organization or one of its projects, at a `role`
-    /// on that level.
+    /// Invite somebody to an organization or one of its projects, at the role
+    /// `level` names on it.
     async fn send_member_invite(
         &self,
         to: &str,
         inviter: &str,
         organization: &str,
         level: InvitedTo,
-        role: &str,
         link: &str,
     ) -> Result<(), MailError>;
 
@@ -297,10 +297,13 @@ impl Mailer for ComposingMailer {
         inviter: &str,
         organization: &str,
         level: InvitedTo,
-        role: &str,
         link: &str,
     ) -> Result<(), MailError> {
         let product = telmoni_shared::PRODUCT_NAME;
+        let role = match level {
+            InvitedTo::Project(role) => role.to_string(),
+            InvitedTo::Organization(role) => role.to_string(),
+        };
         self.send(
             to,
             format!("{inviter} invited you to {organization} on {product}"),
@@ -317,20 +320,26 @@ impl Mailer for ComposingMailer {
                  If you do not know {inviter}, do nothing and the \
                  invitation expires. To tell us it was unwanted, write to \
                  {contact}.",
-                can = match (level, role) {
-                    (InvitedTo::Project, "member") => {
+                can = match level {
+                    InvitedTo::Project(Role::Member) => {
                         "A member has read-only access to the project: its members, API keys and connectors."
                     }
-                    (InvitedTo::Project, "admin") => {
+                    InvitedTo::Project(Role::Admin) => {
                         "An admin manages the project: its members, API keys and connectors, with its audit log to read; only the organization's owner can delete or hand over the project."
                     }
-                    (InvitedTo::Organization, "admin") => {
+                    InvitedTo::Organization(OrganizationRole::Admin) => {
                         "An admin can create projects, manage the organization's members and settings, and work in every project as an admin; only its owner can delete the organization or its projects, or hand either over."
                     }
-                    (InvitedTo::Organization, "member") => {
+                    InvitedTo::Organization(OrganizationRole::Member) => {
                         "A member sees the projects they are given access to, and nothing else."
                     }
-                    _ => "Your access would be whatever that role allows.",
+                    // No invitation makes an owner, who is made only by a
+                    // handover they accept; were one sent, it would claim no
+                    // access it cannot describe.
+                    InvitedTo::Project(Role::Owner)
+                    | InvitedTo::Organization(OrganizationRole::Owner) => {
+                        "Your access would be whatever that role allows."
+                    }
                 },
                 days = crate::handler::invite::INVITE_TTL_DAYS,
                 contact = self.contact(),
@@ -598,6 +607,7 @@ mod tests {
     use super::{ComposingMailer, InvitedTo, Mailer};
     use std::sync::{Arc, Mutex};
     use telmoni_shared::mail::{Mail, MailError, MailSender};
+    use telmoni_shared::{OrganizationRole, Role};
 
     /// Captures what the copy handed to the transport.
     #[derive(Default)]
@@ -700,8 +710,7 @@ mod tests {
                 "ada@example.com",
                 "Grace Hopper",
                 "Acme",
-                InvitedTo::Project,
-                "admin",
+                InvitedTo::Project(Role::Admin),
                 "https://telmoni.com/invite/x",
             )
             .await
@@ -897,8 +906,7 @@ mod tests {
                 "ada@example.com",
                 "grace@example.com",
                 "Acme",
-                InvitedTo::Project,
-                "member",
+                InvitedTo::Project(Role::Member),
                 "https://telmoni.com/invite/tok",
             )
             .await
@@ -943,8 +951,7 @@ mod tests {
                 "ada@example.com",
                 "Grace Hopper",
                 "Acme",
-                InvitedTo::Project,
-                "admin",
+                InvitedTo::Project(Role::Admin),
                 "https://telmoni.com/invite/tok",
             )
             .await
@@ -955,28 +962,74 @@ mod tests {
         assert!(mail.text.contains("Acme"), "{}", mail.text);
     }
 
-    /// An unknown role must not produce a sentence claiming access it cannot
-    /// describe; the fallback says so rather than guessing.
+    /// Each role on either level is named as the console names it and reads
+    /// its own sentence, word for word. An owner, whom no invitation makes,
+    /// reads the vague one rather than a sentence claiming access it cannot
+    /// describe.
     #[tokio::test]
-    async fn an_unknown_role_is_described_vaguely_rather_than_wrongly() {
-        let mail = composed(async |m| {
-            m.send_member_invite(
-                "ada@example.com",
-                "grace@example.com",
-                "Acme",
-                InvitedTo::Project,
-                "auditor",
-                "https://telmoni.com/invite/tok",
-            )
-            .await
-            .expect("recorded");
-        })
-        .await;
-        assert!(
-            mail.text.contains("whatever that role allows"),
-            "{}",
-            mail.text
+    async fn every_level_and_role_is_described_in_its_own_words() {
+        let vague = "Your access would be whatever that role allows.";
+        let pinned = [
+            (InvitedTo::Project(Role::Owner), "owner", vague),
+            (
+                InvitedTo::Project(Role::Admin),
+                "admin",
+                "An admin manages the project: its members, API keys and connectors, with its \
+                 audit log to read; only the organization's owner can delete or hand over the \
+                 project.",
+            ),
+            (
+                InvitedTo::Project(Role::Member),
+                "member",
+                "A member has read-only access to the project: its members, API keys and \
+                 connectors.",
+            ),
+            (
+                InvitedTo::Organization(OrganizationRole::Owner),
+                "owner",
+                vague,
+            ),
+            (
+                InvitedTo::Organization(OrganizationRole::Admin),
+                "admin",
+                "An admin can create projects, manage the organization's members and settings, \
+                 and work in every project as an admin; only its owner can delete the \
+                 organization or its projects, or hand either over.",
+            ),
+            (
+                InvitedTo::Organization(OrganizationRole::Member),
+                "member",
+                "A member sees the projects they are given access to, and nothing else.",
+            ),
+        ];
+        assert_eq!(
+            pinned.len(),
+            Role::all().len() + OrganizationRole::all().len(),
+            "a role on one of the ladders has no sentence pinned here"
         );
+        for (level, role, sentence) in pinned {
+            let mail = composed(async |m| {
+                m.send_member_invite(
+                    "ada@example.com",
+                    "grace@example.com",
+                    "Acme",
+                    level,
+                    "https://telmoni.com/invite/tok",
+                )
+                .await
+                .expect("recorded");
+            })
+            .await;
+            assert!(
+                mail.text.starts_with(&format!(
+                    "grace@example.com invited you to Acme on {} as {role}.\n\n",
+                    telmoni_shared::PRODUCT_NAME
+                )),
+                "{level:?}: {}",
+                mail.text
+            );
+            assert!(mail.text.contains(sentence), "{level:?}: {}", mail.text);
+        }
     }
 
     /// The offer changes nothing by itself, and says so — and it names what

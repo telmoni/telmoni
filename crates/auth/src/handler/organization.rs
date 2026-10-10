@@ -34,7 +34,7 @@ use crate::{
         ActingOrganization, account::DeletionRequest, account::wrong_code, acting_organization,
         deletion::FINALIZE_GRACE_SECONDS, organization_of, organization_role_or_forbidden,
     },
-    model::DeletionKind,
+    model::{AuditKind, DeletionKind},
 };
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::{self, Scoped, maintenance_scope, person_scope};
@@ -195,7 +195,7 @@ pub async fn delete_organization(
             ip_address: None,
             user_agent: None,
             metadata: Some(json!({
-                "kind": "organization_deletion",
+                "kind": AuditKind::OrganizationDeletion,
                 "deletion": "requested",
                 "by": DeletionKind::Owner,
                 "erase_after": erase_after,
@@ -358,10 +358,10 @@ pub(crate) enum Founding {
 }
 
 impl Founding {
-    const fn kind(self) -> &'static str {
+    const fn kind(self) -> AuditKind {
         match self {
-            Self::Provisioned => "auto_provision",
-            Self::OnRequest => "on_request",
+            Self::Provisioned => AuditKind::AutoProvision,
+            Self::OnRequest => AuditKind::OnRequest,
         }
     }
 }
@@ -453,7 +453,7 @@ pub(crate) async fn found_organization(
             user_agent: None,
             metadata: Some(json!({
                 "kind": founding.kind(),
-                "role": OrganizationRole::Owner.to_string(),
+                "role": OrganizationRole::Owner,
             })),
         },
     )

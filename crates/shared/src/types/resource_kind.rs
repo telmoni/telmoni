@@ -29,6 +29,21 @@ pub enum TelmoniResourceKind {
     Connector,
 }
 
+impl TelmoniResourceKind {
+    /// Every kind, in declaration order.
+    #[must_use]
+    pub const fn all() -> [Self; 6] {
+        [
+            Self::Organization,
+            Self::Project,
+            Self::Member,
+            Self::Token,
+            Self::Session,
+            Self::Connector,
+        ]
+    }
+}
+
 impl fmt::Display for TelmoniResourceKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -65,14 +80,7 @@ mod tests {
     use super::*;
 
     /// Every variant, for the round-trip below.
-    const ALL: &[TelmoniResourceKind] = &[
-        TelmoniResourceKind::Organization,
-        TelmoniResourceKind::Project,
-        TelmoniResourceKind::Member,
-        TelmoniResourceKind::Token,
-        TelmoniResourceKind::Session,
-        TelmoniResourceKind::Connector,
-    ];
+    const ALL: &[TelmoniResourceKind] = &TelmoniResourceKind::all();
 
     /// `ALL` covers the enum, and says so by count.
     #[test]

@@ -13,6 +13,8 @@ use std::time::Duration;
 
 use telmoni_auth::AppState;
 
+use crate::cli::Sweep;
+
 /// How long after boot the first tick of each sweep runs: past the startup
 /// probes, and past the replica this one is replacing draining its own.
 const START_DELAY: Duration = Duration::from_secs(60);
@@ -45,7 +47,7 @@ enum Start {
 pub fn spawn(auth: Arc<AppState>) {
     tokio::spawn(every(
         auth.clone(),
-        "deletion",
+        Sweep::Deletion,
         DELETION_EVERY,
         Start::Logged,
         |auth| async move {
@@ -61,21 +63,21 @@ pub fn spawn(auth: Arc<AppState>) {
     ));
     tokio::spawn(every(
         auth.clone(),
-        "retention",
+        Sweep::Retention,
         RETENTION_EVERY,
         Start::Logged,
         |auth| async move { telmoni_auth::sweep::retention(&auth).await.map(|_| ()) },
     ));
     tokio::spawn(every(
         auth.clone(),
-        "audit-verify",
+        Sweep::AuditVerify,
         AUDIT_VERIFY_EVERY,
         Start::Logged,
         |auth| async move { telmoni_auth::sweep::audit_verify(&auth).await },
     ));
     tokio::spawn(every(
         auth,
-        "audit-exports",
+        Sweep::AuditExports,
         AUDIT_EXPORTS_EVERY,
         Start::Quiet,
         |auth| async move {
@@ -96,13 +98,8 @@ pub fn spawn(auth: Arc<AppState>) {
 
 /// One sweep on its timer, forever. The first tick waits [`START_DELAY`];
 /// a tick that overruns delays the next rather than stacking.
-async fn every<F, Fut>(
-    auth: Arc<AppState>,
-    name: &'static str,
-    period: Duration,
-    start: Start,
-    tick: F,
-) where
+async fn every<F, Fut>(auth: Arc<AppState>, sweep: Sweep, period: Duration, start: Start, tick: F)
+where
     F: Fn(Arc<AppState>) -> Fut,
     Fut: Future<Output = Result<(), telmoni_shared::TelmoniError>>,
 {
@@ -112,10 +109,14 @@ async fn every<F, Fut>(
     loop {
         ticker.tick().await;
         if start == Start::Logged {
-            tracing::info!(sweep = name, "sweep starting");
+            tracing::info!(sweep = sweep.as_str(), "sweep starting");
         }
         if let Err(e) = tick(auth.clone()).await {
-            tracing::warn!(sweep = name, error = %e, "sweep failed; the next tick retries");
+            tracing::warn!(
+                sweep = sweep.as_str(),
+                error = %e,
+                "sweep failed; the next tick retries"
+            );
         }
     }
 }

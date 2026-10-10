@@ -52,7 +52,7 @@ use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope, person_scope};
 use telmoni_shared::extract::Json;
 use telmoni_shared::{
-    AuditAction, AuthError, OrganizationId, OrganizationRole, OrganizationStatus, ProjectId,
+    AuditAction, AuthError, OrganizationId, OrganizationRole, OrganizationStatus, ProjectId, Role,
     TelmoniError, TelmoniResourceKind, UserId,
 };
 
@@ -60,8 +60,9 @@ use crate::{
     AppState,
     db::{
         AuthLane, audit_exports, identities, invites, locks, members, organization_members,
-        organizations,
+        organizations::{self, FinalizeStanding},
     },
+    model::AuditKind,
 };
 
 /// How long an organization stays `pending_deletion` before its row may go,
@@ -283,12 +284,11 @@ async fn status_of(
     Ok(status)
 }
 
-/// What the finalize decides on — status, ripe, hook purge recorded — read in
-/// the organization's own scope.
+/// What the finalize decides on, read in the organization's own scope.
 async fn finalize_standing_of(
     state: &AppState,
     organization_id: &OrganizationId,
-) -> Result<Option<(OrganizationStatus, bool, bool)>, TelmoniError> {
+) -> Result<Option<FinalizeStanding>, TelmoniError> {
     let mut tx = organization_scope(&state.db, organization_id).await?;
     let standing = organizations::finalize_standing(&mut tx, organization_id).await?;
     tx.commit().await?;
@@ -343,11 +343,9 @@ pub async fn finalize_organization(
 ) -> Result<FinalizeOutcome, TelmoniError> {
     let hook_recorded = match finalize_standing_of(state, organization_id).await? {
         None => return Ok(FinalizeOutcome::AlreadyGone),
-        Some((status, _, _)) if status != OrganizationStatus::PendingDeletion => {
-            return Ok(FinalizeOutcome::NotPending);
-        }
-        Some((_, false, _)) => return Ok(FinalizeOutcome::TooSoon),
-        Some((_, true, hook_recorded)) => hook_recorded,
+        Some(FinalizeStanding::NotPending) => return Ok(FinalizeOutcome::NotPending),
+        Some(FinalizeStanding::Waiting) => return Ok(FinalizeOutcome::TooSoon),
+        Some(FinalizeStanding::Ripe { hook_purged }) => hook_purged,
     };
 
     // ⚠ **A hook purge nobody has landed goes first.** The request's failed
@@ -375,8 +373,10 @@ pub async fn finalize_organization(
         tx.rollback().await?;
         return Ok(match finalize_standing_of(state, organization_id).await? {
             None => FinalizeOutcome::AlreadyGone,
-            Some((OrganizationStatus::PendingDeletion, false, _)) => FinalizeOutcome::TooSoon,
-            Some(_) => FinalizeOutcome::NotPending,
+            Some(FinalizeStanding::Waiting) => FinalizeOutcome::TooSoon,
+            Some(FinalizeStanding::NotPending | FinalizeStanding::Ripe { .. }) => {
+                FinalizeOutcome::NotPending
+            }
         });
     }
 
@@ -392,7 +392,7 @@ pub async fn finalize_organization(
             request_id: None,
             ip_address: None,
             user_agent: None,
-            metadata: Some(json!({ "kind": "deletion_finalize" })),
+            metadata: Some(json!({ "kind": AuditKind::DeletionFinalize })),
         },
     )
     .await?;
@@ -438,6 +438,15 @@ async fn erase_in_agent(
         )
         .await?;
     Ok(())
+}
+
+/// One row an erasure removes, with the role it held, for the record on its
+/// organization's chain.
+enum Removed {
+    /// A seat on one of the organization's projects.
+    Seat { project: ProjectId, role: Role },
+    /// The organization's own roster row.
+    Roster(OrganizationRole),
 }
 
 /// Erase a person whose account deletion was confirmed: the identity
@@ -527,9 +536,8 @@ pub async fn erase_person(
             "{user_id} came to own {organization} while being erased"
         )));
     }
-    // Every row this removes: the organization whose chain records it, the
-    // project when it was a seat, and the role it held.
-    let mut removed: Vec<(OrganizationId, Option<ProjectId>, String)> = Vec::new();
+    // Every row this removes, beside the organization whose chain records it.
+    let mut removed: Vec<(OrganizationId, Removed)> = Vec::new();
     for (organization, role) in &held {
         locks::lock_organization(&mut mtx, organization).await?;
         let seats = members::memberships_in_organization(&mut mtx, organization, user_id).await?;
@@ -537,13 +545,15 @@ pub async fn erase_person(
             if members::remove(&mut mtx, &seat.project_id, user_id).await? {
                 removed.push((
                     organization.clone(),
-                    Some(seat.project_id),
-                    seat.role.to_string(),
+                    Removed::Seat {
+                        project: seat.project_id,
+                        role: seat.role,
+                    },
                 ));
             }
         }
         if organization_members::remove(&mut mtx, organization, user_id).await? {
-            removed.push((organization.clone(), None, role.to_string()));
+            removed.push((organization.clone(), Removed::Roster(*role)));
         }
     }
     // A seat outside any organization they belong to should not exist (the
@@ -553,8 +563,10 @@ pub async fn erase_person(
         if members::remove(&mut mtx, &seat.project_id, user_id).await? {
             removed.push((
                 seat.organization_id,
-                Some(seat.project_id),
-                seat.role.to_string(),
+                Removed::Seat {
+                    project: seat.project_id,
+                    role: seat.role,
+                },
             ));
         }
     }
@@ -565,12 +577,16 @@ pub async fn erase_person(
     // written below, as a build finishing one holds the export's row before
     // the chain's lock.
     let exports = audit_exports::delete_of_person(&mut mtx, user_id).await?;
-    for (organization, in_project, role) in &removed {
+    for (organization, row) in &removed {
+        let (in_project, role) = match row {
+            Removed::Seat { project, role } => (Some(project), json!(role)),
+            Removed::Roster(role) => (None, json!(role)),
+        };
         emit_audit(
             &mut mtx,
             AuditEvent {
                 organization_id: organization,
-                in_project: in_project.as_ref(),
+                in_project,
                 actor: Actor::Service("deletion-saga"),
                 action: AuditAction::Deleted,
                 resource_kind: TelmoniResourceKind::Member,
@@ -578,7 +594,7 @@ pub async fn erase_person(
                 request_id: None,
                 ip_address: None,
                 user_agent: None,
-                metadata: Some(json!({ "kind": "account_deletion", "role": role })),
+                metadata: Some(json!({ "kind": AuditKind::AccountDeletion, "role": role })),
             },
         )
         .await?;
@@ -608,7 +624,7 @@ pub async fn erase_person(
     let reached = held
         .iter()
         .map(|(organization, _)| organization)
-        .chain(removed.iter().map(|(organization, _, _)| organization));
+        .chain(removed.iter().map(|(organization, _)| organization));
     for organization in reached {
         if !organizations.contains(organization) {
             organizations.push(organization.clone());

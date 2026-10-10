@@ -32,7 +32,7 @@ use telmoni_auth::{AppState, Config, router};
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::digest::sha256_hex;
 use telmoni_shared::mail::{Mail, MailError, MailSender};
-use telmoni_shared::test_util::service_pool;
+use telmoni_shared::test_util::{ServiceRole, service_pool};
 
 const SERVICE_SECRET: &str = "test-service-secret";
 const APP_URL: &str = "http://localhost:3000";
@@ -131,7 +131,7 @@ fn password_provider(
     policy: Policy,
     sender: Arc<dyn MailSender>,
 ) -> (Arc<PasswordProvider>, Arc<telmoni_auth::issuer::Issuer>) {
-    let db = service_pool(pool, "auth");
+    let db = service_pool(pool, ServiceRole::Auth);
     let issuer = test_issuer_verifying(db.clone(), policy.verify_email);
     let mailer: Arc<dyn Mailer> = Arc::new(ComposingMailer::new(sender));
     let provider = Arc::new(PasswordProvider::new(
@@ -154,7 +154,7 @@ fn app_under(pool: PgPool, policy: Policy) -> (Router, Arc<Outbox>) {
     let sender: Arc<dyn MailSender> = outbox.clone();
     let (password, issuer) = password_provider(&pool, policy, sender.clone());
     let state = Arc::new(AppState {
-        db: service_pool(&pool, "auth"),
+        db: service_pool(&pool, ServiceRole::Auth),
         config: config(),
         issuer,
         password: Some(password),
@@ -495,7 +495,7 @@ async fn the_admin_account_is_seeded_once_and_signs_in(pool: PgPool) {
 #[sqlx::test]
 async fn a_refresh_rotates_the_token_and_a_reuse_ends_the_session(pool: PgPool) {
     telmoni_shared::test_util::apply_audit_migrations(&pool).await;
-    let db = service_pool(&pool, "auth");
+    let db = service_pool(&pool, ServiceRole::Auth);
     let (app, outbox) = app(pool);
     let tokens = signed_in(&app, &outbox, "ada@example.com").await;
     let first = tokens["refreshToken"].as_str().unwrap().to_owned();

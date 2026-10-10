@@ -232,7 +232,7 @@ pub async fn update_role(
     )
     .bind(organization_id)
     .bind(member)
-    .bind(role.to_string())
+    .bind(role)
     .execute(tx.conn())
     .await?;
 
@@ -517,7 +517,7 @@ pub async fn create_invite(
     .bind(Uuid::now_v7())
     .bind(organization_id)
     .bind(email)
-    .bind(role.to_string())
+    .bind(role)
     .bind(token_hash)
     .bind(invited_by)
     .bind(expires_at)
@@ -633,7 +633,7 @@ pub async fn add_member<B: RosterInsert>(
     .bind(Uuid::now_v7())
     .bind(organization_id)
     .bind(member)
-    .bind(role.to_string())
+    .bind(role)
     .bind(added_by)
     .bind(derive_shard_key(organization_id))
     .execute(tx.conn())

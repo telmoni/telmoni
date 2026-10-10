@@ -3,6 +3,8 @@
 
 use sha2::{Digest, Sha256};
 
+use crate::db::Visibility;
+
 /// About 800 tokens at four characters each: long enough to keep a section
 /// whole, short enough that one vector still means one thing.
 pub const MAX_CHARS: usize = 3_200;
@@ -121,9 +123,9 @@ fn cap(text: &str) -> Vec<String> {
 /// What a passage is, as far as its embedding and its reader care: a change
 /// to any part is a passage to write again.
 #[must_use]
-pub fn content_hash(title: &str, body: &str, url: Option<&str>, visibility: &str) -> String {
+pub fn content_hash(title: &str, body: &str, url: Option<&str>, visibility: Visibility) -> String {
     let mut hasher = Sha256::new();
-    for part in [title, body, url.unwrap_or_default(), visibility] {
+    for part in [title, body, url.unwrap_or_default(), visibility.as_str()] {
         hasher.update(part.len().to_le_bytes());
         hasher.update(part.as_bytes());
     }
@@ -132,6 +134,8 @@ pub fn content_hash(title: &str, body: &str, url: Option<&str>, visibility: &str
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
 
     #[test]
@@ -191,15 +195,36 @@ mod tests {
 
     #[test]
     fn the_hash_moves_with_every_part_and_nothing_else() {
-        let base = content_hash("t", "b", Some("/u"), "everyone");
-        assert_eq!(base, content_hash("t", "b", Some("/u"), "everyone"));
-        assert_ne!(base, content_hash("t", "b2", Some("/u"), "everyone"));
-        assert_ne!(base, content_hash("t", "b", None, "everyone"));
-        assert_ne!(base, content_hash("t", "b", Some("/u"), "owner"));
+        let base = content_hash("t", "b", Some("/u"), Visibility::Everyone);
+        assert_eq!(
+            base,
+            content_hash("t", "b", Some("/u"), Visibility::Everyone)
+        );
+        assert_ne!(
+            base,
+            content_hash("t", "b2", Some("/u"), Visibility::Everyone)
+        );
+        assert_ne!(base, content_hash("t", "b", None, Visibility::Everyone));
+        // A passage whose readers changed is written again.
+        let by_visibility: HashSet<String> = Visibility::all()
+            .into_iter()
+            .map(|visibility| content_hash("t", "b", Some("/u"), visibility))
+            .collect();
+        assert_eq!(by_visibility.len(), Visibility::all().len());
         // A boundary moved between parts is a different passage.
         assert_ne!(
-            content_hash("ab", "c", None, "x"),
-            content_hash("a", "bc", None, "x")
+            content_hash("ab", "c", None, Visibility::Author),
+            content_hash("a", "bc", None, Visibility::Author)
+        );
+    }
+
+    /// ⚠ Every row in the index carries its hash: one made another way from
+    /// the same passage embeds the whole index again.
+    #[test]
+    fn the_hash_is_the_one_the_index_holds() {
+        assert_eq!(
+            content_hash("t", "b", Some("/u"), Visibility::Everyone),
+            "821a3560ed976ec7ce99bb5f113a845a7dc19952d7cb2a8f0f630b3ecbc41576"
         );
     }
 }

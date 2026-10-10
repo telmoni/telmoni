@@ -20,6 +20,7 @@ use telmoni_shared::{AuthError, OrganizationId, ProjectId, TelmoniError, UserId}
 use uuid::Uuid;
 
 use crate::AppState;
+use crate::connector::Provider;
 use crate::db::{self, NotificationsLane};
 use crate::delivery;
 
@@ -146,7 +147,7 @@ pub async fn emit_notice(
     project_id: Option<&ProjectId>,
     notice: Notice<'_>,
 ) -> Result<Emitted, TelmoniError> {
-    let kind = notice.kind.to_string();
+    let kind = notice.kind;
     let title = bounded(notice.title, "title", TITLE_MAX_CHARS)?;
     let body = bounded(notice.body, "body", BODY_MAX_CHARS)?;
     let dedup_key = match notice.dedup_key.map(str::trim).filter(|s| !s.is_empty()) {
@@ -169,7 +170,7 @@ pub async fn emit_notice(
 
     let item = db::NewFeedItem {
         subject_user_id: notice.subject_user_id,
-        kind: &kind,
+        kind,
         title,
         body,
         metadata: &metadata,
@@ -288,7 +289,7 @@ pub async fn purge_organization(
     tx.commit().await?;
     let mut slack_workspaces = std::collections::HashSet::new();
     for connection in &held {
-        if connection.provider == "slack"
+        if connection.provider == Provider::Slack
             && !slack_workspaces.insert(connection.external_workspace_id.clone())
         {
             continue;
@@ -319,7 +320,7 @@ pub async fn purge_project(state: &AppState, project_id: &ProjectId) -> Result<u
     tx.commit().await?;
     let mut slack_workspaces = std::collections::HashSet::new();
     for connection in &held {
-        if connection.provider == "slack"
+        if connection.provider == Provider::Slack
             && !slack_workspaces.insert(connection.external_workspace_id.clone())
         {
             continue;

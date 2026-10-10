@@ -31,7 +31,7 @@ pub async fn emit_member_joined(
         subject_user_id: Some(joiner_id),
         title: &title,
         body: &body,
-        metadata: json!({ "project_id": project, "role": role.to_string() }),
+        metadata: json!({ "project_id": project, "role": role }),
         dedup_key: None,
     };
     match notifications

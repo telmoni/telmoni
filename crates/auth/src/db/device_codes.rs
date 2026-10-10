@@ -9,45 +9,70 @@ use uuid::Uuid;
 
 use crate::db::AuthLane;
 
-/// Where a device authorization stands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Status {
-    /// Waiting for the person.
+/// The `status` column, in the words its CHECK admits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+enum Status {
     Pending,
-    /// Approved: the next poll is granted.
     Approved,
-    /// Refused: the next poll is told so.
     Denied,
 }
 
-impl Status {
-    fn from_column(s: &str) -> Option<Self> {
-        match s {
-            "pending" => Some(Self::Pending),
-            "approved" => Some(Self::Approved),
-            "denied" => Some(Self::Denied),
-            _ => None,
-        }
-    }
+/// Where a device authorization stands.
+#[derive(Debug)]
+pub enum DeviceState {
+    /// Waiting for the person.
+    Pending,
+    /// Refused: the next poll is told so.
+    Denied,
+    /// Approved: the next poll is granted.
+    Approved {
+        /// The person who approved it.
+        user_id: UserId,
+        /// The session minted for the device.
+        sid: String,
+    },
 }
 
 /// One authorization, as a poll reads it.
 #[derive(Debug)]
 pub struct Device {
     pub id: Uuid,
-    pub status: Status,
-    /// The person who approved it, with the session minted for the device.
-    pub approved: Option<(UserId, String)>,
+    pub state: DeviceState,
     pub expires_at: DateTime<Utc>,
 }
 
 #[derive(sqlx::FromRow)]
 struct Row {
     id: Uuid,
-    status: String,
+    status: Status,
     approved_by: Option<UserId>,
     sid: Option<String>,
     expires_at: DateTime<Utc>,
+}
+
+impl Row {
+    fn into_device(self) -> sqlx::Result<Device> {
+        let state = match (self.status, self.approved_by, self.sid) {
+            (Status::Pending, ..) => DeviceState::Pending,
+            (Status::Denied, ..) => DeviceState::Denied,
+            (Status::Approved, Some(user_id), Some(sid)) => DeviceState::Approved { user_id, sid },
+            // The CHECK pairs an approval with its person and their session,
+            // so a row without them is one nothing here wrote: an error to
+            // answer, never a device left waiting out its code.
+            (Status::Approved, ..) => {
+                return Err(sqlx::Error::Decode(
+                    "an approved device authorization lacks the person or the session it grants"
+                        .into(),
+                ));
+            }
+        };
+        Ok(Device {
+            id: self.id,
+            state,
+            expires_at: self.expires_at,
+        })
+    }
 }
 
 /// Open an authorization for a device that just asked.
@@ -80,22 +105,16 @@ pub async fn find_for_poll(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     device_code_hash: &str,
 ) -> sqlx::Result<Option<Device>> {
-    let row = sqlx::query_as::<_, Row>(
+    sqlx::query_as::<_, Row>(
         "SELECT id, status, approved_by, sid, expires_at
            FROM auth.device_codes WHERE device_code_hash = $1
             FOR UPDATE",
     )
     .bind(device_code_hash)
     .fetch_optional(tx.conn())
-    .await?;
-    Ok(row.map(|r| Device {
-        id: r.id,
-        // The CHECK admits the three spellings and nothing else, so an
-        // unreadable one is a row nothing wrote; treated as still waiting.
-        status: Status::from_column(&r.status).unwrap_or(Status::Pending),
-        approved: r.approved_by.zip(r.sid),
-        expires_at: r.expires_at,
-    }))
+    .await?
+    .map(Row::into_device)
+    .transpose()
 }
 
 /// Note a poll, for the interval the next one is held to: `true` when it came
@@ -168,4 +187,56 @@ pub async fn delete_expired(tx: &mut Scoped<'_, Maintenance<AuthLane>>) -> sqlx:
         .execute(tx.conn())
         .await?;
     Ok(done.rows_affected())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(status: Status, approved_by: Option<UserId>, sid: Option<&str>) -> Row {
+        Row {
+            id: Uuid::nil(),
+            status,
+            approved_by,
+            sid: sid.map(str::to_owned),
+            expires_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn an_approval_reads_with_the_person_and_the_session_it_grants() {
+        let person = UserId::new();
+        let device = row(Status::Approved, Some(person.clone()), Some("ses_a"))
+            .into_device()
+            .unwrap();
+        let DeviceState::Approved { user_id, sid } = device.state else {
+            panic!("read as {:?}", device.state);
+        };
+        assert_eq!(user_id, person);
+        assert_eq!(sid, "ses_a");
+    }
+
+    /// ⚠ Never read as pending: its poll would wait out the code, and nothing
+    /// would say a row is wrong.
+    #[test]
+    fn an_approval_without_its_person_or_its_session_fails_to_decode() {
+        for (approved_by, sid) in [
+            (None, Some("ses_a")),
+            (Some(UserId::new()), None),
+            (None, None),
+        ] {
+            assert!(matches!(
+                row(Status::Approved, approved_by, sid).into_device(),
+                Err(sqlx::Error::Decode(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn a_waiting_or_a_refused_device_reads_as_one() {
+        let pending = row(Status::Pending, None, None).into_device().unwrap();
+        assert!(matches!(pending.state, DeviceState::Pending), "{pending:?}");
+        let denied = row(Status::Denied, None, None).into_device().unwrap();
+        assert!(matches!(denied.state, DeviceState::Denied), "{denied:?}");
+    }
 }

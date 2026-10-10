@@ -95,10 +95,8 @@ impl Acting {
         let project = self.project_or_bad_request()?;
         if !can(project.role, verb, resource) {
             return Err(AuthzError::Forbidden(format!(
-                "role {} may not {} {}",
-                project.role,
-                format!("{verb:?}").to_lowercase(),
-                format!("{resource:?}").to_lowercase()
+                "role {} may not {verb} {resource}",
+                project.role
             ))
             .into());
         }

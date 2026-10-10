@@ -12,7 +12,7 @@ pub mod service_role;
 pub mod tenancy;
 
 pub use migrations::apply_audit_migrations;
-pub use service_role::{SiblingRole, service_pool, sibling_pool};
+pub use service_role::{ServiceRole, SiblingRole, service_pool, sibling_pool};
 pub use tenancy::database_url_or_skip;
 
 /// Record what a code exchange would have: `user`'s verified address, as the

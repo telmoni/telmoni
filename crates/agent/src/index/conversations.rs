@@ -60,7 +60,7 @@ pub async fn remember(
         .ok_or_else(|| TelmoniError::Internal("no embedding for the exchange".into()))?;
     let embedding = literal(&vector)?;
     let source_id = format!("{conversation_id}:{message_id}");
-    let hash = content_hash(&title, &body, None, VISIBILITY.as_str());
+    let hash = content_hash(&title, &body, None, VISIBILITY);
 
     let tx = person_scope(&state.db, &acting.user_id).await?;
     let mut tx = tx.bind_organization(&acting.organization_id).await?;

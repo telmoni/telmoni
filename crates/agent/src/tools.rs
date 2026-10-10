@@ -172,7 +172,7 @@ impl Tool {
                     "type": "object",
                     "properties": {
                         "actor": { "type": "string", "description": "An actor id." },
-                        "action": { "type": "string", "enum": ["created", "updated", "deleted", "exported"] },
+                        "action": { "type": "string", "enum": AuditAction::all() },
                         "since": { "type": "string", "format": "date-time" },
                         "until": { "type": "string", "format": "date-time" },
                         "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
@@ -193,6 +193,13 @@ impl Tool {
 #[must_use]
 pub fn specs() -> Vec<ToolSpec> {
     Tool::ALL.into_iter().map(Tool::spec).collect()
+}
+
+/// The agent's own name for the tool a call asked for. A name the model made
+/// up is free text, which a passage it read can steer, so it is never kept,
+/// streamed or logged.
+pub(crate) fn tool_name(called: &str) -> &'static str {
+    Tool::named(called).map_or("unknown", Tool::name)
 }
 
 /// Run one call, and answer what goes back to the model. A refusal or a
@@ -234,7 +241,7 @@ fn answer(call: &ToolCall, outcome: Outcome) -> ToolResult {
         Err(ToolError::Refused(e)) => {
             let pd = e.to_problem_details();
             if pd.status >= 500 {
-                tracing::warn!(tool = %call.name, error = %e, "agent tool failed");
+                tracing::warn!(tool = tool_name(&call.name), error = %e, "agent tool failed");
                 (
                     "the lookup failed; say so rather than guess".to_owned(),
                     true,
@@ -426,6 +433,16 @@ fn time(input: &Value, key: &str) -> Result<Option<DateTime<Utc>>, ToolError> {
     }
 }
 
+fn action(input: &Value) -> Result<Option<AuditAction>, ToolError> {
+    match input.get("action").and_then(Value::as_str) {
+        None => Ok(None),
+        Some(raw) => raw.trim().parse::<AuditAction>().map(Some).map_err(|_| {
+            let actions = AuditAction::all().map(|a| a.to_string()).join(", ");
+            ToolError::Input(format!("`action` is one of {actions}"))
+        }),
+    }
+}
+
 async fn audit_events(
     state: &AppState,
     acting: &Acting,
@@ -433,19 +450,13 @@ async fn audit_events(
     citations: &mut Citations,
 ) -> Outcome {
     acting.require_project(Verb::Read, Resource::Audit)?;
-    let action = match input.get("action").and_then(Value::as_str) {
-        None => None,
-        Some(raw) => Some(raw.trim().parse::<AuditAction>().map_err(|_| {
-            ToolError::Input("`action` is one of created, updated, deleted, exported".into())
-        })?),
-    };
     let query = AuditEventsQuery {
         actor: input
             .get("actor")
             .and_then(Value::as_str)
             .map(|s| s.trim().to_owned())
             .filter(|s| !s.is_empty()),
-        action,
+        action: action(input)?,
         from: time(input, "since")?,
         to: time(input, "until")?,
         limit: limit(input, 20, 50),
@@ -499,6 +510,37 @@ mod tests {
             assert_eq!(Tool::named(tool.spec().name), Some(tool));
         }
         assert_eq!(Tool::named("delete_project"), None);
+    }
+
+    /// A name the model made up is free text a passage it read can steer:
+    /// the stream and the log read `unknown` for it, and each tool its own.
+    #[test]
+    fn a_tool_name_the_model_made_up_reads_as_unknown() {
+        for tool in Tool::ALL {
+            assert_eq!(tool_name(tool.name()), tool.name());
+        }
+        assert_eq!(tool_name("ada@example.com"), "unknown");
+    }
+
+    /// The model is offered every action, in the audit log's own words and
+    /// order, and told them again when it names another.
+    #[test]
+    fn the_audit_tool_offers_every_action_and_names_them_on_a_wrong_one() {
+        assert_eq!(
+            Tool::AuditEvents.spec().parameters["properties"]["action"],
+            json!({ "type": "string", "enum": ["created", "updated", "deleted", "exported"] })
+        );
+        assert_eq!(
+            action(&json!({ "action": " deleted " })).ok(),
+            Some(Some(AuditAction::Deleted))
+        );
+        let Err(ToolError::Input(said)) = action(&json!({ "action": "read" })) else {
+            panic!("an action there is none of is refused");
+        };
+        assert_eq!(
+            said,
+            "`action` is one of created, updated, deleted, exported"
+        );
     }
 
     #[test]

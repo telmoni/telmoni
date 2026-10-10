@@ -43,6 +43,7 @@ use crate::{
     AppState,
     db::{identities, locks, members, organization_members, organizations},
     handler::{organization_of, organization_role_or_forbidden, parse_user_id},
+    model::AuditKind,
 };
 
 /// Body of `POST /internal/organization/owner-transfer`.
@@ -54,9 +55,18 @@ pub struct OfferRequest {
     pub member_id: String,
 }
 
+/// Which locks [`locked`] takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Lock {
+    /// The organization's alone.
+    Organization,
+    /// The caller's own first, then the organization's: for the one lane that
+    /// changes what they own.
+    PersonThenOrganization,
+}
+
 /// A transaction on the organization, holding its lock, with the caller's role
-/// read under it. `with_person` takes the caller's own lock first, for the one
-/// lane that changes what they own.
+/// read under it, and the caller's own lock too when `lock` asks for it.
 ///
 /// ⚠ **Membership is checked before the lock is taken, and again under it.**
 /// The organization's id arrives from the caller, and a lock is a queue: a
@@ -66,11 +76,11 @@ async fn locked<'a>(
     state: &'a AppState,
     organization: &OrganizationId,
     user_id: &UserId,
-    with_person: bool,
+    lock: Lock,
 ) -> Result<(Scoped<'a, Organization>, OrganizationRole), TelmoniError> {
     let mut tx = organization_scope(&state.db, organization).await?;
     organization_role_or_forbidden(&mut tx, organization, user_id).await?;
-    if with_person {
+    if lock == Lock::PersonThenOrganization {
         locks::lock_person(&mut tx, user_id).await?;
     }
     locks::lock_organization(&mut tx, organization).await?;
@@ -129,7 +139,7 @@ pub async fn offer(
     }
 
     // `locked` refuses an organization being deleted, under its lock.
-    let (mut tx, role) = locked(&state, &organization, &user_id, false).await?;
+    let (mut tx, role) = locked(&state, &organization, &user_id, Lock::Organization).await?;
     let name = offerable(&mut tx, role, &organization, &target).await?;
 
     // Somebody else's live offer is withdrawn by this one, and they are told:
@@ -155,7 +165,7 @@ pub async fn offer(
             ip_address: None,
             user_agent: None,
             metadata: Some(json!({
-                "kind": "ownership_offered",
+                "kind": AuditKind::OwnershipOffered,
                 "to": target.as_str(),
                 "replaces": replaced.as_ref().map(UserId::as_str),
             })),
@@ -241,7 +251,7 @@ pub async fn cancel(
     let organization = organization_of(&headers)?;
     let user_id = principal.user_id;
 
-    let (mut tx, role) = locked(&state, &organization, &user_id, false).await?;
+    let (mut tx, role) = locked(&state, &organization, &user_id, Lock::Organization).await?;
     if role != OrganizationRole::Owner {
         return Err(AuthzError::Forbidden(
             "only the organization's owner can withdraw its offer".into(),
@@ -265,7 +275,10 @@ pub async fn cancel(
             request_id: None,
             ip_address: None,
             user_agent: None,
-            metadata: Some(json!({ "kind": "ownership_offer_cancelled", "to": holder.as_str() })),
+            metadata: Some(json!({
+                "kind": AuditKind::OwnershipOfferCancelled,
+                "to": holder.as_str(),
+            })),
         },
     )
     .await?;
@@ -306,7 +319,7 @@ pub async fn decline(
     let organization = organization_of(&headers)?;
     let user_id = principal.user_id;
 
-    let (mut tx, _) = locked(&state, &organization, &user_id, false).await?;
+    let (mut tx, _) = locked(&state, &organization, &user_id, Lock::Organization).await?;
     if !organization_members::decline_offer(&mut tx, &organization, &user_id).await? {
         return Err(AuthError::NotFound("you hold no offer for this organization".into()).into());
     }
@@ -322,7 +335,7 @@ pub async fn decline(
             request_id: None,
             ip_address: None,
             user_agent: None,
-            metadata: Some(json!({ "kind": "ownership_offer_declined" })),
+            metadata: Some(json!({ "kind": AuditKind::OwnershipOfferDeclined })),
         },
     )
     .await?;
@@ -373,7 +386,13 @@ pub async fn accept(
     let organization = organization_of(&headers)?;
     let user_id = principal.user_id;
 
-    let (tx, role) = locked(&state, &organization, &user_id, true).await?;
+    let (tx, role) = locked(
+        &state,
+        &organization,
+        &user_id,
+        Lock::PersonThenOrganization,
+    )
+    .await?;
     if role == OrganizationRole::Owner {
         return Err(AuthError::BadRequest("you already own this organization".into()).into());
     }
@@ -415,7 +434,7 @@ pub async fn accept(
             ip_address: None,
             user_agent: None,
             metadata: Some(json!({
-                "kind": "ownership_transferred",
+                "kind": AuditKind::OwnershipTransferred,
                 "from": previous.as_ref().map(UserId::as_str),
                 "to": user_id.as_str(),
             })),
@@ -446,8 +465,8 @@ pub async fn accept(
                     ip_address: None,
                     user_agent: None,
                     metadata: Some(json!({
-                        "kind": "seat_folded_into_ownership",
-                        "role": seat.role.to_string(),
+                        "kind": AuditKind::SeatFoldedIntoOwnership,
+                        "role": seat.role,
                     })),
                 },
             )

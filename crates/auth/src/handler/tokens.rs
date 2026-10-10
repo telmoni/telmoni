@@ -77,9 +77,7 @@ pub(crate) fn generate_token() -> String {
 /// same transaction as the write, so there is no check-then-act race.
 fn ensure_token_authz(role: Role, verb: Verb) -> Result<(), TelmoniError> {
     if !can(role, verb, Resource::Token) {
-        return Err(
-            AuthzError::Forbidden(format!("role {role} may not {verb:?} API tokens")).into(),
-        );
+        return Err(AuthzError::Forbidden(format!("role {role} may not {verb} API tokens")).into());
     }
     Ok(())
 }

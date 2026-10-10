@@ -20,13 +20,15 @@ use telmoni_shared::envelope::{KEK_VERSION, Kek, KekError, Sealed};
 use telmoni_shared::extract::{Json, correlation_id};
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::{
-    AuditAction, AuthError, NotificationKind, ProjectId, Redacted, TelmoniError,
+    AuditAction, AuthError, NotificationKind, ParseEnumError, ProjectId, Redacted, TelmoniError,
     TelmoniResourceKind, TenantError,
 };
 use uuid::Uuid;
 
 use crate::AppState;
-use crate::connector::{Connector, DeliveryError, Event, Grant, Provider, Terminal, webhook};
+use crate::connector::{
+    ConnectionStatus, Connector, DeliveryError, Event, Grant, Provider, Terminal, webhook,
+};
 use crate::db::{self, NotificationsLane};
 use crate::delivery;
 use crate::handler::{ProjectIdentity, authorize};
@@ -47,7 +49,7 @@ const KEY_UNWRAP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5
 /// The vendor named in the path, or a 400.
 fn provider_of(raw: &str) -> Result<Provider, TelmoniError> {
     raw.parse()
-        .map_err(|e: String| AuthError::BadRequest(e).into())
+        .map_err(|e: ParseEnumError| AuthError::BadRequest(format!("the provider {e}")).into())
 }
 
 /// The connector for a provider, or a 400 for a deployment that has not
@@ -227,7 +229,7 @@ async fn consume_verified_oauth_state(
     tx.commit().await?;
     if begun.user_id != identity.user_id.as_str()
         || begun.project_id != identity.project_id.as_str()
-        || begun.provider != provider.as_str()
+        || begun.provider != provider
     {
         return Err(telmoni_shared::AuthzError::Forbidden(
             "this connection attempt was started by somebody else".into(),
@@ -380,7 +382,7 @@ impl std::fmt::Debug for CreateWebhookRequest {
 /// receives nothing is a disconnect, and the page offers one of those.
 fn event_kinds_column(
     chosen: Option<Vec<NotificationKind>>,
-) -> Result<Option<Vec<String>>, TelmoniError> {
+) -> Result<Option<Vec<NotificationKind>>, TelmoniError> {
     let Some(chosen) = chosen else {
         return Ok(None);
     };
@@ -396,7 +398,6 @@ fn event_kinds_column(
         NotificationKind::all()
             .into_iter()
             .filter(|kind| chosen.contains(kind))
-            .map(|kind| kind.to_string())
             .collect(),
     ))
 }
@@ -562,7 +563,7 @@ pub async fn rotate_webhook_secret(
         .await?
         .ok_or_else(|| AuthError::NotFound(format!("connection not found: {id}")))?;
     tx.commit().await?;
-    if sealed.provider != Provider::Webhook.as_str() {
+    if sealed.provider != Provider::Webhook {
         return Err(AuthError::BadRequest(
             "only a webhook has a signing secret to rotate; reconnect a channel instead".into(),
         )
@@ -655,12 +656,17 @@ pub async fn list_connectors(
     let mut tx = project_scope(&state.db, &identity.project_id).await?;
     let connections = db::list_connections(&mut tx, &identity.project_id).await?;
     tx.commit().await?;
+    let enabled: serde_json::Map<String, serde_json::Value> = Provider::all()
+        .into_iter()
+        .map(|provider| {
+            (
+                provider.as_str().to_owned(),
+                state.connectors.enabled(provider).into(),
+            )
+        })
+        .collect();
     Ok(Json(json!({
-        "enabled": {
-            "slack": state.connectors.enabled(Provider::Slack),
-            "discord": state.connectors.enabled(Provider::Discord),
-            "webhook": state.connectors.enabled(Provider::Webhook),
-        },
+        "enabled": enabled,
         "connections": connections,
     })))
 }
@@ -710,9 +716,7 @@ pub async fn delete_connector(
 
 /// The upstream half of a disconnect, best effort, after the row is gone.
 async fn tear_down(state: &AppState, sealed: &db::SealedConnection) {
-    let Ok(provider) = sealed.provider.parse::<Provider>() else {
-        return;
-    };
+    let provider = sealed.provider;
     let others = match provider {
         Provider::Discord => Ok(0),
         Provider::Webhook => return,
@@ -730,9 +734,7 @@ pub(crate) async fn tear_down_for_purge(
     sealed: &db::SealedConnection,
     organization_id: &telmoni_shared::OrganizationId,
 ) {
-    let Ok(provider) = sealed.provider.parse::<Provider>() else {
-        return;
-    };
+    let provider = sealed.provider;
     let others = match provider {
         Provider::Discord => Ok(0),
         Provider::Webhook => return,
@@ -757,9 +759,7 @@ pub(crate) async fn tear_down_for_project_purge(
     sealed: &db::SealedConnection,
     project_id: &telmoni_shared::ProjectId,
 ) {
-    let Ok(provider) = sealed.provider.parse::<Provider>() else {
-        return;
-    };
+    let provider = sealed.provider;
     let others = match provider {
         Provider::Discord => Ok(0),
         Provider::Webhook => return,
@@ -890,7 +890,7 @@ pub async fn test_connector(
         .await?
         .ok_or_else(|| AuthError::NotFound(format!("connection not found: {id}")))?;
     tx.commit().await?;
-    if sealed.status != "active" {
+    if sealed.status != ConnectionStatus::Active {
         return Err(AuthError::Conflict(format!(
             "this connection is {}; reconnect it before testing",
             sealed.status
@@ -898,10 +898,7 @@ pub async fn test_connector(
         .into());
     }
 
-    let provider: Provider = sealed
-        .provider
-        .parse()
-        .map_err(|e: String| TelmoniError::Internal(e))?;
+    let provider = sealed.provider;
     let body = format!(
         "This is a test from {}. Notices for this project will arrive here.",
         telmoni_shared::PRODUCT_NAME
@@ -1101,14 +1098,14 @@ async fn claim_webhook_for_redelivery(
         .ok_or_else(|| AuthError::NotFound(format!("connection not found: {id}")))?;
     // A webhook's receiver deduplicates on the delivery id; a chat channel
     // would simply show the message twice.
-    if sealed.provider != Provider::Webhook.as_str() {
+    if sealed.provider != Provider::Webhook {
         tx.commit().await?;
         return Err(AuthError::BadRequest(
             "only a webhook delivery can be resent; a chat channel would show it twice".into(),
         )
         .into());
     }
-    if sealed.status != "active" {
+    if sealed.status != ConnectionStatus::Active {
         tx.commit().await?;
         return Err(AuthError::Conflict(format!(
             "this connection is {}; reconnect it before resending",
@@ -1142,17 +1139,9 @@ async fn dispatch_redelivery(
     claim: &db::Claimed,
 ) -> Result<Result<delivery::Sent, String>, TelmoniError> {
     let delivery = &claim.delivery;
-
-    let Ok(kind) = delivery.kind.parse::<NotificationKind>() else {
-        release(state, project_id, claim).await?;
-        return Err(TelmoniError::Internal(format!(
-            "no renderer for the kind of delivery {}",
-            delivery.id
-        )));
-    };
     let event = Event {
         id: delivery.id,
-        kind,
+        kind: delivery.kind,
         title: &delivery.subject,
         body: &delivery.body,
     };

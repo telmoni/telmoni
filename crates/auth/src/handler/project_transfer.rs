@@ -60,6 +60,7 @@ use crate::{
         ActingProject, BEING_DELETED, acting_project, parse_organization_id, parse_project_id,
         parse_user_id, projects::MAX_PROJECT_NAME, refuse_unless_active,
     },
+    model::AuditKind,
 };
 
 /// Body of `POST /internal/projects/{project_id}/transfer`.
@@ -285,7 +286,7 @@ pub async fn offer(
             ip_address: None,
             user_agent: None,
             metadata: Some(json!({
-                "kind": "project_offered",
+                "kind": AuditKind::ProjectOffered,
                 "to": target.as_str(),
                 "replaces": replaced.as_ref().map(UserId::as_str),
             })),
@@ -376,7 +377,10 @@ pub async fn cancel(
             request_id: None,
             ip_address: None,
             user_agent: None,
-            metadata: Some(json!({ "kind": "project_offer_cancelled", "to": holder.as_str() })),
+            metadata: Some(json!({
+                "kind": AuditKind::ProjectOfferCancelled,
+                "to": holder.as_str(),
+            })),
         },
     )
     .await?;
@@ -432,7 +436,7 @@ pub async fn decline(
             request_id: None,
             ip_address: None,
             user_agent: None,
-            metadata: Some(json!({ "kind": "project_offer_declined" })),
+            metadata: Some(json!({ "kind": AuditKind::ProjectOfferDeclined })),
         },
     )
     .await?;
@@ -492,7 +496,7 @@ async fn emit_project_transfer_audits(
             ip_address: None,
             user_agent: None,
             metadata: Some(json!({
-                "kind": "project_transferred",
+                "kind": AuditKind::ProjectTransferred,
                 "to_organization": audits.destination.as_str(),
                 "to": audits.user_id.as_str(),
                 "from": audits.previous.as_str(),
@@ -514,7 +518,7 @@ async fn emit_project_transfer_audits(
             user_agent: None,
             metadata: Some({
                 let mut received = json!({
-                    "kind": "project_received",
+                    "kind": AuditKind::ProjectReceived,
                     "from_organization": audits.source.as_str(),
                     "from": audits.previous.as_str(),
                     "to": audits.user_id.as_str(),
@@ -546,8 +550,8 @@ async fn emit_project_transfer_audits(
             ip_address: None,
             user_agent: None,
             metadata: Some(json!({
-                "kind": "seat_folded_into_ownership",
-                "role": Role::Admin.to_string(),
+                "kind": AuditKind::SeatFoldedIntoOwnership,
+                "role": Role::Admin,
             })),
         },
     )
@@ -566,8 +570,8 @@ async fn emit_project_transfer_audits(
                 ip_address: None,
                 user_agent: None,
                 metadata: Some(json!({
-                    "kind": "previous_owner_seated",
-                    "role": Role::Admin.to_string(),
+                    "kind": AuditKind::PreviousOwnerSeated,
+                    "role": Role::Admin,
                 })),
             },
         )
@@ -587,8 +591,8 @@ async fn emit_project_transfer_audits(
                 ip_address: None,
                 user_agent: None,
                 metadata: Some(json!({
-                    "kind": "previous_owner_enrolled",
-                    "role": OrganizationRole::Member.to_string(),
+                    "kind": AuditKind::PreviousOwnerEnrolled,
+                    "role": OrganizationRole::Member,
                 })),
             },
         )
@@ -608,9 +612,9 @@ async fn emit_project_transfer_audits(
                 ip_address: None,
                 user_agent: None,
                 metadata: Some(json!({
-                    "kind": "seat_holder_enrolled",
-                    "role": OrganizationRole::Member.to_string(),
-                    "seat": seat.role.to_string(),
+                    "kind": AuditKind::SeatHolderEnrolled,
+                    "role": OrganizationRole::Member,
+                    "seat": seat.role,
                 })),
             },
         )

@@ -23,8 +23,8 @@ use telmoni_notifications::db::NotificationsLane;
 use telmoni_notifications::{AppState, db, router};
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
-use telmoni_shared::test_util::{apply_audit_migrations, service_pool};
-use telmoni_shared::{OrganizationRole, Role};
+use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, service_pool};
+use telmoni_shared::{NotificationKind, OrganizationRole, Role};
 
 const ORGANIZATION: &str = "org_notif_1";
 const OTHER_ORGANIZATION: &str = "org_notif_2";
@@ -188,7 +188,7 @@ fn auth_stub() -> Arc<AuthStub> {
 /// The module with its person lanes asking `auth`.
 fn state(pool: PgPool, auth: &Arc<AuthStub>) -> Arc<AppState> {
     Arc::new(AppState {
-        db: service_pool(&pool, "notifications"),
+        db: service_pool(&pool, ServiceRole::Notifications),
         config: common::config(),
         service_secrets: ServiceSecrets::new(SECRET.to_string(), None::<String>),
         auth: auth.clone(),
@@ -343,7 +343,7 @@ async fn an_organization_purge_clears_every_table_and_spares_every_other_organiz
             &oid(organization),
             &db::NewFeedItem {
                 subject_user_id: None,
-                kind: "member_added",
+                kind: NotificationKind::MemberAdded,
                 title: "Token rotated",
                 body: "Security token rotated.",
                 metadata: &serde_json::json!({}),
@@ -813,7 +813,7 @@ async fn the_purge_auth_calls_removes_every_trace_of_the_organization(pool: PgPo
             &oid(organization),
             &db::NewFeedItem {
                 subject_user_id: None,
-                kind: "member_added",
+                kind: NotificationKind::MemberAdded,
                 title: "T",
                 body: "B",
                 metadata: &serde_json::json!({}),
@@ -1035,7 +1035,7 @@ async fn the_project_purge_auth_calls_removes_the_projects_rows_and_spares_its_s
             &oid(organization),
             &db::NewFeedItem {
                 subject_user_id: None,
-                kind: "member_added",
+                kind: NotificationKind::MemberAdded,
                 title: "T",
                 body: "B",
                 metadata: &serde_json::json!({}),

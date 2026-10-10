@@ -15,7 +15,7 @@ use tower::ServiceExt;
 use telmoni_auth::password::PasswordProvider;
 use telmoni_auth::test_provider::{Call, ScriptedProvider, TEST_SUBJECT, bearer, bearer_in};
 use telmoni_auth::{AppState, Config, router};
-use telmoni_shared::test_util::{seed_identity, service_pool};
+use telmoni_shared::test_util::{ServiceRole, seed_identity, service_pool};
 
 const SERVICE_SECRET: &str = "test-service-secret";
 const REDIRECT_URI: &str = "http://localhost:3000/auth/callback";
@@ -63,7 +63,7 @@ fn app_configured(pool: PgPool, setup: Setup) -> (Router, Arc<ScriptedProvider>)
         deletion_tail_budget_ms: 8_000,
     };
     let provider = Arc::new(ScriptedProvider::new());
-    let db = service_pool(&pool, "auth");
+    let db = service_pool(&pool, ServiceRole::Auth);
     let issuer = telmoni_auth::test_provider::test_issuer(db.clone());
     let mailer: Arc<dyn telmoni_auth::mailer::Mailer> = Arc::new(
         telmoni_auth::mailer::ComposingMailer::new(Arc::new(telmoni_shared::mail::NoopSender)),

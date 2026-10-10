@@ -21,7 +21,7 @@ use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 use crate::AppState;
-use crate::connector::{Connector, DeliveryError, Event, Provider, Terminal};
+use crate::connector::{ConnectionStatus, Connector, DeliveryError, Event, Terminal};
 use crate::db::{
     self, AttemptTrigger, FailedAttempt, LeasedDelivery, NewAttempt, NotificationsLane,
     SealedConnection,
@@ -256,7 +256,7 @@ async fn open_batch(
 ) -> HashMap<Uuid, Arc<Result<Opened, DeliveryError>>> {
     let mut joins = tokio::task::JoinSet::new();
     for connection in connections.values() {
-        if connection.status != "active" {
+        if connection.status != ConnectionStatus::Active {
             continue;
         }
         let state = Arc::clone(state);
@@ -287,10 +287,7 @@ fn connector_for(
     state: &AppState,
     connection: &SealedConnection,
 ) -> Result<Arc<dyn Connector>, DeliveryError> {
-    let provider: Provider = connection
-        .provider
-        .parse()
-        .map_err(|e: String| DeliveryError::terminal(Terminal::OurBug, e))?;
+    let provider = connection.provider;
     state.connectors.get(provider).ok_or_else(|| {
         DeliveryError::terminal(
             Terminal::OurBug,
@@ -472,7 +469,7 @@ async fn attempt_batch(
 
     for delivery in leased {
         let connection = match connections.get(&delivery.connection_id) {
-            Some(c) if c.status == "active" => Ok(Arc::clone(c)),
+            Some(c) if c.status == ConnectionStatus::Active => Ok(Arc::clone(c)),
             Some(c) => Err(format!("the connection is {}", c.status)),
             None => Err("the connection no longer exists".to_owned()),
         };
@@ -528,30 +525,21 @@ async fn attempt_one(
 ) -> Outcome {
     // Every call that reached the connector gets a log entry, a send the guard
     // refused before a socket opened included, since the log is where an
-    // owner learns why nothing arrived. A target that would not open or a kind
-    // with no renderer never reached it, and the row's `last_error` says so.
+    // owner learns why nothing arrived. A target that would not open never
+    // reached it, and the row's `last_error` says so.
     let (result, attempt) = match opened {
         Err(e) => (Err(e.clone()), None),
-        Ok(opened) => match delivery.kind.parse() {
-            Err(e) => (
-                Err(DeliveryError::terminal(
-                    Terminal::OurBug,
-                    format!("no renderer for notification kind: {e}"),
-                )),
-                None,
-            ),
-            Ok(kind) => {
-                let event = Event {
-                    id: delivery.id,
-                    kind,
-                    title: &delivery.subject,
-                    body: &delivery.body,
-                };
-                let sent = dispatch_timed(state, connection, opened, &event).await;
-                let attempt = sent.attempt(delivery.id, AttemptTrigger::Scheduled);
-                (sent.result, Some(attempt))
-            }
-        },
+        Ok(opened) => {
+            let event = Event {
+                id: delivery.id,
+                kind: delivery.kind,
+                title: &delivery.subject,
+                body: &delivery.body,
+            };
+            let sent = dispatch_timed(state, connection, opened, &event).await;
+            let attempt = sent.attempt(delivery.id, AttemptTrigger::Scheduled);
+            (sent.result, Some(attempt))
+        }
     };
 
     match result {
@@ -615,8 +603,10 @@ async fn attempt_one(
 /// How many consecutive failed sends retire this connection, if its
 /// connector keeps a breaker.
 fn breaker_limit(state: &AppState, connection: &SealedConnection) -> Option<i32> {
-    let provider: Provider = connection.provider.parse().ok()?;
-    state.connectors.get(provider)?.consecutive_failure_limit()
+    state
+        .connectors
+        .get(connection.provider)?
+        .consecutive_failure_limit()
 }
 
 /// Write the whole batch's bookkeeping, then retire whatever it condemned.
@@ -753,10 +743,8 @@ pub async fn retire(
     class: Terminal,
     reason: &str,
 ) -> Result<(), TelmoniError> {
-    let status = match class {
-        Terminal::Retire => "revoked",
-        Terminal::BadTarget => "errored",
-        Terminal::OurBug | Terminal::Unknown => return Ok(()),
+    let Some(status) = class.retires_to() else {
+        return Ok(());
     };
     let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
     let Some(retired) = db::retire_connection(&mut tx, connection_id, status, reason).await? else {
@@ -772,7 +760,7 @@ pub async fn retire(
         connection_id = %connection_id,
         project_id = %retired.project_id,
         provider = %retired.provider,
-        status,
+        status = %status,
         class = ?class,
         failed,
         "connector retired on the far end's answer"

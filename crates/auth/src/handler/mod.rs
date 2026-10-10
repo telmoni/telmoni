@@ -237,9 +237,7 @@ pub(crate) fn authorize(
     }
     let Some(required) = telmoni_shared::rbac::minimum_role(verb, resource) else {
         return Err(telmoni_shared::AuthzError::Forbidden(format!(
-            "no role may {} {}",
-            format!("{verb:?}").to_lowercase(),
-            format!("{resource:?}").to_lowercase(),
+            "no role may {verb} {resource}"
         ))
         .into());
     };

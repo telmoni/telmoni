@@ -481,7 +481,7 @@ pub async fn prepare(
                 &passage.title,
                 &passage.body,
                 passage.url.as_deref(),
-                entry.visibility.as_str(),
+                entry.visibility,
             );
             let indexed_as = current.get(&(entry.source_id.as_str(), part));
             let unchanged = indexed_as.is_some_and(|(h, m)| *h == hash && *m == embedder.model());
@@ -586,7 +586,7 @@ async fn embed_each(
             Err(e) => e,
         };
         let [text] = batch else {
-            if !endpoint_works(embedder, &failed, false).await {
+            if !endpoint_works(embedder, &failed, Sent::Batch).await {
                 return Err(failed);
             }
             let middle = range.start + range.len() / 2;
@@ -594,7 +594,7 @@ async fn embed_each(
             ranges.push(range.start..middle);
             continue;
         };
-        if !endpoint_works(embedder, &failed, true).await {
+        if !endpoint_works(embedder, &failed, Sent::Alone).await {
             return Err(failed);
         }
         match embed_paced(embedder, std::slice::from_ref(text)).await {
@@ -604,7 +604,7 @@ async fn embed_each(
                 }
             }
             Err(e) => {
-                if !endpoint_works(embedder, &e, true).await {
+                if !endpoint_works(embedder, &e, Sent::Alone).await {
                     return Err(e);
                 }
                 suspects.push(range.start);
@@ -669,7 +669,7 @@ async fn cut_down(embedder: &dyn Embedder, text: &str) -> Result<Option<String>,
         match embed_paced(embedder, &[text.to_owned()]).await {
             Ok(vectors) => return Ok(vectors.into_iter().next()),
             Err(e) => {
-                if !endpoint_works(embedder, &e, true).await {
+                if !endpoint_works(embedder, &e, Sent::Alone).await {
                     return Err(e);
                 }
                 failures += 1;
@@ -728,12 +728,22 @@ async fn embed_usable(
         .collect()
 }
 
+/// What a failed request carried, for [`endpoint_works`].
+#[derive(Debug, Clone, Copy)]
+enum Sent {
+    /// Several texts, which halving may yet get through.
+    Batch,
+    /// One text, with nothing left to halve.
+    Alone,
+}
+
 /// After a request failed with `failed`, whether the endpoint itself works,
 /// so the request can be split, asked again or cut — or the page fails,
 /// nothing cut or passed over. A probe failing too is the endpoint; and so
-/// is "not now" to a text `alone`, which no halving of a batch can help.
-async fn endpoint_works(embedder: &dyn Embedder, failed: &TelmoniError, alone: bool) -> bool {
-    !(alone && not_now(failed)) && embeds_probe(embedder).await
+/// is "not now" to a text sent alone ([`Sent::Alone`]), which no halving of
+/// a batch can help.
+async fn endpoint_works(embedder: &dyn Embedder, failed: &TelmoniError, sent: Sent) -> bool {
+    !(matches!(sent, Sent::Alone) && not_now(failed)) && embeds_probe(embedder).await
 }
 
 /// The first half of `text`, by characters, or `None` once it is no longer

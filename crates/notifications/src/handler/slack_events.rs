@@ -16,8 +16,34 @@ use crate::db::NotificationsLane;
 use crate::delivery;
 use crate::notify;
 
-/// The events that retire a workspace's connections.
-const REVOKING_EVENTS: &[&str] = &["app_uninstalled", "tokens_revoked"];
+/// The events that retire a workspace's connections, by Slack's name for
+/// them, which the stored reason and the audit row both carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Revocation {
+    AppUninstalled,
+    TokensRevoked,
+}
+
+impl Revocation {
+    const fn all() -> [Self; 2] {
+        [Self::AppUninstalled, Self::TokensRevoked]
+    }
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::AppUninstalled => "app_uninstalled",
+            Self::TokensRevoked => "tokens_revoked",
+        }
+    }
+
+    /// The revocation an event's `type` names; `None` for every other event,
+    /// which is acknowledged and otherwise ignored.
+    fn parse(event_type: &str) -> Option<Self> {
+        Self::all()
+            .into_iter()
+            .find(|revocation| revocation.as_str() == event_type)
+    }
+}
 
 /// `POST /webhooks/slack`.
 pub async fn slack_events(
@@ -69,8 +95,10 @@ pub async fn slack_events(
             .get("team_id")
             .and_then(|t| t.as_str())
             .unwrap_or_default();
-        if REVOKING_EVENTS.contains(&event_type) && !workspace.is_empty() {
-            let revoked = revoke_workspace(&state, workspace, event_type).await?;
+        if let Some(revocation) = Revocation::parse(event_type)
+            && !workspace.is_empty()
+        {
+            let revoked = revoke_workspace(&state, workspace, revocation).await?;
             return Ok(Json(json!({ "ok": true, "revoked": revoked })));
         }
     }
@@ -79,11 +107,12 @@ pub async fn slack_events(
 }
 
 /// Retire every connection into `workspace`, across tenants, on Slack's word.
-pub(crate) async fn revoke_workspace(
+async fn revoke_workspace(
     state: &Arc<AppState>,
     workspace: &str,
-    event_type: &str,
+    revocation: Revocation,
 ) -> Result<usize, TelmoniError> {
+    let event_type = revocation.as_str();
     let reason = format!("slack: {event_type}");
     let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
     let retired = crate::db::revoke_workspace(&mut tx, Provider::Slack, workspace, &reason).await?;
@@ -134,4 +163,49 @@ pub(crate) async fn revoke_workspace(
     }
     delivery::spawn_first_attempts(state, notices);
     Ok(retired.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A new variant fails to compile here until `all()` lists it.
+    #[test]
+    fn all_lists_every_revocation() {
+        for revocation in Revocation::all() {
+            match revocation {
+                Revocation::AppUninstalled | Revocation::TokensRevoked => {}
+            }
+        }
+    }
+
+    /// Slack's own spelling, which `slack: app_uninstalled` on the row and
+    /// the audit row's `event` repeat.
+    #[test]
+    fn a_revocation_is_read_by_slacks_event_name() {
+        assert_eq!(
+            Revocation::parse("app_uninstalled"),
+            Some(Revocation::AppUninstalled)
+        );
+        assert_eq!(
+            Revocation::parse("tokens_revoked"),
+            Some(Revocation::TokensRevoked)
+        );
+        for revocation in Revocation::all() {
+            assert_eq!(Revocation::parse(revocation.as_str()), Some(revocation));
+        }
+    }
+
+    #[test]
+    fn every_other_event_revokes_nothing() {
+        for event in [
+            "url_verification",
+            "event_callback",
+            "app_home_opened",
+            "App_Uninstalled",
+            "",
+        ] {
+            assert_eq!(Revocation::parse(event), None, "parsed: {event:?}");
+        }
+    }
 }

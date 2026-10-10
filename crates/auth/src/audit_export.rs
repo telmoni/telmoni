@@ -10,7 +10,7 @@
 //! Every query runs with the organization and the requester bound: the
 //! table's policy admits an export to nobody else.
 
-use std::sync::Arc;
+use std::{fmt, str::FromStr, sync::Arc};
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,9 @@ use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::{
     PersonAndOrganization, Scoped, maintenance_scope, organization_scope,
 };
-use telmoni_shared::{AuditAction, OrganizationId, TelmoniError, TelmoniResourceKind, UserId};
+use telmoni_shared::{
+    AuditAction, OrganizationId, ParseEnumError, TelmoniError, TelmoniResourceKind, UserId,
+};
 
 use crate::AppState;
 use crate::db::AuthLane;
@@ -77,8 +79,9 @@ static BUILDS: Semaphore = Semaphore::const_new(2);
 
 /// The two shapes a file comes in: JSON, which the docs' script verifies, and
 /// CSV, for a spreadsheet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum ExportFormat {
     /// One JSON document, the rows under `events`.
     Json,
@@ -87,6 +90,12 @@ pub enum ExportFormat {
 }
 
 impl ExportFormat {
+    /// Every format, in wire order.
+    #[must_use]
+    pub const fn all() -> [Self; 2] {
+        [Self::Json, Self::Csv]
+    }
+
     /// The column's spelling.
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -95,20 +104,117 @@ impl ExportFormat {
         }
     }
 
-    /// The format a column names, `None` for a spelling it never writes.
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "json" => Some(Self::Json),
-            "csv" => Some(Self::Csv),
-            _ => None,
-        }
-    }
-
     /// What a download says the file is.
     pub const fn content_type(self) -> &'static str {
         match self {
             Self::Json => "application/json; charset=utf-8",
             Self::Csv => "text/csv; charset=utf-8",
+        }
+    }
+}
+
+impl fmt::Display for ExportFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ExportFormat {
+    type Err = ParseEnumError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "json" => Ok(Self::Json),
+            "csv" => Ok(Self::Csv),
+            _ => Err(ParseEnumError::new(s, "json, csv")),
+        }
+    }
+}
+
+/// Where an export stands. A build takes it from queued to running, and on to
+/// ready or failed; one whose build stopped short is queued again while it has
+/// attempts left.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum ExportStatus {
+    /// Waiting for a build.
+    Queued,
+    /// A build holds it, until its lease runs out.
+    Running,
+    /// The file is stored, for its requester alone, until it expires.
+    Ready,
+    /// Given up for good; its [`ExportFailure`] says why.
+    Failed,
+}
+
+impl ExportStatus {
+    /// Every status, in wire order.
+    #[must_use]
+    pub const fn all() -> [Self; 4] {
+        [Self::Queued, Self::Running, Self::Ready, Self::Failed]
+    }
+}
+
+impl fmt::Display for ExportStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Queued => write!(f, "queued"),
+            Self::Running => write!(f, "running"),
+            Self::Ready => write!(f, "ready"),
+            Self::Failed => write!(f, "failed"),
+        }
+    }
+}
+
+impl FromStr for ExportStatus {
+    type Err = ParseEnumError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "queued" => Ok(Self::Queued),
+            "running" => Ok(Self::Running),
+            "ready" => Ok(Self::Ready),
+            "failed" => Ok(Self::Failed),
+            _ => Err(ParseEnumError::new(s, "queued, running, ready, failed")),
+        }
+    }
+}
+
+/// Why an export failed for good, which tells its requester whether asking
+/// again can help.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum ExportFailure {
+    /// Its range holds more than one file may; a shorter range is the answer.
+    TooLarge,
+    /// Its last attempt's build failed.
+    Error,
+}
+
+impl ExportFailure {
+    /// Every failure, in wire order.
+    #[must_use]
+    pub const fn all() -> [Self; 2] {
+        [Self::TooLarge, Self::Error]
+    }
+}
+
+impl fmt::Display for ExportFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TooLarge => write!(f, "too_large"),
+            Self::Error => write!(f, "error"),
+        }
+    }
+}
+
+impl FromStr for ExportFailure {
+    type Err = ParseEnumError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "too_large" => Ok(Self::TooLarge),
+            "error" => Ok(Self::Error),
+            _ => Err(ParseEnumError::new(s, "too_large, error")),
         }
     }
 }
@@ -306,7 +412,7 @@ async fn hand_back(
             organization_id,
             user_id,
             claimed.attempts,
-            "error",
+            ExportFailure::Error,
             KEEP_FOR_SECS,
         )
         .await?;
@@ -325,9 +431,6 @@ async fn write_and_store(
     user_id: &UserId,
     claimed: &Claimed,
 ) -> Result<Built, TelmoniError> {
-    let format = ExportFormat::parse(&claimed.format)
-        .ok_or_else(|| TelmoniError::Internal(format!("export {id} names no known format")))?;
-
     // Read-only, and every row in the stretch is final: the chain's lock
     // hands out `seq` and is held to commit, so a row is visible only once
     // every row before it is.
@@ -339,7 +442,7 @@ async fn write_and_store(
         claimed.range_to,
     )
     .await?;
-    let mut file = FileWriter::new(format, organization_id, claimed)?;
+    let mut file = FileWriter::new(claimed.format, organization_id, claimed)?;
     let mut too_large = false;
     if let Some((first, last)) = bounds {
         if last - first + 1 > MAX_ROWS {
@@ -370,7 +473,7 @@ async fn write_and_store(
             organization_id,
             user_id,
             claimed.attempts,
-            "too_large",
+            ExportFailure::TooLarge,
             KEEP_FOR_SECS,
         )
         .await?;
@@ -417,7 +520,7 @@ async fn write_and_store(
             user_agent: None,
             metadata: Some(json!({
                 "export": "audit_log",
-                "format": format.as_str(),
+                "format": claimed.format.as_str(),
                 "from": claimed.range_from,
                 "to": claimed.range_to,
                 "rows": row_count,
@@ -619,7 +722,7 @@ mod tests {
 
     fn claimed() -> Claimed {
         Claimed {
-            format: "json".into(),
+            format: ExportFormat::Json,
             range_from: None,
             range_to: Utc::now(),
             attempts: 1,
@@ -663,5 +766,88 @@ mod tests {
              created,project,project_a,,\"{\"\"name\"\":\"\"Ada\"\"}\",,ab"
         );
         assert_eq!(lines.next(), Some(""));
+    }
+
+    /// A new variant fails to compile here until its `all()` lists it.
+    #[test]
+    fn all_lists_every_variant() {
+        for format in ExportFormat::all() {
+            match format {
+                ExportFormat::Json | ExportFormat::Csv => {}
+            }
+        }
+        for status in ExportStatus::all() {
+            match status {
+                ExportStatus::Queued
+                | ExportStatus::Running
+                | ExportStatus::Ready
+                | ExportStatus::Failed => {}
+            }
+        }
+        for failure in ExportFailure::all() {
+            match failure {
+                ExportFailure::TooLarge | ExportFailure::Error => {}
+            }
+        }
+    }
+
+    /// ⚠ The words the table's CHECKs admit and the console's schema reads,
+    /// one for one: a word respelled here fails every write, or every read.
+    #[test]
+    fn each_vocabulary_is_spelled_as_the_table_and_the_console_spell_it() {
+        let formats: Vec<String> = ExportFormat::all()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(formats, ["json", "csv"]);
+        let statuses: Vec<String> = ExportStatus::all()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(statuses, ["queued", "running", "ready", "failed"]);
+        let failures: Vec<String> = ExportFailure::all()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(failures, ["too_large", "error"]);
+    }
+
+    #[test]
+    fn from_str_round_trips_every_variant() {
+        for v in ExportFormat::all() {
+            assert_eq!(v.to_string().parse::<ExportFormat>().unwrap(), v);
+        }
+        for v in ExportStatus::all() {
+            assert_eq!(v.to_string().parse::<ExportStatus>().unwrap(), v);
+        }
+        for v in ExportFailure::all() {
+            assert_eq!(v.to_string().parse::<ExportFailure>().unwrap(), v);
+        }
+    }
+
+    #[test]
+    fn from_str_rejects_unknown() {
+        for word in ["JSON", "xml", ""] {
+            assert!(word.parse::<ExportFormat>().is_err(), "parsed: {word:?}");
+        }
+        for word in ["Queued", "pending", "done", ""] {
+            assert!(word.parse::<ExportStatus>().is_err(), "parsed: {word:?}");
+        }
+        for word in ["too-large", "TooLarge", "timeout", ""] {
+            assert!(word.parse::<ExportFailure>().is_err(), "parsed: {word:?}");
+        }
+    }
+
+    #[test]
+    fn serde_matches_display() {
+        for v in ExportFormat::all() {
+            assert_eq!(serde_json::to_string(&v).unwrap(), format!("\"{v}\""));
+        }
+        for v in ExportStatus::all() {
+            assert_eq!(serde_json::to_string(&v).unwrap(), format!("\"{v}\""));
+        }
+        for v in ExportFailure::all() {
+            assert_eq!(serde_json::to_string(&v).unwrap(), format!("\"{v}\""));
+        }
     }
 }

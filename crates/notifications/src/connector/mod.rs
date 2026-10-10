@@ -10,7 +10,8 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use telmoni_shared::net_guard::{Egress, HostRejection};
 use telmoni_shared::{
-    Redacted, TelmoniError, text::truncate_on_char_boundary, types::NotificationKind,
+    ParseEnumError, Redacted, TelmoniError, text::truncate_on_char_boundary,
+    types::NotificationKind,
 };
 use uuid::Uuid;
 
@@ -20,7 +21,8 @@ pub mod webhook;
 
 /// Which kind of connection; the wire spelling is the `provider` column, the
 /// path segment and the CHECK.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum Provider {
     Slack,
@@ -64,12 +66,12 @@ impl std::fmt::Display for Provider {
 }
 
 impl FromStr for Provider {
-    type Err = String;
+    type Err = ParseEnumError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::all()
             .into_iter()
             .find(|p| p.as_str() == s)
-            .ok_or_else(|| format!("unknown provider: {s}; expected slack, discord or webhook"))
+            .ok_or_else(|| ParseEnumError::new(s, "slack, discord, webhook"))
     }
 }
 
@@ -111,6 +113,54 @@ pub(crate) fn truncate(s: &str, max: usize) -> String {
     truncate_on_char_boundary(s, max).to_owned()
 }
 
+/// Where a connection stands, spelled as the `status` column, its CHECK and
+/// the console have it, and as a customer reads it: "this connection is
+/// errored". Only an `active` connection is sent to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionStatus {
+    /// Sent to: where a connection starts, and where a reconnect or a
+    /// rotation puts it back.
+    Active,
+    /// Its target refuses posts; see [`Terminal::BadTarget`].
+    Errored,
+    /// Its installation is dead; see [`Terminal::Retire`].
+    Revoked,
+}
+
+impl ConnectionStatus {
+    /// Every status, in wire order.
+    #[must_use]
+    pub const fn all() -> [Self; 3] {
+        [Self::Active, Self::Errored, Self::Revoked]
+    }
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Errored => "errored",
+            Self::Revoked => "revoked",
+        }
+    }
+}
+
+impl std::fmt::Display for ConnectionStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ConnectionStatus {
+    type Err = ParseEnumError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::all()
+            .into_iter()
+            .find(|status| status.as_str() == s)
+            .ok_or_else(|| ParseEnumError::new(s, "active, errored, revoked"))
+    }
+}
+
 /// Why a terminal failure is terminal, and so what to do to the connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Terminal {
@@ -126,6 +176,18 @@ pub enum Terminal {
     OurBug,
     /// A 4xx whose body names nothing in the table. Treated as [`Self::OurBug`]
     Unknown,
+}
+
+impl Terminal {
+    /// What the connection becomes on this answer; `None` leaves it standing.
+    #[must_use]
+    pub const fn retires_to(self) -> Option<ConnectionStatus> {
+        match self {
+            Self::Retire => Some(ConnectionStatus::Revoked),
+            Self::BadTarget => Some(ConnectionStatus::Errored),
+            Self::OurBug | Self::Unknown => None,
+        }
+    }
 }
 
 /// The taxonomy as a type. `Clone`, because every row on a connection shares
@@ -411,6 +473,79 @@ mod tests {
         }
         assert!("projects".parse::<Provider>().is_err());
         assert!("Slack".parse::<Provider>().is_err());
+    }
+
+    /// A new variant fails to compile here until `all()` lists it.
+    #[test]
+    fn all_lists_every_provider() {
+        for provider in Provider::all() {
+            match provider {
+                Provider::Slack | Provider::Discord | Provider::Webhook => {}
+            }
+        }
+        let mut seen: Vec<String> = Provider::all().iter().map(ToString::to_string).collect();
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen.len(), Provider::all().len(), "all() repeats a variant");
+    }
+
+    /// A new variant fails to compile here until `all()` lists it.
+    #[test]
+    fn all_lists_every_connection_status() {
+        for status in ConnectionStatus::all() {
+            match status {
+                ConnectionStatus::Active
+                | ConnectionStatus::Errored
+                | ConnectionStatus::Revoked => {}
+            }
+        }
+        let mut seen: Vec<String> = ConnectionStatus::all()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        seen.sort();
+        seen.dedup();
+        assert_eq!(
+            seen.len(),
+            ConnectionStatus::all().len(),
+            "all() repeats a variant"
+        );
+    }
+
+    #[test]
+    fn a_connection_status_round_trips_its_wire_spelling() {
+        for status in ConnectionStatus::all() {
+            assert_eq!(
+                status.to_string().parse::<ConnectionStatus>().unwrap(),
+                status
+            );
+            assert_eq!(
+                serde_json::to_string(&status).unwrap(),
+                format!("\"{status}\"")
+            );
+        }
+        for unknown in ["Active", "pending", "disabled", ""] {
+            assert!(
+                unknown.parse::<ConnectionStatus>().is_err(),
+                "parsed: {unknown:?}"
+            );
+        }
+    }
+
+    /// The statuses `Terminal`'s variants promise; the other two answers leave
+    /// the connection standing.
+    #[test]
+    fn a_terminal_answer_retires_to_the_status_it_promises() {
+        assert_eq!(
+            Terminal::Retire.retires_to(),
+            Some(ConnectionStatus::Revoked)
+        );
+        assert_eq!(
+            Terminal::BadTarget.retires_to(),
+            Some(ConnectionStatus::Errored)
+        );
+        assert_eq!(Terminal::OurBug.retires_to(), None);
+        assert_eq!(Terminal::Unknown.retires_to(), None);
     }
 
     /// The webhook is connected by a URL, so there is no handshake to start.

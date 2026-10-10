@@ -272,15 +272,9 @@ fn owner_can_do_everything() {
 
 const ALL_ROLES: &[Role] = &Role::all();
 
-const ALL_VERBS: &[Verb] = &[Verb::Read, Verb::Create, Verb::Update, Verb::Delete];
+const ALL_VERBS: &[Verb] = &Verb::all();
 
-const ALL_RESOURCES: &[Resource] = &[
-    Resource::Project,
-    Resource::Member,
-    Resource::Token,
-    Resource::Connector,
-    Resource::Audit,
-];
+const ALL_RESOURCES: &[Resource] = &Resource::all();
 
 /// The arrays above must list every variant of their enum, exactly once.
 const fn role_ordinal(r: Role) -> usize {

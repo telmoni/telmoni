@@ -16,8 +16,12 @@ impl IntoResponse for TelmoniError {
             Self::InternalSource { context, source } => {
                 tracing::error!(error = %source, cause = ?source, context = %context, "internal error");
             }
-            Self::AgentModelUnavailable { context } => {
-                tracing::warn!(context = %context, "agent model unavailable");
+            Self::AgentModelUnavailable { context, failure } => {
+                tracing::warn!(
+                    context = %context,
+                    failure = failure.as_str(),
+                    "agent model unavailable"
+                );
             }
             _ => {}
         }

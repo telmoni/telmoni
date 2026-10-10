@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::config::ModelConfig;
 use crate::model::{Message, Model, ModelTurn, TextSink, ToolCall, ToolResult, ToolSpec};
-use crate::tools::Tool;
+use crate::tools::tool_name;
 use crate::turn::{Ending, Runner};
 
 /// One question as it runs, handed to the observer when it drops — on
@@ -85,13 +85,7 @@ impl Recorder {
     }
 
     pub(crate) fn answered(&self, ending: Ending) {
-        let stopped_short = match ending {
-            Ending::Answered | Ending::Cancelled => None,
-            Ending::Capped => Some("capped"),
-            Ending::Truncated => Some("truncated"),
-            Ending::TimedOut => Some("timed_out"),
-            Ending::Interrupted => Some("interrupted"),
-        };
+        let stopped_short = ending.stopped_short();
         self.end(|record| record.ending = AgentTurnEnding::Answered { stopped_short });
     }
 
@@ -158,9 +152,7 @@ impl Drop for Recorder {
             // Every return of the turn names its ending; one that did not
             // left by a path nobody wrote, and is not an answer.
             record.ended_at = Utc::now();
-            record.ending = AgentTurnEnding::Failed {
-                problem_type: "unfinished".to_owned(),
-            };
+            record.ending = AgentTurnEnding::Unfinished;
         }
         observer.observe(record);
     }
@@ -326,12 +318,6 @@ impl Drop for PendingTool<'_> {
             self.recorder.push(AgentStep::Tool(call));
         }
     }
-}
-
-/// The agent's own name for the tool a call asked for. A name the model made
-/// up is free text, which a passage it read can steer, so it is never kept.
-fn tool_name(called: &str) -> &'static str {
-    Tool::named(called).map_or("unknown", Tool::name)
 }
 
 #[cfg(test)]

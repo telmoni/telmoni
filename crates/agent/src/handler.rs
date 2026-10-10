@@ -191,7 +191,9 @@ enum TurnEvent<'a> {
         conversation_id: Uuid,
     },
     Text(&'a str),
-    Tool(&'a str),
+    /// `'static`, so only the agent's own names fit: the one the model
+    /// called is free text ([`tools::tool_name`]).
+    Tool(&'static str),
     Citation(&'a Citation),
     Done {
         conversation_id: Uuid,
@@ -274,7 +276,8 @@ impl Runner for LiveRunner<'_> {
     async fn run(&mut self, call: &ToolCall) -> ToolResult {
         let asker = self.asker_now().await;
         if !self.cancelled() {
-            self.events.send(TurnEvent::Tool(&call.name));
+            self.events
+                .send(TurnEvent::Tool(tools::tool_name(&call.name)));
         }
         match asker {
             Ok(acting) => tools::run(self.state, &acting, call, &mut self.citations).await,

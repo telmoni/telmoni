@@ -8,7 +8,7 @@ use sqlx::PgPool;
 
 use telmoni_auth::test_provider::ScriptedProvider;
 use telmoni_auth::{AppState, Config};
-use telmoni_shared::test_util::service_pool;
+use telmoni_shared::test_util::{ServiceRole, service_pool};
 
 const SERVICE_SECRET: &str = "test-service-secret";
 const ORGANIZATION: &str = "org_reap";
@@ -26,7 +26,7 @@ fn state(pool: PgPool) -> Arc<AppState> {
         support_email: None,
         deletion_tail_budget_ms: 8_000,
     };
-    let db = service_pool(&pool, "auth");
+    let db = service_pool(&pool, ServiceRole::Auth);
     Arc::new(AppState {
         issuer: telmoni_auth::test_provider::test_issuer(db.clone()),
         password: None,

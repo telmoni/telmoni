@@ -1,8 +1,8 @@
 //! What the suites stand up around the module: the module itself, as its
 //! own role, with auth as it holds it — a roster a suite seeds, answered in
 //! process; ClickHouse as its two users — the migrator, who applies the file
-//! and is not held by its row policy, and the module's own, who is — and a
-//! span with nothing in it but what a test sets.
+//! and whom `tenant_isolation` does not hold, and the module's own, whom it
+//! does — and a span with nothing in it but what a test sets.
 #![allow(dead_code, reason = "each suite uses the part of the harness it needs")]
 
 use std::collections::HashMap;
@@ -21,7 +21,7 @@ use telmoni_shared::acting::{Acting, ActingProject};
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::rbac::project_role;
 use telmoni_shared::seam::Auth;
-use telmoni_shared::test_util::{chain_lock_held, service_pool};
+use telmoni_shared::test_util::{ServiceRole, chain_lock_held, service_pool};
 use telmoni_shared::{
     AuthError, AuthzError, FlagSet, OrganizationId, OrganizationRole, OrganizationStatus,
     ProjectId, Role, SpanKind, SpanStatus, TelmoniError, UserId,
@@ -254,7 +254,7 @@ impl Auth for AuthStub {
 /// reads no span asks of it.
 pub(crate) fn state(pool: &PgPool, auth: Arc<dyn Auth>) -> Arc<AppState> {
     Arc::new(AppState {
-        db: service_pool(pool, "telemetry"),
+        db: service_pool(pool, ServiceRole::Telemetry),
         config: Config {
             database_url: "".into(),
             clickhouse_url: "http://telemetry:telemetry@127.0.0.1:1".into(),
@@ -273,7 +273,7 @@ pub(crate) struct ClickHouse {
     pub(crate) store: Store,
     /// The one query module as the migrator's user: a server whose one user
     /// made the tables and reads them, as the Compose quickstart's does,
-    /// where the policy holds nobody.
+    /// where `tenant_isolation` holds nobody.
     pub(crate) unheld: Store,
     /// The module's user, bare: a query the query module would never send.
     pub(crate) telemetry: clickhouse::Client,

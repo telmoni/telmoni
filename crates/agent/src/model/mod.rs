@@ -18,8 +18,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::Value;
-use telmoni_shared::TelmoniError;
 pub use telmoni_shared::seam::TokenUsage;
+use telmoni_shared::{ModelFailure, TelmoniError};
 
 use crate::config::{ModelConfig, Provider};
 
@@ -211,8 +211,13 @@ pub fn from_config(config: &ModelConfig) -> anyhow::Result<Arc<dyn Model>> {
 /// A model failure as the person sees it — a 502 whose cause stays in the
 /// log. Never the provider's body: a refusal can echo the request back.
 pub(crate) fn unavailable(context: impl Into<String>) -> TelmoniError {
+    failed(ModelFailure::Answered, context)
+}
+
+fn failed(failure: ModelFailure, context: impl Into<String>) -> TelmoniError {
     TelmoniError::AgentModelUnavailable {
         context: context.into(),
+        failure,
     }
 }
 
@@ -220,7 +225,7 @@ pub(crate) fn unavailable(context: impl Into<String>) -> TelmoniError {
 /// one, never its sentence. OpenAI and Anthropic say `type` or `code`;
 /// Google says `status` (`UNAVAILABLE`, `NOT_FOUND`), inside a one-element
 /// array on its OpenAI-compatible endpoint. One that says "not now" is
-/// marked so ([`not_now`]).
+/// classed so ([`not_now`]).
 pub(crate) async fn refused(provider: &str, response: reqwest::Response) -> TelmoniError {
     let status = response.status().as_u16();
     let kind = response
@@ -229,12 +234,12 @@ pub(crate) async fn refused(provider: &str, response: reqwest::Response) -> Telm
         .ok()
         .and_then(|body| error_code(&body))
         .unwrap_or_default();
-    let answered = format!("answered {status} {kind}");
-    if NOT_NOW.contains(&status) {
-        not_now_error(provider, &answered)
-    } else {
-        unavailable(format!("{provider} {answered}"))
-    }
+    let failure = match status {
+        429 => ModelFailure::RateLimited,
+        status if NOT_NOW.contains(&status) => ModelFailure::NotNow,
+        _ => ModelFailure::Answered,
+    };
+    failed(failure, format!("{provider} answered {status} {kind}"))
 }
 
 /// Answers that say "not now" whatever was sent: a timeout, a rate limit,
@@ -243,41 +248,35 @@ pub(crate) async fn refused(provider: &str, response: reqwest::Response) -> Telm
 /// so none of them is among these.
 const NOT_NOW: [u16; 4] = [408, 429, 503, 529];
 
-/// How a failure that is the endpoint's state, never what it was sent, is
-/// marked, for [`not_now`].
-const NOT_NOW_MARK: &str = "not now";
-
 /// A failure that is the endpoint's state, never what it was sent: no
-/// answer in time, no connection, a body that never arrived whole, or a
-/// [`NOT_NOW`] answer.
+/// answer in time, no connection, a body that never arrived whole.
 pub(crate) fn not_now_error(provider: &str, detail: &str) -> TelmoniError {
-    unavailable(format!("{provider} {NOT_NOW_MARK}: {detail}"))
+    failed(ModelFailure::NotNow, format!("{provider} {detail}"))
 }
 
 /// Whether an error is the endpoint's state rather than anything about the
 /// request: asking again later cures it, and sending something else proves
-/// nothing. The context opens on the provider's one-word name, then the
-/// mark, then `": "`; an error code the provider chose comes later, so it
-/// cannot read as one.
-pub(crate) fn not_now(error: &TelmoniError) -> bool {
-    not_now_detail(error).is_some()
+/// nothing.
+pub(crate) const fn not_now(error: &TelmoniError) -> bool {
+    matches!(
+        error,
+        TelmoniError::AgentModelUnavailable {
+            failure: ModelFailure::NotNow | ModelFailure::RateLimited,
+            ..
+        }
+    )
 }
 
 /// Whether an error is the endpoint's rate limit — a 429, after [`send`]'s
 /// retries — which waiting out its window may lift.
-pub(crate) fn rate_limited(error: &TelmoniError) -> bool {
-    not_now_detail(error).is_some_and(|detail| detail.starts_with("answered 429 "))
-}
-
-/// What a "not now" error says after its mark, read only at its head.
-fn not_now_detail(error: &TelmoniError) -> Option<&str> {
-    let TelmoniError::AgentModelUnavailable { context } = error else {
-        return None;
-    };
-    let (head, detail) = context.split_once(": ")?;
-    head.split_once(' ')
-        .is_some_and(|(_, mark)| mark == NOT_NOW_MARK)
-        .then_some(detail)
+pub(crate) const fn rate_limited(error: &TelmoniError) -> bool {
+    matches!(
+        error,
+        TelmoniError::AgentModelUnavailable {
+            failure: ModelFailure::RateLimited,
+            ..
+        }
+    )
 }
 
 fn error_code(body: &Value) -> Option<String> {
@@ -544,31 +543,36 @@ mod tests {
         assert!(not_now(&err), "a 503 is the endpoint's state: {err}");
     }
 
-    /// Only the mark at the head reads as "not now": a code the provider
-    /// chose, later in the context, cannot pass for it.
+    /// The class rides beside the context, never in it: whatever an error
+    /// code the provider chose says, it cannot pass for "not now".
     #[test]
     fn only_the_endpoints_state_reads_as_not_now() {
-        assert!(not_now(&not_now_error("embeddings", "timed out")));
+        let timed_out = not_now_error("embeddings", "timed out");
+        assert!(not_now(&timed_out));
+        assert!(!rate_limited(&timed_out));
         assert!(!not_now(&unavailable(
             "embeddings answered 500 x not now: y"
         )));
         assert!(!not_now(&unavailable(
             "embeddings answered 500 server_error"
         )));
-        assert!(rate_limited(&not_now_error(
-            "embeddings",
-            "answered 429 rate_limit_exceeded"
-        )));
-        assert!(!rate_limited(&not_now_error("embeddings", "answered 503 ")));
         assert!(!rate_limited(&unavailable(
             "embeddings answered 500 not now: answered 429 x"
         )));
     }
 
+    /// A 429 is the one answer that is both "not now" and a rate limit; a
+    /// 503 is "not now" alone, and what the input could cause is neither.
     #[tokio::test]
     async fn a_failure_the_input_could_cause_is_not_marked_not_now() {
         use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
-        for (status, endpoint) in [(429, true), (500, false), (502, false), (413, false)] {
+        for (status, endpoint) in [
+            (429, true),
+            (503, true),
+            (500, false),
+            (502, false),
+            (413, false),
+        ] {
             let server = MockServer::start().await;
             Mock::given(method("POST"))
                 .respond_with(ResponseTemplate::new(status).insert_header("retry-after", "0"))
@@ -576,6 +580,7 @@ mod tests {
                 .await;
             let err = post(&server).await.unwrap_err();
             assert_eq!(not_now(&err), endpoint, "{status}: {err}");
+            assert_eq!(rate_limited(&err), status == 429, "{status}: {err}");
         }
     }
 }

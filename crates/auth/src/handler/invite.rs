@@ -35,7 +35,7 @@ use crate::{
     AppState,
     db::{AuthLane, identities, invites, locks, members, organization_members, organizations},
     handler::{acting_project, authorize, member::grantable, parse_project_id},
-    model::InviteScope,
+    model::{AuditKind, InviteScope},
 };
 
 /// How long an invitation lives: through a long weekend, and dead before a
@@ -170,9 +170,9 @@ pub async fn create_invite(
             ip_address: None,
             user_agent: None,
             metadata: Some(json!({
-                "kind": "invited",
+                "kind": AuditKind::Invited,
                 "email": email,
-                "role": role.to_string(),
+                "role": role,
             })),
         },
     )
@@ -188,8 +188,7 @@ pub async fn create_invite(
             &email,
             &inviter,
             &label,
-            crate::mailer::InvitedTo::Project,
-            &role.to_string(),
+            crate::mailer::InvitedTo::Project(role),
             &link,
         )
         .await
@@ -255,7 +254,7 @@ pub async fn revoke_invite(
             request_id: None,
             ip_address: None,
             user_agent: None,
-            metadata: Some(json!({ "kind": "invite_revoked" })),
+            metadata: Some(json!({ "kind": AuditKind::InviteRevoked })),
         },
     )
     .await?;
@@ -297,7 +296,7 @@ pub async fn look_up_invite(
         // ⚠ `scope` says which roster the link seats somebody on. The two
         // ladders spell their roles the same, so the role alone cannot.
         return Ok(Json(json!({
-            "scope": "project",
+            "scope": InviteScope::Project,
             "inviter": inviter_label(
                 invite.inviter_email.as_deref(),
                 invite.inviter_display_name.as_deref(),
@@ -305,7 +304,7 @@ pub async fn look_up_invite(
             ),
             "organization": organization,
             "email": invite.email,
-            "role": invite.role.to_string(),
+            "role": invite.role,
         })));
     }
 
@@ -316,7 +315,7 @@ pub async fn look_up_invite(
     if let Some(invite) = found_organization {
         let organization = invite.organization_name;
         return Ok(Json(json!({
-            "scope": "organization",
+            "scope": InviteScope::Organization,
             "inviter": inviter_label(
                 invite.inviter_email.as_deref(),
                 invite.inviter_display_name.as_deref(),
@@ -324,7 +323,7 @@ pub async fn look_up_invite(
             ),
             "organization": organization,
             "email": invite.email,
-            "role": invite.role.to_string(),
+            "role": invite.role,
         })));
     }
 
@@ -418,9 +417,9 @@ async fn seat_project_member(
                 ip_address: None,
                 user_agent: None,
                 metadata: Some(json!({
-                    "kind": "enrolled_with_project_invite",
+                    "kind": AuditKind::EnrolledWithProjectInvite,
                     "invite_id": invite.id,
-                    "role": OrganizationRole::Member.to_string(),
+                    "role": OrganizationRole::Member,
                     "scope": InviteScope::Organization,
                 })),
             },
@@ -441,9 +440,9 @@ async fn seat_project_member(
             ip_address: None,
             user_agent: None,
             metadata: Some(json!({
-                "kind": "invite_accepted",
+                "kind": AuditKind::InviteAccepted,
                 "invite_id": invite.id,
-                "role": invite.role.to_string(),
+                "role": invite.role,
             })),
         },
     )
@@ -493,9 +492,9 @@ async fn seat_organization_member(
             ip_address: None,
             user_agent: None,
             metadata: Some(json!({
-                "kind": "organization_invite_accepted",
+                "kind": AuditKind::OrganizationInviteAccepted,
                 "invite_id": invite.id,
-                "role": invite.role.to_string(),
+                "role": invite.role,
                 "scope": InviteScope::Organization,
             })),
         },
@@ -790,7 +789,7 @@ pub async fn decline_my_incoming_invite(
                 request_id: None,
                 ip_address: None,
                 user_agent: None,
-                metadata: Some(json!({ "kind": "invite_declined" })),
+                metadata: Some(json!({ "kind": AuditKind::InviteDeclined })),
             },
         )
         .await?;
@@ -829,9 +828,10 @@ pub async fn decline_my_incoming_invite(
                 request_id: None,
                 ip_address: None,
                 user_agent: None,
-                metadata: Some(
-                    json!({ "kind": "organization_invite_declined", "scope": InviteScope::Organization }),
-                ),
+                metadata: Some(json!({
+                    "kind": AuditKind::OrganizationInviteDeclined,
+                    "scope": InviteScope::Organization,
+                })),
             },
         )
         .await?;

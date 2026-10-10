@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use telmoni_shared::TelmoniError;
+use telmoni_shared::seam::StoppedShort;
 use tokio::time::Instant;
 
 use crate::model::{
@@ -96,6 +97,19 @@ impl Ending {
             Self::Truncated => Some(TRUNCATED_NOTE),
             Self::TimedOut => Some(TIMED_OUT_NOTE),
             Self::Interrupted => Some(INTERRUPTED_NOTE),
+            Self::Answered | Self::Cancelled => None,
+        }
+    }
+
+    /// Why the answer stopped short, as an observer is told it: each
+    /// ending that [`Ending::note`] says, and no other.
+    #[must_use]
+    pub const fn stopped_short(self) -> Option<StoppedShort> {
+        match self {
+            Self::Capped => Some(StoppedShort::Capped),
+            Self::Truncated => Some(StoppedShort::Truncated),
+            Self::TimedOut => Some(StoppedShort::TimedOut),
+            Self::Interrupted => Some(StoppedShort::Interrupted),
             Self::Answered | Self::Cancelled => None,
         }
     }

@@ -27,7 +27,7 @@ use crate::{
         ActingOrganization, acting_organization, organization_of, organization_role_or_forbidden,
         parse_user_id,
     },
-    model::InviteScope,
+    model::{AuditKind, InviteScope},
 };
 
 #[derive(Debug, Deserialize)]
@@ -137,7 +137,7 @@ pub async fn update_organization_member_role(
             ip_address: None,
             user_agent: None,
             metadata: Some(json!({
-                "role": role.to_string(),
+                "role": role,
                 "scope": InviteScope::Organization,
             })),
         },
@@ -215,7 +215,7 @@ pub async fn remove_organization_member(
             user_agent: None,
             metadata: Some(json!({
                 "scope": InviteScope::Organization,
-                "kind": if leaving { "left" } else { "removed" },
+                "kind": if leaving { AuditKind::Left } else { AuditKind::Removed },
             })),
         },
     )
@@ -238,8 +238,8 @@ pub async fn remove_organization_member(
                 ip_address: None,
                 user_agent: None,
                 metadata: Some(json!({
-                    "kind": "organization_removal_cascade",
-                    "role": pm.role.to_string(),
+                    "kind": AuditKind::OrganizationRemovalCascade,
+                    "role": pm.role,
                 })),
             },
         )
@@ -365,7 +365,7 @@ pub async fn create_organization_invite(
             user_agent: None,
             metadata: Some(json!({
                 "email": email,
-                "role": role.to_string(),
+                "role": role,
                 "scope": InviteScope::Organization,
             })),
         },
@@ -390,8 +390,7 @@ pub async fn create_organization_invite(
             &email,
             &inviter,
             &label,
-            crate::mailer::InvitedTo::Organization,
-            &role.to_string(),
+            crate::mailer::InvitedTo::Organization(role),
             &link,
         )
         .await
@@ -453,7 +452,7 @@ pub async fn revoke_organization_invite(
             ip_address: None,
             user_agent: None,
             metadata: Some(json!({
-                "kind": "organization_invite_revoked",
+                "kind": AuditKind::OrganizationInviteRevoked,
                 "scope": InviteScope::Organization,
             })),
         },

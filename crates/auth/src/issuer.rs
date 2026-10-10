@@ -349,8 +349,8 @@ impl Issuer {
             tx.commit().await?;
             return Ok(DevicePoll::Expired);
         }
-        let polled = match device.status {
-            device_codes::Status::Pending => {
+        let polled = match device.state {
+            device_codes::DeviceState::Pending => {
                 let too_soon = device_codes::touch(&mut tx, device.id).await?;
                 if too_soon {
                     DevicePoll::SlowDown
@@ -358,18 +358,11 @@ impl Issuer {
                     DevicePoll::Pending
                 }
             }
-            device_codes::Status::Denied => {
+            device_codes::DeviceState::Denied => {
                 device_codes::delete(&mut tx, device.id).await?;
                 DevicePoll::Denied
             }
-            device_codes::Status::Approved => {
-                let Some((user_id, sid)) = device.approved else {
-                    device_codes::delete(&mut tx, device.id).await?;
-                    tx.commit().await?;
-                    return Err(TelmoniError::Internal(
-                        "an approved device authorization names nobody".into(),
-                    ));
-                };
+            device_codes::DeviceState::Approved { user_id, sid } => {
                 device_codes::delete(&mut tx, device.id).await?;
                 // The device is a session of its own; how the person who
                 // approved it signed in is nothing it can answer for.

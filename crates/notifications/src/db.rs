@@ -6,7 +6,7 @@
 //! at the moment of use.
 
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::FromRow;
 use telmoni_shared::db::tenant_session::{
@@ -14,10 +14,10 @@ use telmoni_shared::db::tenant_session::{
     ProjectAndOrganization, Scoped,
 };
 use telmoni_shared::envelope::Sealed;
-use telmoni_shared::{OrganizationId, ProjectId, UserId};
+use telmoni_shared::{NotificationKind, OrganizationId, ParseEnumError, ProjectId, UserId};
 use uuid::Uuid;
 
-use crate::connector::Provider;
+use crate::connector::{ConnectionStatus, Provider};
 
 /// This service's cross-tenant lane: the one declaration, so a sibling's
 /// lane is unnameable here. See `tenant_session::Lane`.
@@ -37,7 +37,7 @@ impl EmitBinding for Organization {}
 #[derive(Debug, Serialize, FromRow)]
 pub struct FeedItem {
     pub id: Uuid,
-    pub kind: String,
+    pub kind: NotificationKind,
     pub title: String,
     pub body: String,
     pub metadata: Value,
@@ -51,7 +51,7 @@ pub struct NewFeedItem<'a> {
     /// The person the text names, when it names one, for the redaction their
     /// erasure asks for.
     pub subject_user_id: Option<&'a UserId>,
-    pub kind: &'a str,
+    pub kind: NotificationKind,
     pub title: &'a str,
     pub body: &'a str,
     pub metadata: &'a Value,
@@ -417,17 +417,17 @@ pub async fn purge_project(
 #[derive(Debug, Serialize, FromRow)]
 pub struct ConnectionSummary {
     pub id: Uuid,
-    pub provider: String,
+    pub provider: Provider,
     pub external_workspace_id: String,
     pub external_workspace_name: Option<String>,
     pub channel_id: String,
     pub channel_name: String,
-    pub status: String,
+    pub status: ConnectionStatus,
     pub last_error: Option<String>,
     pub last_delivery_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     /// The notice kinds a webhook receives; `None` is every kind.
-    pub event_kinds: Option<Vec<String>>,
+    pub event_kinds: Option<Vec<NotificationKind>>,
     /// Until when a rotated secret still signs; `None` outside an overlap.
     pub previous_secret_expires_at: Option<DateTime<Utc>>,
 }
@@ -459,8 +459,8 @@ pub struct SealedConnection {
     pub id: Uuid,
     pub project_id: String,
     pub organization_id: String,
-    pub provider: String,
-    pub status: String,
+    pub provider: Provider,
+    pub status: ConnectionStatus,
     pub external_workspace_id: String,
     pub external_workspace_name: Option<String>,
     pub channel_name: String,
@@ -620,7 +620,7 @@ pub async fn existing_connection_id<B: HasProject>(
           FOR UPDATE",
     )
     .bind(project_id)
-    .bind(provider.as_str())
+    .bind(provider)
     .bind(external_workspace_id)
     .bind(channel_id)
     .fetch_optional(tx.conn())
@@ -648,7 +648,7 @@ pub struct NewConnection<'a> {
     pub scopes: &'a str,
     /// A webhook's chosen notice kinds; `None` is every kind, and always
     /// `None` for a vendor channel.
-    pub event_kinds: Option<&'a [String]>,
+    pub event_kinds: Option<&'a [NotificationKind]>,
     pub installed_by: &'a UserId,
 }
 
@@ -670,7 +670,7 @@ pub async fn insert_connection<B: HasProject>(
     .bind(c.id)
     .bind(c.project_id)
     .bind(c.organization_id)
-    .bind(c.provider.as_str())
+    .bind(c.provider)
     .bind(c.external_workspace_id)
     .bind(c.external_workspace_name)
     .bind(c.channel_id)
@@ -696,7 +696,7 @@ pub async fn set_event_kinds(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
     id: Uuid,
-    event_kinds: Option<&[String]>,
+    event_kinds: Option<&[NotificationKind]>,
 ) -> sqlx::Result<Option<ConnectionSummary>> {
     sqlx::query_as::<_, ConnectionSummary>(&format!(
         "UPDATE notifications.connections
@@ -706,7 +706,7 @@ pub async fn set_event_kinds(
     ))
     .bind(id)
     .bind(project_id)
-    .bind(Provider::Webhook.as_str())
+    .bind(Provider::Webhook)
     .bind(event_kinds)
     .fetch_optional(tx.conn())
     .await
@@ -723,7 +723,7 @@ pub async fn reconnect_connection(
                 target_ciphertext = $4, target_nonce = $5, key_version = $6,
                 wrapped_dek = $7, token_ciphertext = $8, token_nonce = $9,
                 scopes = $10, installed_by = $11,
-                status = 'active', last_error = NULL, revoked_at = NULL,
+                status = $12, last_error = NULL, revoked_at = NULL,
                 consecutive_failures = 0
           WHERE id = $1
       RETURNING {SUMMARY_COLUMNS}"
@@ -739,6 +739,7 @@ pub async fn reconnect_connection(
     .bind(c.token.map(|t| t.nonce.as_slice()))
     .bind(c.scopes)
     .bind(c.installed_by)
+    .bind(ConnectionStatus::Active)
     .fetch_one(tx.conn())
     .await
 }
@@ -768,7 +769,7 @@ pub async fn count_workspace_connections(
         "SELECT count(*) FROM notifications.connections
           WHERE provider = $1 AND external_workspace_id = $2",
     )
-    .bind(provider.as_str())
+    .bind(provider)
     .bind(external_workspace_id)
     .fetch_one(tx.conn())
     .await
@@ -786,7 +787,7 @@ pub async fn count_workspace_connections_outside(
         "SELECT count(*) FROM notifications.connections
           WHERE provider = $1 AND external_workspace_id = $2 AND organization_id <> $3",
     )
-    .bind(provider.as_str())
+    .bind(provider)
     .bind(external_workspace_id)
     .bind(organization_id)
     .fetch_one(tx.conn())
@@ -805,7 +806,7 @@ pub async fn count_workspace_connections_outside_project(
         "SELECT count(*) FROM notifications.connections
           WHERE provider = $1 AND external_workspace_id = $2 AND project_id <> $3",
     )
-    .bind(provider.as_str())
+    .bind(provider)
     .bind(external_workspace_id)
     .bind(project_id)
     .fetch_one(tx.conn())
@@ -819,7 +820,7 @@ pub struct RetiredConnection {
     pub id: Uuid,
     pub project_id: String,
     pub organization_id: String,
-    pub provider: String,
+    pub provider: Provider,
     pub external_workspace_id: String,
     pub external_workspace_name: Option<String>,
     pub channel_name: String,
@@ -833,14 +834,14 @@ const RETIRED_COLUMNS: &str = "id, project_id, organization_id, provider, extern
 pub async fn retire_connection(
     tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
     id: Uuid,
-    status: &str,
+    status: ConnectionStatus,
     reason: &str,
 ) -> sqlx::Result<Option<RetiredConnection>> {
     sqlx::query_as::<_, RetiredConnection>(&format!(
         "UPDATE notifications.connections
             SET status = $2, last_error = $3,
-                revoked_at = CASE WHEN $2 = 'revoked' THEN now() ELSE revoked_at END
-          WHERE id = $1 AND status = 'active'
+                revoked_at = CASE WHEN $2 = $4 THEN now() ELSE revoked_at END
+          WHERE id = $1 AND status = $5
       RETURNING {RETIRED_COLUMNS}"
     ))
     .bind(id)
@@ -849,6 +850,8 @@ pub async fn retire_connection(
         reason,
         LAST_ERROR_MAX,
     ))
+    .bind(ConnectionStatus::Revoked)
+    .bind(ConnectionStatus::Active)
     .fetch_optional(tx.conn())
     .await
 }
@@ -863,16 +866,17 @@ pub async fn revoke_workspace(
 ) -> sqlx::Result<Vec<RetiredConnection>> {
     sqlx::query_as::<_, RetiredConnection>(&format!(
         "UPDATE notifications.connections
-            SET status = 'revoked', last_error = $3, revoked_at = now()
-          WHERE provider = $1 AND external_workspace_id = $2 AND status <> 'revoked'
+            SET status = $4, last_error = $3, revoked_at = now()
+          WHERE provider = $1 AND external_workspace_id = $2 AND status <> $4
       RETURNING {RETIRED_COLUMNS}"
     ))
-    .bind(provider.as_str())
+    .bind(provider)
     .bind(external_workspace_id)
     .bind(telmoni_shared::text::truncate_on_char_boundary(
         reason,
         LAST_ERROR_MAX,
     ))
+    .bind(ConnectionStatus::Revoked)
     .fetch_all(tx.conn())
     .await
 }
@@ -920,11 +924,12 @@ pub async fn record_consecutive_failures(
         "UPDATE notifications.connections c
             SET consecutive_failures = c.consecutive_failures + f.n
            FROM unnest($1::uuid[], $2::int4[]) AS f(id, n)
-          WHERE c.id = f.id AND c.status = 'active'
+          WHERE c.id = f.id AND c.status = $3
       RETURNING c.id, c.consecutive_failures",
     )
     .bind(&ids)
     .bind(&counts)
+    .bind(ConnectionStatus::Active)
     .fetch_all(tx.conn())
     .await?;
     Ok(rows)
@@ -953,19 +958,20 @@ pub async fn reseal_webhook_secret(
                 prior_token_nonce = CASE WHEN $8 > 0 THEN $7::bytea END,
                 prior_token_expires_at = CASE WHEN $8 > 0
                     THEN now() + make_interval(hours => $8) END,
-                status = 'active', last_error = NULL, revoked_at = NULL,
+                status = $9, last_error = NULL, revoked_at = NULL,
                 consecutive_failures = 0
           WHERE id = $1 AND project_id = $2 AND provider = $3 AND token_ciphertext = $4
       RETURNING {SUMMARY_COLUMNS}"
     ))
     .bind(id)
     .bind(project_id)
-    .bind(Provider::Webhook.as_str())
+    .bind(Provider::Webhook)
     .bind(&replacing.ciphertext)
     .bind(&token.ciphertext)
     .bind(&token.nonce)
     .bind(&replacing.nonce)
     .bind(keep_prior_hours)
+    .bind(ConnectionStatus::Active)
     .fetch_optional(tx.conn())
     .await
 }
@@ -979,7 +985,7 @@ pub struct NewDelivery<'a> {
     pub connection_id: Uuid,
     pub project_id: &'a str,
     pub organization_id: &'a OrganizationId,
-    pub kind: &'a str,
+    pub kind: NotificationKind,
     pub subject: &'a str,
     pub body: &'a str,
     /// The person the text names, as on the feed row it came from.
@@ -1025,7 +1031,7 @@ pub async fn enqueue_deliveries<B: Binding>(
     tx: &mut Scoped<'_, B>,
     organization_id: &OrganizationId,
     project_id: Option<&ProjectId>,
-    kind: &str,
+    kind: NotificationKind,
     subject: &str,
     body: &str,
     subject_user_id: Option<&UserId>,
@@ -1035,13 +1041,14 @@ pub async fn enqueue_deliveries<B: Binding>(
            FROM notifications.connections
           WHERE organization_id = $1
             AND ($2::text IS NULL OR project_id = $2)
-            AND status = 'active'
+            AND status = $4
             AND (event_kinds IS NULL OR $3 = ANY (event_kinds))
           ORDER BY id",
     )
     .bind(organization_id)
     .bind(project_id)
     .bind(kind)
+    .bind(ConnectionStatus::Active)
     .fetch_all(tx.conn())
     .await?;
     if targets.is_empty() {
@@ -1077,7 +1084,7 @@ pub async fn enqueue_deliveries<B: Binding>(
 pub struct LeasedDelivery {
     pub id: Uuid,
     pub connection_id: Uuid,
-    pub kind: String,
+    pub kind: NotificationKind,
     pub subject: String,
     pub body: String,
     pub attempts: i32,
@@ -1137,12 +1144,13 @@ pub async fn lease_delivery(
             AND (d.lease_until IS NULL OR d.lease_until < now())
             AND EXISTS (
                 SELECT 1 FROM notifications.connections c
-                 WHERE c.id = d.connection_id AND c.status = 'active'
+                 WHERE c.id = d.connection_id AND c.status = $3
             )
       RETURNING {LEASED_COLUMNS}"
     ))
     .bind(id)
     .bind(lease_secs)
+    .bind(ConnectionStatus::Active)
     .fetch_optional(tx.conn())
     .await
 }
@@ -1281,18 +1289,84 @@ pub async fn fail_pending_for_connections(
 }
 
 /// Who started an attempt: the queue, or an owner or admin resending from the log.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum AttemptTrigger {
     Scheduled,
     Manual,
 }
 
 impl AttemptTrigger {
+    /// Every trigger, in wire order.
+    #[must_use]
+    pub const fn all() -> [Self; 2] {
+        [Self::Scheduled, Self::Manual]
+    }
+
     const fn as_str(self) -> &'static str {
         match self {
             Self::Scheduled => "scheduled",
             Self::Manual => "manual",
         }
+    }
+}
+
+impl std::fmt::Display for AttemptTrigger {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for AttemptTrigger {
+    type Err = ParseEnumError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::all()
+            .into_iter()
+            .find(|trigger| trigger.as_str() == s)
+            .ok_or_else(|| ParseEnumError::new(s, "scheduled, manual"))
+    }
+}
+
+/// How one send ended, as the log keeps it: `delivered` exactly when it
+/// carries no error. Never pending, as its delivery may be: an attempt is a
+/// send that already happened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum AttemptOutcome {
+    Delivered,
+    Failed,
+}
+
+impl AttemptOutcome {
+    /// Every outcome, in wire order.
+    #[must_use]
+    pub const fn all() -> [Self; 2] {
+        [Self::Delivered, Self::Failed]
+    }
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Delivered => "delivered",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+impl std::fmt::Display for AttemptOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for AttemptOutcome {
+    type Err = ParseEnumError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::all()
+            .into_iter()
+            .find(|outcome| outcome.as_str() == s)
+            .ok_or_else(|| ParseEnumError::new(s, "delivered, failed"))
     }
 }
 
@@ -1327,14 +1401,14 @@ pub async fn record_attempts(
     }
     let ids: Vec<Uuid> = attempts.iter().map(|_| Uuid::now_v7()).collect();
     let deliveries: Vec<Uuid> = attempts.iter().map(|a| a.delivery_id).collect();
-    let triggers: Vec<&str> = attempts.iter().map(|a| a.trigger.as_str()).collect();
-    let outcomes: Vec<&str> = attempts
+    let triggers: Vec<AttemptTrigger> = attempts.iter().map(|a| a.trigger).collect();
+    let outcomes: Vec<AttemptOutcome> = attempts
         .iter()
         .map(|a| {
             if a.error.is_none() {
-                "delivered"
+                AttemptOutcome::Delivered
             } else {
-                "failed"
+                AttemptOutcome::Failed
             }
         })
         .collect();
@@ -1396,14 +1470,57 @@ pub async fn connection_exists(
     .await
 }
 
+/// Where a delivery stands: `pending` while the queue still holds it, then
+/// `delivered`, or `failed` once it can no longer land.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum DeliveryStatus {
+    Pending,
+    Delivered,
+    Failed,
+}
+
+impl DeliveryStatus {
+    /// Every status, in wire order.
+    #[must_use]
+    pub const fn all() -> [Self; 3] {
+        [Self::Pending, Self::Delivered, Self::Failed]
+    }
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Delivered => "delivered",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+impl std::fmt::Display for DeliveryStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for DeliveryStatus {
+    type Err = ParseEnumError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::all()
+            .into_iter()
+            .find(|status| status.as_str() == s)
+            .ok_or_else(|| ParseEnumError::new(s, "pending, delivered, failed"))
+    }
+}
+
 /// One delivery as the log lists it, with its sends oldest first.
 #[derive(Debug, Serialize, FromRow)]
 pub struct DeliveryLogEntry {
     pub id: Uuid,
-    pub kind: String,
+    pub kind: NotificationKind,
     pub subject: String,
     pub body: String,
-    pub status: String,
+    pub status: DeliveryStatus,
     pub next_attempt_at: DateTime<Utc>,
     pub last_error: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -1418,8 +1535,8 @@ pub struct AttemptLogEntry {
     pub id: Uuid,
     #[serde(skip)]
     pub delivery_id: Uuid,
-    pub trigger: String,
-    pub outcome: String,
+    pub trigger: AttemptTrigger,
+    pub outcome: AttemptOutcome,
     pub status_code: Option<i32>,
     pub duration_ms: i32,
     pub error: Option<String>,
@@ -1611,10 +1728,11 @@ pub async fn manual_resends(
 ) -> sqlx::Result<i64> {
     sqlx::query_scalar(
         "SELECT count(*) FROM notifications.delivery_attempts
-          WHERE project_id = $1 AND delivery_id = $2 AND trigger = 'manual'",
+          WHERE project_id = $1 AND delivery_id = $2 AND trigger = $3",
     )
     .bind(project_id)
     .bind(delivery_id)
+    .bind(AttemptTrigger::Manual)
     .fetch_one(tx.conn())
     .await
 }
@@ -1698,7 +1816,7 @@ pub async fn insert_oauth_state(
     .bind(project_id)
     .bind(organization_id)
     .bind(user_id)
-    .bind(provider.as_str())
+    .bind(provider)
     .bind(ttl_secs)
     .bind(telmoni_shared::derive_shard_key(organization_id))
     .execute(tx.conn())
@@ -1712,7 +1830,7 @@ pub struct OAuthState {
     pub project_id: String,
     pub organization_id: String,
     pub user_id: String,
-    pub provider: String,
+    pub provider: Provider,
 }
 
 /// Spend one `state`: live, unconsumed and visible under the caller's project
@@ -1746,7 +1864,7 @@ pub struct IndexedFeedItem {
     pub project_id: Option<ProjectId>,
     pub organization_id: OrganizationId,
     pub subject_user_id: Option<UserId>,
-    pub kind: String,
+    pub kind: NotificationKind,
     pub title: String,
     pub body: String,
     pub created_at: DateTime<Utc>,
@@ -1785,12 +1903,12 @@ pub struct IndexedDelivery {
     pub project_id: ProjectId,
     pub organization_id: OrganizationId,
     pub subject_user_id: Option<UserId>,
-    pub kind: String,
+    pub kind: NotificationKind,
     pub subject: String,
-    pub status: String,
+    pub status: DeliveryStatus,
     pub attempts: i32,
     pub last_error: Option<String>,
-    pub provider: String,
+    pub provider: Provider,
     pub channel_name: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -1836,4 +1954,96 @@ pub async fn queue_stats(
     )
     .fetch_one(tx.conn())
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::fmt::{Debug, Display};
+    use std::str::FromStr;
+
+    fn spelled_once<T: Display>(all: &[T]) {
+        let mut seen: Vec<String> = all.iter().map(ToString::to_string).collect();
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen.len(), all.len(), "all() repeats a variant");
+    }
+
+    fn round_trips<T>(all: &[T])
+    where
+        T: Display + FromStr + PartialEq + Debug,
+        T::Err: Debug,
+    {
+        for v in all {
+            assert_eq!(&v.to_string().parse::<T>().unwrap(), v);
+        }
+    }
+
+    fn serde_matches<T: Display + Serialize>(all: &[T]) {
+        for v in all {
+            assert_eq!(serde_json::to_string(v).unwrap(), format!("\"{v}\""));
+        }
+    }
+
+    /// A new variant fails to compile here until its `all()` lists it.
+    #[test]
+    fn all_lists_every_variant() {
+        for trigger in AttemptTrigger::all() {
+            match trigger {
+                AttemptTrigger::Scheduled | AttemptTrigger::Manual => {}
+            }
+        }
+        for outcome in AttemptOutcome::all() {
+            match outcome {
+                AttemptOutcome::Delivered | AttemptOutcome::Failed => {}
+            }
+        }
+        for status in DeliveryStatus::all() {
+            match status {
+                DeliveryStatus::Pending | DeliveryStatus::Delivered | DeliveryStatus::Failed => {}
+            }
+        }
+        spelled_once(&AttemptTrigger::all());
+        spelled_once(&AttemptOutcome::all());
+        spelled_once(&DeliveryStatus::all());
+    }
+
+    #[test]
+    fn from_str_round_trips_every_variant() {
+        round_trips(&AttemptTrigger::all());
+        round_trips(&AttemptOutcome::all());
+        round_trips(&DeliveryStatus::all());
+    }
+
+    /// `pending` is a delivery's word and never an attempt's: an attempt is a
+    /// send that happened.
+    #[test]
+    fn from_str_rejects_unknown() {
+        for unknown in ["Manual", "retry", ""] {
+            assert!(
+                unknown.parse::<AttemptTrigger>().is_err(),
+                "parsed: {unknown:?}"
+            );
+        }
+        for unknown in ["pending", "Delivered", ""] {
+            assert!(
+                unknown.parse::<AttemptOutcome>().is_err(),
+                "parsed: {unknown:?}"
+            );
+        }
+        for unknown in ["active", "Pending", ""] {
+            assert!(
+                unknown.parse::<DeliveryStatus>().is_err(),
+                "parsed: {unknown:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn serde_matches_display() {
+        serde_matches(&AttemptTrigger::all());
+        serde_matches(&AttemptOutcome::all());
+        serde_matches(&DeliveryStatus::all());
+    }
 }

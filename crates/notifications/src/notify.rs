@@ -19,14 +19,13 @@ pub async fn emit_project_notice<B: Binding>(
     body: &str,
     metadata: &serde_json::Value,
 ) -> sqlx::Result<Vec<Uuid>> {
-    let kind = kind.to_string();
     db::insert_feed(
         &mut *tx,
         Some(project_id),
         organization_id,
         &db::NewFeedItem {
             subject_user_id: None,
-            kind: &kind,
+            kind,
             title,
             body,
             metadata,
@@ -34,7 +33,7 @@ pub async fn emit_project_notice<B: Binding>(
         },
     )
     .await?;
-    fan_out(tx, project_id, organization_id, &kind, title, body).await
+    fan_out(tx, project_id, organization_id, kind, title, body).await
 }
 
 /// One delivery row per active connection on the project, in one `INSERT`.
@@ -42,7 +41,7 @@ pub async fn fan_out<B: Binding>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
     organization_id: &OrganizationId,
-    kind: &str,
+    kind: NotificationKind,
     title: &str,
     body: &str,
 ) -> sqlx::Result<Vec<Uuid>> {
@@ -106,7 +105,7 @@ pub async fn connector_disconnected(
     retired: &db::RetiredConnection,
     reason: &str,
 ) -> sqlx::Result<Vec<Uuid>> {
-    let provider: Provider = retired.provider.parse().unwrap_or(Provider::Slack);
+    let provider = retired.provider;
     let target = describe_target(
         provider,
         retired.external_workspace_name.as_deref(),

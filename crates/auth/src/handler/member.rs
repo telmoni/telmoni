@@ -24,6 +24,7 @@ use crate::{
     AppState,
     db::{AuthLane, members, organization_members},
     handler::{ActingProject, acting_project, authorize, parse_project_id, parse_user_id},
+    model::AuditKind,
 };
 
 #[derive(Debug, Deserialize)]
@@ -120,7 +121,7 @@ pub async fn update_role(
             request_id: None,
             ip_address: None,
             user_agent: None,
-            metadata: Some(json!({ "role": role.to_string() })),
+            metadata: Some(json!({ "role": role })),
         },
     )
     .await?;
@@ -165,7 +166,7 @@ pub async fn remove_member(
             request_id: None,
             ip_address: None,
             user_agent: None,
-            metadata: Some(json!({ "kind": "removed_by_owner" })),
+            metadata: Some(json!({ "kind": AuditKind::RemovedByOwner })),
         },
     )
     .await?;
@@ -219,7 +220,7 @@ pub async fn leave(
             request_id: None,
             ip_address: None,
             user_agent: None,
-            metadata: Some(json!({ "kind": "left" })),
+            metadata: Some(json!({ "kind": AuditKind::Left })),
         },
     )
     .await?;

@@ -67,6 +67,156 @@ impl std::fmt::Display for DeletionKind {
     }
 }
 
+/// What happened, as an audit event's details name it beside its action and
+/// its resource. ⚠ **Each word is hashed into every row that records it, on
+/// a chain that is never rewritten**: a word respelled would split one kind
+/// in two across the chain's history, so once written it never changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuditKind {
+    /// An organization `/me` provisioned for a person in none, and its owner.
+    AutoProvision,
+    /// An organization its founder asked for, and its owner.
+    OnRequest,
+    /// A project invitation sent.
+    Invited,
+    /// A project invitation withdrawn.
+    InviteRevoked,
+    /// A project invitation accepted: the seat it gave.
+    InviteAccepted,
+    /// A project invitation declined by the person it was sent to.
+    InviteDeclined,
+    /// The roster row a project invitation's accept adds to its organization.
+    EnrolledWithProjectInvite,
+    /// An organization invitation withdrawn.
+    OrganizationInviteRevoked,
+    /// An organization invitation accepted: the roster row it gave.
+    OrganizationInviteAccepted,
+    /// An organization invitation declined by the person it was sent to.
+    OrganizationInviteDeclined,
+    /// A person left a project, or an organization.
+    Left,
+    /// A person removed from an organization's roster.
+    Removed,
+    /// A person's seat on a project removed by its owner or an admin.
+    RemovedByOwner,
+    /// A seat that went with its holder's removal from the organization.
+    OrganizationRemovalCascade,
+    /// The owner offered the organization to an admin.
+    OwnershipOffered,
+    /// The owner withdrew that offer.
+    OwnershipOfferCancelled,
+    /// The admin turned it down.
+    OwnershipOfferDeclined,
+    /// The admin accepted it, and owns the organization.
+    OwnershipTransferred,
+    /// A seat its holder no longer needs, now owning what it was on.
+    SeatFoldedIntoOwnership,
+    /// The owner offered a project to one of its admins.
+    ProjectOffered,
+    /// The owner withdrew that offer.
+    ProjectOfferCancelled,
+    /// The admin turned it down.
+    ProjectOfferDeclined,
+    /// A project handed to another organization, on the chain it left.
+    ProjectTransferred,
+    /// The same handover, on the chain it joined.
+    ProjectReceived,
+    /// The admin's seat a project's previous owner keeps on it.
+    PreviousOwnerSeated,
+    /// The roster row a project's previous owner takes in its new organization.
+    PreviousOwnerEnrolled,
+    /// The roster row a seat holder takes in a project's new organization.
+    SeatHolderEnrolled,
+    /// A person's address changed.
+    EmailChange,
+    /// An organization's deletion asked for, or taken up by its owner's
+    /// account deletion.
+    OrganizationDeletion,
+    /// An organization's row deleted, its wait over.
+    DeletionFinalize,
+    /// A seat or a roster row a person's erasure removed.
+    AccountDeletion,
+}
+
+impl AuditKind {
+    /// Every kind.
+    #[must_use]
+    pub const fn all() -> [Self; 31] {
+        [
+            Self::AutoProvision,
+            Self::OnRequest,
+            Self::Invited,
+            Self::InviteRevoked,
+            Self::InviteAccepted,
+            Self::InviteDeclined,
+            Self::EnrolledWithProjectInvite,
+            Self::OrganizationInviteRevoked,
+            Self::OrganizationInviteAccepted,
+            Self::OrganizationInviteDeclined,
+            Self::Left,
+            Self::Removed,
+            Self::RemovedByOwner,
+            Self::OrganizationRemovalCascade,
+            Self::OwnershipOffered,
+            Self::OwnershipOfferCancelled,
+            Self::OwnershipOfferDeclined,
+            Self::OwnershipTransferred,
+            Self::SeatFoldedIntoOwnership,
+            Self::ProjectOffered,
+            Self::ProjectOfferCancelled,
+            Self::ProjectOfferDeclined,
+            Self::ProjectTransferred,
+            Self::ProjectReceived,
+            Self::PreviousOwnerSeated,
+            Self::PreviousOwnerEnrolled,
+            Self::SeatHolderEnrolled,
+            Self::EmailChange,
+            Self::OrganizationDeletion,
+            Self::DeletionFinalize,
+            Self::AccountDeletion,
+        ]
+    }
+
+    /// The word the chain records.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AutoProvision => "auto_provision",
+            Self::OnRequest => "on_request",
+            Self::Invited => "invited",
+            Self::InviteRevoked => "invite_revoked",
+            Self::InviteAccepted => "invite_accepted",
+            Self::InviteDeclined => "invite_declined",
+            Self::EnrolledWithProjectInvite => "enrolled_with_project_invite",
+            Self::OrganizationInviteRevoked => "organization_invite_revoked",
+            Self::OrganizationInviteAccepted => "organization_invite_accepted",
+            Self::OrganizationInviteDeclined => "organization_invite_declined",
+            Self::Left => "left",
+            Self::Removed => "removed",
+            Self::RemovedByOwner => "removed_by_owner",
+            Self::OrganizationRemovalCascade => "organization_removal_cascade",
+            Self::OwnershipOffered => "ownership_offered",
+            Self::OwnershipOfferCancelled => "ownership_offer_cancelled",
+            Self::OwnershipOfferDeclined => "ownership_offer_declined",
+            Self::OwnershipTransferred => "ownership_transferred",
+            Self::SeatFoldedIntoOwnership => "seat_folded_into_ownership",
+            Self::ProjectOffered => "project_offered",
+            Self::ProjectOfferCancelled => "project_offer_cancelled",
+            Self::ProjectOfferDeclined => "project_offer_declined",
+            Self::ProjectTransferred => "project_transferred",
+            Self::ProjectReceived => "project_received",
+            Self::PreviousOwnerSeated => "previous_owner_seated",
+            Self::PreviousOwnerEnrolled => "previous_owner_enrolled",
+            Self::SeatHolderEnrolled => "seat_holder_enrolled",
+            Self::EmailChange => "email_change",
+            Self::OrganizationDeletion => "organization_deletion",
+            Self::DeletionFinalize => "deletion_finalize",
+            Self::AccountDeletion => "account_deletion",
+        }
+    }
+}
+
 /// Organization — the tenant, the payer and the container of projects. It is
 /// nobody: the owner is a row in its roster.
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -270,6 +420,122 @@ mod tests {
                 format!("\"{}\"", scope.as_str())
             );
             assert_eq!(scope.to_string(), scope.as_str());
+        }
+    }
+
+    /// A new kind fails to compile here until `all()` lists it.
+    #[test]
+    fn all_lists_every_audit_kind() {
+        for kind in AuditKind::all() {
+            match kind {
+                AuditKind::AutoProvision
+                | AuditKind::OnRequest
+                | AuditKind::Invited
+                | AuditKind::InviteRevoked
+                | AuditKind::InviteAccepted
+                | AuditKind::InviteDeclined
+                | AuditKind::EnrolledWithProjectInvite
+                | AuditKind::OrganizationInviteRevoked
+                | AuditKind::OrganizationInviteAccepted
+                | AuditKind::OrganizationInviteDeclined
+                | AuditKind::Left
+                | AuditKind::Removed
+                | AuditKind::RemovedByOwner
+                | AuditKind::OrganizationRemovalCascade
+                | AuditKind::OwnershipOffered
+                | AuditKind::OwnershipOfferCancelled
+                | AuditKind::OwnershipOfferDeclined
+                | AuditKind::OwnershipTransferred
+                | AuditKind::SeatFoldedIntoOwnership
+                | AuditKind::ProjectOffered
+                | AuditKind::ProjectOfferCancelled
+                | AuditKind::ProjectOfferDeclined
+                | AuditKind::ProjectTransferred
+                | AuditKind::ProjectReceived
+                | AuditKind::PreviousOwnerSeated
+                | AuditKind::PreviousOwnerEnrolled
+                | AuditKind::SeatHolderEnrolled
+                | AuditKind::EmailChange
+                | AuditKind::OrganizationDeletion
+                | AuditKind::DeletionFinalize
+                | AuditKind::AccountDeletion => {}
+            }
+        }
+    }
+
+    /// ⚠ The words the chains already hold, each under a row's hash: none may
+    /// change, and no two kinds may share one.
+    #[test]
+    fn every_audit_kind_keeps_the_word_the_chain_records() {
+        let words = AuditKind::all().map(AuditKind::as_str);
+        assert_eq!(
+            words,
+            [
+                "auto_provision",
+                "on_request",
+                "invited",
+                "invite_revoked",
+                "invite_accepted",
+                "invite_declined",
+                "enrolled_with_project_invite",
+                "organization_invite_revoked",
+                "organization_invite_accepted",
+                "organization_invite_declined",
+                "left",
+                "removed",
+                "removed_by_owner",
+                "organization_removal_cascade",
+                "ownership_offered",
+                "ownership_offer_cancelled",
+                "ownership_offer_declined",
+                "ownership_transferred",
+                "seat_folded_into_ownership",
+                "project_offered",
+                "project_offer_cancelled",
+                "project_offer_declined",
+                "project_transferred",
+                "project_received",
+                "previous_owner_seated",
+                "previous_owner_enrolled",
+                "seat_holder_enrolled",
+                "email_change",
+                "organization_deletion",
+                "deletion_finalize",
+                "account_deletion",
+            ]
+        );
+        let mut unique = words.to_vec();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), words.len(), "two kinds share a word");
+    }
+
+    /// The details are written by serde, so its word must be the one pinned.
+    #[test]
+    fn an_audit_kind_is_written_as_its_word() {
+        for kind in AuditKind::all() {
+            assert_eq!(
+                serde_json::to_value(kind).unwrap(),
+                serde_json::json!(kind.as_str())
+            );
+        }
+    }
+
+    /// The roles a chain's details hold were written as `Display` spells them,
+    /// and are written by serde now: the two must not part.
+    #[test]
+    fn a_role_is_written_into_the_details_as_it_displays() {
+        for role in Role::all() {
+            assert_eq!(
+                serde_json::to_value(role).unwrap(),
+                serde_json::json!(role.to_string())
+            );
+        }
+        for role in telmoni_shared::OrganizationRole::all() {
+            assert_eq!(
+                serde_json::to_value(role).unwrap(),
+                serde_json::json!(role.to_string())
+            );
         }
     }
 }

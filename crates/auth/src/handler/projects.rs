@@ -113,6 +113,14 @@ pub async fn create_project(
         )
         .into());
     }
+    // The creator's role on the new project is the one their organization role
+    // gives them on every project in it. The gate above admits only roles that
+    // give one, so a `None` is a broken rule, refused before anything is written.
+    let Some(role) = telmoni_shared::rbac::project_role(Some(acting.role), None) else {
+        return Err(TelmoniError::Internal(
+            "an organization role that may create a project holds no role on it".into(),
+        ));
+    };
 
     // On the organization's lock, as a project landing here by transfer
     // takes it to pick a free name.
@@ -144,11 +152,6 @@ pub async fn create_project(
 
     acting.tx.commit().await?;
 
-    let role = if acting.role == telmoni_shared::OrganizationRole::Owner {
-        telmoni_shared::Role::Owner
-    } else {
-        telmoni_shared::Role::Admin
-    };
     Ok((
         StatusCode::CREATED,
         Json(json!({ "id": project_id, "slug": slug, "name": name, "role": role })),

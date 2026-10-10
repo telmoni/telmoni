@@ -59,7 +59,7 @@ pub async fn create(
     .bind(Uuid::now_v7())
     .bind(project_id)
     .bind(email)
-    .bind(role.to_string())
+    .bind(role)
     .bind(token_hash)
     .bind(invited_by)
     .bind(expires_at)

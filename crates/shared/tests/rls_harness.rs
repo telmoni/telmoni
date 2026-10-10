@@ -1,7 +1,7 @@
 //! The handler suites run as a role RLS applies to — proved, and kept that way.
 
 use sqlx::PgPool;
-use telmoni_shared::test_util::{project_root, service_pool};
+use telmoni_shared::test_util::{ServiceRole, project_root, service_pool};
 
 /// The handler's pool is filtered by the policies and the test's pool is not,
 /// on a table of its own so this tests the harness rather than a migration.
@@ -26,7 +26,7 @@ async fn the_handlers_pool_is_filtered_and_the_tests_pool_is_not(owner: PgPool) 
             .expect("build the probe table");
     }
 
-    let handler = service_pool(&owner, "auth");
+    let handler = service_pool(&owner, ServiceRole::Auth);
 
     let (role, superuser, bypass): (String, bool, bool) = sqlx::query_as(
         "SELECT current_user::text, rolsuper, rolbypassrls
@@ -172,7 +172,7 @@ fn every_handler_suite_hands_its_router_a_service_role_pool() {
     assert!(
         offenders.is_empty(),
         "these suites give their router a pool RLS does not apply to, so every tenancy \
-         assertion they make is vacuous — pass `service_pool(&pool, \"<service>\")`:\n  {}",
+         assertion they make is vacuous — pass `service_pool(&pool, ServiceRole::<Module>)`:\n  {}",
         offenders.join("\n  ")
     );
     assert!(

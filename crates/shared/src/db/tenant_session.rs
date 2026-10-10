@@ -179,6 +179,57 @@ impl MaintenanceLane {
     }
 }
 
+/// The login role each of this repository's modules runs as: one pool per
+/// module, each as its own role, and only that role a member of the
+/// module's [`MaintenanceLane`]. A module outside this repository names its
+/// own role.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServiceRole {
+    /// `auth`.
+    Auth,
+    /// `notifications`.
+    Notifications,
+    /// `agent`.
+    Agent,
+    /// `telemetry`.
+    Telemetry,
+}
+
+impl ServiceRole {
+    /// Every module's role.
+    #[must_use]
+    pub const fn all() -> [Self; 4] {
+        [
+            Self::Auth,
+            Self::Notifications,
+            Self::Agent,
+            Self::Telemetry,
+        ]
+    }
+
+    /// The role as the database names it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Auth => "auth",
+            Self::Notifications => "notifications",
+            Self::Agent => "agent",
+            Self::Telemetry => "telemetry",
+        }
+    }
+
+    /// The one lane this role may enter.
+    #[must_use]
+    pub const fn lane(self) -> MaintenanceLane {
+        match self {
+            Self::Auth => MaintenanceLane::Auth,
+            Self::Notifications => MaintenanceLane::Notifications,
+            Self::Agent => MaintenanceLane::Agent,
+            Self::Telemetry => MaintenanceLane::Telemetry,
+        }
+    }
+}
+
 /// A service's declaration of its lane: one unit type per service, in that
 /// service's own crate, implementing this. A sibling cannot name a type it
 /// does not depend on, so entering another service's lane is unwritable.
@@ -451,6 +502,31 @@ mod tests {
 
     fn person(s: &str) -> UserId {
         UserId::try_new(s).expect("valid test user id")
+    }
+
+    /// A new role fails to compile here until `all()` lists it, and each
+    /// role's lane is its own module's, named after it.
+    #[test]
+    fn every_service_role_has_its_own_lane() {
+        for role in ServiceRole::all() {
+            match role {
+                ServiceRole::Auth
+                | ServiceRole::Notifications
+                | ServiceRole::Agent
+                | ServiceRole::Telemetry => {}
+            }
+            assert_eq!(
+                role.lane().role(),
+                format!("{}_maintenance", role.name()),
+                "{role:?}"
+            );
+        }
+        let mut names = ServiceRole::all().map(ServiceRole::name);
+        names.sort_unstable();
+        assert!(
+            names.windows(2).all(|pair| pair[0] != pair[1]),
+            "all() repeats a role: {names:?}"
+        );
     }
 
     async fn setting(conn: &mut PgConnection, guc: &str) -> String {

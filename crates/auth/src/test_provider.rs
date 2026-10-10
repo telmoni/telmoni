@@ -20,7 +20,7 @@ use sqlx::PgPool;
 
 use telmoni_shared::db::tenant_session::person_scope;
 use telmoni_shared::seam::{Emitted, Notice, Notifications, PurgeHook, Telemetry};
-use telmoni_shared::{OrganizationId, ProjectId, TelmoniError, UserId};
+use telmoni_shared::{NotificationKind, OrganizationId, ProjectId, TelmoniError, UserId};
 
 use crate::db::access_tokens;
 use crate::issuer::{BEARER_TTL_SECS, Issuer, hash, secret};
@@ -38,7 +38,7 @@ pub enum SiblingCall {
         /// The project, when the notice is a project's.
         project_id: Option<String>,
         /// The wire-stable kind.
-        kind: String,
+        kind: NotificationKind,
         /// The person the notice names.
         subject_user_id: Option<String>,
         /// The one-line title.
@@ -261,7 +261,7 @@ impl Notifications for RecordingNotifications {
         self.record(SiblingCall::Emit {
             organization_id: organization_id.to_string(),
             project_id: project_id.map(ToString::to_string),
-            kind: notice.kind.to_string(),
+            kind: notice.kind,
             subject_user_id: notice.subject_user_id.map(ToString::to_string),
             title: notice.title.to_owned(),
         })

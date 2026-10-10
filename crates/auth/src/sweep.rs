@@ -49,7 +49,7 @@ use crate::db::{
 use crate::handler::deletion::{
     self, ErasureOutcome, FINALIZE_GRACE_SECONDS, FinalizeOutcome, PurgeOutcome, TailOutcome,
 };
-use crate::model::DeletionKind;
+use crate::model::{AuditKind, DeletionKind};
 
 /// Advisory-lock id for the deletion sweep: ASCII `"work_del"` as i64.
 const LOCK_ID_DELETION_SWEEP: i64 = 0x776F_726B_5F64_656C;
@@ -452,7 +452,7 @@ pub async fn terminate(
             ip_address: None,
             user_agent: None,
             metadata: Some(json!({
-                "kind": "organization_deletion",
+                "kind": AuditKind::OrganizationDeletion,
                 "deletion": "requested",
                 "by": DeletionKind::Operator,
                 "erase_after": erase_after,

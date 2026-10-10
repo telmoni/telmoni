@@ -28,7 +28,7 @@ use telmoni_auth::test_provider::{ScriptedProvider, as_person};
 use telmoni_auth::{AppState, Config, router};
 use telmoni_shared::db::audit_hash::row_hash;
 use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope, project_scope};
-use telmoni_shared::test_util::{apply_audit_migrations, seed_identity, service_pool};
+use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, seed_identity, service_pool};
 use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, Role, UserId};
 
 const SERVICE_SECRET: &str = "test-service-secret";
@@ -53,7 +53,7 @@ fn state(pool: PgPool) -> Arc<AppState> {
         support_email: None,
         deletion_tail_budget_ms: 8_000,
     };
-    let db = service_pool(&pool, "auth");
+    let db = service_pool(&pool, ServiceRole::Auth);
     Arc::new(AppState {
         issuer: telmoni_auth::test_provider::test_issuer(db.clone()),
         password: None,
@@ -834,7 +834,7 @@ async fn an_export_is_its_requesters_alone(pool: PgPool) {
 
     // And by the policy, not only the `WHERE`: a query that names nobody
     // reads an export only with its own requester bound.
-    let db = service_pool(&pool, "auth");
+    let db = service_pool(&pool, ServiceRole::Auth);
     let org = OrganizationId::try_new(&organization).unwrap();
     for (who, seen) in [(ADMIN, 0_i64), (OWNER, 1)] {
         let mut tx = organization_scope(&db, &org)
@@ -1050,7 +1050,7 @@ async fn an_erased_persons_exports_go_with_them(pool: PgPool) {
     let entry = finished(&pool, &organization, OWNER, &id).await;
     assert_eq!(entry["status"], json!("ready"), "{entry}");
 
-    let db = service_pool(&pool, "auth");
+    let db = service_pool(&pool, ServiceRole::Auth);
     let mut tx = maintenance_scope(&db, AuthLane).await.unwrap();
     let gone = audit_exports::delete_of_person(&mut tx, &UserId::try_new(OWNER).unwrap())
         .await

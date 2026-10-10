@@ -29,6 +29,7 @@ use crate::db::{AuthLane, access_tokens, flags, members, organizations, projects
 use crate::handler::{
     acting_organization, acting_project, authorize, parse_organization_id, parse_project_id,
 };
+use crate::model::InviteScope;
 
 fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers
@@ -219,7 +220,7 @@ impl Auth for AppState {
             })
             .collect();
         Ok(json!({
-            "scope": if whole_chain { "organization" } else { "project" },
+            "scope": if whole_chain { InviteScope::Organization } else { InviteScope::Project },
             "events": events,
         }))
     }

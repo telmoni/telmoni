@@ -29,8 +29,10 @@ use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::envelope::{KEK_VERSION, Kek, KmsKek, LocalKek, Vault};
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::net_guard::Egress;
-use telmoni_shared::test_util::{apply_audit_migrations, service_pool};
-use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, Redacted, Role, UserId};
+use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, service_pool};
+use telmoni_shared::{
+    NotificationKind, OrganizationId, OrganizationRole, ProjectId, Redacted, Role, UserId,
+};
 const SIGNING_SECRET: &str = "8f742231b10e8888abcd99yyyzzz85a5";
 const CONNECTOR_KEY: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 /// The KMS key the two outage tests name. The mock answers on its path.
@@ -198,7 +200,7 @@ fn state_full(
         auth.flags(flags);
     }
     Arc::new(AppState {
-        db: service_pool(&pool, "notifications"),
+        db: service_pool(&pool, ServiceRole::Notifications),
         config,
         service_secrets: ServiceSecrets::new(SECRET.to_string(), None::<String>),
         auth,
@@ -432,7 +434,7 @@ async fn seed_delivery(pool: &PgPool, organization: &str, connection: Uuid) -> U
             connection_id: connection,
             project_id: &project_of(organization),
             organization_id: &oid(organization),
-            kind: "member_added",
+            kind: NotificationKind::MemberAdded,
             subject: "Sam joined",
             body: "Sam accepted the invitation.",
             subject_user_id: None,
@@ -3273,7 +3275,7 @@ async fn erasing_a_person_rewrites_the_deliveries_that_named_them(pool: PgPool) 
                     connection_id: connection,
                     project_id: &project_of(ORGANIZATION),
                     organization_id: &oid(ORGANIZATION),
-                    kind: "member_added",
+                    kind: NotificationKind::MemberAdded,
                     subject,
                     body: "Sam Leaver accepted the invitation and is now admin on the project.",
                     subject_user_id,

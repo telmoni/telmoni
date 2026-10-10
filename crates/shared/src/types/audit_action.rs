@@ -26,6 +26,14 @@ pub enum AuditAction {
     Exported,
 }
 
+impl AuditAction {
+    /// Every action, in wire order.
+    #[must_use]
+    pub const fn all() -> [Self; 4] {
+        [Self::Created, Self::Updated, Self::Deleted, Self::Exported]
+    }
+}
+
 impl fmt::Display for AuditAction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -58,12 +66,7 @@ mod tests {
     use super::*;
 
     /// Every variant, for the round-trip below.
-    const ALL: &[AuditAction] = &[
-        AuditAction::Created,
-        AuditAction::Updated,
-        AuditAction::Deleted,
-        AuditAction::Exported,
-    ];
+    const ALL: &[AuditAction] = &AuditAction::all();
 
     /// `ALL` covers the enum, and says so by count.
     #[test]

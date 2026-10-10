@@ -27,16 +27,36 @@ pub struct PartitionedTable {
     /// Whether the drop side is active. Off for `audit` until a cold archive
     /// exists, so history is never destroyed.
     pub drop_enabled: bool,
-    /// The RLS key column, and via `app.<column>` the GUC each child's policy
-    /// compares. Hardcoding one key would harden a table keyed by the other
-    /// with a predicate on a column it does not have — every direct read
-    /// refused, maintenance included.
-    pub tenant_key: &'static str,
+    /// What its rows are tenanted by. Hardcoding one key would harden a table
+    /// keyed by the other with a predicate on a column it does not have —
+    /// every direct read refused, maintenance included.
+    pub tenant_key: TenantKey,
     /// The maintenance lanes the parent's `maintenance_access` policy admits.
     /// Each child carries the same list, so it must match the parent's
     /// migration exactly — a lane missing here loses the child's rows when a
     /// query names it directly.
     pub lanes: &'static [MaintenanceLane],
+}
+
+/// The column a partitioned table's rows are tenanted by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TenantKey {
+    /// `organization_id`.
+    Organization,
+    /// `project_id`.
+    Project,
+}
+
+impl TenantKey {
+    /// The key column, and via `app.<column>` the GUC each child's policy
+    /// compares it to.
+    #[must_use]
+    pub const fn column(self) -> &'static str {
+        match self {
+            Self::Organization => "organization_id",
+            Self::Project => "project_id",
+        }
+    }
 }
 
 /// How long the feed keeps a notice: a recent-activity surface, not an
@@ -57,7 +77,7 @@ pub const RETENTION: &[PartitionedTable] = &[PartitionedTable {
     table: "events",
     retention_days: 730,
     drop_enabled: false,
-    tenant_key: "organization_id",
+    tenant_key: TenantKey::Organization,
     lanes: &[MaintenanceLane::Auth, MaintenanceLane::Notifications],
 }];
 
@@ -200,7 +220,7 @@ BEGIN
              || 'WITH CHECK (current_user IN ({lane_names}))';
     END IF;
 END $$;",
-        key = t.tenant_key,
+        key = t.tenant_key.column(),
         schema = t.schema,
         child = child,
         lane_roles = t
@@ -405,7 +425,7 @@ mod tests {
             table: "run_events",
             retention_days: 90,
             drop_enabled: true,
-            tenant_key: "project_id",
+            tenant_key: TenantKey::Project,
             lanes: &[MaintenanceLane::Notifications],
         };
         let sql = harden_child_ddl(
@@ -426,15 +446,8 @@ mod tests {
     }
 
     #[test]
-    fn the_registry_names_a_real_key_for_every_table() {
+    fn every_table_in_the_registry_admits_a_lane() {
         for t in RETENTION {
-            assert!(
-                matches!(t.tenant_key, "organization_id" | "project_id"),
-                "{}.{} names unknown tenant_key {}",
-                t.schema,
-                t.table,
-                t.tenant_key
-            );
             assert!(
                 !t.lanes.is_empty(),
                 "{}.{} admits no lane — its children would render an empty `TO`",
@@ -450,7 +463,7 @@ mod tests {
             table: "t",
             retention_days: 90,
             drop_enabled: true,
-            tenant_key: "project_id",
+            tenant_key: TenantKey::Project,
             lanes: &[MaintenanceLane::Notifications],
         }
     }

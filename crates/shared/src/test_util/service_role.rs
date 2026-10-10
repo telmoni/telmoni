@@ -18,6 +18,8 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{Executor as _, PgPool};
 use tokio::sync::Mutex;
 
+pub use crate::db::tenant_session::ServiceRole;
+
 /// The owner-issued object grants, byte-identical to what the migrator binary
 /// embeds. Read at compile time, so a moved file is a build error rather than
 /// a suite that silently grants nothing.
@@ -26,34 +28,9 @@ const OBJECT_GRANTS_SQL: &str = include_str!(concat!(
     "/../migrator/sql/object_grants.sql"
 ));
 
-/// The roles `object_grants.sql` names as a grantee, plus `migrator`, whose
-/// `ALTER DEFAULT PRIVILEGES` fails without it, plus the lanes, which their
-/// modules' migrations grant on and whose memberships [`prepare`] issues.
-/// Must equal `GRANTEE_ROLES` in `crates/migrator/src/lib.rs` plus those.
-const REQUIRED_ROLES: &[&str] = &[
-    "auth",
-    "notifications",
-    "agent",
-    "telemetry",
-    "migrator",
-    "auth_maintenance",
-    "notifications_maintenance",
-    "agent_maintenance",
-    "telemetry_maintenance",
-];
-
-/// Each module's lane membership, as the role hardening grants it: its own
-/// lane only, and never inherited.
-const LANE_MEMBERSHIPS: &[&str] = &[
-    "GRANT auth_maintenance TO auth WITH INHERIT FALSE, SET TRUE",
-    "GRANT notifications_maintenance TO notifications WITH INHERIT FALSE, SET TRUE",
-    "GRANT agent_maintenance TO agent WITH INHERIT FALSE, SET TRUE",
-    "GRANT telemetry_maintenance TO telemetry WITH INHERIT FALSE, SET TRUE",
-];
-
-/// The roles a module's pool may connect as. One binary holds one pool per
-/// module, each as that module's own role.
-const SERVICE_ROLES: &[&str] = &["auth", "notifications", "agent", "telemetry"];
+/// The role `object_grants.sql`'s `ALTER DEFAULT PRIVILEGES` names, beside
+/// the modules' roles and lanes ([`ServiceRole`]): it fails without it.
+const MIGRATOR_ROLE: &str = "migrator";
 
 /// A service beside this repository's that runs under the same rules: its
 /// login role, the lane role only it may enter, and the owner-issued grants
@@ -78,14 +55,10 @@ const SETUP_LOCK: i64 = 0x7376_635f_726f_6c65; // "svc_role" as bytes
 static PREPARED: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
 
 /// A pool connected as `role`, with the production grants applied to the
-/// calling test's database. Panics if `role` is not a runtime service role.
+/// calling test's database.
 #[must_use = "the pool is what the handler must be given; dropping it changes nothing"]
-pub fn service_pool(pool: &PgPool, role: &str) -> PgPool {
-    assert!(
-        SERVICE_ROLES.contains(&role),
-        "`{role}` is not a runtime service role — expected one of {SERVICE_ROLES:?}"
-    );
-    role_pool(pool, role, None)
+pub fn service_pool(pool: &PgPool, role: ServiceRole) -> PgPool {
+    role_pool(pool, role.name(), None)
 }
 
 /// [`service_pool`] for a service beside this repository's: this
@@ -164,11 +137,15 @@ async fn prepare(conn: &mut sqlx::PgConnection, database: &str, sibling: Option<
         .expect("take the service-role setup lock");
 
     if !core_done {
-        for role in REQUIRED_ROLES {
-            create_role(conn, role).await;
-        }
-        for membership in LANE_MEMBERSHIPS {
-            conn.execute(*membership)
+        create_role(conn, MIGRATOR_ROLE).await;
+        for role in ServiceRole::all() {
+            let (login, lane) = (role.name(), role.lane().role());
+            create_role(conn, login).await;
+            create_role(conn, lane).await;
+            // As the role hardening grants it: its own lane only, and never
+            // inherited.
+            let membership = format!("GRANT {lane} TO {login} WITH INHERIT FALSE, SET TRUE");
+            conn.execute(membership.as_str())
                 .await
                 .expect("grant a maintenance lane membership");
         }

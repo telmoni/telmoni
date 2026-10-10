@@ -397,9 +397,9 @@ pub struct TokenUsage {
 pub enum AgentTurnEnding {
     /// The model answered.
     Answered {
-        /// Why the answer ends early when it does — `capped`, `truncated`,
-        /// `timed_out` or `interrupted` — as the person was told in a note.
-        stopped_short: Option<&'static str>,
+        /// Why the answer ends early when it does, as the person was told in
+        /// a note.
+        stopped_short: Option<StoppedShort>,
     },
     /// The turn failed.
     Failed {
@@ -407,8 +407,37 @@ pub enum AgentTurnEnding {
         /// person wrote.
         problem_type: String,
     },
+    /// The turn left by a path that named no ending: not an answer, and no
+    /// problem the person was shown.
+    Unfinished,
     /// The asker left, or is no longer who began it; nothing was saved.
     Cancelled,
+}
+
+/// Why an answer ends early, as the person was told in a note.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoppedShort {
+    /// The tool loop ran out of rounds first.
+    Capped,
+    /// The answer ran past the token ceiling.
+    Truncated,
+    /// The deadline passed first.
+    TimedOut,
+    /// The model's stream broke off after it had written something.
+    Interrupted,
+}
+
+impl StoppedShort {
+    /// The word a record gives it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Capped => "capped",
+            Self::Truncated => "truncated",
+            Self::TimedOut => "timed_out",
+            Self::Interrupted => "interrupted",
+        }
+    }
 }
 
 /// One model call of a console question.

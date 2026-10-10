@@ -4,6 +4,8 @@
 //! and width-checked by [`crate::embed::literal`], so no driver type for
 //! them is needed.
 
+use std::{fmt, str::FromStr};
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -13,7 +15,7 @@ use telmoni_shared::db::tenant_session::{
     PersonOrganizationProject, Scoped, maintenance_scope,
 };
 use telmoni_shared::seam::Audience;
-use telmoni_shared::{OrganizationId, ProjectId, UserId};
+use telmoni_shared::{OrganizationId, ParseEnumError, ProjectId, UserId};
 use uuid::Uuid;
 
 /// This module's cross-tenant lane. See `tenant_session::Lane`.
@@ -41,13 +43,17 @@ pub enum Source {
 }
 
 impl Source {
-    pub const ALL: [Self; 5] = [
-        Self::Docs,
-        Self::Audit,
-        Self::Feed,
-        Self::Delivery,
-        Self::Conversation,
-    ];
+    /// Every source, in the migration's order.
+    #[must_use]
+    pub const fn all() -> [Self; 5] {
+        [
+            Self::Docs,
+            Self::Audit,
+            Self::Feed,
+            Self::Delivery,
+            Self::Conversation,
+        ]
+    }
 
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -58,6 +64,22 @@ impl Source {
             Self::Delivery => "delivery",
             Self::Conversation => "conversation",
         }
+    }
+}
+
+impl fmt::Display for Source {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for Source {
+    type Err = ParseEnumError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::all()
+            .into_iter()
+            .find(|source| source.as_str() == s)
+            .ok_or_else(|| ParseEnumError::new(s, "docs, audit, feed, delivery, conversation"))
     }
 }
 
@@ -77,6 +99,17 @@ pub enum Visibility {
 }
 
 impl Visibility {
+    /// Every visibility, in the migration's order.
+    #[must_use]
+    pub const fn all() -> [Self; 4] {
+        [
+            Self::Everyone,
+            Self::Audit,
+            Self::OrganizationAdmin,
+            Self::Author,
+        ]
+    }
+
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -85,6 +118,22 @@ impl Visibility {
             Self::OrganizationAdmin => "organization_admin",
             Self::Author => "author",
         }
+    }
+}
+
+impl fmt::Display for Visibility {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for Visibility {
+    type Err = ParseEnumError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::all()
+            .into_iter()
+            .find(|visibility| visibility.as_str() == s)
+            .ok_or_else(|| ParseEnumError::new(s, "everyone, audit, organization_admin, author"))
     }
 }
 
@@ -98,13 +147,42 @@ impl From<Audience> for Visibility {
     }
 }
 
-/// Who wrote a message: `agent.messages.role`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
+/// Who wrote a message: `agent.messages.role`. The console reads it as
+/// `AGENT_ROLES` (`web/lib/types/agent.ts`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, sqlx::Type, Serialize, Deserialize)]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum MessageRole {
     User,
     Assistant,
+}
+
+impl MessageRole {
+    /// Every role, in the migration's order.
+    #[must_use]
+    pub const fn all() -> [Self; 2] {
+        [Self::User, Self::Assistant]
+    }
+}
+
+impl fmt::Display for MessageRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::User => write!(f, "user"),
+            Self::Assistant => write!(f, "assistant"),
+        }
+    }
+}
+
+impl FromStr for MessageRole {
+    type Err = ParseEnumError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "user" => Ok(Self::User),
+            "assistant" => Ok(Self::Assistant),
+            _ => Err(ParseEnumError::new(s, "user, assistant")),
+        }
+    }
 }
 
 // ── The index ────────────────────────────────────────────────────────────────
@@ -1621,4 +1699,76 @@ pub async fn forget_fences(
     .execute(tx.conn())
     .await?
     .rows_affected())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A new variant fails to compile here until `all()` lists it.
+    #[test]
+    fn all_lists_every_variant() {
+        for source in Source::all() {
+            match source {
+                Source::Docs
+                | Source::Audit
+                | Source::Feed
+                | Source::Delivery
+                | Source::Conversation => {}
+            }
+        }
+        for visibility in Visibility::all() {
+            match visibility {
+                Visibility::Everyone
+                | Visibility::Audit
+                | Visibility::OrganizationAdmin
+                | Visibility::Author => {}
+            }
+        }
+        for role in MessageRole::all() {
+            match role {
+                MessageRole::User | MessageRole::Assistant => {}
+            }
+        }
+        listed_once(&Source::all());
+        listed_once(&Visibility::all());
+        listed_once(&MessageRole::all());
+    }
+
+    fn listed_once<T: fmt::Display>(all: &[T]) {
+        let mut seen: Vec<String> = all.iter().map(ToString::to_string).collect();
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen.len(), all.len(), "all() repeats a variant");
+    }
+
+    #[test]
+    fn from_str_round_trips_and_serde_matches_display() {
+        round_trips(&Source::all());
+        round_trips(&Visibility::all());
+        round_trips(&MessageRole::all());
+    }
+
+    fn round_trips<T>(all: &[T])
+    where
+        T: Copy + PartialEq + fmt::Debug + fmt::Display + FromStr<Err = ParseEnumError> + Serialize,
+    {
+        for v in all {
+            assert_eq!(v.to_string().parse::<T>(), Ok(*v));
+            assert_eq!(serde_json::to_string(v).unwrap(), format!("\"{v}\""));
+        }
+    }
+
+    #[test]
+    fn from_str_rejects_unknown() {
+        for word in ["Docs", "conversations", "chunk", ""] {
+            assert!(word.parse::<Source>().is_err(), "parsed: {word:?}");
+        }
+        for word in ["Everyone", "owner", "organization-admin", ""] {
+            assert!(word.parse::<Visibility>().is_err(), "parsed: {word:?}");
+        }
+        for word in ["User", "system", "tool", ""] {
+            assert!(word.parse::<MessageRole>().is_err(), "parsed: {word:?}");
+        }
+    }
 }

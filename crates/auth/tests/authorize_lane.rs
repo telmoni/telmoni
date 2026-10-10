@@ -21,7 +21,7 @@ use tower::ServiceExt;
 use telmoni_auth::test_provider::{Call, ScriptedProvider, as_person, bearer, bearer_in};
 use telmoni_auth::{AppState, Config, router};
 use telmoni_shared::seam::Auth as _;
-use telmoni_shared::test_util::{apply_audit_migrations, seed_identity, service_pool};
+use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, seed_identity, service_pool};
 use telmoni_shared::{OrganizationRole, Role};
 
 const SERVICE_SECRET: &str = "test-service-secret";
@@ -41,7 +41,7 @@ fn state(pool: PgPool) -> (Arc<AppState>, Arc<ScriptedProvider>) {
         deletion_tail_budget_ms: 8_000,
     };
     let provider = Arc::new(ScriptedProvider::new());
-    let db = service_pool(&pool, "auth");
+    let db = service_pool(&pool, ServiceRole::Auth);
     let state = Arc::new(AppState {
         issuer: telmoni_auth::test_provider::test_issuer(db.clone()),
         password: None,

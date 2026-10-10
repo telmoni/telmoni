@@ -32,6 +32,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 
 use telmoni_shared::config::{optional, require};
+use telmoni_shared::db::tenant_session::ServiceRole;
 
 /// Run every pending migration of every set, then the object grants, then
 /// ClickHouse's file.
@@ -268,12 +269,6 @@ async fn run_migrations(
 /// binary that applies them.
 const OBJECT_GRANTS_SQL: &str = include_str!("../sql/object_grants.sql");
 
-/// Every role the grants file names as a grantee, checked before executing.
-/// A deployment that runs everything as one role has none of them, and
-/// nothing to grant; a missing one is otherwise an error the file's own
-/// guards cannot catch.
-const GRANTEE_ROLES: &[&str] = &["auth", "notifications", "agent", "telemetry"];
-
 /// Apply `object_grants.sql` as the owner, then every file in
 /// [`GRANTS_DIR`], each skipped loudly — naming what is missing — when its
 /// grantee roles don't exist.
@@ -284,7 +279,12 @@ async fn apply_object_grants(options: &sqlx::postgres::PgConnectOptions) -> anyh
         .connect_with(options.clone())
         .await?;
 
-    let missing = missing_roles(&pool, GRANTEE_ROLES).await?;
+    // Every module's role is a grantee of the file, checked before it runs.
+    // A deployment that runs everything as one role has none of them, and
+    // nothing to grant; a missing one is otherwise an error the file's own
+    // guards cannot catch.
+    let grantees = ServiceRole::all().map(ServiceRole::name);
+    let missing = missing_roles(&pool, &grantees).await?;
     if !missing.is_empty() {
         tracing::warn!(
             missing = missing.join(", "),

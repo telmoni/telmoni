@@ -30,7 +30,7 @@ use telmoni_shared::acting::{Acting, ActingProject};
 use telmoni_shared::db::tenant_session::{maintenance_scope, person_scope};
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::seam::{Agent, Auth, Emitted, Notice, Notifications, ProjectHome};
-use telmoni_shared::test_util::service_pool;
+use telmoni_shared::test_util::{ServiceRole, service_pool};
 use telmoni_shared::{
     AuthError, FlagSet, OrganizationId, OrganizationRole, OrganizationStatus, ProjectId, Role,
     TelmoniError, UserId,
@@ -103,7 +103,7 @@ fn state(pool: &PgPool, embedder: Arc<SameVector>) -> AppState {
 
 fn state_with(pool: &PgPool, embedder: Arc<SameVector>, auth: Arc<dyn Auth>) -> AppState {
     AppState {
-        db: service_pool(pool, "agent"),
+        db: service_pool(pool, ServiceRole::Agent),
         config: Config {
             database_url: String::new(),
             model: None,
