@@ -70,6 +70,33 @@ export type { ApiToken, TokenAccess } from "./entities/token";
 export { fetchContentMode } from "./entities/content-mode";
 export type { ContentModeSetting } from "./entities/content-mode";
 
+export { fetchFieldInventory } from "./entities/field-inventory";
+export type { FieldInventory } from "./entities/field-inventory";
+
+export { fetchTrace, fetchTraces } from "./entities/traces";
+export type {
+  Trace,
+  TraceAccess,
+  TraceDetail,
+  TraceList,
+  TraceQuery,
+  TraceSpan,
+  TracesAccess,
+} from "./entities/traces";
+
+export { fetchUsers } from "./entities/users";
+export type { UserList, UserQuery, UserRow, UsersAccess } from "./entities/users";
+
+export { fetchConversation, fetchConversations } from "./entities/conversations";
+export type {
+  ConversationAccess,
+  ConversationDetail,
+  ConversationList,
+  ConversationQuery,
+  ConversationRow,
+  ConversationsAccess,
+} from "./entities/conversations";
+
 export { fetchConnectors } from "./entities/connectors";
 export type {
   Connection,

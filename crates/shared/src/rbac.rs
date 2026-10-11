@@ -61,6 +61,10 @@ pub enum Resource {
     /// The organization's append-only audit chain. Owners and admins read it,
     /// members do not; the resource exists to deny the write verbs structurally.
     Audit,
+    /// A project's traces: the runs its agents recorded, which every role on
+    /// the project reads. Ingest alone writes a span and the nightly purge
+    /// alone removes one, so the write verbs are denied structurally.
+    Trace,
     // The product built on this platform adds its resources here WITH their
     // handlers, never before, or the matrix grants a capability no endpoint
     // exposes.
@@ -69,13 +73,14 @@ pub enum Resource {
 impl Resource {
     /// Every resource, in the matrix's order.
     #[must_use]
-    pub const fn all() -> [Self; 5] {
+    pub const fn all() -> [Self; 6] {
         [
             Self::Project,
             Self::Member,
             Self::Token,
             Self::Connector,
             Self::Audit,
+            Self::Trace,
         ]
     }
 
@@ -88,6 +93,7 @@ impl Resource {
             Self::Token => "token",
             Self::Connector => "connector",
             Self::Audit => "audit",
+            Self::Trace => "trace",
         }
     }
 }
@@ -106,10 +112,12 @@ pub fn can(role: Role, verb: Verb, resource: Resource) -> bool {
 
     // Combinations no customer endpoint exposes — deny outright. The chain is
     // written by `emit_audit` and hash-linked. A role that could edit it would
-    // make it a record of what somebody was willing to leave behind.
+    // make it a record of what somebody was willing to leave behind. A trace
+    // is written by ingest and removed by the purge: a record, not a thing a
+    // person edits.
     if matches!(
         (verb, resource),
-        (V::Create | V::Update | V::Delete, R::Audit)
+        (V::Create | V::Update | V::Delete, R::Audit | R::Trace)
     ) {
         return false;
     }
@@ -165,7 +173,7 @@ mod tests {
     use super::*;
 
     const VERBS: [Verb; 4] = Verb::all();
-    const RESOURCES: [Resource; 5] = Resource::all();
+    const RESOURCES: [Resource; 6] = Resource::all();
 
     /// A new variant fails to compile here until `all()` lists it, and two
     /// variants never share a word.
@@ -182,7 +190,8 @@ mod tests {
                 | Resource::Member
                 | Resource::Token
                 | Resource::Connector
-                | Resource::Audit => {}
+                | Resource::Audit
+                | Resource::Trace => {}
             }
         }
         let mut words: Vec<&str> = VERBS.iter().map(|v| v.as_str()).collect();
@@ -206,12 +215,16 @@ mod tests {
     fn deny_by_default_on_meaningless_combos() {
         assert!(!can(Role::Owner, Verb::Create, Resource::Audit));
         assert!(!can(Role::Owner, Verb::Delete, Resource::Audit));
+        assert!(!can(Role::Owner, Verb::Create, Resource::Trace));
+        assert!(!can(Role::Owner, Verb::Update, Resource::Trace));
+        assert!(!can(Role::Owner, Verb::Delete, Resource::Trace));
     }
 
     #[test]
     fn member_is_read_only() {
         assert!(can(Role::Member, Verb::Read, Resource::Member));
         assert!(can(Role::Member, Verb::Read, Resource::Project));
+        assert!(can(Role::Member, Verb::Read, Resource::Trace));
         assert!(!can(Role::Member, Verb::Read, Resource::Audit));
         for resource in RESOURCES {
             for verb in [Verb::Create, Verb::Update, Verb::Delete] {
@@ -251,6 +264,11 @@ mod tests {
         assert!(!can(Role::Admin, Verb::Create, Resource::Audit));
         assert!(!can(Role::Admin, Verb::Update, Resource::Audit));
         assert!(!can(Role::Admin, Verb::Delete, Resource::Audit));
+
+        assert!(can(Role::Admin, Verb::Read, Resource::Trace));
+        assert!(!can(Role::Admin, Verb::Create, Resource::Trace));
+        assert!(!can(Role::Admin, Verb::Update, Resource::Trace));
+        assert!(!can(Role::Admin, Verb::Delete, Resource::Trace));
     }
 
     /// The answer a refusal gives has to be reachable and has to be true.
@@ -308,6 +326,11 @@ mod tests {
             Some(Role::Owner)
         );
         assert_eq!(minimum_role(Verb::Delete, Resource::Audit), None);
+        assert_eq!(
+            minimum_role(Verb::Read, Resource::Trace),
+            Some(Role::Member)
+        );
+        assert_eq!(minimum_role(Verb::Delete, Resource::Trace), None);
     }
 
     #[test]

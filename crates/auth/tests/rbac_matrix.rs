@@ -36,6 +36,7 @@ const MATRIX: &[Cell] = &[
     cell(Role::Owner, Verb::Update, Resource::Connector, true),
     cell(Role::Owner, Verb::Delete, Resource::Connector, true),
     cell(Role::Owner, Verb::Read, Resource::Audit, true),
+    cell(Role::Owner, Verb::Read, Resource::Trace, true),
     cell(Role::Admin, Verb::Read, Resource::Project, true),
     cell(Role::Admin, Verb::Create, Resource::Project, true),
     cell(Role::Admin, Verb::Update, Resource::Project, true),
@@ -53,6 +54,7 @@ const MATRIX: &[Cell] = &[
     cell(Role::Admin, Verb::Update, Resource::Connector, true),
     cell(Role::Admin, Verb::Delete, Resource::Connector, true),
     cell(Role::Admin, Verb::Read, Resource::Audit, true),
+    cell(Role::Admin, Verb::Read, Resource::Trace, true),
     cell(Role::Member, Verb::Read, Resource::Project, true),
     cell(Role::Member, Verb::Create, Resource::Project, false),
     cell(Role::Member, Verb::Update, Resource::Project, false),
@@ -70,6 +72,7 @@ const MATRIX: &[Cell] = &[
     cell(Role::Member, Verb::Update, Resource::Connector, false),
     cell(Role::Member, Verb::Delete, Resource::Connector, false),
     cell(Role::Member, Verb::Read, Resource::Audit, false),
+    cell(Role::Member, Verb::Read, Resource::Trace, true),
 ];
 
 const fn cell(role: Role, verb: Verb, resource: Resource, allowed: bool) -> Cell {
@@ -225,6 +228,7 @@ fn an_admin_can_manage_everything_except_delete_project() {
     assert_allows(Role::Admin, Verb::Delete, Resource::Connector);
 
     assert_allows(Role::Admin, Verb::Read, Resource::Audit);
+    assert_allows(Role::Admin, Verb::Read, Resource::Trace);
 }
 
 /// Owner and Admin read the audit log, the Member does not, and no role writes it.
@@ -303,9 +307,10 @@ const fn resource_ordinal(r: Resource) -> usize {
         Resource::Token => 2,
         Resource::Connector => 3,
         Resource::Audit => 4,
+        Resource::Trace => 5,
     }
 }
-const RESOURCE_COUNT: usize = 5;
+const RESOURCE_COUNT: usize = 6;
 
 /// Assert one array covers `N` slots exactly once.
 fn assert_covers<T: Copy + std::fmt::Debug>(
@@ -356,7 +361,10 @@ fn every_array_lists_every_variant_exactly_once() {
 fn is_meaningless_combo(verb: Verb, resource: Resource) -> bool {
     matches!(
         (verb, resource),
-        (Verb::Create | Verb::Update | Verb::Delete, Resource::Audit)
+        (
+            Verb::Create | Verb::Update | Verb::Delete,
+            Resource::Audit | Resource::Trace
+        )
     )
 }
 
