@@ -4,14 +4,15 @@
 //! each on its own, and a read naming none fails; the module's user reaches
 //! nothing else; a failed read's error quotes none of its values; the
 //! nightly purge drops whole days and months past retention and nothing
-//! newer.
+//! newer; a deleted project's rows are hidden at once and off the disk once
+//! the nightly purge has rewritten them away.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
 mod common;
 
 use chrono::{Duration, TimeZone, Utc};
 
-use common::{clickhouse_or_skip, received, span};
+use common::{clickhouse_or_skip, eventually, received, rows_of, span};
 use telmoni_shared::{ProjectId, SpanKind, SpanStatus};
 use telmoni_telemetry::retention;
 use telmoni_telemetry::store::{PROJECTS_SETTING, Projects, SpanRow};
@@ -39,7 +40,7 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
         input_tokens: 1_200,
         output_tokens: 300,
         cache_read_input_tokens: 1_000,
-        customer_id: "9f86d081884c7d659a2feaa0c55ad015".into(),
+        user_id: "9f86d081884c7d659a2feaa0c55ad015".into(),
         conversation_id: "thread-42".into(),
         tags: vec![
             ("team".into(), "search".into()),
@@ -81,7 +82,7 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
             "SELECT project_id, received_at, units, run_id, agent, trace_id, span_id, \
              parent_span_id, kind, name, started_at, ended_at, status, error_type, model, \
              provider, input_tokens, output_tokens, cache_read_input_tokens, \
-             cache_write_input_tokens, customer_id, conversation_id, tags, bound_stall_after_s, \
+             cache_write_input_tokens, user_id, conversation_id, tags, bound_stall_after_s, \
              bound_max_steps, bound_max_cost_usd, sample_rate, attributes \
              FROM telemetry.spans \
              WHERE project_id IN {projects:Array(String)} AND kind IN {kinds:Array(String)} \
@@ -287,8 +288,8 @@ async fn a_read_naming_no_project_fails() {
 
 /// ⚠ **A failed read's error quotes none of its values.** ClickHouse masks
 /// every quoted literal in its errors and in its own log
-/// (`crates/telemetry/clickhouse/low-memory.xml`), so a customer's id a
-/// read binds reaches neither, nor the client's log of the error.
+/// (`crates/telemetry/clickhouse/low-memory.xml`), so a user's id a read
+/// binds reaches neither, nor the client's log of the error.
 #[tokio::test]
 async fn a_failed_reads_error_quotes_none_of_its_values() {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
@@ -298,23 +299,24 @@ async fn a_failed_reads_error_quotes_none_of_its_values() {
         .store
         .read(
             &Projects::one(ProjectId::new()),
-            "SELECT toUInt64({customer:String}) FROM telemetry.spans \
+            "SELECT toUInt64({user:String}) FROM telemetry.spans \
              WHERE project_id IN {projects:Array(String)}",
         )
-        .param("customer", "customer-7731")
+        .param("user", "user-7731")
         .fetch_all::<u64>()
         .await
-        .expect_err("a customer's id parsed as a number");
+        .expect_err("a user's id parsed as a number");
     let error = failed.to_string();
     assert!(
-        error.contains("CANNOT_PARSE_TEXT") && !error.contains("customer-7731"),
+        error.contains("CANNOT_PARSE_TEXT") && !error.contains("user-7731"),
         "the error quoted the value it failed on: {error}"
     );
 }
 
-/// ⚠ **The module's user reads the two tables and writes spans, and nothing
-/// more.** The view would answer it past the policy, since it reads as its
-/// definer; the rollup is the view's to write; the ledger is the migrator's.
+/// ⚠ **The module's user reads the two tables, writes spans and marks a
+/// project's rows deleted in both, and nothing more.** The view would answer
+/// it past the policy, since it reads as its definer; the rollup is the
+/// view's to write; the ledger is the migrator's.
 #[tokio::test]
 async fn the_module_user_reaches_nothing_but_its_two_tables() {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
@@ -450,6 +452,75 @@ async fn the_nightly_purge_drops_whole_days_and_months_past_retention() {
         retention::Purged::default(),
         "a second night found more to drop"
     );
+}
+
+/// ⚠ **A deleted project's rows go, and no other project's.** Marked by the
+/// module's user, so no read answers them a moment later, in the spans and
+/// in the totals; off the disk once the nightly purge applies the mask,
+/// which the migrator reads past, with `apply_deleted_mask` off, to prove.
+/// A second delete finds nothing and is fine.
+#[tokio::test]
+async fn a_deleted_projects_rows_are_hidden_at_once_and_off_the_disk_by_the_nightly_purge() {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let (gone, kept) = (ProjectId::new(), ProjectId::new());
+    ch.store
+        .insert_spans(&[
+            span(&gone, SpanKind::Run, "nightly-report", 100),
+            span(&gone, SpanKind::ToolCall, "search_docs", 30),
+            span(&kept, SpanKind::Run, "nightly-report", 100),
+        ])
+        .await
+        .expect("insert both projects' spans");
+    assert_eq!(rows_of(&ch.store, &gone).await, (2, 2));
+
+    ch.store
+        .delete_project(&gone)
+        .await
+        .expect("the module's user marks a project's rows deleted");
+    eventually("the deleted project's rows are hidden", || async {
+        rows_of(&ch.store, &gone).await == (0, 0)
+    })
+    .await;
+    assert_eq!(
+        rows_of(&ch.store, &kept).await,
+        (1, 1),
+        "the delete took another project's rows"
+    );
+    ch.store
+        .delete_project(&gone)
+        .await
+        .expect("a second delete finds nothing");
+
+    retention::rewrite_deleted(&ch.migrator)
+        .await
+        .expect("the migrator applies the mask");
+    for table in ["telemetry.spans", "telemetry.spans_hourly"] {
+        let on_disk = |project: &ProjectId| {
+            ch.migrator
+                .query_raw(&format!(
+                    "SELECT count() FROM {table} WHERE project_id = {{project:String}}"
+                ))
+                .with_setting("apply_deleted_mask", "0")
+                .param("project", project.as_str())
+                .fetch_one::<u64>()
+        };
+        assert_eq!(
+            on_disk(&gone)
+                .await
+                .expect("the migrator reads past the mask"),
+            0,
+            "{table} still holds the deleted project's rows on disk"
+        );
+        assert_eq!(
+            on_disk(&kept)
+                .await
+                .expect("the migrator reads past the mask"),
+            1,
+            "{table} lost another project's rows to the rewrite"
+        );
+    }
 }
 
 /// A second run of the file over the store it made changes nothing and is

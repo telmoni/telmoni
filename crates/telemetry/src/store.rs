@@ -14,7 +14,9 @@
 //! both from one [`Projects`], which cannot be empty, and a read whose SQL
 //! names no projects, or that binds them twice, is never sent. An insert
 //! carries neither: ClickHouse gathers into one asynchronous insert only the
-//! inserts whose settings match, and a policy filters reads alone.
+//! inserts whose settings match, and a policy filters reads alone. A delete
+//! names one project both ways too — its own `WHERE` and the setting — and
+//! marks that project's rows alone ([`Store::delete_project`]).
 //!
 //! Every value reaches ClickHouse as a server-side parameter (`{name:Type}`
 //! in the SQL, [`Read::param`] in the code), never spliced into the
@@ -61,6 +63,18 @@ const READ_MAX_EXECUTION_SECS: &str = "8";
 /// which no one is waiting for the answer. A server or a network that never
 /// answers is given up on too.
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// A project's rows marked deleted in each table: what [`Store::delete_project`]
+/// sends, a lightweight delete naming its one project.
+const DELETE_SPANS: &str = "DELETE FROM telemetry.spans WHERE project_id = {project:String}";
+const DELETE_ROLLUP: &str =
+    "DELETE FROM telemetry.spans_hourly WHERE project_id = {project:String}";
+
+/// The longest the client waits for ClickHouse to take a delete down: the
+/// statement answers once the mutation is recorded, not once it has run, so
+/// a healthy server answers at once, and a deletion's budget is not spent on
+/// a stalled one.
+const DELETE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A client for the ClickHouse `url` names, as the user and password it
 /// carries, as a DSN does (`http://user:password@host:8123`). The client
@@ -265,11 +279,11 @@ pub struct SpanRow {
     pub cache_read_input_tokens: u64,
     /// Input tokens written to the provider's cache.
     pub cache_write_input_tokens: u64,
-    /// The end customer it was for, as stored; empty when none was sent.
-    pub customer_id: String,
+    /// The end user it was for, as stored; empty when none was sent.
+    pub user_id: String,
     /// The conversation it belongs to; empty when none was sent.
     pub conversation_id: String,
-    /// The customer's own tags.
+    /// The application's own tags.
     pub tags: Vec<(String, String)>,
     /// A run's stall timeout, in seconds; `None` where it set none.
     pub bound_stall_after_s: Option<u32>,
@@ -286,20 +300,20 @@ pub struct SpanRow {
 /// A closed set as its text, the shape its `LowCardinality(String)` column
 /// holds: the client panics on a unit variant, so a row's enum fields are
 /// written through here and read back through `FromStr`.
-mod text {
+pub(crate) mod text {
     use std::fmt::Display;
     use std::str::FromStr;
 
     use serde::{Deserialize, Deserializer, Serializer, de};
 
-    pub(super) fn serialize<T: Display, S: Serializer>(
+    pub(crate) fn serialize<T: Display, S: Serializer>(
         value: &T,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
         serializer.collect_str(value)
     }
 
-    pub(super) fn deserialize<'de, T, D>(deserializer: D) -> Result<T, D::Error>
+    pub(crate) fn deserialize<'de, T, D>(deserializer: D) -> Result<T, D::Error>
     where
         T: FromStr,
         T::Err: Display,
@@ -346,6 +360,35 @@ impl Store {
             insert.write(span).await?;
         }
         insert.end().await
+    }
+
+    /// Every row of `project`'s, in the spans and in their hourly totals,
+    /// marked deleted: a lightweight delete on each table, held to the one
+    /// project by its own `WHERE` and by the policy's setting, which names
+    /// that project alone. The mark hides the rows from every read; the disk
+    /// gives them up when `rotate` applies it ([`crate::retention`]). Each
+    /// statement answers once ClickHouse has recorded the mutation, not once
+    /// it has run, so a project of any size is purged within a deletion's
+    /// budget and its rows go in the background, as a mutation's do, usually
+    /// within the second. Idempotent: the second mark finds no row.
+    ///
+    /// ⚠ An error's text can carry ClickHouse's own message: log its kind,
+    /// never the text.
+    pub async fn delete_project(&self, project: &ProjectId) -> clickhouse::error::Result<()> {
+        let only = Projects::one(project.clone());
+        for statement in [DELETE_SPANS, DELETE_ROLLUP] {
+            within(
+                DELETE_TIMEOUT,
+                self.client
+                    .query_raw(statement)
+                    .with_setting(PROJECTS_SETTING, only.setting())
+                    .with_setting("lightweight_deletes_sync", "0")
+                    .param("project", project.as_str())
+                    .execute(),
+            )
+            .await?;
+        }
+        Ok(())
     }
 
     /// A read of `projects`' rows alone: `sql`, a literal, sent as written,
@@ -438,6 +481,21 @@ impl Read {
             None => Ok(self.query),
             Some(rule) => Err(clickhouse::error::Error::InvalidParams(rule.into())),
         }
+    }
+}
+
+/// What kind of failure a ClickHouse error is, for a log line. ⚠ The error's
+/// text can carry ClickHouse's own message, which may quote a row or a bound
+/// value: a caller logs the kind and never the text. `ours` is a shape of
+/// ours the server refused, which retrying will not mend.
+pub(crate) fn error_kind(error: &clickhouse::error::Error) -> &'static str {
+    use clickhouse::error::Error;
+    match error {
+        Error::Network(_) => "network",
+        Error::TimedOut => "timed out",
+        Error::BadResponse(_) => "bad response",
+        Error::Other(_) => "other",
+        _ => "ours",
     }
 }
 

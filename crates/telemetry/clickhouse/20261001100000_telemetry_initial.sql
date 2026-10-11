@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS telemetry.spans
     output_tokens            UInt64,
     cache_read_input_tokens  UInt64,
     cache_write_input_tokens UInt64,
-    customer_id              String,
+    user_id                  String,
     conversation_id          String,
     tags                     Map(LowCardinality(String), String),
     -- A run's bounds and sample rate, NULL where it set none and on every
@@ -75,9 +75,9 @@ PARTITION BY toDate(received_at)
 ORDER BY (project_id, started_at);
 
 -- Each hour's totals, by project, agent, kind, model, provider, a tool call's
--- name and status: no customer and no tag, so it outlives the spans, kept
+-- name and status: no user and no tag, so it outlives the spans, kept
 -- thirteen months. `tool` is empty on every kind but a tool call, so the
--- names a customer gives its steps never multiply the rows. Durations are a
+-- names an application gives its steps never multiply the rows. Durations are a
 -- t-digest in milliseconds, which merges across hours and keys and answers
 -- any percentile.
 CREATE TABLE IF NOT EXISTS telemetry.spans_hourly

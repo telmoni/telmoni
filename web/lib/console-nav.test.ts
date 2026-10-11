@@ -97,7 +97,7 @@ describe("buildConsoleNav", () => {
     expect(project?.items.map((i) => i.url)).toEqual([
       "/acme/web",
       "/acme/web/traces",
-      "/acme/web/sessions",
+      "/acme/web/conversations",
       "/acme/web/users",
       "/acme/web/alerts",
       "/acme/web/dashboards",
@@ -105,6 +105,7 @@ describe("buildConsoleNav", () => {
       "/acme/web/connectors",
       "/acme/web/members",
       "/acme/web/audit-log",
+      "/acme/web/privacy",
       "/acme/web/settings",
     ]);
   });
@@ -200,7 +201,7 @@ describe("buildConsoleNav", () => {
     expect(project).toEqual([
       "/acme/web",
       "/acme/web/traces",
-      "/acme/web/sessions",
+      "/acme/web/conversations",
       "/acme/web/users",
       "/acme/web/alerts",
       "/acme/web/dashboards",
@@ -208,6 +209,7 @@ describe("buildConsoleNav", () => {
       "/acme/web/connectors",
       "/acme/web/members",
       "/acme/web/audit-log",
+      "/acme/web/privacy",
       "/acme/web/settings",
     ]);
 
@@ -239,8 +241,8 @@ describe("the blocks of a run", () => {
       navBlocks(project?.items ?? []).map((b) => [b.heading, b.items.map((i) => i.title)]),
     ).toEqual([
       [undefined, ["Overview"]],
-      ["Observability", ["Traces", "Sessions", "Users", "Alerts", "Dashboards"]],
-      ["Project", ["API keys", "Connectors", "Members", "Audit log", "Settings"]],
+      ["Observability", ["Traces", "Conversations", "Users", "Alerts", "Dashboards"]],
+      ["Project", ["API keys", "Connectors", "Members", "Audit log", "Privacy", "Settings"]],
     ]);
     const [organization] = buildConsoleNav("/acme/settings");
     expect(
@@ -293,7 +295,7 @@ describe("the whole destination set", () => {
     ).toEqual([
       "/acme/web",
       "/acme/web/traces",
-      "/acme/web/sessions",
+      "/acme/web/conversations",
       "/acme/web/users",
       "/acme/web/alerts",
       "/acme/web/dashboards",
@@ -301,6 +303,7 @@ describe("the whole destination set", () => {
       "/acme/web/connectors",
       "/acme/web/members",
       "/acme/web/audit-log",
+      "/acme/web/privacy",
       "/acme/web/settings",
       "/acme",
       "/acme/projects",

@@ -28,7 +28,7 @@ export default async function DashboardsPage({
         <Card className="overflow-hidden p-0 gap-0">
           <div className="grid gap-1 p-4">
             <p className="text-sm font-medium">Nothing to show yet.</p>
-            <p className="text-sm text-muted-foreground">Charts over this project&rsquo;s telemetry will live here: spend, tokens, latency and volume by model, agent, user, session and tag over any window, with dashboards you compose and keep.</p>
+            <p className="text-sm text-muted-foreground">Charts over this project&rsquo;s telemetry will live here: spend, tokens, latency and volume by model, agent, user, conversation and tag over any window, with dashboards you compose and keep.</p>
           </div>
         </Card>
       </div>
