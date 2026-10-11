@@ -166,10 +166,12 @@ pub(crate) async fn purge_organization_siblings(
 /// cannot be allowed the console's whole ten seconds.
 const PROJECT_PURGE_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// The longest telemetry's project purge or move may take: one statement on
-/// one row. The transfer's accept calls the move before notifications'
-/// purge, while its own transaction holds both organizations' locks, and the
-/// two together stay under the console's ten seconds.
+/// The longest telemetry's project purge or move may take: a delete recorded
+/// on each of two ClickHouse tables, answered once recorded rather than once
+/// run, and one statement on one Postgres row. The transfer's accept calls
+/// the move before notifications' purge, while its own transaction holds
+/// both organizations' locks, and the two together stay under the console's
+/// ten seconds.
 const TELEMETRY_PROJECT_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Notifications' teardown for one project — its connectors, their
@@ -198,9 +200,10 @@ pub(crate) async fn purge_project_connectors(
     }
 }
 
-/// Telemetry's teardown for one project after it is deleted: its settings.
-/// No telemetry module is nothing to purge. Its spans carry the project
-/// alone, and go with their day at the retention line.
+/// Telemetry's teardown for one project after it is deleted: its spans and
+/// totals marked deleted, then its settings. No telemetry module is nothing
+/// to purge. A purge that fails here is caught up by the organization's,
+/// which finds the project through the settings row the failure left.
 pub(crate) async fn purge_project_telemetry(
     state: &AppState,
     project_id: &ProjectId,

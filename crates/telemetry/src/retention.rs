@@ -8,6 +8,11 @@
 //! partition is listed from the rows themselves, which the migrator reads
 //! all of by a row policy of its own, and dropped by its id, so a night the
 //! job missed is caught up by the next.
+//!
+//! The same night rewrites away the rows a deleted project left: a purge
+//! marks them with a lightweight delete, which hides them from every read at
+//! once ([`crate::store::Store::delete_project`]), and [`rewrite_deleted`]
+//! applies the mask, so they leave the disk too.
 
 use anyhow::Context;
 use chrono::{DateTime, Datelike, Duration, Months, NaiveDate, TimeZone, Utc};
@@ -19,8 +24,8 @@ use crate::store::within;
 /// row in it is older than this.
 pub const SPAN_RETENTION_DAYS: i64 = 360;
 
-/// How long the hourly totals are kept, in months: they name no customer
-/// and no tag, so a baseline keeps a year behind it.
+/// How long the hourly totals are kept, in months: they name no user and no
+/// tag, so a baseline keeps a year behind it.
 pub const ROLLUP_RETENTION_MONTHS: u32 = 13;
 
 /// The days of spans wholly before the cutoff: the partitions to drop.
@@ -39,6 +44,13 @@ const DROP_ROLLUP_MONTH: &str =
 /// How long the server may spend on a listing, in seconds: stopped short of
 /// the client's own limit on the statement, so the night's log says why.
 const LIST_MAX_EXECUTION_SECS: &str = "50";
+
+/// The mask a lightweight delete wrote, applied: the rows a deleted project
+/// left are rewritten out of the parts that hold them, and no other part is
+/// touched.
+const APPLY_SPAN_MASK: &str = "ALTER TABLE telemetry.spans APPLY DELETED MASK";
+
+const APPLY_ROLLUP_MASK: &str = "ALTER TABLE telemetry.spans_hourly APPLY DELETED MASK";
 
 /// What one purge dropped.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -78,10 +90,12 @@ fn midnight(day: NaiveDate) -> DateTime<Utc> {
     Utc.from_utc_datetime(&day.and_time(chrono::NaiveTime::MIN))
 }
 
-/// Drop every day of spans and every month of totals past retention, as
-/// `client`'s user — the migrator's, whose own row policy admits every row,
-/// so the listing sees every project's. Idempotent: a partition already
-/// gone is not listed.
+/// Drop every day of spans and every month of totals past retention, then
+/// rewrite away the rows deleted projects left, as `client`'s user — the
+/// migrator's, whose own row policy admits every row, so the listing sees
+/// every project's. Idempotent: a partition already gone is not listed, and
+/// a mask already applied rewrites nothing. Every step runs whichever failed
+/// before it; the first failure is the answer.
 pub async fn purge(client: &clickhouse::Client, now: DateTime<Utc>) -> anyhow::Result<Purged> {
     let span_days = drop_before(
         client,
@@ -101,10 +115,64 @@ pub async fn purge(client: &clickhouse::Client, now: DateTime<Utc>) -> anyhow::R
     )
     .await
     .context("dropping months of hourly totals past retention");
-    Ok(Purged {
+    let rewritten = rewrite_deleted(client)
+        .await
+        .context("rewriting away the rows deleted projects left");
+    let purged = Purged {
         span_days: span_days?,
         rollup_months: rollup_months?,
-    })
+    };
+    rewritten?;
+    Ok(purged)
+}
+
+/// Apply the deleted mask on both tables, as the migrator, waiting on each
+/// rewrite as long as a statement may take. One that takes longer is left
+/// running — a mutation finishes on its own, and the next night finds
+/// nothing left to rewrite — and noted; any other failure is the answer,
+/// once both tables have been tried.
+pub async fn rewrite_deleted(client: &clickhouse::Client) -> anyhow::Result<()> {
+    let mut first_failure = None;
+    for (table, statement) in [
+        ("spans", APPLY_SPAN_MASK),
+        ("spans_hourly", APPLY_ROLLUP_MASK),
+    ] {
+        match within(
+            STATEMENT_TIMEOUT,
+            client
+                .query_raw(statement)
+                .with_setting("mutations_sync", "1")
+                .execute(),
+        )
+        .await
+        {
+            Ok(()) => {
+                tracing::info!(
+                    table,
+                    "rotate: the rows deleted projects left are off the disk"
+                );
+            }
+            Err(clickhouse::error::Error::TimedOut) => {
+                tracing::info!(
+                    table,
+                    "rotate: the rows deleted projects left are still being rewritten away; \
+                     the mutation finishes on its own"
+                );
+            }
+            Err(e) => {
+                tracing::error!(
+                    table,
+                    error = %e,
+                    "rotate: the deleted mask could not be applied"
+                );
+                first_failure.get_or_insert(e);
+            }
+        }
+    }
+    match first_failure {
+        None => Ok(()),
+        Some(e) => Err(e.into()),
+    }
 }
 
 /// List the partitions of `table` that `list` finds before `cutoff`, and

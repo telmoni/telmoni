@@ -77,10 +77,15 @@ URL](#name-and-url)). On these pages,
   `/{organization}/audit-log`, and `/{organization}/settings`, with
   `/{organization}/billing` on the hosted service.
 - **Project pages** sit under the organization: `/{organization}/{project}` is
-  the project's overview, with `/traces`, `/sessions`, `/users`, `/alerts` and
-  `/dashboards`, which say what each will show until a project's telemetry
-  reaches them, and `/api-keys`, `/connectors`, `/members`, `/audit-log`, and
-  `/settings` under it.
+  the project's overview, with [`/traces`](/docs/workspace/traces) — every run
+  of the project's agents, and a page for each —
+  [`/conversations`](/docs/workspace/conversations) — its runs grouped by
+  conversation, and a page for each — [`/users`](/docs/workspace/users) — by
+  the user they served — and `/alerts` and `/dashboards`, which say what each will show
+  until a project's telemetry reaches them, and `/api-keys`, `/connectors`, `/members`,
+  `/audit-log`, `/privacy` — the project's content mode and the
+  [field inventory](/docs/api/field-inventory), every attribute Telmoni reads
+  from a span and what becomes of it — and `/settings` under it.
 - **Account pages** live under `/account`, including `/account/settings`,
   `/account/notifications`, `/account/accessibility`, and `/account/privacy`.
 - **Switch between projects and organizations** using the switcher in the
@@ -165,9 +170,10 @@ Windows and Linux):
   you are in has one, and the sheet (`?`) lists the rows of that sidebar. On a
   project's pages:
   - `g` `o`: Overview
-  - `g` `t`: Traces, `g` `s`: Sessions, `g` `u`: Users, `g` `a`: Alerts,
+  - `g` `t`: Traces, `g` `c`: Conversations, `g` `u`: Users, `g` `a`: Alerts,
     `g` `d`: Dashboards
-  - `g` `k`: API keys, `g` `c`: Connectors, `g` `m`: Members, `g` `l`: Audit log
+  - `g` `k`: API keys, `g` `i`: Connectors, `g` `m`: Members, `g` `l`: Audit log,
+    `g` `p`: Privacy
   - `g` `,`: Settings, as `⌘,` opens preferences on a Mac
 
   On an organization's pages: `g` `o` Overview, `g` `p` Projects, `g` `m`
@@ -209,7 +215,7 @@ A project's **content mode** says what it keeps of the content its spans
 carry: the prompts and completions of an agent's model calls, the inputs and
 outputs of its tool calls, error messages, a person's name or email address,
 and anything else a person or a model wrote. A span's name, its tags, a
-customer id and an error's type (its class, never its message) are metadata
+user id and an error's type (its class, never its message) are metadata
 you choose to send, and the content mode does not decide what happens to
 them. Everyone on the project sees the mode under **Content** on the
 project's **Settings** page (`/{organization}/{project}/settings`).
@@ -223,8 +229,10 @@ project's **Settings** page (`/{organization}/{project}/settings`).
   Members see the mode and cannot change it.
 - Every change is recorded in the [audit log](/docs/workspace/audit-log).
 
-Telmoni does not record spans yet, so a project's mode has nothing to act on
-today.
+Ingest reads the mode on every export, so it acts at the door, as the span
+arrives. The project's **Privacy** page shows the mode beside the [field
+inventory](/docs/api/field-inventory): every attribute ingest reads, and what
+becomes of each.
 
 ### Deleting a project
 
@@ -239,6 +247,13 @@ Only the **Owner** can delete a project. Deletion is initiated from the
   activity feed are purged right after (whatever fails then goes when the
   organization itself is purged). The console agent removes what it holds
   about the project.
+- Its traces go with it: every span and every hour of totals the project
+  sent is marked deleted in the same purge, gone from every read within
+  moments as the store applies the mark, and the nightly rotation removes
+  them from disk. Telemetry is kept only while
+  its project is active, never past its deletion.
+- [Data deletion](/docs/workspace/data-deletion) lists everything a deletion
+  removes, when, and what stays.
 - Historical audit events for that project remain preserved in the organization's
   append-only audit chain.
 
@@ -366,8 +381,10 @@ Only the **Owner** can delete an organization. Deletion is performed from the
    your [first
    sign-in](/docs/getting-started/sign-in#what-your-first-sign-in-creates) did.
 4. **Erasure follows, usually within the hour**: the automated deletion sweep
-   permanently purges the organization, its projects, API keys, connectors,
-   notices and console agent data. There is no restore window and no undo.
+   permanently purges the organization, its projects and their traces, API
+   keys, connectors, notices and console agent data. There is no restore
+   window and no undo. [Data deletion](/docs/workspace/data-deletion) lists
+   everything it removes, and what stays.
 
 An organization an operator closed from the server (`telmoni terminate`, on a
 self-hosted instance) goes the same way.

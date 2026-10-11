@@ -2,7 +2,8 @@
 //! row-level security: a project with none keeps no content, a project reads
 //! its own settings and no other's, a write binds the project and its own
 //! organization, and auth's purges and a transfer's move reach the rows they
-//! name and no others.
+//! name and no others — the purges in ClickHouse too, where a purged
+//! project's spans and totals are hidden at once.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
 mod common;
@@ -13,7 +14,7 @@ use sqlx::PgPool;
 
 use telmoni_shared::db::tenant_session::{organization_scope, project_scope};
 use telmoni_shared::seam::Telemetry;
-use telmoni_shared::{ContentMode, OrganizationId, ProjectId};
+use telmoni_shared::{ContentMode, OrganizationId, ProjectId, SpanKind};
 use telmoni_telemetry::seam::TelemetrySeam;
 use telmoni_telemetry::{AppState, db};
 
@@ -191,11 +192,17 @@ async fn a_write_binds_the_project_and_its_own_organization(pool: PgPool) {
     }
 }
 
-/// The purges reach the rows they name and no others, a transfer's move
-/// takes a row out of its old organization's purge, and each is idempotent.
+/// The purges reach the rows they name and no others — the settings in
+/// Postgres, and the spans and totals in ClickHouse, hidden at once — a
+/// transfer's move takes a row out of its old organization's purge, and
+/// each is idempotent. The organization's purge finds its projects through
+/// their settings rows, so a project that left it keeps its spans.
 #[sqlx::test]
 async fn the_purges_and_the_move_reach_only_what_they_name(pool: PgPool) {
-    let seam = TelemetrySeam(state(&pool));
+    let Some(ch) = common::clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let seam = TelemetrySeam(common::state_with_stores(&pool, common::AuthStub::new()));
     let (leaving, staying) = (OrganizationId::new(), OrganizationId::new());
     let (moved, left, deleted, untouched) = (
         ProjectId::new(),
@@ -207,6 +214,12 @@ async fn the_purges_and_the_move_reach_only_what_they_name(pool: PgPool) {
     seed(&pool, &leaving, &left, ContentMode::Off).await;
     seed(&pool, &staying, &deleted, ContentMode::Off).await;
     seed(&pool, &staying, &untouched, ContentMode::Off).await;
+    for project in [&moved, &left, &deleted, &untouched] {
+        ch.store
+            .insert_spans(&[common::span(project, SpanKind::Run, "nightly-report", 100)])
+            .await
+            .expect("insert a project's span");
+    }
 
     seam.move_project(&moved, &staying).await.expect("move");
     assert_eq!(
@@ -233,4 +246,18 @@ async fn the_purges_and_the_move_reach_only_what_they_name(pool: PgPool) {
         organization_of(&pool, &untouched).await,
         Some(staying.to_string())
     );
+
+    for gone in [&left, &deleted] {
+        common::eventually("a purged project's spans and totals are hidden", || async {
+            common::rows_of(&ch.store, gone).await == (0, 0)
+        })
+        .await;
+    }
+    for kept in [&moved, &untouched] {
+        assert_eq!(
+            common::rows_of(&ch.store, kept).await,
+            (1, 1),
+            "a purge took the rows of a project it did not name"
+        );
+    }
 }
