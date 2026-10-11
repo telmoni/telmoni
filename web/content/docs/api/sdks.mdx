@@ -1,0 +1,392 @@
+---
+title: "Client SDKs"
+description: "The Telmoni SDKs for Python, TypeScript / JavaScript, Go and Rust: an agent's runs, steps, model calls and tool calls as OpenTelemetry spans, sent to Telmoni and nowhere else."
+---
+
+The SDKs record an agent's **runs**, and the **steps**, **model calls** and
+**tool calls** inside each, as OpenTelemetry spans, and send them to
+[ingest](/docs/api/ingest). Each one runs a tracer provider of its own beside
+whatever OpenTelemetry your application already has, sends nothing outside a
+run, and takes prompts, completions and tool payloads off every span before it
+leaves the process unless you ask and the project's content mode allows.
+
+| Language | Package | Requires | Source |
+|---|---|---|---|
+| **Python** | `telmoni` | Python 3.10 or later | [`sdk/python`](https://github.com/telmoni/telmoni/tree/main/sdk/python) |
+| **TypeScript / JavaScript** | `telmoni` | Node.js 18.19 or 20.6 or later | [`sdk/typescript`](https://github.com/telmoni/telmoni/tree/main/sdk/typescript) |
+| **Go** | `github.com/telmoni/telmoni/sdk/go` | Go 1.26 or later | [`sdk/go`](https://github.com/telmoni/telmoni/tree/main/sdk/go) |
+| **Rust** | `telmoni-sdk` | Rust 1.98.1 or later | [`sdk/rust`](https://github.com/telmoni/telmoni/tree/main/sdk/rust) |
+
+None is published to a package registry yet, so each installs from the
+platform's repository, [`telmoni/telmoni`](https://github.com/telmoni/telmoni),
+which holds them beside the ingest they send to; a `telmoni` package found on
+npm, PyPI or crates.io is not Telmoni's. Each is built on its language's
+OpenTelemetry SDK and sends with the language's own HTTP client, Rust with
+reqwest; none carries anything else.
+
+---
+
+## Installation
+
+<Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
+  <Tab value="Python">
+    ```console
+    $ git clone https://github.com/telmoni/telmoni.git
+    $ pip install ./telmoni/sdk/python
+    ```
+  </Tab>
+  <Tab value="TypeScript">
+    Build it in a checkout of the repository, then add that directory to your project's dependencies:
+
+    ```console
+    $ git clone https://github.com/telmoni/telmoni.git
+    $ cd telmoni/sdk/typescript
+    $ npm ci && npm run build
+    ```
+  </Tab>
+  <Tab value="Go">
+    ```console
+    $ go get github.com/telmoni/telmoni/sdk/go
+    ```
+  </Tab>
+  <Tab value="Rust">
+    Depend on it from the repository in `Cargo.toml`:
+
+    ```toml
+    [dependencies]
+    telmoni-sdk = { git = "https://github.com/telmoni/telmoni" }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## A run
+
+A run is one execution of an agent. Open one around the agent's work, and
+inside it open a step for each unit of work, a model call around each call to
+a model, and a tool call around each tool. The SDK sends the run's start at
+once, so a run stalled in its first call is still heard, and the rest when
+each span ends. Set `TELMONI_API_KEY` to a [project API key](/docs/api/api-keys)
+holding the **ingest** scope.
+
+<Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
+  <Tab value="Python">
+    ```python
+    from telmoni import Bounds, Telmoni, Usage
+
+    telmoni = Telmoni.from_env()
+
+
+    @telmoni.run("support-bot")
+    def answer(question: str) -> str:
+        with telmoni.step("plan"):
+            with telmoni.model_call("gpt-4o-mini", provider="openai") as call:
+                reply = ask_the_model(question)  # your provider's call
+                call.answered(
+                    response_model=reply.model,
+                    usage=Usage(input_tokens=reply.usage.input, output_tokens=reply.usage.output),
+                )
+        with telmoni.tool_call("search"):
+            results = search(reply.query)  # an exception marks the call failed
+        return reply.text
+
+
+    with telmoni.run(
+        "support-bot",
+        user_id="user_42",
+        conversation_id="conv_7",
+        tags={"env": "prod"},
+        bounds=Bounds(stall_after_s=60, max_steps=10, max_cost_usd=1.5),
+    ) as run:
+        ...
+    ```
+
+    Each of `run`, `step`, `model_call` and `tool_call` is a context manager,
+    an `async with`, and a decorator. An exception that escapes one marks the
+    span failed with the exception's class, never its message, and is raised
+    again; a `KeyboardInterrupt` or `asyncio.CancelledError` marks it
+    cancelled. `fail("TimeoutError")` and `cancel()` do the same by hand.
+  </Tab>
+  <Tab value="TypeScript">
+    ```ts
+    import { Telmoni, type Run } from 'telmoni';
+
+    const telmoni = Telmoni.fromEnv();
+
+    const text = await telmoni.run(
+      'support-bot',
+      { userId: 'user_42', conversationId: 'conv_7', tags: { env: 'prod' } },
+      async (run) => {
+        const reply = await run.step('plan', (step) =>
+          step.modelCall('gpt-4o-mini', { provider: 'openai' }, async (call) => {
+            const reply = await askTheModel(question); // your provider's call
+            call.answered({
+              responseModel: reply.model,
+              usage: { inputTokens: reply.usage.input, outputTokens: reply.usage.output },
+            });
+            return reply;
+          }),
+        );
+        await run.toolCall('search', {}, () => search(reply.query)); // a rejection marks it failed
+        return reply.text;
+      },
+    );
+
+    const answer = telmoni.wrap('support-bot', {}, async (question: string, run: Run) => '...');
+    ```
+
+    Each callback receives its handle and may be sync or async; the span ends
+    when the callback settles. An error thrown inside marks the span failed
+    with the error's class name and is thrown again; one named `AbortError`
+    marks it cancelled. `fail('TimeoutError')` and `cancel()` do the same by
+    hand, and `wrap` turns a function into one that opens a run per call.
+  </Tab>
+  <Tab value="Go">
+    ```go
+    client, err := telmoni.NewFromEnv()
+    if err != nil {
+    	log.Fatal(err)
+    }
+    defer client.Shutdown(context.Background())
+
+    ctx, run := client.Run(ctx, "support-bot", telmoni.RunOptions{
+    	UserID:         "user_42",
+    	ConversationID: "conv_7",
+    	Tags:           map[string]string{"env": "prod"},
+    	Bounds:         &telmoni.Bounds{StallAfterS: 60, MaxSteps: 10, MaxCostUSD: 1.5},
+    })
+    defer run.End()
+
+    stepCtx, step := run.Step(ctx, "plan")
+    _, call := run.ModelCall(stepCtx, "gpt-4o-mini", telmoni.ModelCallOptions{Provider: "openai"})
+    reply, err := askTheModel(stepCtx, question) // your provider's call
+    if err != nil {
+    	call.Fail(err)
+    } else {
+    	call.Answered(telmoni.Answer{
+    		ResponseModel: reply.Model,
+    		Usage:         &telmoni.Usage{InputTokens: reply.Usage.Input, OutputTokens: reply.Usage.Output},
+    	})
+    }
+    call.End()
+    step.End()
+
+    _, tool := run.ToolCall(ctx, "search", telmoni.ToolCallOptions{})
+    if _, err := search(reply.Query); err != nil {
+    	tool.Fail(err)
+    }
+    tool.End()
+    ```
+
+    Each opener returns a context carrying its span, so your own OpenTelemetry
+    spans started with it nest under the run, and the handle to end with
+    `defer`; `telmoni.RunFromContext(ctx)` finds the run deep in a call stack.
+    `Fail(err)` marks the span failed with the error's Go type, never its
+    message, and marks it cancelled for `context.Canceled`;
+    `FailWith("TimeoutError")` and `Cancel()` do the same by hand. The SDK
+    never panics: a blank agent name opens a run that does nothing, with one
+    warning.
+  </Tab>
+  <Tab value="Rust">
+    ```rust
+    use telmoni_sdk::{Bounds, Config, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage};
+
+    let telmoni = Telmoni::new(Config::from_env());
+
+    let run = telmoni.run(
+        "support-bot",
+        RunOptions {
+            user_id: Some("user_42".into()),
+            conversation_id: Some("conv_7".into()),
+            tags: [("env".to_owned(), "prod".to_owned())].into(),
+            bounds: Bounds { stall_after_s: Some(60), max_steps: Some(10), max_cost_usd: Some(1.5) },
+            ..RunOptions::default()
+        },
+    )?;
+    let reply = {
+        let step = run.step("plan");
+        let call = step.model_call("gpt-4o-mini", ModelCallOptions { provider: Some("openai".into()), ..ModelCallOptions::default() });
+        let reply = ask_the_model(question)?; // your provider's call
+        call.answered(Reply {
+            response_model: Some(reply.model.clone()),
+            usage: Some(Usage { input_tokens: Some(reply.usage.input), output_tokens: Some(reply.usage.output), ..Usage::default() }),
+            ..Reply::default()
+        });
+        reply
+    };
+    let tool = run.tool_call("search", ToolCallOptions::default());
+    if search(&reply.query).is_err() {
+        tool.fail("TimeoutError");
+    }
+    drop(tool);
+    run.end();
+    telmoni.shutdown();
+    ```
+
+    Each handle is a guard that ends its span when dropped or on `end()`.
+    `run` returns an error for a blank agent name or a sample rate outside
+    its range, and nothing else in the SDK fails: an export that fails is
+    warned about, never returned. The closure forms `run_with`, `step_with`,
+    `model_call_with` and `tool_call_with` end the span when the closure
+    returns, and their `try_` forms mark an `Err` on the span with the
+    error's type name before returning it unchanged. `fail("TimeoutError")`
+    and `cancel()` do the same by hand, and `context()` or `attach()` make
+    the run current for your own spans.
+  </Tab>
+</Tabs>
+
+Flush before a short-lived process exits (`flush()` / `flush()` / `Flush(ctx)`
+/ `flush()`), or shut the client down, which flushes first; a long-lived one
+needs neither.
+
+---
+
+## What a run sends
+
+A run is a span of its own, named `invoke_agent <agent>`, inside your current
+trace when one is current and a trace of its own otherwise. It carries the
+run's id (`telmoni.run_id`, a UUID), its agent (`telmoni.agent`), the user
+and conversation you named (`user.id`, `gen_ai.conversation.id`), each tag as
+`telmoni.tag.<key>`, the bounds and the sample rate; a `telmoni.run.start`
+span of no duration goes out at once under it. Every span inside the run
+carries the run's id, agent, user and conversation, so Telmoni knows each
+span's run without waiting
+for the trace's tree. A step is a span named as you named it; a model call is
+`chat <model>` (or the operation you gave) with the model asked for, the
+model that answered, the provider and the token counts under the GenAI
+conventions' names; a tool call is `execute_tool <name>`. The exception's
+class alone marks a failure, as `error.type`; no message, stack trace or
+event is ever sent. The [ingest page](/docs/api/ingest) lists every
+attribute and what the server keeps of each.
+
+### Content
+
+Prompts, completions, tool arguments and results — `input_messages`,
+`output_messages`, `system_instructions`, `arguments`, `returned(...)` — are
+recorded on the span and taken off by the exporter before anything leaves
+the process. They are sent only when the client is built with
+`capture_content` on **and** the project's content mode, which the SDK learns
+from the server's first answer, is `on`. The server's own drop at the door is
+the second lock, not the first.
+
+### Sampling
+
+`sample_rate`, on the client or on one run, is the share of runs sent, between
+0 and 1. A run sampled out is dropped whole in the exporter, its start among
+it, never through the trace's sampled flag, so your application's own sampling
+is untouched and the volume Telmoni sees is a dial you hold.
+
+### Beside your own OpenTelemetry
+
+The SDK builds every part of its tracer provider itself — resource, sampler,
+limits, batching — so none of your `OTEL_*` variables reaches it, and it
+neither replaces your provider nor sends your spans to Telmoni. A run joins
+the trace that is current where it begins, and your spans opened inside it
+nest under the run. The run's sampled flag follows the trace it joins; a run
+that starts a trace of its own takes the decision your own sampler gives it —
+read from your provider in Python, and given as the `sampler` option in the
+others — so your application keeps its own sampling rate inside runs as
+outside them. A run inside a trace your application does not sample is still
+sent.
+
+### Answers and warnings
+
+The SDK batches spans and sends them in the background, on a bounded queue,
+so a slow Telmoni never slows an agent. It retries `429` and `503` after
+`Retry-After`, three attempts in all, and drops the batch after that with one
+warning; any other refusal is logged once and never retried. An attribute the
+server drops is logged once: content with the project's content mode, which
+decides the drop, and a link to [what is dropped at the
+door](/docs/api/ingest#what-is-dropped-at-the-door); text the field inventory
+does not name with the `telmoni.tag.<key>` that would keep it.
+
+### The key on the wire
+
+The key travels as a bearer over HTTPS. Plain HTTP is accepted only to this
+machine, `localhost` or a loopback address, for a server you run beside the
+agent: Python, TypeScript and Go refuse any other `http://` endpoint when the
+client is built, and Rust when the first export would go, with one warning.
+No SDK follows a redirect, which could carry the key to another host, and the
+key never appears in a log, a warning or an error.
+
+---
+
+## Configuration
+
+<Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
+  <Tab value="Python">
+    ```python
+    from telmoni import Config, Telmoni
+
+    telmoni = Telmoni(
+        Config(
+            endpoint="https://api.telmoni.com",
+            api_key="telmoni_...",
+            organization_id="org_019a0b8c3f2e7d41",
+            capture_content=False,
+            sample_rate=1.0,
+        )
+    )
+    ```
+  </Tab>
+  <Tab value="TypeScript">
+    ```ts
+    import { Telmoni } from 'telmoni';
+
+    const telmoni = new Telmoni({
+      endpoint: 'https://api.telmoni.com',
+      apiKey: process.env.TELMONI_API_KEY,
+      organizationId: 'org_019a0b8c3f2e7d41',
+      captureContent: false,
+      sampleRate: 1.0,
+    });
+    ```
+  </Tab>
+  <Tab value="Go">
+    ```go
+    client, err := telmoni.New(telmoni.Config{
+    	Endpoint:       "https://api.telmoni.com",
+    	APIKey:         os.Getenv("TELMONI_API_KEY"),
+    	OrganizationID: "org_019a0b8c3f2e7d41",
+    	CaptureContent: false,
+    	SampleRate:     1.0,
+    })
+    ```
+  </Tab>
+  <Tab value="Rust">
+    ```rust
+    use telmoni_sdk::{Config, Telmoni};
+
+    let telmoni = Telmoni::new(Config {
+        endpoint: "https://api.telmoni.com".into(),
+        api_key: std::env::var("TELMONI_API_KEY").ok(),
+        organization_id: Some("org_019a0b8c3f2e7d41".into()),
+        ..Default::default()
+    });
+    ```
+  </Tab>
+</Tabs>
+
+Each SDK keeps the API key out of the configuration's printed form: Rust's
+`Debug` shows `<redacted>` in its place and serialization skips it; Python
+holds it as a `Secret` that `repr`, `str` and `dataclasses.asdict` show
+redacted; Go's `String` and `GoString` redact it and JSON skips it;
+TypeScript holds `apiKey` as a non-enumerable property, which `console.log`
+and `JSON.stringify` pass over.
+
+---
+
+## Environment variables
+
+`from_env` / `fromEnv` / `NewFromEnv` / `Config::from_env` read:
+
+| Variable | Description | Default |
+|---|---|---|
+| `TELMONI_ENDPOINT` | The origin ingest is served on: Telmoni's machine host, or your own deployment's | `https://api.telmoni.com` when unset or blank |
+| `TELMONI_API_KEY` | An [API key](/docs/api/api-keys) holding the **ingest** scope, created on a project's API keys page | None |
+| `TELMONI_ORG` | The organization's ID (`org_...`), held and not sent: the key names the project | None |
+
+Every SDK reads these three and no others. OpenTelemetry's own `OTEL_*`
+variables are your application's, for its own exporters, and change nothing
+of the SDK's.

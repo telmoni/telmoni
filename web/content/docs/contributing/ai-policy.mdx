@@ -1,0 +1,32 @@
+---
+title: "AI policy"
+description: "How AI tools may be used in contributing to Telmoni: ownership, disclosure, what never goes into a tool, the review bar, and the courtesy owed on both sides."
+---
+
+Telmoni holds people's organizations, their members and their secrets, so the project values:
+
+- **Trust.** Correctness and security before speed; nothing ships that its author cannot vouch for.
+- **Clarity.** One way to do a thing, written down with its reason, in as few words as it takes.
+- **Ownership.** A person stands behind every change and can explain it.
+
+Telmoni is built with AI tools in the loop, under the rules in the repository's [`AGENTS.md`](https://github.com/telmoni/telmoni/blob/main/AGENTS.md). They are tools. What they produce becomes yours the moment you submit it, and these norms are about that.
+
+## Norms
+
+- **Ownership.** You are responsible for everything you submit. Understand every line of code and every sentence you put up for review, and be ready to explain the design and its trade-offs when asked. Work within what you know of the project: a change its author cannot discuss is sent back, however good it looks.
+- **Disclosure.** Say in the pull request how AI was used, if it was: drafting, review, tests, research. Reviewers read differently when they know where to look. Disclosure is never held against you; a denial that later proves wrong is.
+- **Humans in the conversation.** Write to people yourself. Do not paste AI output into issues or reviews as if it were your words. Help with translation or accessibility is welcome; include the original.
+- **Prose is yours.** Documentation, issues, pull request descriptions and commit messages say exactly what you know and no more: every claim checked against the code, in your words, at the length the matter needs. Generated filler is the easiest thing to spot and the fastest way to lose a reviewer's trust.
+- **Humans author commits.** Only people are authors, and only people appear in `Co-authored-by`. No AI signatures, attribution lines or tool trailers, anywhere.
+- **No generated media.** Icons, images, audio and other assets are made by hand, commissioned, or taken under a permissive licence; none are authored or altered with generative tools.
+- **Nothing secret goes into a tool.** Never put a credential, a `.env` file, a customer's data or a security report into an AI tool. The repository's `.env` and `web/.env.local` hold real secrets: `AGENTS.md` forbids an agent to read, print, diff or recreate either file, and lets it change one key by name; the same goes for whatever tool sits on your machine.
+- **The same bar.** AI-assisted work is reviewed as any other: correctness, tests, rationale, small reviewable units. Changes to sign-in, authorization, tenancy, the migrator's role hardening and anything that handles a secret get the slowest reading, whoever or whatever drafted them.
+- **Agents follow the house rules.** `AGENTS.md` is the instruction file for AI tooling in the repository. Point your tools at it; a change that ignores it (bulk edits, unasked dependencies, weakened tests) is treated like any other that does.
+- **Refusal.** Nobody here is required to use AI tools, review AI-assisted work, or discuss AI. Someone who declines all three is as much part of the project as anyone.
+- **Courtesy.** The [Code of Conduct](/docs/contributing/code-of-conduct) applies to arguments about AI as to everything else: no baiting, no claiming its use is or will be mandatory, no sneering at disclosure, no generalizing about people by their stance on it, and no pressing on after being asked to stop. Criticizing a tool, a company, a decision or a specific piece of work is fine; fixating on the topic is not.
+
+Reviewers may request changes to anything that falls short of these norms, and close what cannot be rescued, which is usually a change its author does not understand. We will gladly help you learn what you need to contribute, but we need to be talking to you when we do. Repeated or serious violations are handled under the Code of Conduct.
+
+## Why this, and not a ban
+
+A ban cannot be enforced fairly. Generated code and prose are rarely provable, so a ban punishes whoever is honest about it and rewards whoever is not, and it turns review into a guess about provenance instead of a reading of the work. What can be enforced is the standard the work must meet and the honesty of the person submitting it. [Bevy's contributors](https://bevy.org/learn/contribute/policies/ai/) wrote this up well after trying the ban first; this policy follows theirs, and those of Blender, Godot, Rust, Mastodon and GCC, in substance.

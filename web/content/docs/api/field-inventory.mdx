@@ -1,0 +1,154 @@
+---
+title: "Field inventory"
+description: "Every attribute Telmoni reads from a span, at the pinned commit of the GenAI semantic conventions: where it is read, what becomes of it, and the content mode it needs. Anything else is dropped at the door."
+---
+
+Telmoni keeps metadata about an agent's runs and drops everything else at the
+door. This page is the whole list of what ingest reads from a span and from
+its resource, and what becomes of each: the column it fills, the `attributes`
+it is kept in under its own name, or the drop. **Any text, or array, under a
+name this page does not list is dropped in every content mode**, the span kept
+and the attribute named in the answer — content arrives under names no
+convention gave it, so what is kept is this list, not a guess at what is
+content.
+
+The names are the [GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai)'
+at commit `6fd0d763a092db245a54104fc1124031eb3c51d2`, pinned on purpose: the
+conventions have tagged no release and rename what Telmoni sums, so a rename
+is a change to this page and to ingest, never to what is stored. What the
+conventions do not name — runs, tags, bounds, sample rates — is Telmoni's own,
+under `telmoni.*`; the user a span was for is `user.id`, from OpenTelemetry's
+general registry.
+
+The list is held to the code: a test in the server fails when ingest reads a
+name this page lacks, or this page lists one ingest does not read. The console
+shows the same list on a project's **Privacy** page, served from the same code.
+
+## How to read it
+
+- **On**: the spans the attribute belongs on, where Telmoni's SDKs and the
+  conventions put it — every span of a run, the run itself (and the
+  `telmoni.run.start` that opens it), a model call, a tool call, any span that
+  carries it, or the resource every span of an export shares. Ingest reads it
+  from whichever span carries it, a model's name or tokens on a step among
+  them.
+- **Kept as**: the column of `spans` it fills, `attributes` under its own
+  name, or what the drop does with it.
+- **Needs**: the project [content mode](/docs/api/ingest#what-is-dropped-at-the-door)
+  it takes to keep it. Metadata is kept in every mode; content needs `on`, or
+  `sealed` for what Telmoni's SDK encrypted.
+- **Rule**: its cap or format. A span whose field breaks its rule is refused
+  whole; an attribute past its cap is dropped and the span kept. The
+  resource's attributes are copied onto every span of its export, so they
+  keep at most 2 KiB together, keys and values; one past that is dropped
+  without a word.
+
+Two things on the wire are not attributes: the instrumentation scope
+`telmoni`, under which a span the conventions give no operation is a step
+rather than a plain span, and the span named `telmoni.run.start`, which opens
+a run and is never a row.
+
+## Telmoni's own
+
+| Attribute | On | Kept as | Needs | Rule |
+|---|---|---|---|---|
+| `telmoni.run_id` | every span | the column `run_id` | any | a UUID, the same on every span of a run; a span without it is refused |
+| `telmoni.agent` | every span | the column `agent`, and a run's `name` where `gen_ai.agent.name` is unset | any | 1 to 128 characters; a span without it is refused |
+| `user.id` | any span | the column `user_id`, as its HMAC-SHA-256 under a key of the project's own, the first 16 bytes in hex, unless the project keeps it plain | any | up to 128 characters |
+| `telmoni.tag.<key>` | any span | `tags`, under `<key>` | any | up to 32 tags; a key up to 64 characters, a value up to 256 |
+| `telmoni.bound.stall_after_s` | the run | the column `bound_stall_after_s` | any | seconds, a whole number |
+| `telmoni.bound.max_steps` | the run | the column `bound_max_steps` | any | a whole number |
+| `telmoni.bound.max_cost_usd` | the run | the column `bound_max_cost_usd` | any | US dollars |
+| `telmoni.sample_rate` | the run | the column `sample_rate` | any | above 0, up to 1: the share of runs the SDK sends |
+| `telmoni.cancelled` | any span | the column `status`, as `cancelled` | any | `true` on a span the agent cancelled |
+| `telmoni.content` | any span | read and not kept: `sealed` marks content the SDK encrypted, which a `sealed` project alone keeps | any | `sealed` |
+
+## The conventions' fields
+
+| Attribute | On | Kept as | Needs | Rule |
+|---|---|---|---|---|
+| `gen_ai.operation.name` | every span | the column `kind` | any | `invoke_agent` or `invoke_workflow` is the run; `chat`, `generate_content`, `text_completion` or `embeddings` a model call; `execute_tool` a tool call; any other span a step under the `telmoni` scope, a plain span elsewhere |
+| `gen_ai.agent.name` | the run | the column `name` | any | 1 to 128 characters |
+| `gen_ai.workflow.name` | the run | the column `name`, where `gen_ai.agent.name` is unset | any | 1 to 128 characters |
+| `gen_ai.tool.name` | a tool call | the column `name` | any | 1 to 128 characters |
+| `error.type` | any span | the column `error_type` | any | up to 128 characters: the exception's class, never its message |
+| `gen_ai.response.model` | a model call | the column `model` | any | up to 128 characters, as the provider spells it |
+| `gen_ai.request.model` | a model call | the column `model`, where the response names none | any | up to 128 characters, as the provider spells it |
+| `gen_ai.provider.name` | a model call | the column `provider` | any | up to 128 characters, as the conventions spell it: `openai`, `anthropic`, `gcp.vertex_ai`, `aws.bedrock` |
+| `gen_ai.usage.input_tokens` | a model call | the column `input_tokens` | any | a whole number, 0 or more: every input token, the cache's reads and writes among them |
+| `gen_ai.usage.output_tokens` | a model call | the column `output_tokens` | any | a whole number, 0 or more: every output token, reasoning among them |
+| `gen_ai.usage.cache_read.input_tokens` | a model call | the column `cache_read_input_tokens` | any | a whole number, 0 or more |
+| `gen_ai.usage.cache_write.input_tokens` | a model call | the column `cache_write_input_tokens` | any | a whole number, 0 or more |
+| `gen_ai.conversation.id` | any span | the column `conversation_id` | any | up to 200 characters, kept as sent |
+
+## Names the conventions replaced
+
+Exporters lag the conventions, so the names they replaced are read as the
+current ones.
+
+| Attribute | On | Kept as | Needs | Rule |
+|---|---|---|---|---|
+| `gen_ai.system` | a model call | read as `gen_ai.provider.name` | any | a name the conventions replaced, read as the current one |
+| `gen_ai.usage.prompt_tokens` | a model call | read as `gen_ai.usage.input_tokens` | any | a name the conventions replaced, read as the current one |
+| `gen_ai.usage.completion_tokens` | a model call | read as `gen_ai.usage.output_tokens` | any | a name the conventions replaced, read as the current one |
+| `gen_ai.usage.cache_creation.input_tokens` | a model call | read as `gen_ai.usage.cache_write.input_tokens` | any | a name the conventions replaced, read as the current one |
+
+## Kept under their own names
+
+Each of these is kept in `attributes` under its own name, whatever its value's
+type; a named array is kept as its JSON. A key is up to 128 characters and a
+value up to 1,024, and a span keeps up to 64 attributes, its resource's among
+them.
+
+| Attribute | On | Kept as | Needs | Rule |
+|---|---|---|---|---|
+| `gen_ai.response.id` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `gen_ai.response.finish_reasons` | a model call | `attributes`, under its own name | any | an array, as its JSON |
+| `gen_ai.response.status` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `gen_ai.request.reasoning.level` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `gen_ai.agent.version` | the run | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `gen_ai.tool.call.id` | a tool call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `gen_ai.tool.type` | a tool call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `gen_ai.output.type` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `gen_ai.prompt.name` | any span | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `gen_ai.prompt.version` | any span | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `gen_ai.data_source.id` | any span | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `server.address` | any span | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `service.name` | the resource | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `service.version` | the resource | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `deployment.environment.name` | the resource | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `telemetry.sdk.*` | the resource | `attributes`, under its own name | any | what the OpenTelemetry SDK says of itself: its name, language and version |
+| `telemetry.distro.*` | the resource | `attributes`, under its own name | any | what the distribution says of itself: `telmoni` and its version, on everything Telmoni's SDKs send |
+
+## Content
+
+Content is what a person or a model wrote, and the people a span names. On a
+project whose content mode is `off` — every project today — each of these is
+dropped at the door, the span kept and the field named in the answer, and
+nothing of it reaches a store. Once a project may keep content, it is kept in
+Postgres alone, never in a column of `spans`, and every read of it is audited.
+
+| Attribute | On | Kept as | Needs | Rule |
+|---|---|---|---|---|
+| `gen_ai.input.messages` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `gen_ai.output.messages` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `gen_ai.system_instructions` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `gen_ai.tool.definitions` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `gen_ai.tool.call.arguments` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `gen_ai.tool.call.result` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `gen_ai.retrieval.query.text` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `gen_ai.retrieval.documents` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `gen_ai.memory.query.text` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `gen_ai.memory.records` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `gen_ai.prompt.variable` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `user.email` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | names a person: content, whatever else the span carries |
+| `user.full_name` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | names a person: content, whatever else the span carries |
+| `user.name` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | names a person: content, whatever else the span carries |
+
+## Everything else
+
+| Attribute | On | Kept as | Needs | Rule |
+|---|---|---|---|---|
+| any other number or boolean | any span | `attributes`, under its own name | any | a measurement no person writes; on the resource, dropped without a word |
+| any other text or array | any span | dropped in every mode, the span kept and the attribute named in the answer as `unlisted` | any | content arrives under names no convention gave it; on the resource, dropped without a word |
+| the span's events and status message | any span | never kept | any | where an exception writes its message and stack trace |

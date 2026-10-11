@@ -1,0 +1,63 @@
+---
+title: "Traces"
+description: "A project's Traces page: every run of its agents as a row, newest first, filtered and sorted by user, conversation, status, model or tool, and each run's own page with its steps, calls and timeline — all of it metadata."
+---
+
+A **trace** is one run's record: the run's own span and every span recorded
+inside it, found by the run's id. A project's **Traces** page lists them, and
+each has a page of its own. Everything on both is metadata — timings, statuses,
+counts, model and tool names — and nothing on either is a prompt, a completion
+or a tool payload, in any [content mode](/docs/api/ingest#what-is-dropped-at-the-door).
+
+## The list
+
+Every run of the project's agents from the last seven days, newest first, one
+row each:
+
+| Column | What it is |
+|---|---|
+| Trace | The first eight characters of the run's id; opens the trace |
+| Started | When the run's first span started, in your time zone |
+| Agent | The run's agent (`telmoni.agent`), which will name its monitor once monitors are built |
+| User | The end user the run was for (`user.id`), as stored: hashed under the project's own key |
+| Conversation | The conversation the run belongs to (`gen_ai.conversation.id`), as the application set it |
+| Status | **OK**, **Error** or **Cancelled** once the run's own span has arrived; **Running** until it has |
+| Steps | How many steps the run took; hover for its model and tool calls |
+| Tokens | Its model calls' input and output tokens, summed; hover for the split |
+| Duration | From its first span's start to its last span's end |
+
+**Filter** by any of agent, user, conversation, status, model or tool with the
+form above the list, or click an agent, a user or a conversation in a row to
+see its runs together: one user's traces, or one conversation's, stand as a
+list of their own. **Sort** by any column by clicking its heading; a second click turns
+it round. Names sort in the alphabet's order, and the newest, the longest and
+the most come first on the others.
+
+**The window** is the last day, week, 30 or 90 days, by the day each span
+arrived. The list shows up to 100 runs, and says so when the window holds
+more: show up to 500, or narrow the window or the filters.
+
+Every filter, the sort and the window are in the page's URL, so a link holds
+the view you were looking at.
+
+## A trace
+
+A trace's page names its run and sums it: status, when it started, how long it
+ran, its user — a link to the runs that share it — and its conversation, a link
+to [its page](/docs/workspace/conversations#a-conversation), how many steps and calls it
+made, its tokens, the bounds it declared, its sample rate, its tags, and its
+run id in full.
+
+**Steps** lists each step the agent recorded, in the order they ran, with the
+model and tool calls made inside it: the model and its provider, the call's
+tokens, its latency, and how it ended, with the error's type where it failed.
+Calls made straight under the run, with no step around them, are listed
+together under the run's own heading, where the first of them started.
+
+**Timeline**, one view away, draws every span of the run — the steps, the
+calls, and any other span an exporter recorded inside it — as a bar on one
+line of time, nested as it was recorded, with its duration beside it.
+
+A run whose own span has not arrived yet is shown as running. A trace that
+is not in the project — a run that has passed its retention, or one of another
+project's — says so, and leads back to the list.

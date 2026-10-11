@@ -1,0 +1,44 @@
+---
+title: "Users"
+description: "A project's Users page: every end user its agents served in the window, by the id the application tagged runs with, with their traces, errors, steps and tokens — each opening their traces."
+---
+
+A **user** is whoever your agents served: the person a run was for, as the
+application named them, never a member of your organization. A project's
+**Users** page lists every one seen in the window with what their runs added
+up to, and each opens their traces together. Everything on it is metadata,
+and the id is as stored: hashed under the project's own key, so the page names
+nobody by it.
+
+## Naming the user
+
+Name the user when you open a run — `user_id` in the [SDKs](/docs/api/sdks),
+`user.id` on the span, which is OpenTelemetry's own name for it — and every
+span inside the run carries it. A run that names no user is nobody's and counts on
+no row here; a project whose runs name none sees the page say so, with the
+attribute to set.
+
+## The list
+
+| Column | What it is |
+|---|---|
+| User | The user's id, as stored; opens their traces |
+| Traces | How many runs were for them in the window |
+| Errors | How many of those had a span that failed |
+| Steps | The steps those runs took, summed |
+| Tokens | Their model calls' input and output tokens, summed; hover for the split |
+| First seen | When their first run in the window started, in your time zone |
+| Last seen | When their last run in the window ended |
+
+**Sort** by any column by clicking its heading; most tokens first until a
+call is priced, when spend will take its place. A second click turns the sort
+round. Ids and first seen sort the alphabet's and the calendar's way; the most
+and the latest come first on the others.
+
+**The window** is the last day, week, 30 or 90 days, by the day each span
+arrived. The page reads the spans within it — never the whole table — so a
+user whose runs have all passed their retention is no longer listed. Up to 100
+users are shown, and the page says when the window holds more: show up to 500,
+or narrow the window.
+
+The sort and the window are in the page's URL, so a link holds the view.

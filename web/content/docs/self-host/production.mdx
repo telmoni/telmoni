@@ -1,0 +1,425 @@
+---
+title: Production & Maintenance
+description: Production hardening, database role separation, automated partition rotation, reverse proxying, and disaster recovery.
+---
+
+A production deployment of Telmoni separates the database roles, keeps audit partitions ahead of the calendar, sits behind a TLS reverse proxy, and can move sign-in to an OpenID Connect (OIDC) identity provider.
+
+## Identity & Authentication: Production OIDC Hardening
+
+When first launching Telmoni, you can seed an initial account with `ADMIN_EMAIL` and `ADMIN_PASSWORD`. It signs in through the login form (an email address and a password that Telmoni holds), which is on unless `DISABLE_LOGIN_FORM=true`.
+
+In a production deployment, **we strongly recommend connecting an OpenID Connect (OIDC) identity provider**, one that publishes its discovery document at `{issuer}/.well-known/openid-configuration` and signs ID tokens with RS256, and disabling the login form entirely.
+
+### Why use OIDC in production?
+
+1. **Centralized lifecycle**: When an employee leaves your company, deprovisioning them in your IdP stops their next sign-in to Telmoni. A session already open is Telmoni's own and lasts until it expires or is signed out, so remove them from your organizations as well. Telmoni reads no group or role claim, so their roles here change only in Telmoni.
+2. **Your provider's MFA**: Telmoni has no second factor of its own and reads no `acr` or `amr` claim; a sign-in through the provider carries whatever factors the provider requires.
+3. **No password lanes**: With `DISABLE_LOGIN_FORM=true` the server mounts none of the password lanes: sign-in, sign-up, verification, forgot and reset.
+
+### Step-by-step transition to OIDC
+
+<Steps>
+
+<Step>
+
+**Configure your OpenID Connect Provider**
+
+Register Telmoni in your Identity Provider (IdP) with the following parameters:
+- **Allowed Redirect URI**: `https://telmoni.example.com/auth/callback`
+- **Allowed post-logout redirect URI**: `https://telmoni.example.com/` (when the provider publishes an `end_session_endpoint`, signing out of a session that began there sends the browser to it with `id_token_hint`, and it comes back here, to `AUTH_URL` and `/`)
+- **Scopes**: `openid`, `email`, `profile`
+
+</Step>
+
+<Step>
+
+**Add OIDC variables to your environment**
+
+Configure the provider details in your `.env` or Kubernetes secret:
+
+```sh
+# Identity Provider Discovery URL (must serve /.well-known/openid-configuration)
+OIDC_ISSUER=https://idp.example.com/realms/production
+OIDC_CLIENT_ID=telmoni-client-id
+OIDC_CLIENT_SECRET=telmoni-client-secret
+OIDC_REDIRECT_URI=https://telmoni.example.com/auth/callback
+OIDC_NAME="Corporate SSO"
+```
+
+The console needs one variable of its own, `AUTH_PROVIDER_ORIGINS`: the provider's origins, space separated. Signing out from the account menu is a form post that ends in a redirect to the provider, and the console's Content Security Policy lets the browser follow it only to these origins and to the console itself, so without it signing out through the provider is blocked (sign-in is a link, which the policy does not govern). Each entry must be a bare origin, or a wildcard subdomain such as `https://*.idp.example`; an entry with a path, such as the issuer URL, is ignored. With Compose it is set in the same `.env` and passed to the `web` container; with the chart it is `config.authProviderOrigins`.
+
+```sh
+AUTH_PROVIDER_ORIGINS=https://idp.example.com
+```
+
+</Step>
+
+<Step>
+
+**Verify OIDC sign-in**
+
+Recreate the server and web containers (`docker compose -f deploy/compose/docker-compose.yml up -d`, or roll both deployments on the chart; a plain restart keeps the old environment) and sign in with the new **"Continue with Corporate SSO"** button. A first sign-in through the provider creates your account while `OIDC_ALLOW_SIGN_UP` is on, its default. An address that already holds an account here (the seeded administrator's, say) is refused when the provider sends it back (the browser returns to the sign-in page, and the server logs that `OIDC_ALLOW_INSECURE_EMAIL_LOOKUP=true` would link them) unless `OIDC_ALLOW_INSECURE_EMAIL_LOOKUP=true`, which links the two: set it for that one sign-in, then turn it off again. Signing in with a different address instead makes a new person with a new organization, and the seeded administrator's organization would keep an owner who can no longer sign in once step 4 closes the form. Confirm you land in the console.
+
+</Step>
+
+<Step>
+
+**Close sign-ups and the local password form**
+
+Once every administrator has signed in through the provider, remove `ADMIN_EMAIL` and `ADMIN_PASSWORD` from your environment and set:
+
+```sh
+DISABLE_LOGIN_FORM=true
+OIDC_ALLOW_SIGN_UP=false
+ALLOW_SIGN_UP=false
+```
+
+From then on nobody new signs in, invited or not: with the password form off there is no sign-up for an invitation to open, and `OIDC_ALLOW_SIGN_UP=false` turns away every identity the provider has not already brought here. For an invitation-only deployment, leave `OIDC_ALLOW_SIGN_UP` on and turn the `signup` feature flag off instead (see [closing new organizations](#closing-new-organizations) below): a newcomer's first sign-in makes an account but no organization, and an invitation is what seats them in one.
+
+<Callout type="warn">
+The Telmoni server performs sanity checks at boot:
+- If `DISABLE_LOGIN_FORM=true` is set without a configured `OIDC_ISSUER`, the server halts immediately because nobody could sign in.
+- If `ADMIN_EMAIL` or `ADMIN_PASSWORD` is set alongside `DISABLE_LOGIN_FORM=true`, the server halts because a password account could never log in. Remove both before enabling `DISABLE_LOGIN_FORM`.
+</Callout>
+</Step>
+
+</Steps>
+
+### Closing new organizations
+
+The `signup` flag is a row in the database, not an environment variable; the newest row for a key wins. The `auth` role may only read `auth.feature_flags`, so write the row as the table's owner — the `migrator` role, the login `MIGRATOR_DATABASE_URL` names — or as the Compose stack's single database user:
+
+```sql
+INSERT INTO auth.feature_flags (key, enabled, note, actor)
+VALUES ('signup', false, 'invitation only', 'ops@example.com');
+```
+
+A new person who signs in then lands on their account alone, with their invitations. The console's switcher stops offering **New organization** too, to existing accounts as well, so nobody creates one. Insert a row with `true` to open sign-ups again.
+
+### The other feature flags
+
+`signup` is one of five keys, all read the same way: the newest row per key wins, and a key with no row is on. A row in `auth.organization_flags` (the same columns, plus the organization's `org_...` id) overrides the global row for that organization, except for `signup` and `connectors`, which are read from the global rows alone.
+
+| Key | Off means |
+| :--- | :--- |
+| `signup` | No organization is provisioned at first sign-in, and the switcher offers no **New organization** ("Sign-ups are closed right now." to a request that creates one). |
+| `members` | Inviting is refused ("Adding a member is switched off right now."). |
+| `api_tokens` | Minting or rotating an API key is refused ("API keys are switched off right now."); revoking still works. |
+| `public_api` | `/v1` answers `503 Service Unavailable` with the `/errors/tenant/feature-off` problem type ("The API is switched off right now."). |
+| `connectors` | Connecting is refused ("Connectors are switched off right now."), and retries wait until it is on again; a notice's first attempt (while the server has fewer than 32 in flight), **Send test** and **Resend** still go out. |
+
+```sql
+INSERT INTO auth.organization_flags (organization_id, key, enabled, note, actor)
+VALUES ('org_019a0b8c3f2e7d41', 'api_tokens', false, 'pending review', 'ops@example.com');
+```
+
+---
+
+## Database role hardening
+
+In a production cluster, each module connects as its own role, granted its own schema, and none connects as a PostgreSQL superuser.
+
+### Role separation
+
+The database tier is split into five distinct roles:
+
+```text
+┌─────────────────┬────────────────────────────────────────────────────────┐
+│ Role            │ Granted Capabilities                                   │
+├─────────────────┼────────────────────────────────────────────────────────┤
+│ migrator        │ Owns every schema and table. Runs DDL.                 │
+│ auth            │ CRUD on accounts, orgs, projects, and RBAC tables.     │
+│ notifications   │ CRUD on delivery queues, feeds, and connector records. │
+│ agent           │ CRUD on chunks, conversations, messages and cursors.   │
+│ telemetry       │ Reads and writes each project's settings; no deletes.  │
+└─────────────────┴────────────────────────────────────────────────────────┘
+```
+
+The audit chain is the one surface shared across roles: `auth`, `notifications` and `telemetry` may read and append `audit.events`, each to record its own changes (telemetry's are a project's content mode), and neither they nor the maintenance lanes may update or delete a row; `agent` has no audit grant at all. The spans are not in Postgres: ClickHouse keeps them, under users of its own (see [Kubernetes](/docs/self-host/kubernetes)). The owner role, `migrator`, keeps every privilege. Each module role is also kept from the writes the owner or a maintenance lane makes: `auth` may not write `feature_flags` or `organization_flags`, `notifications` may not write `delivery_attempts`, `agent` may not write `erasures`, and `telemetry` may not delete from `project_settings`.
+
+### Applying role hardening
+
+To apply the production hardening policies, run the superuser setup script provided in the repository:
+
+<Steps>
+
+<Step>
+
+**Create the login roles**
+
+Connect as a superuser to the database Telmoni will use, and create the service roles, each with a strong password of its own, and the `vector` extension. The hardening script looks for these exact role names and stops if one is missing. The extension belongs to one database, not the cluster, so it must be created in Telmoni's own: the agent's tables need it, only a superuser can create it, and the migration stops without it or on a version before 0.8:
+
+```sql
+CREATE ROLE migrator WITH LOGIN PASSWORD '<migrator password>';
+CREATE ROLE auth WITH LOGIN PASSWORD '<auth password>';
+CREATE ROLE notifications WITH LOGIN PASSWORD '<notifications password>';
+CREATE ROLE agent WITH LOGIN PASSWORD '<agent password>';
+CREATE ROLE telemetry WITH LOGIN PASSWORD '<telemetry password>';
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+</Step>
+
+<Step>
+
+**Execute hardening script**
+
+Apply `crates/migrator/sql/role_hardening.sql`:
+
+```bash
+psql "$SUPERUSER_DATABASE_URL" -v ON_ERROR_STOP=1 -f crates/migrator/sql/role_hardening.sql
+```
+
+This script, which refuses to run as one of the five roles and stops if any of them is missing:
+- Strips `SUPERUSER`, `CREATEROLE`, and `CREATEDB` from all five roles.
+- Enforces `NOBYPASSRLS` across `auth`, `notifications`, `agent` and `telemetry` so that application pools cannot bypass PostgreSQL Row-Level Security policies; `migrator` gets `BYPASSRLS` and `CREATE` on the database, since it owns every schema.
+- Sets each module role's session defaults: `statement_timeout` 5 s, `lock_timeout` 2 s, `idle_in_transaction_session_timeout` 2 min, and a `search_path` of its own schema (`agent, public` for the agent, whose `vector` type lives in `public`); the migrator gets 5 min and 30 s.
+- Revokes `CREATE` on the `public` schema and `TEMPORARY` on the database from `PUBLIC`.
+- Creates the four `*_maintenance` lanes, `NOLOGIN` roles each module enters with `SET ROLE` for its cross-tenant work (the sweeps, the delivery loop, sign-in lookups, the `/v1` key check, telemetry's purges and a transfer's move), and grants each to its module's role.
+
+</Step>
+
+<Step>
+
+**Run migrations and apply object grants**
+
+Execute the migrator as the `migrator` user, in Postgres and in ClickHouse:
+
+```bash
+MIGRATOR_DATABASE_URL="postgres://migrator:<migrator password>@postgres:5432/telmoni" \
+MIGRATOR_CLICKHOUSE_URL="http://migrator:<ClickHouse migrator password>@clickhouse:8123" \
+  telmoni migrate
+```
+
+After every run the migrator applies `object_grants.sql`. It grants each module's role `SELECT`, `INSERT`, `UPDATE` and `DELETE` on its own schema, and `SELECT` and `INSERT` on `audit.events` to `auth`, `notifications` and `telemetry`. It takes back the module roles' writes to the tables only the owner or a maintenance lane writes (the feature-flag tables, the delivery log, the agent's erasure fences), and `telemetry`'s deletes from the project settings its maintenance lane purges. When any of the four module roles is missing, as in the Compose quickstart, the grants are skipped with a warning naming it. Then it creates ClickHouse's `telemetry` database, its tables and their row policies, every statement `IF NOT EXISTS`, so a second run changes nothing. The database records the digest of the statements it was made from, and a release whose statements differ refuses to run over it rather than skip the difference: before Telmoni's first release, that means recreating ClickHouse's volume.
+
+</Step>
+
+</Steps>
+
+---
+
+## Partition rotation
+
+Telmoni's audit log uses range-partitioned tables partitioned monthly by timestamp (`created_at`). An audit row for a month with no partition fails its insert, and the change it records fails with it, so `telmoni migrate` creates the current month and the next three, and the rotation command keeps that runway ahead of the calendar. The same command drops ClickHouse's spans past retention:
+
+```bash
+telmoni rotate
+```
+
+### Rotation behavior
+
+- **Forward Runway**: `telmoni rotate` creates the current calendar month and the next three months of partitions ahead of time (`{table}_YYYY_MM`). It never drops audit partitions.
+- **Spans**: It drops each day of spans in ClickHouse once every span in it arrived more than 360 days ago, and each month of hourly totals once it is more than 13 months behind. A night it misses is caught up by the next.
+- **Deleted projects**: It rewrites away the rows a deleted project left. Deleting a project, or an organization with its projects, marks every span and every hour of totals of the project deleted the moment the purge runs, so that within moments, as the store applies the mark, no read answers them; the rotation applies that mark to the disk, so the rows leave it too. A rewrite that outlasts the statement's minute is left running, since a ClickHouse mutation finishes on its own, and noted in the log.
+- **Idempotency**: Safe to run any number of times: a run creates only the audit partitions that are missing, drops only the days and months past retention and rewrites only what is marked, so a second run the same night changes nothing.
+
+### Scheduling
+
+The Helm chart runs it daily as the `rotate` CronJob (`migrator.rotateSchedule`, default `"0 2 * * *"`). On Compose, schedule it yourself, once a day, so spans go when their retention ends:
+
+```bash
+# /etc/cron.d/telmoni-rotate
+0 3 * * * root docker compose -f /opt/telmoni/deploy/compose/docker-compose.yml run --rm migrate rotate
+```
+
+---
+
+## Operator CLI sweeps & disaster recovery
+
+The `telmoni` binary includes administrative commands for cluster operators.
+
+### Background maintenance sweeps
+
+Inside `telmoni serve`, the deletion sweep runs every ten minutes, the audit-export sweep every five, and the retention and audit-verification sweeps every 24 hours, each first a minute after boot. The deletion and audit-verification sweeps take a leader lock for each tick, so replicas on the same timers do not run one tick twice; the retention and audit-export sweeps take none, since their deletes are safe to repeat and each export they build is claimed first. Every step is idempotent, so a tick cut short by a rollout is finished by the next. `RUN_SWEEPS=false` leaves them to runs you schedule; schedule the audit-export sweep every few minutes, since it is the only retry for an export a restart cut short — without it one shows **Preparing** for good, and three such hold its owner off starting another — and what deletes a file past its 7 days. You can also trigger individual maintenance jobs on demand:
+
+```bash
+# Finish pending deletions: erase each organization past its wait (15 minutes
+# after its deletion), then each person whose deletion is pending
+telmoni sweep deletion
+
+# Verify cryptographic hash chain across the audit ledger
+telmoni sweep audit-verify
+
+# Delete API keys revoked or expired over 7 days ago, invitations 30 days past
+# expiry or withdrawal, sessions revoked over 90 days ago, and the sign-in
+# tokens, codes and device authorizations nobody can use any more
+telmoni sweep retention
+
+# Re-embed every agent passage that a previous EMBEDDINGS_MODEL embedded
+telmoni sweep agent-reindex
+
+# Delete every audit log export past its 7 days, then finish building the
+# exports a restart left unfinished
+telmoni sweep audit-exports
+```
+
+### Emergency organization management
+
+If an organization needs to be closed by a platform administrator:
+
+```bash
+# Close an organization at once; the deletion sweep erases it after the same
+# 15-minute wait as an owner's deletion
+telmoni terminate org_019a0b8c3f2e7d41
+```
+
+`terminate` closes the organization without its owner's confirmation code, as `service:operator` in its audit log. There is no way back: the next deletion sweep past the wait erases it, as it erases one its owner deleted.
+
+---
+
+## What the server refuses at boot
+
+`telmoni serve` reads its environment once and stops, with the reason in its log, rather than run with a setting that would fail later or weaken the deployment:
+
+- `DISABLE_LOGIN_FORM=true` without `OIDC_ISSUER`: nobody could sign in.
+- `ADMIN_EMAIL` or `ADMIN_PASSWORD` with `DISABLE_LOGIN_FORM=true`: the seeded account could never sign in. The two are also refused one without the other, and at every boot an `ADMIN_EMAIL` that is not an address or an `ADMIN_PASSWORD` under 8 characters or over 256 bytes, even once the account exists.
+- `OIDC_ISSUER` without `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`.
+- `SLACK_CLIENT_ID` without `SLACK_SIGNING_SECRET`; either of `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` without the other; Slack credentials without `CONNECTOR_KEK`; and a `CONNECTOR_KEK` that is neither `local:` with 64 hex characters nor a Cloud KMS key name (a key version is refused too).
+- An `SMTP_URL` that is not a connection URL, or, with `SMTP_URL` set, a `MAIL_FROM` that is not an address.
+- `AGENT_MODEL_PROVIDER` without `AGENT_DATABASE_URL`, or with a value other than `anthropic` and `openai`; `openai` without `AGENT_MODEL`; `RERANK_URL` without `RERANK_MODEL`; a hosted `AGENT_MODEL_URL` or `EMBEDDINGS_URL` without its key; `AGENT_MODEL_TIMEOUT_SECS` outside 1 to 100; an embeddings endpoint that answers with a width other than 768 (one not answering yet is allowed, and checked at its first answer).
+- A set value that does not parse (`PORT=eight`), or a count below its minimum: the `NOTIFICATIONS_DELIVERY_*` settings, `AGENT_MESSAGES_PER_HOUR` and `AGENT_MAX_TOKENS` must be at least 1, except `NOTIFICATIONS_DELIVERY_BACKOFF_SECS`, which may be 0. A blank value reads as unset and takes the default.
+- A `TELEMETRY_CLICKHOUSE_URL` that is not an `http` or `https` URL with a host, or that carries a query string or a fragment: settings are the server's to choose, never the URL's. The reason names the fault, never the URL, which holds a password. ClickHouse itself being down is no refusal: the server starts, and reaches it at the first read or write of a span.
+- In a Kubernetes pod only: an `OIDC_ISSUER` that is not `https://`, an `SMTP_URL` that is neither TLS nor loopback, a `local:` `CONNECTOR_KEK`, `ALLOW_TEST_SESSION`, a missing `DATABASE_CA_CERT`, and a ClickHouse URL over plain `http` to anything but loopback or a Service's name with its namespace (`clickhouse.<namespace>.svc`, `….svc.cluster.local`), which `telmoni migrate` and `telmoni rotate` refuse too.
+
+---
+
+## Reverse proxy configuration
+
+In production, place Telmoni behind a reverse proxy that terminates TLS and forwards the console's host to the web console on port `3000`, and the machine lanes — ingest at `/otlp/v1/traces`, where the SDKs send; the read API under `/v1`; the CLI's sign-in under `/cli`; and Slack's signed events at `/webhooks/slack` — to the server on port `8082`: on a host of their own (`api.telmoni.example.com`, which is then the SDKs' and the CLI's `endpoint`) or under their paths on the console's host (then the endpoint). Forward only those paths to `8082`: on that port every other lane but the health probes (`/health`, `/livez`) requires the service secret and is the console's to call, and a person's every request enters through the console. Never expose either port directly to the public internet. The Compose file publishes `3000` on every interface of the host, so firewall it, or publish it on `127.0.0.1` alone with a Compose override; it publishes `8082` on `127.0.0.1` already, for the proxy on the same host. The server reads `TRUSTED_PROXY_HOPS` as the console does, so the machine lanes' per-address limits find the caller's address past the same proxies.
+
+**What the console expects of the proxy.** The console's rate limiter takes each caller's address from `X-Forwarded-For`, counting `TRUSTED_PROXY_HOPS` entries back from the end: one for each entry the proxies in front append, so that entry is the first one no caller wrote. The Compose file sets `TRUSTED_PROXY_HOPS=1` for the single reverse proxy below, which may set `X-Forwarded-For` to the client's address, as both configurations do, or append it to whatever the client sent; either way the last entry is the client's. Count every entry an outer hop appends as well: a plain load balancer in front of the proxy adds one (`2`), Google's load balancer adds two — the client's address and then its own, which is why the Helm chart's default is `2` with nothing else in front, and `3` with an appending proxy behind it. `0` is for nothing in front at all, and leaves the per-address limits to the caller's own header. `X-Real-IP` is not read.
+
+The console's live updates (server-sent events) and the agent's streamed answers are marked `X-Accel-Buffering: no`, so Nginx passes them through unbuffered. The console uses no WebSockets.
+
+<Tabs items={['Caddy (Recommended)', 'Nginx']}>
+  <Tab value="Caddy (Recommended)">
+    Caddy automatically provisions and renews Let's Encrypt / ZeroSSL certificates:
+
+    ```nginx
+    # /etc/caddy/Caddyfile
+    telmoni.example.com {
+        encode zstd gzip
+
+        # The machine lanes, by path: ingest, where the SDKs send, the read
+        # API, the CLI's sign-in and Slack's events. On a host of their own
+        # instead, give that host a site block holding this handle alone, and
+        # set it as the SDKs' and the CLI's endpoint.
+        @machines path /otlp/* /v1/* /cli/* /webhooks/slack
+        handle @machines {
+            reverse_proxy localhost:8082 {
+                header_up X-Forwarded-For {remote_host}
+            }
+        }
+
+        # Next.js Web Console
+        handle {
+            reverse_proxy localhost:3000 {
+                header_up Host {host}
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-For {remote_host}
+                header_up X-Forwarded-Proto {scheme}
+            }
+        }
+    }
+    ```
+  </Tab>
+  <Tab value="Nginx">
+    Nginx with TLS, forwarding to the console. `X-Forwarded-For` is set to `$remote_addr`, the address Nginx saw the client at; `$proxy_add_x_forwarded_for`, which appends it to whatever the client sent, works as well with `TRUSTED_PROXY_HOPS=1`, since the console reads the last entry:
+
+    ```nginx
+    # /etc/nginx/sites-available/telmoni.conf
+    server {
+        listen 80;
+        server_name telmoni.example.com;
+        return 301 https://$host$request_uri;
+    }
+
+    server {
+        listen 443 ssl http2;
+        server_name telmoni.example.com;
+
+        ssl_certificate /etc/letsencrypt/live/telmoni.example.com/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/telmoni.example.com/privkey.pem;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+
+        client_max_body_size 25M;
+
+        # The machine lanes, by path: ingest, where the SDKs send, the read
+        # API, the CLI's sign-in and Slack's events. On a host of their own
+        # instead, give that host a server block holding this location alone,
+        # and set it as the SDKs' and the CLI's endpoint.
+        location ~ ^/(otlp|v1|cli)/|^/webhooks/slack$ {
+            proxy_pass http://127.0.0.1:8082;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $remote_addr;
+        }
+
+        location / {
+            proxy_pass http://127.0.0.1:3000;
+            proxy_http_version 1.1;
+
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $remote_addr;
+            proxy_set_header X-Forwarded-Proto $scheme;
+
+            # Timeouts for the event streams
+            proxy_read_timeout 86400s;
+            proxy_send_timeout 86400s;
+        }
+    }
+    ```
+
+    If Nginx itself sits behind another proxy or load balancer, `$remote_addr` is that hop's address and every client shares one rate-limit bucket. Either have Nginx append with `$proxy_add_x_forwarded_for` and raise `TRUSTED_PROXY_HOPS` by the entries the outer hop appends (one for most proxies, so `2`; two for Google's load balancer, so `3`), so the console counts past both hops to the address the outer one saw, or use Nginx's `real_ip` module (`set_real_ip_from`, `real_ip_header`) so that `$remote_addr` is the client's address again and `1` still holds.
+  </Tab>
+</Tabs>
+
+---
+
+## Backups & disaster recovery
+
+### PostgreSQL backups
+
+Telmoni keeps its persistent state in two stores: everything but the spans in PostgreSQL, and the spans with their hourly totals in ClickHouse ([below](#clickhouse-backups)). Create periodic logical backups of PostgreSQL with `pg_dump`. Every tenant table forces row-level security, so run it as a role that bypasses it: a superuser, such as the Compose stack's single database user, or `migrator` with separate roles.
+
+```bash
+# Logical database dump, from the Compose host (Postgres listens on 127.0.0.1)
+pg_dump -h 127.0.0.1 -U telmoni -d telmoni -Fc -f "/backups/telmoni_$(date +%Y%m%d_%H%M%S).dump"
+```
+
+To restore from a backup file:
+
+```bash
+pg_restore -h 127.0.0.1 -U telmoni -d telmoni --clean --if-exists "/backups/telmoni_backup.dump"
+```
+
+<Callout type="warn">
+Connector credentials are sealed with `CONNECTOR_KEK`, and a dump restored without the matching key leaves them permanently unreadable. A `local:` key is a secret: back it up alongside your dumps. A Cloud KMS key cannot be dumped: never disable or destroy it while a dump that needs it exists.
+</Callout>
+
+### ClickHouse backups
+
+ClickHouse holds the `telemetry` database: every span, the hourly totals, and the digest of the statements its tables were made from. Losing it loses that history but not the server: `telmoni migrate` makes an empty store again. Back it up with ClickHouse's own `BACKUP`, as a user allowed to write backups, such as the Compose stack's single ClickHouse user. The image allows backups under `backups/` in its data directory, so on the Compose host the archive lands in ClickHouse's volume, from where you copy it off:
+
+```bash
+# The container's own CLICKHOUSE_USER and CLICKHOUSE_PASSWORD sign the client in
+docker compose -f deploy/compose/docker-compose.yml exec clickhouse \
+  clickhouse-client --query "BACKUP DATABASE telemetry TO File('telemetry_20270101.zip')"
+docker compose -f deploy/compose/docker-compose.yml cp \
+  clickhouse:/var/lib/clickhouse/backups/telemetry_20270101.zip /backups/
+```
+
+To restore, copy the archive back into the same directory, drop what is there, and restore it. The row policies are not part of the database: they stay on the server, and `telmoni migrate` makes them again on a new one, finding its own digest in the restored store:
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml cp \
+  /backups/telemetry_20270101.zip clickhouse:/var/lib/clickhouse/backups/
+docker compose -f deploy/compose/docker-compose.yml exec clickhouse \
+  clickhouse-client --query "DROP DATABASE IF EXISTS telemetry SYNC"
+docker compose -f deploy/compose/docker-compose.yml exec clickhouse \
+  clickhouse-client --query "RESTORE DATABASE telemetry FROM File('telemetry_20270101.zip')"
+```

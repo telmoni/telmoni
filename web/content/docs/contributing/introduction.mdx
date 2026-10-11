@@ -1,0 +1,37 @@
+---
+title: "Contributing to Telmoni"
+description: "How to contribute to the open-source Telmoni platform: setting up, the rules the code follows, the gate before a pull request, and how commits are written."
+---
+
+Telmoni's open-source core is [`telmoni/telmoni`](https://github.com/telmoni/telmoni) on GitHub, the four SDKs under `sdk/` with it; these pages are [`telmoni/docs`](https://github.com/telmoni/docs), the CLI is [`telmoni/telmoni-cli`](https://github.com/telmoni/telmoni-cli), and the agent skills [`telmoni/skills`](https://github.com/telmoni/skills). Thanks for helping build it. Everyone taking part follows the [Code of Conduct](/docs/contributing/code-of-conduct), and the [AI policy](/docs/contributing/ai-policy) says how AI tools fit in.
+
+## Four repositories
+
+- [`telmoni/telmoni`](https://github.com/telmoni/telmoni), the platform and the four SDKs (`sdk/`). [Developing it](/docs/contributing/developing#the-platform) takes two commands; [`ARCHITECTURE.md`](https://github.com/telmoni/telmoni/blob/main/ARCHITECTURE.md) explains how it is built on one page: the place to read before changing anything structural. `make ci` is the gate.
+- [`telmoni/docs`](https://github.com/telmoni/docs), these pages, which the platform's console serves at `/docs`. [The docs](/docs/contributing/developing#the-docs) says how a page is wired, and every claim on one is checked against the code first. `make check` is the gate, with the platform checked out beside it.
+- [`telmoni/telmoni-cli`](https://github.com/telmoni/telmoni-cli), the CLI. [Developing it](/docs/contributing/developing#the-cli); its [`ARCHITECTURE.md`](https://github.com/telmoni/telmoni-cli/blob/main/ARCHITECTURE.md) explains how it is built on one page. `cargo xtask ci` is the gate.
+- [`telmoni/skills`](https://github.com/telmoni/skills), the agent skills. [Developing them](/docs/contributing/developing#the-skills); its [`AGENTS.md`](https://github.com/telmoni/skills/blob/main/AGENTS.md) holds the rules a skill is held to, and how to test one. `make check` is the gate.
+
+## Before you start
+
+Open an issue first for a new feature, a schema change or anything architectural, so the shape is agreed before the work. A bug fix or a small improvement can go straight to a pull request.
+
+## How the platform's code is shaped
+
+- **Rust owns the rules.** Business logic, queries, authorization, tenancy and the audit log live in `crates/`; the console in `web/` is a thin proxy and holds none of them.
+- **Never log a secret or personal data**, at any level. Secrets are held in `Redacted` and read on purpose.
+- **Nothing has shipped**, so there are no migration paths: a schema change edits the module's existing migration, and `make db-reset` rebuilds the local database. After a change to the wire contract, `make contract` regenerates it.
+
+## Before you push
+
+Run the repository's gate, which is what its CI runs: `make ci` in the platform (formatting, clippy, rustdoc, the Rust tests against a local Postgres and ClickHouse, the console's typecheck, lint, dead-code check, tests and build, the SDK suites, and the dependency and spelling checks), `make check` in the docs, `cargo xtask ci` in the CLI, and `make check` in the skills. A pull request is reviewed once its gate passes.
+
+## Commits and pull requests
+
+- Keep a pull request to one change.
+- Commits follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`). No sign-off or agreement is needed: unless you say otherwise, a contribution you submit is licensed under the project's Apache-2.0 licence, as its section 5 provides.
+- Only people are commit authors; the [AI policy](/docs/contributing/ai-policy) has the rest.
+
+## Security
+
+A suspected vulnerability is never a public issue: see [reporting a vulnerability](https://telmoni.com/docs/legal/security#reporting-a-vulnerability), which is the security policy of every Telmoni repository.

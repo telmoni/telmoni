@@ -1,0 +1,98 @@
+---
+title: "Data deletion"
+description: "What deleting a project, an organization, your account, an API key or a connector removes, how fast, what stays — the audit log, and copies already delivered elsewhere — and what cannot be deleted on its own yet."
+---
+
+Deletion in Telmoni is final: there is no restore window and no undo, and
+every deletion takes its telemetry with it, since telemetry is kept only
+while its project is active. This page says what each deletion removes and
+when; the steps are on the pages it links to. How long each kind of data is
+kept otherwise is on [Data retention](/docs/workspace/data-retention).
+
+## Deleting a project
+
+Only the organization's **Owner** can, from the project's **Settings** page,
+after typing the project's name
+([steps](/docs/workspace/organizations-and-projects#deleting-a-project)).
+
+- **At once:** the project is gone from the console, its API keys stop
+  authenticating, and its member seats and pending invitations go with it.
+- **In the same purge:** every span and every hour of totals the project
+  sent is marked deleted, gone from every read within moments as the store
+  applies the mark, and the nightly rotation removes them from disk; its
+  telemetry settings, and the key its
+  end-user ids were hashed under, go with them. Its connectors, their
+  delivery history and its activity feed are purged right after, and the
+  console agent removes what it holds about the project within the hour.
+- **What stays:** the project's events in the organization's audit log.
+- **If a step fails** — a store that did not answer — the organization's own
+  deletion finishes it: telemetry finds the project again through the
+  settings row the failure left.
+
+## Deleting an organization
+
+Only the **Owner** can, with a confirmation code sent to their address
+([steps](/docs/workspace/organizations-and-projects#deleting-an-organization)).
+
+- **At once:** the organization is closed, every API key stops
+  authenticating and member access ends. On the hosted service its
+  subscription is cancelled and the unused part of the period refunded.
+- **After a 15-minute grace**, the deletion sweep, which runs every ten
+  minutes, erases it: its projects, with everything a project's deletion
+  removes above; memberships and pending invitations; API keys; connectors
+  and the notices queued for them; the audit log's exports; the console
+  agent's conversations and search index; and telemetry's settings and
+  hashing keys. Usually within the hour. A part that cannot finish is
+  retried every ten minutes until it does.
+- **What stays:** the audit log, which is append-only and outlives the
+  organization; invoices, which Stripe holds; and copies already delivered
+  to a Slack channel or a webhook the organization connected, which are the
+  organization's.
+- On a self-hosted deployment, an operator can close an organization from
+  the server with `telmoni terminate`, which goes the same way.
+
+## Deleting your account
+
+From your account's **Privacy** page, with a confirmation code, once you own
+no organization that has other members
+([steps and the full list](/docs/account/privacy#deleting-your-account)).
+
+- **Erased:** your sessions, your memberships, the audit log exports you
+  started, your conversations with the console agent and your own index
+  rows, and your record at the identity provider on the hosted service.
+- **Deleted with you:** every organization you own alone, after the same
+  15-minute grace.
+- **Rewritten:** feed notices and other people's agent answers that named
+  you say "a former member" instead.
+
+## Deleting smaller things
+
+- **An API key:** **Revoke** ends it at once, and its record is deleted seven
+  days later. **Rotate** keeps the old key working for a day while you deploy
+  the new one ([API keys](/docs/api/api-keys)).
+- **A connector:** disconnecting it revokes the grant at the vendor and
+  erases the grant or signing secret, and its deliveries and their attempts
+  go with it ([Notifications](/docs/integrations/notifications)).
+- **A session:** end any session but the current one from **Active
+  sessions**; the device signs out within minutes
+  ([Privacy](/docs/account/privacy#active-sessions)).
+- **An invitation:** withdraw it; its record goes 30 days later.
+
+## What cannot be deleted on its own yet
+
+- **A single trace, conversation or user's telemetry.** Nothing deletes one
+  of them today: they go with their project, or when their day passes the
+  360-day retention. An end user's id is stored only as a keyed hash, so a
+  stored row names nobody on its own; an erasure by user id is not offered
+  yet.
+- **An audit log entry.** The audit log is append-only by design, kept
+  through every deletion, and verified daily; only an export's file is a
+  copy, and it is deleted after seven days.
+
+## Backups and copies
+
+On the hosted service, deleted data leaves the backups as they expire: the
+database keeps thirty daily backups, telemetry's store thirty nightly ones,
+and nothing older than thirty days is kept of either. On a self-hosted
+deployment, your backups are yours. Files you downloaded and notices already
+delivered to your channels are yours too, and nothing recalls them.

@@ -1,0 +1,70 @@
+---
+title: "Introduction"
+description: "What Telmoni is today, core architecture, and navigation guide."
+---
+
+Telmoni is privacy-first telemetry and monitoring for AI agents. Its SDKs
+record an agent's runs, ingest keeps them as metadata with content dropped at
+the door, and the console reads them as [traces](/docs/workspace/traces),
+[conversations](/docs/workspace/conversations) and
+[users](/docs/workspace/users). Underneath is a foundation for organizations
+and their projects: members and roles, API keys, notifications and a
+hash-chained audit log, with a CLI and an HTTP API. Monitors and alerts are
+not built yet. These documentation pages describe the open core platform,
+hosted cloud service, console interface, developer tools, and HTTP API as
+implemented today.
+
+## Platform capabilities
+
+Telmoni is available both as a hosted cloud service and as an open core
+platform deployed on your own infrastructure:
+
+- **[Hosted cloud service](https://telmoni.com)**: Run for you on Google Cloud,
+  with sign-in through an identity provider and the free
+  [Hobby plan](https://telmoni.com/plans).
+- **[Self-hosted deployment](/docs/self-host/overview)**: Run the complete platform
+  on your own infrastructure using [Docker Compose](/docs/self-host/docker-compose) or
+  the [Kubernetes Helm chart](/docs/self-host/kubernetes), backed by PostgreSQL 17
+  with `pgvector`, ClickHouse and Redis 7.
+- **[Organizations and projects](/docs/workspace/organizations-and-projects)**: Two
+  tiers. An organization holds projects, its own settings and a rolled-up audit
+  log; a project holds API keys and notification connectors.
+- **[Members and roles](/docs/workspace/roles)**: Role-based access control with
+  three roles, **Owner**, **Admin**, and **Member**, governing both
+  organization administration and project resources.
+- **[Audit log](/docs/workspace/audit-log)**: Append-only audit logging linking
+  each recorded event into a SHA-256 hash chain, verified every 24 hours by a
+  background sweep.
+- **[Notifications and connectors](/docs/integrations/notifications)**: Project
+  and organization notices, and fan-out delivery to
+  [Slack](/docs/integrations/slack) and signed
+  [Webhooks](/docs/integrations/webhooks).
+- **[AI Context Agent](/docs/self-host/agent)**: Embedded context assistant that,
+  where the deployment configures a model, answers questions about a project's
+  activity, members, connectors, and audit log in the console (`⌘J`), with
+  numbered citations.
+- **[Telmoni CLI](/docs/api/cli)**: The official command-line interface with interactive
+  device code authorization ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)),
+  organization switching, and JSON output from `telmoni status --json`.
+- **[Client SDKs](/docs/api/sdks)**: SDKs for Python, TypeScript / JavaScript, Go and
+  Rust that record an agent's runs, steps, model calls and tool calls as
+  OpenTelemetry spans, with content taken off before it leaves the process;
+  installed from the repository.
+- **[API keys and /v1 API](/docs/api/api-keys)**: Project-owned `telmoni_` keys,
+  each opening [ingest](/docs/api/ingest), the read-only [API](/docs/api/reference)
+  or both, with a 24-hour grace period on rotation.
+
+## Where to start
+
+1. [Signing up and signing in](/docs/getting-started/sign-in): How you sign in,
+   the organization your first sign-in creates, and your first project.
+2. [Telmoni CLI](/docs/api/cli): Installing the CLI and signing in via device code or API key.
+3. [Client SDKs](/docs/api/sdks): Recording an agent's runs from Python, TypeScript, Go or Rust.
+4. [Organizations and projects](/docs/workspace/organizations-and-projects): Organizations
+   and projects, their URLs, keyboard shortcuts, and their lifecycle.
+5. [Members and invitations](/docs/workspace/members): Inviting collaborators
+   and managing roles.
+6. [Self-hosting overview](/docs/self-host/overview): Architecture, requirements,
+   and deployment models.
+7. [Docker Compose quickstart](/docs/self-host/docker-compose): Running the server,
+   the console, PostgreSQL, ClickHouse and Redis on a single machine.

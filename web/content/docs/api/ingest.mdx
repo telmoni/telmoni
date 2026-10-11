@@ -1,0 +1,142 @@
+---
+title: "Sending spans"
+description: "Ingest over OpenTelemetry's protocol: the endpoint, the key it takes, what a span must carry, what is kept and what is dropped at the door, the answer, and the limits."
+---
+
+Telmoni takes spans over OpenTelemetry's own protocol, OTLP/HTTP, at one
+endpoint:
+
+```text
+POST https://api.telmoni.com/otlp/v1/traces
+```
+
+*(On a self-hosted instance, replace `https://api.telmoni.com` with your
+deployment's own machine host, or with its console's host where the lanes are
+routed by path: [Self-hosting → Production](/docs/self-host/production#reverse-proxy-configuration).)*
+
+The wire is OTLP's, unchanged: an `ExportTraceServiceRequest`, as
+`Content-Type: application/json` in OTLP's JSON encoding or
+`application/x-protobuf`, gzipped (`Content-Encoding: gzip`) or not. What is
+Telmoni's is which attributes are read, and what is done with each.
+
+## The key
+
+Send a [project API key](/docs/api/api-keys) holding the **ingest** scope as
+a bearer token:
+
+```http
+Authorization: Bearer telmoni_...
+```
+
+Every span of the export is the key's project's. No key, or a revoked,
+expired or unknown one, answers `401` `/errors/auth/invalid-token`; a live
+key without the ingest scope answers `403` `/errors/authz/forbidden`.
+
+## What a span must carry
+
+Spans are kept inside a **run**: one execution of an agent. Every span of a
+run carries the run's id, `telmoni.run_id`, a UUID minted as the run starts
+and the same on each of its spans, and the run's agent, `telmoni.agent`, up to
+128 characters. A span without both is refused, one by one, and named in the
+answer: until a later release reads a run out of any trace, a stock
+OpenTelemetry exporter sends nothing that is kept.
+
+What a span is, its **kind**, follows `gen_ai.operation.name`: `invoke_agent`
+or `invoke_workflow` is the run itself; `chat`, `generate_content`,
+`text_completion` or `embeddings` a model call; `execute_tool` a tool call;
+any other span opened under the `telmoni` instrumentation scope a step, and
+one opened elsewhere a plain span. A run is named by `gen_ai.agent.name` (or
+`gen_ai.workflow.name`), a tool call by `gen_ai.tool.name`, and every other
+span by its own name, 1 to 128 characters. The span named `telmoni.run.start`,
+which opens a run, is never a row.
+
+## What is kept
+
+Each field below is a column, read from the attribute named, and the names
+are the GenAI semantic conventions' — the ones they replaced are read as the
+current ones (`gen_ai.system`, `gen_ai.usage.prompt_tokens`,
+`gen_ai.usage.completion_tokens`, `gen_ai.usage.cache_creation.input_tokens`):
+
+| Field | From | Rule |
+|---|---|---|
+| `status` | `telmoni.cancelled` (true), else the span's status code | `ok`, `error` or `cancelled` |
+| `error_type` | `error.type` | up to 128 characters: the exception's class, never its message |
+| `model`, `provider` | `gen_ai.response.model` (else `gen_ai.request.model`), `gen_ai.provider.name` | up to 128 characters each |
+| `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_write_input_tokens` | `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.cache_write.input_tokens` | integers, 0 or more |
+| `user_id` | `user.id` | up to 128 characters; stored as its HMAC-SHA-256 under a key of the project's own, the first 16 bytes in hex, so no stored id names a person |
+| `conversation_id` | `gen_ai.conversation.id` | up to 200 characters, kept as sent |
+| `tags` | each `telmoni.tag.<key>` | up to 32; a key up to 64 characters, a value up to 256 |
+| `bounds`, `sample_rate` | `telmoni.bound.stall_after_s`, `telmoni.bound.max_steps`, `telmoni.bound.max_cost_usd`, `telmoni.sample_rate` | on a run |
+| `attributes` | the attributes the field inventory names, and any other whose value is a number or a boolean | up to 64, the resource's among them, which keep at most 2 KiB together since every span of the export carries them; a key up to 128 characters, a value up to 1,024; a named array as its JSON |
+
+A field whose value breaks its rule refuses the span whole; an attribute past
+its cap is dropped and the span kept.
+
+The [field inventory](/docs/api/field-inventory) names, on a span, `gen_ai.response.id`,
+`gen_ai.response.finish_reasons`, `gen_ai.response.status`,
+`gen_ai.request.reasoning.level`, `gen_ai.agent.version`, `gen_ai.tool.call.id`,
+`gen_ai.tool.type`, `gen_ai.output.type`, `gen_ai.prompt.name`,
+`gen_ai.prompt.version`, `gen_ai.data_source.id` and `server.address`, and on
+the resource `service.name`, `service.version`, `deployment.environment.name`
+and every `telemetry.sdk.*` and `telemetry.distro.*`.
+
+## What is dropped at the door
+
+**Content** — `gen_ai.input.messages`, `gen_ai.output.messages`,
+`gen_ai.system_instructions`, `gen_ai.tool.definitions`,
+`gen_ai.tool.call.arguments`, `gen_ai.tool.call.result`,
+`gen_ai.retrieval.query.text`, `gen_ai.retrieval.documents`,
+`gen_ai.memory.query.text`, `gen_ai.memory.records`, `gen_ai.prompt.variable`,
+and the `user.email`, `user.full_name` and `user.name` that name a person — is
+dropped on a project whose content mode is `off`, which is every project today,
+and never reaches a store. The span is kept, and the answer names the field.
+
+**Any other text, or array**, the [field inventory](/docs/api/field-inventory)
+does not name is dropped in every mode as `unlisted`: content arrives under
+names no convention gave it. A span's events and its status message are never
+kept.
+
+## The answer
+
+`200` with OTLP's `ExportTraceServiceResponse` in the request's encoding, once
+the rows are stored, and the header `Telmoni-Content-Mode` naming the
+project's mode. `partialSuccess` is absent when every span was kept as sent;
+otherwise `rejectedSpans` counts the spans refused whole, and `errorMessage`
+names each span refused and each attribute dropped, with why — its first 4 KiB,
+then a count of the rest:
+
+```json
+{
+  "partialSuccess": {
+    "rejectedSpans": 1,
+    "errorMessage": "span 0202020202020202 refused: no telmoni.run_id and telmoni.agent; a span outside a Telmoni run is refused\nspan 00f067aa0ba902b7 dropped gen_ai.input.messages: content; the project's content mode is off"
+  }
+}
+```
+
+An exporter retries with the same bytes when an answer was lost. An export
+sent again within an hour, byte for byte, gets its first answer again and is
+not written twice; a copy that arrives while the first is still being written
+is answered `503` with `Retry-After: 1`.
+
+## Refusals
+
+A refusal is OTLP's `Status`, in the request's encoding, its `message`
+opening with the [error type](/docs/errors) and its `code` the gRPC code the
+status maps to:
+
+```json
+{ "code": 3, "message": "/errors/telemetry/invalid-batch: the export holds no span" }
+```
+
+| Status | Type | When |
+|---|---|---|
+| `400` | `/errors/telemetry/invalid-batch` | The body does not decode in the encoding `Content-Type` names, or holds no span, or more than 1,000 |
+| `401` | `/errors/auth/invalid-token` | No live key |
+| `403` | `/errors/authz/forbidden` | A key without the ingest scope |
+| `413` | `/errors/telemetry/batch-too-large` | More than 1 MiB once decompressed |
+| `429` | `/errors/tenant/rate-limited` | More than 600 exports a minute from one project; `Retry-After` says how long to wait |
+| `503` | `/errors/telemetry/store-unavailable` | The store did not take the rows, or a copy of the export is being written; retry after `Retry-After` |
+
+`429` and `503` are the two an exporter retries; `400`, `401`, `403` and `413`
+it does not.

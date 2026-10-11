@@ -1,0 +1,87 @@
+---
+title: "Data retention"
+description: "How long Telmoni keeps each kind of data — telemetry, the organization's records, accounts and sessions, the console agent's data — what ends each window, and what the hosted service keeps in backups and logs."
+---
+
+Telmoni keeps each kind of data for a window of its own. The windows are the
+platform's: the same on a self-hosted deployment and on the hosted service,
+and none is set per project yet. Deleting a project, an organization or an
+account ends every window early for what they held, as
+[Data deletion](/docs/workspace/data-deletion) describes.
+
+## Telemetry
+
+Telemetry is kept only while its project is active.
+
+| Data | Kept | Then |
+|---|---|---|
+| Spans: every run, step, model call and tool call, as metadata | 360 days after a span arrives | `telmoni rotate` drops each day of spans once every span in it is older |
+| Hourly totals: spans, units, tokens and durations by project, agent, kind, model, provider, tool and status, which name no user and no tag | 13 months | `rotate` drops each month of totals once it is older |
+| A deleted project's spans and totals | Until the project is deleted | Marked deleted the moment the project goes, and gone from every read within moments, as the store applies the mark; `rotate` rewrites them off the disk that night |
+| The claim on an export's bytes, which answers a retry with the first answer rather than writing twice | 1 hour | Expires |
+| A project's telemetry settings: its content mode, whether end-user ids are hashed, and the key they are hashed under | While the project exists | Purged with the project |
+
+Content — prompts, completions, system instructions, tool inputs and outputs,
+retrieved documents, error messages and every attribute that names a person —
+is kept for no time at all: it is dropped at the door in the one content mode
+offered today, as the [ingest page](/docs/api/ingest#what-is-dropped-at-the-door)
+lists. An end user's id is stored only as a keyed hash
+([Users](/docs/workspace/users)).
+
+## The organization's records
+
+| Data | Kept | Then |
+|---|---|---|
+| Organizations, projects, members and roles | While they exist | Deleted with the organization, or the project |
+| Invitations | Until accepted, declined or withdrawn, or 7 days; the record 30 days past expiry or withdrawal | The retention sweep deletes the record |
+| API keys | While live; a revoked or expired key's record 7 days | The retention sweep deletes the record |
+| Connectors: Slack grants, webhook endpoints and their signing secrets | While connected | Revoked at the vendor and erased when disconnected, or with the project or the organization |
+| Activity feed notices | 90 days | The notifications sweep deletes them |
+| Connector deliveries: what was sent where, and the answer | 30 days | The same sweep |
+| The audit log | Without a time limit, through the organization's deletion | Never deleted: its monthly partitions are kept, and only an export's file is a copy |
+| Audit log exports | 7 days after the file is built | The audit-export sweep deletes the file |
+
+## Accounts and sessions
+
+| Data | Kept | Then |
+|---|---|---|
+| Your account: the name and address your identity provider or password account gave | While the account exists | Erased when you delete the account |
+| Sessions | Until signed out or revoked, or 30 days unused; a revoked session's row 90 days | The retention sweep deletes the row |
+| Sign-in codes, device authorizations and the tokens nobody can use any more | Minutes | The retention sweep deletes them |
+| Confirmation codes, for a deletion or an email change | 15 minutes | Expire; five wrong guesses burn one |
+
+## The console agent
+
+| Data | Kept | Then |
+|---|---|---|
+| Your conversations with the agent, visible to you alone | 90 days after a conversation was last used | The agent's retention sweep deletes them |
+| Its search index: copies of the audit log, feed notices, connector deliveries and your own answered questions | 730, 90, 30 and 90 days: each copy no longer than its source | The same sweep |
+| The documentation a deployment indexes | Until it is updated or removed from the corpus | Re-indexed |
+
+What the agent sends its model provider is on the account's
+[Privacy page](/docs/account/privacy#console-agent-data).
+
+## On the hosted service
+
+- **Backups.** The database is backed up daily, with seven days of
+  point-in-time recovery, and thirty daily backups are kept. Telemetry's
+  store is backed up nightly, thirty nights are kept, and the bucket deletes
+  anything older than thirty days whatever the tool left. Deleted data leaves
+  the backups as they expire, within thirty days.
+- **Operational logs** are kept thirty days. They name ids, never addresses.
+- **Billing.** The subscription's status, period and Stripe's identifiers
+  while the organization exists; Stripe holds the invoices under its own
+  terms.
+- **The console agent's model provider** keeps each request 55 days to detect
+  abuse, as the [Subprocessors](https://telmoni.com/docs/legal/subprocessors) page states.
+
+The hosted service's commitments are in its
+[Privacy Policy](https://telmoni.com/docs/legal/privacy-policy).
+
+## On a self-hosted deployment
+
+The windows above hold as long as `telmoni rotate` runs daily and the server's
+sweeps run, as the [production guide](/docs/self-host/production#partition-rotation)
+describes: spans and totals go when `rotate` drops them, and the rest when
+the sweeps inside `telmoni serve` pass. Your backups are yours, and so is
+their window.
