@@ -6,16 +6,11 @@ import { toast } from "sonner";
 
 import { ChoiceGroup, type Choice } from "@/components/choice-group";
 import { Button } from "@/components/ui/button";
+import { CONTENT_MODE_LABEL as LABELS } from "@/lib/content-mode";
 import { ContentMode } from "@/lib/types/enums";
 import { cn } from "@/lib/utils";
 
 import { updateContentModeAction } from "./actions";
-
-const LABELS: Record<ContentMode, string> = {
-  [ContentMode.Off]: "Off",
-  [ContentMode.On]: "On",
-  [ContentMode.Sealed]: "Sealed",
-};
 
 /** "On", "On and Sealed", "On, Sealed and Off": the modes named in a sentence. */
 function named(modes: ContentMode[]): string {
