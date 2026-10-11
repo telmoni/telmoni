@@ -239,7 +239,9 @@ impl<'a> PendingGeneration<'a> {
                 generation.tool_calls =
                     turn.tool_calls.iter().map(|c| tool_name(&c.name)).collect();
             }
-            Err(e) => generation.error = Some(e.to_string()),
+            // The problem type, as the turn's own ending records one: a
+            // kind, never the provider's words, which can echo the request.
+            Err(e) => generation.error = Some(e.to_problem_details().type_uri),
         }
         self.recorder.push(AgentStep::Generation(generation));
     }
