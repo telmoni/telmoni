@@ -1,6 +1,6 @@
 # Build context for the server image (context = repo root; the web image
 # builds from web/ with its own web/.dockerignore). crates/telmoni/Dockerfile
-# COPYs only `Cargo.toml Cargo.lock` + `crates/`, but the whole context is
+# COPYs only `Cargo.toml Cargo.lock` + `crates/` + `sdk/rust/`, but the whole context is
 # uploaded to the daemon minus what's excluded here — so keep the heavy,
 # never-needed trees out (target/ alone can be tens of GB locally).
 

@@ -52,6 +52,7 @@ help:
 	@echo "  Before you push"
 	@echo "    make ci                   the full gate — run this (check + lint + test + web + deny + typos)"
 	@echo "    make check                the fast half: types, clippy, fmt, rustdoc"
+	@echo "    make sdk-check            the SDKs: the TypeScript, Go and Python suites, and the Rust crate's tests"
 	@echo "    make test                 vitest (web) + cargo test (the crates)"
 	@echo "    make fmt                  cargo fmt + prettier"
 	@echo ""
@@ -159,7 +160,7 @@ schema-check:
 .PHONY: env-check-services
 env-check-services:
 	@missing=""; \
-	for var in AUTH_DATABASE_URL NOTIFICATIONS_DATABASE_URL TELEMETRY_DATABASE_URL MIGRATOR_DATABASE_URL TELEMETRY_CLICKHOUSE_URL MIGRATOR_CLICKHOUSE_URL SERVICE_SECRET; do \
+	for var in AUTH_DATABASE_URL NOTIFICATIONS_DATABASE_URL TELEMETRY_DATABASE_URL MIGRATOR_DATABASE_URL TELEMETRY_CLICKHOUSE_URL MIGRATOR_CLICKHOUSE_URL TELEMETRY_KEK REDIS_URL SERVICE_SECRET; do \
 		eval val=\$$$$var; \
 		if [ -n "$$val" ]; then continue; fi; \
 		if [ -f .env ] && grep -qE "^$$var=[^[:space:]]+" .env; then continue; fi; \
@@ -264,7 +265,7 @@ doc:
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --locked --no-deps --document-private-items --quiet
 
 .PHONY: ci
-ci: check lint test web-gate deny typos
+ci: check lint test web-gate deny typos sdk-check
 
 .PHONY: web-gate
 web-gate:
@@ -307,6 +308,17 @@ deny:
 .PHONY: typos
 typos:
 	typos
+
+# The three SDKs outside the Cargo workspace, each by its own toolchain, and
+# the Rust crate's tests, which need no database: CI's `sdks` job runs the
+# same commands. Python's tools come from the venv Developing describes
+# (`python3 -m venv sdk/python/.venv`, then `pip install -e "sdk/python[dev]"`).
+.PHONY: sdk-check
+sdk-check:
+	cd sdk/typescript && npm run verify
+	cd sdk/go && test -z "$$(gofmt -l .)" && go vet ./... && go test -race ./...
+	cd sdk/python && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/mypy && .venv/bin/pytest
+	cargo test -p telmoni-sdk --locked
 
 .PHONY: fmt
 fmt:

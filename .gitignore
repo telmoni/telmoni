@@ -43,6 +43,18 @@ next-env.d.ts
 .eslintcache
 npm-debug.log*
 
+# ── SDKs (sdk/) ───────────────────────────────────────────────────────────────
+# Four ecosystems in one tree, each vendoring differently; node_modules/ is
+# already ignored above.
+sdk/*/dist/
+sdk/*/.venv/
+sdk/**/__pycache__/
+sdk/*/.pytest_cache/
+sdk/*/.mypy_cache/
+sdk/*/.ruff_cache/
+sdk/**/*.egg-info/
+sdk/**/*.pyc
+
 # ── Test artifacts ────────────────────────────────────────────────────────────
 coverage/
 test-results/

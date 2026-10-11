@@ -1,7 +1,8 @@
 # CI — the full quality gate: format, clippy (workspace deny lints), typos,
 # cargo-deny (advisories/licenses/bans/sources), web typecheck/lint/knip/test/
-# build, and the Rust test suite against a fully migrated Postgres and
-# ClickHouse.
+# build, the Rust test suite against a fully migrated Postgres and
+# ClickHouse, and the TypeScript, Go and Python SDK suites (the Rust SDK is a
+# workspace member, under the cargo jobs).
 # `make ci` runs this same set locally — that is the contract, and the two
 # halves are checked against each other whenever either changes.
 # Intentionally absent: benchmarks, fuzzing, OS matrix, browser e2e, and any
@@ -204,13 +205,78 @@ jobs:
       - run: npm run build
         working-directory: web
 
+  # The three SDKs that are no crate, each by its own toolchain, as `make
+  # sdk-check` runs them; the Rust SDK (`sdk/rust`) is a workspace member and
+  # is built, linted, documented and tested by the cargo jobs above.
+  sdks:
+    name: SDK (${{ matrix.sdk }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sdk: typescript
+          - sdk: go
+          - sdk: python
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        if: matrix.sdk == 'typescript'
+        uses: actions/setup-node@v7
+        with:
+          # The locked vitest's engines: 22.12+, 24 or 26+.
+          node-version: 22
+
+      - name: Verify the TypeScript SDK
+        if: matrix.sdk == 'typescript'
+        run: |
+          cd sdk/typescript
+          npm ci
+          npm run verify
+
+      - name: Setup Go
+        if: matrix.sdk == 'go'
+        uses: actions/setup-go@v7
+        with:
+          # OpenTelemetry's Go SDK at the locked version requires 1.26.
+          go-version: '1.26'
+
+      - name: Verify the Go SDK
+        if: matrix.sdk == 'go'
+        run: |
+          cd sdk/go
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test -race -v ./...
+
+      - name: Setup Python
+        if: matrix.sdk == 'python'
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Verify the Python SDK
+        if: matrix.sdk == 'python'
+        run: |
+          cd sdk/python
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          ruff check .
+          ruff format --check .
+          mypy
+          pytest
+
   # Single required status check — branch protection points at this one job.
   # It passes only if every job above succeeded (and none were cancelled).
   ci-status:
     name: CI status
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    needs: [rustfmt, clippy, rustdoc, typos, test-rust, deny, web]
+    needs: [rustfmt, clippy, rustdoc, typos, test-rust, deny, web, sdks]
     if: always()
     steps:
       # `skipped` counts as a failure: a required check that goes green because

@@ -1,0 +1,11 @@
+{
+  "status": 200,
+  "headers": { "Content-Type": "application/json", "Telmoni-Content-Mode": "off" },
+  "body": {
+    "partialSuccess": {
+      "rejectedSpans": 0,
+      "errorMessage": "span 00f067aa0ba902b7 dropped ai.prompt: unlisted; text the field inventory does not name is never kept"
+    }
+  },
+  "expect": "one warning naming ai.prompt and the tag that would keep it, telmoni.tag.ai.prompt"
+}

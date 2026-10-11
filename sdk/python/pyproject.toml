@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "telmoni"
+version = "0.1.0"
+description = "Python SDK for Telmoni: an agent's runs, steps, model calls and tool calls as OpenTelemetry spans"
+readme = "README.md"
+authors = [{ name = "Kendrick Lawton" }]
+# OpenTelemetry's SDK requires 3.10, and 3.9 is past its end of life.
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+keywords = ["telmoni", "sdk", "opentelemetry", "agents"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development",
+    "Typing :: Typed",
+]
+# Spans, context and the tracer provider come from OpenTelemetry; the exporter
+# is this package's own, on the standard library, so no protobuf is pulled in.
+dependencies = [
+    "opentelemetry-api>=1.45,<2",
+    "opentelemetry-sdk>=1.45,<2",
+]
+
+[project.urls]
+Homepage = "https://github.com/telmoni/telmoni"
+Repository = "https://github.com/telmoni/telmoni"
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "mypy>=1.0", "ruff>=0.6"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.mypy]
+strict = true
+python_version = "3.10"
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.pyright]
+extraPaths = ["src"]
+venvPath = "."
+venv = ".venv"

@@ -32,6 +32,9 @@ FROM chef AS planner
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
+# `sdk/rust` is a member of the workspace: without its manifest, neither the
+# recipe nor the build can read the workspace at all.
+COPY sdk/rust/ sdk/rust/
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
@@ -40,6 +43,7 @@ COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --locked --target x86_64-unknown-linux-musl --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
+COPY sdk/rust/ sdk/rust/
 RUN cargo build --release --locked --target x86_64-unknown-linux-musl -p telmoni
 
 FROM gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3

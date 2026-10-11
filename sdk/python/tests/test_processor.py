@@ -1,0 +1,105 @@
+from __future__ import annotations
+
+import logging
+import os
+
+import pytest
+
+from conftest import FakeTransport
+from telmoni import Config, Telmoni
+from telmoni.exporter import Exporter
+from telmoni.processor import Processor
+
+
+def test_the_queue_is_bounded_and_drops_are_counted_once(
+    transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    # A tiny queue, and a worker that will not wake until flushed.
+    client.processor.shutdown()
+    exporter = Exporter(client.config, transport=transport)
+    processor = Processor(
+        exporter, max_queue_size=2, max_batch_size=100, schedule_delay_s=60
+    )
+    client.processor = processor
+    client._provider._active_span_processor._span_processors = (processor,)
+    try:
+        with client.run("bot"):
+            for n in range(5):
+                with client.step(f"s{n}"):
+                    pass
+        assert client.flush()
+    finally:
+        processor.shutdown()
+        client.shutdown()
+    names = sorted(s["name"] for s in transport.spans())
+    assert len(names) == 2, names
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert (
+        len(warnings) == 1
+        and "queue was full" in warnings[0]
+        and "5 spans" in warnings[0]
+    )
+
+
+def test_shutdown_drains_what_is_queued(transport: FakeTransport) -> None:
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    with client.run("bot"):
+        pass
+    client.shutdown()
+    assert {s["name"] for s in transport.spans()} == {
+        "telmoni.run.start",
+        "invoke_agent bot",
+    }
+    client.shutdown()
+
+
+def test_a_batch_fills_and_goes_without_a_flush(transport: FakeTransport) -> None:
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    client.processor.shutdown()
+    processor = Processor(
+        Exporter(client.config, transport=transport),
+        max_batch_size=3,
+        schedule_delay_s=60,
+    )
+    client.processor = processor
+    client._provider._active_span_processor._span_processors = (processor,)
+    try:
+        with client.run("bot"):
+            assert transport.wait_for(1)
+            for n in range(3):
+                with client.step(f"s{n}"):
+                    pass
+            assert transport.wait_for(2), "three steps fill a batch of three"
+    finally:
+        processor.shutdown()
+        client.shutdown()
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="no fork on this platform")
+# Forking a process with a thread is what this test is about.
+@pytest.mark.filterwarnings("ignore:This process:DeprecationWarning")
+def test_a_forked_child_gets_a_worker_of_its_own(transport: FakeTransport) -> None:
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    try:
+        with client.run("bot"):
+            pass
+        assert client.flush()
+        before = len(transport.requests)
+        pid = os.fork()
+        if pid == 0:
+            # The child: the parent's worker thread did not come along, so a
+            # new one must have, or nothing from here is ever sent.
+            sent = False
+            try:
+                with client.run("child"):
+                    pass
+                # The flush returns once the new worker has exported, so the
+                # child's own copy of the transport has taken its requests.
+                sent = client.flush() and len(transport.requests) > before
+            finally:
+                os._exit(0 if sent else 1)
+        _, status = os.waitpid(pid, 0)
+        assert os.waitstatus_to_exitcode(status) == 0, "the child sent nothing"
+    finally:
+        client.shutdown()

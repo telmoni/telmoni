@@ -1,0 +1,27 @@
+[package]
+name = "telmoni-sdk"
+# The SDKs' version, the same in all four and tagged `sdk/v…` (PACKAGES.md in
+# telmoni-cloud); the workspace's `0.0.0` is the server's, and never this crate's.
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Rust SDK for Telmoni: an agent's runs, steps, model calls and tool calls as OpenTelemetry spans"
+repository = "https://github.com/telmoni/telmoni"
+authors = ["Kendrick Lawton"]
+license.workspace = true
+readme = "README.md"
+publish = false
+
+[dependencies]
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+# Blocking, because the span processor's thread is the SDK's own and runs no
+# async runtime of the application's.
+reqwest = { workspace = true, features = ["blocking"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[lints]
+workspace = true

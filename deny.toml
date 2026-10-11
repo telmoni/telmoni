@@ -57,6 +57,10 @@ allow = [
     # ISC with the attribution requirement removed, so nothing to carry;
     # reviewed 2026-09-29.
     "0BSD",
+    # xxhash-rust — the hash `redis` cannot leave out. The Boost Software
+    # License: permissive, attribution in source distributions alone, so
+    # nothing to carry in a binary; reviewed 2026-10-10.
+    "BSL-1.0",
 ]
 
 [sources]
