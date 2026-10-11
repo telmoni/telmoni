@@ -282,9 +282,11 @@ impl AppState {
     }
 }
 
-/// The module's router: the person lanes, the pre-session lanes, `/me` and
-/// `/v1`, under this module's own gates. The binary mounts it beside the
-/// other modules' and adds the health probes and the request layers once.
+/// The module's router for the console: the person lanes, the pre-session
+/// lanes and `/me`, under this module's own gates. The binary mounts it
+/// beside the other modules' and adds the health probes and the request
+/// layers once; the lanes a machine reaches straight are [`v1_router`] and
+/// [`cli_router`], which the binary nests on the machine host.
 pub fn router(state: Arc<AppState>) -> Router {
     let secrets = ServiceSecrets::new(
         state.config.service_secret.clone(),
@@ -481,17 +483,14 @@ pub fn router(state: Arc<AppState>) -> Router {
         person::require_person_token,
     ));
 
-    // `/auth/device/*` are the CLI's sign-in, the device authorization grant,
-    // reached through the console's `/cli` door. Pre-session like the
-    // console's own start and exchange, and the poll carries no secret but
-    // the device code: a device code is worth nothing until the person
-    // approves it in the console.
+    // The pre-session lanes: the console's own start and exchange, its
+    // refresh and its sign-out. The device grant's start and poll are the
+    // CLI's, under `/cli` ([`cli_router`]); its approve and deny are the
+    // person's, above.
     let service = Router::new()
         .route("/auth/config", get(handler::session::config))
         .route("/auth/start", post(handler::session::start))
         .route("/auth/exchange", post(handler::session::exchange))
-        .route("/auth/device/start", post(handler::session::device_start))
-        .route("/auth/device/poll", post(handler::session::device_poll))
         .route("/auth/refresh", post(handler::session::refresh))
         .route("/auth/logout", post(handler::session::logout))
         .route("/auth/logout-url", post(handler::session::logout_url));
@@ -557,55 +556,45 @@ pub fn router(state: Arc<AppState>) -> Router {
         customer
     };
 
-    // ── /v1 — the public read API a `telmoni_` token opens ──────────────────
-    // Two gates, both load-bearing: `require_token` (the customer's bearer, the
-    // only thing that decides which organization is read) and the service
-    // secret (the hop came through the BFF). Layers apply outermost-last, so the
-    // secret is checked first and a request that skipped the BFF never spends a
-    // database round trip. Built by folding `V1_LANES`, the same table the
-    // OpenAPI document is generated from, split on `bearer` so a future lane
-    // without one does not silently inherit `require_token`.
-    let mount = |router: Router<Arc<AppState>>, lane: &handler::v1::V1Lane| {
-        let path = lane
-            .route
-            .path
-            .strip_prefix("/v1")
-            .unwrap_or(lane.route.path);
-        router.route(
-            path,
-            match lane.op {
-                handler::v1::V1Op::Organization => get(handler::v1::get_organization),
-                handler::v1::V1Op::Members => get(handler::v1::list_members),
-            },
-        )
-    };
-    let bearer_v1 = handler::v1::V1_LANES
-        .iter()
-        .filter(|lane| lane.route.bearer)
-        .fold(Router::new(), mount)
-        .layer(middleware::from_fn_with_state(
-            state.clone(),
-            handler::v1::require_token,
-        ));
-    let open_v1 = handler::v1::V1_LANES
-        .iter()
-        .filter(|lane| !lane.route.bearer)
-        .fold(Router::new(), mount);
-    // A path under `/v1` that no lane serves is a problem document too, not
-    // axum's bare 404; the fallback sits outside `require_token`, so it names
-    // no organization and costs no database round trip.
-    let public_v1 = bearer_v1
-        .merge(open_v1)
-        .fallback(handler::v1::not_found)
-        .layer(middleware::from_fn_with_state(
-            secrets,
-            require_service_secret,
-        ));
-
     Router::new()
         .merge(customer)
-        .nest("/v1", public_v1)
         .nest("/internal", internal)
+        .with_state(state)
+}
+
+/// This module's lanes under the binary's one `/v1`, the public read API a
+/// `telmoni_` key opens ([`handler::v1::router`]): on the machine host, behind
+/// the door the binary puts in front of it, and never behind the service
+/// secret, since a machine reaches it straight and its key is its gate.
+pub fn v1_router(state: Arc<AppState>) -> Router {
+    handler::v1::router(state)
+}
+
+/// The CLI's session lanes, which the binary nests under `/cli` on the
+/// machine host: the device grant's start and poll, admitted by the device
+/// code they carry, which is worth nothing until a person approves it in the
+/// console; the refresh, by the refresh token it spends; and `/me` and the
+/// session revoke, by the bearer, as every person lane is. A browser's
+/// request is refused, a body is held to [`handler::cli::BODY_CAP_BYTES`], a
+/// method but `POST` and a path no lane serves are problem documents, and
+/// the shapes are the CLI's ([`handler::cli`]).
+pub fn cli_router(state: Arc<AppState>) -> Router {
+    let bearer = Router::new()
+        .route("/me", post(handler::cli::me))
+        .route("/sessions/{id}/revoke", post(handler::sessions::revoke))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            person::require_person_token,
+        ));
+    Router::new()
+        .route("/auth/device", post(handler::session::device_start))
+        .route("/auth/device/poll", post(handler::session::device_poll))
+        .route("/auth/refresh", post(handler::cli::refresh))
+        .merge(bearer)
+        .route_layer(middleware::from_fn(handler::cli::refuse_browsers))
+        .method_not_allowed_fallback(handler::cli::method_not_allowed)
+        .fallback(handler::cli::not_found)
+        .layer(middleware::from_fn(handler::cli::cap_body))
         .with_state(state)
 }
 

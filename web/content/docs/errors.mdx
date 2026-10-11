@@ -45,6 +45,8 @@ your code can branch on.
 | `/errors/tenant/cross-tenant-denied` | 403 | Reserved for a request that reaches outside the organization or project it may act in; no lane returns it. | |
 | `/errors/bad-request` | 400 | The request body did not parse or failed validation. `detail` names the field. | |
 | `/errors/payload-too-large` | 413 | The request body is larger than this route accepts, such as a body over 8 KiB sent to the CLI's lanes. | |
+| `/errors/not-found` | 404 | No lane answers at this path on the machine host, under `/v1` or `/cli`. Not a resource a lane looked for: that is `/errors/auth/not-found`. | |
+| `/errors/method-not-allowed` | 405 | The lane does not take this method. The `Allow` header lists the ones it does. | |
 | `/errors/incompatible-client` | 426 | Reserved for a client older than the oldest version Telmoni supports; no lane checks a client's version, so none returns it. | |
 | `/errors/tenant/rate-limited` | 429 | Too many requests. Wait and try again. A `Retry-After` header carries the same number of seconds. | `retry_after_secs` |
 | `/errors/tenant/feature-off` | 503 | This feature is switched off, for your organization or for the whole deployment. `detail` says which in a sentence. | `flag`, `retry_after_secs` |
@@ -55,48 +57,37 @@ your code can branch on.
 | `/errors/agent/disabled` | 503 | The operator of this deployment has not configured the console agent. | |
 | `/errors/agent/model-unavailable` | 502 | The model or embeddings service behind the console agent did not answer. Nothing was changed; try again shortly. | |
 | `/errors/agent/rate-limited` | 429 | You have asked the console agent as many questions as this hour allows. | `retry_after_secs` |
+| `/errors/telemetry/invalid-batch` | 400 | An export to `/otlp/v1/traces` did not decode as OTLP in the encoding its `Content-Type` named, held no span, or held more than 1,000. On that lane the body is OTLP's `Status` rather than a problem document, its message opening with the type. | |
+| `/errors/telemetry/batch-too-large` | 413 | An export was larger than 1 MiB once decompressed. Send fewer spans per export. | `max_bytes` |
+| `/errors/telemetry/store-unavailable` | 503 | The store that keeps spans, or the key service that seals a project's hashing key, did not answer. Nothing was kept; retry after the second `Retry-After` gives. | `retry_after_secs` |
 
 `feature-off` answers `503` with a retry hint, not `404`, on purpose: the route
 exists and the switch is Telmoni's, so a program should wait and retry rather
 than conclude the route is gone.
 
-## Answers whose type is not in the table
+## Methods, and lanes that do not exist
 
-Some answers are problem documents whose type the table above does not list,
-because they come from the console in front of the server rather than from the
-server itself.
+The machine host answers a problem document for everything, the two the door
+itself mints among them.
 
-**A method a lane does not take** is `405` with an `Allow` header. The
-[API](/docs/api/reference) takes `GET` and `HEAD` (`OPTIONS` alone answers `204`,
-with `Allow: GET, HEAD, OPTIONS`). The CLI's lanes take `POST`: a `GET` or
-`DELETE` to one answers with `Allow: POST` and the detail "this lane takes
-POST", and a `PUT` or `PATCH` gets a bare `405` with no body:
+**A method a lane does not take** is `405` with an `Allow` header,
+`/errors/method-not-allowed`. The [API](/docs/api/reference) takes `GET` and
+`HEAD`, and `OPTIONS` alone answers `204` with `Allow: GET, HEAD, OPTIONS`; the
+CLI's lanes take `POST`, and every other method, `OPTIONS` included, is told so:
 
 ```json
 {
   "type": "/errors/method-not-allowed",
   "title": "method not allowed",
   "status": 405,
-  "detail": "this lane takes GET, HEAD, OPTIONS"
+  "detail": "this lane takes POST"
 }
 ```
 
-**A server that did not answer** is `503`; wait and try again. The API and the
-CLI's lanes answer the same type when the server refused the console's own
-credential, with the detail "the platform failed on its own side; try again
-shortly"; on a self-hosted deployment, one that persists means the console's
-`SERVICE_SECRET` no longer matches the server's:
-
-```json
-{
-  "type": "/errors/upstream-unavailable",
-  "title": "upstream unavailable",
-  "status": 503,
-  "detail": "the server did not answer; try again shortly"
-}
-```
-
-**A path under `/cli` that none of the CLI's lanes serves** is `404`:
+**A path no lane serves**, under `/v1` or `/cli`, is `404` with
+`/errors/not-found`: a type apart from `/errors/auth/not-found`, which a lane
+answers about a resource it looked for and did not find, so a client can tell
+a missing lane from a missing row:
 
 ```json
 {
@@ -109,5 +100,4 @@ shortly"; on a self-hosted deployment, one that persists means the console's
 
 On `/v1`, a server that cannot reach its database while it checks the key
 answers `503` with `/errors/auth/identity-unavailable`, from the table; anywhere
-else a database failure is `500` with `/errors/internal/database`. A path under
-`/v1` that no lane serves answers `404` with `/errors/auth/not-found`.
+else a database failure is `500` with `/errors/internal/database`.

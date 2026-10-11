@@ -15,11 +15,6 @@ describe("isPublic", () => {
     "/api/health",
     "/robots.txt",
     "/sitemap.xml",
-    "/v1",
-    "/v1/members",
-    "/cli",
-    "/cli/me",
-    "/cli/auth/start",
     "/docs",
     "/docs/self-host/overview",
     "/api/search",
@@ -42,10 +37,18 @@ describe("isPublic", () => {
     "/acme/web",
     "/acme/web/api-keys",
     "/acme/settings",
+    // The machine lanes are the server's, on the machine host: the console
+    // relays none of them, so a path spelled like one is an organization's
+    // here, or nothing.
+    "/v1",
+    "/v1/members",
     "/v1x",
     "/v1-internal",
+    "/cli",
+    "/cli/me",
     "/client",
     "/cli-internal",
+    "/api/webhooks/slack",
     "/docsx",
     "/api/search/x",
     "/llms.txt/x",
@@ -70,24 +73,6 @@ describe("isPublic", () => {
       expect(isPublic(p)).toBe(false);
     },
   );
-
-  describe("the Slack events delivery path", () => {
-    it("is public — Slack carries no session, only a signature", () => {
-      expect(isPublic("/api/webhooks/slack")).toBe(true);
-    });
-
-    it.each([
-      "/api/webhooks",
-      "/api/webhooks/slack/extra",
-      "/api/webhooks/slacks",
-      "/api/webhooks/discord",
-    ])(
-      "keeps %s protected — the entry is one exact path, not a subtree",
-      (p) => {
-        expect(isPublic(p)).toBe(false);
-      },
-    );
-  });
 
   // The OAuth handshake routes are deliberately NOT public: a lapsed session
   // on the vendor's consent page must land on login and come back with the

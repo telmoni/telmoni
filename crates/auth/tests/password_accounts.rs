@@ -27,8 +27,8 @@ use tower::ServiceExt;
 use telmoni_auth::db::{AuthLane, refresh_tokens};
 use telmoni_auth::mailer::{ComposingMailer, Mailer};
 use telmoni_auth::password::PasswordProvider;
-use telmoni_auth::test_provider::test_issuer_verifying;
-use telmoni_auth::{AppState, Config, router};
+use telmoni_auth::test_provider::{full_router, test_issuer_verifying};
+use telmoni_auth::{AppState, Config};
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::digest::sha256_hex;
 use telmoni_shared::mail::{Mail, MailError, MailSender};
@@ -163,7 +163,7 @@ fn app_under(pool: PgPool, policy: Policy) -> (Router, Arc<Outbox>) {
         exchange_cache: telmoni_auth::ExchangeCache::new(),
         siblings: telmoni_auth::Siblings::default(),
     });
-    (router(state), outbox)
+    (full_router(state), outbox)
 }
 
 fn post_json(uri: &str, body: serde_json::Value) -> Request<Body> {
@@ -685,10 +685,7 @@ async fn a_device_is_approved_or_denied_from_the_console(pool: PgPool) {
         let app = app.clone();
         async move {
             let resp = app
-                .oneshot(post_json(
-                    "/internal/auth/device/start",
-                    serde_json::json!({}),
-                ))
+                .oneshot(post_json("/cli/auth/device", serde_json::json!({})))
                 .await
                 .unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
@@ -699,7 +696,7 @@ async fn a_device_is_approved_or_denied_from_the_console(pool: PgPool) {
         let app = app.clone();
         async move {
             app.oneshot(post_json(
-                "/internal/auth/device/poll",
+                "/cli/auth/device/poll",
                 serde_json::json!({ "deviceCode": device_code }),
             ))
             .await

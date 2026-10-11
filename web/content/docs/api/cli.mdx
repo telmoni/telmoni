@@ -64,16 +64,16 @@ For local development machines, authenticate using the interactive device author
 $ telmoni login
 ```
 
-The CLI prints a one-time code and the address of the console's device page (`/auth/device`), then opens that page in your browser with the code filled in. It opens the page only when the address is on the endpoint it signs in to; a deployment whose console answers at another address gets `note: the verification page is not on <endpoint>; open it yourself` instead. For headless environments or SSH sessions where a browser cannot be opened, add `--no-browser`:
+The CLI prints a one-time code and the address of the console's device page (`/auth/device`), then opens that page in your browser with the code filled in. It opens the page only when the address is the endpoint's own, or the console beside a machine host — the endpoint's host with its leading `api.` taken off, so `api.telmoni.com` opens a page on `telmoni.com`; a deployment whose console answers anywhere else gets `note: the verification page is not on <endpoint>; open it yourself` instead. For headless environments or SSH sessions where a browser cannot be opened, add `--no-browser`:
 
 ```console
 $ telmoni login --no-browser
 ```
 
-To authenticate against a self-hosted Telmoni instance, supply the `--endpoint` flag (or set `TELMONI_ENDPOINT`):
+To authenticate against a self-hosted Telmoni instance, supply the `--endpoint` flag (or set `TELMONI_ENDPOINT`): the deployment's machine host, or its console's host where the machine lanes are routed by path ([Self-hosting → Production](/docs/self-host/production#reverse-proxy-configuration)):
 
 ```console
-$ telmoni login --endpoint https://telmoni.example.com
+$ telmoni login --endpoint https://api.telmoni.example.com
 ```
 
 The endpoint must use HTTPS unless it is this machine (`localhost` or a loopback address): the CLI refuses to send credentials over plain HTTP to any other host. A request to this machine never goes through a proxy, whatever the system proxy variables name. An endpoint given without a scheme gets `https://`, or `http://` for this machine. The CLI follows no redirects, and gives up on a request after 30 seconds.
@@ -207,7 +207,7 @@ $ telmoni config get endpoint
 
 | Key | Description | Default |
 |---|---|---|
-| `endpoint` | The Telmoni server URL `telmoni login` signs in to | `https://telmoni.com` |
+| `endpoint` | The Telmoni server URL `telmoni login` signs in to: the machine host | `https://api.telmoni.com` |
 | `api_key_helper` | A shell command that prints an API key, such as a secret manager's read, run for each command that acts with a key while `TELMONI_API_KEY` is unset. The file holds the command, never the key. | None |
 | `output_format` | Accepted and stored. No command reads it: use `--json` for JSON output. | None (`config list` shows `(default: text)`) |
 
@@ -231,7 +231,7 @@ The CLI reads the following environment variables:
 
 | Variable | Description |
 |---|---|
-| `TELMONI_ENDPOINT` | The endpoint `telmoni login` signs in to (default: `https://telmoni.com`). It comes after `--endpoint` and ahead of the `endpoint` configuration key. A saved session keeps the endpoint it signed in to. |
+| `TELMONI_ENDPOINT` | The endpoint `telmoni login` signs in to (default: `https://api.telmoni.com`, the machine host). It comes after `--endpoint` and ahead of the `endpoint` configuration key. A saved session keeps the endpoint it signed in to. |
 | `TELMONI_API_KEY` | An API key for each command that acts with one, ahead of any saved login and never saved, for CI/CD runs. A blank value counts as unset. |
 | `TELMONI_ORG` | With a browser session, the organization `status`, `whoami` and `logout` act in instead of the active one, by ID or slug, from the list the CLI saved. A script should give the ID, which nothing moves. |
 

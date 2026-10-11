@@ -28,6 +28,16 @@ use crate::provider::{
     AuthProvider, Authenticated, ConfirmedEmail, EmailChangeChallenge, PasswordResetLink, Subject,
 };
 
+/// Every lane the binary mounts for this module, through one router, for the
+/// suites: the console's under `/internal` and `/me`, the public read API
+/// under `/v1` and the CLI's under `/cli` — without the door's limits, which
+/// are the binary's own.
+pub fn full_router(state: Arc<crate::AppState>) -> axum::Router {
+    crate::router(state.clone())
+        .nest("/v1", crate::v1_router(state.clone()))
+        .nest("/cli", crate::cli_router(state))
+}
+
 /// One call auth made on a module beside it, as the recorders keep it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SiblingCall {

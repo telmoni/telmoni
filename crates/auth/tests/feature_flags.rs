@@ -15,8 +15,8 @@ use serde_json::json;
 use sqlx::PgPool;
 use tower::ServiceExt;
 
-use telmoni_auth::test_provider::{ScriptedProvider, as_person};
-use telmoni_auth::{AppState, Config, router};
+use telmoni_auth::test_provider::{ScriptedProvider, as_person, full_router};
+use telmoni_auth::{AppState, Config};
 use telmoni_shared::Flag;
 use telmoni_shared::seam::Auth as _;
 use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, seed_identity, service_pool};
@@ -24,7 +24,7 @@ use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, seed_identi
 const SERVICE_SECRET: &str = "test-service-secret";
 
 fn app(pool: PgPool) -> Router {
-    router(state(pool))
+    full_router(state(pool))
 }
 
 fn state(pool: PgPool) -> Arc<AppState> {
@@ -265,7 +265,7 @@ async fn validation_carries_the_set_and_v1_refuses_when_public_api_is_off(pool: 
             )
             .await
             .body(Body::from(
-                json!({ "name": "ci", "created_by": "u_owner" }).to_string(),
+                json!({ "name": "ci", "created_by": "u_owner", "scopes": ["read"] }).to_string(),
             ))
             .unwrap(),
         )
@@ -385,7 +385,7 @@ async fn a_served_read_stamps_last_used_and_an_organizations_own_switch_refuses_
             )
             .await
             .body(Body::from(
-                json!({ "name": "ci", "created_by": "u_owner" }).to_string(),
+                json!({ "name": "ci", "created_by": "u_owner", "scopes": ["read"] }).to_string(),
             ))
             .unwrap(),
         )
@@ -483,7 +483,7 @@ async fn a_switched_off_api_tokens_flag_refuses_minting_and_rotating_but_not_rev
         &project,
         "POST",
         "/internal/tokens",
-        json!({ "name": "ci", "created_by": "u_owner" }),
+        json!({ "name": "ci", "created_by": "u_owner", "scopes": ["read"] }),
     )
     .await;
     assert_eq!(minted.status(), StatusCode::CREATED);
@@ -500,7 +500,7 @@ async fn a_switched_off_api_tokens_flag_refuses_minting_and_rotating_but_not_rev
         &project,
         "POST",
         "/internal/tokens",
-        json!({ "name": "ci-2", "created_by": "u_owner" }),
+        json!({ "name": "ci-2", "created_by": "u_owner", "scopes": ["read"] }),
     )
     .await;
     assert_eq!(refused.status(), StatusCode::SERVICE_UNAVAILABLE);

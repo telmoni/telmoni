@@ -5,16 +5,19 @@ description: "The Telmoni read-only API: authentication, rate limits, and the pu
 
 The Telmoni API is a read-only HTTP interface under `/v1`. Authenticated by a
 [project API key](/docs/api/api-keys), it provides programmatic access to
-organization metadata and roster details. It has no write routes.
+organization metadata and roster details. It has no write routes; spans go to a
+lane of their own, [`/otlp/v1/traces`](/docs/api/ingest), with a key holding the
+`ingest` scope, where the routes here need `read`.
 
 ## Base URL and authentication
 
 ```text
-https://telmoni.com/v1
+https://api.telmoni.com/v1
 ```
 
-*(On a self-hosted instance, replace `https://telmoni.com` with your deployment's
-configured origin).*
+*(On a self-hosted instance, replace `https://api.telmoni.com` with your
+deployment's own machine host, or with its console's host where the machine
+lanes are routed by path: [Self-hosting → Production](/docs/self-host/production#reverse-proxy-configuration).)*
 
 Authenticate all requests by including your project API key as a bearer token:
 
@@ -49,7 +52,10 @@ answers `204` with `Allow: GET, HEAD, OPTIONS`.
 | Per source IP address | 1,200 requests / minute |
 
 Exceeding either rate limit returns `429 Too Many Requests` along with a
-`Retry-After` header. See [Errors](/docs/errors).
+`Retry-After` header. See [Errors](/docs/errors). The server meters both
+itself, the address read past the proxies in front of it
+(`TRUSTED_PROXY_HOPS`), and shares the counts between its replicas through
+Redis.
 
 ## `GET /v1/organization`
 

@@ -100,4 +100,71 @@ spec:
     group: ""
     kind: Service
     name: web
+---
+# The machine lanes — ingest at /otlp/v1/traces, the public read API under
+# /v1, the CLI's session lanes under /cli, and Slack's signed events at
+# /webhooks/slack — on `server-api`: on a host of their own where
+# `ingress.apiHost` names one, else under their paths on the console's host,
+# whose slugs are reserved so no organization shadows them. Only the lanes'
+# paths, on either host: every other lane of the server is the console's to
+# call, behind the service secret, and stays unreachable from outside. A
+# matched path outranks the console's catch-all, and a named host outranks a
+# route naming none. A backend policy for the lanes is the deployment's to
+# add, as the console's is here.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: server-api
+  labels:
+    app.kubernetes.io/name: server
+    app.kubernetes.io/component: ingress
+    {{- include "telmoni.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: web
+      sectionName: https
+  {{- with .Values.ingress.apiHost }}
+  hostnames:
+    - {{ . | quote }}
+  {{- end }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /otlp
+        - path:
+            type: PathPrefix
+            value: /v1
+        - path:
+            type: PathPrefix
+            value: /cli
+        - path:
+            type: Exact
+            value: /webhooks/slack
+      backendRefs:
+        - name: server-api
+          port: 8082
+---
+# The load balancer's own check of the machine lanes' backend: liveness,
+# which touches no database, so a database blip does not also refuse the
+# exporters' retries; readiness already takes a pod out of the Service.
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: server-api
+  labels:
+    app.kubernetes.io/name: server
+    app.kubernetes.io/component: ingress
+    {{- include "telmoni.labels" . | nindent 4 }}
+spec:
+  default:
+    config:
+      type: HTTP
+      httpHealthCheck:
+        port: 8082
+        requestPath: /livez
+  targetRef:
+    group: ""
+    kind: Service
+    name: server-api
 {{- end }}

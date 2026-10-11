@@ -535,9 +535,21 @@ pub async fn refresh(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RefreshRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
+    refresh_session(&state, &req.refresh_token, req.session_row_id)
+        .await
+        .map(Json)
+}
+
+/// The refresh behind the console's lane and the CLI's (`/cli/auth/refresh`),
+/// which differ in their spelling alone.
+pub(crate) async fn refresh_session(
+    state: &AppState,
+    refresh_token: &str,
+    session_row_id: Option<uuid::Uuid>,
+) -> Result<AuthnResult, TelmoniError> {
     // Maintenance scope: a row id is the only handle this pre-session lane
     // carries, and the person is not known until the grant.
-    if let Some(row) = req.session_row_id {
+    if let Some(row) = session_row_id {
         let mut tx = maintenance_scope(&state.db, AuthLane).await?;
         let revoked = crate::db::sessions::is_revoked(&mut tx, row).await?;
         tx.commit().await?;
@@ -547,9 +559,9 @@ pub async fn refresh(
         }
     }
 
-    let tokens = state.issuer.refresh(&req.refresh_token).await?;
+    let tokens = state.issuer.refresh(refresh_token).await?;
 
-    if let Some(row) = req.session_row_id {
+    if let Some(row) = session_row_id {
         let mut tx = maintenance_scope(&state.db, AuthLane).await?;
         let live = crate::db::sessions::touch_by_id(&mut tx, row).await?;
         tx.commit().await?;
@@ -559,7 +571,7 @@ pub async fn refresh(
             return Err(AuthError::Unauthenticated.into());
         }
     }
-    Ok(Json(AuthnResult::from(tokens)))
+    Ok(AuthnResult::from(tokens))
 }
 
 /// `POST /internal/auth/logout` — end the session: its row, which refuses

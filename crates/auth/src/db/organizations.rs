@@ -31,6 +31,39 @@ pub async fn get<B: Binding>(
     .await
 }
 
+/// What `/v1/organization` answers of an organization: its slug and name,
+/// and its owner's address and display name — another person's row, so the
+/// maintenance lane's to read.
+#[derive(Debug, sqlx::FromRow)]
+pub struct OrganizationSummary {
+    pub slug: String,
+    pub name: String,
+    pub owner_email: Option<String>,
+    pub owner_display_name: Option<String>,
+}
+
+/// One active organization by its id, with its owner; `None` for one that
+/// is gone or being deleted, whose key then opens nothing.
+pub async fn summary_with_owner(
+    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+    external_id: &OrganizationId,
+) -> sqlx::Result<Option<OrganizationSummary>> {
+    sqlx::query_as::<_, OrganizationSummary>(
+        "SELECT o.slug, o.name,
+                owner_identity.email AS owner_email,
+                owner_identity.display_name AS owner_display_name
+           FROM auth.organizations o
+           LEFT JOIN auth.organization_members owner_row
+                  ON owner_row.organization_id = o.external_id AND owner_row.role = 'owner'
+           LEFT JOIN auth.identities owner_identity
+                  ON owner_identity.user_id = owner_row.user_id
+          WHERE o.external_id = $1 AND o.status = 'active'",
+    )
+    .bind(external_id)
+    .fetch_optional(tx.conn())
+    .await
+}
+
 /// The longest name an organization may carry, in CHARACTERS rather than
 /// bytes, so a non-Latin name is not refused at a third of an ASCII one's length.
 pub const MAX_ORGANIZATION_NAME: usize = 80;

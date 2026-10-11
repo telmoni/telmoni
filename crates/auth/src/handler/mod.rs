@@ -1,5 +1,6 @@
 pub mod account;
 pub mod audit;
+pub mod cli;
 pub mod deletion;
 pub mod export;
 pub mod invite;

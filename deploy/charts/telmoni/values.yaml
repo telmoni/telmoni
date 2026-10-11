@@ -46,6 +46,14 @@ config:
   legalUrl: ""
   mailFrom: "Telmoni <no-reply@localhost>"
   connectorKek: "local:dev_key"
+  # The key each project's hashing key is sealed under, which the customer
+  # ids its spans carry are hashed with. A Cloud KMS key name in a pod, as
+  # `connectorKek` is; required, where that one may be empty.
+  telemetryKek: "local:dev_key"
+  # A project of the operator's own the console agent's questions are
+  # recorded as runs of (`TELEMETRY_DOGFOOD_PROJECT_ID`): a project id, or
+  # empty for none.
+  dogfoodProjectId: ""
   # The console agent. Off while modelProvider is empty; on, it needs
   # `AGENT_DATABASE_URL` in `server-secrets` (the `agent` role's DSN), and
   # `AGENT_MODEL_API_KEY` there for a hosted model. modelProvider is the
@@ -95,10 +103,11 @@ web:
   enabled: true
   image: "web"
   replicas: 1
-  # How many entries the proxies in front of the console append to
-  # X-Forwarded-For, where it finds the one client address no caller wrote
-  # and keys its per-address rate limits: the GKE Gateway appends the
-  # client's address and then its own.
+  # How many entries the proxies in front append to X-Forwarded-For, where
+  # the one client address no caller wrote is found and the per-address rate
+  # limits are keyed — the console's, and the server's on the machine lanes,
+  # which read the same count from the ConfigMap, since both sit behind the
+  # same Gateway: it appends the client's address and then its own.
   trustedProxyHops: 2
   extraEnv: []
   resources:
@@ -119,7 +128,8 @@ web:
 # as a DSN does: `https://telemetry:password@clickhouse.example.com:8443`,
 # or `http://` to a Service in the cluster by its name and namespace, which
 # a pod requires of plain http, and which needs NetworkPolicies of your own:
-# templates/network-policies.yaml), the
+# templates/network-policies.yaml), `REDIS_URL` (the console's Redis, which
+# ingest's claims on each export and its rate limits share), the
 # agent's `AGENT_MODEL_API_KEY`, `EMBEDDINGS_API_KEY` and `RERANK_API_KEY`
 # when its endpoints need them, `SERVICE_SECRET`, `ADMIN_EMAIL` and `ADMIN_PASSWORD`
 # for the first account, `OIDC_ISSUER`, `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` for an
@@ -165,3 +175,10 @@ ingress:
   staticAddressName: "telmoni-web"
   annotations:
     networking.gke.io/certmap: "telmoni-web"
+  # The machine lanes — ingest at /otlp/v1/traces, and each lane the server
+  # serves machines after it — go to the `server-api` Service: on a host of
+  # their own named here (`api.telmoni.example.com`, then the SDKs'
+  # endpoint), whose certificate the map above must hold too; or, empty,
+  # under their paths on the console's host, which is then the endpoint.
+  # Either way only the lanes' paths reach the server from outside.
+  apiHost: ""

@@ -18,8 +18,10 @@
 #![deny(missing_docs)]
 
 pub mod cli;
+pub mod door;
 pub mod sweeps;
 
+use std::net::SocketAddr;
 use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
@@ -28,7 +30,7 @@ use axum::{Json, Router, middleware, routing::get};
 use serde_json::json;
 use sqlx::PgPool;
 
-use telmoni_shared::acting::Acting;
+use telmoni_shared::acting::{Acting, ActingKey};
 use telmoni_shared::config::env_parse;
 use telmoni_shared::middleware::service_auth::{ServiceSecrets, require_service_secret};
 use telmoni_shared::seam::{
@@ -89,6 +91,10 @@ pub struct Parts {
     /// A module of the deployment's own that holds something of an
     /// organization's outside these tables, run before the organization goes.
     pub purge_hook: Option<Arc<dyn PurgeHook>>,
+    /// How many `X-Forwarded-For` entries the proxies in front of the server
+    /// append (`TRUSTED_PROXY_HOPS`), which the machine door's per-address
+    /// limits read the caller's address past ([`door`]).
+    pub trusted_proxy_hops: u8,
 }
 
 /// The process: every module's state, wired to the others.
@@ -101,6 +107,8 @@ pub struct App {
     pub telemetry: Arc<telmoni_telemetry::AppState>,
     /// The agent, when the deployment has one.
     pub agent: Option<Arc<telmoni_agent::AppState>>,
+    /// The machine door, in front of `/v1` and `/cli`.
+    door: Arc<door::Door>,
     secrets: ServiceSecrets,
     /// The deployment's own modules, in the order they were mounted.
     modules: Vec<Arc<dyn Module>>,
@@ -128,6 +136,10 @@ impl Auth for LateAuth {
 
     async fn resolve_again(&self, acting: &Acting) -> Result<Acting, TelmoniError> {
         self.get()?.resolve_again(acting).await
+    }
+
+    async fn resolve_api_key(&self, headers: &HeaderMap) -> Result<ActingKey, TelmoniError> {
+        self.get()?.resolve_api_key(headers).await
     }
 
     async fn project_homes(
@@ -228,13 +240,29 @@ impl App {
         let agent = parts
             .agent
             .map(|agent| {
+                // The telemetry module records the agent's questions as runs
+                // of the platform's own project, where one is named and the
+                // binary handed no observer of its own.
+                let observer = agent.observer.or_else(|| {
+                    telemetry
+                        .config
+                        .dogfood_project_id
+                        .clone()
+                        .map(|project_id| {
+                            Arc::new(telmoni_telemetry::dogfood::Dogfood::new(
+                                telemetry.clone(),
+                                project_id,
+                            ))
+                                as Arc<dyn telmoni_shared::seam::AgentObserver>
+                        })
+                });
                 telmoni_agent::boot::state(
                     agent.config,
                     agent.pool,
                     secrets.clone(),
                     late_auth.clone(),
                     notifier.clone(),
-                    agent.observer,
+                    observer,
                 )
                 .map(Arc::new)
             })
@@ -258,11 +286,13 @@ impl App {
         if late_auth.0.set(auth.clone()).is_err() {
             anyhow::bail!("auth was wired twice");
         }
+        let door = door::Door::new(telemetry.clone(), parts.trusted_proxy_hops);
         Ok(Self {
             auth,
             notifications,
             telemetry,
             agent,
+            door,
             secrets,
             modules: Vec::new(),
         })
@@ -304,6 +334,7 @@ impl App {
             telemetry_pool,
             agent,
             purge_hook: None,
+            trusted_proxy_hops: env_parse("TRUSTED_PROXY_HOPS", 2_u8)?,
         })
     }
 
@@ -325,10 +356,21 @@ impl App {
                 self.secrets.clone(),
                 require_service_secret,
             ));
+        // The machine lanes, on the one `/v1` and the one `/cli`, behind the
+        // door: every module's `/v1` lanes nest here as they come, auth's
+        // today, each module gating its own with the key check.
         let core = Router::new()
             .merge(probes)
             .merge(log_level)
             .merge(telmoni_auth::router(self.auth.clone()))
+            .nest(
+                "/v1",
+                self.door.v1(telmoni_auth::v1_router(self.auth.clone())),
+            )
+            .nest(
+                "/cli",
+                self.door.cli(telmoni_auth::cli_router(self.auth.clone())),
+            )
             .merge(telmoni_notifications::router(self.notifications.clone()))
             .merge(telmoni_telemetry::router(self.telemetry.clone()))
             .merge(match &self.agent {
@@ -382,10 +424,20 @@ impl App {
 
         let addr = format!("0.0.0.0:{port}");
         let listener = tokio::net::TcpListener::bind(&addr).await?;
-        tracing::info!(addr = %addr, "telmoni listening");
+        tracing::info!(
+            addr = %addr,
+            trusted_proxy_hops = self.door.trusted_proxy_hops(),
+            "telmoni listening"
+        );
 
-        let serve = axum::serve(listener, self.router())
-            .with_graceful_shutdown(telmoni_shared::shutdown::shutdown_signal());
+        // With the peer's address on every request, so the door's per-address
+        // limits hold a caller that sends no `X-Forwarded-For` too.
+        let serve = axum::serve(
+            listener,
+            self.router()
+                .into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(telmoni_shared::shutdown::shutdown_signal());
         // ⚠ The delivery loop is raced against the server: a dead loop would
         // leave a Ready pod with every delivery `pending`, so the process
         // exits and the restart is the recovery.

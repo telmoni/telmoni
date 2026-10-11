@@ -146,6 +146,20 @@ pub async fn me(
     headers: HeaderMap,
     Json(req): Json<MeRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
+    answer(&state, principal, &headers, req.user_agent.as_deref())
+        .await
+        .map(Json)
+}
+
+/// The answer behind `/me`, for the console's lane and the CLI's
+/// (`/cli/me`), which differ only in where the device's `User-Agent` comes
+/// from: the console's body, the CLI's own request header.
+pub(crate) async fn answer(
+    state: &AppState,
+    principal: Principal,
+    headers: &HeaderMap,
+    user_agent: Option<&str>,
+) -> Result<MeResponse, TelmoniError> {
     let user_id = principal.user_id;
 
     let mut tx = person_scope(&state.db, &user_id).await?;
@@ -173,7 +187,7 @@ pub async fn me(
         false
     } else {
         matches!(
-            provision_first_organization(&state, &user_id, person.display_name.as_deref()).await?,
+            provision_first_organization(state, &user_id, person.display_name.as_deref()).await?,
             Provisioning::Provisioned
         )
     };
@@ -194,7 +208,7 @@ pub async fn me(
         Vec::new()
     };
     let project_offers = members::project_offers_to(&mut mtx, &user_id).await?;
-    let requested = requested_organization(&headers);
+    let requested = requested_organization(headers);
     let default = default_organization(&organizations, person.default_organization_id.as_ref());
     let active = choose_active(&organizations, requested.as_ref(), default.as_ref());
     let flags = match &active {
@@ -210,13 +224,9 @@ pub async fn me(
     // The session row, keyed on the bearer's `sid`: this is the first bearer
     // call of every session, which is why the row is written here rather than
     // at the code exchange.
-    let session_row_id = sessions::find_or_create_for_sid(
-        &mut tx,
-        &user_id,
-        &principal.session_id,
-        req.user_agent.as_deref(),
-    )
-    .await?;
+    let session_row_id =
+        sessions::find_or_create_for_sid(&mut tx, &user_id, &principal.session_id, user_agent)
+            .await?;
     let mut memberships = members::memberships_of(&mut tx, &user_id).await?;
     tx.commit().await?;
     // A seat in an organization being deleted goes the way of the
@@ -229,7 +239,7 @@ pub async fn me(
             .any(|organization| organization.organization_id == seat.organization_id)
     });
 
-    Ok(Json(MeResponse {
+    Ok(MeResponse {
         person: PersonSummary {
             user_id,
             email: person.email,
@@ -246,7 +256,7 @@ pub async fn me(
         flags,
         first_login,
         session_row_id,
-    }))
+    })
 }
 
 /// The organization a caller asked to act in: by id, as the CLI names one, or

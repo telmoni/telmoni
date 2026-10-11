@@ -1,4 +1,6 @@
-//! `IntoResponse` impl for [`TelmoniError`] + an `AnyhowError` newtype.
+//! `IntoResponse` impl for [`TelmoniError`] + an `AnyhowError` newtype, and
+//! the two problem documents a door answers about its own lanes: a path none
+//! of them serves, and a method none takes.
 
 use axum::{
     Json,
@@ -7,6 +9,61 @@ use axum::{
 };
 
 use crate::error::{TelmoniError, TenantError};
+use crate::error_schema::ProblemDetails;
+
+/// A path no lane serves, on a door that answers problem documents for
+/// everything: `/errors/not-found`, apart from `/errors/auth/not-found`,
+/// which a lane answers about a resource it looked for, so a client can
+/// tell a missing lane from a missing row.
+#[must_use]
+pub fn not_found(detail: &str) -> Response {
+    problem(
+        StatusCode::NOT_FOUND,
+        "/errors/not-found",
+        "not found",
+        detail,
+        &[],
+    )
+}
+
+/// A method no lane at this path takes: `405`, with `Allow` naming the
+/// methods it does.
+#[must_use]
+pub fn method_not_allowed(allow: &'static str) -> Response {
+    problem(
+        StatusCode::METHOD_NOT_ALLOWED,
+        "/errors/method-not-allowed",
+        "method not allowed",
+        &format!("this lane takes {allow}"),
+        &[(header::ALLOW, HeaderValue::from_static(allow))],
+    )
+}
+
+fn problem(
+    status: StatusCode,
+    type_uri: &str,
+    title: &str,
+    detail: &str,
+    headers: &[(header::HeaderName, HeaderValue)],
+) -> Response {
+    let body = ProblemDetails {
+        type_uri: type_uri.into(),
+        title: title.into(),
+        status: status.as_u16(),
+        detail: Some(detail.into()),
+        instance: None,
+        extensions: serde_json::Map::new(),
+    };
+    let mut response = (status, Json(body)).into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/problem+json"),
+    );
+    for (name, value) in headers {
+        response.headers_mut().insert(name.clone(), value.clone());
+    }
+    response
+}
 
 impl IntoResponse for TelmoniError {
     fn into_response(self) -> Response {
@@ -85,7 +142,6 @@ mod tests {
 
     use super::*;
     use crate::error::{AuthError, TenantError};
-    use crate::error_schema::ProblemDetails;
 
     async fn body_problem(resp: Response) -> ProblemDetails {
         let bytes = to_bytes(resp.into_body(), usize::MAX)
@@ -156,5 +212,36 @@ mod tests {
         let pd = body_problem(resp).await;
         assert_eq!(pd.type_uri, "/errors/internal/unknown");
         assert!(pd.detail.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_doors_own_answers_are_problem_documents_with_their_headers() {
+        let resp = method_not_allowed("GET, HEAD, OPTIONS");
+        assert_eq!(resp.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(
+            resp.headers()
+                .get(header::ALLOW)
+                .and_then(|v| v.to_str().ok()),
+            Some("GET, HEAD, OPTIONS")
+        );
+        assert_eq!(
+            resp.headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok()),
+            Some("application/problem+json")
+        );
+        let pd = body_problem(resp).await;
+        assert_eq!(pd.type_uri, "/errors/method-not-allowed");
+        assert_eq!(pd.status, 405);
+        assert_eq!(
+            pd.detail.as_deref(),
+            Some("this lane takes GET, HEAD, OPTIONS")
+        );
+
+        let resp = not_found("no such lane");
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        let pd = body_problem(resp).await;
+        assert_eq!(pd.type_uri, "/errors/not-found");
+        assert_eq!(pd.detail.as_deref(), Some("no such lane"));
     }
 }

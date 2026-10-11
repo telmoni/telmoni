@@ -46,7 +46,7 @@
   "paths": {
     "/v1/members": {
       "get": {
-        "description": "Everyone on the project the token was minted on, the owner first, with the role each holds. The same body the console's project roster shows, so a token reads no more than the project admin who minted it could; the organization's roster is the console's alone.",
+        "description": "Everyone on the project the key was minted on, the owner first, with the role each holds. The same body the console's project roster shows, so a key reads no more than the project admin who minted it could; the organization's roster is the console's alone.",
         "responses": {
           "200": {
             "description": "The members: the owner, then the project's seats."
@@ -59,7 +59,7 @@
                 }
               }
             },
-            "description": "No live `telmoni_` token was presented. A revoked, expired or unknown token answers the same way."
+            "description": "No live `telmoni_` API key was presented. A revoked, expired or unknown key answers the same way."
           },
           "429": {
             "content": {
@@ -69,7 +69,7 @@
                 }
               }
             },
-            "description": "Too many requests. The front door meters by source and by token before the request reaches a service, and says when to come back in `Retry-After`."
+            "description": "Too many requests. The server meters by source address and by key before the request reaches a lane, and says when to come back in `Retry-After`."
           },
           "503": {
             "content": {
@@ -87,7 +87,7 @@
     },
     "/v1/organization": {
       "get": {
-        "description": "The organization the token belongs to — its id, its slug, its name and its owner's address and name. The slug is what the console's URLs name it by: set from the name it was created under, when that reads as one, and moved only when the URL is changed in Settings; the id never moves. A token IS an organization, so this answers for the caller and for nobody else.",
+        "description": "The organization the key belongs to — its id, its slug, its name and its owner's address and name. The slug is what the console's URLs name it by: set from the name it was created under, when that reads as one, and moved only when the URL is changed in Settings; the id never moves. A key IS an organization, so this answers for the caller and for nobody else.",
         "responses": {
           "200": {
             "description": "The organization."
@@ -100,7 +100,7 @@
                 }
               }
             },
-            "description": "No live `telmoni_` token was presented. A revoked, expired or unknown token answers the same way."
+            "description": "No live `telmoni_` API key was presented. A revoked, expired or unknown key answers the same way."
           },
           "429": {
             "content": {
@@ -110,7 +110,7 @@
                 }
               }
             },
-            "description": "Too many requests. The front door meters by source and by token before the request reaches a service, and says when to come back in `Retry-After`."
+            "description": "Too many requests. The server meters by source address and by key before the request reaches a lane, and says when to come back in `Retry-After`."
           },
           "503": {
             "content": {
@@ -123,7 +123,7 @@
             "description": "The lane is switched off, or something it needs did not answer. A switched-off lane says when to try again in `Retry-After`."
           }
         },
-        "summary": "Who this token is"
+        "summary": "Who this key is"
       }
     }
   },
@@ -134,7 +134,7 @@
   ],
   "servers": [
     {
-      "url": "https://telmoni.com"
+      "url": "https://api.telmoni.com"
     }
   ]
 }

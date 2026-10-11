@@ -32,8 +32,11 @@ spec:
         - protocol: TCP
           port: 53
 ---
-# The console is the server's one caller: the modules reach each other
-# inside the process, and nothing calls the jobs.
+# The server takes the console's calls and, on the machine lanes, the world's:
+# the load balancer reaches its pods directly (container-native), from
+# addresses no selector can name, as it reaches the console's. Each lane has
+# a gate of its own — the service secret, or a project API key — and the
+# modules reach each other inside the process; nothing calls the jobs.
 kind: NetworkPolicy
 apiVersion: networking.k8s.io/v1
 metadata:
@@ -48,11 +51,7 @@ spec:
   policyTypes:
     - Ingress
   ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: web
-      ports:
+    - ports:
         - protocol: TCP
           port: 8082
 ---

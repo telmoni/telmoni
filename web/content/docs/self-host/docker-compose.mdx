@@ -10,6 +10,7 @@ Docker Compose runs a Telmoni instance on a single host, to evaluate it or to se
 Before starting, ensure your host has the following tools installed:
 - [Docker Engine](https://docs.docker.com/engine/install/) with the [Docker Compose](https://docs.docker.com/compose/install/) v2 plugin (`docker compose`)
 - `openssl`, to generate the secrets
+- A host with 4 GB of memory, or 8 GB to serve the agent's models on it too ([System requirements](/docs/self-host/overview#system-requirements))
 
 ---
 
@@ -42,13 +43,14 @@ Compose reads `.env` from the compose file's directory. With `docker compose -f 
 touch deploy/compose/.env
 ```
 
-Four values have no default, and the stack does not start without them:
+Five values have no default, and the stack does not start without them:
 - `SERVICE_SECRET`: A shared secret the web console sends to the backend server as the `x-service-secret` header on every internal call, compared in constant time.
 - `AUTH_SECRET`: A secret of 32 bytes or more used to seal and decrypt session cookies.
 - `POSTGRES_PASSWORD`: The password of the stack's one database user. A default in the compose file would be the same on every install.
 - `CLICKHOUSE_PASSWORD`: The password of ClickHouse's one user. Like `POSTGRES_PASSWORD`, it goes into a connection URL, so keep to the hex `openssl` prints.
+- `TELEMETRY_KEK`: `local:` followed by 64 hex characters: the key that seals each project's hashing key, which the user ids its spans carry are hashed under before they are stored. A secret to back up beside your database dumps: a dump restored without it leaves every stored user id matching nothing a new key makes.
 
-A fifth, `CONNECTOR_KEK`, seals connector secrets at rest. The server starts without it unless Slack or Discord credentials are configured, but no connector (webhooks included) is offered without it. It has no default: a key shipped in the compose file would be the same on every install, and a database dump would then open every connector's grant.
+A sixth, `CONNECTOR_KEK`, seals connector secrets at rest. The server starts without it unless Slack or Discord credentials are configured, but no connector (webhooks included) is offered without it. It has no default: a key shipped in the compose file would be the same on every install, and a database dump would then open every connector's grant.
 
 Generate random values using `openssl`:
 
@@ -60,11 +62,12 @@ openssl rand -hex 32
 Update `deploy/compose/.env` with the generated values and set your initial administrator credentials:
 
 ```sh
-# Secrets: the first four have no default, and the stack does not start without them
+# Secrets: the first five have no default, and the stack does not start without them
 SERVICE_SECRET=f3b9c7e2a1d4...      # Output from openssl rand -hex 32
 AUTH_SECRET=8e6a1c5d0f2b...         # Output from openssl rand -hex 32
 POSTGRES_PASSWORD=4c7d2e9f1a6b...   # Output from openssl rand -hex 32
 CLICKHOUSE_PASSWORD=b52e0c9d7f13... # Output from openssl rand -hex 32
+TELEMETRY_KEK=local:7c3e...         # local: and the output of openssl rand -hex 32; a secret to back up
 CONNECTOR_KEK=local:9a1f...         # local: and the output of openssl rand -hex 32; a secret to back up
 
 # Public application URL: APP_URL and AUTH_URL change with your domain.
@@ -110,8 +113,8 @@ docker compose -f deploy/compose/docker-compose.yml up -d
 Compose starts the services in dependency order:
 1. Starts `postgres`, `clickhouse` and `redis`, each published on the host's loopback interface only (`127.0.0.1:5432`, `127.0.0.1:8123` and `127.0.0.1:6379`), and waits for their healthchecks.
 2. Once Postgres and ClickHouse are healthy, runs the one-shot `migrate` container, which applies every schema's DDL, then ClickHouse's database and tables, and exits `0`. This quickstart runs every module as the one database user, which owns every table, so the object grants for separate roles are skipped with a note in its log.
-3. Starts the `server` container once `migrate` has exited `0`. It listens on port `8082` inside the compose network and publishes nothing to the host.
-4. Starts the `web` container once the server container has started (Compose does not wait for the server to answer) and Redis is healthy, publishing port `3000` on every interface of the host, unlike Postgres, ClickHouse and Redis; keep it behind your firewall and TLS proxy.
+3. Starts the `server` container once `migrate` has exited `0`. It listens on port `8082` inside the compose network, published on the host's loopback interface alone (`127.0.0.1:8082`) for the machine lanes — ingest at `/otlp/v1/traces`, where the SDKs send; the read API under `/v1`; the CLI's sign-in under `/cli`; Slack's signed events at `/webhooks/slack` — which your reverse proxy forwards there by path or on a host of its own ([Production → Reverse proxy configuration](/docs/self-host/production#reverse-proxy-configuration)); an SDK or the CLI on the host itself may use `http://localhost:8082` directly. The console's lanes share the port, behind the service secret, and are the console's to call.
+4. Starts the `web` container once the server container has started (Compose does not wait for the server to answer) and Redis is healthy, publishing port `3000` on every interface of the host, unlike the server, Postgres, ClickHouse and Redis; keep it behind your firewall and TLS proxy.
 
 </Step>
 

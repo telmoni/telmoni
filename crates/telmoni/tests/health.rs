@@ -72,10 +72,16 @@ fn assemble() -> App {
         telemetry_config: telmoni_telemetry::Config {
             database_url: "".into(),
             clickhouse_url: "http://telemetry:telemetry@127.0.0.1:1".into(),
+            dogfood_project_id: None,
+            telemetry_kek: format!("local:{}", "0".repeat(64)).into(),
+            kms_api_base: "http://127.0.0.1:1".into(),
+            metadata_api_base: "http://127.0.0.1:1".into(),
+            redis_url: "redis://127.0.0.1:1".into(),
         },
         telemetry_pool: unreachable_pool(),
         agent: None,
         purge_hook: None,
+        trusted_proxy_hops: 2,
     })
     .expect("the modules wire together")
 }
@@ -246,5 +252,154 @@ async fn a_mounted_module_is_served_and_probed() {
         probe.asked.load(Ordering::SeqCst),
         1,
         "the module was asked once"
+    );
+}
+
+async fn send(request: Request<Body>) -> axum::response::Response {
+    app()
+        .router()
+        .oneshot(request)
+        .await
+        .expect("router responds")
+}
+
+fn header<'a>(response: &'a axum::response::Response, name: &str) -> Option<&'a str> {
+    response.headers().get(name).and_then(|v| v.to_str().ok())
+}
+
+async fn problem(response: axum::response::Response) -> serde_json::Value {
+    assert_eq!(
+        header(&response, "content-type"),
+        Some("application/problem+json")
+    );
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    serde_json::from_slice(&body).expect("a problem document")
+}
+
+/// The public read API is on the binary's `/v1`, open to a machine with no
+/// service secret and refused without a key: a problem document with the
+/// bearer challenge; a method no lane takes and a path none serves are
+/// problem documents too, and `OPTIONS` is told the methods.
+#[tokio::test]
+async fn the_public_api_is_served_at_v1_behind_its_key() {
+    let refused = send(get("/v1/organization")).await;
+    assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(header(&refused, "www-authenticate"), Some("Bearer"));
+    let body = problem(refused).await;
+    assert_eq!(body["type"], "/errors/auth/invalid-token");
+    assert_eq!(body["detail"], "a live telmoni_ API key is required");
+
+    let put = Request::put("/v1/organization")
+        .body(Body::empty())
+        .unwrap();
+    let refused = send(put).await;
+    assert_eq!(refused.status(), StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(header(&refused, "allow"), Some("GET, HEAD, OPTIONS"));
+    assert_eq!(problem(refused).await["type"], "/errors/method-not-allowed");
+
+    let options = Request::options("/v1/members").body(Body::empty()).unwrap();
+    let told = send(options).await;
+    assert_eq!(told.status(), StatusCode::NO_CONTENT);
+    assert_eq!(header(&told, "allow"), Some("GET, HEAD, OPTIONS"));
+
+    let missing = send(get("/v1/audit")).await;
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    assert_eq!(problem(missing).await["type"], "/errors/not-found");
+}
+
+/// The CLI's lanes are on the binary's `/cli`, each taking `POST` and its
+/// own credential: a bearer lane with no bearer is a 401 before any table,
+/// a browser is refused, a body past the cap is refused, and a path none
+/// serves is a problem document of the door's own.
+#[tokio::test]
+async fn the_cli_lanes_are_served_at_cli_behind_their_gates() {
+    let post = |path: &str| Request::post(path).header("content-type", "application/json");
+
+    let no_bearer = send(post("/cli/me").body(Body::empty()).unwrap()).await;
+    assert_eq!(no_bearer.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        problem(no_bearer).await["type"],
+        "/errors/auth/unauthenticated"
+    );
+
+    let browser = send(
+        post("/cli/auth/refresh")
+            .header("sec-fetch-site", "same-origin")
+            .body(Body::from(r#"{"refreshToken":"x"}"#))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(browser.status(), StatusCode::FORBIDDEN);
+    assert_eq!(problem(browser).await["detail"], "not a browser lane");
+
+    let get_me = send(get("/cli/me")).await;
+    assert_eq!(get_me.status(), StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(header(&get_me, "allow"), Some("POST"));
+    assert_eq!(problem(get_me).await["type"], "/errors/method-not-allowed");
+
+    let nowhere = send(post("/cli/nowhere").body(Body::empty()).unwrap()).await;
+    assert_eq!(nowhere.status(), StatusCode::NOT_FOUND);
+    let body = problem(nowhere).await;
+    assert_eq!(body["type"], "/errors/not-found");
+    assert_eq!(body["detail"], "no such lane");
+
+    let oversized = format!(r#"{{"refreshToken":"{}"}}"#, "x".repeat(9 * 1024));
+    let too_large = send(
+        post("/cli/auth/refresh")
+            .body(Body::from(oversized))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(too_large.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+/// The door meters each lane by the caller's address, read past the two
+/// proxies the tier runs, and refuses the one over the minute's allowance
+/// with how long to wait; another address has an allowance of its own.
+#[tokio::test]
+async fn the_door_meters_the_cli_lanes_by_address() {
+    // One process: the door's limits live with it, held in the process
+    // while its Redis (unreachable here) does not answer.
+    let app = app();
+    let router = app.router();
+    let from = |address: &str| {
+        router.clone().oneshot(
+            Request::post("/cli/nowhere")
+                .header("x-forwarded-for", format!("{address}, 35.191.0.1"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+    };
+    for n in 0..120 {
+        assert_eq!(
+            from("203.0.113.9").await.expect("router responds").status(),
+            StatusCode::NOT_FOUND,
+            "request {n} is within the minute's allowance"
+        );
+    }
+    // The limit leaks two a second, so a slow machine earns a few more
+    // before the refusal; it comes within a handful either way.
+    let mut refused = None;
+    for _ in 0..20 {
+        let response = from("203.0.113.9").await.expect("router responds");
+        if response.status() == StatusCode::TOO_MANY_REQUESTS {
+            refused = Some(response);
+            break;
+        }
+    }
+    let refused = refused.expect("the minute's allowance was spent");
+    assert!(header(&refused, "retry-after").is_some());
+    let body = problem(refused).await;
+    assert_eq!(body["type"], "/errors/tenant/rate-limited");
+
+    assert_eq!(
+        from("198.51.100.7")
+            .await
+            .expect("router responds")
+            .status(),
+        StatusCode::NOT_FOUND,
+        "another address is metered on its own"
     );
 }

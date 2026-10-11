@@ -19,8 +19,8 @@ use serde_json::{Value, json};
 use sqlx::PgPool;
 use tower::ServiceExt;
 
-use telmoni_auth::test_provider::{ScriptedProvider, as_person};
-use telmoni_auth::{AppState, Config, router};
+use telmoni_auth::test_provider::{ScriptedProvider, as_person, full_router};
+use telmoni_auth::{AppState, Config};
 use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, seed_identity, service_pool};
 
 const SERVICE_SECRET: &str = "test-service-secret";
@@ -54,7 +54,7 @@ fn app(pool: PgPool) -> Router {
         ))),
         exchange_cache: telmoni_auth::ExchangeCache::new(),
     });
-    router(state)
+    full_router(state)
 }
 
 async fn json_body(resp: axum::response::Response) -> Value {
@@ -106,8 +106,13 @@ async fn create_project(pool: &PgPool, organization: &str, name: &str) -> String
         .to_owned()
 }
 
-/// Sign in and mint one token.
+/// Sign in and mint one token that reads.
 async fn token(pool: &PgPool) -> Fixture {
+    token_with(pool, &["read"]).await
+}
+
+/// Sign in and mint one token holding `scopes`.
+async fn token_with(pool: &PgPool, scopes: &[&str]) -> Fixture {
     apply_audit_migrations(pool).await;
     seed_identity(pool, USER, EMAIL).await;
     let resp = app(pool.clone())
@@ -155,7 +160,7 @@ async fn token(pool: &PgPool) -> Fixture {
             )
             .await
             .body(Body::from(
-                json!({ "name": "ci", "created_by": USER }).to_string(),
+                json!({ "name": "ci", "created_by": USER, "scopes": scopes }).to_string(),
             ))
             .unwrap(),
         )
@@ -186,6 +191,18 @@ async fn organization(pool: &PgPool, bearer: &str) -> axum::response::Response {
         )
         .await
         .unwrap()
+}
+
+/// ⚠ **A key minted to send spans reads nothing.** One baked into an
+/// agent's process is the one most likely to leak, so `/v1` refuses it as a
+/// role the matrix does not admit is refused — the key itself still live.
+#[sqlx::test]
+async fn an_ingest_key_opens_no_read_lane(pool: PgPool) {
+    let fixture = token_with(&pool, &["ingest"]).await;
+    let resp = organization(&pool, &format!("Bearer {}", fixture.raw)).await;
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    let body = json_body(resp).await;
+    assert_eq!(body["type"], "/errors/authz/forbidden", "{body}");
 }
 
 #[sqlx::test]

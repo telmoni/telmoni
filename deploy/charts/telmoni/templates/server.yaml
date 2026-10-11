@@ -91,4 +91,25 @@ spec:
     - name: http
       port: 8082
       targetPort: http
+---
+# The machine lanes' own door: a second Service over the same pods, so a
+# route from outside reaches the server here, and a deployment can give it a
+# backend policy of its own, apart from the console's and from any other
+# route it sends to `server`.
+apiVersion: v1
+kind: Service
+metadata:
+  name: server-api
+  labels:
+    app.kubernetes.io/name: server
+    app.kubernetes.io/component: api
+    {{- include "telmoni.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: server
+  ports:
+    - name: http
+      port: 8082
+      targetPort: http
 {{- end }}

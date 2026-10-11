@@ -6,19 +6,27 @@
 #   1. Write .env beside this file with the keys the docs list
 #      (telmoni.com/docs/self-host/docker-compose) — not a copy of the
 #      repository's root .env.example, which is the development stack's and
-#      names services this stack does not run. Four values have no default
+#      names services this stack does not run. Five values have no default
 #      and the stack does not start without them:
 #      SERVICE_SECRET (any random string; both processes get the same one),
 #      AUTH_SECRET (the console's cookie seal, 32 bytes or more),
 #      POSTGRES_PASSWORD and CLICKHOUSE_PASSWORD (each store's one user's; a
 #      default here would be the same on every install, and each goes into a
-#      URL, so hex):
+#      URL, so hex), and TELEMETRY_KEK=local:<openssl rand -hex 32>, which
+#      seals the key each project's user ids are hashed under: a secret
+#      to back up beside the database, since a dump restored without it
+#      leaves every stored user id matching nothing new:
 #        openssl rand -hex 32
-#      Connectors (Slack, Discord, webhooks) stay off until a fifth is set,
+#      Connectors (Slack, Discord, webhooks) stay off until a sixth is set,
 #      CONNECTOR_KEK=local:<openssl rand -hex 32>, which seals their grants
 #      at rest: a secret to back up beside the database, since a dump
 #      restored without it leaves every grant unreadable.
 #   2. Run: docker compose -f deploy/compose/docker-compose.yml up -d
+#   3. The console answers on :3000, and the machine lanes — ingest at
+#      /otlp/v1/traces, where the SDKs send; the read API under /v1; the
+#      CLI's sign-in under /cli; Slack's events at /webhooks/slack — on
+#      127.0.0.1:8082; the reverse proxy in front
+#      (telmoni.com/docs/self-host/production) forwards each.
 #
 # The server runs its own sweeps on a timer (the deletion saga, retention, the
 # daily audit walk, the audit exports' retries and expiry), so nothing here
@@ -157,6 +165,13 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
+    # The machine lanes' door — ingest, the read API, the CLI's sign-in and
+    # Slack's events — for the reverse proxy on this host to forward to, on
+    # the loopback interface alone: the console's lanes share the port,
+    # behind the service secret, and are the console's to call. An SDK or
+    # the CLI on this machine may use http://localhost:8082 directly.
+    ports:
+      - "127.0.0.1:8082:8082"
     networks:
       - telmoni-net
     environment:
@@ -168,6 +183,18 @@ services:
       AGENT_DATABASE_URL: *database_url
       TELEMETRY_DATABASE_URL: *database_url
       TELEMETRY_CLICKHOUSE_URL: *clickhouse_url
+      # The key each project's hashing key is sealed under; no default, since
+      # one shipped here would be the same on every install.
+      TELEMETRY_KEK: ${TELEMETRY_KEK}
+      # A project of your own the console agent's questions are recorded as
+      # runs of, by its id; empty for none.
+      TELEMETRY_DOGFOOD_PROJECT_ID: ${TELEMETRY_DOGFOOD_PROJECT_ID:-}
+      # The console's Redis, which ingest's claims and rate limits share.
+      REDIS_URL: redis://redis:6379
+      # The one reverse proxy in front appends the caller's address once;
+      # the machine lanes' per-address limits read it there, as the console's
+      # do. 0 when the server is reached directly.
+      TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-1}
       SERVICE_SECRET: ${SERVICE_SECRET}
       APP_URL: ${APP_URL:-http://localhost:3000}
       # The login form is on unless DISABLE_LOGIN_FORM; password sign-ups are

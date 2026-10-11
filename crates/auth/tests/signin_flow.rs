@@ -13,8 +13,10 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 
 use telmoni_auth::password::PasswordProvider;
-use telmoni_auth::test_provider::{Call, ScriptedProvider, TEST_SUBJECT, bearer, bearer_in};
-use telmoni_auth::{AppState, Config, router};
+use telmoni_auth::test_provider::{
+    Call, ScriptedProvider, TEST_SUBJECT, bearer, bearer_in, full_router,
+};
+use telmoni_auth::{AppState, Config};
 use telmoni_shared::test_util::{ServiceRole, seed_identity, service_pool};
 
 const SERVICE_SECRET: &str = "test-service-secret";
@@ -90,7 +92,7 @@ fn app_configured(pool: PgPool, setup: Setup) -> (Router, Arc<ScriptedProvider>)
         exchange_cache: telmoni_auth::ExchangeCache::new(),
         siblings: telmoni_auth::Siblings::default(),
     });
-    (router(state), provider)
+    (full_router(state), provider)
 }
 
 fn post_json(uri: &str, body: serde_json::Value) -> Request<Body> {
@@ -531,10 +533,7 @@ async fn a_device_start_hands_the_cli_the_codes(pool: PgPool) {
     let (app, provider) = app(pool);
 
     let resp = app
-        .oneshot(post_json(
-            "/internal/auth/device/start",
-            serde_json::json!({}),
-        ))
+        .oneshot(post_json("/cli/auth/device", serde_json::json!({})))
         .await
         .unwrap();
 
@@ -555,7 +554,7 @@ async fn a_device_poll_refuses_a_blank_code(pool: PgPool) {
 
     let resp = app
         .oneshot(post_json(
-            "/internal/auth/device/poll",
+            "/cli/auth/device/poll",
             serde_json::json!({ "deviceCode": "  " }),
         ))
         .await

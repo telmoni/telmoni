@@ -9,13 +9,13 @@ use telmoni_shared::openapi::{Answer, Method, Route, document};
 const UNIVERSAL: &[Answer] = &[
     Answer {
         status: 401,
-        description: "No live `telmoni_` token was presented. A revoked, expired \
-                      or unknown token answers the same way.",
+        description: "No live `telmoni_` API key was presented. A revoked, \
+                      expired or unknown key answers the same way.",
     },
     Answer {
         status: 429,
-        description: "Too many requests. The front door meters by source and \
-                      by token before the request reaches a service, and says \
+        description: "Too many requests. The server meters by source address \
+                      and by key before the request reaches a lane, and says \
                       when to come back in `Retry-After`.",
     },
     Answer {
@@ -29,7 +29,8 @@ const UNIVERSAL: &[Answer] = &[
 const TITLE: &str = "Telmoni API";
 /// `/v1` is additive only, so this is `1` until a removal forces a `/v2`.
 const VERSION: &str = "1";
-const SERVER: &str = "https://telmoni.com";
+/// The machine host: the server's one public face, where every lane here is served.
+const SERVER: &str = "https://api.telmoni.com";
 
 /// Every lane, from the services that serve them.
 fn lanes() -> Vec<Route> {
@@ -87,58 +88,6 @@ fn every_lane_is_reachable_through_the_front_door() {
             route.path
         );
     }
-}
-
-/// Every write on an `auth` lane is one the BFF's own table admits.
-#[test]
-fn every_auth_write_is_one_the_front_door_admits() {
-    let door = repo_root().join("web/app/v1/[...path]/route.ts");
-    let source = std::fs::read_to_string(&door).expect("read the BFF's /v1 route");
-    let table = source
-        .split_once("const AUTH_WRITES")
-        .expect("the BFF names its write table AUTH_WRITES")
-        .1
-        .split_once('{')
-        .expect("the write table is an object literal")
-        .1
-        .split_once("};")
-        .expect("the write table is closed")
-        .0;
-
-    let writes: Vec<Route> = lanes()
-        .into_iter()
-        .filter(|r| !matches!(r.method, Method::Get | Method::Head))
-        .collect();
-    for route in &writes {
-        let lane = route.path.trim_start_matches("/v1/");
-        let method = route.method.as_str().to_uppercase();
-        let entry = [
-            format!("\"{lane}\": \"{method}\""),
-            format!("{lane}: \"{method}\""),
-        ];
-        assert!(
-            entry.iter().any(|e| table.contains(e.as_str())),
-            "{} {}: the front door has no AUTH_WRITES entry, so it answers 405 before the hop.\n\
-             Its table is:{table}",
-            method,
-            route.path
-        );
-    }
-
-    let entries = table
-        .lines()
-        .filter(|l| {
-            let l = l.trim();
-            !l.is_empty() && !l.starts_with("//") && l.contains(':')
-        })
-        .count();
-    assert_eq!(
-        entries,
-        writes.len(),
-        "AUTH_WRITES holds {entries} entries for {} write lanes — the front door \n\
-         forwards a method no `/v1` lane serves.\nIts table is:{table}",
-        writes.len()
-    );
 }
 
 /// One address, one description: a duplicate would overwrite silently and panic the router.

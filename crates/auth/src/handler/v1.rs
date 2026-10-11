@@ -1,27 +1,34 @@
-//! `/v1` — the public read API, authenticated by a `telmoni_` API token.
+//! `/v1` — the public read API, opened by a `telmoni_` API key holding the
+//! `read` scope. The binary nests this module's [`router`] under its one
+//! `/v1`, on the machine host, behind the door's limits; the key gate every
+//! machine lane shares (`require_api_key`) puts the key's [`ActingKey`] on
+//! the request, and the handlers act on that and on nothing else. No path or
+//! body under `/v1` names an organization, which makes cross-tenant access
+//! impossible to express, not just checked.
 
 use std::sync::Arc;
 
-use axum::extract::FromRequestParts;
-use axum::http::request::Parts;
 use axum::{
+    Router,
     extract::{Request, State},
-    http::{HeaderValue, StatusCode, header},
-    middleware::Next,
+    http::{HeaderMap, HeaderValue, Method as HttpMethod, StatusCode, header},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
+    routing::get,
 };
 use serde_json::json;
-use uuid::Uuid;
 
-use telmoni_shared::extract::Json;
-use telmoni_shared::openapi::{Answer, Method, Route};
-
+use telmoni_shared::acting::ActingKey;
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
-use telmoni_shared::types::API_TOKEN_PREFIX;
-use telmoni_shared::{AuthError, OrganizationId, ProjectId, TelmoniError};
+use telmoni_shared::extract::Json;
+use telmoni_shared::middleware::api_key::{ApiKeyGate, require_api_key};
+use telmoni_shared::middleware::problem;
+use telmoni_shared::openapi::{Answer, Method, Route};
+use telmoni_shared::types::{API_TOKEN_PREFIX, ApiKeyScope};
+use telmoni_shared::{AuthError, Flag, TelmoniError, TenantError};
 
 use crate::AppState;
-use crate::db::{AuthLane, tokens};
+use crate::db::{AuthLane, organizations};
 
 /// One `/v1` lane this service serves: what it is, and which handler answers.
 pub struct V1Lane {
@@ -48,14 +55,14 @@ pub const V1_LANES: &[V1Lane] = &[
             method: Method::Get,
             bearer: true,
             path: "/v1/organization",
-            summary: "Who this token is",
-            description: "The organization the token belongs to — its id, \
+            summary: "Who this key is",
+            description: "The organization the key belongs to — its id, \
                           its slug, its name and its owner's address and name. \
                           The slug is what the console's URLs name it by: set \
                           from the name it was created under, when that reads \
                           as one, and moved only when the URL is changed in \
                           Settings; the id never moves. A \
-                          token IS an organization, so this answers for the \
+                          key IS an organization, so this answers for the \
                           caller and for nobody else.",
             params: &[],
             answers: &[Answer {
@@ -71,9 +78,9 @@ pub const V1_LANES: &[V1Lane] = &[
             bearer: true,
             path: "/v1/members",
             summary: "Who is on the project",
-            description: "Everyone on the project the token was minted on, the \
+            description: "Everyone on the project the key was minted on, the \
                           owner first, with the role each holds. The same body \
-                          the console's project roster shows, so a token reads \
+                          the console's project roster shows, so a key reads \
                           no more than the project admin who minted it could; \
                           the organization's roster is the console's alone.",
             params: &[],
@@ -85,36 +92,118 @@ pub const V1_LANES: &[V1Lane] = &[
     },
 ];
 
-/// The organization a validated `telmoni_` token resolved to. A newtype, so an
-/// extension lookup cannot confuse it with an id from a path or a body.
-#[derive(Debug, Clone)]
-pub struct TokenOrganization {
-    pub organization_id: OrganizationId,
-    /// The project the token was minted on, which bounds what it reads: a
-    /// project admin may mint one and sees no further than their project.
-    pub project_id: ProjectId,
-    /// The row the bearer hashed to, so a lane can act on the credential
-    /// without ever seeing it.
-    pub token_id: Uuid,
-    /// What the validation's join already carries about the organization —
-    /// its slug, its name and its owner — so `/v1/organization` reads nothing
-    /// more.
-    pub slug: String,
-    pub name: String,
-    pub owner_email: Option<String>,
-    pub owner_display_name: Option<String>,
+/// What a lane answers to a method it does not take, and what `OPTIONS` is
+/// told: every lane here is a read.
+const ALLOW: &str = "GET, HEAD, OPTIONS";
+
+/// This module's `/v1` subtree: every lane of [`V1_LANES`] under its path
+/// with the `/v1` taken off, since the binary nests it there. Each lane a
+/// key opens sits behind two gates: the key gate, which refuses as every
+/// `/v1` answer refuses — a problem document, with the bearer challenge on a
+/// 401 — and the organization's own switch. Built by folding the table the
+/// OpenAPI document is generated from, split on `bearer`, so a future lane
+/// without one does not silently inherit the gates. A path no lane serves,
+/// and a method no lane takes, are problem documents too, outside the gates,
+/// so they name no organization and cost no database round trip.
+pub fn router(state: Arc<AppState>) -> Router {
+    let mount = |router: Router<Arc<AppState>>, lane: &V1Lane| {
+        let path = lane
+            .route
+            .path
+            .strip_prefix("/v1")
+            .unwrap_or(lane.route.path);
+        router.route(
+            path,
+            match lane.op {
+                V1Op::Organization => get(get_organization),
+                V1Op::Members => get(list_members),
+            },
+        )
+    };
+    let gate = ApiKeyGate {
+        auth: state.clone(),
+        scope: ApiKeyScope::Read,
+        refuse,
+    };
+    // Layers apply outermost-last: the key is checked first, and the switch
+    // is read for a key that passed.
+    let keyed = V1_LANES
+        .iter()
+        .filter(|lane| lane.route.bearer)
+        .fold(Router::new(), mount)
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_public_api,
+        ))
+        .route_layer(middleware::from_fn_with_state(gate, require_api_key));
+    let open = V1_LANES
+        .iter()
+        .filter(|lane| !lane.route.bearer)
+        .fold(Router::new(), mount);
+    keyed
+        .merge(open)
+        .method_not_allowed_fallback(method_not_allowed)
+        .fallback(not_found)
+        .with_state(state)
 }
 
-/// Reject anything without a live `telmoni_` bearer; on success, attach the
-/// organization it names. No path or body under `/v1` names an organization,
-/// which makes cross-tenant access impossible to express, not just checked.
-pub async fn require_token(
+/// How every `/v1` lane refuses a key: a problem document, as every answer
+/// here is, and on a `401` the `WWW-Authenticate` challenge and the detail a
+/// customer can act on. The type is the one a bad credential gets everywhere
+/// else; the headers are read by no one, since a `/v1` answer has one shape.
+fn refuse(error: TelmoniError, _headers: &HeaderMap) -> Response {
+    let mut problem = error.to_problem_details();
+    let status = StatusCode::from_u16(problem.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    if status == StatusCode::UNAUTHORIZED {
+        problem.detail = Some("a live telmoni_ API key is required".into());
+    }
+    let mut response = (status, Json(problem)).into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/problem+json"),
+    );
+    if status == StatusCode::UNAUTHORIZED {
+        response
+            .headers_mut()
+            .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+    }
+    response
+}
+
+/// The organization's own switch, `Flag::PublicApi`: off, every lane is a
+/// `503` that says when to come back, as a switched-off feature is answered
+/// everywhere else — the route exists and the switch is Telmoni's, so a
+/// program waits rather than concluding the route is gone.
+async fn require_public_api(
     State(state): State<Arc<AppState>>,
-    mut request: Request,
+    request: Request,
     next: Next,
 ) -> Response {
-    let presented = request
-        .headers()
+    let Some(key) = request.extensions().get::<ActingKey>().cloned() else {
+        return TelmoniError::Internal("v1: the request carries no key".into()).into_response();
+    };
+    let flags = async {
+        let mut tx = maintenance_scope(&state.db, AuthLane).await?;
+        let flags =
+            crate::db::flags::resolve_for_organization(&mut tx, &key.organization_id).await?;
+        tx.commit().await?;
+        Ok::<_, sqlx::Error>(flags)
+    }
+    .await;
+    match flags {
+        Ok(flags) if flags.is_on(Flag::PublicApi) => next.run(request).await,
+        Ok(_) => TelmoniError::from(TenantError::FeatureOff {
+            flag: Flag::PublicApi,
+        })
+        .into_response(),
+        Err(e) => unavailable(&e, "v1: flag resolution failed"),
+    }
+}
+
+/// The `telmoni_` key a request's `authorization` presents as its bearer,
+/// or `None` for no bearer, an empty one, or one that is not an API key.
+pub(crate) fn presented_key(headers: &HeaderMap) -> Option<&str> {
+    headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| {
@@ -122,60 +211,12 @@ pub async fn require_token(
             scheme.eq_ignore_ascii_case("bearer ").then_some(token)
         })
         .map(str::trim)
-        .filter(|t| !t.is_empty());
-
-    let Some(token) = presented else {
-        return unauthorized();
-    };
-    if !token.starts_with(API_TOKEN_PREFIX) {
-        return unauthorized();
-    }
-
-    let token_hash = crate::handler::tokens::hash_token(token);
-
-    let mut tx = match maintenance_scope(&state.db, AuthLane).await {
-        Ok(tx) => tx,
-        Err(e) => return unavailable(&e, "v1: token check could not open a transaction"),
-    };
-    let validated = tokens::validate(&mut tx, &token_hash).await;
-
-    match validated {
-        Ok(Some(v)) => {
-            let flags =
-                crate::db::flags::resolve_for_organization(&mut tx, &v.organization_id).await;
-            let flags = match flags {
-                Ok(f) => f,
-                Err(e) => return unavailable(&e, "v1: flag resolution failed"),
-            };
-            if let Err(e) = tx.commit().await {
-                return unavailable(&e, "v1: token validation commit failed");
-            }
-            if !flags.is_on(telmoni_shared::Flag::PublicApi) {
-                return TelmoniError::from(telmoni_shared::TenantError::FeatureOff {
-                    flag: telmoni_shared::Flag::PublicApi,
-                })
-                .into_response();
-            }
-            request.extensions_mut().insert(TokenOrganization {
-                organization_id: v.organization_id,
-                project_id: v.project_id,
-                token_id: v.id,
-                slug: v.slug,
-                name: v.name,
-                owner_email: v.owner_email,
-                owner_display_name: v.owner_display_name,
-            });
-            next.run(request).await
-        }
-        Ok(None) => unauthorized(),
-        Err(e) => unavailable(&e, "v1: token validation failed"),
-    }
+        .filter(|t| !t.is_empty() && t.starts_with(API_TOKEN_PREFIX))
 }
 
-/// The token check could not reach the database: a `503` problem document,
-/// the same `identity-unavailable` a sign-in gets when the identity provider
-/// cannot be read, and a log line, since this is an outage and not a caller's
-/// doing.
+/// A read could not reach the database: a `503` problem document, the same
+/// `identity-unavailable` a sign-in gets when the identity provider cannot be
+/// read, and a log line, since this is an outage and not a caller's doing.
 fn unavailable(error: &dyn std::fmt::Display, what: &str) -> Response {
     tracing::error!(error = %error, "{what}");
     TelmoniError::from(AuthError::IdentityUnavailable).into_response()
@@ -183,63 +224,46 @@ fn unavailable(error: &dyn std::fmt::Display, what: &str) -> Response {
 
 /// A path under `/v1` no lane serves: a `404` problem document, like every
 /// other answer here, in place of axum's bare one.
-pub async fn not_found() -> TelmoniError {
-    AuthError::NotFound("no such lane under /v1".into()).into()
+async fn not_found() -> Response {
+    problem::not_found("no such lane under /v1")
 }
 
-/// `401` with a `WWW-Authenticate` challenge: a problem document, as every
-/// answer under `/v1` is, built by hand because an `AuthError` can carry
-/// neither the challenge header nor this detail. The type is the one a bad
-/// credential gets everywhere else.
-fn unauthorized() -> Response {
-    let mut problem = AuthError::InvalidToken.to_problem_details();
-    problem.detail = Some("a live telmoni_ API key is required".into());
-    let mut resp = (StatusCode::UNAUTHORIZED, Json(problem)).into_response();
-    resp.headers_mut()
-        .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
-    resp.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("application/problem+json"),
-    );
-    resp
-}
-
-/// Pull the organization the middleware resolved.
-impl<S: Send + Sync> FromRequestParts<S> for TokenOrganization {
-    type Rejection = TelmoniError;
-
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        parts
-            .extensions
-            .get::<Self>()
-            .cloned()
-            .ok_or_else(|| AuthError::Unauthenticated.into())
+/// A method no lane takes: `405` with `Allow`, as a problem document, but for
+/// `OPTIONS`, which is told the methods and nothing else.
+async fn method_not_allowed(request: Request) -> Response {
+    if request.method() == HttpMethod::OPTIONS {
+        let mut response = StatusCode::NO_CONTENT.into_response();
+        response
+            .headers_mut()
+            .insert(header::ALLOW, HeaderValue::from_static(ALLOW));
+        return response;
     }
+    problem::method_not_allowed(ALLOW)
 }
 
-/// `GET /v1/organization` — who the calling token is. Answered from what the
-/// token's validation already joined: the row, its name and its owner. No
-/// second transaction.
+/// `GET /v1/organization` — who the calling key is: the organization the key
+/// gate resolved, read with its owner, whose row is another person's and so
+/// the maintenance lane's. An organization gone between the key check and
+/// this read is a key that opens nothing.
 pub async fn get_organization(
-    token_organization: TokenOrganization,
+    State(state): State<Arc<AppState>>,
+    key: ActingKey,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let organization_id = token_organization.organization_id.clone();
-    let TokenOrganization {
-        slug,
-        name,
-        owner_email,
-        owner_display_name,
-        ..
-    } = token_organization;
+    let mut tx = maintenance_scope(&state.db, AuthLane).await?;
+    let summary = organizations::summary_with_owner(&mut tx, &key.organization_id).await?;
+    tx.commit().await?;
+    let Some(summary) = summary else {
+        return Err(AuthError::InvalidToken.into());
+    };
     Ok(Json(json!({
-        "organization_id": organization_id,
-        "slug": slug,
-        "name": name,
-        "owner": owner_email.map(|email| json!({ "email": email, "display_name": owner_display_name })),
+        "organization_id": key.organization_id,
+        "slug": summary.slug,
+        "name": summary.name,
+        "owner": summary.owner_email.map(|email| json!({ "email": email, "display_name": summary.owner_display_name })),
     })))
 }
 
-/// `GET /v1/members` — the roster of the PROJECT the token was minted on,
+/// `GET /v1/members` — the roster of the PROJECT the key was minted on,
 /// with each role. ⚠ Never the organization's: a project admin may mint a
 /// key, and the console refuses that seat the organization's roster, so a key
 /// that listed it would read past its minter. Read under the owning
@@ -248,16 +272,11 @@ pub async fn get_organization(
 /// join them against nothing.
 pub async fn list_members(
     State(state): State<Arc<AppState>>,
-    token_organization: TokenOrganization,
+    key: ActingKey,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let TokenOrganization {
-        organization_id,
-        project_id,
-        ..
-    } = token_organization;
-    let tx = project_scope(&state.db, &project_id).await?;
-    let mut tx = tx.bind_organization(&organization_id).await?;
-    let rows = crate::db::members::list_for_project(&mut tx, &project_id).await?;
+    let tx = project_scope(&state.db, &key.project_id).await?;
+    let mut tx = tx.bind_organization(&key.organization_id).await?;
+    let rows = crate::db::members::list_for_project(&mut tx, &key.project_id).await?;
     tx.commit().await?;
     Ok(Json(json!({ "members": rows })))
 }
