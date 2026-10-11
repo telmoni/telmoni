@@ -2,7 +2,7 @@
 
 Telmoni's core on one page: what it is for, what it is made of, how a request moves through it, how tenants are kept apart, how data lives and is erased, how it runs, how it fails, and why it is built this way. It is the repository's one document on how the core is built: the detail behind each line is in the code it names, the code's comments and its tests.
 
-**Where it stands:** Telmoni has not launched. What runs is the foundation: organizations and projects, members and roles, API keys, notifications, a hash-chained audit log and a read-only console agent. The telemetry the product is for has its module and its two stores, and is built on them next, in the open; nothing records a run yet ([Where it goes next](#where-it-goes-next)).
+**Where it stands:** Telmoni has not launched. What runs is the foundation: organizations and projects, members and roles, API keys, notifications, a hash-chained audit log and a read-only console agent. The telemetry the product is for has its module and its two stores, its ingest lane, and the four SDKs under `sdk/` that send a run to it; nothing reads a run back yet ([Where it goes next](#where-it-goes-next)).
 
 ## Contents
 
@@ -15,6 +15,7 @@ Telmoni's core on one page: what it is for, what it is made of, how a request mo
 - [Data](#data)
 - [Notifications](#notifications)
 - [The console agent](#the-console-agent)
+- [The SDKs](#the-sdks)
 - [Background work](#background-work)
 - [Deployment](#deployment)
 - [Extending the core](#extending-the-core)
@@ -33,7 +34,7 @@ Telmoni is a privacy-first telemetry and monitoring platform for AI agents, open
 - notifications, to an in-app feed, Slack, Discord and webhooks;
 - a hash-chained audit log, exportable by range;
 - a read-only console agent that answers from the docs and a project's own data;
-- telemetry's stores: each project's settings in Postgres, its content mode set by the organization's owner, and the spans and their hourly totals in ClickHouse, which nothing writes yet.
+- telemetry: ingest over OpenTelemetry's own protocol, behind a project API key, with every content field dropped at the door; each project's settings in Postgres, its content mode set by the organization's owner and the key its user ids are hashed under; and the spans and their hourly totals in ClickHouse.
 
 It is **one Rust binary**, `telmoni`, and **a Next.js console** beside it, deployed together with a Helm chart or Docker Compose. A deployment that needs more builds its own binary and console on these crates rather than forking them ([Extending the core](#extending-the-core)).
 
@@ -75,6 +76,7 @@ flowchart LR
   People["People, in a browser"]
   CLI["The CLI"]
   Scripts["Scripts holding an API key"]
+  SDKs["The SDKs, in an agent's process"]
   SlackIn["Slack's events"]
   Operator["The operator"]
   subgraph Install["An installation"]
@@ -87,9 +89,10 @@ flowchart LR
   KEK["Cloud KMS, or a local key"]
   Dest["Slack, Discord, customers' webhooks"]
   People -->|"HTTPS"| Console
-  CLI -->|"/cli"| Console
-  Scripts -->|"/v1"| Console
-  SlackIn -->|"signed events"| Console
+  CLI -->|"/cli, the machine host"| Server
+  Scripts -->|"/v1, a read key"| Server
+  SDKs -->|"/otlp/v1/traces, an ingest key"| Server
+  SlackIn -->|"/webhooks/slack, signed events"| Server
   People -.->|"sign-in"| IdP
   Console -->|"bearer and service secret"| Server
   Server -->|"code exchange"| IdP
@@ -105,6 +108,7 @@ flowchart LR
 | **People** | An organization's owner, admins and members, in a browser | Pages and Server Actions, under a sealed session cookie |
 | **The CLI** | `telmoni/telmoni-cli`, signed in by a device grant | The `/cli` lanes: start, poll, refresh, `/me`, sign-out |
 | **Scripts** | Whoever holds a project's API key | `/v1`, read-only today |
+| **The SDKs** | `sdk/`: Python, TypeScript, Go and Rust, linked into an agent's own process (*The SDKs*) | `/otlp/v1/traces` on the server: a run's spans as OTLP JSON, content taken off, under a project API key with the `ingest` scope |
 | **Slack's events** | Slack telling the core an app was removed or its tokens revoked | Signed events, verified by the server |
 | **An OIDC provider** | Optional: who a person is, beside or instead of the password form | Discovery, the code exchange, an RS256 id token, logout |
 | **SMTP** | Mail: verification, reset, invitations, codes | Each message |
@@ -120,7 +124,7 @@ flowchart TB
   subgraph Web["web: the Next.js console"]
     Proxy["proxy.ts: sign-in gate, CSP"]
     Pages["Server Components and Server Actions"]
-    Relays["relays: /v1, /cli, Slack, agent turns, live events"]
+    Relays["relays: agent turns, live events"]
   end
   Redis[("Redis: limits, blacklist, live events, announcement")]
   subgraph Server["server: telmoni serve, one process"]
@@ -145,10 +149,11 @@ flowchart TB
 | `auth` | Identity, sessions and the one issuer; organizations, projects, rosters, invitations and transfers; API keys; flags; export, audit exports and deletion; `/me` and `/v1` | The `auth` schema |
 | `notifications` | The feeds, the connectors, the delivery queue and its loop, Slack's events | The `notifications` schema |
 | `agent` | Model adapters, embeddings, the index and hybrid search, five read-only tools, the turn loop | The `agent` schema, with pgvector |
-| `telemetry` | Each project's settings, and the switch its organization's owner sets its content mode with; the one query module for ClickHouse, which names the reader's projects on every read; the ClickHouse file and its nightly purge | The `telemetry` schema, and ClickHouse's `telemetry` database |
+| `telemetry` | Ingest at `/otlp/v1/traces`: the contract (`contract.rs`, with the field inventory as a table the docs page and the console are held to), the span read by it with its content dropped (`ingest/`), the claim on each export and the rate limit in Redis, and each project's hashing key (`hashing.rs`); each project's settings, and the switch its organization's owner sets its content mode with; the console's reads — the trace list and a trace's spans (`traces.rs`, `handler/traces.rs`), the users and the conversations, a run's spans summed by user and by conversation (`users.rs`, `conversations.rs`, their handlers), the field inventory (`handler/field_inventory.rs`) — each through the one query module for ClickHouse, which names the reader's projects on every read; the dogfood observer, which records the console agent's own questions as runs of a project of the operator's (`dogfood.rs`); the purge that marks a deleted project's rows in both tables, as auth's deletions ask through the seam (`seam.rs`, `store.rs`); the ClickHouse file and its nightly purge | The `telemetry` schema, and ClickHouse's `telemetry` database |
 | `shared` | Errors and problems, RBAC, `Acting`, scoped transactions, the seams, the audit writer and verifier, envelope encryption, the egress guard, logging, configuration, `Redacted`, slugs | — |
-| `migrator` | The migration runner, `rotate`, the `audit` schema, role hardening and grants; ClickHouse's file and purge, run as its user there | The `audit` schema |
+| `migrator` | The migration runner, `rotate`, the `audit` schema, role hardening and grants; ClickHouse's file, its purge and the rewrite of the rows deleted projects left, run as its user there | The `audit` schema |
 | `web/` | The console: pages, the session, the edge's rate limits, the relays; no database access and no business logic | Nothing but what Redis holds |
+| `sdk/` | The four SDKs, in an agent's own process: a tracer provider of each one's own, a batch processor, and an exporter that takes content off and sends OTLP JSON to ingest (*The SDKs*); `fixtures/`, the golden export and the answers every suite replays | A bounded queue, in memory, until it is sent |
 | Postgres | One database: a schema per module, each written by its own role alone | Everything durable but the spans and their totals |
 | ClickHouse | One node: telemetry's spans and their hourly totals, metadata alone, read under a row policy | The spans, until the retention line, and their hourly totals for 13 months |
 | Redis | The console's alone: rate-limit windows, the session blacklist, live events, the announcement — all of it losable | Nothing that must survive |
@@ -179,13 +184,14 @@ Every way in:
 | Way in | Path | Gate |
 |---|---|---|
 | A page or a Server Action | Browser → console → the server's `/internal` lanes | The sealed cookie, then the service secret and the bearer, then the matrix, then RLS |
-| `/v1` | A script → the console's relay → the server | The service secret, then the API key |
-| `/cli` | The CLI → the console's relay → the server | The service secret; then the device grant, then a bearer |
-| Slack's events | Slack → the console's relay → `POST /webhooks/slack` | Slack's signature |
+| `/v1` | A script → the machine host → the server's door → auth's lanes | The door's limits by address and key; the API key's `read` scope; the organization's switch |
+| `/cli` | The CLI → the machine host → the server's door → auth's lanes | The door's limits by address and bearer; the device code, or the bearer; never a browser |
+| Ingest | An SDK, or any OTLP exporter → the machine host → the server's `/otlp/v1/traces` | The API key's `ingest` scope, the project's own limit, then the contract: a span outside a run refused, content dropped |
+| Slack's events | Slack → the machine host → `POST /webhooks/slack` | Slack's signature |
 | An agent turn | The agent's window → `POST /api/agent/turns` → the server, streamed back | The session, then a turn as the asker, re-resolved as it runs |
 | Live events | `EventSource` → `/api/events` → Redis's channels | Same origin, the session, the blacklist |
 
-**The console is the one public surface.** The server takes traffic from the console alone, and the service secret proves only that a call came from inside; who is asking is auth's answer on every request.
+**The console is the one public surface for people, and the machine host the one for machines.** A person's every request enters through the console, which calls the server with the service secret; that secret proves only that a call came from inside, and who is asking is auth's answer on every request. A machine reaches the server straight, on the lanes the binary's door puts in front of (`crates/telmoni/src/door.rs`): ingest at `/otlp/v1/traces` and the read API under `/v1`, each opened by a project API key; the CLI's session lanes under `/cli`, opened by the device code or the bearer they carry; and Slack's signed events at `/webhooks/slack`. The door reads the caller's address past the proxies in front (`TRUSTED_PROXY_HOPS`) and meters each lane by source and by credential in Redis, and every refusal it makes is a problem document.
 
 ## Identity and access
 
@@ -211,7 +217,7 @@ auth            people, credentials, sessions, organizations, projects, rosters,
                 transfers, API keys, flags, audit exports
 notifications   feed, connections, deliveries, delivery_attempts, oauth_states
 agent           chunks (a vector and a text index), conversations, messages, cursors, erasures
-telemetry       project_settings
+telemetry       project_settings (the content mode; the project's hashing key, sealed under TELEMETRY_KEK)
 
 ClickHouse, telemetry's database:
 spans           a row per finished span, partitioned by the day it arrived
@@ -221,7 +227,7 @@ migrations      the digest of the statements the store was made from
 
 - **One migration per module and store**, edited in place before launch. The migrator runs `audit`, then `auth`, then the rest by name, then the grants, then ClickHouse's one file.
 - **The audit log** is append-only by its grants, one chain per organization written under an advisory lock, in a frozen hash format pinned by golden vectors. It is verified daily and never repaired; `rotate` makes its partitions ahead, and none is dropped. An owner or admin exports a range as a file that verifies on its own.
-- **Retention** is each module's sweep deleting what has passed its window, in chunks where the work can be large; each window is a named constant. ClickHouse's spans go a whole day at a time, dropped by `rotate` at the longest retention sold.
+- **Retention** is each module's sweep deleting what has passed its window, in chunks where the work can be large; each window is a named constant. ClickHouse's spans go a whole day at a time, dropped by `rotate` at the longest retention sold; a deleted project's go with it, marked at once and rewritten off the disk by the same `rotate`.
 - **Export** is the organization's own data, read in one consistent transaction.
 
 **Deletion** runs across every module, and only auth starts it:
@@ -242,13 +248,13 @@ sequenceDiagram
   A->>A: the deletion sweep, once the grace has passed
   A->>H: the hook, if it never answered Ok
   A->>N: purge the organization
-  A->>T: purge its projects' settings
+  A->>T: purge its projects' spans, totals and settings
   A->>G: purge the organization
   A->>H: the hook again, for anything that landed since
   A->>A: delete the row under the organization's lock, cascading, audited
 ```
 
-- **A project** goes at once, its notices and its telemetry settings purged after the commit and the agent's index catching up within the hour; its spans wait for the retention line.
+- **A project** goes at once, its notices, its spans and totals — marked deleted, gone from every read within moments as the store applies the mark, and off the disk by the night's `rotate` — and its telemetry settings purged after the commit, and the agent's index catching up within the hour.
 - **A person** is erased across every module, the identity provider first, and the erasure stops if that fails.
 - **The audit log outlives what it describes**: its rows name ids, with no foreign key to cascade.
 
@@ -268,8 +274,48 @@ sequenceDiagram
 - **The index** holds the docs, the audit log, the feed, deliveries and remembered conversations, each document's audience decided by the module that owns it.
 - **Prompt injection is contained, not prevented:** nothing retrieved enters the system prompt, tool results are fenced, the answer is rendered as nodes, never HTML, and the agent cannot act.
 - **A vendor's outage never stops the server booting**; an embedding model of the wrong width does.
-- **Its own questions** are recorded through `AgentObserver`, as ids, timings and token counts, never content; nothing implements it yet.
+- **Its own questions** are recorded through `AgentObserver`, as ids, timings and token counts, never content. The telemetry module implements it (`dogfood.rs`) where `TELEMETRY_DOGFOOD_PROJECT_ID` names a project of the operator's own: each question a run of that project under the agent `console-agent`, each model call and tool call a span under it, the asking organization its user — hashed under the project's key as any user id is — and the agent's conversation the run's, written through the store on a task of its own, so an answer never waits on a row and a write that fails is logged by its kind and lost. Unset, nothing records them.
 - **In the console, a window over every page**, moved, sized or filling the screen, that leaves the page its keys; a turn's stream names its conversation first, so an answer stopped or cut off never splits a thread.
+
+## The SDKs
+
+Four SDKs, one contract, under `sdk/`: an agent's runs, steps, model calls and tool calls as OpenTelemetry spans, sent to ingest (`POST /otlp/v1/traces`) and nowhere else. Each runs a tracer provider of its own beside whatever OpenTelemetry the application has, sends nothing outside a run, and takes content off every span before it leaves the process unless asked and the project allows. Python (`sdk/python`) was built first and is the reference; the three others were ported from it, and `sdk/fixtures/` holds the golden export and the server's answers every suite replays, so no language ships a behaviour the others lack. `crates/telemetry/src/contract.rs` names what ingest reads; each SDK's `contract` module copies those names, and a name changes on both sides in the same change.
+
+| SDK | Package | On | Entry points |
+|---|---|---|---|
+| Python | `telmoni` (3.10+) | `opentelemetry-api`, `opentelemetry-sdk`; `urllib` sends | `Telmoni(config, transport=, sleep=)`, `Telmoni.from_env()`; `run`, `step`, `model_call`, `tool_call` as context managers, `async with` and decorators; `flush()`, `shutdown()` |
+| TypeScript | `telmoni` (Node 18.19+ / 20.6+) | `@opentelemetry/api`, `@opentelemetry/sdk-trace-base`, `@opentelemetry/resources`; `fetch` sends | `new Telmoni(config, hooks)`, `Telmoni.fromEnv()`; `run(agent, options, fn)`, `wrap(agent, options, fn)`; `step`, `modelCall`, `toolCall` on a `Run` or a `Step`, each with a callback; `flush()`, `shutdown()` |
+| Go | `github.com/telmoni/telmoni/sdk/go` (1.26+) | `go.opentelemetry.io/otel`, `otel/sdk`, `otel/trace`; `net/http` sends | `New(cfg, opts…)` and `NewFromEnv()`, both `(*Client, error)`; `client.Run(ctx, agent, RunOptions)`, `run.Step`, `ModelCall`, `ToolCall(ctx, …)`, each `(context.Context, *T)` ended by `End()`; `RunFromContext`; `Flush(ctx)`, `Shutdown(ctx)` |
+| Rust | `telmoni-sdk` (`publish = false`), a member of this workspace | `opentelemetry`, `opentelemetry_sdk` (`trace`), `uuid`; reqwest's blocking client sends, built on the processor's thread | `Telmoni::new(config)`, `from_env()`, `with_hooks(config, Hooks)`; `run(agent, RunOptions) -> Result<Run, Error>`; `step`, `model_call`, `tool_call` as guards, `*_with` and `try_*_with` closures; `flush()`, `shutdown()` |
+
+**The parity table.** Every row is answered the same in all four unless a cell says otherwise; a new behaviour adds a row and, where the wire or an answer changes, a fixture.
+
+| Behaviour | Python | TypeScript | Go | Rust |
+|---|---|---|---|---|
+| The default endpoint `https://api.telmoni.com`; trailing slashes stripped; a blank endpoint, explicit or from the environment, falls back; a blank organization or key is unset | yes | yes | yes | yes |
+| `TELMONI_ENDPOINT`, `TELMONI_API_KEY` and `TELMONI_ORG` read in one place and no other variable; no `OTEL_*` variable reaches the SDK, proved with six set | `Config.from_env` | `Telmoni.fromEnv` | `ConfigFromEnv` | `Config::from_env` |
+| The key never printed or serialized | a `Secret`: `repr`, `str` and `dataclasses.asdict` show it redacted; `pickle` refused | a non-enumerable `apiKey`; `#private` internals | `json:"-"`, `String`, `GoString` | a hand-written `Debug`; `skip_serializing` |
+| Plain HTTP only to this machine (`localhost`, `*.localhost`, a loopback address); no redirect followed | `ValueError` at `Config`; an opener without `urllib`'s redirect handler | `TypeError` at construction; `fetch` with `redirect: 'manual'` | `New` returns an error; `CheckRedirect` returns the 3xx | one warning and nothing sent, since `new` cannot fail; reqwest's `Policy::none()` |
+| `sample_rate` above 0 and up to 1, else refused | `ValueError` | `RangeError` | `New` returns an error; a run's bad rate falls back to the client's with one warning | `Error::SampleRate` |
+| A tracer provider of the SDK's own: resource, sampler, limits, id generator and processor given explicitly | `TracerProvider(...)`, its `OTEL_SDK_DISABLED` switch overridden | `BasicTracerProvider` with every option (the 2.12 shim merges `OTEL_*` under them) | `NewTracerProvider` with `WithSampler`, `WithRawSpanLimits`, `NewSchemaless` | `SdkTracerProvider::builder()` with every part |
+| The sampler records every span and decides nothing: a parent's flag, else the root sampler's decision, never a drop | reads the application's global provider's sampler when none is configured | the `sampler` option, else always on: the api cannot read the application's | the `Sampler` field, else `AlwaysSample` | the `sampler` field, else `AlwaysOn` |
+| The SDK's own batch processor: a queue of 2048, batches of 512, 5 s; `telmoni.run.start` exported at once; drops counted and warned once; flush and drain | a thread | an unref'd timer | a goroutine | a thread |
+| The run: `invoke_agent <agent>`, INTERNAL, in the current trace; `telmoni.run_id` a UUID v4; tags, bounds and the sample rate; its start span at the same instant | yes | yes | yes | yes |
+| A blank agent name | `ValueError` | `TypeError` | a run that does nothing, with one warning: the SDK never panics | `Error::EmptyAgent` |
+| Every span inside a run carries `telmoni.run_id`, `telmoni.agent`, and `user.id` and `gen_ai.conversation.id` when set | yes | yes | yes | yes |
+| Steps INTERNAL; model calls `<operation> <model>` CLIENT with `answered(...)`; tool calls `execute_tool <name>` with `returned(...)`; content set as JSON strings | yes | yes | yes; a `Usage` sends all four counts, a zero among them | yes; `Content` from a string, a `Value` or any `Serialize` |
+| Errors: `fail(type)` sets `error.type` and status ERROR with no message; `cancel()` sets `telmoni.cancelled`; the idiom's own error | the exception's class; `KeyboardInterrupt` and `CancelledError` cancel | `constructor.name`, then `name`; an `AbortError` cancels | `Fail(err)`: `%T` without its `*`; `context.Canceled` cancels, and a deadline that ran out fails with its type | `try_*_with`: the error type's last path segment; a panic unwinding through a guard marks `panic` |
+| Nothing sent outside a run | a client-level call outside a run is a no-op with one warning | impossible: steps and calls open on handles | `RunFromContext(ctx)` outside a run is nil, whose handles do nothing | impossible: guards open on guards |
+| The exporter: OTLP/JSON, `Authorization: Bearer` when keyed, `User-Agent: telmoni-<language>/<version>`, the resource's five attributes from its own list, content off unless `capture_content` is on and the mode learned is `on` | `telmoni-python` | `telmoni-typescript` | `telmoni-go` | `telmoni-rust` |
+| Answers: the content mode learned from the header; each drop and refusal warned once with what lifts it; 429 and 503 retried after `Retry-After`, else 2^attempt seconds, at most 60, three attempts in all; others never; a transport error retried the same way | `logging`, logger `telmoni` | `console.warn`, or the `warn` hook | `log/slog` | `tracing::warn!`, target `telmoni` |
+| Warnings once per client, the set bounded at 1,024 keys | yes | yes | yes | yes |
+| Beside the application's own OpenTelemetry: a run joins the current trace, the application's spans opened inside nest under it, its sampling rate holds inside runs, and a run in a trace it does not sample is still sent | through the context | through the application's context manager, or `handle.context` | through the returned `ctx` | through `context()` or `attach()`; the run's parent from `Context::current()` |
+
+What each suite proves (`sdk/<language>/tests`): the configuration rows; the golden run of `sdk/fixtures/run.json`, its start travelling first; each answer under `sdk/fixtures/answers/`; `run`, `step`, `model_call` and `tool_call` in the idiom; the application's provider beside ours, with an in-memory exporter, an every-other sampler, an always-off one and six `OTEL_*` variables set; and the processor's bound, its unflushed full batch and its drain. Python has 50 tests, TypeScript 62, Go 56 with two examples, Rust 53 and its harness's own. None replays the fixtures against ingest's handler yet (*Known gaps*).
+
+**Growing the SDKs:** built in Python first and then in the three others in the same change, each behaviour a row above and, where the wire or an answer changes, a fixture every suite replays; a lane only once the server serves it; a disagreement between an SDK and ingest is fixed on the side that is wrong, with its fixture, never worked around on the other.
+
+They are checked by `make sdk-check` and CI's `sdks` job, the Rust SDK as a workspace member under the cargo jobs besides. None is published yet: the four go up together, at a tag of their own (`PACKAGES.md` in `telmoni/telmoni-cloud`), all at `0.1.0`, which TypeScript and Python test against their manifests and Rust reads from its own, and Go under a tag of its own, `sdk/go/v…`, matching its `Version` constant.
 
 ## Background work
 
@@ -297,11 +343,14 @@ flowchart LR
   Internet --> GW["Gateway, when ingress is on"]
   subgraph Cluster["Kubernetes: the chart"]
     GW --> Web["web :3000"]
+    GW -->|"/otlp, by host or by path"| API["server-api: the machine lanes"]
     Web --> Server["server :8082"]
+    API --> Server
     Migrate["migrate: pre-install and pre-upgrade hook"]
     Rotate["rotate: daily CronJob"]
   end
   Web --> Redis[("Redis: the operator's")]
+  Server --> Redis
   Server --> PG[("Postgres with pgvector: the operator's")]
   Server --> CH[("ClickHouse: the operator's")]
   Server --> KMS["The key-encryption key"]
@@ -311,9 +360,9 @@ flowchart LR
 
 - **Two images**, `server` (a static musl binary on distroless) and `web` (Node on distroless), published to GHCR once CI passes on `main`.
 - **The chart** runs the console, the server, the migrate hook and the rotate CronJob, reads one ConfigMap and three Secrets the operator makes, denies all traffic by default, runs every pod non-root with every capability dropped, and offers high availability and a Gateway as switches. Postgres, ClickHouse, Redis and the key are the operator's, outside it.
-- **Only the console is exposed.** The server takes traffic from the console alone.
+- **Two doors.** The console's, for people; and the machine lanes' — ingest at `/otlp/v1/traces`, the read API under `/v1`, the CLI's session lanes under `/cli` and Slack's events at `/webhooks/slack` — on a Service of their own, `server-api`, routed on a host of their own (`ingress.apiHost`) or by path on the console's host, whose slugs are reserved for them, and only the lanes' paths either way: every other lane of the server is the console's to call, behind the service secret, and each machine lane has a gate of its own, a project API key, the CLI's device code or bearer, or Slack's signature. The server reads `TRUSTED_PROXY_HOPS` from the same ConfigMap value the console does (`web.trustedProxyHops`), since both sit behind the same Gateway.
 - **Order:** the ConfigMap and the migrator's account as hooks, then the migration, then the rollout; a failed migration fails the upgrade before anything rolls.
-- **Compose** runs the whole of it on one machine, every module as one superuser, ClickHouse as one user, and `rotate` by hand.
+- **Compose** runs the whole of it on one machine, every module as one superuser, ClickHouse as one user, and `rotate` by hand; it publishes the console, and the server's port on loopback alone, for the reverse proxy on the host to forward the machine lanes to.
 - **CI** checks, and tests against Postgres and ClickHouse; `publish.yml` pushes the images once CI passes on `main`; nothing deploys.
 
 ## Extending the core
@@ -366,13 +415,11 @@ A deployment that needs more builds on the core rather than forking it, and the 
 
 ## Where it goes next
 
-Telmoni is for telemetry from AI agents, and that is built on this foundation in the open. What is built: **the `telemetry` module**, a module like the others, with its own schema and role, its seam, and its two stores — Postgres for what must be transactional or private, ClickHouse for the spans and their hourly totals, metadata alone, read under a row policy and purged a day at a time, their totals a month at a time. Self-hosting runs both. And the switch a project's content mode is set with: the organization's owner's alone, audited, and offering `off` alone until content has somewhere to be kept. What is settled, and not built:
-- **Ingest over OpenTelemetry's own protocol**, with content kept out unless an organization's owner turns it on for a project, written through the module's one query module.
-- **The console agent as the first agent recorded**, through the `AgentObserver` the agent already calls.
-- **A host for machines**, routed straight to the server, apart from the console's. The console's `/v1`, `/cli` and Slack relays go, and their limits move into the server.
+Telmoni is for telemetry from AI agents, and that is built on this foundation in the open. What is built: **the `telemetry` module**, a module like the others, with its own schema and role, its seam, and its two stores — Postgres for what must be transactional or private, ClickHouse for the spans and their hourly totals, metadata alone, read under a row policy and purged a day at a time, their totals a month at a time. Self-hosting runs both. And the switch a project's content mode is set with: the organization's owner's alone, audited, and offering `off` alone until content has somewhere to be kept. And **ingest**, over OpenTelemetry's own protocol at `/otlp/v1/traces`, JSON or protobuf, behind a project API key holding the `ingest` scope: each span read by the contract (`crates/telemetry/src/contract.rs`, the one list of what is read and kept) into a row, every content field dropped at the door and named in OTLP's partial success, each `user.id` hashed under a key of the project's own, sealed under `TELEMETRY_KEK`, and the export's digest claimed in the console's Redis so a retry with the same bytes is answered rather than written twice. A span is kept only inside a run our SDKs and the CLI mark (`telmoni.run_id`, `telmoni.agent`); any other exporter's is refused one by one until a run is read out of any trace. And **the four SDKs** (*The SDKs*), which open those runs and send them, each on its language's OpenTelemetry SDK with an exporter of ours. And **the console's first reads of a run**: the trace list, a row per run in a window of days — its agent, user, conversation, status, steps, tokens and duration, filtered by any of them and by model and tool, sorted by any column, all of it in the URL — and a trace's page, its steps with their calls first and the timeline of its spans one view away, each read through the one query module as the project `x-project-id` names; **the users and conversations pages** on the same reads: a row per user and per conversation the window's runs named — traces, errors, steps, tokens, first and last seen, sorted by any column from the URL — read from the spans, since the rollups name no user, a user opening their traces and a conversation its own page, its runs in the order they started, a replay in metadata and never a message; **the field inventory**, every attribute ingest reads and what becomes of it, one table in `contract.rs` that the docs page is held to by a test and the console's Privacy page reads over a lane, beside the project's content mode; **the console agent as the first agent recorded**, its questions runs of a project of the operator's own (*The console agent*); and **one door for machines** (`crates/telmoni/src/door.rs`): the read API, the CLI's session lanes, ingest and Slack's events served by the server itself on the machine host, through the chart's `server-api` Service or a self-hoster's proxy, the console's relays for them gone and their limits — by source address and by credential, in Redis — moved into the server. What is settled, and not built:
+- **The CLI sending**: a command wrapped as a run, and a hook for a coding agent's session.
 - **Monitors, alert rules and incidents** on top, delivered through the connectors, with mail and PagerDuty joining them.
 
-The words those lanes will take — `otlp`, `ping`, `webhooks` — are already reserved, so no organization holds one.
+The word the ping lane will take, `ping`, is already reserved, as `otlp`, `v1`, `cli` and `webhooks` are, so no organization holds one.
 
 ## Decisions
 
@@ -402,6 +449,12 @@ The words those lanes will take — `otlp`, `ping`, `webhooks` — are already r
 | **Generated contracts, the router built from the document's table** | A lane the document does not describe is a lane the server does not serve | `make contract` after each change |
 | **Ids name rows, slugs spell links, and a moved slug does not redirect** | Links read as names, never an id in the address bar | A link outlived by a URL change answers "not found" |
 | **Redis for the console alone, all of it losable** | Nothing durable in a cache | Per-instance limits while it is down |
+| **The SDKs in this repository, on OpenTelemetry's SDK, with an exporter of their own, growing together** | OpenTelemetry gives spans, context and batching in every language and lets a framework's instrumentation join later; an exporter of ours sees each answer's headers and takes content off before it leaves; a language that lags is a customer who cannot start; and beside ingest, both sides of the contract change in one commit, under the licence a library an agent links needs | Each SDK carries its language's OpenTelemetry SDK, every behaviour is written four times, held together by the fixtures, and this repository's CI carries three more toolchains |
+| **A sampler and a batch processor of the SDK's own** | OpenTelemetry's processors skip a span whose trace is not sampled and its samplers drop, so a run inside an unsampled trace would vanish and a run of ours would change the application's sampling; ours records everything, follows the parent's flag, and drops whole runs by rate in the exporter | A processor and a sampler in each language rather than OpenTelemetry's |
+| **Plain HTTP only to this machine, and no redirect, in the SDKs as in the CLI** | Every export carries the key | A self-hosted server reached across a network needs TLS in front of it |
+| **The trace list as one aggregation per run, a literal per sort, every filter bound** | The query module takes a literal and server-side parameters alone, so the sort is chosen in code from a closed set and a filter left empty binds as `''` and matches every row; ClickHouse sums each run's spans in one pass over the window | Sixteen literals from one macro, and a filter that is a `HAVING` on the sums |
+| **The field inventory as a table in the contract, served to the console and held to the docs page by a test** | What ingest reads, what the page says and what the console shows cannot drift apart: one list, in the code that reads it | A row of prose for every name, and a page edited beside the code |
+| **Dogfood in process, through the store, on a task of its own** | A question of ours waits on nothing of ours and crosses no door; the record holds no content to keep or drop | The console agent's runs skip ingest's door, so its rate limit, its claims and its answer are not exercised by them |
 
 ## Known gaps
 
@@ -411,7 +464,14 @@ The ones that shape the design, each kept here until it is closed:
 - **The password-reset mail can be lost** to a rollout, and nothing retries it.
 - **Delivery is at least once, unordered, and unpaced per vendor**.
 - **Audit partitions are never dropped**, and `ip_address`, `user_agent` and `shard_key` are filled by nothing.
-- **A deleted project's spans wait for their day's partition to be dropped**, and every project keeps the longest retention, since no plan's limit is read yet.
+- **Every project keeps the longest retention**, since no plan's limit is read yet.
 - **A transfer whose settling of telemetry's settings fails every try**, or never runs, leaves them under an organization that no longer holds the project, until the project moves again, is deleted or has its content mode changed. Auth logs the project's id at `error`.
 - **Leader locks prevent overlap, not repetition.** Each replica's timer starts at its own boot, so a daily sweep runs once a day for each replica (`crates/telmoni/src/sweeps.rs`).
 - **No `preStop` hook, no grace period of the chart's own, and no startup probe**, so a pod leaving its Service can still meet a few requests while it drains.
+- **The SDKs' real transports are untested:** `urllib`, `fetch`, `net/http` and reqwest, their timeouts and their redirect refusals, since every suite injects its transport; Go's example compiles and never runs, and TypeScript's tests import the sources rather than the built package. And no suite replays `sdk/fixtures/` against ingest's handler, though both now live here.
+- **The root run's sampling decision is read from the application in Python alone**, whose provider exposes its sampler; the three others take a `sampler` option, and sample every root run without one.
+- **Go's `Usage` sends all four counts**, a zero among them, where the others send the counts given.
+- **The trace list reads a window of days to a limit, with no cursor**: past 500 traces the rest are reached by narrowing, and a run whose own span never arrives is listed as running for as long as its spans are kept, since no open run is tracked yet.
+- **A dogfood question is lost to the record when auth cannot answer the project's home or ClickHouse does not take the rows**, logged by kind and never retried; the agent's answer is unaffected either way.
+- **A project's telemetry purge that ClickHouse does not take is finished by its organization's deletion**, which finds the project through the settings row the failure left, and by nothing sooner: until then the rows stay, unreadable, since the project and its keys are gone, and leave at the retention line at the latest. Nothing in `serve` retries it on its own.
+- **Ingest is metered per project and after its key check**: an unkeyed flood costs one key lookup per request, and no per-address limit stands in front of it, as the door's does in front of `/v1` and `/cli`.

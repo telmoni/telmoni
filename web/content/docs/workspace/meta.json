@@ -1,5 +1,16 @@
 {
   "title": "Organizations and projects",
   "defaultOpen": true,
-  "pages": ["organizations-and-projects", "members", "roles", "audit-log", "..."]
+  "pages": [
+    "organizations-and-projects",
+    "traces",
+    "conversations",
+    "users",
+    "members",
+    "roles",
+    "audit-log",
+    "data-retention",
+    "data-deletion",
+    "..."
+  ]
 }
