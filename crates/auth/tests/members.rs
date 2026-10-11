@@ -799,7 +799,7 @@ async fn a_validated_token_carries_the_organizations_it_may_act_on(pool: PgPool)
         "/internal/tokens",
         &member,
         Some(&own_project),
-        Some(json!({ "name": "ci", "created_by": member })),
+        Some(json!({ "name": "ci", "created_by": member, "scopes": ["read"] })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "mint failed: {minted}");
@@ -841,7 +841,7 @@ async fn a_validated_token_carries_the_organizations_it_may_act_on(pool: PgPool)
         "/internal/tokens",
         &owner,
         Some(&project_of(&pool, &owner).await),
-        Some(json!({ "name": "ci", "created_by": owner })),
+        Some(json!({ "name": "ci", "created_by": owner, "scopes": ["read"] })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "mint failed: {minted}");

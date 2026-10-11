@@ -1,5 +1,11 @@
-//! The console's lanes under `/internal/telemetry`. Each asks auth who is
-//! acting, through [`telmoni_shared::seam::Auth`], since this module holds no
-//! grant on auth's roster.
+//! The module's lanes: the console's under `/internal/telemetry`, each asking
+//! auth who is acting through [`telmoni_shared::seam::Auth`], since this
+//! module holds no grant on auth's roster; and ingest's, `/otlp/v1/traces`,
+//! which a machine reaches with a project API key auth verifies the same way.
 
 pub mod content_mode;
+pub mod conversations;
+pub mod field_inventory;
+pub mod ingest;
+pub mod traces;
+pub mod users;

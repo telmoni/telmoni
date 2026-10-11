@@ -1359,7 +1359,7 @@ async fn a_key_rotated_after_a_transfer_is_recorded_as_the_new_owners(pool: PgPo
         OWNER,
         &organization,
         &project,
-        json!({ "name": "ci", "created_by": OWNER }),
+        json!({ "name": "ci", "created_by": OWNER, "scopes": ["read"] }),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{minted}");

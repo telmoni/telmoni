@@ -13,6 +13,7 @@ import {
   fetchTokens,
   getServerContext,
 } from "@/lib/server/data";
+import { SCOPE_LABEL } from "@/lib/api-key-scopes";
 import { projectPath } from "@/lib/slug";
 import { Role } from "@/lib/types/enums";
 
@@ -63,7 +64,7 @@ export default async function ApiKeysPage({
               that carries an `h2` here uses it to name a section the title
               does NOT already cover — "Invited", "Organization notices". */}
           <p className="text-sm text-muted-foreground">
-            Tokens for the CLI and API. Plaintext is shown only when minted.
+            Keys for sending spans and reading the API. Plaintext is shown only when minted.
           </p>
           {tokens.length === 0 ? (
             <Card className="overflow-hidden p-0 gap-0">
@@ -80,6 +81,7 @@ export default async function ApiKeysPage({
             <DataTable>
               <THead>
                 <Th>Name</Th>
+                <Th>Opens</Th>
                 <Th>Expires</Th>
                 <Th>Last used</Th>
                 <Th>Created</Th>
@@ -89,6 +91,9 @@ export default async function ApiKeysPage({
                 {tokens.map((t) => (
                   <tr key={t.id}>
                     <Td className="font-medium whitespace-nowrap">{t.name}</Td>
+                    <Td className="text-xs text-muted-foreground whitespace-nowrap">
+                      {t.scopes.map((s) => SCOPE_LABEL[s]).join(", ")}
+                    </Td>
                     <Td className="text-xs text-muted-foreground whitespace-nowrap">
                       <ExpiryCell expiresAt={t.expires_at} />
                     </Td>

@@ -520,7 +520,7 @@ async fn accepting_moves_the_project_with_its_keys_and_seats_and_both_chains_rec
         OWNER,
         Some(&h.source),
         Some(&h.project),
-        Some(json!({ "name": "ci", "created_by": OWNER })),
+        Some(json!({ "name": "ci", "created_by": OWNER, "scopes": ["read"] })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{minted}");

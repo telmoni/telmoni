@@ -60,6 +60,55 @@ pub const fn hex_digit(n: u8) -> char {
     }
 }
 
+/// A key for HMAC-SHA-256, held by `ring`: the material never leaves it, and
+/// `Debug` prints none of it.
+pub struct HmacKey(ring::hmac::Key);
+
+impl HmacKey {
+    /// A key over `secret`, whatever its length.
+    #[must_use]
+    pub fn new(secret: &[u8]) -> Self {
+        Self(ring::hmac::Key::new(ring::hmac::HMAC_SHA256, secret))
+    }
+
+    /// HMAC-SHA-256 of `data` under this key, its first `bytes` bytes — at
+    /// most all 32 — as lowercase hex.
+    #[must_use]
+    pub fn prefix_hex(&self, data: &[u8], bytes: usize) -> String {
+        let tag = ring::hmac::sign(&self.0, data);
+        hex_lower(tag.as_ref().get(..bytes.min(32)).unwrap_or_default())
+    }
+}
+
+impl std::fmt::Debug for HmacKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HmacKey(***)")
+    }
+}
+
+#[cfg(test)]
+mod hmac_tests {
+    use super::*;
+
+    /// RFC 4231, test case 2.
+    #[test]
+    fn hmac_sha256_matches_the_rfc_vector_and_is_cut_to_its_prefix() {
+        let key = HmacKey::new(b"Jefe");
+        let data = b"what do ya want for nothing?";
+        assert_eq!(
+            key.prefix_hex(data, 32),
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        );
+        assert_eq!(key.prefix_hex(data, 16), "5bdcc146bf60754e6a042426089575c7");
+        assert_eq!(
+            key.prefix_hex(data, 64).len(),
+            64,
+            "never more than the whole tag"
+        );
+        assert_eq!(format!("{key:?}"), "HmacKey(***)");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

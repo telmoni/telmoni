@@ -18,6 +18,10 @@ pub enum TelmoniError {
     #[error(transparent)]
     Tenant(#[from] TenantError),
 
+    /// Ingest's refusal of an export.
+    #[error(transparent)]
+    Telemetry(#[from] TelemetryError),
+
     /// Database error (surfaced as redacted 500).
     #[error(transparent)]
     Database(#[from] sqlx::Error),
@@ -159,6 +163,7 @@ impl TelmoniError {
             Self::Auth(e) => e.to_problem_details(),
             Self::Authz(e) => e.to_problem_details(),
             Self::Tenant(e) => e.to_problem_details(),
+            Self::Telemetry(e) => e.to_problem_details(),
             Self::Database(sqlx::Error::Database(e)) if e.is_unique_violation() => {
                 AuthError::Conflict("That already exists. Refresh and try again.".into())
                     .to_problem_details()
@@ -383,6 +388,74 @@ impl AuthzError {
             status: 403,
             detail,
             ..Default::default()
+        }
+    }
+}
+
+/// Ingest's refusals of an export to `/otlp/v1/traces`. On that lane the
+/// body is OTLP's `Status` rather than a problem document, its message
+/// opening with the type, so an exporter and a person read the same name.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum TelemetryError {
+    /// The body did not decode as OTLP in the encoding its `Content-Type`
+    /// named, held no span, or held more than the batch allows. Maps to 400.
+    #[error("invalid batch: {0}")]
+    InvalidBatch(String),
+
+    /// Past the batch's cap once decompressed. Maps to 413, with the cap as
+    /// `max_bytes`.
+    #[error("batch too large: more than {max_bytes} bytes once decompressed")]
+    BatchTooLarge {
+        /// The most bytes an export may unfold to.
+        max_bytes: usize,
+    },
+
+    /// ClickHouse, or the key service a project's hashing key is sealed
+    /// under, did not answer: nothing was kept. Maps to 503, with a
+    /// `Retry-After` of one second, the answer an exporter retries.
+    #[error("store unavailable: {0}")]
+    StoreUnavailable(String),
+}
+
+impl TelemetryError {
+    /// Render this error as RFC 9457 problem-details.
+    #[must_use]
+    pub fn to_problem_details(&self) -> ProblemDetails {
+        match self {
+            Self::InvalidBatch(detail) => ProblemDetails {
+                type_uri: "/errors/telemetry/invalid-batch".into(),
+                title: "invalid batch".into(),
+                status: 400,
+                detail: Some(detail.clone()),
+                ..Default::default()
+            },
+            Self::BatchTooLarge { max_bytes } => {
+                let mut pd = ProblemDetails {
+                    type_uri: "/errors/telemetry/batch-too-large".into(),
+                    title: "batch too large".into(),
+                    status: 413,
+                    detail: Some(format!(
+                        "the body is larger than {max_bytes} bytes once decompressed"
+                    )),
+                    ..Default::default()
+                };
+                pd.extensions
+                    .insert("max_bytes".into(), serde_json::Value::from(*max_bytes));
+                pd
+            }
+            Self::StoreUnavailable(detail) => {
+                let mut pd = ProblemDetails {
+                    type_uri: "/errors/telemetry/store-unavailable".into(),
+                    title: "store unavailable".into(),
+                    status: 503,
+                    detail: Some(detail.clone()),
+                    ..Default::default()
+                };
+                pd.extensions
+                    .insert("retry_after_secs".into(), serde_json::Value::from(1_u64));
+                pd
+            }
         }
     }
 }

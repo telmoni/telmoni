@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
+import { isApiKeyScope } from "@/lib/api-key-scopes";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
@@ -61,6 +62,10 @@ export async function mintTokenAction(
   const description = String(formData.get("description") ?? "").trim() || null;
   const ttl = formData.get("ttl");
   if (!isTtl(ttl)) return { status: "error", error: "Invalid TTL selection." };
+  const scopes = String(formData.get("scopes") ?? "").split(",").filter(Boolean);
+  if (scopes.length === 0 || !scopes.every(isApiKeyScope)) {
+    return { status: "error", error: "Choose what the key opens: sending spans, reading the API, or both." };
+  }
 
   const resolved = await activeProjectForMutation(projectId);
   if (resolved.error !== null) return { status: "error", error: resolved.error };
@@ -76,6 +81,7 @@ export async function mintTokenAction(
       name,
       description,
       created_by:         session.userId,
+      scopes,
       expires_in_seconds,
     }),
   });

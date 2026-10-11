@@ -11,11 +11,12 @@
 //!   on each read the projects its row policy may admit.
 //!
 //! Its ClickHouse tables are made by [`schema`], which `telmoni migrate` runs
-//! after the Postgres sets, and their expired days and months are dropped by
-//! [`retention`], which `telmoni rotate` runs: both as the migrator's user,
-//! whom `tenant_isolation` does not hold. Auth reaches it through
-//! [`telmoni_shared::seam::Telemetry`] ([`seam`]) to purge an organization's
-//! or a project's settings and to move a project's, and the console through
+//! after the Postgres sets, and their expired days and months are dropped,
+//! and the rows deleted projects left rewritten away, by [`retention`], which
+//! `telmoni rotate` runs: both as the migrator's user, whom `tenant_isolation`
+//! does not hold. Auth reaches it through [`telmoni_shared::seam::Telemetry`]
+//! ([`seam`]) to purge an organization's or a project's spans, totals and
+//! settings and to move a project's settings, and the console through
 //! its lanes under `/internal/telemetry` ([`handler`], [`router`]), which ask
 //! auth who is acting through [`telmoni_shared::seam::Auth`].
 //!
@@ -29,19 +30,33 @@
 
 use std::sync::Arc;
 
-use axum::{Router, middleware, routing::get};
+use axum::{
+    Router, middleware,
+    routing::{get, post},
+};
 use sqlx::PgPool;
 
+use telmoni_shared::ApiKeyScope;
+use telmoni_shared::middleware::api_key::{ApiKeyGate, require_api_key};
 use telmoni_shared::middleware::service_auth::{ServiceSecrets, require_service_secret};
 
 pub mod boot;
 pub mod config;
+pub mod contract;
+pub mod conversations;
 pub mod db;
+pub mod dogfood;
 pub mod handler;
+pub mod hashing;
+pub mod ingest;
+pub mod rate_limit;
+pub mod replica;
 pub mod retention;
 pub mod schema;
 pub mod seam;
 pub mod store;
+pub mod traces;
+pub mod users;
 
 pub use config::Config;
 
@@ -58,6 +73,21 @@ pub struct AppState {
     /// Auth, in process: who is behind a lane's bearer, and what role they
     /// hold on the project it names.
     pub auth: Arc<dyn telmoni_shared::seam::Auth>,
+    /// The client Cloud KMS is called through, where `TELEMETRY_KEK` names a
+    /// key there.
+    pub http: reqwest::Client,
+    /// Seals and opens each project's hashing key under a data key of the
+    /// row's own; holds no key itself.
+    pub vault: telmoni_shared::envelope::Vault,
+    /// What wraps each row's data key: `TELEMETRY_KEK`.
+    pub kek: telmoni_shared::envelope::Kek,
+    /// Each project's hashing key, opened once per process ([`hashing`]).
+    pub hashing_keys: hashing::Cache,
+    /// Redis, as this replica holds it ([`replica`]): ingest's claims and
+    /// limits, shared with every other replica.
+    pub redis: replica::Redis,
+    /// Ingest's rate limit, per project.
+    pub rate_limit: rate_limit::RateLimit,
 }
 
 impl AppState {
@@ -75,8 +105,10 @@ impl AppState {
 }
 
 /// The module's router: the console's lanes under `/internal`, behind the
-/// service secret. The binary mounts it beside the other modules' and adds
-/// the health probes and the request layers once.
+/// service secret, and ingest at `/otlp/v1/traces`, behind a project API key
+/// holding the ingest scope and nothing else — a machine reaches it straight,
+/// and the key is its gate. The binary mounts it beside the other modules'
+/// and adds the health probes and the request layers once.
 pub fn router(state: Arc<AppState>) -> Router {
     let internal = Router::new()
         .route(
@@ -84,9 +116,38 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(handler::content_mode::get_content_mode)
                 .put(handler::content_mode::put_content_mode),
         )
+        .route(
+            "/telemetry/field-inventory",
+            get(handler::field_inventory::get_field_inventory),
+        )
+        .route("/telemetry/traces", get(handler::traces::list_traces))
+        .route(
+            "/telemetry/traces/{run_id}",
+            get(handler::traces::get_trace),
+        )
+        .route("/telemetry/users", get(handler::users::list_users))
+        .route(
+            "/telemetry/conversations",
+            get(handler::conversations::list_conversations),
+        )
+        .route(
+            "/telemetry/conversations/{conversation_id}",
+            get(handler::conversations::get_conversation),
+        )
         .layer(middleware::from_fn_with_state(
             state.service_secrets.clone(),
             require_service_secret,
         ));
-    Router::new().nest("/internal", internal).with_state(state)
+    let gate = ApiKeyGate {
+        auth: state.auth.clone(),
+        scope: ApiKeyScope::Ingest,
+        refuse: handler::ingest::refuse,
+    };
+    let otlp = Router::new()
+        .route("/otlp/v1/traces", post(handler::ingest::export))
+        .route_layer(middleware::from_fn_with_state(gate, require_api_key));
+    Router::new()
+        .nest("/internal", internal)
+        .merge(otlp)
+        .with_state(state)
 }

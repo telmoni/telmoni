@@ -72,8 +72,8 @@ async fn seed(pool: &PgPool) {
     ] {
         sqlx::query(
             "INSERT INTO auth.api_tokens (organization_id, project_id, name, token_hash,
-                                          created_by, revoked_at, expires_at)
-             VALUES ($1, $2, $3, $4, 'u_seed',
+                                          created_by, scopes, revoked_at, expires_at)
+             VALUES ($1, $2, $3, $4, 'u_seed', ARRAY['read'],
                      CASE WHEN $5::text IS NULL THEN NULL
                           ELSE now() - $5::interval END,
                      CASE WHEN $6::text IS NULL THEN NULL

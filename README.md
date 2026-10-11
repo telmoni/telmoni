@@ -3,9 +3,9 @@
 [![CI](https://github.com/telmoni/telmoni/actions/workflows/ci.yml/badge.svg)](https://github.com/telmoni/telmoni/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-A foundation for organizations and their projects: members and roles, API keys, notifications, a hash-chained audit log, a console agent, and telemetry's stores for agents' spans. One Rust binary runs all of it behind a Next.js console.
+A foundation for organizations and their projects: members and roles, API keys, notifications, a hash-chained audit log, a console agent, telemetry's ingest and stores for agents' spans, and the SDKs that send them. One Rust binary runs all of it behind a Next.js console.
 
-Telmoni has not launched yet. The customer documentation is this repository's, `web/content/docs`, served by the console at [telmoni.com/docs](https://telmoni.com/docs); the CLI and SDKs are in [`telmoni/telmoni-cli`](https://github.com/telmoni/telmoni-cli).
+Telmoni has not launched yet. The customer documentation is this repository's, `web/content/docs`, served by the console at [telmoni.com/docs](https://telmoni.com/docs), and so are the four SDKs, under `sdk/`; the CLI is [`telmoni/telmoni-cli`](https://github.com/telmoni/telmoni-cli).
 
 ## Getting started
 
@@ -26,12 +26,14 @@ crates/
   auth/           sign-in, organizations and projects, members, invitations, API keys
   notifications/  the feed, the Slack, Discord and webhook connectors, delivery
   agent/          the console agent: search over the docs and a project's own data
-  telemetry/      each project's settings, the spans and their hourly totals in ClickHouse,
-                  its ClickHouse file and nightly purge, ClickHouse's configuration and local users
+  telemetry/      ingest at /otlp/v1/traces, each project's settings, the spans and their hourly
+                  totals in ClickHouse, its ClickHouse file and nightly purge, ClickHouse's
+                  configuration and local users
   migrator/       the migration runner, grants, role hardening, the audit schema;
                   runs telemetry's ClickHouse file and purge
   shared/         errors, RBAC, tenancy, the seams between modules
 web/              the console, a thin proxy in front of the server, and the docs it serves (`web/content/docs`)
+sdk/              the SDKs: python/, typescript/, go/, rust/, and the fixtures every suite replays
 contract/         the generated wire contract and OpenAPI document
 deploy/           the Helm chart and the self-host compose file
 scripts/          `up.sh` behind `make up`, and the webhook tunnel and receiver for testing a connector

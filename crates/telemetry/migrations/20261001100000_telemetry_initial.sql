@@ -37,11 +37,26 @@ GRANT USAGE ON SCHEMA telemetry TO telemetry_maintenance;
 -- the defaults, so content stays off until an owner turns it on, and nothing
 -- has to be written when a project is made.
 CREATE TABLE telemetry.project_settings (
-    project_id      TEXT        PRIMARY KEY,
-    organization_id TEXT        NOT NULL,
-    content_mode    TEXT        NOT NULL DEFAULT 'off',
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT project_settings_content_mode_check CHECK (content_mode IN ('off', 'on', 'sealed'))
+    project_id              TEXT        PRIMARY KEY,
+    organization_id         TEXT        NOT NULL,
+    content_mode            TEXT        NOT NULL DEFAULT 'off',
+    -- Whether a span's user id is stored as its HMAC-SHA-256 under the
+    -- project's own key, or as sent where the project keeps it plain.
+    user_id_hashed          BOOLEAN     NOT NULL DEFAULT true,
+    -- That key, sealed under a data key of the row's own, which TELEMETRY_KEK
+    -- wraps, as a connector's grant is sealed under CONNECTOR_KEK. Made by the
+    -- project's first export, so a row the content switch made has none yet.
+    hashing_key_ciphertext  BYTEA,
+    hashing_key_nonce       BYTEA,
+    hashing_key_wrapped_dek BYTEA,
+    hashing_key_version     SMALLINT,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT project_settings_content_mode_check CHECK (content_mode IN ('off', 'on', 'sealed')),
+    -- The key is there whole or not at all.
+    CONSTRAINT project_settings_hashing_key_check CHECK (
+        (hashing_key_ciphertext IS NULL) = (hashing_key_nonce IS NULL)
+        AND (hashing_key_ciphertext IS NULL) = (hashing_key_wrapped_dek IS NULL)
+        AND (hashing_key_ciphertext IS NULL) = (hashing_key_version IS NULL))
 );
 
 CREATE INDEX project_settings_organization_idx ON telemetry.project_settings (organization_id);

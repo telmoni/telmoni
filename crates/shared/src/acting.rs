@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::rbac::{Resource, Verb, can};
-use crate::types::{OrganizationId, OrganizationRole, ProjectId, Role, UserId};
+use crate::types::{ApiKeyScope, OrganizationId, OrganizationRole, ProjectId, Role, UserId};
 use crate::{AuthError, AuthzError, TelmoniError};
 
 /// The authorization resolution auth returned for a request.
@@ -111,6 +111,58 @@ impl Acting {
     }
 }
 
+/// What an API key resolved to: the project it was minted on, that project's
+/// organization now, and the scopes it holds. A key names no person, so a
+/// lane behind one acts for the project alone, and nothing a person may do
+/// follows from it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActingKey {
+    /// The key's own row, so a lane can name the credential in a log line
+    /// without ever seeing it.
+    pub token_id: uuid::Uuid,
+    /// The organization that holds the key's project now.
+    pub organization_id: OrganizationId,
+    /// The project the key was minted on.
+    pub project_id: ProjectId,
+    /// What the key may be used for, as minted.
+    pub scopes: Vec<ApiKeyScope>,
+}
+
+impl ActingKey {
+    /// A lane that needs `scope`: a key without it is refused, as a person
+    /// whose role the matrix does not admit is.
+    pub fn require_scope(&self, scope: ApiKeyScope) -> Result<&Self, TelmoniError> {
+        if self.scopes.contains(&scope) {
+            Ok(self)
+        } else {
+            Err(
+                AuthzError::Forbidden(format!("this API key does not hold the {scope} scope"))
+                    .into(),
+            )
+        }
+    }
+}
+
+/// The key the gate (`require_api_key`) put on the request, for a handler
+/// behind it to take as an argument; a lane that reaches a handler with no
+/// key on it was mounted outside the gate, and is refused as unauthenticated
+/// rather than served.
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ActingKey {
+    type Rejection = TelmoniError;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        parts
+            .extensions
+            .get::<Self>()
+            .cloned()
+            .ok_or_else(|| AuthError::Unauthenticated.into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,5 +255,36 @@ mod tests {
             ..owner
         };
         assert!(no_project.require_project_owner().is_err());
+    }
+
+    /// ⚠ A key opens only what it was minted for: an ingest key reads
+    /// nothing, and a read key sends nothing.
+    #[test]
+    fn a_key_is_held_to_its_scopes() {
+        let key = |scopes: Vec<ApiKeyScope>| ActingKey {
+            token_id: uuid::Uuid::nil(),
+            organization_id: OrganizationId::try_new("org_1").unwrap(),
+            project_id: ProjectId::try_new("proj_1").unwrap(),
+            scopes,
+        };
+        let both = key(ApiKeyScope::all().to_vec());
+        for scope in ApiKeyScope::all() {
+            assert!(
+                both.require_scope(scope).is_ok(),
+                "{scope} refused to a key holding it"
+            );
+        }
+        let refused = key(vec![ApiKeyScope::Ingest])
+            .require_scope(ApiKeyScope::Read)
+            .unwrap_err();
+        assert!(
+            matches!(&refused, TelmoniError::Authz(AuthzError::Forbidden(_))),
+            "an ingest key was not refused a read: {refused:?}"
+        );
+        assert!(
+            key(vec![ApiKeyScope::Read])
+                .require_scope(ApiKeyScope::Ingest)
+                .is_err()
+        );
     }
 }

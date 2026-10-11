@@ -650,11 +650,18 @@ CREATE TABLE auth.api_tokens (
     description     TEXT,
     token_hash      TEXT        NOT NULL UNIQUE,
     created_by      TEXT        NOT NULL,
+    -- What the key opens, chosen when it is minted and kept through every
+    -- rotation: `read`, the `/v1` lanes, and `ingest`, sending spans. No
+    -- default, so no path can mint a key that opens what nobody chose.
+    scopes          TEXT[]      NOT NULL,
     expires_at      TIMESTAMPTZ,
     last_used_at    TIMESTAMPTZ,
     revoked_at      TIMESTAMPTZ,
     shard_key       UUID        NOT NULL DEFAULT gen_random_uuid(),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- At least one scope, each one `ApiKeyScope` names (`crates/auth/tests/api_key_scopes.rs`).
+    CONSTRAINT api_tokens_scopes_check
+        CHECK (cardinality(scopes) > 0 AND scopes <@ ARRAY['read', 'ingest']::TEXT[]),
     -- The pair, not each alone: a token naming another organization's project would act for this one.
     -- ON UPDATE CASCADE is what carries the keys with a project handed to
     -- another organization: the one UPDATE of `projects.organization_id`

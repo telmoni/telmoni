@@ -876,8 +876,8 @@ async fn seed_keys(pool: &PgPool) -> [&'static str; 3] {
     for (raw, project, grace) in keys {
         sqlx::query(
             "INSERT INTO auth.api_tokens (organization_id, project_id, name, token_hash,
-                                          created_by, revoked_at)
-             VALUES ($1, $2, $3, $4, $5,
+                                          created_by, scopes, revoked_at)
+             VALUES ($1, $2, $3, $4, $5, ARRAY['read'],
                      CASE WHEN $6::text IS NULL THEN NULL ELSE now() + $6::interval END)",
         )
         .bind(ORGANIZATION)
@@ -1809,8 +1809,9 @@ async fn a_pending_deletion_organizations_key_does_not_validate(pool: PgPool) {
     seed_organization_deletion(&pool, "pending_deletion").await;
     let raw = "telmoni_missed_by_the_revoke";
     sqlx::query(
-        "INSERT INTO auth.api_tokens (organization_id, project_id, name, token_hash, created_by)
-         VALUES ($1, $2, 'missed', $3, $4)",
+        "INSERT INTO auth.api_tokens (organization_id, project_id, name, token_hash, created_by,
+                                      scopes)
+         VALUES ($1, $2, 'missed', $3, $4, ARRAY['read'])",
     )
     .bind(ORGANIZATION)
     .bind(project_of(ORGANIZATION))

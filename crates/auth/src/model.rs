@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use telmoni_shared::{OrganizationId, OrganizationStatus, ProjectId, Role, UserId};
+use telmoni_shared::{ApiKeyScope, OrganizationId, OrganizationStatus, ProjectId, Role, UserId};
 
 /// Which level an invitation is to — a project inside an organization, or the
 /// organization itself. The two live in separate tables with separate role
@@ -278,6 +278,8 @@ pub struct ApiToken {
     pub name: String,
     pub description: Option<String>,
     pub created_by: String,
+    /// What the key opens, as minted.
+    pub scopes: Vec<ApiKeyScope>,
     pub expires_at: Option<DateTime<Utc>>,
     pub last_used_at: Option<DateTime<Utc>>,
     /// "Valid until": NULL or future is active, past is invalid.
@@ -294,6 +296,9 @@ pub struct CreateTokenRequest {
     /// Provider sub of the minter, supplied by the BFF, which holds the
     /// request's authenticated identity.
     pub created_by: String,
+    /// What the key opens: one scope or both, never none. Required, so no
+    /// caller mints a key that opens what nobody chose.
+    pub scopes: Vec<ApiKeyScope>,
     /// TTL in seconds. **Omitted** ⇒ the safe default 90-day expiry. Explicit
     /// `null` ⇒ no expiry. Zero is a 400. The double `Option` is load-bearing:
     /// it distinguishes "absent" from `null`, and `u32` makes a negative TTL

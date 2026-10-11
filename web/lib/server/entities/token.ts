@@ -4,12 +4,14 @@ import { z } from "zod";
 import { fetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
+import { ApiKeyScope } from "@/lib/types/enums";
 
 import { identityContext, projectHeaders } from "./identity-context";
 
 const ApiTokenSchema = z.object({
   id: z.string(),
   name: z.string(),
+  scopes: z.array(z.enum([ApiKeyScope.Read, ApiKeyScope.Ingest])),
   expires_at: z.string().nullable(),
   last_used_at: z.string().nullable(),
   created_at: z.string(),

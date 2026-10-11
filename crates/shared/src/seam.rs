@@ -14,7 +14,7 @@ use axum::http::HeaderMap;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::acting::Acting;
+use crate::acting::{Acting, ActingKey};
 use crate::{
     AuditAction, FlagSet, NotificationKind, OrganizationId, OrganizationStatus, ProjectId,
     TelmoniError, UserId,
@@ -138,6 +138,17 @@ pub trait Auth: Send + Sync {
     async fn resolve_again(&self, acting: &Acting) -> Result<Acting, TelmoniError> {
         let _ = acting;
         Err(not_linked("a role read again"))
+    }
+
+    /// The API key this request's bearer presents (`authorization`), and
+    /// what it opens: its project, the organization holding that project
+    /// now, and its scopes. The key is verified here — live, unexpired, its
+    /// organization active — and holding it to a scope is the caller's
+    /// ([`ActingKey::require_scope`]). For a lane a machine calls with a key
+    /// rather than a person with a session: ingest's.
+    async fn resolve_api_key(&self, headers: &HeaderMap) -> Result<ActingKey, TelmoniError> {
+        let _ = headers;
+        Err(not_linked("an API key"))
     }
 
     /// Where each of `projects` is held now — its organization, and the slugs
@@ -335,10 +346,12 @@ pub trait Agent: Send + Sync {
 /// organization it moves to. Each call is idempotent; each purge answers how
 /// many rows went.
 ///
-/// What it holds here is each project's settings, in Postgres. A span in
-/// ClickHouse carries its project and nothing above it, so a transfer leaves
-/// every span where it is, and a purge leaves them to the nightly purge that
-/// drops their day's partition at the retention line.
+/// What it holds is each project's settings, in Postgres, and the project's
+/// spans and hourly totals, in ClickHouse. A span carries its project and
+/// nothing above it, so a transfer leaves every span where it is; a purge
+/// marks every span and every hour's totals of the project deleted, hidden
+/// from every read within moments, as the store applies the mark, and
+/// rewritten away by the nightly `rotate`, then removes its settings.
 #[async_trait]
 pub trait Telemetry: Send + Sync {
     /// Everything held for an organization's projects, before its row goes.

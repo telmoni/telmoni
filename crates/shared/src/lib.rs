@@ -35,11 +35,12 @@ pub mod types;
 
 pub use sharding::derive_shard_key;
 
-pub use error::{AuthError, AuthzError, ModelFailure, TelmoniError, TenantError};
+pub use error::{AuthError, AuthzError, ModelFailure, TelemetryError, TelmoniError, TenantError};
 pub use error_schema::ProblemDetails;
 pub use extract::correlation_id;
 pub use types::{
-    AuditAction, ContentMode, Flag, FlagSet, NotificationKind, OrganizationId, OrganizationIdError,
-    OrganizationRole, OrganizationStatus, ParseEnumError, ProjectId, ProjectIdError, Redacted,
-    Role, SpanKind, SpanStatus, TelmoniResourceKind, UserId, UserIdError,
+    ApiKeyScope, AuditAction, ContentMode, ConversationSort, Flag, FlagSet, NotificationKind,
+    OrganizationId, OrganizationIdError, OrganizationRole, OrganizationStatus, ParseEnumError,
+    ProjectId, ProjectIdError, Redacted, Role, SortDirection, SpanKind, SpanStatus,
+    TelmoniResourceKind, TraceSort, UserId, UserIdError, UserSort,
 };

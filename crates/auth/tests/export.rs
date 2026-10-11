@@ -217,7 +217,7 @@ async fn seed(pool: &PgPool) -> (String, String) {
         OWNER,
         &organization,
         Some(&project),
-        Some(json!({ "name": "deploy key", "created_by": OWNER })),
+        Some(json!({ "name": "deploy key", "created_by": OWNER, "scopes": ["read"] })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "mint");

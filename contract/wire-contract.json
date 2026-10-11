@@ -1,10 +1,24 @@
 {
   "$generated": "by `make contract` from crates/shared/src/types and slug.rs — do not edit by hand",
   "enums": {
+    "ApiKeyScope": [
+      "read",
+      "ingest"
+    ],
     "ContentMode": [
       "off",
       "on",
       "sealed"
+    ],
+    "ConversationSort": [
+      "conversation",
+      "user",
+      "traces",
+      "errors",
+      "steps",
+      "tokens",
+      "first_seen",
+      "last_seen"
     ],
     "Flag": [
       "connectors",
@@ -30,6 +44,10 @@
       "admin",
       "member"
     ],
+    "SortDirection": [
+      "asc",
+      "desc"
+    ],
     "SpanKind": [
       "run",
       "step",
@@ -41,6 +59,25 @@
       "ok",
       "error",
       "cancelled"
+    ],
+    "TraceSort": [
+      "started",
+      "agent",
+      "user",
+      "conversation",
+      "status",
+      "steps",
+      "tokens",
+      "duration"
+    ],
+    "UserSort": [
+      "user",
+      "traces",
+      "errors",
+      "steps",
+      "tokens",
+      "first_seen",
+      "last_seen"
     ]
   },
   "flags": {

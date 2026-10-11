@@ -17,14 +17,14 @@ use sqlx::PgPool;
 use tokio::sync::OnceCell;
 use uuid::Uuid;
 
-use telmoni_shared::acting::{Acting, ActingProject};
+use telmoni_shared::acting::{Acting, ActingKey, ActingProject};
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::rbac::project_role;
-use telmoni_shared::seam::Auth;
+use telmoni_shared::seam::{Auth, ProjectHome};
 use telmoni_shared::test_util::{ServiceRole, chain_lock_held, service_pool};
 use telmoni_shared::{
-    AuthError, AuthzError, FlagSet, OrganizationId, OrganizationRole, OrganizationStatus,
-    ProjectId, Role, SpanKind, SpanStatus, TelmoniError, UserId,
+    ApiKeyScope, AuthError, AuthzError, FlagSet, OrganizationId, OrganizationRole,
+    OrganizationStatus, ProjectId, Role, SpanKind, SpanStatus, TelmoniError, UserId,
 };
 use telmoni_telemetry::store::{self, SpanRow, Store};
 use telmoni_telemetry::{AppState, Config};
@@ -54,6 +54,8 @@ pub(crate) struct AuthStub {
     chain_probe: Option<PgPool>,
     /// For each answer read again, whether that lock was held.
     chain_held: Mutex<Vec<bool>>,
+    /// The API keys auth would resolve, by the bearer that presents them.
+    keys: Mutex<HashMap<String, ActingKey>>,
 }
 
 impl AuthStub {
@@ -102,6 +104,30 @@ impl AuthStub {
             .insert(
                 (user.to_owned(), project.to_string()),
                 (organization.clone(), organization_role, seat),
+            );
+        self
+    }
+
+    /// `token` is a live API key minted on `project`, held by `organization`,
+    /// with `scopes`, as auth would resolve it.
+    pub(crate) fn key(
+        &self,
+        token: &str,
+        organization: &OrganizationId,
+        project: &ProjectId,
+        scopes: &[ApiKeyScope],
+    ) -> &Self {
+        self.keys
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(
+                token.to_owned(),
+                ActingKey {
+                    token_id: Uuid::now_v7(),
+                    organization_id: organization.clone(),
+                    project_id: project.clone(),
+                    scopes: scopes.to_vec(),
+                },
             );
         self
     }
@@ -173,6 +199,18 @@ fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
 
 #[async_trait]
 impl Auth for AuthStub {
+    async fn resolve_api_key(&self, headers: &HeaderMap) -> Result<ActingKey, TelmoniError> {
+        let token = header(headers, "authorization")
+            .and_then(|bearer| bearer.strip_prefix("Bearer "))
+            .ok_or(AuthError::InvalidToken)?;
+        self.keys
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(token)
+            .cloned()
+            .ok_or_else(|| AuthError::InvalidToken.into())
+    }
+
     async fn resolve(&self, headers: &HeaderMap) -> Result<Acting, TelmoniError> {
         let user = header(headers, "authorization")
             .and_then(|bearer| bearer.strip_prefix("Bearer tok_"))
@@ -241,6 +279,32 @@ impl Auth for AuthStub {
         Ok(FlagSet::all_on())
     }
 
+    /// Where each project is held, from the roster: the organization of any
+    /// seat on it, and its ids for its slugs.
+    async fn project_homes(
+        &self,
+        projects: &[ProjectId],
+    ) -> Result<Vec<ProjectHome>, TelmoniError> {
+        let seats = self
+            .seats
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Ok(projects
+            .iter()
+            .filter_map(|project| {
+                seats
+                    .iter()
+                    .find(|((_, p), _)| *p == project.to_string())
+                    .map(|(_, (organization, _, _))| ProjectHome {
+                        project_id: project.clone(),
+                        slug: project.to_string(),
+                        organization_id: organization.clone(),
+                        organization_slug: organization.to_string(),
+                    })
+            })
+            .collect())
+    }
+
     async fn organization_standing(
         &self,
         _organization_id: &OrganizationId,
@@ -253,16 +317,54 @@ impl Auth for AuthStub {
 /// who acts. ClickHouse is named and never dialled: nothing a suite that
 /// reads no span asks of it.
 pub(crate) fn state(pool: &PgPool, auth: Arc<dyn Auth>) -> Arc<AppState> {
-    Arc::new(AppState {
-        db: service_pool(pool, ServiceRole::Telemetry),
-        config: Config {
-            database_url: "".into(),
-            clickhouse_url: "http://telemetry:telemetry@127.0.0.1:1".into(),
-        },
-        store: Store::connect("http://telemetry:telemetry@127.0.0.1:1").expect("a ClickHouse URL"),
-        service_secrets: ServiceSecrets::new(SECRET, None::<String>),
+    // Nothing listens on either: the replica stands in for Redis, as it does
+    // on a laptop with none, and a lane that reaches for ClickHouse fails.
+    state_at(
+        pool,
         auth,
-    })
+        "http://telemetry:telemetry@127.0.0.1:1",
+        "redis://127.0.0.1:1",
+    )
+}
+
+/// The module over `pool`, with the stores a suite can reach: ClickHouse as
+/// `TELEMETRY_CLICKHOUSE_URL` names it, which the caller has checked with
+/// [`clickhouse_or_skip`], and Redis as `REDIS_URL` names it, or the compose
+/// file's; neither dialled until a lane needs it.
+pub(crate) fn state_with_stores(pool: &PgPool, auth: Arc<dyn Auth>) -> Arc<AppState> {
+    let clickhouse = std::env::var("TELEMETRY_CLICKHOUSE_URL").expect(
+        "state_with_stores: TELEMETRY_CLICKHOUSE_URL is set, checked by clickhouse_or_skip",
+    );
+    let redis = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_owned());
+    state_at(pool, auth, &clickhouse, &redis)
+}
+
+fn state_at(
+    pool: &PgPool,
+    auth: Arc<dyn Auth>,
+    clickhouse_url: &str,
+    redis_url: &str,
+) -> Arc<AppState> {
+    let config = Config {
+        dogfood_project_id: None,
+        database_url: "".into(),
+        clickhouse_url: clickhouse_url.into(),
+        // A laptop's key: the suites seal and open on their own machine, and
+        // name no KMS.
+        telemetry_kek: format!("local:{}", "0".repeat(64)).into(),
+        kms_api_base: "http://127.0.0.1:1".into(),
+        metadata_api_base: "http://127.0.0.1:1".into(),
+        redis_url: redis_url.into(),
+    };
+    Arc::new(
+        telmoni_telemetry::boot::state(
+            config,
+            service_pool(pool, ServiceRole::Telemetry),
+            ServiceSecrets::new(SECRET, None::<String>),
+            auth,
+        )
+        .expect("the module's state over a laptop's key"),
+    )
 }
 
 /// ClickHouse as both of the users a tier runs it with.
@@ -314,6 +416,123 @@ pub(crate) async fn clickhouse_or_skip(test: &str) -> Option<ClickHouse> {
     })
 }
 
+/// Wait for `holds` to answer true, asking every 50 ms for up to ten
+/// seconds, or fail naming `what`: a lightweight delete answers once it is
+/// recorded, and its rows go a moment later.
+pub(crate) async fn eventually<F, Fut>(what: &str, mut holds: F)
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = bool>,
+{
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if holds().await {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{what}: still not so after ten seconds"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// A project's rows in both tables, as the module's user reads them: its
+/// spans, and the hours of its totals.
+pub(crate) async fn rows_of(store: &Store, project: &ProjectId) -> (u64, u64) {
+    let only = store::Projects::one(project.clone());
+    let spans: u64 = store
+        .read(
+            &only,
+            "SELECT count() FROM telemetry.spans WHERE project_id IN {projects:Array(String)}",
+        )
+        .fetch_one()
+        .await
+        .expect("count a project's spans");
+    let hours: u64 = store
+        .read(
+            &only,
+            "SELECT count() FROM telemetry.spans_hourly \
+             WHERE project_id IN {projects:Array(String)}",
+        )
+        .fetch_one()
+        .await
+        .expect("count a project's hours of totals");
+    (spans, hours)
+}
+
+/// One run of `support-bot` as the users and conversations pages sum it: its
+/// run span, one step and one model call with `tokens`, every span carrying
+/// `user` and `conversation`, started at `started` and received now, the run
+/// `failed` or not, its span ids from `n`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "eight facts name a run; a struct built at each of the eleven call sites would say the same in more lines"
+)]
+pub(crate) fn run_of(
+    project: &ProjectId,
+    run: Uuid,
+    user: &str,
+    conversation: &str,
+    started: DateTime<Utc>,
+    tokens: (u64, u64),
+    failed: bool,
+    n: u64,
+) -> [SpanRow; 3] {
+    let ids = |row: SpanRow, span: u64, parent: Option<u64>| SpanRow {
+        run_id: run,
+        agent: "support-bot".into(),
+        span_id: format!("{span:016x}"),
+        parent_span_id: parent.map(|p| format!("{p:016x}")).unwrap_or_default(),
+        user_id: user.into(),
+        conversation_id: conversation.into(),
+        ..row
+    };
+    [
+        ids(
+            SpanRow {
+                started_at: started,
+                ended_at: started + chrono::Duration::seconds(2),
+                status: if failed {
+                    SpanStatus::Error
+                } else {
+                    SpanStatus::Ok
+                },
+                error_type: if failed {
+                    "RuntimeError".into()
+                } else {
+                    String::new()
+                },
+                ..span(project, SpanKind::Run, "support-bot", 2_000)
+            },
+            n,
+            None,
+        ),
+        ids(
+            SpanRow {
+                started_at: started + chrono::Duration::milliseconds(10),
+                ended_at: started + chrono::Duration::milliseconds(1_900),
+                ..span(project, SpanKind::Step, "answer", 1_890)
+            },
+            n + 1,
+            Some(n),
+        ),
+        ids(
+            SpanRow {
+                started_at: started + chrono::Duration::milliseconds(20),
+                ended_at: started + chrono::Duration::seconds(1),
+                model: "claude-sonnet-5-5".into(),
+                provider: "anthropic".into(),
+                input_tokens: tokens.0,
+                output_tokens: tokens.1,
+                ..span(project, SpanKind::ModelCall, "chat claude-sonnet-5-5", 980)
+            },
+            n + 2,
+            Some(n + 1),
+        ),
+    ]
+}
+
 /// A finished span of `kind`, received now, lasting `millis`, with nothing
 /// else set.
 pub(crate) fn span(project_id: &ProjectId, kind: SpanKind, name: &str, millis: i64) -> SpanRow {
@@ -351,7 +570,7 @@ pub(crate) fn received(
         output_tokens: 0,
         cache_read_input_tokens: 0,
         cache_write_input_tokens: 0,
-        customer_id: String::new(),
+        user_id: String::new(),
         conversation_id: String::new(),
         tags: Vec::new(),
         bound_stall_after_s: None,

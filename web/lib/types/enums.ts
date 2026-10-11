@@ -2,6 +2,13 @@
 // `contract.test.ts` fails if any differs from contract/wire-contract.json,
 // which `make contract` writes from the Rust enums in crates/shared/src/types.
 
+/** Wire vocabulary of the Rust `ApiKeyScope`: what an API key opens. */
+export const ApiKeyScope = {
+  Read:   "read",
+  Ingest: "ingest",
+} as const;
+export type ApiKeyScope = typeof ApiKeyScope[keyof typeof ApiKeyScope];
+
 /** Wire vocabulary of the Rust `ContentMode`: what a project keeps of its spans' content. */
 export const ContentMode = {
   Off:    "off",
@@ -63,6 +70,51 @@ export const SpanStatus = {
   Cancelled: "cancelled",
 } as const;
 export type SpanStatus = typeof SpanStatus[keyof typeof SpanStatus];
+
+/** Wire vocabulary of the Rust `TraceSort`: a column of the trace list, named in the URL. */
+export const TraceSort = {
+  Started:      "started",
+  Agent:        "agent",
+  User:         "user",
+  Conversation: "conversation",
+  Status:       "status",
+  Steps:        "steps",
+  Tokens:       "tokens",
+  Duration:     "duration",
+} as const;
+export type TraceSort = typeof TraceSort[keyof typeof TraceSort];
+
+/** Wire vocabulary of the Rust `UserSort`: a column of the users page, named in the URL. */
+export const UserSort = {
+  User:      "user",
+  Traces:    "traces",
+  Errors:    "errors",
+  Steps:     "steps",
+  Tokens:    "tokens",
+  FirstSeen: "first_seen",
+  LastSeen:  "last_seen",
+} as const;
+export type UserSort = typeof UserSort[keyof typeof UserSort];
+
+/** Wire vocabulary of the Rust `ConversationSort`: a column of the conversations page, named in the URL. */
+export const ConversationSort = {
+  Conversation: "conversation",
+  User:         "user",
+  Traces:       "traces",
+  Errors:       "errors",
+  Steps:        "steps",
+  Tokens:       "tokens",
+  FirstSeen:    "first_seen",
+  LastSeen:     "last_seen",
+} as const;
+export type ConversationSort = typeof ConversationSort[keyof typeof ConversationSort];
+
+/** Wire vocabulary of the Rust `SortDirection`: which way a list is sorted. */
+export const SortDirection = {
+  Asc:  "asc",
+  Desc: "desc",
+} as const;
+export type SortDirection = typeof SortDirection[keyof typeof SortDirection];
 
 /** The sentence a switched-off feature answers with, by flag — the Rust `Flag::off_detail`. */
 export const FlagOffDetail = {

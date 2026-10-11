@@ -21,6 +21,12 @@ async-trait = { workspace = true }
 axum        = { workspace = true }
 chrono      = { workspace = true }
 clickhouse  = { workspace = true }
+# Ingest: an export's gzip, its OTLP messages, and the `Status` a refusal is.
+flate2              = { workspace = true }
+opentelemetry-proto = { workspace = true }
+prost               = { workspace = true }
+# What every replica shares: a claim on each export's digest, and the limits.
+redis               = { workspace = true }
 serde       = { workspace = true }
 serde_json  = { workspace = true }
 # The digest of the ClickHouse file's statements, which a store keeps.

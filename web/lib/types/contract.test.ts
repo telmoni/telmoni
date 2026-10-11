@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  ApiKeyScope,
   asRole,
   ContentMode,
   Flag,
@@ -11,8 +12,12 @@ import {
   NotificationKind,
   OrganizationStatus,
   Role,
+  ConversationSort,
+  SortDirection,
   SpanKind,
   SpanStatus,
+  TraceSort,
+  UserSort,
 } from "./enums";
 import { RESERVED_ORGANIZATION_SLUGS, RESERVED_PROJECT_SLUGS, SLUG_MAX_LENGTH } from "../slug";
 
@@ -30,13 +35,18 @@ const contract = JSON.parse(
 // Every enum the server publishes, and the console's copy of it. A new one
 // in the contract fails the first test until it is added here.
 const CONSOLE: Record<string, Record<string, string>> = {
+  ApiKeyScope,
   ContentMode,
   Flag,
   NotificationKind,
   OrganizationStatus,
   Role,
+  ConversationSort,
+  SortDirection,
   SpanKind,
   SpanStatus,
+  TraceSort,
+  UserSort,
 };
 
 describe("wire contract", () => {

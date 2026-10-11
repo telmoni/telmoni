@@ -15,7 +15,7 @@ use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::rbac::{Resource, Verb, can};
-use telmoni_shared::types::API_TOKEN_PREFIX;
+use telmoni_shared::types::{API_TOKEN_PREFIX, ApiKeyScope};
 use telmoni_shared::{
     AuditAction, AuthError, AuthzError, Flag, Role, TelmoniError, TelmoniResourceKind, TenantError,
 };
@@ -140,6 +140,7 @@ pub async fn create_token(
         Some(None) => None,
         Some(Some(secs)) => Some(bounded_expiry(secs)?),
     };
+    let scopes = minted_scopes(&req.scopes)?;
     let raw_token = generate_token();
     let token_hash = hash_token(&raw_token);
     let description = req.description.as_deref();
@@ -160,6 +161,7 @@ pub async fn create_token(
         &req.name,
         description,
         &crate::handler::parse_user_id(&req.created_by)?,
+        &scopes,
         expires_at,
         &token_hash,
     )
@@ -187,6 +189,7 @@ pub async fn create_token(
             metadata: Some(json!({
                 "name": req.name,
                 "description": description,
+                "scopes": scopes,
                 "expires_at": expires_at,
             })),
         },
@@ -204,6 +207,21 @@ pub async fn create_token(
             token: raw_token,
         }),
     ))
+}
+
+/// The scopes a key is minted with: each asked once, in wire order, so a
+/// key's row reads the same whatever order the console sent them in. None
+/// is a 400 here rather than the `CHECK`'s violation, which the insert would
+/// report as a collision.
+fn minted_scopes(asked: &[ApiKeyScope]) -> Result<Vec<ApiKeyScope>, TelmoniError> {
+    let scopes: Vec<ApiKeyScope> = ApiKeyScope::all()
+        .into_iter()
+        .filter(|scope| asked.contains(scope))
+        .collect();
+    if scopes.is_empty() {
+        return Err(AuthError::BadRequest("scopes must name read, ingest or both".into()).into());
+    }
+    Ok(scopes)
 }
 
 /// The default token expiry, applied only when `expires_in_seconds` is
@@ -256,6 +274,7 @@ pub async fn rotate_token(
         &ctx.name,
         ctx.description.as_deref(),
         &actor,
+        &ctx.scopes,
         expires_at,
         &token_hash,
     )
@@ -510,5 +529,22 @@ mod tests {
             "no membership row, no role"
         );
         Ok(())
+    }
+
+    /// A key's scopes are stored once each, in wire order, whatever the
+    /// console sent; a key that opens nothing is refused before it is
+    /// minted.
+    #[test]
+    fn a_key_is_minted_with_each_scope_once_and_never_none() {
+        let both = minted_scopes(&[ApiKeyScope::Ingest, ApiKeyScope::Read, ApiKeyScope::Ingest]);
+        assert_eq!(both.unwrap(), [ApiKeyScope::Read, ApiKeyScope::Ingest]);
+        assert_eq!(
+            minted_scopes(&[ApiKeyScope::Ingest]).unwrap(),
+            [ApiKeyScope::Ingest]
+        );
+        assert!(
+            minted_scopes(&[]).is_err(),
+            "a key with no scope was minted"
+        );
     }
 }

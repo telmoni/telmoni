@@ -12,7 +12,7 @@ use axum::http::HeaderMap;
 use serde_json::json;
 use uuid::Uuid;
 
-use telmoni_shared::acting::{Acting, ActingProject};
+use telmoni_shared::acting::{Acting, ActingKey, ActingProject};
 use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope};
 use telmoni_shared::rbac::{Resource, Verb, can};
 use telmoni_shared::seam::{
@@ -25,7 +25,7 @@ use telmoni_shared::{
 
 use crate::AppState;
 use crate::db::audit::{self, AuditQuery};
-use crate::db::{AuthLane, access_tokens, flags, members, organizations, projects};
+use crate::db::{AuthLane, access_tokens, flags, members, organizations, projects, tokens};
 use crate::handler::{
     acting_organization, acting_project, authorize, parse_organization_id, parse_project_id,
 };
@@ -41,6 +41,31 @@ fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
 
 #[async_trait]
 impl Auth for AppState {
+    async fn resolve_api_key(&self, headers: &HeaderMap) -> Result<ActingKey, TelmoniError> {
+        let token = crate::handler::v1::presented_key(headers).ok_or(AuthError::InvalidToken)?;
+        let token_hash = crate::handler::tokens::hash_token(token);
+        // An outage, not the caller's doing: logged, and answered as one,
+        // so a machine retries rather than taking its key for revoked.
+        let unavailable = |e: &dyn std::fmt::Display| -> TelmoniError {
+            tracing::error!(error = %e, "API key check could not read its key");
+            AuthError::IdentityUnavailable.into()
+        };
+        let mut tx = maintenance_scope(&self.db, AuthLane)
+            .await
+            .map_err(|e| unavailable(&e))?;
+        let validated = tokens::validate(&mut tx, &token_hash)
+            .await
+            .map_err(|e| unavailable(&e))?;
+        tx.commit().await.map_err(|e| unavailable(&e))?;
+        let key = validated.ok_or(AuthError::InvalidToken)?;
+        Ok(ActingKey {
+            token_id: key.id,
+            organization_id: key.organization_id,
+            project_id: key.project_id,
+            scopes: key.scopes,
+        })
+    }
+
     async fn resolve(&self, headers: &HeaderMap) -> Result<Acting, TelmoniError> {
         let principal = crate::person::principal_of(self, header(headers, "authorization")).await?;
         let user_id = principal.user_id;

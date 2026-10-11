@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -25,7 +26,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { API_KEY_SCOPES } from "@/lib/api-key-scopes";
 import { PRODUCT_NAME } from "@/lib/site";
+import type { ApiKeyScope } from "@/lib/types/enums";
 
 import { mintTokenAction, type MintResult } from "./actions";
 
@@ -90,10 +93,16 @@ function MintDialog({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [ttl, setTtl] = useState("90d");
+  const [scopes, setScopes] = useState<ApiKeyScope[]>(API_KEY_SCOPES.map(({ scope }) => scope));
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
-  const canSubmit = name.trim().length > 0 && !pending;
+  const canSubmit = name.trim().length > 0 && scopes.length > 0 && !pending;
+
+  function toggle(scope: ApiKeyScope, on: boolean) {
+    setScopes((held) => (on ? [...held, scope] : held.filter((s) => s !== scope)));
+    setError(null);
+  }
 
   function submit() {
     setError(null);
@@ -102,6 +111,7 @@ function MintDialog({
       fd.set("name", name);
       fd.set("description", description);
       fd.set("ttl", ttl);
+      fd.set("scopes", scopes.join(","));
       fd.set("projectId", projectId);
       try {
         const r = await mintTokenAction(undefined, fd);
@@ -133,8 +143,8 @@ function MintDialog({
           </DialogHeader>
           <DialogBody>
             <DialogDescription>
-              A <code>telmoni_</code> token for the API — it acts on behalf of this project. The plaintext
-              is shown exactly once.
+              A <code>telmoni_</code> key for this project: it sends spans, reads the API, or both. The
+              plaintext is shown exactly once.
             </DialogDescription>
             <div className="grid gap-2">
               <Label htmlFor="key-name">Name</Label>
@@ -161,6 +171,23 @@ function MintDialog({
                 disabled={pending}
               />
             </div>
+            <fieldset className="grid gap-3">
+              <legend className="mb-2 text-sm font-medium">What it opens</legend>
+              {API_KEY_SCOPES.map(({ scope, label, detail }) => (
+                <div key={scope} className="flex items-center justify-between gap-3">
+                  <Label htmlFor={`key-scope-${scope}`} className="grid gap-0.5 font-normal">
+                    <span>{label}</span>
+                    <span className="text-xs text-muted-foreground">{detail}</span>
+                  </Label>
+                  <Switch
+                    id={`key-scope-${scope}`}
+                    checked={scopes.includes(scope)}
+                    onCheckedChange={(on) => toggle(scope, on)}
+                    disabled={pending}
+                  />
+                </div>
+              ))}
+            </fieldset>
             <div className="grid gap-2">
               <Label htmlFor="key-ttl">Expires</Label>
               <Select value={ttl} onValueChange={setTtl} disabled={pending}>

@@ -16,7 +16,12 @@ Project **Owners** and **Admins** can mint, rotate, and revoke API keys.
 2. Select **Mint key**.
 3. Provide a name describing what service uses the key (up to 100 characters),
    and optionally a description (up to 500).
-4. Choose when it expires: 30 days, 90 days (the default), 1 year, or **Never
+4. Choose what it opens: **Send spans**, the `ingest` scope, which opens
+   [`/otlp/v1/traces`](/docs/api/ingest); **Read the API**, the `read` scope,
+   which opens [`/v1`](/docs/api/reference); or both. Both are on to start; a
+   key needs at least one. A key baked into an agent's process should send
+   alone, so a leak of it reads nothing.
+5. Choose when it expires: 30 days, 90 days (the default), 1 year, or **Never
    (not recommended)**.
 
 Where the `api_tokens` feature flag is off, for the deployment or for the
@@ -35,8 +40,13 @@ Every key begins with the prefix `telmoni_`.
 Include the key as a bearer token in the HTTP `Authorization` header:
 
 ```console
-$ curl -H "Authorization: Bearer $TELMONI_API_KEY" https://telmoni.com/v1/organization
+$ curl -H "Authorization: Bearer $TELMONI_API_KEY" https://api.telmoni.com/v1/organization
 ```
+
+Each lane needs its scope: `/v1` the `read` scope, and
+[`/otlp/v1/traces`](/docs/api/ingest), where spans are sent, the `ingest` scope. A
+live key without the scope a lane needs is refused with `403`
+`/errors/authz/forbidden`.
 
 The [Telmoni CLI](/docs/api/cli) uses it from the `TELMONI_API_KEY` environment
 variable, for each command and without saving it, or saves it with
@@ -66,8 +76,9 @@ of whether the individual user who created it leaves the project.
 ## Who can see keys
 
 Anyone on the project (Owner, Admin, or Member) can view the list of active
-keys: each key's name, creation date, last-used date (written at most once a
-minute, so a busy key is not a write per request), and expiration date. The
+keys: each key's name, what it opens, creation date, last-used date (written at
+most once a minute, so a busy key is not a write per request), and expiration
+date. The
 secret itself is never visible after creation.
 
 ## Rotating a key
@@ -78,8 +89,8 @@ on its row on the **API keys** page.
 Rotating a key produces a new `telmoni_` token (shown once) and keeps the
 previous token valid for a **24-hour grace period**, or until its own expiry if
 that comes sooner. Both tokens authenticate during that window; after it, the
-old one is refused like a revoked key. The replacement keeps the key's name and
-description, is recorded as minted by whoever rotated it, and expires 90 days
+old one is refused like a revoked key. The replacement keeps the key's name,
+description and scopes, is recorded as minted by whoever rotated it, and expires 90 days
 after rotation, whatever the old key's expiry was.
 
 Minting, rotating and revoking a key are each recorded in the project's

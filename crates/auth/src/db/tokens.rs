@@ -2,13 +2,13 @@
 
 use chrono::{DateTime, Utc};
 use telmoni_shared::db::tenant_session::{Maintenance, PersonAndOrganization, Project, Scoped};
-use telmoni_shared::{OrganizationId, ProjectId, UserId};
+use telmoni_shared::{ApiKeyScope, OrganizationId, ProjectId, UserId};
 use uuid::Uuid;
 
 use crate::db::AuthLane;
 use crate::model::ApiToken;
 
-const TOKEN_COLUMNS: &str = "id, project_id, name, description, created_by, \
+const TOKEN_COLUMNS: &str = "id, project_id, name, description, created_by, scopes, \
      expires_at, last_used_at, revoked_at, created_at";
 
 /// Active tokens for `project_id`: not revoked and not expired. A token in its
@@ -43,14 +43,15 @@ pub async fn create(
     name: &str,
     description: Option<&str>,
     created_by: &UserId,
+    scopes: &[ApiKeyScope],
     expires_at: Option<DateTime<Utc>>,
     token_hash: &str,
 ) -> sqlx::Result<ApiToken> {
     sqlx::query_as::<_, ApiToken>(&format!(
         "INSERT INTO auth.api_tokens
              (id, organization_id, project_id, name, description, token_hash,
-              created_by, expires_at, shard_key)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+              created_by, scopes, expires_at, shard_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING {TOKEN_COLUMNS}",
     ))
     .bind(Uuid::now_v7())
@@ -60,6 +61,7 @@ pub async fn create(
     .bind(description)
     .bind(token_hash)
     .bind(created_by)
+    .bind(scopes)
     .bind(expires_at)
     .bind(telmoni_shared::derive_shard_key(organization_id))
     .fetch_one(tx.conn())
@@ -75,28 +77,15 @@ pub struct ValidatedToken {
     /// The project the token was minted on: the roster `/v1/members` reads,
     /// since a project admin may mint a key and may see no more than that.
     pub project_id: ProjectId,
-    /// The slug the console's paths name the organization by, for
-    /// `/v1/organization`'s answer.
-    pub slug: String,
-    /// The organization's name, and its owner's address, carried because
-    /// `/v1` has no BFF to look them up.
+    /// The organization's name, which the console's validate lane answers;
+    /// `/v1/organization` reads its own answer, owner and all, through
+    /// `organizations::summary_with_owner`.
     pub name: String,
-    pub owner_email: Option<String>,
-    /// The owner's display name, for `/v1/organization`'s answer: the one
-    /// column the join did not already carry, which cost that lane a second
-    /// transaction of its own.
-    pub owner_display_name: Option<String>,
+    /// What the key opens, as minted: each lane holds it to its own scope.
+    pub scopes: Vec<ApiKeyScope>,
 }
 
-type ValidatedRow = (
-    Uuid,
-    OrganizationId,
-    ProjectId,
-    String,
-    String,
-    Option<String>,
-    Option<String>,
-);
+type ValidatedRow = (Uuid, OrganizationId, ProjectId, String, Vec<ApiKeyScope>);
 
 /// Returns the token's id and organization if it is valid: hash matches,
 /// neither `revoked_at` nor `expires_at` has passed, and its organization is
@@ -110,17 +99,14 @@ pub async fn validate(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     token_hash: &str,
 ) -> sqlx::Result<Option<ValidatedToken>> {
-    // One round trip on every `/v1` request: the lookup and the touch of
-    // `last_used_at` (at most once a minute, so a busy key is not a write
-    // per call) in a single statement.
+    // One round trip on every request a key opens, ingest's included: the
+    // lookup and the touch of `last_used_at` (at most once a minute, so a
+    // busy key is not a write per call) in a single statement.
     let row: Option<ValidatedRow> = sqlx::query_as(
         "WITH v AS (
-            SELECT t.id, a.external_id, t.project_id, a.slug, a.name, oi.email, oi.display_name
+            SELECT t.id, a.external_id, t.project_id, a.name, t.scopes
               FROM auth.api_tokens t
               JOIN auth.organizations a ON a.external_id = t.organization_id
-              LEFT JOIN auth.organization_members om
-                     ON om.organization_id = a.external_id AND om.role = 'owner'
-              LEFT JOIN auth.identities oi ON oi.user_id = om.user_id
              WHERE t.token_hash = $1
                AND a.status = 'active'
                AND (t.revoked_at IS NULL OR t.revoked_at > now())
@@ -130,23 +116,19 @@ pub async fn validate(
              WHERE id = (SELECT id FROM v)
                AND (last_used_at IS NULL OR last_used_at < now() - interval '1 minute')
          )
-         SELECT id, external_id, project_id, slug, name, email, display_name FROM v",
+         SELECT id, external_id, project_id, name, scopes FROM v",
     )
     .bind(token_hash)
     .fetch_optional(tx.conn())
     .await?;
 
     Ok(row.map(
-        |(id, organization_id, project_id, slug, name, owner_email, owner_display_name)| {
-            ValidatedToken {
-                id,
-                organization_id,
-                project_id,
-                slug,
-                name,
-                owner_email,
-                owner_display_name,
-            }
+        |(id, organization_id, project_id, name, scopes)| ValidatedToken {
+            id,
+            organization_id,
+            project_id,
+            name,
+            scopes,
         },
     ))
 }
@@ -231,6 +213,9 @@ async fn revoke_live_in_project(
 pub struct RotationContext {
     pub name: String,
     pub description: Option<String>,
+    /// The old key's scopes: a rotation replaces the secret, never what it
+    /// opens.
+    pub scopes: Vec<ApiKeyScope>,
 }
 
 /// In the caller's transaction, one statement: stamp the old row's
@@ -242,18 +227,22 @@ pub async fn begin_rotation(
     token_id: Uuid,
     grace_seconds: i64,
 ) -> sqlx::Result<Option<RotationContext>> {
-    let row: Option<(String, Option<String>)> = sqlx::query_as(
+    let row: Option<(String, Option<String>, Vec<ApiKeyScope>)> = sqlx::query_as(
         "UPDATE auth.api_tokens
             SET revoked_at = now() + make_interval(secs => $1::bigint)
           WHERE id = $2 AND project_id = $3 AND (revoked_at IS NULL OR revoked_at > now())
-      RETURNING name, description",
+      RETURNING name, description, scopes",
     )
     .bind(grace_seconds)
     .bind(token_id)
     .bind(project_id)
     .fetch_optional(tx.conn())
     .await?;
-    Ok(row.map(|(name, description)| RotationContext { name, description }))
+    Ok(row.map(|(name, description, scopes)| RotationContext {
+        name,
+        description,
+        scopes,
+    }))
 }
 
 /// Hard-delete tokens seven days past revocation or expiry. The grace gives
@@ -319,6 +308,7 @@ mod tests {
             "my-key",
             None,
             &uid("user_tok"),
+            &[ApiKeyScope::Read],
             None,
             "hash-abc",
         )
@@ -346,6 +336,7 @@ mod tests {
             "valid",
             None,
             &uid("user_tok"),
+            &[ApiKeyScope::Read, ApiKeyScope::Ingest],
             None,
             "hash-valid",
         )
@@ -359,6 +350,11 @@ mod tests {
         assert_eq!(
             validated.id, tok.id,
             "validation resolves the token's own id"
+        );
+        assert_eq!(
+            validated.scopes,
+            [ApiKeyScope::Read, ApiKeyScope::Ingest],
+            "validation answers the scopes the key was minted with"
         );
         tx.commit().await?;
         Ok(())
@@ -384,6 +380,7 @@ mod tests {
             "revoke-me",
             None,
             &uid("user_tok"),
+            &[ApiKeyScope::Read],
             None,
             "hash-revoke",
         )
@@ -410,6 +407,7 @@ mod tests {
             "key",
             None,
             &uid("user_tok"),
+            &[ApiKeyScope::Read],
             None,
             "hash-x",
         )
@@ -432,6 +430,7 @@ mod tests {
             "expired",
             None,
             &uid("user_tok"),
+            &[ApiKeyScope::Read],
             Some(past),
             "hash-expired",
         )
@@ -458,6 +457,7 @@ mod tests {
             "rotate-me",
             Some("nightly CI"),
             &uid("user_tok"),
+            &[ApiKeyScope::Ingest],
             None,
             "hash-old",
         )
@@ -468,6 +468,11 @@ mod tests {
             .expect("rotation context");
         assert_eq!(ctx.name, "rotate-me");
         assert_eq!(ctx.description.as_deref(), Some("nightly CI"));
+        assert_eq!(
+            ctx.scopes,
+            [ApiKeyScope::Ingest],
+            "a rotation replaces the secret, never what it opens"
+        );
 
         let _new = create(
             &mut tx,
@@ -476,6 +481,7 @@ mod tests {
             &ctx.name,
             ctx.description.as_deref(),
             &uid("user_tok"),
+            &ctx.scopes,
             None,
             "hash-new",
         )
@@ -520,6 +526,7 @@ mod tests {
             "leaked",
             None,
             &uid("user_tok"),
+            &[ApiKeyScope::Read],
             None,
             "hash-grace",
         )
@@ -567,6 +574,7 @@ mod tests {
             "k",
             None,
             &uid("user_tok"),
+            &[ApiKeyScope::Read],
             None,
             "hash-r",
         )
@@ -601,6 +609,7 @@ mod tests {
             "keep",
             None,
             &uid("user_tok"),
+            &[ApiKeyScope::Read],
             None,
             "hash-keep",
         )
@@ -612,6 +621,7 @@ mod tests {
             "gone1",
             None,
             &uid("user_tok"),
+            &[ApiKeyScope::Read],
             None,
             "hash-gone1",
         )
@@ -623,6 +633,7 @@ mod tests {
             "gone2",
             None,
             &uid("user_tok"),
+            &[ApiKeyScope::Read],
             None,
             "hash-gone2",
         )
@@ -669,6 +680,7 @@ mod tests {
             "recent",
             None,
             &uid("user_tok"),
+            &[ApiKeyScope::Read],
             None,
             "hash-recent",
         )
