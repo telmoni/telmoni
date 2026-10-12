@@ -4,7 +4,7 @@
 //! a word anyone wrote — and this module writes it as the rows ingest would:
 //! the question a run, each model call and tool call a span under it, the
 //! asking organization its user, hashed under the project's own key as any
-//! user id is, and the agent's conversation its conversation. In process, through
+//! user id is, and the agent's conversation its session. In process, through
 //! the store, never over a door of ours: a question of ours waits on nothing
 //! of ours, and a write that fails is logged by its kind and lost.
 //!
@@ -154,7 +154,7 @@ pub fn rows(
     let trace_id = record.trace_id.simple().to_string();
     let run_span_id = span_id(record.trace_id);
     let user_id = store_user_id(record.organization_id.as_str());
-    let conversation_id = record.conversation_id.to_string();
+    let session_id = record.conversation_id.to_string();
     // What every span says of where it came from, under the inventory's names.
     let resource = vec![
         ("service.name".to_owned(), "telmoni".to_owned()),
@@ -187,7 +187,7 @@ pub fn rows(
                 cache_read_input_tokens: 0,
                 cache_write_input_tokens: 0,
                 user_id: user_id.clone(),
-                conversation_id: conversation_id.clone(),
+                session_id: session_id.clone(),
                 tags: Vec::new(),
                 bound_stall_after_s: None,
                 bound_max_steps: None,
@@ -409,7 +409,7 @@ mod tests {
 
     /// The question is the run; each call a span under it, in order; the
     /// asker's organization its user, hashed, and the agent's conversation
-    /// its conversation, on every span.
+    /// its session, on every span.
     #[test]
     fn a_question_is_a_run_and_its_calls_are_spans_under_it() {
         let project = ProjectId::new();
@@ -437,7 +437,7 @@ mod tests {
             format!("hash({})", turn.organization_id),
             "the asking organization, as a user id is stored"
         );
-        assert_eq!(run.conversation_id, turn.conversation_id.to_string());
+        assert_eq!(run.session_id, turn.conversation_id.to_string());
         assert_eq!(
             run.tags,
             [
@@ -466,7 +466,7 @@ mod tests {
         );
         assert_eq!(first.status, SpanStatus::Ok);
         assert_eq!(first.user_id, run.user_id);
-        assert_eq!(first.conversation_id, run.conversation_id);
+        assert_eq!(first.session_id, run.session_id);
         let attribute = |key: &str| {
             first
                 .attributes

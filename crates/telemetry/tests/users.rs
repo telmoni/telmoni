@@ -123,7 +123,7 @@ fn user<'a>(list: &'a Value, id: &str) -> &'a Value {
         .expect("the user is listed")
 }
 
-/// Four runs of ours — two of one user's, in one conversation, one of them
+/// Four runs of ours — two of one user's, in one session, one of them
 /// failed; one of another's; one that names nobody — and one of another
 /// project's, by the first user.
 struct Seeded {

@@ -1,11 +1,11 @@
-//! The console's conversation lanes, under `Resource::Trace`, which every
-//! role on a project holds: `GET /internal/telemetry/conversations`, the page
-//! — every conversation the project's runs belonged to in a window of days,
-//! with the end user it was with and what its runs came to, sorted as the
-//! URL says — and `GET /internal/telemetry/conversations/{conversation_id}`,
-//! one conversation's traces in the order they ran: a replay in metadata,
-//! never a message, since content is not metadata. Each reads the spans of
-//! the project `x-project-id` names and no other.
+//! The console's session lanes, under `Resource::Trace`, which every role on
+//! a project holds: `GET /internal/telemetry/sessions`, the page — every
+//! session the project's runs belonged to in a window of days, with the end
+//! user it was with and what its runs came to, sorted as the URL says — and
+//! `GET /internal/telemetry/sessions/{session_id}`, one session's traces
+//! in the order they ran: a replay in metadata, never a message, since
+//! content is not metadata. Each reads the spans of the project
+//! `x-project-id` names and no other.
 
 use std::sync::Arc;
 
@@ -16,12 +16,12 @@ use serde::{Deserialize, Serialize};
 
 use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::rbac::{Resource, Verb};
-use telmoni_shared::{AuthError, ConversationSort, SortDirection, TelmoniError, TraceSort};
+use telmoni_shared::{AuthError, SessionSort, SortDirection, TelmoniError, TraceSort};
 
 use crate::AppState;
-use crate::contract::CONVERSATION_ID_MAX;
-use crate::conversations::{self, ConversationRow};
+use crate::contract::SESSION_ID_MAX;
 use crate::handler::traces::{Trace, parse_days, parse_limit, read_failed};
+use crate::sessions::{self, SessionRow};
 use crate::store::Projects;
 use crate::traces::{self, TraceFilter, Window};
 
@@ -30,8 +30,8 @@ use crate::traces::{self, TraceFilter, Window};
 /// parameter takes is a 400 that echoes none of it.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ConversationsQuery {
-    /// The column to sort by ([`ConversationSort`]).
+pub struct SessionsQuery {
+    /// The column to sort by ([`SessionSort`]).
     #[serde(default)]
     pub sort: String,
     /// Which way ([`SortDirection`]); the column's own default when unset.
@@ -40,25 +40,25 @@ pub struct ConversationsQuery {
     /// How many days back.
     #[serde(default)]
     pub days: String,
-    /// The most conversations to answer.
+    /// The most sessions to answer.
     #[serde(default)]
     pub limit: String,
 }
 
-impl ConversationsQuery {
+impl SessionsQuery {
     /// The window and the sort the query asks for, each value checked.
     ///
     /// # Errors
     ///
     /// A value that is not what its parameter takes, named by the parameter
     /// and never echoed.
-    pub fn into_parts(self) -> Result<(Window, ConversationSort, SortDirection), TelmoniError> {
+    pub fn into_parts(self) -> Result<(Window, SessionSort, SortDirection), TelmoniError> {
         let sort = match self.sort.trim() {
-            "" => ConversationSort::LastSeen,
-            given => given.parse::<ConversationSort>().map_err(|_| {
+            "" => SessionSort::LastSeen,
+            given => given.parse::<SessionSort>().map_err(|_| {
                 TelmoniError::BadRequest(
-                    "sort is one of conversation, user, traces, errors, steps, tokens, \
-                     first_seen, last_seen"
+                    "sort is one of session, user, traces, errors, steps, tokens, first_seen, \
+                     last_seen"
                         .into(),
                 )
             })?,
@@ -83,24 +83,21 @@ impl ConversationsQuery {
 /// The way a column sorts when the URL names none: the most and the latest
 /// first; ids in the alphabet's order, and the earliest seen first.
 #[must_use]
-pub const fn default_direction(sort: ConversationSort) -> SortDirection {
+pub const fn default_direction(sort: SessionSort) -> SortDirection {
     match sort {
-        ConversationSort::Conversation | ConversationSort::User | ConversationSort::FirstSeen => {
-            SortDirection::Asc
-        }
-        ConversationSort::Traces
-        | ConversationSort::Errors
-        | ConversationSort::Steps
-        | ConversationSort::Tokens
-        | ConversationSort::LastSeen => SortDirection::Desc,
+        SessionSort::Session | SessionSort::User | SessionSort::FirstSeen => SortDirection::Asc,
+        SessionSort::Traces
+        | SessionSort::Errors
+        | SessionSort::Steps
+        | SessionSort::Tokens
+        | SessionSort::LastSeen => SortDirection::Desc,
     }
 }
 
-/// A conversation's own page's query string: the window its traces are read
-/// in.
+/// A session's own page's query string: the window its traces are read in.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ConversationQuery {
+pub struct SessionQuery {
     /// How many days back.
     #[serde(default)]
     pub days: String,
@@ -111,25 +108,25 @@ pub struct ConversationQuery {
 
 /// What the page's lane answers.
 #[derive(Debug, Serialize)]
-pub struct ConversationList {
-    /// The conversations, in the order asked.
-    pub conversations: Vec<Conversation>,
+pub struct SessionList {
+    /// The sessions, in the order asked.
+    pub sessions: Vec<Session>,
     /// How many days back the page read.
     pub days: u16,
     /// The most it would answer.
     pub limit: u32,
-    /// Whether the window held more conversations than the limit.
+    /// Whether the window held more sessions than the limit.
     pub more: bool,
     /// The sort it is in.
-    pub sort: ConversationSort,
+    pub sort: SessionSort,
     /// And its direction.
     pub dir: SortDirection,
 }
 
-/// One conversation of the page: its runs, summed ([`ConversationRow`]).
+/// One session of the page: its runs, summed ([`SessionRow`]).
 #[derive(Debug, Serialize)]
-pub struct Conversation {
-    pub conversation_id: String,
+pub struct Session {
+    pub session_id: String,
     pub user_id: String,
     pub traces: u64,
     pub errors: u64,
@@ -140,10 +137,10 @@ pub struct Conversation {
     pub last_seen: DateTime<Utc>,
 }
 
-impl From<ConversationRow> for Conversation {
-    fn from(row: ConversationRow) -> Self {
+impl From<SessionRow> for Session {
+    fn from(row: SessionRow) -> Self {
         Self {
-            conversation_id: row.conversation_id,
+            session_id: row.session_id,
             user_id: row.user_id,
             traces: row.traces,
             errors: row.errors,
@@ -156,30 +153,29 @@ impl From<ConversationRow> for Conversation {
     }
 }
 
-/// What one conversation's lane answers: its traces in the order they ran.
+/// What one session's lane answers: its traces in the order they ran.
 #[derive(Debug, Serialize)]
-pub struct ConversationDetail {
-    pub conversation_id: String,
-    /// The conversation's runs, earliest first, each summed as the trace
-    /// list sums it.
+pub struct SessionDetail {
+    pub session_id: String,
+    /// The session's runs, earliest first, each summed as the trace list sums
+    /// it.
     pub traces: Vec<Trace>,
     /// How many days back the lane read.
     pub days: u16,
     /// The most traces it would answer.
     pub limit: u32,
-    /// Whether the window held more of the conversation's traces than the
-    /// limit.
+    /// Whether the window held more of the session's traces than the limit.
     pub more: bool,
 }
 
-/// `GET /internal/telemetry/conversations` — the project's conversations in
-/// the window, sorted as the query says, up to its limit, and whether the
-/// window held more.
-pub async fn list_conversations(
+/// `GET /internal/telemetry/sessions` — the project's sessions in the window,
+/// sorted as the query says, up to its limit, and whether the window held
+/// more.
+pub async fn list_sessions(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Query(query): Query<ConversationsQuery>,
-) -> Result<Json<ConversationList>, TelmoniError> {
+    Query(query): Query<SessionsQuery>,
+) -> Result<Json<SessionList>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = acting
         .require_project(Verb::Read, Resource::Trace)?
@@ -191,15 +187,15 @@ pub async fn list_conversations(
         limit: window.limit + 1,
         ..window
     };
-    let rows = conversations::list(&state.store, &Projects::one(project_id), read, sort, dir)
+    let rows = sessions::list(&state.store, &Projects::one(project_id), read, sort, dir)
         .await
         .map_err(read_failed)?;
     let more = rows.len() > window.limit as usize;
-    Ok(Json(ConversationList {
-        conversations: rows
+    Ok(Json(SessionList {
+        sessions: rows
             .into_iter()
             .take(window.limit as usize)
-            .map(Conversation::from)
+            .map(Session::from)
             .collect(),
         days: window.days,
         limit: window.limit,
@@ -209,25 +205,25 @@ pub async fn list_conversations(
     }))
 }
 
-/// `GET /internal/telemetry/conversations/{conversation_id}` — one
-/// conversation's traces in the window, earliest first; `404` for a
-/// conversation the project's runs in the window did not belong to, which is
-/// also what another project's conversation id gets.
-pub async fn get_conversation(
+/// `GET /internal/telemetry/sessions/{session_id}` — one session's traces in
+/// the window, earliest first; `404` for a session the project's runs in the
+/// window did not belong to, which is also what another project's session id
+/// gets.
+pub async fn get_session(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Path(conversation_id): Path<String>,
-    Query(query): Query<ConversationQuery>,
-) -> Result<Json<ConversationDetail>, TelmoniError> {
+    Path(session_id): Path<String>,
+    Query(query): Query<SessionQuery>,
+) -> Result<Json<SessionDetail>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = acting
         .require_project(Verb::Read, Resource::Trace)?
         .project_id
         .clone();
-    let conversation_id = conversation_id.trim().to_owned();
-    if conversation_id.is_empty() || conversation_id.chars().count() > CONVERSATION_ID_MAX {
+    let session_id = session_id.trim().to_owned();
+    if session_id.is_empty() || session_id.chars().count() > SESSION_ID_MAX {
         return Err(TelmoniError::BadRequest(format!(
-            "a conversation is named by its id, up to {CONVERSATION_ID_MAX} characters"
+            "a session is named by its id, up to {SESSION_ID_MAX} characters"
         )));
     }
     let window = Window {
@@ -235,7 +231,7 @@ pub async fn get_conversation(
         limit: parse_limit(&query.limit)?,
     };
     let filter = TraceFilter {
-        conversation_id: conversation_id.clone(),
+        session_id: session_id.clone(),
         days: window.days,
         // One past the limit, so the answer can say whether there were more.
         limit: window.limit + 1,
@@ -252,13 +248,13 @@ pub async fn get_conversation(
     .map_err(read_failed)?;
     if rows.is_empty() {
         return Err(AuthError::NotFound(
-            "no conversation with that id among this project's runs in the window".into(),
+            "no session with that id among this project's runs in the window".into(),
         )
         .into());
     }
     let more = rows.len() > window.limit as usize;
-    Ok(Json(ConversationDetail {
-        conversation_id,
+    Ok(Json(SessionDetail {
+        session_id,
         traces: rows
             .into_iter()
             .take(window.limit as usize)
@@ -277,33 +273,28 @@ mod tests {
 
     #[test]
     fn an_empty_query_is_the_latest_first_over_a_week() {
-        let (window, sort, dir) = ConversationsQuery::default()
-            .into_parts()
-            .expect("the default");
+        let (window, sort, dir) = SessionsQuery::default().into_parts().expect("the default");
         assert_eq!(window.days, DEFAULT_DAYS);
         assert_eq!(window.limit, DEFAULT_LIMIT);
-        assert_eq!(sort, ConversationSort::LastSeen);
+        assert_eq!(sort, SessionSort::LastSeen);
         assert_eq!(dir, SortDirection::Desc);
     }
 
     #[test]
     fn each_column_has_its_own_first_direction() {
-        for sort in ConversationSort::all() {
-            let (_, parsed, dir) = ConversationsQuery {
+        for sort in SessionSort::all() {
+            let (_, parsed, dir) = SessionsQuery {
                 sort: sort.to_string(),
-                ..ConversationsQuery::default()
+                ..SessionsQuery::default()
             }
             .into_parts()
             .expect("a column");
             assert_eq!(parsed, sort);
             assert_eq!(dir, default_direction(sort));
         }
+        assert_eq!(default_direction(SessionSort::Session), SortDirection::Asc);
         assert_eq!(
-            default_direction(ConversationSort::Conversation),
-            SortDirection::Asc
-        );
-        assert_eq!(
-            default_direction(ConversationSort::LastSeen),
+            default_direction(SessionSort::LastSeen),
             SortDirection::Desc
         );
     }
@@ -312,9 +303,9 @@ mod tests {
     /// and never echoed.
     #[test]
     fn a_bad_value_names_the_parameter_and_echoes_nothing() {
-        let refused = ConversationsQuery {
+        let refused = SessionsQuery {
             sort: "spend<script>".into(),
-            ..ConversationsQuery::default()
+            ..SessionsQuery::default()
         }
         .into_parts()
         .expect_err("refused")

@@ -55,7 +55,7 @@ function span(over: Record<string, unknown>) {
     cache_read_input_tokens: 0,
     cache_write_input_tokens: 0,
     user_id: "",
-    conversation_id: "",
+    session_id:"",
     tags: {},
     bound_stall_after_s: null,
     bound_max_steps: null,
@@ -71,7 +71,7 @@ function span(over: Record<string, unknown>) {
 const SPANS = [
   span({
     user_id: "9f86d081884c7d659a2feaa0c55ad015",
-    conversation_id: "conv-1",
+    session_id:"conv-1",
     tags: { team: "search" },
     bound_max_steps: 40,
   }),
@@ -140,10 +140,10 @@ describe("TracePage", () => {
       "href",
       "/acme/web/traces?user=9f86d081884c7d659a2feaa0c55ad015",
     );
-    // The conversation leads to its own page, the user to their traces.
+    // The session leads to its own page, the user to their traces.
     expect(screen.getByRole("link", { name: "conv-1" })).toHaveAttribute(
       "href",
-      "/acme/web/conversations/conv-1",
+      "/acme/web/sessions/conv-1",
     );
 
     // The steps view: the step, then its two calls under it.

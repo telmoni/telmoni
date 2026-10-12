@@ -43,7 +43,6 @@ use telmoni_shared::middleware::service_auth::{ServiceSecrets, require_service_s
 pub mod boot;
 pub mod config;
 pub mod contract;
-pub mod conversations;
 pub mod db;
 pub mod dogfood;
 pub mod handler;
@@ -54,6 +53,7 @@ pub mod replica;
 pub mod retention;
 pub mod schema;
 pub mod seam;
+pub mod sessions;
 pub mod store;
 pub mod traces;
 pub mod users;
@@ -126,13 +126,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(handler::traces::get_trace),
         )
         .route("/telemetry/users", get(handler::users::list_users))
+        .route("/telemetry/sessions", get(handler::sessions::list_sessions))
         .route(
-            "/telemetry/conversations",
-            get(handler::conversations::list_conversations),
-        )
-        .route(
-            "/telemetry/conversations/{conversation_id}",
-            get(handler::conversations::get_conversation),
+            "/telemetry/sessions/{session_id}",
+            get(handler::sessions::get_session),
         )
         .layer(middleware::from_fn_with_state(
             state.service_secrets.clone(),

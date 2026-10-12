@@ -179,7 +179,7 @@ async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
         // Run A: a report, one user's, four spans, its tool call failed.
         SpanRow {
             user_id: "user-a".into(),
-            conversation_id: "conv-1".into(),
+            session_id: "conv-1".into(),
             tags: vec![("team".into(), "search".into())],
             bound_max_steps: Some(40),
             sample_rate: Some(1.0),
@@ -196,7 +196,7 @@ async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
         SpanRow {
             parent_span_id: format!("{:016x}", 1),
             user_id: "user-a".into(),
-            conversation_id: "conv-1".into(),
+            session_id: "conv-1".into(),
             ..span_at(
                 &p.ours,
                 a,
@@ -216,7 +216,7 @@ async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
             cache_read_input_tokens: 100,
             cache_write_input_tokens: 50,
             user_id: "user-a".into(),
-            conversation_id: "conv-1".into(),
+            session_id: "conv-1".into(),
             attributes: vec![("gen_ai.response.id".into(), "resp_01".into())],
             ..span_at(
                 &p.ours,
@@ -233,7 +233,7 @@ async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
             status: SpanStatus::Error,
             error_type: "TimeoutError".into(),
             user_id: "user-a".into(),
-            conversation_id: "conv-1".into(),
+            session_id: "conv-1".into(),
             ..span_at(
                 &p.ours,
                 a,
@@ -250,7 +250,7 @@ async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
             status: SpanStatus::Error,
             error_type: "RuntimeError".into(),
             user_id: "user-b".into(),
-            conversation_id: "conv-2".into(),
+            session_id: "conv-2".into(),
             ..span_at(&p.ours, b, SpanKind::Run, "support-bot", b_start, 500, 5)
         },
         SpanRow {
@@ -261,7 +261,7 @@ async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
             input_tokens: 10,
             output_tokens: 5,
             user_id: "user-b".into(),
-            conversation_id: "conv-2".into(),
+            session_id: "conv-2".into(),
             ..span_at(
                 &p.ours,
                 b,
@@ -313,7 +313,7 @@ async fn the_list_sums_each_run_newest_first_and_names_only_the_projects_runs(po
     let report = trace(&list, a);
     assert_eq!(report["agent"], "nightly-report");
     assert_eq!(report["user_id"], "user-a");
-    assert_eq!(report["conversation_id"], "conv-1");
+    assert_eq!(report["session_id"], "conv-1");
     assert_eq!(report["ended"], true);
     assert_eq!(report["status"], "ok");
     assert_eq!(report["duration_ms"], 2_000);
@@ -365,7 +365,7 @@ async fn the_list_filters_by_any_column_and_sorts_by_any(pool: PgPool) {
 
     assert_eq!(ids(&p.list("?agent=support-bot").await), [b]);
     assert_eq!(ids(&p.list("?user=user-a").await), [a]);
-    assert_eq!(ids(&p.list("?conversation=conv-2").await), [b]);
+    assert_eq!(ids(&p.list("?session=conv-2").await), [b]);
     assert_eq!(ids(&p.list("?status=error").await), [b]);
     assert_eq!(ids(&p.list("?status=ok").await), [c, a]);
     assert_eq!(ids(&p.list("?model=gpt-x").await), [c, b]);
@@ -393,7 +393,7 @@ async fn the_list_filters_by_any_column_and_sorts_by_any(pool: PgPool) {
         [c, a, b],
         "no user first, then the users in order"
     );
-    assert_eq!(ids(&p.list("?sort=conversation&dir=desc").await), [b, a, c]);
+    assert_eq!(ids(&p.list("?sort=session&dir=desc").await), [b, a, c]);
     assert_eq!(ids(&p.list("?sort=status").await)[0], b, "error before ok");
     assert_eq!(ids(&p.list("?sort=started&dir=asc").await), [a, b, c]);
 

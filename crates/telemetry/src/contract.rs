@@ -49,8 +49,8 @@ pub const MODEL_MAX: usize = 128;
 pub const PROVIDER_MAX: usize = 128;
 /// `user_id`, as sent, before it is hashed.
 pub const USER_ID_MAX: usize = 128;
-/// `conversation_id`, kept as sent.
-pub const CONVERSATION_ID_MAX: usize = 200;
+/// `session_id`, kept as sent.
+pub const SESSION_ID_MAX: usize = 200;
 /// How many `tags` a span may carry.
 pub const TAGS_MAX: usize = 32;
 /// A tag's key, after `telmoni.tag.`.
@@ -138,8 +138,8 @@ pub const OUTPUT_TOKENS: &str = "gen_ai.usage.output_tokens";
 pub const CACHE_READ_INPUT_TOKENS: &str = "gen_ai.usage.cache_read.input_tokens";
 /// Input tokens written to the provider's cache.
 pub const CACHE_WRITE_INPUT_TOKENS: &str = "gen_ai.usage.cache_write.input_tokens";
-/// The conversation a span belongs to.
-pub const CONVERSATION_ID: &str = "gen_ai.conversation.id";
+/// The session a span belongs to, under the conventions' name for it.
+pub const SESSION_ID: &str = "gen_ai.conversation.id";
 
 /// The names the pinned conventions replaced, read as what replaced them,
 /// since exporters lag the conventions: a rename is an edit here, never to
@@ -271,7 +271,7 @@ pub const FIELDS: &[&str] = &[
     OUTPUT_TOKENS,
     CACHE_READ_INPUT_TOKENS,
     CACHE_WRITE_INPUT_TOKENS,
-    CONVERSATION_ID,
+    SESSION_ID,
 ];
 
 /// Whether a column is read from `key`.
@@ -603,9 +603,9 @@ pub const INVENTORY: &[InventoryRow] = &[
         RULE_COUNT,
     ),
     row(
-        CONVERSATION_ID,
+        SESSION_ID,
         ReadOn::AnySpan,
-        "the column conversation_id",
+        "the column session_id",
         Needs::AnyMode,
         "up to 200 characters, kept as sent",
     ),

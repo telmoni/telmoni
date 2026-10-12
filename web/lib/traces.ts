@@ -26,7 +26,7 @@ export function parseTraceQuery(searchParams: SearchParams): TraceQuery {
   return compact({
     agent: one(searchParams.agent),
     user: one(searchParams.user),
-    conversation: one(searchParams.conversation),
+    session: one(searchParams.session),
     status: oneOf(searchParams.status, SpanStatus),
     model: one(searchParams.model),
     tool: one(searchParams.tool),
@@ -59,7 +59,7 @@ export const TRACE_COLUMNS: readonly Column<TraceSort>[] = [
   { sort: TraceSort.Started, label: "Started", first: SortDirection.Desc },
   { sort: TraceSort.Agent, label: "Agent", first: SortDirection.Asc },
   { sort: TraceSort.User, label: "User", first: SortDirection.Asc },
-  { sort: TraceSort.Conversation, label: "Conversation", first: SortDirection.Asc },
+  { sort: TraceSort.Session, label: "Session", first: SortDirection.Asc },
   { sort: TraceSort.Status, label: "Status", first: SortDirection.Asc },
   { sort: TraceSort.Steps, label: "Steps", first: SortDirection.Desc },
   { sort: TraceSort.Tokens, label: "Tokens", first: SortDirection.Desc },
@@ -85,7 +85,7 @@ export function activeFilters(query: TraceQuery): { key: keyof TraceQuery; label
   const named: [keyof TraceQuery, string][] = [
     ["agent", "Agent"],
     ["user", "User"],
-    ["conversation", "Conversation"],
+    ["session", "Session"],
     ["status", "Status"],
     ["model", "Model"],
     ["tool", "Tool"],

@@ -42,7 +42,7 @@ const TRACE_A = {
   run_id: RUN_A,
   agent: "nightly-report",
   user_id: "9f86d081884c7d659a2feaa0c55ad015",
-  conversation_id: "conv-1",
+  session_id:"conv-1",
   ended: true,
   status: "ok",
   started_at: "2026-10-11T03:00:00Z",
@@ -65,7 +65,7 @@ const TRACE_B = {
   run_id: RUN_B,
   agent: "support-bot",
   user_id: "",
-  conversation_id: "",
+  session_id:"",
   ended: false,
   status: "error",
   steps: 0,
@@ -92,7 +92,7 @@ beforeEach(() => {
 });
 
 describe("TracesPage", () => {
-  it("lists each run with its agent, user, conversation, status, steps, tokens and duration", async () => {
+  it("lists each run with its agent, user, session, status, steps, tokens and duration", async () => {
     render(await TracesPage({ params: PARAMS }));
     expect(screen.getByTestId("page-header")).toHaveTextContent("Traces");
     expect(screen.getByTestId("count")).toHaveTextContent("2");
@@ -113,7 +113,7 @@ describe("TracesPage", () => {
     );
     expect(screen.getByRole("link", { name: "conv-1" })).toHaveAttribute(
       "href",
-      "/acme/web/traces?conversation=conv-1",
+      "/acme/web/traces?session=conv-1",
     );
     // The filter form offers every status as an option; the badges are the rest.
     const badges = (text: string) =>
@@ -151,9 +151,9 @@ describe("TracesPage", () => {
       "href",
       "/acme/web/traces?user=9f86d081884c7d659a2feaa0c55ad015&sort=tokens&days=30&dir=asc",
     );
-    expect(screen.getByRole("link", { name: "Conversation" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Session" })).toHaveAttribute(
       "href",
-      "/acme/web/traces?user=9f86d081884c7d659a2feaa0c55ad015&sort=conversation&days=30&dir=asc",
+      "/acme/web/traces?user=9f86d081884c7d659a2feaa0c55ad015&sort=session&days=30&dir=asc",
     );
     expect(screen.getByRole("link", { name: "Started" })).toHaveAttribute(
       "href",

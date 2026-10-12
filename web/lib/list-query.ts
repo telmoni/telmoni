@@ -3,7 +3,7 @@ import { SortDirection } from "@/lib/types/enums";
 
 // A list's URL is its state: the sort, the window and every filter are query
 // parameters, so a link holds the view and a page sent to a colleague opens
-// as it was left. The traces, users and conversations pages each read theirs with
+// as it was left. The traces, users and sessions pages each read theirs with
 // what is here — one reading of a parameter, one bound on the window, one way
 // a column heading sorts — and keep to themselves only the columns they have.
 
@@ -18,7 +18,7 @@ const OPENING_DAYS = 7;
 
 /** The narrowest window a page offers that reaches back to `iso`, or none
  *  where the week a list opens on already does: a link from a run to its
- *  user's traces or its conversation then finds the run it came from, and
+ *  user's traces or its session then finds the run it came from, and
  *  the runs beside it, however old it is. */
 export function windowReaching(iso: string, now: number = Date.now()): number | undefined {
   const age = Math.ceil((now - Date.parse(iso)) / 86_400_000);

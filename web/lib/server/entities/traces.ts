@@ -17,7 +17,7 @@ export const TraceSchema = z.object({
   run_id: z.string(),
   agent: z.string(),
   user_id: z.string(),
-  conversation_id: z.string(),
+  session_id: z.string(),
   ended: z.boolean(),
   status: z.enum(SpanStatus),
   started_at: z.string(),
@@ -67,7 +67,7 @@ const TraceSpanSchema = z.object({
   cache_read_input_tokens: z.number(),
   cache_write_input_tokens: z.number(),
   user_id: z.string(),
-  conversation_id: z.string(),
+  session_id: z.string(),
   tags: z.record(z.string(), z.string()),
   bound_stall_after_s: z.number().nullable(),
   bound_max_steps: z.number().nullable(),
@@ -92,7 +92,7 @@ export type TraceDetail = z.infer<typeof TraceDetailSchema>;
 export type TraceQuery = {
   agent?: string;
   user?: string;
-  conversation?: string;
+  session?: string;
   status?: SpanStatus;
   model?: string;
   tool?: string;

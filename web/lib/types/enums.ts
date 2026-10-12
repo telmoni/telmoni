@@ -73,14 +73,14 @@ export type SpanStatus = typeof SpanStatus[keyof typeof SpanStatus];
 
 /** Wire vocabulary of the Rust `TraceSort`: a column of the trace list, named in the URL. */
 export const TraceSort = {
-  Started:      "started",
-  Agent:        "agent",
-  User:         "user",
-  Conversation: "conversation",
-  Status:       "status",
-  Steps:        "steps",
-  Tokens:       "tokens",
-  Duration:     "duration",
+  Started:  "started",
+  Agent:    "agent",
+  User:     "user",
+  Session:  "session",
+  Status:   "status",
+  Steps:    "steps",
+  Tokens:   "tokens",
+  Duration: "duration",
 } as const;
 export type TraceSort = typeof TraceSort[keyof typeof TraceSort];
 
@@ -96,18 +96,18 @@ export const UserSort = {
 } as const;
 export type UserSort = typeof UserSort[keyof typeof UserSort];
 
-/** Wire vocabulary of the Rust `ConversationSort`: a column of the conversations page, named in the URL. */
-export const ConversationSort = {
-  Conversation: "conversation",
-  User:         "user",
-  Traces:       "traces",
-  Errors:       "errors",
-  Steps:        "steps",
-  Tokens:       "tokens",
-  FirstSeen:    "first_seen",
-  LastSeen:     "last_seen",
+/** Wire vocabulary of the Rust `SessionSort`: a column of the sessions page, named in the URL. */
+export const SessionSort = {
+  Session:   "session",
+  User:      "user",
+  Traces:    "traces",
+  Errors:    "errors",
+  Steps:     "steps",
+  Tokens:    "tokens",
+  FirstSeen: "first_seen",
+  LastSeen:  "last_seen",
 } as const;
-export type ConversationSort = typeof ConversationSort[keyof typeof ConversationSort];
+export type SessionSort = typeof SessionSort[keyof typeof SessionSort];
 
 /** Wire vocabulary of the Rust `SortDirection`: which way a list is sorted. */
 export const SortDirection = {

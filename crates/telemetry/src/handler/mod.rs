@@ -4,8 +4,8 @@
 //! which a machine reaches with a project API key auth verifies the same way.
 
 pub mod content_mode;
-pub mod conversations;
 pub mod field_inventory;
 pub mod ingest;
+pub mod sessions;
 pub mod traces;
 pub mod users;

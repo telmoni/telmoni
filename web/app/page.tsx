@@ -28,7 +28,7 @@ const PITCH =
 
 // True today; it moves as the roadmap does, and says what is not built yet.
 const STATUS =
-  "Telmoni has not launched. What runs today is the foundation — organizations and roles, API keys, the audit log, notifications and the console agent — and the first of the telemetry on it: SDKs in four languages that record an agent's runs, ingest that keeps them as metadata, and a console that reads them as traces, conversations and users. Monitors and alerts are next, built in the open.";
+  "Telmoni has not launched. What runs today is the foundation — organizations and roles, API keys, the audit log, notifications and the console agent — and the first of the telemetry on it: SDKs in four languages that record an agent's runs, ingest that keeps them as metadata, and a console that reads them as traces, sessions and users. Monitors and alerts are next, built in the open.";
 
 // What the product is for, one cell per goal, in the order they are built:
 // a small motion that says it, a line, then three points.
@@ -185,7 +185,7 @@ const FAQ = [
   {
     question: "Has it launched?",
     answer:
-      "Not yet. What runs today is the foundation — organizations and roles, API keys, the audit log, notifications, the console agent and the CLI — and the first of the telemetry: the SDKs record an agent's runs, ingest keeps them as metadata, and the console reads them as traces, conversations and users. Monitors and alerts are not built yet.",
+      "Not yet. What runs today is the foundation — organizations and roles, API keys, the audit log, notifications, the console agent and the CLI — and the first of the telemetry: the SDKs record an agent's runs, ingest keeps them as metadata, and the console reads them as traces, sessions and users. Monitors and alerts are not built yet.",
   },
   {
     question: "What does it store?",

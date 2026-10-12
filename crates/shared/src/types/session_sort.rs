@@ -1,5 +1,5 @@
-//! [`ConversationSort`] — closed vocabulary of the columns the conversations
-//! page sorts by.
+//! [`SessionSort`] — closed vocabulary of the columns the sessions page sorts
+//! by.
 
 use std::{fmt, str::FromStr};
 
@@ -7,17 +7,17 @@ use crate::types::ParseEnumError;
 
 use serde::{Deserialize, Serialize};
 
-/// A column of the console's conversations page, named in the URL so a link
-/// holds the sort: last seen first by default, so the conversations still
-/// going stand at the top. `[PUBLIC-API]`.
+/// A column of the console's sessions page, named in the URL so a link holds
+/// the sort: last seen first by default, so the sessions still going stand at
+/// the top. `[PUBLIC-API]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ConversationSort {
-    /// The conversation's id, as the application set it.
-    Conversation,
-    /// The end user the conversation was with, as stored.
+pub enum SessionSort {
+    /// The session's id, as the application set it.
+    Session,
+    /// The end user the session was with, as stored.
     User,
-    /// How many runs the conversation holds in the window.
+    /// How many runs the session holds in the window.
     Traces,
     /// How many of those runs had a span that failed.
     Errors,
@@ -31,12 +31,12 @@ pub enum ConversationSort {
     LastSeen,
 }
 
-impl ConversationSort {
+impl SessionSort {
     /// Every column, in wire order.
     #[must_use]
     pub const fn all() -> [Self; 8] {
         [
-            Self::Conversation,
+            Self::Session,
             Self::User,
             Self::Traces,
             Self::Errors,
@@ -48,10 +48,10 @@ impl ConversationSort {
     }
 }
 
-impl fmt::Display for ConversationSort {
+impl fmt::Display for SessionSort {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Conversation => write!(f, "conversation"),
+            Self::Session => write!(f, "session"),
             Self::User => write!(f, "user"),
             Self::Traces => write!(f, "traces"),
             Self::Errors => write!(f, "errors"),
@@ -63,11 +63,11 @@ impl fmt::Display for ConversationSort {
     }
 }
 
-impl FromStr for ConversationSort {
+impl FromStr for SessionSort {
     type Err = ParseEnumError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "conversation" => Ok(Self::Conversation),
+            "session" => Ok(Self::Session),
             "user" => Ok(Self::User),
             "traces" => Ok(Self::Traces),
             "errors" => Ok(Self::Errors),
@@ -77,7 +77,7 @@ impl FromStr for ConversationSort {
             "last_seen" => Ok(Self::LastSeen),
             _ => Err(ParseEnumError::new(
                 s,
-                "conversation, user, traces, errors, steps, tokens, first_seen, last_seen",
+                "session, user, traces, errors, steps, tokens, first_seen, last_seen",
             )),
         }
     }
@@ -87,7 +87,7 @@ impl FromStr for ConversationSort {
 mod tests {
     use super::*;
 
-    const ALL: [ConversationSort; 8] = ConversationSort::all();
+    const ALL: [SessionSort; 8] = SessionSort::all();
 
     /// `all()` is a hand-written array, so nothing but a `match` forces it to
     /// stay complete: a new variant fails to compile here until it is listed.
@@ -95,14 +95,14 @@ mod tests {
     fn all_lists_every_variant() {
         for sort in ALL {
             match sort {
-                ConversationSort::Conversation
-                | ConversationSort::User
-                | ConversationSort::Traces
-                | ConversationSort::Errors
-                | ConversationSort::Steps
-                | ConversationSort::Tokens
-                | ConversationSort::FirstSeen
-                | ConversationSort::LastSeen => {}
+                SessionSort::Session
+                | SessionSort::User
+                | SessionSort::Traces
+                | SessionSort::Errors
+                | SessionSort::Steps
+                | SessionSort::Tokens
+                | SessionSort::FirstSeen
+                | SessionSort::LastSeen => {}
             }
         }
         let mut seen: Vec<String> = ALL.iter().map(ToString::to_string).collect();
@@ -114,10 +114,10 @@ mod tests {
     #[test]
     fn from_str_round_trips_every_variant() {
         for v in &ALL {
-            assert_eq!(v.to_string().parse::<ConversationSort>().unwrap(), *v);
+            assert_eq!(v.to_string().parse::<SessionSort>().unwrap(), *v);
         }
-        assert!("LastSeen".parse::<ConversationSort>().is_err());
-        assert!("".parse::<ConversationSort>().is_err());
+        assert!("LastSeen".parse::<SessionSort>().is_err());
+        assert!("".parse::<SessionSort>().is_err());
     }
 
     #[test]

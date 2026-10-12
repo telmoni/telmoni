@@ -8,35 +8,35 @@ import { ServiceUnavailable } from "@/components/service-unavailable";
 import { SortHeading } from "@/components/sort-heading";
 import { Card } from "@/components/ui/card";
 import { WindowForm } from "@/components/window-form";
-import {
-  CONVERSATION_COLUMNS,
-  conversationHref,
-  conversationsHref,
-  currentConversationSort,
-  nextConversationSort,
-  parseConversationQuery,
-} from "@/lib/conversations";
 import { ownerContact } from "@/lib/identity";
 import { MAX_LIMIT, type SearchParams } from "@/lib/list-query";
 import {
   activeOrganization,
-  fetchConversations,
   fetchProjectBySlug,
+  fetchSessions,
   getServerContext,
-  type ConversationQuery,
-  type ConversationRow,
+  type SessionQuery,
+  type SessionRow,
 } from "@/lib/server/data";
+import {
+  SESSION_COLUMNS,
+  currentSessionSort,
+  nextSessionSort,
+  parseSessionQuery,
+  sessionHref,
+  sessionsHref,
+} from "@/lib/sessions";
 import { projectPath } from "@/lib/slug";
 import { formatCount, tracesHref } from "@/lib/traces";
 
-export const metadata = { title: "Conversations" };
+export const metadata = { title: "Sessions" };
 
-// The conversations list: a row per conversation this project's agents took
-// part in within a window of days, by the id the application gave it, with
-// the user it was with and what its runs added up to. Every column is a
-// sort, carried in the URL; a conversation opens its own page, a replay of
-// its runs in metadata. Nothing here is a message: the server sums spans.
-export default async function ConversationsPage({
+// The sessions list: a row per session this project's agents took part in
+// within a window of days, by the id the application gave it, with the user
+// it was with and what its runs added up to. Every column is a sort, carried
+// in the URL; a session opens its own page, a replay of its runs in metadata.
+// Nothing here is a message: the server sums spans.
+export default async function SessionsPage({
   params,
   searchParams,
 }: {
@@ -44,16 +44,16 @@ export default async function ConversationsPage({
   searchParams?: Promise<SearchParams>;
 }) {
   const { organization, project: slug } = await params;
-  const query = parseConversationQuery((await searchParams) ?? {});
+  const query = parseSessionQuery((await searchParams) ?? {});
   const [gate, project] = await Promise.all([getServerContext(), fetchProjectBySlug(slug)]);
   if (!gate || !project) return <ServiceUnavailable />;
 
-  const access = await fetchConversations(project.id, query);
+  const access = await fetchSessions(project.id, query);
   if (access.kind === "unavailable") return <ServiceUnavailable />;
   if (access.kind === "forbidden") {
     return (
       <AccessDenied
-        what="this project's conversations"
+        what="this project's sessions"
         owner={ownerContact(activeOrganization(gate))}
         backHref={projectPath(organization, slug)}
       />
@@ -61,71 +61,66 @@ export default async function ConversationsPage({
   }
 
   const { list } = access;
-  const { sort, dir } = currentConversationSort(query);
-  const href = (patch: Partial<ConversationQuery>) =>
-    conversationsHref(organization, slug, query, patch);
+  const { sort, dir } = currentSessionSort(query);
+  const href = (patch: Partial<SessionQuery>) => sessionsHref(organization, slug, query, patch);
   const days = query.days ?? list.days;
 
   return (
     <>
-      <PageHeader
-        title="Conversations"
-        count={list.more ? undefined : list.conversations.length}
-      />
+      <PageHeader title="Sessions" count={list.more ? undefined : list.sessions.length} />
       <div className="grid gap-6">
         <section className="grid gap-3">
           <p className="text-sm text-muted-foreground">
-            Every conversation this project&rsquo;s agents took part in, last heard from first,
-            with the user it was with and its traces, errors, steps and tokens. Click a
-            conversation to replay its runs; click a heading to sort by it.
+            Every session this project&rsquo;s agents took part in, last heard from first, with the
+            user it was with and its traces, errors, steps and tokens. Click a session to replay
+            its runs; click a heading to sort by it.
           </p>
 
           <WindowForm
-            action={projectPath(organization, slug, "/conversations")}
+            action={projectPath(organization, slug, "/sessions")}
             days={days}
             carry={{ sort: query.sort, dir: query.dir }}
             label="Choose the window"
           />
 
-          {list.conversations.length === 0 ? (
+          {list.sessions.length === 0 ? (
             <Card className="overflow-hidden p-0 gap-0">
               <div className="grid gap-1 p-4">
                 <p className="text-sm font-medium">Nothing to show yet.</p>
                 <p className="text-sm text-muted-foreground">
-                  No run from the last {days} {days === 1 ? "day" : "days"} named the conversation
-                  it belonged to. Name one when you open a run — <code>conversation_id</code> in
-                  the{" "}
+                  No run from the last {days} {days === 1 ? "day" : "days"} named the session it
+                  belonged to. Name one when you open a run — <code>session_id</code> in the{" "}
                   <Link href="/docs/api/sdks" className="underline underline-offset-4">
                     SDKs
                   </Link>
                   , <code>gen_ai.conversation.id</code> on the span — and the runs that share it
-                  group here as a conversation.
+                  group here as a session.
                 </p>
               </div>
             </Card>
           ) : (
             <DataTable>
               <THead>
-                {CONVERSATION_COLUMNS.map((column) => (
+                {SESSION_COLUMNS.map((column) => (
                   <SortHeading
                     key={column.sort}
                     label={column.label}
                     column={column.sort}
                     sort={sort}
                     dir={dir}
-                    href={href(nextConversationSort(query, column.sort))}
+                    href={href(nextSessionSort(query, column.sort))}
                   />
                 ))}
               </THead>
               <tbody>
-                {list.conversations.map((c) => (
-                  <ConversationTableRow
-                    key={c.conversation_id}
-                    conversation={c}
-                    open={conversationHref(organization, slug, c.conversation_id, {
+                {list.sessions.map((s) => (
+                  <SessionTableRow
+                    key={s.session_id}
+                    session={s}
+                    open={sessionHref(organization, slug, s.session_id, {
                       days: query.days,
                     })}
-                    user={tracesHref(organization, slug, { user: c.user_id, days: query.days })}
+                    user={tracesHref(organization, slug, { user: s.user_id, days: query.days })}
                   />
                 ))}
               </tbody>
@@ -153,53 +148,49 @@ export default async function ConversationsPage({
   );
 }
 
-function ConversationTableRow({
-  conversation,
+function SessionTableRow({
+  session,
   open,
   user,
 }: {
-  conversation: ConversationRow;
+  session: SessionRow;
   open: string;
   user: string;
 }) {
   return (
     <tr>
-      <Td className="max-w-64 truncate font-mono text-xs" title={conversation.conversation_id}>
+      <Td className="max-w-64 truncate font-mono text-xs" title={session.session_id}>
         <Link href={open} className="underline-offset-4 hover:underline">
-          {conversation.conversation_id}
+          {session.session_id}
         </Link>
       </Td>
-      <Td className="max-w-48 truncate font-mono text-xs" title={conversation.user_id || undefined}>
-        {conversation.user_id ? (
+      <Td className="max-w-48 truncate font-mono text-xs" title={session.user_id || undefined}>
+        {session.user_id ? (
           <Link href={user} className="underline-offset-4 hover:underline">
-            {conversation.user_id}
+            {session.user_id}
           </Link>
         ) : (
           <span className="text-muted-foreground">—</span>
         )}
       </Td>
-      <Td className="whitespace-nowrap text-right tabular-nums">
-        {formatCount(conversation.traces)}
-      </Td>
+      <Td className="whitespace-nowrap text-right tabular-nums">{formatCount(session.traces)}</Td>
       <Td
-        className={`whitespace-nowrap text-right tabular-nums ${conversation.errors > 0 ? "text-destructive" : "text-muted-foreground"}`}
+        className={`whitespace-nowrap text-right tabular-nums ${session.errors > 0 ? "text-destructive" : "text-muted-foreground"}`}
       >
-        {formatCount(conversation.errors)}
+        {formatCount(session.errors)}
       </Td>
-      <Td className="whitespace-nowrap text-right tabular-nums">
-        {formatCount(conversation.steps)}
-      </Td>
+      <Td className="whitespace-nowrap text-right tabular-nums">{formatCount(session.steps)}</Td>
       <Td
         className="whitespace-nowrap text-right tabular-nums"
-        title={`${formatCount(conversation.input_tokens)} in, ${formatCount(conversation.output_tokens)} out`}
+        title={`${formatCount(session.input_tokens)} in, ${formatCount(session.output_tokens)} out`}
       >
-        {formatCount(conversation.input_tokens + conversation.output_tokens)}
+        {formatCount(session.input_tokens + session.output_tokens)}
       </Td>
       <Td className="whitespace-nowrap text-xs text-muted-foreground">
-        <LocalTime iso={conversation.first_seen} />
+        <LocalTime iso={session.first_seen} />
       </Td>
       <Td className="whitespace-nowrap text-xs text-muted-foreground">
-        <LocalTime iso={conversation.last_seen} />
+        <LocalTime iso={session.last_seen} />
       </Td>
     </tr>
   );

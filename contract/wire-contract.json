@@ -10,16 +10,6 @@
       "on",
       "sealed"
     ],
-    "ConversationSort": [
-      "conversation",
-      "user",
-      "traces",
-      "errors",
-      "steps",
-      "tokens",
-      "first_seen",
-      "last_seen"
-    ],
     "Flag": [
       "connectors",
       "public_api",
@@ -44,6 +34,16 @@
       "admin",
       "member"
     ],
+    "SessionSort": [
+      "session",
+      "user",
+      "traces",
+      "errors",
+      "steps",
+      "tokens",
+      "first_seen",
+      "last_seen"
+    ],
     "SortDirection": [
       "asc",
       "desc"
@@ -64,7 +64,7 @@
       "started",
       "agent",
       "user",
-      "conversation",
+      "session",
       "status",
       "steps",
       "tokens",

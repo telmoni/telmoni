@@ -39,8 +39,8 @@ pub use error::{AuthError, AuthzError, ModelFailure, TelemetryError, TelmoniErro
 pub use error_schema::ProblemDetails;
 pub use extract::correlation_id;
 pub use types::{
-    ApiKeyScope, AuditAction, ContentMode, ConversationSort, Flag, FlagSet, NotificationKind,
-    OrganizationId, OrganizationIdError, OrganizationRole, OrganizationStatus, ParseEnumError,
-    ProjectId, ProjectIdError, Redacted, Role, SortDirection, SpanKind, SpanStatus,
+    ApiKeyScope, AuditAction, ContentMode, Flag, FlagSet, NotificationKind, OrganizationId,
+    OrganizationIdError, OrganizationRole, OrganizationStatus, ParseEnumError, ProjectId,
+    ProjectIdError, Redacted, Role, SessionSort, SortDirection, SpanKind, SpanStatus,
     TelmoniResourceKind, TraceSort, UserId, UserIdError, UserSort,
 };

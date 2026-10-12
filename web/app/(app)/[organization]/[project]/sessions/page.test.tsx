@@ -19,26 +19,26 @@ import { Role } from "@/lib/types/enums";
 
 let mockContext: unknown;
 let mockProject: unknown;
-let mockConversations: unknown;
+let mockSessions: unknown;
 const fetchProjectBySlug = vi.fn<(slug: string) => Promise<unknown>>(async () => mockProject);
-const fetchConversations = vi.fn<(projectId: string, query: unknown) => Promise<unknown>>(
-  async () => mockConversations,
+const fetchSessions = vi.fn<(projectId: string, query: unknown) => Promise<unknown>>(
+  async () => mockSessions,
 );
 
 vi.mock("@/lib/server/data", () => ({
   activeOrganization: () => null,
   getServerContext: async () => mockContext,
   fetchProjectBySlug: (slug: string) => fetchProjectBySlug(slug),
-  fetchConversations: (projectId: string, query: unknown) => fetchConversations(projectId, query),
+  fetchSessions: (projectId: string, query: unknown) => fetchSessions(projectId, query),
 }));
 
-import ConversationsPage from "./page";
+import SessionsPage from "./page";
 
 const PARAMS = Promise.resolve({ organization: "acme", project: "web" });
 const HASHED = "9f86d081884c7d659a2feaa0c55ad015";
 
-const CONVERSATION_A = {
-  conversation_id: "conv-1",
+const SESSION_A = {
+  session_id:"conv-1",
   user_id: HASHED,
   traces: 3,
   errors: 1,
@@ -49,8 +49,8 @@ const CONVERSATION_A = {
   last_seen: "2026-10-11T03:04:02Z",
 };
 // An id of the application's choosing, with a slash and a space, and no user.
-const CONVERSATION_B = {
-  conversation_id: "chat/42 b",
+const SESSION_B = {
+  session_id:"chat/42 b",
   user_id: "",
   traces: 1,
   errors: 0,
@@ -65,7 +65,7 @@ function list(over: Record<string, unknown> = {}) {
   return {
     kind: "ok",
     list: {
-      conversations: [CONVERSATION_A, CONVERSATION_B],
+      sessions: [SESSION_A, SESSION_B],
       days: 7,
       limit: 100,
       more: false,
@@ -87,29 +87,29 @@ beforeEach(() => {
     flags: {},
   };
   mockProject = { id: "project_7bQx2mNv9BcK4dLp", slug: "web", name: "Web", role: Role.Member };
-  mockConversations = list();
+  mockSessions = list();
 });
 
-describe("ConversationsPage", () => {
-  it("lists each conversation with its user and sums, the conversation opening its page and the user their traces", async () => {
-    render(await ConversationsPage({ params: PARAMS }));
-    expect(screen.getByTestId("page-header")).toHaveTextContent("Conversations");
+describe("SessionsPage", () => {
+  it("lists each session with its user and sums, the session opening its page and the user their traces", async () => {
+    render(await SessionsPage({ params: PARAMS }));
+    expect(screen.getByTestId("page-header")).toHaveTextContent("Sessions");
     expect(screen.getByTestId("count")).toHaveTextContent("2");
-    expect(fetchConversations).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", {});
+    expect(fetchSessions).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", {});
 
     expect(screen.getByRole("link", { name: "conv-1" })).toHaveAttribute(
       "href",
-      "/acme/web/conversations/conv-1",
+      "/acme/web/sessions/conv-1",
     );
     expect(screen.getByRole("link", { name: "chat/42 b" })).toHaveAttribute(
       "href",
-      "/acme/web/conversations/chat%2F42%20b",
+      "/acme/web/sessions/chat%2F42%20b",
     );
     expect(screen.getByRole("link", { name: HASHED })).toHaveAttribute(
       "href",
       `/acme/web/traces?user=${HASHED}`,
     );
-    // A conversation whose runs named no user shows a dash, not a link.
+    // A session whose runs named no user shows a dash, not a link.
     expect(screen.getByText("—")).toBeInTheDocument();
     expect(screen.getByText("1,500")).toHaveAttribute("title", "1,200 in, 300 out");
 
@@ -120,26 +120,26 @@ describe("ConversationsPage", () => {
     );
     expect(screen.getByRole("link", { name: /Last seen/ })).toHaveAttribute(
       "href",
-      "/acme/web/conversations?sort=last_seen&dir=asc",
+      "/acme/web/sessions?sort=last_seen&dir=asc",
     );
-    expect(screen.getByRole("link", { name: "Conversation" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Session" })).toHaveAttribute(
       "href",
-      "/acme/web/conversations?sort=conversation&dir=asc",
+      "/acme/web/sessions?sort=session&dir=asc",
     );
     expect(screen.getByRole("link", { name: "Errors" })).toHaveAttribute(
       "href",
-      "/acme/web/conversations?sort=errors&dir=desc",
+      "/acme/web/sessions?sort=errors&dir=desc",
     );
   });
 
   it("reads the URL's sort and window, hands them to the server, and carries them in the form", async () => {
     render(
-      await ConversationsPage({
+      await SessionsPage({
         params: PARAMS,
         searchParams: Promise.resolve({ sort: "user", dir: "desc", days: "90", limit: "0" }),
       }),
     );
-    expect(fetchConversations).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", {
+    expect(fetchSessions).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", {
       sort: "user",
       dir: "desc",
       days: 90,
@@ -149,25 +149,25 @@ describe("ConversationsPage", () => {
       "descending",
     );
     const form = screen.getByRole("form", { name: "Choose the window" });
-    expect(form).toHaveAttribute("action", "/acme/web/conversations");
+    expect(form).toHaveAttribute("action", "/acme/web/sessions");
     expect(screen.getByRole("combobox", { name: /Window/ })).toHaveValue("90");
     expect(form.querySelector('input[name="sort"]')).toHaveValue("user");
     expect(form.querySelector('input[name="dir"]')).toHaveValue("desc");
   });
 
   it("says when the window holds more, and offers the larger page", async () => {
-    mockConversations = list({ conversations: [CONVERSATION_A], more: true });
-    render(await ConversationsPage({ params: PARAMS }));
+    mockSessions = list({ sessions: [SESSION_A], more: true });
+    render(await SessionsPage({ params: PARAMS }));
     expect(screen.queryByTestId("count")).toBeNull();
     expect(screen.getByRole("link", { name: "Show up to 500" })).toHaveAttribute(
       "href",
-      "/acme/web/conversations?limit=500",
+      "/acme/web/sessions?limit=500",
     );
   });
 
-  it("tells a project that names no conversation which attribute to set", async () => {
-    mockConversations = list({ conversations: [] });
-    render(await ConversationsPage({ params: PARAMS }));
+  it("tells a project that names no session which attribute to set", async () => {
+    mockSessions = list({ sessions: [] });
+    render(await SessionsPage({ params: PARAMS }));
     expect(screen.getByText("Nothing to show yet.")).toBeInTheDocument();
     expect(screen.getByText("gen_ai.conversation.id")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "SDKs" })).toHaveAttribute("href", "/docs/api/sdks");
@@ -175,21 +175,21 @@ describe("ConversationsPage", () => {
   });
 
   it("sends a refused role back to the project's overview, and says so on an outage", async () => {
-    mockConversations = { kind: "forbidden" };
-    render(await ConversationsPage({ params: PARAMS }));
+    mockSessions = { kind: "forbidden" };
+    render(await SessionsPage({ params: PARAMS }));
     expect(screen.getByRole("link", { name: "Back to overview" })).toHaveAttribute(
       "href",
       "/acme/web",
     );
 
-    mockConversations = { kind: "unavailable" };
-    render(await ConversationsPage({ params: PARAMS }));
+    mockSessions = { kind: "unavailable" };
+    render(await SessionsPage({ params: PARAMS }));
     expect(screen.getByTestId("outage")).toBeInTheDocument();
   });
 
   it("renders ServiceUnavailable when context fails", async () => {
     mockContext = null;
-    render(await ConversationsPage({ params: PARAMS }));
+    render(await SessionsPage({ params: PARAMS }));
     expect(screen.getByTestId("outage")).toBeInTheDocument();
   });
 });

@@ -9,7 +9,6 @@ import { Section } from "@/components/section";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { conversationHref } from "@/lib/conversations";
 import { ownerContact } from "@/lib/identity";
 import { windowReaching, type SearchParams } from "@/lib/list-query";
 import {
@@ -19,6 +18,7 @@ import {
   getServerContext,
   type TraceSpan,
 } from "@/lib/server/data";
+import { sessionHref } from "@/lib/sessions";
 import { projectPath } from "@/lib/slug";
 import {
   KIND_LABEL,
@@ -98,7 +98,7 @@ export default async function TracePage({
     first.ended_at,
   );
   const duration = Math.max(0, new Date(endedAt).getTime() - new Date(startedAt).getTime());
-  // The user's and the conversation's pages open on a week: one older run
+  // The user's and the session's pages open on a week: one older run
   // links to a window that still holds it.
   const reaching = windowReaching(startedAt);
   const calls = trace.spans.filter(
@@ -136,8 +136,8 @@ export default async function TracePage({
             <Row label="User" hint="The end user, as stored.">
               <Value mono value={root.user_id} href={tracesHref(organization, slug, { user: root.user_id, days: reaching })} />
             </Row>
-            <Row label="Conversation" hint="The one this run was part of, as the application named it.">
-              <Value mono value={root.conversation_id} href={conversationHref(organization, slug, root.conversation_id, { days: reaching })} />
+            <Row label="Session" hint="The one this run was part of, as the application named it.">
+              <Value mono value={root.session_id} href={sessionHref(organization, slug, root.session_id, { days: reaching })} />
             </Row>
             <Row label="Calls">
               <span className="text-sm">

@@ -21,7 +21,7 @@ use telmoni_shared::{
 };
 
 use crate::AppState;
-use crate::contract::{CONVERSATION_ID_MAX, MODEL_MAX, NAME_MAX, USER_ID_MAX};
+use crate::contract::{MODEL_MAX, NAME_MAX, SESSION_ID_MAX, USER_ID_MAX};
 use crate::store::{self, Projects, SpanRow};
 use crate::traces::{self, DEFAULT_LIMIT, MAX_DAYS, MAX_LIMIT, SPANS_MAX, TraceFilter, TraceRow};
 
@@ -37,9 +37,9 @@ pub struct ListQuery {
     /// The end user, as stored.
     #[serde(default)]
     pub user: String,
-    /// The conversation.
+    /// The session, by its id.
     #[serde(default)]
-    pub conversation: String,
+    pub session: String,
     /// How the run ended: `ok`, `error` or `cancelled`.
     #[serde(default)]
     pub status: String,
@@ -90,7 +90,7 @@ impl ListQuery {
             "" => TraceSort::Started,
             given => given.parse::<TraceSort>().map_err(|_| {
                 TelmoniError::BadRequest(
-                    "sort is one of started, agent, user, conversation, status, steps, tokens, \
+                    "sort is one of started, agent, user, session, status, steps, tokens, \
                      duration"
                         .into(),
                 )
@@ -108,7 +108,7 @@ impl ListQuery {
             TraceFilter {
                 agent: text("agent", self.agent, NAME_MAX)?,
                 user_id: text("user", self.user, USER_ID_MAX)?,
-                conversation_id: text("conversation", self.conversation, CONVERSATION_ID_MAX)?,
+                session_id: text("session", self.session, SESSION_ID_MAX)?,
                 status,
                 model: text("model", self.model, MODEL_MAX)?,
                 tool: text("tool", self.tool, NAME_MAX)?,
@@ -129,7 +129,7 @@ pub const fn default_direction(sort: TraceSort) -> SortDirection {
         TraceSort::Started | TraceSort::Steps | TraceSort::Tokens | TraceSort::Duration => {
             SortDirection::Desc
         }
-        TraceSort::Agent | TraceSort::User | TraceSort::Conversation | TraceSort::Status => {
+        TraceSort::Agent | TraceSort::User | TraceSort::Session | TraceSort::Status => {
             SortDirection::Asc
         }
     }
@@ -188,7 +188,7 @@ pub struct Trace {
     pub run_id: Uuid,
     pub agent: String,
     pub user_id: String,
-    pub conversation_id: String,
+    pub session_id: String,
     /// Whether the run's own span has arrived.
     pub ended: bool,
     pub status: SpanStatus,
@@ -214,7 +214,7 @@ impl From<TraceRow> for Trace {
             run_id: row.run_id,
             agent: row.agent,
             user_id: row.user_id,
-            conversation_id: row.conversation_id,
+            session_id: row.session_id,
             ended: row.ended != 0,
             status: row.status,
             started_at: row.started_at,
@@ -266,7 +266,7 @@ pub struct TraceSpan {
     pub cache_read_input_tokens: u64,
     pub cache_write_input_tokens: u64,
     pub user_id: String,
-    pub conversation_id: String,
+    pub session_id: String,
     pub tags: BTreeMap<String, String>,
     pub bound_stall_after_s: Option<u32>,
     pub bound_max_steps: Option<u32>,
@@ -297,7 +297,7 @@ impl From<SpanRow> for TraceSpan {
             cache_read_input_tokens: row.cache_read_input_tokens,
             cache_write_input_tokens: row.cache_write_input_tokens,
             user_id: row.user_id,
-            conversation_id: row.conversation_id,
+            session_id: row.session_id,
             tags: row.tags.into_iter().collect(),
             bound_stall_after_s: row.bound_stall_after_s,
             bound_max_steps: row.bound_max_steps,
@@ -386,7 +386,7 @@ pub async fn get_trace(
 
 /// ClickHouse did not answer a read: an outage the console says so about, or
 /// a shape of ours it refused, which retrying will not mend. The users and
-/// conversations lanes answer the same way.
+/// sessions lanes answer the same way.
 pub(crate) fn read_failed(error: clickhouse::error::Error) -> TelmoniError {
     let kind = store::error_kind(&error);
     if kind == "ours" {
@@ -418,7 +418,7 @@ mod tests {
         let (filter, sort, dir) = parts(ListQuery {
             agent: " nightly-report ".into(),
             user: "9f86d081884c7d659a2feaa0c55ad015".into(),
-            conversation: "thread-42".into(),
+            session: "thread-42".into(),
             status: "error".into(),
             model: "claude-sonnet-5-5".into(),
             tool: "search_docs".into(),
@@ -430,7 +430,7 @@ mod tests {
         .expect("a full query");
         assert_eq!(filter.agent, "nightly-report");
         assert_eq!(filter.user_id, "9f86d081884c7d659a2feaa0c55ad015");
-        assert_eq!(filter.conversation_id, "thread-42");
+        assert_eq!(filter.session_id, "thread-42");
         assert_eq!(filter.status, Some(SpanStatus::Error));
         assert_eq!(filter.model, "claude-sonnet-5-5");
         assert_eq!(filter.tool, "search_docs");
@@ -497,7 +497,7 @@ mod tests {
                 ..ListQuery::default()
             },
             ListQuery {
-                conversation: "s".repeat(CONVERSATION_ID_MAX + 1),
+                session: "s".repeat(SESSION_ID_MAX + 1),
                 ..ListQuery::default()
             },
         ];

@@ -85,8 +85,8 @@ describe("writing it", () => {
     expect(
       listHref("acme", "web", "/users", { sort: "user", days: 30 }, { days: undefined, dir: "desc" }),
     ).toBe("/acme/web/users?sort=user&dir=desc");
-    expect(listHref("acme", "web", "/conversations/chat%2F42", { limit: 500 })).toBe(
-      "/acme/web/conversations/chat%2F42?limit=500",
+    expect(listHref("acme", "web", "/sessions/chat%2F42", { limit: 500 })).toBe(
+      "/acme/web/sessions/chat%2F42?limit=500",
     );
   });
 });

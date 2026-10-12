@@ -7,8 +7,8 @@ use crate::types::ParseEnumError;
 use serde::{Deserialize, Serialize};
 
 /// A column of the console's trace list, named in the URL so a link holds
-/// the sort: by user and by conversation above all, so one user's traces, and
-/// one conversation's, stand together. `[PUBLIC-API]`.
+/// the sort: by user and by session above all, so one user's traces, and one
+/// session's, stand together. `[PUBLIC-API]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceSort {
@@ -18,8 +18,8 @@ pub enum TraceSort {
     Agent,
     /// The end user, as stored.
     User,
-    /// The conversation the run belongs to.
-    Conversation,
+    /// The session the run belongs to.
+    Session,
     /// How the run ended.
     Status,
     /// How many steps the run took.
@@ -38,7 +38,7 @@ impl TraceSort {
             Self::Started,
             Self::Agent,
             Self::User,
-            Self::Conversation,
+            Self::Session,
             Self::Status,
             Self::Steps,
             Self::Tokens,
@@ -53,7 +53,7 @@ impl fmt::Display for TraceSort {
             Self::Started => write!(f, "started"),
             Self::Agent => write!(f, "agent"),
             Self::User => write!(f, "user"),
-            Self::Conversation => write!(f, "conversation"),
+            Self::Session => write!(f, "session"),
             Self::Status => write!(f, "status"),
             Self::Steps => write!(f, "steps"),
             Self::Tokens => write!(f, "tokens"),
@@ -69,14 +69,14 @@ impl FromStr for TraceSort {
             "started" => Ok(Self::Started),
             "agent" => Ok(Self::Agent),
             "user" => Ok(Self::User),
-            "conversation" => Ok(Self::Conversation),
+            "session" => Ok(Self::Session),
             "status" => Ok(Self::Status),
             "steps" => Ok(Self::Steps),
             "tokens" => Ok(Self::Tokens),
             "duration" => Ok(Self::Duration),
             _ => Err(ParseEnumError::new(
                 s,
-                "started, agent, user, conversation, status, steps, tokens, duration",
+                "started, agent, user, session, status, steps, tokens, duration",
             )),
         }
     }
@@ -97,7 +97,7 @@ mod tests {
                 TraceSort::Started
                 | TraceSort::Agent
                 | TraceSort::User
-                | TraceSort::Conversation
+                | TraceSort::Session
                 | TraceSort::Status
                 | TraceSort::Steps
                 | TraceSort::Tokens

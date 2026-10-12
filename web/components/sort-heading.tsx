@@ -6,7 +6,7 @@ import { SortDirection } from "@/lib/types/enums";
 
 // A heading that sorts: the list's URL with this column first, flipped on a
 // second click, and `aria-sort` for the reader who cannot see the chevron.
-// The traces, users and conversations lists share it, each with its own columns.
+// The traces, users and sessions lists share it, each with its own columns.
 export function SortHeading<S extends string>({
   label,
   column,

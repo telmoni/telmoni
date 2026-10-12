@@ -281,8 +281,8 @@ pub struct SpanRow {
     pub cache_write_input_tokens: u64,
     /// The end user it was for, as stored; empty when none was sent.
     pub user_id: String,
-    /// The conversation it belongs to; empty when none was sent.
-    pub conversation_id: String,
+    /// The session it belongs to; empty when none was sent.
+    pub session_id: String,
     /// The application's own tags.
     pub tags: Vec<(String, String)>,
     /// A run's stall timeout, in seconds; `None` where it set none.

@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 use serde_json::{Value, json};
 use telmoni_shared::{
-    ApiKeyScope, ContentMode, ConversationSort, Flag, NotificationKind, OrganizationStatus, Role,
+    ApiKeyScope, ContentMode, Flag, NotificationKind, OrganizationStatus, Role, SessionSort,
     SortDirection, SpanKind, SpanStatus, TraceSort, UserSort, slug,
 };
 
@@ -53,7 +53,7 @@ fn generated_contract() -> Value {
             "SpanStatus": wire(&SpanStatus::all()),
             "TraceSort": wire(&TraceSort::all()),
             "UserSort": wire(&UserSort::all()),
-            "ConversationSort": wire(&ConversationSort::all()),
+            "SessionSort": wire(&SessionSort::all()),
             "SortDirection": wire(&SortDirection::all()),
             "ContentMode": wire(&ContentMode::all()),
             "ApiKeyScope": wire(&ApiKeyScope::all()),

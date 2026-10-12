@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS telemetry.spans
     cache_read_input_tokens  UInt64,
     cache_write_input_tokens UInt64,
     user_id                  String,
-    conversation_id          String,
+    session_id               String,
     tags                     Map(LowCardinality(String), String),
     -- A run's bounds and sample rate, NULL where it set none and on every
     -- other kind.

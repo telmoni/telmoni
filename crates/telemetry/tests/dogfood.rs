@@ -159,7 +159,7 @@ async fn a_question_lands_as_a_run_of_our_project_and_the_trace_lanes_read_it(po
     assert_eq!(run["agent"], AGENT);
     assert_eq!(run["name"], AGENT);
     assert_eq!(run["status"], "ok");
-    assert_eq!(run["conversation_id"], conversation.to_string());
+    assert_eq!(run["session_id"], conversation.to_string());
     // ⚠ The asking organization is a user id: hashed under our project's own
     // key, never its id.
     let user = run["user_id"].as_str().expect("a user");
@@ -211,5 +211,5 @@ async fn a_question_lands_as_a_run_of_our_project_and_the_trace_lanes_read_it(po
     assert_eq!(trace["output_tokens"], 140);
     assert_eq!(trace["ended"], true);
     assert_eq!(trace["user_id"], user);
-    assert_eq!(trace["conversation_id"], conversation.to_string());
+    assert_eq!(trace["session_id"], conversation.to_string());
 }

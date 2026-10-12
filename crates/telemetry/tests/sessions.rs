@@ -1,9 +1,8 @@
-//! The conversation lanes against a real ClickHouse: the page sums each
-//! conversation's runs into one row, latest first, sorted as asked, a run
-//! with no conversation belonging to none and another project's never
-//! listed; a conversation's own page is its traces in the order they ran,
-//! and a conversation the project's runs in the window did not belong to is
-//! a 404.
+//! The session lanes against a real ClickHouse: the page sums each session's
+//! runs into one row, latest first, sorted as asked, a run with no session
+//! id belonging to none and another project's never listed; a session's own
+//! page is its traces in the order they ran, and a session the project's runs
+//! in the window did not belong to is a 404.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
 mod common;
@@ -23,7 +22,7 @@ use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, Role};
 use telmoni_telemetry::router;
 
-const LANE: &str = "/internal/telemetry/conversations";
+const LANE: &str = "/internal/telemetry/sessions";
 const MEMBER: &str = "user_member";
 const STRANGER: &str = "user_stranger";
 
@@ -104,35 +103,35 @@ impl Projects {
         body
     }
 
-    /// One conversation's page as the member reads it, by its id as the path
-    /// spells it.
+    /// One session's page as the member reads it, by its id as the path spells
+    /// it.
     async fn detail(&self, path: &str) -> (StatusCode, Value) {
         self.send(self.request(MEMBER, &self.ours, &format!("{LANE}/{path}")))
             .await
     }
 }
 
-/// The conversation ids a page answers, in its order.
+/// The session ids a page answers, in its order.
 fn ids(list: &Value) -> Vec<&str> {
-    list["conversations"]
+    list["sessions"]
         .as_array()
-        .expect("conversations")
+        .expect("sessions")
         .iter()
-        .map(|c| c["conversation_id"].as_str().expect("a conversation id"))
+        .map(|s| s["session_id"].as_str().expect("a session id"))
         .collect()
 }
 
-/// The page's row for `conversation`.
-fn conversation<'a>(list: &'a Value, conversation: &str) -> &'a Value {
-    list["conversations"]
+/// The page's row for `session`.
+fn session<'a>(list: &'a Value, session: &str) -> &'a Value {
+    list["sessions"]
         .as_array()
-        .expect("conversations")
+        .expect("sessions")
         .iter()
-        .find(|c| c["conversation_id"] == conversation)
-        .expect("the conversation is listed")
+        .find(|s| s["session_id"] == session)
+        .expect("the session is listed")
 }
 
-/// The run ids a conversation's page answers, in its order.
+/// The run ids a session's page answers, in its order.
 fn runs(detail: &Value) -> Vec<Uuid> {
     detail["traces"]
         .as_array()
@@ -148,9 +147,9 @@ fn runs(detail: &Value) -> Vec<Uuid> {
         .collect()
 }
 
-/// Five runs of ours — two of one conversation's, one of them failed; one
-/// of another's; one whose id holds a slash and a space; one that names no
-/// conversation — and one of another project's.
+/// Five runs of ours — two of one session's, one of them failed; one of
+/// another's; one whose id holds a slash and a space; one that names no
+/// session — and one of another project's.
 struct Seeded {
     a: Uuid,
     b: Uuid,
@@ -231,7 +230,7 @@ async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
 }
 
 #[sqlx::test]
-async fn the_page_sums_each_conversations_runs_latest_first(pool: PgPool) {
+async fn the_page_sums_each_sessions_runs_latest_first(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -250,7 +249,7 @@ async fn the_page_sums_each_conversations_runs_latest_first(pool: PgPool) {
     assert_eq!(list["limit"], 100);
     assert_eq!(list["more"], false);
 
-    let one = conversation(&list, "conv-1");
+    let one = session(&list, "conv-1");
     assert_eq!(one["user_id"], "user-a");
     assert_eq!(one["traces"], 2);
     assert_eq!(one["errors"], 1, "one of its two runs failed");
@@ -258,7 +257,7 @@ async fn the_page_sums_each_conversations_runs_latest_first(pool: PgPool) {
     assert_eq!(one["input_tokens"], 300);
     assert_eq!(one["output_tokens"], 30);
     assert!(one["first_seen"].as_str().is_some() && one["last_seen"].as_str().is_some());
-    assert_eq!(conversation(&list, "conv-2")["user_id"], "user-b");
+    assert_eq!(session(&list, "conv-2")["user_id"], "user-b");
 
     let (status, _) = p.send(p.request(STRANGER, &p.ours, LANE)).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
@@ -280,7 +279,7 @@ async fn the_page_sorts_by_any_column_and_holds_to_its_limit(pool: PgPool) {
     seed(&ch, &p).await;
 
     assert_eq!(
-        ids(&p.list("?sort=conversation").await),
+        ids(&p.list("?sort=session").await),
         ["chat/42 b", "conv-1", "conv-2"]
     );
     assert_eq!(
@@ -313,7 +312,7 @@ async fn the_page_sorts_by_any_column_and_holds_to_its_limit(pool: PgPool) {
 
     // The word the page no longer answers to is refused by name, unechoed.
     let (status, body) = p
-        .send(p.request(MEMBER, &p.ours, &format!("{LANE}?sort=session")))
+        .send(p.request(MEMBER, &p.ours, &format!("{LANE}?sort=conversation")))
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert!(
@@ -325,7 +324,7 @@ async fn the_page_sorts_by_any_column_and_holds_to_its_limit(pool: PgPool) {
 }
 
 #[sqlx::test]
-async fn a_conversation_is_its_traces_in_the_order_they_ran(pool: PgPool) {
+async fn a_session_is_its_traces_in_the_order_they_ran(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -334,7 +333,7 @@ async fn a_conversation_is_its_traces_in_the_order_they_ran(pool: PgPool) {
 
     let (status, detail) = p.detail("conv-1").await;
     assert_eq!(status, StatusCode::OK, "{detail}");
-    assert_eq!(detail["conversation_id"], "conv-1");
+    assert_eq!(detail["session_id"], "conv-1");
     assert_eq!(runs(&detail), [seeded.a, seeded.b], "earliest first");
     assert_eq!(detail["traces"][0]["agent"], "support-bot");
     assert_eq!(detail["traces"][0]["status"], "ok");
@@ -346,7 +345,7 @@ async fn a_conversation_is_its_traces_in_the_order_they_ran(pool: PgPool) {
     // An id with a slash and a space, as the path encodes it.
     let (status, spaced) = p.detail("chat%2F42%20b").await;
     assert_eq!(status, StatusCode::OK, "{spaced}");
-    assert_eq!(spaced["conversation_id"], "chat/42 b");
+    assert_eq!(spaced["session_id"], "chat/42 b");
     assert_eq!(runs(&spaced), [seeded.spaced]);
 
     let (status, cut) = p.detail("conv-1?limit=1").await;
@@ -354,7 +353,7 @@ async fn a_conversation_is_its_traces_in_the_order_they_ran(pool: PgPool) {
     assert_eq!(runs(&cut), [seeded.a]);
     assert_eq!(cut["more"], true);
 
-    // Another project's conversation, and one nobody had, are not here.
+    // Another project's session, and one nobody had, are not here.
     let (status, body) = p.detail("conv-9").await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     assert_eq!(body["type"], "/errors/auth/not-found");

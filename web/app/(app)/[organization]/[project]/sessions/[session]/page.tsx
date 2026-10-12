@@ -10,45 +10,45 @@ import { ServiceUnavailable } from "@/components/service-unavailable";
 import { TraceStatusBadge } from "@/components/trace-status-badge";
 import { Card } from "@/components/ui/card";
 import { WindowForm } from "@/components/window-form";
-import { conversationHref, conversationsHref } from "@/lib/conversations";
 import { ownerContact } from "@/lib/identity";
 import { MAX_LIMIT, parseWindow, type SearchParams } from "@/lib/list-query";
 import {
   activeOrganization,
-  fetchConversation,
   fetchProjectBySlug,
+  fetchSession,
   getServerContext,
   type Trace,
 } from "@/lib/server/data";
+import { sessionHref, sessionsHref } from "@/lib/sessions";
 import { projectPath } from "@/lib/slug";
 import { formatCount, formatDuration, shortId, traceHref, tracesHref } from "@/lib/traces";
 
-export const metadata = { title: "Conversation" };
+export const metadata = { title: "Session" };
 
-// One conversation: its runs in the window, in the order they ran, each
-// summed as the trace list sums it — a replay in metadata, never a message.
-// The conversation id is the application's own text, up to 200 characters:
-// the path carries it URL-encoded, and Next hands it here decoded, as the
-// fetcher re-encodes it for the server.
-export default async function ConversationPage({
+// One session: its runs in the window, in the order they ran, each summed as
+// the trace list sums it — a replay in metadata, never a message. The session
+// id is the application's own text, up to 200 characters: the path carries it
+// URL-encoded, and Next hands it here decoded, as the fetcher re-encodes it
+// for the server.
+export default async function SessionPage({
   params,
   searchParams,
 }: {
-  params: Promise<{ organization: string; project: string; conversation: string }>;
+  params: Promise<{ organization: string; project: string; session: string }>;
   searchParams?: Promise<SearchParams>;
 }) {
-  const { organization, project: slug, conversation: conversationId } = await params;
+  const { organization, project: slug, session: sessionId } = await params;
   const query = parseWindow((await searchParams) ?? {});
   const [gate, project] = await Promise.all([getServerContext(), fetchProjectBySlug(slug)]);
   if (!gate || !project) return <ServiceUnavailable />;
 
-  const list = conversationsHref(organization, slug, { days: query.days });
-  const access = await fetchConversation(project.id, conversationId, query);
+  const list = sessionsHref(organization, slug, { days: query.days });
+  const access = await fetchSession(project.id, sessionId, query);
   if (access.kind === "unavailable") return <ServiceUnavailable />;
   if (access.kind === "forbidden") {
     return (
       <AccessDenied
-        what="this project's conversations"
+        what="this project's sessions"
         owner={ownerContact(activeOrganization(gate))}
         backHref={projectPath(organization, slug)}
       />
@@ -57,16 +57,14 @@ export default async function ConversationPage({
   if (access.kind === "missing") {
     return (
       <>
-        <PageHeader title="Conversation" backHref={list} backLabel="Conversations" />
+        <PageHeader title="Session" backHref={list} backLabel="Sessions" />
         <Card className="grid gap-1 text-sm">
-          <p className="font-medium">
-            No conversation with this id in this project&rsquo;s window.
-          </p>
+          <p className="font-medium">No session with this id in this project&rsquo;s window.</p>
           <p className="text-muted-foreground">
-            Its runs may lie outside the window or have passed their retention, or the
-            conversation belongs to another project.{" "}
+            Its runs may lie outside the window or have passed their retention, or the session
+            belongs to another project.{" "}
             <Link href={list} className="underline underline-offset-4">
-              Back to the conversations
+              Back to the sessions
             </Link>
             .
           </p>
@@ -75,12 +73,12 @@ export default async function ConversationPage({
     );
   }
 
-  const { conversation } = access;
-  const traces = conversation.traces;
+  const { session } = access;
+  const traces = session.traces;
   const first = traces[0]!;
   const user = traces.find((t) => t.user_id)?.user_id ?? "";
-  // As the list counts a conversation's errors: the runs with a span that
-  // failed, a run that recovered from a failed call among them.
+  // As the list counts a session's errors: the runs with a span that failed,
+  // a run that recovered from a failed call among them.
   const errors = traces.filter((t) => t.errors > 0).length;
   const steps = traces.reduce((sum, t) => sum + t.steps, 0);
   const inputTokens = traces.reduce((sum, t) => sum + t.input_tokens, 0);
@@ -89,22 +87,22 @@ export default async function ConversationPage({
     (latest, t) => (t.ended_at > latest ? t.ended_at : latest),
     first.ended_at,
   );
-  const days = query.days ?? conversation.days;
+  const days = query.days ?? session.days;
   const here = (patch: { days?: number; limit?: number }) =>
-    conversationHref(organization, slug, conversation.conversation_id, { ...query, ...patch });
+    sessionHref(organization, slug, session.session_id, { ...query, ...patch });
 
   return (
     <>
-      <PageHeader title="Conversation" backHref={list} backLabel="Conversations" />
+      <PageHeader title="Session" backHref={list} backLabel="Sessions" />
       <div className="grid gap-6">
         <Section
-          title="Conversation"
+          title="Session"
           description="Who it was with and what its runs added up to, from their spans alone."
         >
           <Rows>
-            <Row label="Conversation" hint="As the application named it.">
-              <code className="max-w-96 truncate text-xs" title={conversation.conversation_id}>
-                {conversation.conversation_id}
+            <Row label="Session" hint="As the application named it.">
+              <code className="max-w-96 truncate text-xs" title={session.session_id}>
+                {session.session_id}
               </code>
             </Row>
             <Row label="User" hint="The end user, as stored.">
@@ -122,7 +120,7 @@ export default async function ConversationPage({
             <Row label="Traces">
               <span className="text-sm tabular-nums">
                 {formatCount(traces.length)}
-                {conversation.more ? " shown" : ""}
+                {session.more ? " shown" : ""}
                 {errors > 0 && (
                   <span className="text-destructive">
                     , {formatCount(errors)} in error
@@ -156,10 +154,10 @@ export default async function ConversationPage({
 
         <Section
           title="Runs"
-          description="Each run of the conversation in the order it started, with its agent, status, steps and tokens."
+          description="Each run of the session in the order it started, with its agent, status, steps and tokens."
         >
           <WindowForm
-            action={conversationHref(organization, slug, conversation.conversation_id)}
+            action={sessionHref(organization, slug, session.session_id)}
             days={days}
             label="Choose the window"
           />
@@ -179,10 +177,10 @@ export default async function ConversationPage({
               ))}
             </tbody>
           </DataTable>
-          {conversation.more && (
+          {session.more && (
             <p className="text-sm text-muted-foreground">
-              The first {formatCount(conversation.limit)} of more in this window.{" "}
-              {conversation.limit < MAX_LIMIT ? (
+              The first {formatCount(session.limit)} of more in this window.{" "}
+              {session.limit < MAX_LIMIT ? (
                 <>
                   <Link href={here({ limit: MAX_LIMIT })} className="underline underline-offset-4">
                     Show up to {formatCount(MAX_LIMIT)}

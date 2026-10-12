@@ -29,7 +29,7 @@ pub const MAX_LIMIT: u32 = 500;
 /// The most spans a trace's page shows; a run past it is shown cut short.
 pub const SPANS_MAX: u32 = 5_000;
 
-/// A window of days and a cap on rows: what the users and conversations pages are
+/// A window of days and a cap on rows: what the users and sessions pages are
 /// read by, each one aggregation over the spans of those days and never the
 /// whole table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,8 +56,8 @@ pub struct TraceFilter {
     pub agent: String,
     /// The end user, as stored: hashed, unless the project keeps it plain.
     pub user_id: String,
-    /// The conversation.
-    pub conversation_id: String,
+    /// The session, by its id.
+    pub session_id: String,
     /// How the run ended.
     pub status: Option<SpanStatus>,
     /// A model one of its calls answered with.
@@ -75,7 +75,7 @@ impl Default for TraceFilter {
         Self {
             agent: String::new(),
             user_id: String::new(),
-            conversation_id: String::new(),
+            session_id: String::new(),
             status: None,
             model: String::new(),
             tool: String::new(),
@@ -97,8 +97,8 @@ pub struct TraceRow {
     pub agent: String,
     /// The end user, as stored; empty when none was sent.
     pub user_id: String,
-    /// The conversation; empty when none was sent.
-    pub conversation_id: String,
+    /// The session's id; empty when none was sent.
+    pub session_id: String,
     /// 1 once the run's own span has arrived, 0 while it has not.
     pub ended: u8,
     /// How it ended.
@@ -150,7 +150,7 @@ macro_rules! list_sql {
     ($order:literal) => {
         concat!(
             "SELECT run_id, run_agent AS agent, run_user_id AS user_id, ",
-            "run_conversation_id AS conversation_id, run_ended AS ended, run_status AS status, ",
+            "run_session_id AS session_id, run_ended AS ended, run_status AS status, ",
             "first_started_at AS started_at, last_ended_at AS ended_at, duration_ms, ",
             "spans, steps, model_calls, tool_calls, errors, ",
             "input_total AS input_tokens, output_total AS output_tokens, ",
@@ -158,7 +158,7 @@ macro_rules! list_sql {
             "cache_write_total AS cache_write_input_tokens, tokens, models, tools ",
             "FROM (SELECT run_id, any(agent) AS run_agent, ",
             "anyIf(user_id, user_id != '') AS run_user_id, ",
-            "anyIf(conversation_id, conversation_id != '') AS run_conversation_id, ",
+            "anyIf(session_id, session_id != '') AS run_session_id, ",
             "toUInt8(countIf(kind = 'run') > 0) AS run_ended, ",
             "if(countIf(kind = 'run') > 0, anyIf(status, kind = 'run'), ",
             "if(countIf(status = 'error') > 0, 'error', 'ok')) AS run_status, ",
@@ -181,7 +181,7 @@ macro_rules! list_sql {
             "AND ({agent:String} = '' OR agent = {agent:String}) ",
             "GROUP BY run_id ",
             "HAVING ({user:String} = '' OR run_user_id = {user:String}) ",
-            "AND ({conversation:String} = '' OR run_conversation_id = {conversation:String}) ",
+            "AND ({session:String} = '' OR run_session_id = {session:String}) ",
             "AND ({status:String} = '' OR run_status = {status:String}) ",
             "AND ({model:String} = '' OR has(models, {model:String})) ",
             "AND ({tool:String} = '' OR has(tools, {tool:String}))) ",
@@ -203,8 +203,8 @@ const fn list_sql(sort: TraceSort, direction: SortDirection) -> &'static str {
         (TraceSort::Agent, Desc) => list_sql!("agent DESC"),
         (TraceSort::User, Asc) => list_sql!("user_id ASC"),
         (TraceSort::User, Desc) => list_sql!("user_id DESC"),
-        (TraceSort::Conversation, Asc) => list_sql!("conversation_id ASC"),
-        (TraceSort::Conversation, Desc) => list_sql!("conversation_id DESC"),
+        (TraceSort::Session, Asc) => list_sql!("session_id ASC"),
+        (TraceSort::Session, Desc) => list_sql!("session_id DESC"),
         (TraceSort::Status, Asc) => list_sql!("status ASC"),
         (TraceSort::Status, Desc) => list_sql!("status DESC"),
         (TraceSort::Steps, Asc) => list_sql!("steps ASC"),
@@ -222,7 +222,7 @@ const fn list_sql(sort: TraceSort, direction: SortDirection) -> &'static str {
 const SPANS_SQL: &str = "SELECT project_id, received_at, units, run_id, agent, trace_id, \
      span_id, parent_span_id, kind, name, started_at, ended_at, status, error_type, model, \
      provider, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, \
-     user_id, conversation_id, tags, bound_stall_after_s, bound_max_steps, \
+     user_id, session_id, tags, bound_stall_after_s, bound_max_steps, \
      bound_max_cost_usd, sample_rate, attributes \
      FROM telemetry.spans \
      WHERE project_id IN {projects:Array(String)} AND run_id = {run:UUID} \
@@ -247,7 +247,7 @@ pub async fn list(
         .param("days", filter.days)
         .param("agent", &filter.agent)
         .param("user", &filter.user_id)
-        .param("conversation", &filter.conversation_id)
+        .param("session", &filter.session_id)
         .param(
             "status",
             filter.status.map(|s| s.to_string()).unwrap_or_default(),
@@ -297,7 +297,7 @@ mod tests {
                     TraceSort::Started => "started_at",
                     TraceSort::Agent => "agent",
                     TraceSort::User => "user_id",
-                    TraceSort::Conversation => "conversation_id",
+                    TraceSort::Session => "session_id",
                     TraceSort::Status => "status",
                     TraceSort::Steps => "steps",
                     TraceSort::Tokens => "tokens",
@@ -309,7 +309,7 @@ mod tests {
                     "{days:UInt16}",
                     "{agent:String}",
                     "{user:String}",
-                    "{conversation:String}",
+                    "{session:String}",
                     "{status:String}",
                     "{model:String}",
                     "{tool:String}",

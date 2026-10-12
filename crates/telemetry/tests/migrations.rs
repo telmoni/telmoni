@@ -217,7 +217,7 @@ fn spans_has_a_column_for_every_field_of_the_row_and_no_other() {
         cache_read_input_tokens: 0,
         cache_write_input_tokens: 0,
         user_id: String::new(),
-        conversation_id: String::new(),
+        session_id: String::new(),
         tags: Vec::new(),
         bound_stall_after_s: None,
         bound_max_steps: None,

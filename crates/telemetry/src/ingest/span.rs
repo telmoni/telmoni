@@ -226,7 +226,7 @@ pub fn map(
         cache_read_input_tokens: fields.cache_read_input_tokens.unwrap_or_default(),
         cache_write_input_tokens: fields.cache_write_input_tokens.unwrap_or_default(),
         user_id,
-        conversation_id: fields.conversation_id.unwrap_or_default(),
+        session_id: fields.session_id.unwrap_or_default(),
         tags: fields.tags,
         bound_stall_after_s: fields.bound_stall_after_s,
         bound_max_steps: fields.bound_max_steps,
@@ -250,7 +250,7 @@ pub fn units_of(row: &SpanRow) -> u32 {
         &row.model,
         &row.provider,
         &row.user_id,
-        &row.conversation_id,
+        &row.session_id,
     ]
     .into_iter()
     .map(String::len)
@@ -281,7 +281,7 @@ struct Fields {
     cache_read_input_tokens: Option<u64>,
     cache_write_input_tokens: Option<u64>,
     user_id: Option<String>,
-    conversation_id: Option<String>,
+    session_id: Option<String>,
     cancelled: bool,
     bound_stall_after_s: Option<u32>,
     bound_max_steps: Option<u32>,
@@ -415,11 +415,11 @@ impl Fields {
                 self.cache_write_input_tokens =
                     Some(count(value, contract::CACHE_WRITE_INPUT_TOKENS)?);
             }
-            contract::CONVERSATION_ID => {
-                self.conversation_id = Some(bounded_text(
+            contract::SESSION_ID => {
+                self.session_id = Some(bounded_text(
                     value,
-                    contract::CONVERSATION_ID_MAX,
-                    contract::CONVERSATION_ID,
+                    contract::SESSION_ID_MAX,
+                    contract::SESSION_ID,
                 )?);
             }
             // ⚠ Dropped in every mode: no table keeps content until 4.1 and
@@ -644,7 +644,7 @@ mod tests {
                     Value::IntValue(40),
                 ),
                 kv(contract::USER_ID, s("acme-42")),
-                kv(contract::CONVERSATION_ID, Value::IntValue(7)),
+                kv(contract::SESSION_ID, Value::IntValue(7)),
                 kv("telmoni.tag.team", s("search")),
                 kv("gen_ai.response.id", s("resp_01")),
                 kv(
@@ -715,7 +715,7 @@ mod tests {
         );
         assert_eq!(row.status, SpanStatus::Error);
         assert_eq!(row.user_id, "h(acme-42)", "stored as the project hashes it");
-        assert_eq!(row.conversation_id, "7", "a scalar reads as text");
+        assert_eq!(row.session_id, "7", "a scalar reads as text");
         assert_eq!(row.tags, [("team".to_owned(), "search".to_owned())]);
         assert_eq!(
             row.attributes,
@@ -892,9 +892,9 @@ mod tests {
                 Refusal::OverCap(contract::ERROR_TYPE),
             ),
             (
-                contract::CONVERSATION_ID,
+                contract::SESSION_ID,
                 s(&"c".repeat(201)),
-                Refusal::OverCap(contract::CONVERSATION_ID),
+                Refusal::OverCap(contract::SESSION_ID),
             ),
         ] {
             let refused = map(

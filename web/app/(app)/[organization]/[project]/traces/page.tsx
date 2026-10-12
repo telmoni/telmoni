@@ -82,8 +82,8 @@ export default async function TracesPage({
         <section className="grid gap-3">
           <p className="text-sm text-muted-foreground">
             Every run of this project&rsquo;s agents, newest first, with its steps, model and
-            tool calls. Click a user or a conversation to see its runs together; click a heading to
-            sort by it.
+            tool calls. Click a user or a session to see its runs together; click a heading to sort
+            by it.
           </p>
 
           <FilterForm organization={organization} slug={slug} query={query} days={days} />
@@ -224,11 +224,11 @@ function TraceRow({
           href={href({ user: trace.user_id })}
         />
       </Td>
-      <Td className="max-w-48 truncate font-mono text-xs" title={trace.conversation_id || undefined}>
+      <Td className="max-w-48 truncate font-mono text-xs" title={trace.session_id || undefined}>
         <FilterLink
-          value={trace.conversation_id}
-          current={query.conversation}
-          href={href({ conversation: trace.conversation_id })}
+          value={trace.session_id}
+          current={query.session}
+          href={href({ session: trace.session_id })}
         />
       </Td>
       <Td className="whitespace-nowrap">
@@ -297,7 +297,7 @@ function FilterForm({
         [
           ["agent", "Agent"],
           ["user", "User"],
-          ["conversation", "Conversation"],
+          ["session", "Session"],
           ["model", "Model"],
           ["tool", "Tool"],
         ] as const

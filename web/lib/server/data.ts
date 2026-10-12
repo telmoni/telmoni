@@ -38,8 +38,8 @@ export type {
   ProjectEverywhereListing,
 } from "./entities/projects";
 
-export { fetchActiveSessions } from "./entities/sessions";
-export type { ActiveSession } from "./entities/sessions";
+export { fetchActiveSessions } from "./entities/active-sessions";
+export type { ActiveSession } from "./entities/active-sessions";
 export { fetchNotifications } from "./entities/notification-feed";
 export type { FeedItem, NotificationFeed } from "./entities/notification-feed";
 export { fetchProjectAnnouncement } from "./entities/announcement";
@@ -87,15 +87,15 @@ export type {
 export { fetchUsers } from "./entities/users";
 export type { UserList, UserQuery, UserRow, UsersAccess } from "./entities/users";
 
-export { fetchConversation, fetchConversations } from "./entities/conversations";
+export { fetchSession, fetchSessions } from "./entities/sessions";
 export type {
-  ConversationAccess,
-  ConversationDetail,
-  ConversationList,
-  ConversationQuery,
-  ConversationRow,
-  ConversationsAccess,
-} from "./entities/conversations";
+  SessionAccess,
+  SessionDetail,
+  SessionList,
+  SessionQuery,
+  SessionRow,
+  SessionsAccess,
+} from "./entities/sessions";
 
 export { fetchConnectors } from "./entities/connectors";
 export type {

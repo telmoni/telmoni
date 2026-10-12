@@ -195,8 +195,8 @@ interface GroupSpec {
 // unique within a rail (two rails may share one: `p` is Projects on an
 // organization's and Privacy on a project's and on Account's), never `g`, `?` or shift-`O`, the
 // one sequence that crosses rails (`lib/keys.ts`). `,` reaches Settings on
-// every rail, as `⌘,` opens preferences on a Mac; `c` is Conversations and
-// also the page's action, which `lib/keys.ts` explains is no collision.
+// every rail, as `⌘,` opens preferences on a Mac; `c` is Connectors and also
+// the page's action, which `lib/keys.ts` explains is no collision.
 
 const CORE_GROUPS: GroupSpec[] = [
   {
@@ -204,21 +204,19 @@ const CORE_GROUPS: GroupSpec[] = [
     // Alerts and Dashboards stand in the rail before their pages exist (3.12
     // and 8.5), so the console shows the product's shape while the rest is
     // built: each opens a placeholder that the real page replaces, as Traces,
-    // Conversations and Users were until theirs landed. The Observability
+    // Sessions and Users were until theirs landed. The Observability
     // block is headed because its five rows are the product, and the Project
     // block because the rest of the rail is the project's own housekeeping;
     // Overview stands alone above both.
     items: [
       { title: "Overview", path: "", icon: Activity, key: "o" },
       { title: "Traces", path: "/traces", icon: ListTree, block: { heading: "Observability" }, key: "t" },
-      { title: "Conversations", path: "/conversations", icon: MessagesSquare, key: "c" },
+      { title: "Sessions", path: "/sessions", icon: MessagesSquare, key: "s" },
       { title: "Users", path: "/users", icon: UsersRound, key: "u" },
       { title: "Alerts", path: "/alerts", icon: BellRing, key: "a" },
       { title: "Dashboards", path: "/dashboards", icon: LayoutDashboard, key: "d" },
       { title: "API keys", path: "/api-keys", icon: KeyRound, block: { heading: "Project" }, key: "k" },
-      // `i`, as in integrations: `c` is the conversations', the row people
-      // reach for more.
-      { title: "Connectors", path: "/connectors", icon: Plug, key: "i" },
+      { title: "Connectors", path: "/connectors", icon: Plug, key: "c" },
       { title: "Members", path: "/members", icon: Users, key: "m" },
       { title: "Audit log", path: "/audit-log", icon: History, key: "l" },
       { title: "Privacy", path: "/privacy", icon: ShieldCheck, key: "p" },

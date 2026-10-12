@@ -18,29 +18,29 @@ import { Role } from "@/lib/types/enums";
 
 let mockContext: unknown;
 let mockProject: unknown;
-let mockConversation: unknown;
+let mockSession: unknown;
 const fetchProjectBySlug = vi.fn<(slug: string) => Promise<unknown>>(async () => mockProject);
-const fetchConversation = vi.fn<
-  (projectId: string, conversationId: string, query: unknown) => Promise<unknown>
->(async () => mockConversation);
+const fetchSession = vi.fn<
+  (projectId: string, sessionId: string, query: unknown) => Promise<unknown>
+>(async () => mockSession);
 
 vi.mock("@/lib/server/data", () => ({
   activeOrganization: () => null,
   getServerContext: async () => mockContext,
   fetchProjectBySlug: (slug: string) => fetchProjectBySlug(slug),
-  fetchConversation: (projectId: string, conversationId: string, query: unknown) =>
-    fetchConversation(projectId, conversationId, query),
+  fetchSession: (projectId: string, sessionId: string, query: unknown) =>
+    fetchSession(projectId, sessionId, query),
 }));
 
-import ConversationPage from "./page";
+import SessionPage from "./page";
 
 // The segment as Next hands it over: decoded, slash and space and all.
-const CONVERSATION = "chat/42 b";
+const SESSION = "chat/42 b";
 const ENCODED = "chat%2F42%20b";
 const PARAMS = Promise.resolve({
   organization: "acme",
   project: "web",
-  conversation: CONVERSATION,
+  session: SESSION,
 });
 const HASHED = "9f86d081884c7d659a2feaa0c55ad015";
 const RUN_A = "5d4f5c68-0000-4000-8000-000000000001";
@@ -50,7 +50,7 @@ const TRACE_A = {
   run_id: RUN_A,
   agent: "support-bot",
   user_id: HASHED,
-  conversation_id: CONVERSATION,
+  session_id: SESSION,
   ended: true,
   status: "ok",
   started_at: "2026-10-11T03:00:00Z",
@@ -71,7 +71,7 @@ const TRACE_A = {
 const TRACE_B = {
   ...TRACE_A,
   run_id: RUN_B,
-  // The second run named no user; the conversation's user is read off the first that did.
+  // The second run named no user; the session's user is read off the first that did.
   user_id: "",
   status: "error",
   started_at: "2026-10-11T03:01:00Z",
@@ -86,8 +86,8 @@ const TRACE_B = {
 function detail(over: Record<string, unknown> = {}) {
   return {
     kind: "ok",
-    conversation: {
-      conversation_id: CONVERSATION,
+    session: {
+      session_id: SESSION,
       traces: [TRACE_A, TRACE_B],
       days: 7,
       limit: 100,
@@ -108,20 +108,17 @@ beforeEach(() => {
     flags: {},
   };
   mockProject = { id: "project_7bQx2mNv9BcK4dLp", slug: "web", name: "Web", role: Role.Member };
-  mockConversation = detail();
+  mockSession = detail();
 });
 
-describe("ConversationPage", () => {
-  it("sums the conversation and replays its runs in order, each opening its trace", async () => {
-    render(await ConversationPage({ params: PARAMS }));
-    expect(screen.getByTestId("page-header")).toHaveTextContent("Conversation");
-    expect(screen.getByTestId("page-header")).toHaveAttribute(
-      "data-back",
-      "/acme/web/conversations",
-    );
-    expect(fetchConversation).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", CONVERSATION, {});
+describe("SessionPage", () => {
+  it("sums the session and replays its runs in order, each opening its trace", async () => {
+    render(await SessionPage({ params: PARAMS }));
+    expect(screen.getByTestId("page-header")).toHaveTextContent("Session");
+    expect(screen.getByTestId("page-header")).toHaveAttribute("data-back", "/acme/web/sessions");
+    expect(fetchSession).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", SESSION, {});
 
-    expect(screen.getByText(CONVERSATION)).toBeInTheDocument();
+    expect(screen.getByText(SESSION)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: HASHED })).toHaveAttribute(
       "href",
       `/acme/web/traces?user=${HASHED}`,
@@ -141,66 +138,64 @@ describe("ConversationPage", () => {
     expect(screen.getByText("2 s")).toBeInTheDocument();
     expect(screen.getByText("500 ms")).toBeInTheDocument();
 
-    // The window form posts back to this conversation, encoded as the path carries it.
+    // The window form posts back to this session, encoded as the path carries it.
     expect(screen.getByRole("form", { name: "Choose the window" })).toHaveAttribute(
       "action",
-      `/acme/web/conversations/${ENCODED}`,
+      `/acme/web/sessions/${ENCODED}`,
     );
   });
 
   it("reads the window from the URL, hands it to the server, and offers the larger page", async () => {
-    mockConversation = detail({ traces: [TRACE_A], more: true });
+    mockSession = detail({ traces: [TRACE_A], more: true });
     render(
-      await ConversationPage({
+      await SessionPage({
         params: PARAMS,
         searchParams: Promise.resolve({ days: "30", limit: "x" }),
       }),
     );
-    expect(fetchConversation).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", CONVERSATION, {
+    expect(fetchSession).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", SESSION, {
       days: 30,
     });
     expect(screen.getByText("1 shown", { exact: false })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Show up to 500" })).toHaveAttribute(
       "href",
-      `/acme/web/conversations/${ENCODED}?days=30&limit=500`,
+      `/acme/web/sessions/${ENCODED}?days=30&limit=500`,
     );
 
     cleanup();
-    mockConversation = detail({ traces: [TRACE_A], limit: 500, more: true });
-    render(
-      await ConversationPage({ params: PARAMS, searchParams: Promise.resolve({ limit: "500" }) }),
-    );
+    mockSession = detail({ traces: [TRACE_A], limit: 500, more: true });
+    render(await SessionPage({ params: PARAMS, searchParams: Promise.resolve({ limit: "500" }) }));
     expect(screen.getByText(/Narrow the window to see the rest\./)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Show up to 500" })).toBeNull();
   });
 
-  it("says when no run of the window belonged to the conversation, and leads back", async () => {
-    mockConversation = { kind: "missing" };
-    render(await ConversationPage({ params: PARAMS }));
-    expect(screen.getByText(/No conversation with this id/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Back to the conversations" })).toHaveAttribute(
+  it("says when no run of the window belonged to the session, and leads back", async () => {
+    mockSession = { kind: "missing" };
+    render(await SessionPage({ params: PARAMS }));
+    expect(screen.getByText(/No session with this id/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to the sessions" })).toHaveAttribute(
       "href",
-      "/acme/web/conversations",
+      "/acme/web/sessions",
     );
     expect(screen.queryByRole("table")).toBeNull();
   });
 
   it("sends a refused role back to the project's overview, and says so on an outage", async () => {
-    mockConversation = { kind: "forbidden" };
-    render(await ConversationPage({ params: PARAMS }));
+    mockSession = { kind: "forbidden" };
+    render(await SessionPage({ params: PARAMS }));
     expect(screen.getByRole("link", { name: "Back to overview" })).toHaveAttribute(
       "href",
       "/acme/web",
     );
 
-    mockConversation = { kind: "unavailable" };
-    render(await ConversationPage({ params: PARAMS }));
+    mockSession = { kind: "unavailable" };
+    render(await SessionPage({ params: PARAMS }));
     expect(screen.getByTestId("outage")).toBeInTheDocument();
   });
 
   it("renders ServiceUnavailable when context fails", async () => {
     mockContext = null;
-    render(await ConversationPage({ params: PARAMS }));
+    render(await SessionPage({ params: PARAMS }));
     expect(screen.getByTestId("outage")).toBeInTheDocument();
   });
 });

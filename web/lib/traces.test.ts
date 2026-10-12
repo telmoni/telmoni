@@ -32,7 +32,7 @@ function span(over: Partial<TraceSpan> & Pick<TraceSpan, "span_id" | "kind">): T
     cache_read_input_tokens: 0,
     cache_write_input_tokens: 0,
     user_id: "",
-    conversation_id: "",
+    session_id: "",
     tags: {},
     bound_stall_after_s: null,
     bound_max_steps: null,
@@ -51,7 +51,7 @@ describe("the URL as the list's state", () => {
       parseTraceQuery({
         agent: " nightly-report ",
         user: "9f86d081884c7d659a2feaa0c55ad015",
-        conversation: ["conv-1", "conv-2"],
+        session: ["conv-1", "conv-2"],
         status: "error",
         model: "gpt-x",
         tool: "search_docs",
@@ -63,7 +63,7 @@ describe("the URL as the list's state", () => {
     ).toEqual({
       agent: "nightly-report",
       user: "9f86d081884c7d659a2feaa0c55ad015",
-      conversation: "conv-1",
+      session: "conv-1",
       status: "error",
       model: "gpt-x",
       tool: "search_docs",

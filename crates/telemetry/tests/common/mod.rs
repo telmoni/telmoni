@@ -461,9 +461,9 @@ pub(crate) async fn rows_of(store: &Store, project: &ProjectId) -> (u64, u64) {
     (spans, hours)
 }
 
-/// One run of `support-bot` as the users and conversations pages sum it: its
-/// run span, one step and one model call with `tokens`, every span carrying
-/// `user` and `conversation`, started at `started` and received now, the run
+/// One run of `support-bot` as the users and sessions pages sum it: its run
+/// span, one step and one model call with `tokens`, every span carrying
+/// `user` and `session`, started at `started` and received now, the run
 /// `failed` or not, its span ids from `n`.
 #[expect(
     clippy::too_many_arguments,
@@ -473,7 +473,7 @@ pub(crate) fn run_of(
     project: &ProjectId,
     run: Uuid,
     user: &str,
-    conversation: &str,
+    session: &str,
     started: DateTime<Utc>,
     tokens: (u64, u64),
     failed: bool,
@@ -485,7 +485,7 @@ pub(crate) fn run_of(
         span_id: format!("{span:016x}"),
         parent_span_id: parent.map(|p| format!("{p:016x}")).unwrap_or_default(),
         user_id: user.into(),
-        conversation_id: conversation.into(),
+        session_id: session.into(),
         ..row
     };
     [
@@ -571,7 +571,7 @@ pub(crate) fn received(
         cache_read_input_tokens: 0,
         cache_write_input_tokens: 0,
         user_id: String::new(),
-        conversation_id: String::new(),
+        session_id: String::new(),
         tags: Vec::new(),
         bound_stall_after_s: None,
         bound_max_steps: None,
