@@ -14,7 +14,14 @@ vi.mock("./identity-context", () => ({
     "x-project-id": projectId,
   }),
 }));
-import { fetchTrace, fetchTraces } from "./traces";
+import {
+  fetchTrace,
+  fetchTraceFacets,
+  fetchTraceHistogram,
+  fetchTraces,
+  fetchTraceViews,
+  traceDownload,
+} from "./traces";
 
 const PROJECT = "project_1";
 const RUN = "5d4f5c68-0000-4000-8000-000000000001";
@@ -41,7 +48,62 @@ const TRACE = {
   models: ["claude-sonnet-5-5"],
   tools: ["search_docs"],
 };
-const LIST = { traces: [TRACE], days: 7, limit: 100, more: false, sort: "started", dir: "desc" };
+const LIST = {
+  traces: [TRACE],
+  days: 7,
+  limit: 50,
+  page: 1,
+  total: 1,
+  more: false,
+  sort: "started",
+  dir: "desc",
+};
+
+const FACET = { values: [{ value: "nightly-report", runs: 1 }], more: false };
+const FACETS = {
+  days: 7,
+  agent: FACET,
+  user: { values: [], more: false },
+  session: { values: [], more: false },
+  status: { values: [{ value: "ok", runs: 1 }], more: false },
+  model: { values: [], more: false },
+  tool: { values: [], more: false },
+};
+
+const HISTOGRAM = {
+  days: 1,
+  bucket_seconds: 3600,
+  utc_offset: 330,
+  bars: [
+    {
+      at: "2026-10-11T02:30:00Z",
+      ok: 1,
+      error: 0,
+      cancelled: 0,
+      tokens: 1500,
+      duration_p50_ms: 2000,
+      duration_p95_ms: 2000,
+    },
+    {
+      at: "2026-10-11T03:30:00Z",
+      ok: 0,
+      error: 0,
+      cancelled: 0,
+      tokens: 0,
+      duration_p50_ms: null,
+      duration_p95_ms: null,
+    },
+  ],
+};
+
+const VIEW = {
+  id: "0b6f2c1e-6a4f-4d2b-9e3a-5c7d8e9f0a1b",
+  name: "Errors",
+  query: { status: ["error"], sort: "duration" },
+  columns: ["started", "duration"],
+  created_at: "2026-10-11T03:00:00Z",
+  updated_at: "2026-10-11T03:00:00Z",
+};
 
 const SPAN = {
   span_id: "0000000000000001",
@@ -83,14 +145,18 @@ beforeEach(() => {
 });
 
 describe("fetchTraces", () => {
-  it("reads the list from telemetry's lane, as the project, with the query", async () => {
+  it("reads a page of the list from telemetry's lane, as the project, a filter's values given again", async () => {
     answer(200, LIST);
-    expect(await fetchTraces(PROJECT, { agent: "nightly-report", sort: "user" })).toEqual({
+    expect(
+      await fetchTraces(PROJECT, { agent: ["nightly-report", "zeta"], sort: "user", limit: 50, page: 2 }),
+    ).toEqual({
       kind: "ok",
       list: LIST,
     });
     const [url, init] = fetchWithTimeout.mock.calls[0];
-    expect(url).toBe("http://server/internal/telemetry/traces?agent=nightly-report&sort=user");
+    expect(url).toBe(
+      "http://server/internal/telemetry/traces?agent=nightly-report&agent=zeta&sort=user&limit=50&page=2",
+    );
     expect(init.headers).toMatchObject({ "x-project-id": PROJECT });
   });
 
@@ -110,6 +176,80 @@ describe("fetchTraces", () => {
     identityContext.mockResolvedValue(null);
     expect(await fetchTraces(PROJECT, {})).toEqual({ kind: "unavailable" });
     expect(fetchWithTimeout).not.toHaveBeenCalled();
+  });
+});
+
+describe("the reads beside the list", () => {
+  // Each of these lanes refuses a parameter it has no use for, so each is
+  // sent the filters and the window alone.
+  const QUERY = { agent: ["zeta"], status: ["error" as const], sort: "tokens" as const, page: 3, limit: 25, days: 30 };
+
+  it("reads each filter's values with the filters and the window alone", async () => {
+    answer(200, FACETS);
+    expect(await fetchTraceFacets(PROJECT, QUERY)).toEqual({ kind: "ok", facets: FACETS });
+    const [url] = fetchWithTimeout.mock.calls[0];
+    expect(url).toBe("http://server/internal/telemetry/traces/facets?agent=zeta&status=error&days=30");
+  });
+
+  it("reads the histogram on the reader's clock, its empty bars with no durations", async () => {
+    answer(200, HISTOGRAM);
+    expect(await fetchTraceHistogram(PROJECT, QUERY, 330)).toEqual({ kind: "ok", histogram: HISTOGRAM });
+    const [url] = fetchWithTimeout.mock.calls[0];
+    expect(url).toBe(
+      "http://server/internal/telemetry/traces/histogram?agent=zeta&status=error&days=30&utc_offset=330",
+    );
+  });
+
+  it("reads the project's saved views", async () => {
+    answer(200, { views: [VIEW] });
+    expect(await fetchTraceViews(PROJECT)).toEqual({ kind: "ok", views: [VIEW] });
+    const [url] = fetchWithTimeout.mock.calls[0];
+    expect(url).toBe("http://server/internal/telemetry/views");
+  });
+
+  it("reads a refusal as forbidden, and a shape it cannot read as unavailable", async () => {
+    answer(403, {});
+    expect(await fetchTraceFacets(PROJECT, {})).toEqual({ kind: "forbidden" });
+    answer(200, { ...HISTOGRAM, bars: [{ at: "x" }] });
+    expect(await fetchTraceHistogram(PROJECT, {}, 0)).toEqual({ kind: "unavailable" });
+    answer(200, { views: [{ ...VIEW, columns: ["run_id"] }] });
+    expect(await fetchTraceViews(PROJECT)).toEqual({ kind: "unavailable" });
+  });
+});
+
+describe("traceDownload", () => {
+  function file(status: number, contentType = "text/csv; charset=utf-8") {
+    fetchWithTimeout.mockResolvedValue({
+      ok: status < 400,
+      status,
+      headers: new Headers({ "content-type": contentType }),
+      arrayBuffer: async () => new TextEncoder().encode("run_id\r\n").buffer,
+    });
+  }
+
+  it("asks for the list's filters and sort as a file, never its page, or the chosen runs", async () => {
+    file(200);
+    const result = await traceDownload(
+      PROJECT,
+      { agent: ["zeta"], sort: "tokens", page: 3, limit: 25 },
+      "csv",
+      [RUN],
+    );
+    expect(result).toMatchObject({ kind: "ok", contentType: "text/csv; charset=utf-8" });
+    const [url, , timeout] = fetchWithTimeout.mock.calls[0];
+    expect(url).toBe(
+      `http://server/internal/telemetry/traces/export?agent=zeta&sort=tokens&format=csv&run=${RUN}`,
+    );
+    expect(timeout).toBeGreaterThan(10_000);
+  });
+
+  it("reads a 400 as a refusal of the query, and a 403 as forbidden", async () => {
+    file(400);
+    expect(await traceDownload(PROJECT, {}, "json", [])).toEqual({ kind: "refused" });
+    file(403);
+    expect(await traceDownload(PROJECT, {}, "json", [])).toEqual({ kind: "forbidden" });
+    file(503);
+    expect(await traceDownload(PROJECT, {}, "json", [])).toEqual({ kind: "unavailable" });
   });
 });
 

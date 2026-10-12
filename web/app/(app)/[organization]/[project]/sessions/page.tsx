@@ -2,13 +2,15 @@ import Link from "next/link";
 
 import { AccessDenied } from "@/components/access-denied";
 import { DataTable, THead, Td } from "@/components/data-table";
+import { LinkPending } from "@/components/link-pending";
 import { LocalTime } from "@/components/local-time";
 import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { SortHeading } from "@/components/sort-heading";
 import { Card } from "@/components/ui/card";
-import { WindowForm } from "@/components/window-form";
+import { WindowPicker } from "@/components/window-picker";
 import { ownerContact } from "@/lib/identity";
+import { LIST_DIMS_WHILE_PENDING } from "@/lib/list-pending";
 import { MAX_LIMIT, type SearchParams } from "@/lib/list-query";
 import {
   activeOrganization,
@@ -69,19 +71,19 @@ export default async function SessionsPage({
     <>
       <PageHeader title="Sessions" count={list.more ? undefined : list.sessions.length} />
       <div className="grid gap-6">
-        <section className="grid gap-3">
+        {/* The window, the headings and the link to more mark themselves
+            pending while the list they asked for is on its way, and the
+            list dims under them. */}
+        <section className="group/list grid gap-3">
           <p className="text-sm text-muted-foreground">
             Every session this project&rsquo;s agents took part in, last heard from first, with the
             user it was with and its traces, errors, steps and tokens. Click a session to replay
             its runs; click a heading to sort by it.
           </p>
 
-          <WindowForm
-            action={projectPath(organization, slug, "/sessions")}
-            days={days}
-            carry={{ sort: query.sort, dir: query.dir }}
-            label="Choose the window"
-          />
+          <div>
+            <WindowPicker days={days} />
+          </div>
 
           {list.sessions.length === 0 ? (
             <Card className="overflow-hidden p-0 gap-0">
@@ -99,7 +101,7 @@ export default async function SessionsPage({
               </div>
             </Card>
           ) : (
-            <DataTable>
+            <DataTable className={LIST_DIMS_WHILE_PENDING}>
               <THead>
                 {SESSION_COLUMNS.map((column) => (
                   <SortHeading
@@ -120,7 +122,7 @@ export default async function SessionsPage({
                     open={sessionHref(organization, slug, s.session_id, {
                       days: query.days,
                     })}
-                    user={tracesHref(organization, slug, { user: s.user_id, days: query.days })}
+                    user={tracesHref(organization, slug, { user: [s.user_id], days: query.days })}
                   />
                 ))}
               </tbody>
@@ -132,8 +134,13 @@ export default async function SessionsPage({
               The first {formatCount(list.limit)} of more in this window.{" "}
               {list.limit < MAX_LIMIT ? (
                 <>
-                  <Link href={href({ limit: MAX_LIMIT })} className="underline underline-offset-4">
+                  <Link
+                    href={href({ limit: MAX_LIMIT })}
+                    scroll={false}
+                    className="underline underline-offset-4"
+                  >
                     Show up to {formatCount(MAX_LIMIT)}
+                    <LinkPending />
                   </Link>
                   , or narrow the window.
                 </>

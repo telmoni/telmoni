@@ -10,6 +10,13 @@ vi.mock("@/components/page-header", () => ({
   ),
 }));
 
+// The window picker reads and writes the URL through the router.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  usePathname: () => "/acme/web/sessions/conv-1",
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 vi.mock("@/components/service-unavailable", () => ({
   ServiceUnavailable: () => <div data-testid="outage">unavailable</div>,
 }));
@@ -138,11 +145,9 @@ describe("SessionPage", () => {
     expect(screen.getByText("2 s")).toBeInTheDocument();
     expect(screen.getByText("500 ms")).toBeInTheDocument();
 
-    // The window form posts back to this session, encoded as the path carries it.
-    expect(screen.getByRole("form", { name: "Choose the window" })).toHaveAttribute(
-      "action",
-      `/acme/web/sessions/${ENCODED}`,
-    );
+    // The window picker stands at the session's window; a pick rewrites this
+    // page's own address, read from the router, so the encoded id carries over.
+    expect(screen.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 7 days");
   });
 
   it("reads the window from the URL, hands it to the server, and offers the larger page", async () => {

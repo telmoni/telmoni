@@ -134,7 +134,7 @@ export default async function TracePage({
               <span className="tabular-nums">{formatDuration(duration)}</span>
             </Row>
             <Row label="User" hint="The end user, as stored.">
-              <Value mono value={root.user_id} href={tracesHref(organization, slug, { user: root.user_id, days: reaching })} />
+              <Value mono value={root.user_id} href={tracesHref(organization, slug, { user: [root.user_id], days: reaching })} />
             </Row>
             <Row label="Session" hint="The one this run was part of, as the application named it.">
               <Value mono value={root.session_id} href={sessionHref(organization, slug, root.session_id, { days: reaching })} />

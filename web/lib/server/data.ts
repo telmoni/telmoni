@@ -73,15 +73,28 @@ export type { ContentModeSetting } from "./entities/content-mode";
 export { fetchFieldInventory } from "./entities/field-inventory";
 export type { FieldInventory } from "./entities/field-inventory";
 
-export { fetchTrace, fetchTraces } from "./entities/traces";
+export {
+  fetchTrace,
+  fetchTraceFacets,
+  fetchTraceHistogram,
+  fetchTraces,
+  fetchTraceViews,
+  traceDownload,
+} from "./entities/traces";
 export type {
+  DownloadFormat,
+  Facet,
   Trace,
   TraceAccess,
   TraceDetail,
+  TraceFacets,
+  TraceHistogram,
   TraceList,
   TraceQuery,
   TraceSpan,
   TracesAccess,
+  TraceView,
+  ViewQuery,
 } from "./entities/traces";
 
 export { fetchUsers } from "./entities/users";

@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import { SortDirection, SpanStatus } from "@/lib/types/enums";
 
 import {
+  FILTER_VALUES_MAX,
   compact,
   listHref,
+  many,
   one,
   oneOf,
   parseWindow,
@@ -50,6 +52,14 @@ describe("reading a list's URL", () => {
     expect(whole(undefined, 360)).toBeUndefined();
   });
 
+  it("reads a filter given again as its values, each trimmed and once", () => {
+    expect(many(["support-bot", " zeta ", "support-bot", "  "])).toEqual(["support-bot", "zeta"]);
+    expect(many("nightly-report")).toEqual(["nightly-report"]);
+    expect(many(undefined)).toEqual([]);
+    const lots = Array.from({ length: FILTER_VALUES_MAX + 5 }, (_, i) => `agent-${i}`);
+    expect(many(lots)).toHaveLength(FILTER_VALUES_MAX);
+  });
+
   it("reads a word of a vocabulary, and not its name", () => {
     expect(oneOf("error", SpanStatus)).toBe("error");
     expect(oneOf(["ok"], SpanStatus)).toBe("ok");
@@ -78,6 +88,9 @@ describe("writing it", () => {
       "?days=30&status=error",
     );
     expect(queryString({ user: "a b&c" })).toBe("?user=a+b%26c");
+    expect(queryString({ agent: ["support-bot", "", "zeta"], status: [] })).toBe(
+      "?agent=support-bot&agent=zeta",
+    );
   });
 
   it("patches a list's path, dropping a key patched away and keeping the rest in place", () => {

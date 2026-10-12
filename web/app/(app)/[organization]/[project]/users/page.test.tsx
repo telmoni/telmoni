@@ -11,6 +11,13 @@ vi.mock("@/components/page-header", () => ({
   ),
 }));
 
+// The window picker reads and writes the URL through the router.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  usePathname: () => "/acme/web/users",
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 vi.mock("@/components/service-unavailable", () => ({
   ServiceUnavailable: () => <div data-testid="outage">unavailable</div>,
 }));
@@ -115,7 +122,7 @@ describe("UsersPage", () => {
     );
   });
 
-  it("reads the URL's sort and window, hands them to the server, and carries them in the form", async () => {
+  it("reads the URL's sort and window, hands them to the server, and shows the window picked", async () => {
     render(
       await UsersPage({
         params: PARAMS,
@@ -134,11 +141,7 @@ describe("UsersPage", () => {
       "href",
       "/acme/web/users?sort=first_seen&days=30&dir=desc",
     );
-    const form = screen.getByRole("form", { name: "Choose the window" });
-    expect(form).toHaveAttribute("action", "/acme/web/users");
-    expect(screen.getByRole("combobox", { name: /Window/ })).toHaveValue("30");
-    expect(form.querySelector('input[name="sort"]')).toHaveValue("first_seen");
-    expect(form.querySelector('input[name="dir"]')).toBeNull();
+    expect(screen.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 30 days");
   });
 
   it("says when the window holds more, and offers the larger page", async () => {

@@ -1,0 +1,57 @@
+import Link from "next/link";
+import { XIcon } from "lucide-react";
+
+import { LinkPending } from "@/components/link-pending";
+import { Badge } from "@/components/ui/badge";
+import type { TraceQuery } from "@/lib/server/entities/traces";
+import { activeFilters, tracesHref, unfiltered, without, type TraceUi } from "@/lib/traces";
+
+// The filters in force above the list, as Langfuse writes its query above
+// its table: a value at a time, each taken off by its own ×, and all of them
+// at once. Plain links, so the bar is the server's to draw.
+export function TraceFilterBar({
+  organization,
+  slug,
+  query,
+  ui,
+}: {
+  organization: string;
+  slug: string;
+  query: TraceQuery;
+  ui: TraceUi;
+}) {
+  const chips = activeFilters(query);
+  if (chips.length === 0) return null;
+  return (
+    <div
+      className="flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border border-border px-2 py-1"
+      aria-label="Filters in force"
+    >
+      {chips.map((chip) => (
+        <Badge key={`${chip.filter}:${chip.value}`} variant="secondary" className="max-w-full gap-1 font-normal">
+          <span className="text-muted-foreground">{chip.label}:</span>
+          <span className="max-w-56 truncate" title={chip.value}>
+            {chip.text}
+          </span>
+          <Link
+            href={tracesHref(organization, slug, without(query, chip.filter, chip.value), {}, ui)}
+            scroll={false}
+            aria-label={`Clear ${chip.label.toLowerCase()} ${chip.text}`}
+            className="rounded-sm text-muted-foreground hover:text-foreground"
+          >
+            <XIcon className="size-3" aria-hidden="true" />
+            <LinkPending />
+          </Link>
+        </Badge>
+      ))}
+      <Link
+        href={tracesHref(organization, slug, unfiltered(query), {}, ui)}
+        scroll={false}
+        className="ml-auto text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+      >
+        Clear all
+        <LinkPending />
+      </Link>
+    </div>
+  );
+}

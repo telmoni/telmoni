@@ -11,6 +11,13 @@ vi.mock("@/components/page-header", () => ({
   ),
 }));
 
+// The window picker reads and writes the URL through the router.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  usePathname: () => "/acme/web/sessions",
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 vi.mock("@/components/service-unavailable", () => ({
   ServiceUnavailable: () => <div data-testid="outage">unavailable</div>,
 }));
@@ -132,7 +139,7 @@ describe("SessionsPage", () => {
     );
   });
 
-  it("reads the URL's sort and window, hands them to the server, and carries them in the form", async () => {
+  it("reads the URL's sort and window, hands them to the server, and shows the window picked", async () => {
     render(
       await SessionsPage({
         params: PARAMS,
@@ -148,11 +155,7 @@ describe("SessionsPage", () => {
       "aria-sort",
       "descending",
     );
-    const form = screen.getByRole("form", { name: "Choose the window" });
-    expect(form).toHaveAttribute("action", "/acme/web/sessions");
-    expect(screen.getByRole("combobox", { name: /Window/ })).toHaveValue("90");
-    expect(form.querySelector('input[name="sort"]')).toHaveValue("user");
-    expect(form.querySelector('input[name="dir"]')).toHaveValue("desc");
+    expect(screen.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 90 days");
   });
 
   it("says when the window holds more, and offers the larger page", async () => {

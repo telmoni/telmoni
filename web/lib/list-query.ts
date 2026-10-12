@@ -13,6 +13,19 @@ export const MAX_DAYS = 360;
 export const MAX_LIMIT = 500;
 /** The windows a page offers, in days. */
 export const WINDOWS = [1, 7, 30, 90] as const;
+
+/** A window of days as a page names it. */
+export function windowLabel(days: number): string {
+  return days === 1 ? "Last day" : `Last ${days} days`;
+}
+
+/** The windows a page offers, and the one in force among them: a window the
+ *  URL asked for by hand is offered too, so the picker says what is shown. */
+export function windowsOffered(days: number): number[] {
+  return (WINDOWS as readonly number[]).includes(days)
+    ? [...WINDOWS]
+    : [...WINDOWS, days].sort((a, b) => a - b);
+}
 /** The week a list opens on when its URL names no window, as the server's. */
 const OPENING_DAYS = 7;
 
@@ -38,6 +51,22 @@ export function one(value: string | string[] | undefined): string | undefined {
   const text = Array.isArray(value) ? value[0] : value;
   const trimmed = text?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+/** The most values one filter carries, as the server admits them. */
+export const FILTER_VALUES_MAX = 50;
+
+/** A filter's values as the URL repeats it, each trimmed and once, an empty
+ *  one dropped; past the most a filter admits, the rest are let go rather
+ *  than turning the page into a refusal. */
+export function many(value: string | string[] | undefined): string[] {
+  const given = Array.isArray(value) ? value : value === undefined ? [] : [value];
+  const kept: string[] = [];
+  for (const text of given) {
+    const trimmed = text.trim();
+    if (trimmed && !kept.includes(trimmed)) kept.push(trimmed);
+  }
+  return kept.slice(0, FILTER_VALUES_MAX);
 }
 
 /** A whole number from 1 to `max`, or none: a day count or a page's limit. */
@@ -76,11 +105,19 @@ export function compact<Q extends object>(query: Q): Q {
   return query;
 }
 
+/** One parameter's value as a URL or a lane takes it: a filter's values are
+ *  the parameter given again, once each. */
+export type QueryValue = string | number | readonly string[] | undefined;
+
 /** The query string a lane or a path takes, with only the keys that are set. */
-export function queryString(query: Record<string, string | number | undefined>): string {
+export function queryString(query: Record<string, QueryValue>): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
     if (value === undefined || value === "") continue;
+    if (typeof value === "object") {
+      for (const each of value) if (each !== "") params.append(key, each);
+      continue;
+    }
     params.set(key, String(value));
   }
   const text = params.toString();
@@ -93,8 +130,8 @@ export function listHref(
   organization: string,
   project: string,
   page: string,
-  query: Record<string, string | number | undefined>,
-  patch: Record<string, string | number | undefined> = {},
+  query: Record<string, QueryValue>,
+  patch: Record<string, QueryValue> = {},
 ): string {
   return projectPath(organization, project, `${page}${queryString({ ...query, ...patch })}`);
 }

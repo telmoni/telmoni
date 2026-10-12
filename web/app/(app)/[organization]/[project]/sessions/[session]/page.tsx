@@ -9,7 +9,7 @@ import { Section } from "@/components/section";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { TraceStatusBadge } from "@/components/trace-status-badge";
 import { Card } from "@/components/ui/card";
-import { WindowForm } from "@/components/window-form";
+import { WindowPicker } from "@/components/window-picker";
 import { ownerContact } from "@/lib/identity";
 import { MAX_LIMIT, parseWindow, type SearchParams } from "@/lib/list-query";
 import {
@@ -108,7 +108,7 @@ export default async function SessionPage({
             <Row label="User" hint="The end user, as stored.">
               {user ? (
                 <Link
-                  href={tracesHref(organization, slug, { user, days: query.days })}
+                  href={tracesHref(organization, slug, { user: [user], days: query.days })}
                   className="font-mono text-xs underline-offset-4 hover:underline"
                 >
                   {user}
@@ -156,11 +156,9 @@ export default async function SessionPage({
           title="Runs"
           description="Each run of the session in the order it started, with its agent, status, steps and tokens."
         >
-          <WindowForm
-            action={sessionHref(organization, slug, session.session_id)}
-            days={days}
-            label="Choose the window"
-          />
+          <div>
+            <WindowPicker days={days} />
+          </div>
           <DataTable>
             <THead>
               <Th className="whitespace-nowrap">Trace</Th>
