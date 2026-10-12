@@ -1,6 +1,5 @@
 "use client";
 
-import type { SearchIndex } from "@/app/(app)/search-actions";
 import { useConsoleUi } from "@/components/console-ui-context";
 import { useSearchIndex } from "@/components/search/use-search-index";
 
@@ -34,6 +33,7 @@ import { SEARCH_MODIFIER_KEY } from "@/lib/keys";
 import {
   GROUP_LABELS,
   groupItems,
+  type SearchIndex,
   type SearchItem,
   type SearchKind,
 } from "@/lib/search";

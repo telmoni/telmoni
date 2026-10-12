@@ -1,6 +1,7 @@
-"use server";
+import { type NextRequest, NextResponse } from "next/server";
 
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
+import type { SearchIndex, SearchItem, SearchSection } from "@/lib/search";
 import {
   activeOrganization,
   fetchMembers,
@@ -10,18 +11,14 @@ import {
 } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
 import { projectPath } from "@/lib/slug";
-import type { SearchItem } from "@/lib/search";
 
-export interface SearchSection {
-  items: SearchItem[];
-  forbidden: boolean;
-  unavailable: boolean;
-}
+// The search palette's index of a project — its API keys and its members,
+// each leading to the page that lists it. A read, so a Route Handler: Server
+// Actions are for writes, and the client sends them one at a time, so the
+// palette opened during a slow save would wait on the save. Its answer is
+// the session's own, so nothing in between keeps a copy.
 
-export interface SearchIndex {
-  keys: SearchSection;
-  members: SearchSection;
-}
+const NO_STORE = { "cache-control": "private, no-store" };
 
 const REFUSED: SearchSection = { items: [], forbidden: true, unavailable: false };
 const BROKEN: SearchSection = { items: [], forbidden: false, unavailable: true };
@@ -33,23 +30,26 @@ const ok = (items: SearchItem[]): SearchSection => ({
 
 const PROJECT_ID_RE = /^project_[0-9A-Za-z]{16}$/;
 
-export async function searchIndexAction(
-  projectId: string,
-): Promise<SearchIndex | { error: string }> {
+function refuse(error: string, status: number) {
+  return NextResponse.json({ error }, { status, headers: NO_STORE });
+}
+
+export async function GET(request: NextRequest) {
   const session = await getServerSession();
-  if (!session) return { error: "Your session expired — sign in again." };
+  if (!session) return refuse("Your session expired — sign in again.", 401);
 
   const limited = await rateLimit(sessionKey(session, "search:index"), {
     limit: 30,
     windowMs: 60_000,
   });
-  if (limited) return { error: "Too many requests — slow down a moment." };
+  if (limited) return refuse("Too many requests — slow down a moment.", 429);
 
-  if (!PROJECT_ID_RE.test(projectId)) return { error: "Unknown project." };
+  const projectId = request.nextUrl.searchParams.get("project") ?? "";
+  if (!PROJECT_ID_RE.test(projectId)) return refuse("Unknown project.", 404);
 
   const [project, gate] = await Promise.all([fetchProject(projectId), getServerContext()]);
   const organization = gate ? activeOrganization(gate) : null;
-  if (!project || !organization) return { error: "Unknown project." };
+  if (!project || !organization) return refuse("Unknown project.", 404);
   const page = (path: string) => projectPath(organization.slug, project.slug, path);
 
   const [tokens, members] = await Promise.all([
@@ -57,7 +57,7 @@ export async function searchIndexAction(
     fetchMembers(projectId),
   ]);
 
-  return {
+  const index: SearchIndex = {
     keys:
       tokens.kind === "ok"
         ? ok(
@@ -88,5 +88,5 @@ export async function searchIndexAction(
           ? REFUSED
           : BROKEN,
   };
+  return NextResponse.json(index, { headers: NO_STORE });
 }
-

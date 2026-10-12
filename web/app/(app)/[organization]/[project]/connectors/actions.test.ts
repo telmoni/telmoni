@@ -40,7 +40,6 @@ import { getServerSession } from "@/lib/server/session";
 import {
   createWebhookConnectorAction,
   disconnectConnectorAction,
-  listDeliveriesAction,
   redeliverAction,
   rotateWebhookSecretAction,
   sendTestMessageAction,
@@ -204,10 +203,16 @@ describe("sendTestMessageAction", () => {
     );
   });
 
-  it("returns the service's refusal as the message", async () => {
+  // A refusal that names the connection retires it upstream, so the page is
+  // read again after a refusal as after a delivery.
+  it("returns the service's refusal as the message, and re-reads the page", async () => {
     fetchMock.mockResolvedValue(new Response("{}", { status: 409 }));
     const res = await sendTestMessageAction(PROJECT, ID);
     expect(res.error).toBe("connection not found");
+    expect(vi.mocked(revalidatePath)).toHaveBeenCalledWith(
+      "/(app)/[organization]/[project]/connectors",
+      "page",
+    );
   });
 });
 
@@ -436,103 +441,6 @@ describe("rotateWebhookSecretAction", () => {
   });
 });
 
-describe("listDeliveriesAction", () => {
-  const page = {
-    deliveries: [
-      {
-        id: DELIVERY,
-        kind: "member_added",
-        subject: "Ada joined Project",
-        body: "Ada accepted an invitation.",
-        status: "failed",
-        next_attempt_at: "2026-09-21T12:00:00Z",
-        last_error: "HTTP 500",
-        created_at: "2026-09-20T12:00:00Z",
-        updated_at: "2026-09-21T12:00:00Z",
-        attempts: [
-          {
-            id: "55555555-5555-4555-8555-555555555555",
-            trigger: "scheduled",
-            outcome: "failed",
-            status_code: 500,
-            duration_ms: 120,
-            error: "HTTP 500",
-            created_at: "2026-09-20T12:00:01Z",
-          },
-        ],
-      },
-    ],
-    next_before: DELIVERY,
-  };
-
-  it("reads the first page under the project's headers", async () => {
-    fetchMock.mockResolvedValue(json(page));
-    const res = await listDeliveriesAction(PROJECT, ID, null);
-    expect(res).toEqual({ error: null, page });
-    expect(fetchMock).toHaveBeenCalledWith(
-      `http://notifications.test/internal/connectors/${ID}/deliveries?limit=25`,
-      expect.objectContaining({
-        method: "GET",
-        headers: expect.objectContaining({ authorization: "Bearer at_1" }),
-      }),
-    );
-    expect(vi.mocked(revalidatePath)).not.toHaveBeenCalled();
-  });
-
-  it("pages back from the cursor", async () => {
-    fetchMock.mockResolvedValue(json({ deliveries: [], next_before: null }));
-    await listDeliveriesAction(PROJECT, ID, DELIVERY);
-    expect(fetchMock).toHaveBeenCalledWith(
-      `http://notifications.test/internal/connectors/${ID}/deliveries?limit=25&before=${DELIVERY}`,
-      expect.anything(),
-    );
-  });
-
-  // A member reads the log too: the role is the service's to check, so the
-  // action asks the same way whatever the project role.
-  it("reads for a member as for an owner", async () => {
-    vi.mocked(fetchProject).mockResolvedValue({
-    id: PROJECT,
-    slug: "project",
-    name: "Project",
-    role: "member",
-  });
-    fetchMock.mockResolvedValue(json(page));
-    expect((await listDeliveriesAction(PROJECT, ID, null)).error).toBeNull();
-  });
-
-  it("refuses a malformed cursor before any request", async () => {
-    const res = await listDeliveriesAction(PROJECT, ID, "not-a-uuid");
-    expect(res.error).toMatch(/invalid delivery/i);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("refuses a malformed connection id before any request", async () => {
-    const res = await listDeliveriesAction(PROJECT, "not-a-uuid", null);
-    expect(res.error).toMatch(/invalid connection/i);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("returns the service's refusal as the message", async () => {
-    fetchMock.mockResolvedValue(new Response("{}", { status: 404 }));
-    expect(await listDeliveriesAction(PROJECT, ID, null)).toEqual({
-      error: "connection not found",
-    });
-  });
-
-  it("reports a shape it cannot read", async () => {
-    fetchMock.mockResolvedValue(json({ deliveries: [{ id: DELIVERY }], next_before: null }));
-    const res = await listDeliveriesAction(PROJECT, ID, null);
-    expect(res.error).toMatch(/unexpected response/i);
-    expect(res.page).toBeUndefined();
-  });
-
-  it("reports an unreachable service", async () => {
-    fetchMock.mockResolvedValue(null);
-    expect((await listDeliveriesAction(PROJECT, ID, null)).error).toMatch(/unavailable/i);
-  });
-});
-
 describe("redeliverAction", () => {
   const url = `http://notifications.test/internal/connectors/${ID}/deliveries/${DELIVERY}/redeliver`;
 
@@ -566,12 +474,17 @@ describe("redeliverAction", () => {
 
   // 409 is a stopped connection or an attempt already in flight; the
   // problem's own sentence says which.
-  it("returns the service's refusal as the message", async () => {
+  // A refusal that names the connection retires it upstream, so the page is
+  // read again after a refusal as after a delivery.
+  it("returns the service's refusal as the message, and re-reads the page", async () => {
     fetchMock.mockResolvedValue(new Response("{}", { status: 409 }));
     expect(await redeliverAction(PROJECT, ID, DELIVERY)).toEqual({
       error: "connection not found",
     });
-    expect(vi.mocked(revalidatePath)).not.toHaveBeenCalled();
+    expect(vi.mocked(revalidatePath)).toHaveBeenCalledWith(
+      "/(app)/[organization]/[project]/connectors",
+      "page",
+    );
   });
 
   it("refuses a malformed delivery id before any request", async () => {

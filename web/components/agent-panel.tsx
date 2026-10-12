@@ -5,17 +5,17 @@ import { flushSync } from "react-dom";
 import { usePathname } from "next/navigation";
 import { ArrowUp, HistoryIcon, Info, MessageSquare, Plus, Square } from "lucide-react";
 
-import {
-  agentStatusAction,
-  deleteAgentConversationAction,
-  listAgentConversationsAction,
-  openAgentConversationAction,
-} from "@/app/(app)/agent-actions";
+import { deleteAgentConversationAction } from "@/app/(app)/agent-actions";
 import { useConsoleUi } from "@/components/console-ui-context";
 import { Conversation } from "@/components/agent/agent-messages";
 import { Empty, HistoryList, ICON_BUTTON, type HistoryState } from "@/components/agent/agent-history-list";
 import { Welcome } from "@/components/agent/agent-welcome";
 import { AgentWindow } from "@/components/agent/agent-window";
+import {
+  readAgentConversation,
+  readAgentConversations,
+  readAgentStatus,
+} from "@/components/agent/reads";
 import {
   agentEvents,
   agentReducer,
@@ -113,7 +113,7 @@ export function AgentPanel() {
   useEffect(() => {
     if (!agentOpen || !projectId) return;
     let cancelled = false;
-    void agentStatusAction(projectId).then((res) => {
+    void readAgentStatus(projectId).then((res) => {
       if (!cancelled) {
         setStatus({ projectId, status: "error" in res ? "unavailable" : res.status });
       }
@@ -214,7 +214,7 @@ export function AgentPanel() {
   const loadHistory = useCallback(async (pId: string) => {
     const ask = ++historyAsk.current;
     setHistory({ kind: "loading" });
-    const res = await listAgentConversationsAction(pId);
+    const res = await readAgentConversations(pId);
     if (ask !== historyAsk.current || shown.current.projectId !== pId) return;
     setHistory(
       "error" in res
@@ -228,7 +228,7 @@ export function AgentPanel() {
       if (!projectId) return;
       const ask = ++openAsk.current;
       setNotice(null);
-      const res = await openAgentConversationAction(projectId, conversationId);
+      const res = await readAgentConversation(projectId, conversationId);
       if (ask !== openAsk.current || shown.current.projectId !== projectId) return;
       if ("error" in res) {
         setNotice(res.error);

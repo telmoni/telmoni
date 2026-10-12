@@ -15,6 +15,21 @@ export interface SearchItem {
   external?: boolean;
 }
 
+/** One of a project's sections in the palette: its items, or why there are
+ *  none — the reader may not see them, or they could not be read. */
+export interface SearchSection {
+  items: SearchItem[];
+  forbidden: boolean;
+  unavailable: boolean;
+}
+
+/** What the palette lists of the project it is opened on, as
+ *  `/api/search/index` answers it. */
+export interface SearchIndex {
+  keys: SearchSection;
+  members: SearchSection;
+}
+
 export const GROUP_ORDER: readonly SearchKind[] = [
   "recent",
   "project",

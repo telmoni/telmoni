@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { searchIndexAction, type SearchIndex } from "@/app/(app)/search-actions";
+
+import type { SearchIndex } from "@/lib/search";
+
+const UNREAD = "We couldn't read this project's resources just now.";
+const EXPIRED = "Your session expired — sign in again.";
 
 export function useSearchIndex(open: boolean, projectId?: string) {
   const [index, setIndex] = useState<SearchIndex | null>(null);
@@ -13,34 +17,46 @@ export function useSearchIndex(open: boolean, projectId?: string) {
     if (!open || !projectId) return;
     if (indexedProject.current === projectId) return;
     indexedProject.current = projectId;
-    let live = true;
+    // A read, from the index's Route Handler (`app/api/search/index`),
+    // dropped when the palette closes or moves to another project before it
+    // lands — and then forgotten, so the next opening asks again.
+    const abort = new AbortController();
+    let settled = false;
     setLoading(true);
     // Drop the last project's results before asking for this one's. This
     // does not remount across a navigation, so index outlives the project it
     // was fetched for: dropping it prevents showing previous project's items.
     setIndex(null);
     setIndexError(null);
-    void searchIndexAction(projectId)
-      .then((answer) => {
-        if (!live) return;
-        if ("error" in answer) {
-          setIndex(null);
-          setIndexError(answer.error);
+    fetch(`/api/search/index?project=${encodeURIComponent(projectId)}`, {
+      signal: abort.signal,
+    })
+      .then(async (res) => {
+        const answer = (await res.json().catch(() => null)) as
+          | (SearchIndex & { error?: string })
+          | null;
+        if (!res.ok || !answer || answer.error !== undefined) {
+          // A lapsed session is turned away by the console's proxy before
+          // the handler runs, in a word meant for code; say it as the
+          // handler would have.
+          setIndexError(res.status === 401 ? EXPIRED : answer?.error || UNREAD);
           indexedProject.current = null;
           return;
         }
         setIndex(answer);
       })
       .catch(() => {
-        if (!live) return;
-        setIndexError("We couldn't read this project's resources just now.");
+        if (abort.signal.aborted) return;
+        setIndexError(UNREAD);
         indexedProject.current = null;
       })
       .finally(() => {
-        if (live) setLoading(false);
+        settled = true;
+        if (!abort.signal.aborted) setLoading(false);
       });
     return () => {
-      live = false;
+      abort.abort();
+      if (!settled) indexedProject.current = null;
     };
   }, [open, projectId]);
 

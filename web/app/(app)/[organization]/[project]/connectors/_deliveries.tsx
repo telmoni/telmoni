@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 
+import { readDeliveries } from "@/components/connectors/reads";
 import { LocalTime } from "@/components/local-time";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,7 +21,7 @@ import {
 import { eventKindLabel } from "@/lib/notification-kinds";
 import type { DeliveryAttempt, DeliveryLogEntry } from "@/lib/server/data";
 
-import { listDeliveriesAction, redeliverAction } from "./actions";
+import { redeliverAction } from "./actions";
 
 type Load =
   | { state: "loading" }
@@ -56,10 +57,10 @@ export function DeliveriesButton({
     setLoad({ state: "loading" });
     setOlderError(null);
     try {
-      const r = await listDeliveriesAction(projectId, connectionId, null);
+      const r = await readDeliveries(projectId, connectionId, null);
       if (mine !== seq.current) return;
-      if (r.error !== null || !r.page) {
-        setLoad({ state: "error", message: r.error ?? "Couldn't load the deliveries." });
+      if (r.error !== undefined) {
+        setLoad({ state: "error", message: r.error });
         return;
       }
       setLoad({ state: "ready", entries: r.page.deliveries, nextBefore: r.page.next_before });
@@ -75,10 +76,10 @@ export function DeliveriesButton({
     setOlderError(null);
     startOlder(async () => {
       try {
-        const r = await listDeliveriesAction(projectId, connectionId, nextBefore);
+        const r = await readDeliveries(projectId, connectionId, nextBefore);
         if (mine !== seq.current) return;
-        if (r.error !== null || !r.page) {
-          setOlderError(r.error ?? "Couldn't load older deliveries.");
+        if (r.error !== undefined) {
+          setOlderError(r.error);
           return;
         }
         setLoad({
