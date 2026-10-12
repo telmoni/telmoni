@@ -115,7 +115,7 @@ CREATE TABLE notifications.connections (
     shard_key                UUID        NOT NULL DEFAULT gen_random_uuid(),
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     revoked_at               TIMESTAMPTZ,
-    CONSTRAINT connections_provider_check CHECK (provider IN ('slack', 'discord', 'webhook')),
+    CONSTRAINT connections_provider_check CHECK (provider IN ('slack', 'webhook')),
     CONSTRAINT connections_status_check CHECK (status IN ('active', 'errored', 'revoked')),
     CONSTRAINT connections_token_pair_check CHECK ((token_ciphertext IS NULL) = (token_nonce IS NULL)),
     CONSTRAINT connections_prior_token_check CHECK (
@@ -290,7 +290,7 @@ CREATE TABLE notifications.oauth_states (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at      TIMESTAMPTZ NOT NULL,
     consumed_at     TIMESTAMPTZ,
-    CONSTRAINT oauth_states_provider_check CHECK (provider IN ('slack', 'discord'))
+    CONSTRAINT oauth_states_provider_check CHECK (provider IN ('slack'))
 );
 
 CREATE INDEX oauth_states_organization_idx ON notifications.oauth_states (organization_id);

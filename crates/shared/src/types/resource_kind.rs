@@ -23,7 +23,7 @@ pub enum TelmoniResourceKind {
     /// A browser sign-in, ended from another device. Distinct from `Token`, or
     /// "signed out my old laptop" would be filed under API-key activity.
     Session,
-    /// A project's Slack, Discord or signed-webhook connection. The row names
+    /// A project's Slack or signed-webhook connection. The row names
     /// the vendor and channel or the endpoint's host — never the grant, the URL
     /// or the secret, because the chain is append-only.
     Connector,

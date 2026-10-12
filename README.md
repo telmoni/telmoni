@@ -24,7 +24,7 @@ Sign in with the password form; mail lands in Mailpit at http://localhost:8025. 
 crates/
   telmoni/        the binary: `serve`, and the admin commands (`migrate`, `rotate`, `sweep`, …)
   auth/           sign-in, organizations and projects, members, invitations, API keys
-  notifications/  the feed, the Slack, Discord and webhook connectors, delivery
+  notifications/  the feed, the Slack and webhook connectors, delivery
   agent/          the console agent: search over the docs and a project's own data
   telemetry/      ingest at /otlp/v1/traces, each project's settings, the spans and their hourly
                   totals in ClickHouse, its ClickHouse file and nightly purge, ClickHouse's

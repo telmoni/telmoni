@@ -503,8 +503,7 @@ impl SealedConnection {
         }
     }
 
-    /// The sealed token: Slack's bot token or the webhook's signing secret;
-    /// `None` for Discord.
+    /// The sealed token: Slack's bot token or the webhook's signing secret.
     #[must_use]
     pub fn token(&self) -> Option<Sealed> {
         match (&self.token_ciphertext, &self.token_nonce) {

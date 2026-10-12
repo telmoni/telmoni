@@ -135,8 +135,8 @@ describe("GET /connect/[provider]/callback", () => {
     expect(tryFetchWithTimeout).not.toHaveBeenCalled();
   });
 
-  it("refuses a cookie sealed for the other provider", async () => {
-    const res = await callback("?code=c0de&state=st8", "discord");
+  it("refuses a provider the console does not offer", async () => {
+    const res = await callback("?code=c0de&state=st8", "teams");
     expect(res.headers.get("location")).toBe("https://app.example/console");
     expect(tryFetchWithTimeout).not.toHaveBeenCalled();
   });

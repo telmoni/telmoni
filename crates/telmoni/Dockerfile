@@ -15,7 +15,7 @@
 #   file is compiled into the binary)
 # Optional:
 #   PORT (default 8082), LOG_LEVEL (default info), RUN_SWEEPS (default true),
-#   the OIDC_* provider, SMTP_URL, MAIL_FROM, the SLACK_* and DISCORD_* apps,
+#   the OIDC_* provider, SMTP_URL, MAIL_FROM, the SLACK_* app,
 #   CONNECTOR_KEK, DATABASE_CA_CERT (required in a pod), and the agent:
 #   AGENT_DATABASE_URL, AGENT_MODEL_* and EMBEDDINGS_* (crates/agent/src/config.rs)
 

@@ -1,14 +1,14 @@
-// The three connectors the console offers, and the one place the handshake's
+// The two connectors the console offers, and the one place the handshake's
 // path shapes are spelled. Shared by the two Route Handlers under
 // `app/connect/[provider]/` and the Connectors page that links to them.
 //
-// Two of the three are OAuth grants the browser is handed off for; the third
-// is a webhook an owner or admin connects with a URL, in a dialog, and it never
-// reaches the handshake routes — which is why they are two lists.
+// Slack is an OAuth grant the browser is handed off for; the webhook is one an
+// owner or admin connects with a URL, in a dialog, and it never reaches the
+// handshake routes — which is why they are two lists.
 
 import { projectPath } from "@/lib/slug";
 
-export const OAUTH_PROVIDERS = ["slack", "discord"] as const;
+export const OAUTH_PROVIDERS = ["slack"] as const;
 export type OAuthProvider = (typeof OAUTH_PROVIDERS)[number];
 
 export const PROVIDERS = [...OAUTH_PROVIDERS, "webhook"] as const;
@@ -24,7 +24,6 @@ export function isOAuthProvider(value: string): value is OAuthProvider {
 
 export const PROVIDER_LABEL: Record<Provider, string> = {
   slack: "Slack",
-  discord: "Discord",
   webhook: "Webhook",
 };
 

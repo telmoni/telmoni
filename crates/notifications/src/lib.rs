@@ -1,5 +1,5 @@
 //! Notifications — the in-app feed, and the connectors that repeat it:
-//! Slack, Discord, and a customer's own signed webhook — as a module of the
+//! Slack, and a customer's own signed webhook — as a module of the
 //! `telmoni` binary. It owns the `notifications` schema and connects as the
 //! `notifications` role; it asks auth who is acting through
 //! [`telmoni_shared::seam::Auth`], and answers auth's notices and purges

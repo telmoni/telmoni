@@ -23,8 +23,8 @@ import { createWebhookConnectorAction, type SecretResult } from "./actions";
 
 // The webhook is the one connector with no handshake: an owner or admin types the
 // endpoint here, the service checks it and mints the signing secret, and the
-// secret is shown exactly once on the way back. Slack and Discord are a link
-// to a GET route instead, because the browser has to leave for the vendor.
+// secret is shown exactly once on the way back. Slack is a link to a GET
+// route instead, because the browser has to leave for the vendor.
 export function ConnectWebhookButton({ projectId, label }: { projectId: string; label: string }) {
   const [open, setOpen] = useState(false);
   const [minted, setMinted] = useState<SecretResult | null>(null);

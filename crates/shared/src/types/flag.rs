@@ -17,7 +17,7 @@ use crate::types::ParseEnumError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Flag {
-    /// The connectors — Slack, Discord and the signed webhook. Off, the
+    /// The connectors — Slack and the signed webhook. Off, the
     /// delivery queue PAUSES in place and drains when it is on again, and a
     /// new connection is refused; connected targets stay listed and removable.
     Connectors,

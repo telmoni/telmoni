@@ -539,8 +539,8 @@ html.a11y-no-letter-keys [data-letter-key] {
   --color-console-field: var(--console-field);
 
   /* ⚠ **Vendor marks — the one set of colours that must NOT follow a theme.**
-     These are third parties' brands on the connectors page. Somebody
-     recognises Slack by those four hues and Discord by Blurple, so a value
+     These are a third party's brand on the connectors page. Somebody
+     recognises Slack by those four hues, so a value
      that shifted with light/dark, or with a skin, would stop naming the
      product it is there to name. Literals, and unlike every token above they
      are not restated per theme.
@@ -553,7 +553,6 @@ html.a11y-no-letter-keys [data-letter-key] {
   --color-vendor-slack-blue: #36c5f0;
   --color-vendor-slack-green: #2eb67d;
   --color-vendor-slack-yellow: #ecb22e;
-  --color-vendor-discord-blurple: #5865f2;
 
   /* ⚠ **Six steps, one number.** Every card, button, input, dialog and badge
      spends a step on this scale, and each step is derived from `--radius`

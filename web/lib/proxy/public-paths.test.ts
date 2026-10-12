@@ -77,7 +77,7 @@ describe("isPublic", () => {
   // The OAuth handshake routes are deliberately NOT public: a lapsed session
   // on the vendor's consent page must land on login and come back with the
   // code and state intact, which only the protected-path redirect gives.
-  it.each(["/connect/slack/start", "/connect/slack/callback", "/connect/discord/callback"])(
+  it.each(["/connect/slack/start", "/connect/slack/callback"])(
     "treats %s as protected so a lapsed session is sent through login",
     (p) => {
       expect(isPublic(p)).toBe(false);

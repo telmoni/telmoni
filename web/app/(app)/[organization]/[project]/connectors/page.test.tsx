@@ -84,17 +84,16 @@ beforeEach(() => {
   mockContext = { organization: { organizationId: "org_1" } };
   mockProject = { id: PROJECT, slug: "project", name: "Project", role: "owner" };
   mockListing = {
-    enabled: { slack: true, discord: false, webhook: true },
+    enabled: { slack: true, webhook: true },
     connections: [],
   };
 });
 
 describe("ConnectorsPage", () => {
-  it("names the page and offers the three destinations", async () => {
+  it("names the page and offers the two destinations", async () => {
     await renderPage();
     expect(screen.getByRole("heading", { name: "Connectors" })).toBeInTheDocument();
     expect(screen.getByText("Slack")).toBeInTheDocument();
-    expect(screen.getByText("Discord")).toBeInTheDocument();
     expect(screen.getByText("Webhook")).toBeInTheDocument();
   });
 
@@ -117,11 +116,12 @@ describe("ConnectorsPage", () => {
   // A provider this deployment holds no credentials for renders exactly as
   // the page did before the lane existed: a Soon badge and a disabled button.
   it("keeps a provider that is not configured disabled and labelled", async () => {
+    mockListing = { enabled: { slack: false, webhook: true }, connections: [] };
     await renderPage();
     expect(screen.getByText("Soon")).toBeInTheDocument();
-    const discord = screen.getByRole("button", { name: /^Connect Discord/ });
-    expect(discord).toBeDisabled();
-    expect(screen.queryByRole("link", { name: /Discord/ })).toBeNull();
+    const slack = screen.getByRole("button", { name: /^Connect Slack/ });
+    expect(slack).toBeDisabled();
+    expect(screen.queryByRole("link", { name: /Slack/ })).toBeNull();
   });
 
   it("tells a member who can connect, and offers no link or dialog", async () => {
@@ -129,7 +129,7 @@ describe("ConnectorsPage", () => {
     await renderPage();
     expect(screen.queryByRole("link", { name: /^Connect/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Connect Webhook" })).toBeNull();
-    // Once per enabled tile: Slack and the webhook; Discord is disabled.
+    // Once per enabled tile: Slack and the webhook.
     expect(
       screen.getAllByText("Only a project owner or admin can connect or remove a destination."),
     ).toHaveLength(2);
@@ -147,7 +147,7 @@ describe("ConnectorsPage", () => {
   // the URL, which the service seals and the listing does not carry.
   it("lists an endpoint by its host and fingerprint and offers another", async () => {
     mockListing = {
-      enabled: { slack: true, discord: true, webhook: true },
+      enabled: { slack: true, webhook: true },
       connections: [
         connection({
           id: "33333333-3333-4333-8333-333333333333",
@@ -170,17 +170,17 @@ describe("ConnectorsPage", () => {
 
   it("lists a connection by its channel and workspace, with actions for the owner", async () => {
     mockListing = {
-      enabled: { slack: true, discord: true, webhook: true },
+      enabled: { slack: true, webhook: true },
       connections: [
         connection(),
         connection({
           id: "22222222-2222-4222-8222-222222222222",
-          provider: "discord",
-          external_workspace_id: "G0",
+          external_workspace_id: "T0002",
           external_workspace_name: null,
-          channel_name: "Telmoni alerts",
+          channel_id: "C0OPS",
+          channel_name: "ops",
           status: "errored",
-          last_error: "discord 10015: Unknown Webhook",
+          last_error: "slack: channel_not_found",
         }),
       ],
     };
@@ -188,9 +188,9 @@ describe("ConnectorsPage", () => {
     expect(screen.getByText("#alerts in Acme")).toBeInTheDocument();
     expect(screen.getByText("Connected")).toBeInTheDocument();
     expect(screen.getByText("No messages yet.")).toBeInTheDocument();
-    expect(screen.getByText("Telmoni alerts")).toBeInTheDocument();
+    expect(screen.getByText("#ops")).toBeInTheDocument();
     expect(screen.getByText("Needs attention")).toBeInTheDocument();
-    expect(screen.getByText("discord 10015: Unknown Webhook")).toBeInTheDocument();
+    expect(screen.getByText("slack: channel_not_found")).toBeInTheDocument();
     expect(screen.getByTestId("actions-11111111-1111-4111-8111-111111111111")).toBeInTheDocument();
     expect(screen.getByTestId("actions-22222222-2222-4222-8222-222222222222")).toBeInTheDocument();
     expect(
@@ -201,7 +201,7 @@ describe("ConnectorsPage", () => {
   it("shows a member the list without actions", async () => {
     mockProject = { id: PROJECT, name: "Project", role: "member" };
     mockListing = {
-      enabled: { slack: true, discord: true, webhook: true },
+      enabled: { slack: true, webhook: true },
       connections: [connection()],
     };
     await renderPage();
@@ -214,7 +214,7 @@ describe("ConnectorsPage", () => {
   it("offers the delivery log to a member, without the resend", async () => {
     mockProject = { id: PROJECT, name: "Project", role: "member" };
     mockListing = {
-      enabled: { slack: true, discord: true, webhook: true },
+      enabled: { slack: true, webhook: true },
       connections: [connection({ provider: "webhook" })],
     };
     await renderPage();
@@ -225,7 +225,7 @@ describe("ConnectorsPage", () => {
 
   it("offers the owner the delivery log with the resend on a webhook", async () => {
     mockListing = {
-      enabled: { slack: true, discord: true, webhook: true },
+      enabled: { slack: true, webhook: true },
       connections: [connection({ provider: "webhook" })],
     };
     await renderPage();
@@ -236,7 +236,7 @@ describe("ConnectorsPage", () => {
 
   it("offers no resend on a chat channel, even to the owner", async () => {
     mockListing = {
-      enabled: { slack: true, discord: true, webhook: true },
+      enabled: { slack: true, webhook: true },
       connections: [connection()],
     };
     await renderPage();
@@ -247,7 +247,7 @@ describe("ConnectorsPage", () => {
 
   it("says a webhook with no filter receives all events", async () => {
     mockListing = {
-      enabled: { slack: true, discord: true, webhook: true },
+      enabled: { slack: true, webhook: true },
       connections: [webhook()],
     };
     await renderPage();
@@ -256,7 +256,7 @@ describe("ConnectorsPage", () => {
 
   it("names up to two chosen events by their labels", async () => {
     mockListing = {
-      enabled: { slack: true, discord: true, webhook: true },
+      enabled: { slack: true, webhook: true },
       connections: [webhook({ event_kinds: ["member_added", "connector_connected"] })],
     };
     await renderPage();
@@ -265,7 +265,7 @@ describe("ConnectorsPage", () => {
 
   it("counts more than two chosen events", async () => {
     mockListing = {
-      enabled: { slack: true, discord: true, webhook: true },
+      enabled: { slack: true, webhook: true },
       connections: [
         webhook({
           event_kinds: ["member_added", "connector_connected", "connector_disconnected"],
@@ -276,10 +276,10 @@ describe("ConnectorsPage", () => {
     expect(screen.getByText("Events: 3 events")).toBeInTheDocument();
   });
 
-  // Slack and Discord take every kind; the line is the webhook's alone.
+  // Slack takes every kind; the line is the webhook's alone.
   it("gives a vendor channel no events line", async () => {
     mockListing = {
-      enabled: { slack: true, discord: true, webhook: true },
+      enabled: { slack: true, webhook: true },
       connections: [connection()],
     };
     await renderPage();
@@ -288,7 +288,7 @@ describe("ConnectorsPage", () => {
 
   it("shows when a rotated webhook's previous secret stops", async () => {
     mockListing = {
-      enabled: { slack: true, discord: true, webhook: true },
+      enabled: { slack: true, webhook: true },
       connections: [webhook({ previous_secret_expires_at: "2026-09-21T12:00:00Z" })],
     };
     await renderPage();
@@ -298,7 +298,7 @@ describe("ConnectorsPage", () => {
 
   it("shows no previous-secret line outside a rotation", async () => {
     mockListing = {
-      enabled: { slack: true, discord: true, webhook: true },
+      enabled: { slack: true, webhook: true },
       connections: [webhook()],
     };
     await renderPage();
@@ -310,9 +310,9 @@ describe("ConnectorsPage", () => {
   it("renders every tile as unavailable when the listing cannot be read", async () => {
     mockListing = null;
     await renderPage();
-    expect(screen.getAllByText("Soon")).toHaveLength(3);
+    expect(screen.getAllByText("Soon")).toHaveLength(2);
     const connect = screen.getAllByRole("button", { name: /^Connect / });
-    expect(connect).toHaveLength(3);
+    expect(connect).toHaveLength(2);
     for (const button of connect) expect(button).toBeDisabled();
     expect(screen.queryByRole("link", { name: /^Connect/ })).toBeNull();
   });

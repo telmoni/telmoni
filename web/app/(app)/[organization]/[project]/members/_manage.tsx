@@ -323,7 +323,7 @@ export function MemberRow({
                 </Button>
               }
               title={`Hand this project to ${personName(who(member))}?`}
-              description="They become its owner when they accept: it moves into an organization they own, with its members and API keys. Its Slack, Discord and webhook connectors stay with your organization and are disconnected. You stay on as an admin of the project, and join their organization as a member. The offer lapses in 7 days if they do nothing."
+              description="They become its owner when they accept: it moves into an organization they own, with its members and API keys. Its Slack and webhook connectors stay with your organization and are disconnected. You stay on as an admin of the project, and join their organization as a member. The offer lapses in 7 days if they do nothing."
               confirmLabel="Send offer"
               onConfirm={() => act(() => offerProjectAction(projectId, member.member_id))}
             />

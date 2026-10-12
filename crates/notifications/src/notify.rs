@@ -57,9 +57,9 @@ pub async fn fan_out<B: Binding>(
     .await
 }
 
-/// Where a connection points, in a customer's words: `#general in Acme`, a
-/// Discord webhook's name, or the host of a signed webhook — the one thing
-/// about its URL the platform will say.
+/// Where a connection points, in a customer's words: `#general in Acme`, or
+/// the host of a signed webhook — the one thing about its URL the platform
+/// will say.
 #[must_use]
 pub fn describe_target(
     provider: Provider,
@@ -71,7 +71,6 @@ pub fn describe_target(
             format!("#{} in {workspace}", channel_name.trim_start_matches('#'))
         }
         (Provider::Slack, None) => format!("#{}", channel_name.trim_start_matches('#')),
-        (Provider::Discord, _) => channel_name.to_owned(),
         (Provider::Webhook, _) => format!("the endpoint at {channel_name}"),
     }
 }
@@ -147,10 +146,6 @@ mod tests {
         assert_eq!(
             describe_target(Provider::Slack, None, "general"),
             "#general"
-        );
-        assert_eq!(
-            describe_target(Provider::Discord, None, "Telmoni alerts"),
-            "Telmoni alerts"
         );
         assert_eq!(
             describe_target(Provider::Webhook, None, "hooks.example.com:8443"),

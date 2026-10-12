@@ -17,7 +17,7 @@ const NotificationKindSchema = z.enum(NotificationKind);
 // never a webhook's signing secret, which is answered once at creation.
 export const ConnectionSchema = z.object({
   id: z.string(),
-  provider: z.enum(["slack", "discord", "webhook"]),
+  provider: z.enum(["slack", "webhook"]),
   external_workspace_id: z.string(),
   external_workspace_name: z.string().nullable(),
   channel_id: z.string(),
@@ -72,7 +72,7 @@ const ConnectorListingSchema = z.object({
   // Which connectors this deployment can connect: the vendors it holds
   // credentials for, and the webhook whenever it holds a key. A tile for one
   // it cannot renders as unavailable.
-  enabled: z.object({ slack: z.boolean(), discord: z.boolean(), webhook: z.boolean() }),
+  enabled: z.object({ slack: z.boolean(), webhook: z.boolean() }),
   connections: z.array(ConnectionSchema),
 });
 export type ConnectorListing = z.infer<typeof ConnectorListingSchema>;

@@ -56,7 +56,7 @@ pub enum Resource {
     Member,
     /// `telmoni_` API tokens — the keys an organization mints to call the public API.
     Token,
-    /// A project's Slack, Discord or webhook connection.
+    /// A project's Slack or webhook connection.
     Connector,
     /// The organization's append-only audit chain. Owners and admins read it,
     /// members do not; the resource exists to deny the write verbs structurally.

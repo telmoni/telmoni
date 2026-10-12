@@ -344,7 +344,7 @@ pub async fn purge_project(state: &AppState, project_id: &ProjectId) -> Result<u
 /// member. Called by auth's `erase_person` before the identity goes;
 /// idempotent, and a failure stops that erasure for the sweep to retry.
 ///
-/// What a connected Slack or Discord channel, or a webhook, already received
+/// What a connected Slack channel, or a webhook, already received
 /// is not reached from here and cannot be: those copies are the vendor's.
 pub async fn redact_person(state: &AppState, user_id: &UserId) -> Result<u64, TelmoniError> {
     let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;

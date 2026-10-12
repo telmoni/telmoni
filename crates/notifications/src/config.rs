@@ -30,10 +30,6 @@ pub struct Config {
     pub slack_signing_secret: Option<Redacted>,
     /// Slack's API origin (`SLACK_API_BASE`, default `https://slack.com`).
     pub slack_api_base: String,
-    /// The Discord application, or `None` when its credentials are unset.
-    pub discord: Option<OAuthApp>,
-    /// Discord's API origin (`DISCORD_API_BASE`, default `https://discord.com`).
-    pub discord_api_base: String,
     /// The key that wraps every row's data key (`CONNECTOR_KEK`): a Cloud KMS
     /// key name, or `local:<64 hex>` for a laptop. `None` disables every
     /// connector: a grant this module cannot seal is one it must not accept.
@@ -72,9 +68,6 @@ impl Config {
             slack_signing_secret: optional("SLACK_SIGNING_SECRET").map(Into::into),
             slack_api_base: optional_base_url("SLACK_API_BASE")
                 .unwrap_or_else(|| "https://slack.com".to_owned()),
-            discord: oauth_app("DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET")?,
-            discord_api_base: optional_base_url("DISCORD_API_BASE")
-                .unwrap_or_else(|| "https://discord.com".to_owned()),
             connector_kek: optional("CONNECTOR_KEK").map(Into::into),
             kms_api_base: optional_base_url("KMS_API_BASE")
                 .unwrap_or_else(|| "https://cloudkms.googleapis.com".to_owned()),
@@ -105,9 +98,9 @@ impl Config {
         if config.delivery_drain_rounds < 1 {
             anyhow::bail!("NOTIFICATIONS_DELIVERY_DRAIN_ROUNDS must be at least 1");
         }
-        if (config.slack.is_some() || config.discord.is_some()) && config.connector_kek.is_none() {
+        if config.slack.is_some() && config.connector_kek.is_none() {
             anyhow::bail!(
-                "SLACK_* or DISCORD_* credentials are set but CONNECTOR_KEK is not; \
+                "SLACK_* credentials are set but CONNECTOR_KEK is not; \
                  a connector cannot store a grant it cannot seal"
             );
         }

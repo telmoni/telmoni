@@ -18,11 +18,11 @@ use http_body_util::BodyExt;
 use sqlx::PgPool;
 use tower::ServiceExt;
 use uuid::Uuid;
-use wiremock::matchers::{body_string_contains, header as header_is, method, path, query_param};
+use wiremock::matchers::{body_string_contains, header as header_is, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use common::{AuthStub, Flags, SECRET};
-use telmoni_notifications::connector::{Connectors, Provider, discord, slack, webhook};
+use telmoni_notifications::connector::{Connectors, Provider, slack, webhook};
 use telmoni_notifications::db::NotificationsLane;
 use telmoni_notifications::{AppState, db, delivery, router};
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
@@ -142,11 +142,6 @@ fn both_connectors(mocks: &MockServer) -> Connectors {
             Redacted::from("slack_client_secret"),
             &mocks.uri(),
         ))),
-        discord: Some(Arc::new(discord::DiscordConnector::new(
-            "discord_client_id",
-            Redacted::from("discord_client_secret"),
-            &mocks.uri(),
-        ))),
         webhook: Some(Arc::new(webhook::WebhookConnector)),
     }
 }
@@ -189,7 +184,6 @@ fn state_full(
         app_url: "https://app.example".into(),
         slack_signing_secret: Some(SIGNING_SECRET.into()),
         slack_api_base: mocks.uri(),
-        discord_api_base: mocks.uri(),
         connector_kek: Some(format!("local:{CONNECTOR_KEY}").into()),
         kms_api_base: mocks.uri(),
         metadata_api_base: mocks.uri(),
@@ -601,7 +595,7 @@ async fn a_member_cannot_start_a_handshake(pool: PgPool) {
     let resp = app(&st)
         .oneshot(req_as(
             "POST",
-            "/internal/connectors/discord/authorize",
+            "/internal/connectors/slack/authorize",
             ORGANIZATION,
             MEMBER,
             None,
@@ -625,18 +619,14 @@ async fn a_member_cannot_start_a_handshake(pool: PgPool) {
 async fn an_unconfigured_provider_is_refused_and_listed_as_disabled(pool: PgPool) {
     apply_audit_migrations(&pool).await;
     let mocks = MockServer::start().await;
-    let slack_only = Connectors {
-        discord: None,
+    let webhook_only = Connectors {
+        slack: None,
         ..both_connectors(&mocks)
     };
-    let st = state_with(pool.clone(), &mocks, None, slack_only);
+    let st = state_with(pool.clone(), &mocks, None, webhook_only);
 
     let resp = app(&st)
-        .oneshot(owner(
-            "POST",
-            "/internal/connectors/discord/authorize",
-            None,
-        ))
+        .oneshot(owner("POST", "/internal/connectors/slack/authorize", None))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
@@ -646,8 +636,8 @@ async fn an_unconfigured_provider_is_refused_and_listed_as_disabled(pool: PgPool
         .await
         .unwrap();
     let body = json_body(resp).await;
-    assert_eq!(body["enabled"]["slack"], true);
-    assert_eq!(body["enabled"]["discord"], false);
+    assert_eq!(body["enabled"]["slack"], false);
+    assert_eq!(body["enabled"]["webhook"], true);
 }
 
 /// A switched-off flag refuses a NEW install with a problem naming the flag.
@@ -818,95 +808,6 @@ async fn the_slack_callback_stores_the_sealed_grant_and_audits_it(pool: PgPool) 
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
-/// The Discord handshake: Basic auth, the webhook object read into the row,
-/// and no channel or guild name invented.
-#[sqlx::test]
-async fn the_discord_callback_reads_the_webhook_object(pool: PgPool) {
-    apply_audit_migrations(&pool).await;
-    let mocks = MockServer::start().await;
-    let hook = format!("{}/api/webhooks/123/tok_discord", mocks.uri());
-    Mock::given(method("POST"))
-        .and(path("/api/oauth2/token"))
-        .and(header_is(
-            "authorization",
-            "Basic ZGlzY29yZF9jbGllbnRfaWQ6ZGlzY29yZF9jbGllbnRfc2VjcmV0",
-        ))
-        .and(body_string_contains("grant_type=authorization_code"))
-        .and(body_string_contains("code=dc0de"))
-        .and(body_string_contains(
-            "redirect_uri=https%3A%2F%2Fapp.example%2Fconnect%2Fdiscord%2Fcallback",
-        ))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "token_type": "Bearer",
-            "access_token": "not-kept",
-            "expires_in": 604800,
-            "refresh_token": "not-kept-either",
-            "scope": "webhook.incoming",
-            "webhook": {
-                "application_id": "app",
-                "name": "Telmoni alerts",
-                "url": hook,
-                "channel_id": "C0DISCORD",
-                "token": "tok_discord",
-                "type": 1,
-                "avatar": null,
-                "guild_id": "G0GUILD",
-                "id": "123"
-            }
-        })))
-        .expect(1)
-        .mount(&mocks)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/api/webhooks/123/tok_discord"))
-        .and(query_param("wait", "true"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": "m1"})))
-        .expect(1)
-        .mount(&mocks)
-        .await;
-    let st = state(pool.clone(), &mocks, None);
-
-    let resp = app(&st)
-        .oneshot(owner(
-            "POST",
-            "/internal/connectors/discord/authorize",
-            None,
-        ))
-        .await
-        .unwrap();
-    let raw_state = json_body(resp).await["state"].as_str().unwrap().to_owned();
-    let resp = app(&st)
-        .oneshot(owner(
-            "POST",
-            "/internal/connectors/discord/callback",
-            Some(&format!(r#"{{"code":"dc0de","state":"{raw_state}"}}"#)),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::CREATED);
-    let c = json_body(resp).await["connection"].clone();
-    assert_eq!(c["provider"], "discord");
-    assert_eq!(c["external_workspace_id"], "G0GUILD");
-    assert!(
-        c["external_workspace_name"].is_null(),
-        "discord names no guild"
-    );
-    assert_eq!(c["channel_id"], "C0DISCORD");
-    assert_eq!(c["channel_name"], "Telmoni alerts");
-    let id: Uuid = c["id"].as_str().unwrap().parse().unwrap();
-    let queued: Vec<Uuid> =
-        sqlx::query_scalar("SELECT id FROM notifications.deliveries WHERE connection_id = $1")
-            .bind(id)
-            .fetch_all(&pool)
-            .await
-            .unwrap();
-    let (status, _, _) = wait_until_settled(&pool, queued[0]).await;
-    assert_eq!(
-        status, "delivered",
-        "the connected notice reached the webhook with wait=true"
-    );
-}
-
 /// A state nobody minted, already spent, another person's or another project's
 /// is refused with zero requests at the vendor.
 #[sqlx::test]
@@ -948,31 +849,6 @@ async fn a_callback_with_a_state_that_is_not_the_callers_is_refused_before_the_v
             "POST",
             "/internal/connectors/slack/callback",
             Some(r#"{"code":"c0de","state":"theirs"}"#),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-
-    {
-        let mut tx = project_scope(&pool, &pid(ORGANIZATION)).await.unwrap();
-        db::insert_oauth_state(
-            &mut tx,
-            &hash("discord-one"),
-            &pid(ORGANIZATION),
-            &oid(ORGANIZATION),
-            &uid(OWNER),
-            Provider::Discord,
-            600,
-        )
-        .await
-        .unwrap();
-        tx.commit().await.unwrap();
-    }
-    let resp = app(&st)
-        .oneshot(owner(
-            "POST",
-            "/internal/connectors/slack/callback",
-            Some(r#"{"code":"c0de","state":"discord-one"}"#),
         ))
         .await
         .unwrap();
@@ -1139,7 +1015,7 @@ async fn the_list_names_the_channel_and_never_the_grant(pool: PgPool) {
         assert_eq!(resp.status(), StatusCode::OK, "{user}");
         let body = json_body(resp).await;
         assert_eq!(body["enabled"]["slack"], true);
-        assert_eq!(body["enabled"]["discord"], true);
+        assert_eq!(body["enabled"]["webhook"], true);
         assert_eq!(body["connections"].as_array().unwrap().len(), 1);
         assert_eq!(body["connections"][0]["channel_name"], "C0ALERTS");
         let text = body.to_string();
@@ -1391,73 +1267,6 @@ async fn a_tick_with_the_flag_read_broken_holds_everything(pool: PgPool) {
     let st = state(pool.clone(), &mocks, Some(Flags::Unreadable));
     assert!(delivery::tick_once(&st).await.is_err());
     assert_eq!(delivery_status(&pool, id).await.1, 0, "no attempt spent");
-}
-
-/// Discord posts carry `wait=true` (the fixture requires it), and a `10015`
-/// retires the connection.
-#[sqlx::test]
-async fn discord_posts_wait_and_an_unknown_webhook_retires(pool: PgPool) {
-    apply_audit_migrations(&pool).await;
-    let mocks = MockServer::start().await;
-    let live = seed_connection(
-        &pool,
-        ORGANIZATION,
-        Provider::Discord,
-        "G0GUILD",
-        "Telmoni alerts",
-        &format!("{}/api/webhooks/1/live", mocks.uri()),
-        None,
-    )
-    .await;
-    let gone = seed_connection(
-        &pool,
-        ORGANIZATION,
-        Provider::Discord,
-        "G0GUILD",
-        "Old alerts",
-        &format!("{}/api/webhooks/2/gone", mocks.uri()),
-        None,
-    )
-    .await;
-    let live_row = seed_delivery(&pool, ORGANIZATION, live).await;
-    let gone_row = seed_delivery(&pool, ORGANIZATION, gone).await;
-    Mock::given(method("POST"))
-        .and(path("/api/webhooks/1/live"))
-        .and(query_param("wait", "true"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": "m"})))
-        .expect(1)
-        .mount(&mocks)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/api/webhooks/2/gone"))
-        .and(query_param("wait", "true"))
-        .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
-            "message": "Unknown Webhook", "code": 10015
-        })))
-        .expect(1)
-        .mount(&mocks)
-        .await;
-    let st = state(pool.clone(), &mocks, None);
-    delivery::tick_once(&st).await.unwrap();
-
-    assert_eq!(delivery_status(&pool, live_row).await.0, "delivered");
-    assert_eq!(delivery_status(&pool, gone_row).await.0, "failed");
-    assert_eq!(connection_status(&pool, live).await.0, "active");
-    let (status, error) = connection_status(&pool, gone).await;
-    assert_eq!(status, "revoked");
-    assert_eq!(error.as_deref(), Some("discord 10015: Unknown Webhook"));
-    assert_eq!(
-        feed_titles(&pool, ORGANIZATION).await,
-        ["Discord disconnected"]
-    );
-    let notice: Vec<(Uuid, String)> = sqlx::query_as(
-        "SELECT connection_id, kind FROM notifications.deliveries WHERE kind = 'connector_disconnected'",
-    )
-    .fetch_all(&pool)
-    .await
-    .unwrap();
-    assert_eq!(notice.len(), 1);
-    assert_eq!(notice[0].0, live);
 }
 
 /// A vendor outage is retried with backoff, and the budget ends it.
@@ -2035,73 +1844,24 @@ async fn a_slack_disconnect_uninstalls_only_when_it_was_the_last(pool: PgPool) {
     );
 }
 
-/// A Discord disconnect deletes the webhook once, a 404 still deletes the row,
-/// and a member cannot.
+/// Another organization's connection is invisible to a disconnect: a 404,
+/// the row standing, and the vendor never asked.
 #[sqlx::test]
-async fn a_discord_disconnect_deletes_the_webhook(pool: PgPool) {
+async fn another_organizations_connection_cannot_be_disconnected(pool: PgPool) {
     apply_audit_migrations(&pool).await;
     let mocks = MockServer::start().await;
-    let connection = seed_connection(
-        &pool,
-        ORGANIZATION,
-        Provider::Discord,
-        "G0GUILD",
-        "Telmoni alerts",
-        &format!("{}/api/webhooks/9/tok", mocks.uri()),
-        None,
-    )
-    .await;
-    Mock::given(method("DELETE"))
-        .and(path("/api/webhooks/9/tok"))
-        .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
-            "message": "Unknown Webhook", "code": 10015
-        })))
-        .expect(1)
-        .mount(&mocks)
-        .await;
-    let st = state(pool.clone(), &mocks, None);
-
-    let resp = app(&st)
-        .oneshot(req_as(
-            "DELETE",
-            &format!("/internal/connectors/{connection}"),
-            ORGANIZATION,
-            MEMBER,
-            None,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-    assert!(
-        vendor_requests(&mocks).await.is_empty(),
-        "a refused disconnect reached the vendor"
-    );
-
-    let resp = app(&st)
-        .oneshot(owner(
-            "DELETE",
-            &format!("/internal/connectors/{connection}"),
-            None,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM notifications.connections")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(rows, 0);
-
     let theirs = seed_connection(
         &pool,
         OTHER_ORGANIZATION,
-        Provider::Discord,
-        "G0GUILD",
-        "Theirs",
-        &format!("{}/api/webhooks/8/tok", mocks.uri()),
-        None,
+        Provider::Slack,
+        SLACK_WORKSPACE,
+        "C0THEIRS",
+        &slack_hook_url(&mocks, "theirs"),
+        Some("xoxb-theirs"),
     )
     .await;
+    let st = state(pool.clone(), &mocks, None);
+
     let resp = app(&st)
         .oneshot(owner(
             "DELETE",
@@ -2111,6 +1871,11 @@ async fn a_discord_disconnect_deletes_the_webhook(pool: PgPool) {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    assert_eq!(connection_status(&pool, theirs).await.0, "active");
+    assert!(
+        vendor_requests(&mocks).await.is_empty(),
+        "a refused disconnect reached the vendor"
+    );
 }
 
 /// Disconnecting is a write, and the matrix gives a member none: the row
@@ -2281,16 +2046,6 @@ async fn the_purge_tears_down_the_grants_and_removes_every_row(pool: PgPool) {
         Some("xoxb-shared"),
     )
     .await;
-    let discord = seed_connection(
-        &pool,
-        ORGANIZATION,
-        Provider::Discord,
-        "G0GUILD",
-        "Alerts",
-        &format!("{}/api/webhooks/7/tok", mocks.uri()),
-        None,
-    )
-    .await;
     let theirs = seed_connection(
         &pool,
         OTHER_ORGANIZATION,
@@ -2321,12 +2076,6 @@ async fn the_purge_tears_down_the_grants_and_removes_every_row(pool: PgPool) {
         .and(path("/api/apps.uninstall"))
         .and(header_is("authorization", "Bearer xoxb-mine"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
-        .expect(1)
-        .mount(&mocks)
-        .await;
-    Mock::given(method("DELETE"))
-        .and(path("/api/webhooks/7/tok"))
-        .respond_with(ResponseTemplate::new(204))
         .expect(1)
         .mount(&mocks)
         .await;
@@ -2372,7 +2121,7 @@ async fn the_purge_tears_down_the_grants_and_removes_every_row(pool: PgPool) {
             .unwrap();
         assert_eq!(left, expect, "{table}");
     }
-    let _ = (shared, discord);
+    let _ = shared;
     assert_eq!(connection_status(&pool, theirs).await.0, "active");
 }
 
@@ -3501,7 +3250,7 @@ async fn a_webhook_receives_only_the_events_it_chose(pool: PgPool) {
         .oneshot(emit_req(
             ORGANIZATION,
             true,
-            r#"{"kind":"connector_connected","title":"Discord connected","body":"."}"#,
+            r#"{"kind":"connector_connected","title":"Slack connected","body":"."}"#,
         ))
         .await
         .unwrap();

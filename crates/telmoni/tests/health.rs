@@ -44,8 +44,6 @@ fn assemble() -> App {
         slack: None,
         slack_signing_secret: None,
         slack_api_base: "https://slack.com".into(),
-        discord: None,
-        discord_api_base: "https://discord.com".into(),
         connector_kek: None,
         kms_api_base: "https://cloudkms.googleapis.com".into(),
         metadata_api_base: "http://metadata.google.internal".into(),

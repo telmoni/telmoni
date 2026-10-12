@@ -699,8 +699,8 @@ async fn lock_transfer_organizations(
 /// step that fails moves nothing.** Telemetry's move of the project's
 /// settings comes first because it can be undone, so a refused move leaves
 /// everything as it was. Notifications' purge cannot be: the project's
-/// connectors are the old organization's Slack and Discord grants and
-/// webhook secrets, and a project arriving with them would post the new
+/// connectors are the old organization's Slack grants and webhook
+/// secrets, and a project arriving with them would post the new
 /// owner's events into the old owner's channels. Only a purge that answered
 /// `Ok` is followed by the commit. Until the commit answers, a guard
 /// (`SettleTelemetry`) puts telemetry's settings back with the project,

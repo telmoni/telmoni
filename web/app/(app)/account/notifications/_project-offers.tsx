@@ -96,7 +96,7 @@ function ProjectOfferCard({
         <p className="text-sm text-muted-foreground">
           It leaves {from} and moves into an organization you own, with its
           members and its API keys — rotate any key you did not mint. Its
-          Slack, Discord and webhook connectors stay behind. {owner} stays on
+          Slack and webhook connectors stay behind. {owner} stays on
           as an admin of the project, and joins your organization as a member.
           If a project there already has its name, it arrives with the next
           free number on the end.

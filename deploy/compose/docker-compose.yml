@@ -17,7 +17,7 @@
 #      to back up beside the database, since a dump restored without it
 #      leaves every stored user id matching nothing new:
 #        openssl rand -hex 32
-#      Connectors (Slack, Discord, webhooks) stay off until a sixth is set,
+#      Connectors (Slack, webhooks) stay off until a sixth is set,
 #      CONNECTOR_KEK=local:<openssl rand -hex 32>, which seals their grants
 #      at rest: a secret to back up beside the database, since a dump
 #      restored without it leaves every grant unreadable.
@@ -227,8 +227,6 @@ services:
       SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-}
       SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-}
       SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
-      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
-      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
       CONNECTOR_KEK: ${CONNECTOR_KEK:-}
       # The agent: `anthropic` or `openai` (the protocol), the model and its
       # key, and the embeddings the `ollama` service serves.

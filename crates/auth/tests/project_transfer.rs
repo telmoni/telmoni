@@ -1475,8 +1475,8 @@ async fn a_stranger_is_refused_without_queueing_on_the_organizations_lock(pool: 
 }
 
 /// ⚠ **The connectors are purged before the move, and a purge that fails
-/// moves nothing.** They are the old organization's Slack and Discord grants
-/// and webhook secrets; a project arriving with them would post the new
+/// moves nothing.** They are the old organization's Slack grants and
+/// webhook secrets; a project arriving with them would post the new
 /// owner's events into the old owner's channels. Notifications is asked in
 /// process, for the project, and only a purge that answered is followed by
 /// the commit.

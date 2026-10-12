@@ -1,7 +1,7 @@
-//! The three connectors, behind one trait — and the two OAuth grants behind
-//! another. Slack and Discord hand back a webhook URL bound to a channel the
-//! person picked; the signed webhook is an endpoint they typed and a secret we
-//! minted. From here all three are a target to seal, a body to render and an
+//! The two connectors, behind one trait — and Slack's OAuth grant behind
+//! another. Slack hands back a webhook URL bound to a channel the person
+//! picked; the signed webhook is an endpoint they typed and a secret we
+//! minted. From here both are a target to seal, a body to render and an
 //! error vocabulary to classify.
 
 use std::str::FromStr;
@@ -15,7 +15,6 @@ use telmoni_shared::{
 };
 use uuid::Uuid;
 
-pub mod discord;
 pub mod slack;
 pub mod webhook;
 
@@ -26,7 +25,6 @@ pub mod webhook;
 #[serde(rename_all = "snake_case")]
 pub enum Provider {
     Slack,
-    Discord,
     /// A customer's own HTTPS endpoint, posted signed JSON: the URL is theirs
     /// and the signing secret is ours.
     Webhook,
@@ -35,15 +33,14 @@ pub enum Provider {
 impl Provider {
     /// Every provider, in the order the page lists them.
     #[must_use]
-    pub const fn all() -> [Self; 3] {
-        [Self::Slack, Self::Discord, Self::Webhook]
+    pub const fn all() -> [Self; 2] {
+        [Self::Slack, Self::Webhook]
     }
 
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Slack => "slack",
-            Self::Discord => "discord",
             Self::Webhook => "webhook",
         }
     }
@@ -53,7 +50,6 @@ impl Provider {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Slack => "Slack",
-            Self::Discord => "Discord",
             Self::Webhook => "Webhook",
         }
     }
@@ -71,19 +67,19 @@ impl FromStr for Provider {
         Self::all()
             .into_iter()
             .find(|p| p.as_str() == s)
-            .ok_or_else(|| ParseEnumError::new(s, "slack, discord, webhook"))
+            .ok_or_else(|| ParseEnumError::new(s, "slack, webhook"))
     }
 }
 
 /// What one install of a vendor app yields.
 #[derive(Debug)]
 pub struct Installed {
-    /// Slack's `team.id`; Discord's `guild_id`.
+    /// Slack's `team.id`.
     pub workspace_id: String,
-    /// Slack's `team.name`; Discord names no guild, so `None`.
+    /// Slack's `team.name`, where it sent one.
     pub workspace_name: Option<String>,
     pub channel_id: String,
-    /// Slack's channel name, or Discord's webhook name.
+    /// Slack's channel name.
     pub channel_name: String,
     /// The incoming-webhook URL — the per-connection credential.
     pub url: Redacted,
@@ -328,7 +324,7 @@ pub trait Connector: Send + Sync {
     ) -> Result<(), TelmoniError>;
 }
 
-/// The OAuth handshake, Slack's and Discord's; the signed webhook has none.
+/// The OAuth handshake, Slack's; the signed webhook has none.
 #[async_trait]
 pub trait Grant: Send + Sync {
     /// Where to send the browser. `redirect_uri` must be sent again, unchanged,
@@ -349,7 +345,6 @@ pub trait Grant: Send + Sync {
 #[derive(Clone, Default)]
 pub struct Connectors {
     pub slack: Option<std::sync::Arc<slack::SlackConnector>>,
-    pub discord: Option<std::sync::Arc<discord::DiscordConnector>>,
     pub webhook: Option<std::sync::Arc<webhook::WebhookConnector>>,
 }
 
@@ -357,7 +352,6 @@ impl std::fmt::Debug for Connectors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Connectors")
             .field("slack", &self.slack.is_some())
-            .field("discord", &self.discord.is_some())
             .field("webhook", &self.webhook.is_some())
             .finish()
     }
@@ -376,13 +370,6 @@ impl Connectors {
                     &config.slack_api_base,
                 ))
             }),
-            discord: config.discord.as_ref().map(|app| {
-                std::sync::Arc::new(discord::DiscordConnector::new(
-                    app.client_id.clone(),
-                    app.client_secret.clone(),
-                    &config.discord_api_base,
-                ))
-            }),
             webhook: config
                 .connector_kek
                 .is_some()
@@ -398,10 +385,6 @@ impl Connectors {
                 .slack
                 .clone()
                 .map(|c| c as std::sync::Arc<dyn Connector>),
-            Provider::Discord => self
-                .discord
-                .clone()
-                .map(|c| c as std::sync::Arc<dyn Connector>),
             Provider::Webhook => self
                 .webhook
                 .clone()
@@ -415,7 +398,6 @@ impl Connectors {
     pub fn grant(&self, provider: Provider) -> Option<std::sync::Arc<dyn Grant>> {
         match provider {
             Provider::Slack => self.slack.clone().map(|c| c as std::sync::Arc<dyn Grant>),
-            Provider::Discord => self.discord.clone().map(|c| c as std::sync::Arc<dyn Grant>),
             Provider::Webhook => None,
         }
     }
@@ -480,7 +462,7 @@ mod tests {
     fn all_lists_every_provider() {
         for provider in Provider::all() {
             match provider {
-                Provider::Slack | Provider::Discord | Provider::Webhook => {}
+                Provider::Slack | Provider::Webhook => {}
             }
         }
         let mut seen: Vec<String> = Provider::all().iter().map(ToString::to_string).collect();

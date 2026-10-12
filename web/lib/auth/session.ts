@@ -242,7 +242,7 @@ const ConnectData = z.object({
   state: z.string().min(1),
   organizationId: z.string().min(1),
   projectId: z.string().min(1),
-  provider: z.enum(["slack", "discord"]),
+  provider: z.enum(["slack"]),
 });
 
 export type ConnectData = z.infer<typeof ConnectData>;

@@ -148,8 +148,7 @@ impl Tool {
                 json!({ "type": "object", "properties": {}, "additionalProperties": false }),
             ),
             Self::ListConnectors => (
-                "The project's Slack, Discord and webhook connectors, with their status and last \
-                 error.",
+                "The project's Slack and webhook connectors, with their status and last error.",
                 json!({ "type": "object", "properties": {}, "additionalProperties": false }),
             ),
             Self::ConnectorDeliveries => (

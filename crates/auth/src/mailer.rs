@@ -462,7 +462,7 @@ impl Mailer for ComposingMailer {
                  Accepting moves it into an organization you own. Its members \
                  come with it and join that organization as members, and so do \
                  its API keys — rotate any key you did not mint yourself. Its \
-                 Slack, Discord and webhook connectors do not: they belong to \
+                 Slack and webhook connectors do not: they belong to \
                  {organization}, and you would connect your own. {owner} stays \
                  on as an admin of the project, and joins your organization as \
                  a member.\n\n\

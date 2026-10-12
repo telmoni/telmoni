@@ -718,7 +718,6 @@ pub async fn delete_connector(
 async fn tear_down(state: &AppState, sealed: &db::SealedConnection) {
     let provider = sealed.provider;
     let others = match provider {
-        Provider::Discord => Ok(0),
         Provider::Webhook => return,
         Provider::Slack => {
             remaining_in_workspace(state, provider, &sealed.external_workspace_id, None).await
@@ -736,7 +735,6 @@ pub(crate) async fn tear_down_for_purge(
 ) {
     let provider = sealed.provider;
     let others = match provider {
-        Provider::Discord => Ok(0),
         Provider::Webhook => return,
         Provider::Slack => {
             remaining_in_workspace(
@@ -761,7 +759,6 @@ pub(crate) async fn tear_down_for_project_purge(
 ) {
     let provider = sealed.provider;
     let others = match provider {
-        Provider::Discord => Ok(0),
         Provider::Webhook => return,
         Provider::Slack => {
             remaining_in_workspace_outside_project(

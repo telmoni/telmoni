@@ -31,7 +31,7 @@ Telmoni's core on one page: what it is for, what it is made of, how a request mo
 Telmoni is a privacy-first telemetry and monitoring platform for AI agents, open source under Apache-2.0. This repository is its core: everything an installation runs. Today that is the multi-tenant foundation the telemetry will stand on:
 - organizations and projects, members and roles;
 - API keys, and a read API, `/v1`;
-- notifications, to an in-app feed, Slack, Discord and webhooks;
+- notifications, to an in-app feed, Slack and webhooks;
 - a hash-chained audit log, exportable by range;
 - a read-only console agent that answers from the docs and a project's own data;
 - telemetry: ingest over OpenTelemetry's own protocol, behind a project API key, with every content field dropped at the door; each project's settings in Postgres, its content mode set by the organization's owner and the key its user ids are hashed under; and the spans and their hourly totals in ClickHouse.
@@ -87,7 +87,7 @@ flowchart LR
   Mail["SMTP"]
   Models["Chat model, embeddings, reranker"]
   KEK["Cloud KMS, or a local key"]
-  Dest["Slack, Discord, customers' webhooks"]
+  Dest["Slack, customers' webhooks"]
   People -->|"HTTPS"| Console
   CLI -->|"/cli, the machine host"| Server
   Scripts -->|"/v1, a read key"| Server
@@ -114,7 +114,7 @@ flowchart LR
 | **SMTP** | Mail: verification, reset, invitations, codes | Each message |
 | **Models** | The agent's chat model (Anthropic, or anything OpenAI-compatible), embeddings and an optional reranker: the operator's, and never egress-guarded | A turn's text and the passages it reads; every passage the agent indexes |
 | **The key-encryption key** | A Cloud KMS key on a cluster, a local key on a laptop | Each connector row's data key, to wrap or unwrap |
-| **Slack, Discord, customers' webhooks** | Where notices are delivered | Each notice; a webhook's signed |
+| **Slack, customers' webhooks** | Where notices are delivered | Each notice; a webhook's signed |
 | **The operator** | Whoever runs the installation | Subcommands, feature flags, the log level |
 
 ## Building blocks
@@ -262,7 +262,7 @@ sequenceDiagram
 
 - **Two feeds:** each project's, and the organization's own, for its owner and admins.
 - **Raising a notice** writes it and one delivery per active connection in one transaction. The first attempt is made right after the commit; the rest are the delivery loop's: leased rows, backoff, at least once, deduplicated by the receiver on the delivery's id.
-- **Connectors**: Slack and Discord through OAuth, and webhooks signed with `telmoni-signature`.
+- **Connectors**: Slack through OAuth, and webhooks signed with `telmoni-signature`.
 - **Every grant is sealed at rest.** A data key per row, AES-256-GCM per field with the row's id as associated data, the data key wrapped by the key-encryption key: a library, never a lane.
 - **The egress guard** checks a customer's URL when it is registered, when it is dialled and when it connects, and follows no redirect, because a network policy cannot tell a customer's address from the database's.
 

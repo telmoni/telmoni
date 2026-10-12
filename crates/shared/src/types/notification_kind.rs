@@ -20,7 +20,7 @@ pub enum NotificationKind {
     MemberAdded,
     /// A member left or was removed from a project.
     MemberLeft,
-    /// A Slack or Discord channel was connected to the project.
+    /// A Slack channel or a webhook was connected to the project.
     ConnectorConnected,
     /// A connection stopped: the vendor answered that the installation is gone
     /// or the target refuses posts. The feed carries the news because the

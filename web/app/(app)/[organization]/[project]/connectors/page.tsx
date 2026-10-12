@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Webhook } from "lucide-react";
 
-import { DiscordIcon, SlackIcon } from "@/components/brand-icons";
+import { SlackIcon } from "@/components/brand-icons";
 import { LocalTime } from "@/components/local-time";
 import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
@@ -32,22 +32,20 @@ import { ConnectWebhookButton } from "./_webhook";
 
 export const metadata = { title: "Connectors" };
 
-// Three destinations for a project's notices. Slack and Discord are OAuth
-// grants: an owner or admin is sent to the vendor, picks a channel in the
-// vendor's own dialog, and the service keeps what comes back — sealed, and
-// never shown here; the handshake itself is `app/connect/[provider]`. The
-// webhook is an endpoint an owner or admin types into a dialog on this page,
-// and the one thing shown of it afterwards is its host. This page lists what
-// is connected and offers the control that connects more.
+// Two destinations for a project's notices. Slack is an OAuth grant: an
+// owner or admin is sent to the vendor, picks a channel in the vendor's own
+// dialog, and the service keeps what comes back — sealed, and never shown
+// here; the handshake itself is `app/connect/[provider]`. The webhook is an
+// endpoint an owner or admin types into a dialog on this page, and the one
+// thing shown of it afterwards is its host. This page lists what is connected
+// and offers the control that connects more.
 const BLURB: Record<Provider, string> = {
   slack: "Post this project's notices to a channel in your Slack workspace.",
-  discord: "Post this project's notices to a channel in your server.",
   webhook: "Post this project's notices as signed JSON to an HTTPS endpoint you run.",
 };
 
 const ICON: Record<Provider, (props: { className?: string }) => ReactNode> = {
   slack: SlackIcon,
-  discord: DiscordIcon,
   webhook: Webhook,
 };
 
@@ -92,9 +90,9 @@ export default async function ConnectorsPage({
       <div className="grid gap-6">
         <section className="grid gap-3">
           <p className="text-sm text-muted-foreground">
-            Connect this project to the places it already talks. A Slack or Discord
-            channel gets every notice this project raises; a webhook gets the events
-            you choose for it.
+            Connect this project to the places it already talks. A Slack channel
+            gets every notice this project raises; a webhook gets the events you
+            choose for it.
           </p>
 
           {notice && (
@@ -111,7 +109,7 @@ export default async function ConnectorsPage({
           )}
 
           {/* Two to a row from `sm` up, one below it: a tile holds a mark, a
-              name and a sentence, and three of those across a phone is a
+              name and a sentence, and two of those across a phone is a
               column of initials. */}
           <div className="grid gap-3 sm:grid-cols-2">
             {PROVIDERS.map((provider) => (
@@ -277,11 +275,10 @@ function Tile({
 }
 
 // Where a connection points, in the vendor's own terms: `#alerts in Acme`
-// for Slack, the webhook's name for Discord, which names neither the guild
-// nor the channel in its exchange, and the host alone for a webhook, whose
-// path may carry the customer's own token.
+// for Slack, and the host alone for a webhook, whose path may carry the
+// customer's own token.
 function describe(connection: Connection): string {
-  if (connection.provider === "discord" || connection.provider === "webhook") {
+  if (connection.provider === "webhook") {
     return connection.channel_name;
   }
   const channel = `#${connection.channel_name.replace(/^#/, "")}`;

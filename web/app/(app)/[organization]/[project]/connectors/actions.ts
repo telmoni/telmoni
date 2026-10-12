@@ -171,8 +171,8 @@ export async function createWebhookConnectorAction(
 
 const UpdatedConnection = z.object({ connection: ConnectionSchema });
 
-// Which notices an endpoint receives. A webhook's alone: Slack and Discord
-// take every kind, and the service refuses the change for them.
+// Which notices an endpoint receives. A webhook's alone: Slack takes every
+// kind, and the service refuses the change for it.
 export async function updateWebhookEventsAction(
   projectId: string,
   connectionId: string,
