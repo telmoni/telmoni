@@ -25,7 +25,7 @@ Each file is one answer from `POST /otlp/v1/traces` — `status`, `headers`, `bo
 | File | Answer | The SDK |
 |---|---|---|
 | `kept.json` | `200`, `Telmoni-Content-Mode: off`, no partial success | logs nothing; its content mode is now `off` |
-| `dropped.json` | `200`, a partial success naming an attribute dropped as content | warns once, naming the attribute and what lifts the drop; the same attribute named again is not logged again |
+| `dropped.json` | `200`, a partial success naming an attribute dropped as content | warns once, naming the attribute, the project's content mode that decides the drop, and the page that says which modes keep content (`https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door`); the same attribute named again is not logged again |
 | `unlisted.json` | `200`, a partial success naming a text attribute the inventory does not name | warns once, naming the tag that would keep it |
 | `refused.json` | `200`, a partial success refusing one span | warns once with the server's line; never retries |
 | `rate-limited.json` | `429` with `Retry-After` | waits `Retry-After` seconds, through its injected sleep, then sends the same bytes again |

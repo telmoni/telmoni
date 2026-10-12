@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import logging
+from concurrent.futures import ThreadPoolExecutor
+
+import pytest
+
 from conftest import FakeTransport, attributes_of
-from telmoni import Telmoni
+from telmoni import Run, Telmoni
 
 
 def by_name(transport: FakeTransport) -> dict[str, dict[str, object]]:
@@ -40,6 +45,32 @@ def test_a_step_opened_on_the_run_handle_is_the_same(
     assert telmoni.flush()
     step = by_name(transport)["explicit"]
     assert attributes_of(step)["telmoni.run_id"] == run.run_id
+
+
+def test_a_step_or_call_from_a_worker_thread_goes_under_the_run(
+    telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    def work(run: Run) -> None:
+        # A pool's thread starts with an empty context: neither the run's span
+        # nor the run is current in it.
+        with run.step("think"), telmoni.tool_call("search"):
+            pass
+        with run.model_call("m"):
+            pass
+
+    with telmoni.run("bot") as run, ThreadPoolExecutor(max_workers=1) as pool:
+        pool.submit(work, run).result()
+    assert telmoni.flush()
+    spans = by_name(transport)
+    agent = spans["invoke_agent bot"]
+    for name in ("think", "chat m"):
+        assert spans[name]["parentSpanId"] == agent["spanId"], name
+        assert spans[name]["traceId"] == agent["traceId"], name
+    # The client-level call inside the step found the run through it.
+    search = spans["execute_tool search"]
+    assert search["parentSpanId"] == spans["think"]["spanId"]
+    assert attributes_of(search)["telmoni.run_id"] == run.run_id
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
 def test_a_failing_step_records_the_error_class_and_reraises(

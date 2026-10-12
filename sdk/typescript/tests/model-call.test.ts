@@ -47,6 +47,18 @@ describe('a model call', () => {
     expect(typed['gen_ai.usage.input_tokens']).toEqual({ intValue: '12' });
   });
 
+  it('takes a blank operation as chat', async () => {
+    // As one left out is: sent blank, the span would be named ' m' and
+    // ingest would read it as a step.
+    h.telmoni.run('bot', (run) => {
+      for (const operation of ['', '  ']) run.modelCall('m', { operation }, () => {});
+    });
+    expect(await h.telmoni.flush()).toBe(true);
+    const spans = h.transport.spans().filter((span) => span.name === 'chat m');
+    expect(spans, h.transport.spans().map((span) => span.name).join(', ')).toHaveLength(2);
+    for (const span of spans) expect(attributesOf(span)['gen_ai.operation.name']).toBe('chat');
+  });
+
   it('has content taken off before it leaves', async () => {
     h.telmoni.run('bot', (run) => {
       run.modelCall('m', { inputMessages: [{ role: 'user', content: 'my secret prompt' }] }, (call) => {

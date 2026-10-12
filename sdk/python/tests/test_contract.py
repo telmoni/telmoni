@@ -100,6 +100,22 @@ def test_plain_http_is_refused_except_to_this_machine() -> None:
             Config(endpoint=endpoint)
 
 
+def test_a_configuration_changed_after_it_was_built_is_checked_again() -> None:
+    # The client checks what it is given, as the other SDKs do: a field set
+    # after the configuration was built skipped the checks it was built with.
+    config = Config(api_key="k")
+    config.endpoint = "http://api.example.com"
+    with pytest.raises(ValueError, match="unencrypted HTTP"):
+        Telmoni(config)
+    config.endpoint = "https://api.telmoni.local//"
+    client = Telmoni(config)
+    try:
+        assert client.config.endpoint == "https://api.telmoni.local"
+        assert client.exporter._url == "https://api.telmoni.local/otlp/v1/traces"
+    finally:
+        client.shutdown()
+
+
 def test_a_secret_is_never_pickled_but_copies_as_itself() -> None:
     import copy
     import pickle

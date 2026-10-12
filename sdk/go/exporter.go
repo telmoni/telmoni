@@ -33,6 +33,8 @@ const (
 	// warnedMax is how many distinct warnings are remembered before the set
 	// starts over.
 	warnedMax = 1024
+	// contentDocs is where a dropped content field's warning sends the reader.
+	contentDocs = "https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door"
 )
 
 var (
@@ -246,7 +248,9 @@ func (e *exporter) warnOnce(key, text string) {
 func remedy(attr, reason string) string {
 	switch reason {
 	case "content":
-		return "turn the project's content mode on in its settings to keep it"
+		// The page, not a setting to change: which modes keep content is the
+		// platform's to say, and no project can choose one that does yet.
+		return "the project's content mode decides whether content is kept: " + contentDocs
 	case "unlisted":
 		return "send it as the tag " + tagPrefix + attr + " to keep it"
 	case "over_cap":

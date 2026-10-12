@@ -32,6 +32,9 @@ class Telmoni:
         sleep: Callable[[float], None] | None = None,
     ) -> None:
         self.config = config or Config()
+        # Before the exporter takes it: an endpoint set to plain HTTP after the
+        # configuration was built would carry the key in the clear.
+        self.config._normalize()
         self.exporter = Exporter(self.config, transport=transport, sleep=sleep)
         self.processor = Processor(self.exporter)
         resource = Resource(

@@ -362,7 +362,8 @@ func TestDroppedIsWarnedOnce(t *testing.T) {
 	aRun(t, h)
 	h.shutdown()
 	expectWarnings(t, h, "telmoni: the server dropped gen_ai.input.messages (content; the project's content mode is off); "+
-		"turn the project's content mode on in its settings to keep it")
+		"the project's content mode decides whether content is kept: "+
+		"https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door")
 }
 
 func TestUnlistedNamesTheTagThatWouldKeepIt(t *testing.T) {

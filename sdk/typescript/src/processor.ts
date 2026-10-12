@@ -36,6 +36,8 @@ export class Processor implements SpanProcessor {
   #timer: ReturnType<typeof setTimeout> | undefined;
   #inFlight: Promise<void> | undefined;
   #down = false;
+  /** Set once a shutdown's deadline has passed: nothing more is started. */
+  #givenUp = false;
 
   constructor(exporter: Exporter, warn: (message: string) => void, options: ProcessorOptions = {}) {
     this.#exporter = exporter;
@@ -80,7 +82,9 @@ export class Processor implements SpanProcessor {
 
   /** Resolves once the queue is empty and the export in flight has settled. */
   forceFlush(): Promise<void> {
-    if (this.#idle()) return Promise.resolve();
+    // Given up, nothing will drain: as the other SDKs' flush after a
+    // shutdown, it returns at once rather than wait out its timeout.
+    if (this.#idle() || this.#givenUp) return Promise.resolve();
     return new Promise((resolve) => {
       this.#flushers.push(resolve);
       this.#wake(0);
@@ -88,9 +92,11 @@ export class Processor implements SpanProcessor {
   }
 
   /**
-   * Drains, then takes nothing more. A batch still retrying past the timeout
-   * is left to settle on its own: the process exit the caller is heading for
-   * takes it.
+   * Drains, then takes nothing more. Past the timeout what is left is given
+   * up: the wait for a retry ends there and no batch or attempt follows, so
+   * nothing of the SDK's but a request already in flight, which its own
+   * timeout bounds, holds the process the caller is ending, as the other
+   * SDKs' workers hold none.
    */
   async shutdown(): Promise<void> {
     if (this.#down) return;
@@ -99,7 +105,11 @@ export class Processor implements SpanProcessor {
     while (!this.#idle()) {
       if (this.#inFlight === undefined) this.#tick();
       const remaining = deadline - Date.now();
-      if (remaining <= 0) break;
+      if (remaining <= 0) {
+        this.#givenUp = true;
+        this.#exporter.giveUp();
+        break;
+      }
       await Promise.race([this.#inFlight, pause(remaining)]);
     }
     if (this.#timer !== undefined) {
@@ -122,6 +132,7 @@ export class Processor implements SpanProcessor {
   // The worker is a timer, never referenced: an idle SDK never keeps the
   // process alive, and a pending one fires no later than the delay.
   #wake(ms: number): void {
+    if (this.#givenUp) return;
     if (this.#timer !== undefined) {
       if (ms > 0) return;
       clearTimeout(this.#timer);
@@ -136,7 +147,7 @@ export class Processor implements SpanProcessor {
 
   /** One batch, one at a time; the export's end looks again. */
   #tick(): void {
-    if (this.#inFlight !== undefined) return;
+    if (this.#inFlight !== undefined || this.#givenUp) return;
     const batch = this.#queue.splice(0, this.#maxBatchSize);
     const dropped = this.#dropped;
     this.#dropped = 0;

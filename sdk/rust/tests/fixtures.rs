@@ -282,7 +282,14 @@ fn dropped_is_warned_once() -> Outcome {
         warning.contains("content; the project's content mode is off"),
         "{warning}"
     );
-    assert!(warning.contains("content mode on"), "{warning}");
+    assert!(
+        warning.contains("content mode decides whether content is kept"),
+        "{warning}"
+    );
+    assert!(
+        warning.contains("docs/api/ingest#what-is-dropped-at-the-door"),
+        "{warning}"
+    );
     Ok(())
 }
 

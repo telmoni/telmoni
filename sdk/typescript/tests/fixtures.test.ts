@@ -226,7 +226,8 @@ describe('answers/', () => {
     expect(h.warnings).toHaveLength(1);
     expect(h.warnings[0]).toContain('gen_ai.input.messages');
     expect(h.warnings[0]).toContain("content; the project's content mode is off");
-    expect(h.warnings[0]).toContain('content mode on');
+    expect(h.warnings[0]).toContain('content mode decides whether content is kept');
+    expect(h.warnings[0]).toContain('docs/api/ingest#what-is-dropped-at-the-door');
   });
 
   it('unlisted names the tag that would keep it', async () => {

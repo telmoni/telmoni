@@ -175,8 +175,10 @@ func (c *Client) ContentMode() string {
 	return c.exporter.contentMode()
 }
 
-// Flush sends everything queued and waits until the platform has it, or ctx
-// ends.
+// Flush sends everything queued and waits until the platform has it. It waits
+// for ctx, or 30 seconds when ctx has no deadline, as the other SDKs wait at
+// most, and then returns ctx's error; a batch still being sent is left to the
+// worker.
 func (c *Client) Flush(ctx context.Context) error {
 	return c.provider.ForceFlush(ctx)
 }

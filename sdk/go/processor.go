@@ -20,10 +20,10 @@ type queueLimits struct {
 
 var defaultQueueLimits = queueLimits{maxQueue: 2048, maxBatch: 512, delay: 5 * time.Second}
 
-// shutdownTimeout bounds a Shutdown whose context has no deadline, as the
-// Python and Rust SDKs bound theirs: a batch mid-retry at exit is given this
-// long, and the worker is then left to finish on its own.
-const shutdownTimeout = 30 * time.Second
+// defaultWait bounds a Flush or a Shutdown whose context has no deadline, as
+// the other SDKs bound theirs: a batch mid-retry is given this long, and the
+// worker is then left to finish on its own.
+const defaultWait = 30 * time.Second
 
 // processor is the SDK's own batch processor: OpenTelemetry's batching and
 // bounded queue, without the check that skips a span whose trace is not
@@ -130,6 +130,8 @@ func (p *processor) ForceFlush(ctx context.Context) error {
 		p.flushing--
 		p.mu.Unlock()
 	}()
+	ctx, cancel := withDefaultWait(ctx)
+	defer cancel()
 	select {
 	case <-drained:
 		return nil
@@ -147,20 +149,25 @@ func (p *processor) Shutdown(ctx context.Context) error {
 	p.stopped = true
 	p.signal()
 	p.mu.Unlock()
-	if _, has := ctx.Deadline(); !has {
-		// Without a deadline, the documented `defer client.Shutdown(
-		// context.Background())` would hold a process exit for as long as
-		// a batch's retries take.
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, shutdownTimeout)
-		defer cancel()
-	}
+	ctx, cancel := withDefaultWait(ctx)
+	defer cancel()
 	select {
 	case <-p.done:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// withDefaultWait is ctx, given defaultWait when it has no deadline of its
+// own: the documented `defer client.Shutdown(context.Background())` would
+// otherwise hold a process exit, and a Flush with that context its caller,
+// for as long as a batch's retries take.
+func withDefaultWait(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, has := ctx.Deadline(); has {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, defaultWait)
 }
 
 // signal wakes the worker; a signal already pending is enough. Called under
@@ -211,10 +218,10 @@ func (p *processor) work() {
 		p.exporting = n > 0
 		p.mu.Unlock()
 		if dropped > 0 {
-			p.logger.Warn(fmt.Sprintf("telmoni: the export queue was full; %d spans were dropped", dropped))
+			p.warn(fmt.Sprintf("telmoni: the export queue was full; %d spans were dropped", dropped))
 		}
 		if n > 0 {
-			p.exporter.export(batch)
+			p.export(batch)
 		}
 		p.mu.Lock()
 		p.exporting = false
@@ -223,6 +230,27 @@ func (p *processor) work() {
 		}
 		p.mu.Unlock()
 	}
+}
+
+// export sends one batch. A hook of the application's (its transport, sleep
+// or logger) may panic, and a panic on the worker would take the process
+// down: recovered here, so the worker outlives it and the next batch still
+// goes. The batch in hand is lost, and said so.
+func (p *processor) export(batch []sdktrace.ReadOnlySpan) {
+	defer func() {
+		if recover() != nil {
+			p.warn("telmoni: a hook panicked during an export; the batch was dropped")
+		}
+	}()
+	p.exporter.export(batch)
+}
+
+// warn logs text through the application's logger, whose handler may panic
+// too: recovered on its own, so a warning that panics costs no batch. Nothing
+// says so, since the logger is where warnings go.
+func (p *processor) warn(text string) {
+	defer func() { _ = recover() }()
+	p.logger.Warn(text)
 }
 
 // due is whether the worker should export without waiting; under the lock.

@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { harness } from './helpers';
+import { answer, harness } from './helpers';
 
 describe('the processor', () => {
   it('bounds the queue and counts the drops once', async () => {
@@ -75,5 +75,34 @@ describe('the processor', () => {
     const h = harness({}, { transport: () => new Promise(() => {}) });
     h.telmoni.run('bot', () => {});
     expect(await h.telmoni.flush(0.01)).toBe(false);
+  });
+
+  it('shutdown drains until its deadline, then holds no timer and sends nothing more', async () => {
+    vi.useFakeTimers();
+    try {
+      // The real sleep, on the fake clock: every answer asks for 20 s, and a
+      // batch of one leaves the run's own span queued behind its start.
+      const h = harness(
+        {},
+        { sleep: undefined, processor: { maxBatchSize: 1 } },
+        Array.from({ length: 10 }, () => answer(429, { 'Retry-After': '20' }, '{}')),
+      );
+      h.telmoni.run('bot', () => {});
+      const done = h.telmoni.shutdown();
+      // Before the deadline the drain goes on: the start's retry, 20 s in.
+      await vi.advanceTimersByTimeAsync(30_000);
+      await done;
+      expect(h.transport.requests).toHaveLength(2);
+      // Past it nothing is pending to hold the process, and nothing more is
+      // sent however long the process lives.
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(h.transport.requests).toHaveLength(2);
+      // A flush after it has nothing left to wait for, so it waits for nothing.
+      expect(await h.telmoni.flush()).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

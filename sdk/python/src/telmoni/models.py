@@ -100,6 +100,13 @@ class Config:
     sampler: Sampler | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
+        self._normalize()
+
+    def _normalize(self) -> None:
+        """Blank values unset, the endpoint's trailing slashes off, the key
+        wrapped, and every check: as the configuration is built, and again as
+        a client is built on it, since a field set in between is otherwise
+        never checked."""
         endpoint = _unset_if_blank(self.endpoint)
         self.endpoint = (endpoint or DEFAULT_ENDPOINT).rstrip("/")
         refuse_cleartext(self.endpoint)

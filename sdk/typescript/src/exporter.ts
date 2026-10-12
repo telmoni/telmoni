@@ -23,6 +23,8 @@ export const REQUEST_TIMEOUT_MS = 10_000;
 export const RETRY_AFTER_MAX_S = 60;
 /** How many distinct warnings are remembered before the set starts over. */
 export const WARNED_MAX = 1024;
+/** Where a dropped content field's warning sends the reader. */
+const CONTENT_DOCS = 'https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door';
 
 const DROPPED = /^span (\S+) dropped (\S+): (\w+)(?:; (.*))?$/;
 const REFUSED = /^span (\S+) refused: (.*)$/;
@@ -83,7 +85,8 @@ export interface ExportTraceServiceRequest {
 
 export interface ExporterHooks {
   transport: Transport;
-  sleep: (seconds: number) => Promise<void>;
+  /** `signal` aborts once the wait is given up; a hook may ignore it. */
+  sleep: (seconds: number, signal: AbortSignal) => Promise<void>;
   warn: (message: string) => void;
 }
 
@@ -95,10 +98,21 @@ export interface ExporterHooks {
 export const fetchTransport: Transport = (url, init) =>
   fetch(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
 
-/** A real wait between attempts; it holds the process, since a retry is pending work. */
-export const realSleep = (seconds: number): Promise<void> =>
+/**
+ * A real wait between attempts. It holds the process, since a retry is pending
+ * work, until `signal` gives the retry up: then it ends at once, and holds
+ * nothing.
+ */
+export const realSleep = (seconds: number, signal: AbortSignal): Promise<void> =>
   new Promise((resolve) => {
-    setTimeout(resolve, seconds * 1000);
+    const done = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, seconds * 1000);
+    if (signal.aborted) done();
+    else signal.addEventListener('abort', done, { once: true });
   });
 
 function sdkVersion(): string {
@@ -109,11 +123,12 @@ function sdkVersion(): string {
 export class Exporter {
   readonly #config: ResolvedConfig;
   readonly #transport: Transport;
-  readonly #sleep: (seconds: number) => Promise<void>;
+  readonly #sleep: (seconds: number, signal: AbortSignal) => Promise<void>;
   readonly #warn: (message: string) => void;
   readonly #url: string;
   readonly #warned = new Set<string>();
   readonly #resource: KeyValue[];
+  readonly #givenUp = new AbortController();
   #contentMode: string | undefined;
 
   constructor(config: ResolvedConfig, hooks: ExporterHooks) {
@@ -136,6 +151,15 @@ export class Exporter {
     return this.#contentMode;
   }
 
+  /**
+   * Gives up what is left: the wait before a retry ends now, and no attempt
+   * follows it. A shutdown past its deadline calls it, so a process that
+   * ends without `process.exit()` is not held for the retries.
+   */
+  giveUp(): void {
+    this.#givenUp.abort();
+  }
+
   async export(spans: readonly ReadableSpan[]): Promise<void> {
     if (spans.length === 0) return;
     const body = JSON.stringify(this.encode(spans));
@@ -148,6 +172,7 @@ export class Exporter {
     }
     let failure = '';
     for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+      if (this.#givenUp.signal.aborted) return;
       let answer: TransportResponse;
       try {
         answer = await this.#transport(this.#url, { method: 'POST', headers, body });
@@ -264,7 +289,7 @@ export class Exporter {
     if (retryAfter !== null && /^\s*[+-]?\d+\s*$/.test(retryAfter)) {
       seconds = Number.parseInt(retryAfter, 10);
     }
-    await this.#sleep(Math.min(Math.max(seconds, 0), RETRY_AFTER_MAX_S));
+    await this.#sleep(Math.min(Math.max(seconds, 0), RETRY_AFTER_MAX_S), this.#givenUp.signal);
   }
 
   #warnOnce(key: string, text: string): void {
@@ -278,7 +303,9 @@ export class Exporter {
 }
 
 function remedy(attributeName: string, reason: string): string {
-  if (reason === 'content') return "turn the project's content mode on in its settings to keep it";
+  // The page, not a setting to change: which modes keep content is the
+  // platform's to say, and no project can choose one that does yet.
+  if (reason === 'content') return `the project's content mode decides whether content is kept: ${CONTENT_DOCS}`;
   if (reason === 'unlisted') return `send it as the tag ${contract.TAG_PREFIX}${attributeName} to keep it`;
   if (reason === 'over_cap') return 'shorten it to keep it';
   return "see the server's answer";

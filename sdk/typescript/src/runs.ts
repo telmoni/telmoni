@@ -261,7 +261,10 @@ export class Opener {
   }
 
   modelCall(run: Run, parent: Context, model: string, options: ModelCallOptions): ModelCall {
-    const operation = options.operation ?? 'chat';
+    // Sent blank, the span would be named ` <model>` and ingest would read it
+    // as a step.
+    const operation =
+      typeof options.operation === 'string' && options.operation.trim() !== '' ? options.operation : 'chat';
     const attributes: Attributes = {
       ...run.inherited,
       [contract.OPERATION]: operation,

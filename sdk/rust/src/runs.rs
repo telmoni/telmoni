@@ -75,7 +75,7 @@ pub struct ModelCallOptions {
     /// Blank reads as none.
     pub provider: Option<String>,
     /// The operation: `chat` unless given (`generate_content`,
-    /// `text_completion`, `embeddings`).
+    /// `text_completion`, `embeddings`); a blank one is `chat` too.
     pub operation: Option<String>,
     /// The messages sent to the model: content, which leaves the process only
     /// when [`Config::capture_content`](crate::Config::capture_content) is on
@@ -191,9 +191,11 @@ impl Handle {
     }
 
     fn model_call(&self, model: &str, options: ModelCallOptions) -> ModelCall {
+        // Sent blank, the span would be named ` <model>` and ingest would
+        // read it as a step.
         let operation = options
             .operation
-            .filter(|operation| !operation.is_empty())
+            .filter(|operation| !operation.trim().is_empty())
             .unwrap_or_else(|| contract::MODEL_OPERATION_DEFAULT.to_owned());
         let mut attributes = vec![
             KeyValue::new(contract::OPERATION, operation.clone()),

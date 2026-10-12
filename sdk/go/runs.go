@@ -152,7 +152,8 @@ func contextWithRun(ctx context.Context, r *Run) context.Context {
 }
 
 // RunFromContext is the run open in ctx, or nil outside one. A nil Run opens
-// handles that do nothing, so nothing is sent outside a run.
+// handles that do nothing, and its own End, Fail, FailWith and Cancel do
+// nothing, so nothing is sent outside a run and nothing panics.
 func RunFromContext(ctx context.Context) *Run {
 	if ctx == nil {
 		return nil
@@ -246,6 +247,45 @@ func (r *Run) Agent() string {
 	return r.agent
 }
 
+// End ends the run's span; a second End does nothing. End, Fail, FailWith and
+// Cancel are the handle's, declared again on Run so a nil Run does nothing:
+// reached through the embedded handle, the nil Run would be dereferenced
+// before the handle's own check.
+func (r *Run) End() {
+	if r == nil {
+		return
+	}
+	r.handle.End()
+}
+
+// Fail marks the run failed with err's Go type, never its message, or
+// cancelled for an error that is or wraps context.Canceled, as a step's Fail
+// does.
+func (r *Run) Fail(err error) {
+	if r == nil {
+		return
+	}
+	r.handle.Fail(err)
+}
+
+// FailWith marks the run failed with errorType as its error.type, and status
+// ERROR with no message.
+func (r *Run) FailWith(errorType string) {
+	if r == nil {
+		return
+	}
+	r.handle.FailWith(errorType)
+}
+
+// Cancel marks the run cancelled by the agent, which is neither ok nor an
+// error.
+func (r *Run) Cancel() {
+	if r == nil {
+		return
+	}
+	r.handle.Cancel()
+}
+
 // Step opens a step named name under the span in ctx: the run's, or a step's
 // to nest under it. The context returned carries the step's span.
 func (r *Run) Step(ctx context.Context, name string) (context.Context, *Step) {
@@ -263,7 +303,9 @@ func (r *Run) ModelCall(ctx context.Context, model string, opts ModelCallOptions
 		return ctx, &ModelCall{}
 	}
 	operation := opts.Operation
-	if operation == "" {
+	// Sent blank, the span would be named " <model>" and ingest would read
+	// it as a step.
+	if strings.TrimSpace(operation) == "" {
 		operation = defaultModelOperation
 	}
 	attrs := []attribute.KeyValue{

@@ -24,6 +24,8 @@ use crate::{VERSION, lock};
 const ATTEMPTS: u32 = 3;
 /// The longest a `Retry-After` is honoured for.
 const RETRY_AFTER_MAX_SECS: u64 = 60;
+/// Where a dropped content field's warning sends the reader.
+const CONTENT_DOCS: &str = "https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door";
 
 pub(crate) struct Exporter {
     url: String,
@@ -294,7 +296,11 @@ fn refused(line: &str) -> Option<&str> {
 
 fn remedy(attribute: &str, reason: &str) -> String {
     match reason {
-        "content" => "turn the project's content mode on in its settings to keep it".to_owned(),
+        // The page, not a setting to change: which modes keep content is the
+        // platform's to say, and no project can choose one that does yet.
+        "content" => {
+            format!("the project's content mode decides whether content is kept: {CONTENT_DOCS}")
+        }
         "unlisted" => format!(
             "send it as the tag {}{attribute} to keep it",
             contract::TAG_PREFIX

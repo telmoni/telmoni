@@ -7,5 +7,5 @@
       "errorMessage": "span 00f067aa0ba902b7 dropped gen_ai.input.messages: content; the project's content mode is off"
     }
   },
-  "expect": "one warning naming gen_ai.input.messages, the reason (content; the project's content mode is off) and what lifts it (the project's content mode, in its settings); a second answer naming the same attribute logs nothing"
+  "expect": "one warning naming gen_ai.input.messages, the reason (content; the project's content mode is off) and what decides it (the project's content mode), with the page that says which modes keep content (api/ingest, What is dropped at the door); a second answer naming the same attribute logs nothing"
 }

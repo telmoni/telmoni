@@ -82,7 +82,7 @@ export interface RunOptions {
 
 export interface ModelCallOptions {
   provider?: string | undefined;
-  /** `chat` (default), `generate_content`, `text_completion` or `embeddings`. */
+  /** `chat` (default, and what a blank one means), `generate_content`, `text_completion` or `embeddings`. */
   operation?: string | undefined;
   /** Content: sent only with `captureContent` and the project's mode `on`. */
   inputMessages?: unknown;

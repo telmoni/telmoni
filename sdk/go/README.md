@@ -106,7 +106,8 @@ start goes at once) and sent as OTLP/JSON to `POST {endpoint}/otlp/v1/traces`
 over HTTPS, following no redirect. A `429` or `503` is retried after
 `Retry-After`, three attempts in all. Every warning is logged once per client
 through `log/slog`. `client.Flush(ctx)` sends what is queued;
-`client.Shutdown(ctx)` drains and stops.
+`client.Shutdown(ctx)` drains and stops. Each waits for `ctx`, or 30 seconds
+when it has no deadline.
 
 The variables, the attributes each span carries, and the other SDKs are
 documented at [telmoni.com/docs/api/sdks](https://telmoni.com/docs/api/sdks).

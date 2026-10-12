@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	telmoni "github.com/telmoni/telmoni/sdk/go"
@@ -110,5 +113,112 @@ func TestFlushHonoursItsContext(t *testing.T) {
 	h.flush()
 	if got := sortedNames(h.transport.spans(t)); !reflect.DeepEqual(got, []string{"invoke_agent bot", "telmoni.run.start"}) {
 		t.Errorf("spans sent: %v", got)
+	}
+}
+
+// A flush whose context has no deadline still returns while an export hangs:
+// after 30 seconds, as the other SDKs wait at most. The bubble's clock makes
+// those seconds pass at once.
+func TestAFlushWithoutADeadlineWaitsThirtySeconds(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		release := make(chan struct{})
+		transport := newFakeTransport(t)
+		h := newHarness(t, testConfig(), transport, telmoni.WithTransport(func(req *http.Request) (*http.Response, error) {
+			<-release
+			return transport.send(req)
+		}))
+		_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+		run.End()
+		start := time.Now()
+		if err := h.client.Flush(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("Flush = %v, want context.DeadlineExceeded", err)
+		}
+		if waited := time.Since(start); waited != 30*time.Second {
+			t.Errorf("Flush waited %v, want 30s", waited)
+		}
+		close(release)
+	})
+}
+
+// panicking is a slog handler that panics on every record, as a broken
+// handler of the application's would.
+type panicking struct{}
+
+func (panicking) Enabled(context.Context, slog.Level) bool  { return true }
+func (panicking) Handle(context.Context, slog.Record) error { panic("the handler broke") }
+func (panicking) WithAttrs([]slog.Attr) slog.Handler        { return panicking{} }
+func (panicking) WithGroup(string) slog.Handler             { return panicking{} }
+
+// A hook of the application's that panics, here the logger on the queue's
+// warning, kills no worker: the warning is lost, the batch beside it and the
+// next one still go, and a flush and a shutdown still return.
+func TestAHookThatPanicsDoesNotStopTheExporter(t *testing.T) {
+	// The start's export is held once it is recorded; the steps behind it
+	// overflow a queue of one, so the next batch carries a drop count and
+	// the logger panics on its warning.
+	release := make(chan struct{})
+	transport := newFakeTransport(t)
+	h := newHarness(t, testConfig(), transport,
+		telmoni.WithTransport(func(req *http.Request) (*http.Response, error) {
+			resp, err := transport.send(req)
+			<-release
+			return resp, err
+		}),
+		telmoni.WithLogger(slog.New(panicking{})),
+		telmoni.WithQueue(1, 100, time.Minute),
+	)
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	if !transport.waitFor(1, waitTimeout) {
+		t.Fatal("the run's start was not sent at once")
+	}
+	for n := range 3 {
+		_, step := run.Step(ctx, fmt.Sprintf("s%d", n))
+		step.End()
+	}
+	run.End()
+	close(release)
+	h.flush()
+	// The worker is alive: a run after the panic is sent. Its start goes
+	// alone first, so the queue of one has room for the run itself.
+	_, again := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	if !transport.waitFor(3, waitTimeout) {
+		t.Fatal("the run after the panic did not start")
+	}
+	again.End()
+	h.flush()
+	want := []string{"invoke_agent bot", "s0", "telmoni.run.start", "telmoni.run.start"}
+	if got := sortedNames(transport.spans(t)); !reflect.DeepEqual(got, want) {
+		t.Errorf("spans sent: %v, want %v", got, want)
+	}
+}
+
+// A transport that panics loses the batch it was given, and the logger says
+// so; the worker goes on, and the next batch is sent.
+func TestATransportThatPanicsLosesOnlyItsBatch(t *testing.T) {
+	transport := newFakeTransport(t)
+	panicked := make(chan struct{})
+	var sends atomic.Int32
+	h := newHarness(t, testConfig(), transport, telmoni.WithTransport(func(req *http.Request) (*http.Response, error) {
+		if sends.Add(1) == 1 {
+			close(panicked)
+			panic("the transport broke")
+		}
+		return transport.send(req)
+	}))
+	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	// Waiting for the panic keeps the start alone in the batch it costs.
+	select {
+	case <-panicked:
+	case <-time.After(waitTimeout):
+		t.Fatal("the run's start was not sent at once")
+	}
+	run.End()
+	h.flush()
+	if got := names(transport.spans(t)); !reflect.DeepEqual(got, []string{"invoke_agent bot"}) {
+		t.Errorf("spans sent: %v, want the run's own, its start lost with the panic", got)
+	}
+	warnings := h.logs.warnings()
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "a hook panicked during an export; the batch was dropped") {
+		t.Errorf("warnings = %q, want one saying the batch was dropped", warnings)
 	}
 }

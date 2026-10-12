@@ -225,20 +225,23 @@ fn work(shared: &Shared, exporter: &Exporter, warner: &Warner) {
             (batch, dropped)
         };
         // A hook of the application's — its `warn`, `sleep` or `transport` —
-        // may panic; caught here, so the worker outlives it and the next
-        // batch still goes. The batch in hand is lost, and said so where
-        // the hook cannot reach.
-        let sent = panic::catch_unwind(AssertUnwindSafe(|| {
-            if dropped > 0 {
+        // may panic; each call is caught on its own, so the worker outlives
+        // it, a warning that panics costs no batch, and the next batch still
+        // goes. A panic during an export loses that batch, said where the hook
+        // cannot reach.
+        if dropped > 0 {
+            let warned = panic::catch_unwind(AssertUnwindSafe(|| {
                 warner.warn(&format!(
                     "telmoni: the export queue was full; {dropped} spans were dropped"
                 ));
+            }));
+            if warned.is_err() {
+                tracing::warn!(target: "telmoni", "telmoni: the warn hook panicked");
             }
-            if !batch.is_empty() {
-                exporter.export(&batch);
-            }
-        }));
-        if sent.is_err() {
+        }
+        if !batch.is_empty()
+            && panic::catch_unwind(AssertUnwindSafe(|| exporter.export(&batch))).is_err()
+        {
             tracing::warn!(
                 target: "telmoni",
                 "telmoni: a hook panicked during an export; the batch was dropped"

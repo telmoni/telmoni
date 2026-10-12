@@ -164,7 +164,8 @@ def test_dropped_is_warned_once(caplog: pytest.LogCaptureFixture) -> None:
     assert len(warnings) == 1, warnings
     assert "gen_ai.input.messages" in warnings[0]
     assert "content; the project's content mode is off" in warnings[0]
-    assert "content mode on" in warnings[0]
+    assert "content mode decides whether content is kept" in warnings[0]
+    assert "docs/api/ingest#what-is-dropped-at-the-door" in warnings[0]
 
 
 def test_unlisted_names_the_tag_that_would_keep_it(

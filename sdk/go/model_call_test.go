@@ -83,6 +83,31 @@ func TestAnswerWithoutUsageOrModelSetsNeither(t *testing.T) {
 	}
 }
 
+// A blank operation is chat, as one left out is: sent blank, the span would
+// be named " m" and ingest would read it as a step.
+func TestABlankOperationIsChat(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	for _, blank := range []string{"", "  "} {
+		_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{Operation: blank})
+		call.End()
+	}
+	run.End()
+	h.flush()
+	spans := calls(t, h)
+	if len(spans) != 2 {
+		t.Fatalf("want two chat calls, got %v", sortedNames(h.transport.spans(t)))
+	}
+	for _, span := range spans {
+		if span["name"] != "chat m" {
+			t.Errorf("name = %q, want chat m", span["name"])
+		}
+		if got := attributesOf(t, span)["gen_ai.operation.name"]; got != "chat" {
+			t.Errorf("gen_ai.operation.name = %v, want chat", got)
+		}
+	}
+}
+
 func TestContentIsTakenOffBeforeItLeaves(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})

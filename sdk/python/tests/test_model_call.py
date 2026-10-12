@@ -37,6 +37,20 @@ def test_a_model_call_carries_the_conventions_names(
     }
 
 
+def test_a_blank_operation_is_chat(telmoni: Telmoni, transport: FakeTransport) -> None:
+    # As one left out is: sent blank, the span would be named " m" and ingest
+    # would read it as a step.
+    with telmoni.run("bot") as run:
+        with telmoni.model_call("m", operation=""):
+            pass
+        with run.model_call("m", operation="  "):
+            pass
+    assert telmoni.flush()
+    spans = [s for s in transport.spans() if s["name"] == "chat m"]
+    assert len(spans) == 2, [s["name"] for s in transport.spans()]
+    assert all(attributes_of(s)["gen_ai.operation.name"] == "chat" for s in spans)
+
+
 def test_content_is_taken_off_before_it_leaves(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:

@@ -303,7 +303,7 @@ class Opener:
         run = run or self._outside("step")
         if run is None:
             return None
-        return self._child(Step, name, run.inherited, SpanKind.INTERNAL)
+        return self._child(run, Step, name, run.inherited, SpanKind.INTERNAL)
 
     def model_call(
         self,
@@ -318,6 +318,10 @@ class Opener:
         run = run or self._outside("model_call")
         if run is None:
             return None
+        # Sent blank, the span would be named " <model>" and ingest would read
+        # it as a step.
+        if not (operation and operation.strip()):
+            operation = "chat"
         attributes: dict[str, Any] = {
             **run.inherited,
             contract.OPERATION: operation,
@@ -330,7 +334,7 @@ class Opener:
         if system_instructions is not None:
             attributes[contract.SYSTEM_INSTRUCTIONS] = _as_json(system_instructions)
         return self._child(
-            ModelCall, f"{operation} {model}", attributes, SpanKind.CLIENT
+            run, ModelCall, f"{operation} {model}", attributes, SpanKind.CLIENT
         )
 
     def tool_call(
@@ -347,7 +351,7 @@ class Opener:
         if arguments is not None:
             attributes[contract.TOOL_CALL_ARGUMENTS] = _as_json(arguments)
         return self._child(
-            ToolCall, f"execute_tool {name}", attributes, SpanKind.INTERNAL
+            run, ToolCall, f"execute_tool {name}", attributes, SpanKind.INTERNAL
         )
 
     def _outside(self, what: str) -> Run | None:
@@ -361,12 +365,20 @@ class Opener:
 
     def _child(
         self,
+        run: Run,
         handle: type[C],
         name: str,
         attributes: Mapping[str, Any],
         kind: SpanKind,
     ) -> C:
         parent = context.get_current()
+        if current_run(parent) is not run:
+            # A context this run is not in, a worker thread's say, puts the
+            # span under the run itself rather than at the root of a trace of
+            # its own, and carries the run, so calls inside find it.
+            parent = context.set_value(
+                _RUN_KEY, run, trace.set_span_in_context(run._span, parent)
+            )
         span = self._start(name, parent, attributes, kind)
         opened = handle(span)
         opened._attach(trace.set_span_in_context(span, parent))

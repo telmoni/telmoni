@@ -309,6 +309,11 @@ func TestNothingIsSentOutsideARun(t *testing.T) {
 	tool.Returned(map[string]int{"a": 1})
 	tool.Cancel()
 	tool.End()
+	// The nil run's own marks and End do nothing either, rather than panic.
+	none.Fail(errors.New("x"))
+	none.FailWith("x")
+	none.Cancel()
+	none.End()
 	h.flush()
 	if sent := len(h.transport.all()); sent != 0 {
 		t.Errorf("sent %d exports outside a run", sent)

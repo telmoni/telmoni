@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::{Harness, Outcome, attributes_of, keyed, only};
+use common::{Harness, Outcome, attributes_of, keyed, only, starting_with};
 use serde_json::json;
 use telmoni_sdk::transport::Answer;
 use telmoni_sdk::{Config, Content, ModelCallOptions, Reply, RunOptions, Usage};
@@ -59,6 +59,37 @@ fn a_model_call_carries_the_conventions_names() -> Outcome {
             "gen_ai.usage.cache_read.input_tokens": 3,
         })
     );
+    Ok(())
+}
+
+/// A blank operation is `chat`, as one left out is: sent blank, the span would
+/// be named ` m` and ingest would read it as a step.
+#[test]
+fn a_blank_operation_is_chat() -> Outcome {
+    let harness = Harness::new()?;
+    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    for blank in ["", "  "] {
+        let call = run.model_call(
+            "m",
+            ModelCallOptions {
+                operation: Some(blank.to_owned()),
+                ..ModelCallOptions::default()
+            },
+        );
+        call.end();
+    }
+    run.end();
+    harness.flush()?;
+
+    let spans = harness.spans()?;
+    let calls = starting_with(&spans, "chat m");
+    assert_eq!(calls.len(), 2, "{spans:?}");
+    for call in calls {
+        assert_eq!(
+            attributes_of(call)?.get("gen_ai.operation.name"),
+            Some(&json!("chat"))
+        );
+    }
     Ok(())
 }
 

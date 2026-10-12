@@ -35,6 +35,8 @@ REQUEST_TIMEOUT_S = 10.0
 RETRY_AFTER_MAX_S = 60.0
 WARNED_MAX = 1024
 """How many distinct warnings are remembered before the set starts over."""
+CONTENT_DOCS = "https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door"
+"""Where a dropped content field's warning sends the reader."""
 
 _DROPPED = re.compile(r"^span (\S+) dropped (\S+): (\w+)(?:; (.*))?$")
 _REFUSED = re.compile(r"^span (\S+) refused: (.*)$")
@@ -268,7 +270,9 @@ class Exporter:
 
 def _remedy(attribute: str, reason: str) -> str:
     if reason == "content":
-        return "turn the project's content mode on in its settings to keep it"
+        # The page, not a setting to change: which modes keep content is the
+        # platform's to say, and no project can choose one that does yet.
+        return f"the project's content mode decides whether content is kept: {CONTENT_DOCS}"
     if reason == "unlisted":
         return f"send it as the tag {contract.TAG_PREFIX}{attribute} to keep it"
     if reason == "over_cap":

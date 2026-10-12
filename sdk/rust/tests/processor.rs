@@ -117,8 +117,8 @@ fn a_batch_fills_and_goes_without_a_flush() -> Outcome {
 }
 
 /// ⚠ A hook of the application's that panics — here `warn`, on the first
-/// warning — kills no worker: the batch in hand is lost, the next one goes,
-/// and a flush and a shutdown still return.
+/// warning — kills no worker: the warning is lost, the batch beside it and the
+/// next one still go, and a flush and a shutdown still return.
 #[test]
 fn a_hook_that_panics_does_not_stop_the_exporter() -> Outcome {
     let transport = FakeTransport::new([])?;
@@ -156,8 +156,12 @@ fn a_hook_that_panics_does_not_stop_the_exporter() -> Outcome {
     assert!(telmoni.flush());
     telmoni.shutdown();
 
-    let starts = transport
-        .spans()?
+    let spans = transport.spans()?;
+    assert!(
+        spans.iter().any(|span| name_of(span) == "s0"),
+        "the batch beside the warning that panicked was not sent"
+    );
+    let starts = spans
         .iter()
         .filter(|span| name_of(span) == "telmoni.run.start")
         .count();
