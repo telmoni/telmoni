@@ -121,7 +121,13 @@ function onNavKeyDown(e: KeyboardEvent<HTMLElement>) {
   rows[to]?.focus();
 }
 
-export function ConsoleSidebar() {
+export function ConsoleSidebar({
+  version,
+}: {
+  /// The release the console was built as (`lib/server/version.ts`), named at
+  /// the rail's foot.
+  version: string;
+}) {
   const pathname = usePathname();
   const { collapsed, toggle, closeOnMobile, animating } = useSidebar();
   const expanded = !collapsed;
@@ -261,6 +267,20 @@ export function ConsoleSidebar() {
           ))}
         </nav>
       </ScrollArea>
+      {/* The foot: the header's first cell mirrored, as tall, with its rule
+          above as the cell's is below. The version stands centred on the
+          rail's axis, 30px in, where the header's mark and every rail icon
+          do, so it rests while the rail toggles and fits it closed. */}
+      <div className="flex h-15 shrink-0 items-center border-t border-sidebar-border px-3">
+        <div className="flex w-9 shrink-0 justify-center">
+          <p className="whitespace-nowrap text-xs text-muted-foreground tabular-nums">
+            <span className="sr-only">
+              {PRODUCT_NAME} version {version}
+            </span>
+            <span aria-hidden="true">v{version}</span>
+          </p>
+        </div>
+      </div>
     </aside>
   );
 }

@@ -26,6 +26,7 @@ import {
 import { env } from "@/lib/env";
 import { getServerSession } from "@/lib/server/session";
 import { storeSeed } from "@/lib/server/store-seed";
+import { VERSION } from "@/lib/server/version";
 import { Flag, flagOn } from "@/lib/flags";
 import { StoreProvider } from "@/lib/store/provider";
 import { accountOnly } from "@/lib/account-only";
@@ -115,7 +116,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 organizationBadge={<ExtensionOrganizationBadge />}
               />
               <div className="flex min-h-0 flex-1">
-                <ConsoleSidebar />
+                <ConsoleSidebar version={VERSION} />
                 <ConsoleShell>{children}</ConsoleShell>
               </div>
             </SidebarProvider>
