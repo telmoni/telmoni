@@ -1,6 +1,7 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { refresh, revalidatePath } from "next/cache";
+import { redirect, RedirectType } from "next/navigation";
 import { z } from "zod";
 
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
@@ -15,6 +16,7 @@ import {
 import { activeOrganization, getServerContext } from "@/lib/server/entities/organization";
 import { fetchProject } from "@/lib/server/entities/projects";
 import { unplacedOrganization } from "@/lib/server/identity";
+import { canonicalPath } from "@/lib/server/path";
 import { getServerSession } from "@/lib/server/session";
 import { ContentMode } from "@/lib/types/enums";
 
@@ -27,15 +29,14 @@ const Mode = z.enum(ContentMode);
 
 const UNRESOLVED_PROJECT = "Couldn't resolve that project. Reload and try again.";
 
-/// `movedTo` is the slug the project goes by now, when the rename moved it:
-/// the page follows it there, and so does everybody else with one of the
-/// project's pages open, who is told. Nothing is revalidated then — the path
-/// this was posted from names no project any more, and rendering it again
-/// would answer "not found" before the page had moved.
+/// A rename moves the project's slug with its name, and the page follows it:
+/// the answer is the same page at the project's new path, drawn there rather
+/// than here, where the old path names no project any more. Everybody else
+/// with one of the project's pages open is told, and follows it too.
 export async function updateProjectNameAction(
   projectId: string,
   name: string,
-): Promise<ActionResult & { movedTo?: string }> {
+): Promise<ActionResult> {
   const session = await getServerSession();
   if (!session) return { error: "Your session expired — sign in again." };
   const limited = await rateLimit(sessionKey(session, "project:rename"), {
@@ -96,7 +97,17 @@ export async function updateProjectNameAction(
         },
       });
     }
-    return { error: null, movedTo: renamed.data.slug };
+    // `replace`, so Back does not return to a path that names nothing. With
+    // no organization to spell the path with, the console's own way in finds
+    // the project's. Nothing is revalidated first: the new path is drawn
+    // whole with this answer, and a revalidation would have the router read
+    // it all again as soon as it lands.
+    redirect(
+      organization !== undefined
+        ? await canonicalPath([organization, renamed.data.slug])
+        : "/console",
+      RedirectType.replace,
+    );
   }
   revalidatePath("/(app)/[organization]/[project]", "layout");
   return { error: null };
@@ -132,11 +143,12 @@ export async function updateContentModeAction(
     body: JSON.stringify({ content_mode: chosen.data }),
   });
 
-  if (!res || !res.ok) {
-    const error = res
-      ? (await extractProblem(res)).message
-      : "Failed to change the content mode. Please try again.";
-    return { error };
+  if (!res) return { error: "Failed to change the content mode. Please try again." };
+  if (!res.ok) {
+    // A refusal can mean the page is out of date — the owner changed, or a
+    // mode closed — so it is drawn again with the answer.
+    refresh();
+    return { error: (await extractProblem(res)).message };
   }
 
   revalidatePath("/(app)/[organization]/[project]/settings", "page");
@@ -180,7 +192,9 @@ export async function deleteProjectAction(projectId: string): Promise<ActionResu
   });
 
   // Every console page lists the organization's projects in its header's
-  // switcher.
+  // switcher, so each one visited is read again; this one, the deleted
+  // project's own, is left at once for the console's entry page, whose page
+  // comes with this answer — `replace`, so Back does not return to it.
   revalidatePath("/", "layout");
-  return { error: null };
+  redirect("/console", RedirectType.replace);
 }

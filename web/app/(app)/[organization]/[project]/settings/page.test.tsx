@@ -17,18 +17,16 @@ vi.mock("@/components/service-unavailable", () => ({
 vi.mock("./_rename-project", () => ({
   RenameProjectForm: ({
     projectId,
-    organization,
     slug,
     initialName,
     canEdit,
   }: {
     projectId: string;
-    organization: string;
     slug: string;
     initialName: string;
     canEdit: boolean;
   }) => (
-    <div data-testid="rename-form" data-project-id={projectId} data-path={`/${organization}/${slug}`}>
+    <div data-testid="rename-form" data-project-id={projectId} data-slug={slug}>
       <span>{initialName}</span>
       <span>{canEdit ? "editable" : "readonly"}</span>
     </div>
@@ -133,12 +131,12 @@ describe("SettingsPage", () => {
 
     // The id is what an API request and an SDK are configured with; the slug
     // in the path follows the name and is nothing to copy.
-    it("shows the project's id, and hands the rename the id and the path's slugs", async () => {
+    it("shows the project's id, and hands the rename the id and the path's slug", async () => {
       render(await SettingsPage({ params: PARAMS }));
       expect(screen.getByText("project_7bQx2mNv9BcK4dLp")).toBeInTheDocument();
       const form = screen.getByTestId("rename-form");
       expect(form).toHaveAttribute("data-project-id", "project_7bQx2mNv9BcK4dLp");
-      expect(form).toHaveAttribute("data-path", "/acme/my-project");
+      expect(form).toHaveAttribute("data-slug", "my-project");
     });
 
     it("offers the owner a danger zone for this project, named", async () => {

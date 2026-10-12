@@ -1,5 +1,6 @@
 "use client";
 
+import { unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -71,10 +72,12 @@ export function LeaveOrganization({
               setError(null);
               try {
                 const r = await leaveOrganizationAction(organizationId);
-                // A success redirects and never returns; anything here is a
-                // refusal the person can act on.
+                // Anything returned is a refusal the person can act on.
                 if (r?.error) setError(r.error);
-              } catch {
+              } catch (err) {
+                // A success redirects, which rejects this call with Next's
+                // redirect: it goes back to the router, never to the person.
+                unstable_rethrow(err);
                 setError("Network error. Try again.");
               }
             })

@@ -21,7 +21,7 @@ async function answerOffer(
   verb: "accept" | "decline",
 ): Promise<{ error: string | null }> {
   const session = await getServerSession();
-  if (!session) redirect("/auth/login");
+  if (!session) return { error: "Your session expired — sign in again." };
 
   // The id travels as a header; anything but an organization id is refused
   // here rather than making `fetch` throw on a stray character.
@@ -69,11 +69,10 @@ export async function declineOwnershipAction(
 const PROJECT_ID = /^project_[A-Za-z0-9]+$/;
 const ORGANIZATION_ID = /^org_[A-Za-z0-9]+$/;
 
-/// What answering a project offer comes back with: on an accept, where to go
-/// next — the project, now in the caller's organization.
+/// What answering a project offer comes back with. An accept that landed
+/// answers with the project's page instead, in the caller's organization now.
 export interface ProjectOfferAnswer {
   error: string | null;
-  href?: string;
 }
 
 // Answering the offer of a project. The project is the OFFER's, named
@@ -87,7 +86,7 @@ async function answerProjectOffer(
   organizationId?: string,
 ): Promise<ProjectOfferAnswer> {
   const session = await getServerSession();
-  if (!session) redirect("/auth/login");
+  if (!session) return { error: "Your session expired — sign in again." };
 
   // Both ids reach auth in the URL or the body; anything but the shape each
   // has is refused here rather than making `fetch` throw on a stray character.
@@ -159,11 +158,13 @@ async function answerProjectOffer(
       },
     },
   );
+  // On to the project, drawn whole with this answer: nothing is revalidated
+  // first, which would have the router read it all again as soon as it
+  // landed. Where auth did not say where it landed, this page is drawn again
+  // without the offer.
+  if (organization && project) redirect(projectPath(organization, project));
   revalidatePath("/", "layout");
-  return {
-    error: null,
-    href: organization && project ? projectPath(organization, project) : undefined,
-  };
+  return { error: null };
 }
 
 export async function acceptProjectOfferAction(

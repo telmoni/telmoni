@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { LocalTime } from "@/components/local-time";
@@ -64,7 +64,6 @@ function ProjectOfferCard({
   offer: ProjectOffer;
   owned: readonly OrganizationEntry[];
 }) {
-  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
@@ -80,8 +79,8 @@ function ProjectOfferCard({
       try {
         const r = await declineProjectOfferAction(offer.projectId);
         if (r.error) setError(r.error);
-        else router.refresh();
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         setError("Network error. Try again.");
       }
     });
@@ -154,7 +153,6 @@ function AcceptDialog({
   onOpenChange: (v: boolean) => void;
   onError: (message: string | null) => void;
 }) {
-  const router = useRouter();
   const [destination, setDestination] = useState(owned[0]?.organizationId ?? "");
   const [pending, start] = useTransition();
   const chosen = owned.find((o) => o.organizationId === destination) ?? owned[0];
@@ -163,16 +161,17 @@ function AcceptDialog({
     onError(null);
     start(async () => {
       try {
+        // An accept that landed never answers here: the action takes the page
+        // on to the project, and its redirect goes on to the router from the
+        // catch below. One that answers is a refusal, or a landing auth did
+        // not place, whose page the action draws again without the offer.
         const r = await acceptProjectOfferAction(offer.projectId, destination);
         if (r.error) {
           onError(r.error);
           onOpenChange(false);
-        } else if (r.href) {
-          router.push(r.href);
-        } else {
-          router.refresh();
         }
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         onError("Network error. Try again.");
         onOpenChange(false);
       }

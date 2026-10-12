@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { unstable_rethrow } from "next/navigation";
+import { startTransition, useState, useTransition } from "react";
 import { KeyRound } from "lucide-react";
 
 import { PageAction } from "@/components/page-action";
@@ -89,7 +89,6 @@ function MintDialog({
   onOpenChange: (v: boolean) => void;
   onMinted: (r: MintResult) => void;
 }) {
-  const router = useRouter();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [ttl, setTtl] = useState("90d");
@@ -107,22 +106,21 @@ function MintDialog({
   function submit() {
     setError(null);
     start(async () => {
-      const fd = new FormData();
-      fd.set("name", name);
-      fd.set("description", description);
-      fd.set("ttl", ttl);
-      fd.set("scopes", scopes.join(","));
-      fd.set("projectId", projectId);
       try {
-        const r = await mintTokenAction(undefined, fd);
+        const r = await mintTokenAction(projectId, { name, description, ttl, scopes });
         if (r.status === "error") {
           setError(r.error ?? "Something went wrong. Try again.");
           return;
         }
-        onOpenChange(false);
-        onMinted(r);
-        router.refresh();
-      } catch {
+        // In the transition, with the list the action drew again: after the
+        // `await` it would be an update of its own, and the dialog would
+        // close a frame before the new key is listed.
+        startTransition(() => {
+          onOpenChange(false);
+          onMinted(r);
+        });
+      } catch (err) {
+        unstable_rethrow(err);
         setError("Network error. Try again.");
       }
     });

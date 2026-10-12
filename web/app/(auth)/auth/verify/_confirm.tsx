@@ -1,5 +1,6 @@
 "use client";
 
+import { unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -39,7 +40,8 @@ export function ConfirmEmail({ userId, token }: { userId: string; token: string 
                 const res = await verifyEmailAction({ userId, token });
                 if (res.error) setError(res.error);
                 else setDone(true);
-              } catch {
+              } catch (err) {
+                unstable_rethrow(err);
                 setError("Network error. Try again.");
               }
             })

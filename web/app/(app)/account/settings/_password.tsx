@@ -1,5 +1,6 @@
 "use client";
 
+import { unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
@@ -24,7 +25,8 @@ export function PasswordReset({ method }: { method: string | null }) {
         }
         setSent(true);
         toast.success("Check your email for a link to set a new password.");
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         toast.error("Network error. Please try again.");
       }
     });

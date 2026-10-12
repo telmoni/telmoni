@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState, useTransition, type ReactNode } from "react";
+import { unstable_rethrow } from "next/navigation";
+import { startTransition, useState, useTransition, type ReactNode } from "react";
 
 import { PlaintextTokenDialog } from "@/components/plaintext-token-dialog";
 import { Button } from "@/components/ui/button";
@@ -104,7 +104,6 @@ function AddEndpointDialog({
   onOpenChange: (v: boolean) => void;
   onConnected: (r: SecretResult) => void;
 }) {
-  const router = useRouter();
   const [url, setUrl] = useState("");
   const [events, setEvents] = useState<EventChoice>({ all: true, kinds: [] });
   const [error, setError] = useState<string | null>(null);
@@ -121,10 +120,14 @@ function AddEndpointDialog({
           setError(r.error);
           return;
         }
-        onOpenChange(false);
-        onConnected(r);
-        router.refresh();
-      } catch {
+        // In the transition, with the list the action drew again: after the
+        // `await` it would be an update of its own, a frame ahead of it.
+        startTransition(() => {
+          onOpenChange(false);
+          onConnected(r);
+        });
+      } catch (err) {
+        unstable_rethrow(err);
         setError("Network error. Try again.");
       }
     });

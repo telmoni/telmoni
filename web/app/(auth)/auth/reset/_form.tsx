@@ -1,5 +1,6 @@
 "use client";
 
+import { unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { PasswordInput } from "@/components/password-input";
@@ -45,7 +46,8 @@ export function ResetForm({ userId, token }: { userId: string; token: string }) 
             const res = await resetPasswordAction({ userId, token, password });
             if (res.error) setError(res.error);
             else setDone(true);
-          } catch {
+          } catch (err) {
+            unstable_rethrow(err);
             setError("Network error. Try again.");
           }
         });

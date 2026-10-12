@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
+  refresh: vi.fn(),
 }));
 vi.mock("@/lib/server/session", () => ({
   getServerSession: vi.fn(),
@@ -56,7 +57,7 @@ vi.mock("@/lib/events/publisher", () => ({
   organizationChannel: (organizationId: string) => `bfev:organization:${organizationId}`,
 }));
 
-import { revalidatePath } from "next/cache";
+import { refresh, revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 
 import { tryFetchWithTimeout } from "@/lib/api/fetch";
@@ -108,6 +109,14 @@ describe("Incoming invites server actions", () => {
           headers: expect.objectContaining({ authorization: "Bearer at_1" }),
         }),
       );
+      // Read again for the projects the accept just granted, wherever it was
+      // answered: a revalidation in an action draws the current route again,
+      // so a refresh on top would draw it twice.
+      expect(vi.mocked(revalidatePath)).toHaveBeenCalledWith(
+        "/(app)/[organization]/projects",
+        "page",
+      );
+      expect(vi.mocked(refresh)).not.toHaveBeenCalled();
     });
 
     it("publishes invite:resolved to invitee, inviter, and owner organization channels", async () => {
@@ -192,6 +201,7 @@ describe("Incoming invites server actions", () => {
       );
       const res = await acceptIncomingInviteAction("inv_123");
       expect(res.error).toBe("invitation already used");
+      expect(vi.mocked(refresh)).not.toHaveBeenCalled();
     });
   });
 
@@ -207,6 +217,7 @@ describe("Incoming invites server actions", () => {
           headers: expect.objectContaining({ authorization: "Bearer at_1" }),
         }),
       );
+      expect(vi.mocked(refresh)).toHaveBeenCalledOnce();
     });
 
     // An invitation answers the PERSON: somebody in no organization — sign-ups
@@ -312,6 +323,7 @@ describe("Incoming invites server actions", () => {
       const res = await revokeInviteAction("project_1", "inv_789");
       expect(res.error).toBe("invitation already used");
       expect(mockPublishEvent).not.toHaveBeenCalled();
+      expect(vi.mocked(refresh)).not.toHaveBeenCalled();
     });
   });
 
@@ -349,6 +361,21 @@ describe("Incoming invites server actions", () => {
           }),
         }),
       );
+    });
+
+    // The role reaches auth in the body: a Server Action is handed whatever
+    // was posted, whatever its parameter's type says.
+    it("refuses a role it may not hand out before asking auth", async () => {
+      for (const role of ["owner", "", "admin\u0000"]) {
+        expect(
+          await inviteMemberAction("project_1", "new@example.test", role as never),
+          role,
+        ).toEqual({ error: "Choose admin or member." });
+        expect(await updateMemberRoleAction("project_1", "user_2", role as never), role).toEqual({
+          error: "Choose admin or member.",
+        });
+      }
+      expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it("tells the organization even when the invitee's offer cannot be built", async () => {
@@ -492,6 +519,7 @@ describe("Incoming invites server actions", () => {
           data: { organizationId: "org_1", projectId: "project_1" },
         },
       );
+      expect(vi.mocked(refresh)).toHaveBeenCalledOnce();
     });
   });
 
@@ -509,6 +537,7 @@ describe("Incoming invites server actions", () => {
         type: "membership:changed",
         data: { organizationId: "org_1", projectId: "project_1" },
       });
+      expect(vi.mocked(refresh)).toHaveBeenCalledOnce();
     });
 
     it("tells nobody about a role change the roster does not know, or auth refused", async () => {
@@ -519,6 +548,8 @@ describe("Incoming invites server actions", () => {
         error: "invitation already used",
       });
       expect(mockPublishEvent).not.toHaveBeenCalled();
+      // The page is drawn again for the change that landed, not the refusal.
+      expect(vi.mocked(refresh)).toHaveBeenCalledOnce();
     });
   });
 });

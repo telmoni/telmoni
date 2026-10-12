@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { unstable_rethrow, useRouter } from "next/navigation";
+import { startTransition, useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -58,14 +58,17 @@ export function CreateOrganizationDialog({
           setRefusal({ message: res.error, field: res.field });
           return;
         }
-        onOpenChange(false);
-        toast.success("Organization created.");
         // On to its Overview. Without an address to follow, auth's answer
-        // could not be read; the switcher lists it once the layout is read
-        // again.
-        if (res.href) router.push(res.href);
-        else router.refresh();
-      } catch {
+        // could not be read; the switcher lists it all the same, the layout
+        // read again by the action's revalidation. The dialog closes in one
+        // transition with either, so it goes as the page lands.
+        startTransition(() => {
+          onOpenChange(false);
+          if (res.href) router.push(res.href);
+        });
+        toast.success("Organization created.");
+      } catch (err) {
+        unstable_rethrow(err);
         setRefusal({ message: "Something went wrong. Please try again." });
       }
     });

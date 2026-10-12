@@ -1,7 +1,5 @@
 "use server";
 
-import { redirect } from "next/navigation";
-
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { isSessionBlacklisted } from "@/lib/auth/session-blacklist";
@@ -28,7 +26,9 @@ export async function requestOrganizationDeletionCodeAction(
   ok?: boolean;
 }> {
   const session = await getServerSession();
-  if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) redirect("/auth/login");
+  if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
+    return { error: "Your session expired — sign in again." };
+  }
 
   const limited = await rateLimit(sessionKey(session, "organization:delete-code"), {
     limit: 3,
@@ -63,7 +63,9 @@ export async function deleteOrganizationAction(
   code: string,
 ): Promise<{ error?: string; ok?: boolean; purged?: boolean }> {
   const session = await getServerSession();
-  if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) redirect("/auth/login");
+  if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
+    return { error: "Your session expired — sign in again." };
+  }
 
   if (!/^\d{6}$/.test(code)) {
     return { error: "Enter the 6-digit code from your email." };

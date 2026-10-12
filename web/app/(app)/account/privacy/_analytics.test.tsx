@@ -3,7 +3,9 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const refresh = vi.hoisted(() => vi.fn());
-vi.mock("next/navigation", () => ({
+// Next's own `unstable_rethrow`; only the router is a stand-in.
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
   useRouter: () => ({ refresh }),
 }));
 
@@ -49,13 +51,15 @@ describe("AnalyticsPreference", () => {
     expect(setAnalyticsPreferenceAction).toHaveBeenLastCalledWith(false);
   });
 
-  it("flips optimistically and refreshes once the write lands", async () => {
+  // The page is drawn again by the action once the write lands (its
+  // `refresh()`): a refresh here on top would draw it twice.
+  it("flips optimistically and stays flipped once the write lands", async () => {
     render(<AnalyticsPreference optIn={false} />);
     await act(async () => {
       fireEvent.click(toggle());
     });
     expect(toggle()).toBeChecked();
-    expect(refresh).toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("puts the switch back when the service refuses", async () => {

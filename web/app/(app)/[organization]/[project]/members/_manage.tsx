@@ -2,9 +2,9 @@
 
 import { InviteSentDialog } from "@/components/members/invite-sent-dialog";
 
-import { useRouter } from "next/navigation";
 import { UserPlus } from "lucide-react";
-import { useState, useTransition } from "react";
+import { unstable_rethrow } from "next/navigation";
+import { startTransition, useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -70,7 +70,6 @@ function AddDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Grantable>("member");
   const [error, setError] = useState<string | null>(null);
@@ -84,11 +83,12 @@ function AddDialog({
         const r = await inviteMemberAction(projectId, email, role);
         if (r.error) setError(r.error);
         else {
-          setLink(r.link ?? null);
+          // In the transition, with the invitations the action drew again.
+          startTransition(() => setLink(r.link ?? null));
           toast.success(`Invitation sent to ${email}`);
-          router.refresh();
         }
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         setError("Network error. Try again.");
       }
     });
@@ -168,7 +168,6 @@ export function InviteRow({
   invite: Invite;
   canManage?: boolean;
 }) {
-  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -205,8 +204,8 @@ export function InviteRow({
                 try {
                   const r = await revokeInviteAction(projectId, invite.id);
                   if (r.error) setError(r.error);
-                  else router.refresh();
-                } catch {
+                } catch (err) {
+                  unstable_rethrow(err);
                   setError("Network error. Try again.");
                 }
               })
@@ -232,7 +231,6 @@ export function MemberRow({
   canManage = true,
   isOwnerCaller = false,
 }: MemberRowProps) {
-  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -242,8 +240,8 @@ export function MemberRow({
       try {
         const r = await work();
         if (r.error) setError(r.error);
-        else router.refresh();
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         setError("Network error. Try again.");
       }
     });

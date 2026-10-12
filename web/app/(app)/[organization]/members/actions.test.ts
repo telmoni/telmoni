@@ -48,8 +48,10 @@ vi.mock("next/navigation", () => ({
 vi.mock("next/headers", () => ({
   cookies: async () => ({ delete: mockCookieDelete }),
 }));
+const mockRefresh = vi.fn();
 vi.mock("next/cache", () => ({
   revalidatePath: (...a: unknown[]) => mockRevalidate(...a),
+  refresh: (...a: unknown[]) => mockRefresh(...a),
 }));
 vi.mock("@/lib/env", () => ({
   env: {
@@ -398,6 +400,7 @@ describe("organization members actions", () => {
           body: JSON.stringify({ role: "admin" }),
         }),
       );
+      expect(mockRefresh).toHaveBeenCalledOnce();
     });
 
     it("tells the member whose role changed, at the roster's address, and nobody else", async () => {
@@ -416,6 +419,7 @@ describe("organization members actions", () => {
       const res = await updateOrganizationMemberRoleAction(ORGANIZATION, "user_2", "admin");
       expect(res).toEqual({ error: "problem" });
       expect(mockPublishEvent).not.toHaveBeenCalled();
+      expect(mockRefresh).not.toHaveBeenCalled();
     });
 
     it("removeOrganizationMemberAction removes from the organization the page rendered", async () => {
@@ -429,6 +433,7 @@ describe("organization members actions", () => {
           headers: expect.objectContaining({ "x-organization-id": ORGANIZATION }),
         }),
       );
+      expect(mockRefresh).toHaveBeenCalledOnce();
     });
 
     it("notifies the removed member on their personal channel, at the roster's address", async () => {

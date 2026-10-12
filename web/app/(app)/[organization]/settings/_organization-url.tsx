@@ -1,13 +1,13 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-import { SLUG_MAX_LENGTH, organizationPath } from "@/lib/slug";
+import { SLUG_MAX_LENGTH } from "@/lib/slug";
 
 import { changeOrganizationUrlAction } from "./settings-actions";
 
@@ -25,7 +25,6 @@ export function OrganizationUrlForm({
   host: string;
   canEdit: boolean;
 }) {
-  const router = useRouter();
   const [value, setValue] = useState(slug);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -47,17 +46,17 @@ export function OrganizationUrlForm({
     setError(null);
     start(async () => {
       try {
+        // A change that moved the URL never answers here: the action takes the
+        // page on to the new address itself, and its redirect goes on to the
+        // router from the catch below. One that moved nothing is drawn again
+        // by the action's revalidation.
         const res = await changeOrganizationUrlAction(organizationId, trimmed);
         if (res.error) {
           setError(res.error);
           toast.error(res.error);
-          return;
         }
-        toast.success("URL changed.");
-        // The organization's pages, this one included, are at the new address.
-        if (res.movedTo) router.replace(organizationPath(res.movedTo, "/settings"));
-        else router.refresh();
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         const msg = "Network error. Please try again.";
         setError(msg);
         toast.error(msg);

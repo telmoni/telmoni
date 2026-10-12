@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
@@ -16,25 +16,19 @@ export function DeleteProjectForm({
   projectId: string;
   projectName: string;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
 
   const onConfirm = () => {
     startTransition(async () => {
       try {
+        // A deletion that landed leaves for the console in the action itself
+        // (its `redirect`), which rejects this call: what comes back is a
+        // refusal.
         const res = await deleteProjectAction(projectId);
-        if (res.error) {
-          toast.error(res.error);
-          return;
-        }
-        toast.success(`${projectName} deleted.`);
-        // No `refresh()` beside it: it can re-render the route still showing,
-        // the deleted project's own page, before the move lands. The action's
-        // revalidation already drops the stale rail. `replace`, so Back does
-        // not return to a project that is gone.
-        router.replace("/console");
-      } catch {
+        if (res.error) toast.error(res.error);
+      } catch (err) {
+        unstable_rethrow(err);
         toast.error("Network error. Please try again.");
       }
     });

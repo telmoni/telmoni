@@ -12,6 +12,7 @@ vi.mock("@/lib/auth/session-blacklist", () => ({
 }));
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
+  refresh: vi.fn(),
 }));
 vi.mock("@/lib/api/rate-limit", () => ({
   rateLimit: vi.fn(async () => null),
@@ -34,7 +35,7 @@ vi.mock("@/lib/server/entities/organization", async (importOriginal) => ({
   getServerContext: vi.fn(),
 }));
 
-import { revalidatePath } from "next/cache";
+import { refresh, revalidatePath } from "next/cache";
 
 import { getServerSession } from "@/lib/server/session";
 import { writeSessionCookie } from "@/lib/auth/session";
@@ -510,11 +511,14 @@ describe("setDefaultOrganizationAction", () => {
       }),
     );
     expect(sentHeaders()).not.toHaveProperty("x-organization-id");
+    // The page names the default, which this has just moved.
+    expect(refresh).toHaveBeenCalledOnce();
   });
 
   it("hands back auth's refusal in its own words", async () => {
     vi.mocked(tryFetchWithTimeout).mockResolvedValue(new Response(null, { status: 403 }));
     expect(await setDefaultOrganizationAction("org_stranger")).toEqual({ error: "problem" });
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("says so when auth cannot be reached", async () => {

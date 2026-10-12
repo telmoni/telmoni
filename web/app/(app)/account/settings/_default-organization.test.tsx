@@ -3,7 +3,11 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const refresh = vi.hoisted(() => vi.fn());
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
+// Next's own `unstable_rethrow`; only the router is a stand-in.
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
+  useRouter: () => ({ refresh }),
+}));
 
 const toastError = vi.hoisted(() => vi.fn());
 const toastSuccess = vi.hoisted(() => vi.fn());
@@ -74,7 +78,9 @@ describe("DefaultOrganization", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
-  it("saves the organization chosen, then reads the page again", async () => {
+  // The action reads the page again once the save lands (its `refresh()`):
+  // a refresh here on top would draw it twice.
+  it("saves the organization chosen, and leaves the page to the action", async () => {
     render(<DefaultOrganization organizations={ORGANIZATIONS} current="org_1" />);
     choose("org_2");
     await act(async () => {
@@ -83,7 +89,7 @@ describe("DefaultOrganization", () => {
 
     expect(setDefaultOrganizationAction).toHaveBeenCalledWith("org_2");
     expect(toastSuccess).toHaveBeenCalledWith("Default organization saved.");
-    expect(refresh).toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("says what auth refused, and claims nothing was saved", async () => {

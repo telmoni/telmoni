@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { unstable_rethrow } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
 
@@ -16,7 +16,6 @@ export function MarkOrganizationRead({
   organizationId: string;
   unread: number;
 }) {
-  const router = useRouter();
   const [pending, start] = useTransition();
 
   return (
@@ -29,12 +28,9 @@ export function MarkOrganizationRead({
         start(async () => {
           try {
             const { error } = await markOrganizationReadAction(organizationId);
-            if (error) {
-              toast.error(error);
-              return;
-            }
-            router.refresh();
-          } catch {
+            if (error) toast.error(error);
+          } catch (err) {
+            unstable_rethrow(err);
             toast.error("Something went wrong. Please try again.");
           }
         })

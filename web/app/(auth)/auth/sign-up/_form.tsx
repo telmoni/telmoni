@@ -1,5 +1,6 @@
 "use client";
 
+import { unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { PasswordInput } from "@/components/password-input";
@@ -51,7 +52,8 @@ export function SignUpForm({
           return;
         }
         setSentTo(email.trim());
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         setError("Network error. Try again.");
       }
     });

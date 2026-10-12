@@ -1,5 +1,6 @@
 "use client";
 
+import { unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -35,7 +36,8 @@ export function ForgotForm() {
             const res = await forgotPasswordAction({ email: email.trim() });
             if (res.error) setError(res.error);
             else setSent(true);
-          } catch {
+          } catch (err) {
+            unstable_rethrow(err);
             setError("Network error. Try again.");
           }
         });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { acceptInviteAction } from "./actions";
 
 export function AcceptInvite({ token }: { token: string }) {
-  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -21,10 +20,13 @@ export function AcceptInvite({ token }: { token: string }) {
             start(async () => {
               setError(null);
               try {
+                // An accept that landed goes on to the console in the action
+                // itself (its `redirect`), which rejects this call: what
+                // comes back is a refusal.
                 const r = await acceptInviteAction(token);
                 if (r.error) setError(r.error);
-                else router.push("/console");
-              } catch {
+              } catch (err) {
+                unstable_rethrow(err);
                 setError("Network error. Try again.");
               }
             })

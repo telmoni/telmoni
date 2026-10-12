@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("next/cache", () => ({
+  refresh: vi.fn(),
+}));
 vi.mock("@/lib/server/session", () => ({
   getServerSession: vi.fn(),
 }));
@@ -30,6 +33,8 @@ vi.mock("next/navigation", () => ({
     throw new Error(`REDIRECT:${to}`);
   },
 }));
+
+import { refresh } from "next/cache";
 
 import { tryFetchWithTimeout } from "@/lib/api/fetch";
 import { identityContext } from "@/lib/server/entities/identity-context";
@@ -72,6 +77,8 @@ describe("markOrganizationReadAction", () => {
         headers: expect.objectContaining({ "x-organization-id": ORGANIZATION }),
       }),
     );
+    // The overview is drawn again, its notices read.
+    expect(refresh).toHaveBeenCalledOnce();
   });
 
   // The page said A; the request resolves B. Marking B's feed read from A's
@@ -81,6 +88,7 @@ describe("markOrganizationReadAction", () => {
     const res = await markOrganizationReadAction(ORGANIZATION);
     expect(res.error).toMatch(/out of date/);
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   // Posted from a tab whose organization changed its URL, or let the person

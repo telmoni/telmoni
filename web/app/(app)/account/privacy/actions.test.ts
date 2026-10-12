@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("next/cache", () => ({
+  refresh: vi.fn(),
+}));
 vi.mock("@/lib/server/session", () => ({
   getServerSession: vi.fn(),
 }));
@@ -33,6 +36,8 @@ vi.mock("@/lib/server/entities/organization", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/server/entities/organization")>()),
   getServerContext: vi.fn(),
 }));
+
+import { refresh } from "next/cache";
 
 import { getServerSession } from "@/lib/server/session";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
@@ -270,6 +275,8 @@ describe("revokeSessionAction", () => {
       }),
     );
     expect(sentHeaders()).not.toHaveProperty("x-user-id");
+    // The sessions list is drawn again without it.
+    expect(refresh).toHaveBeenCalledOnce();
   });
 
   it("encodes the session id into the path", async () => {
@@ -296,6 +303,7 @@ describe("revokeSessionAction", () => {
     fetchMock.mockResolvedValue(null as never);
     expect(await revokeSessionAction("sess_abc")).toEqual({ error: UNREACHABLE });
     expect(blacklistSession).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("refuses without calling auth when it cannot tell where the caller stands", async () => {
@@ -349,6 +357,7 @@ describe("setAnalyticsPreferenceAction", () => {
         body: JSON.stringify({ opt_in: true }),
       }),
     );
+    expect(refresh).toHaveBeenCalledOnce();
   });
 
   it("refuses without calling auth when it cannot tell where the caller stands", async () => {

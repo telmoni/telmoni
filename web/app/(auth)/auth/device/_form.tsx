@@ -1,5 +1,6 @@
 "use client";
 
+import { unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -28,7 +29,8 @@ export function DeviceForm({ code: initialCode }: { code: string }) {
         const res = await deviceDecisionAction({ userCode: code.trim(), decision });
         if (res.error) setError(res.error);
         else setDecided(decision);
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         setError("Network error. Try again.");
       }
     });

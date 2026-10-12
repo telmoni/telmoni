@@ -2,9 +2,9 @@
 
 import { InviteSentDialog } from "@/components/members/invite-sent-dialog";
 
-import { useRouter } from "next/navigation";
 import { UserPlus } from "lucide-react";
-import { useState, useTransition } from "react";
+import { unstable_rethrow } from "next/navigation";
+import { startTransition, useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -74,7 +74,6 @@ function AddOrganizationMemberDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<GrantableOrganizationRole>("member");
   const [error, setError] = useState<string | null>(null);
@@ -88,11 +87,12 @@ function AddOrganizationMemberDialog({
         const r = await inviteOrganizationMemberAction(organizationId, email, role);
         if (r.error) setError(r.error);
         else {
-          setLink(r.link ?? null);
+          // In the transition, with the invitations the action drew again.
+          startTransition(() => setLink(r.link ?? null));
           toast.success(`Invitation sent to ${email}`);
-          router.refresh();
         }
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         setError("Network error. Try again.");
       }
     });
@@ -177,7 +177,6 @@ export function OrganizationMemberRow({
   canManage: boolean;
   isOwnerCaller?: boolean;
 }) {
-  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -187,8 +186,8 @@ export function OrganizationMemberRow({
       try {
         const r = await work();
         if (r.error) setError(r.error);
-        else router.refresh();
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         setError("Network error. Try again.");
       }
     });
@@ -339,7 +338,6 @@ export function OrganizationInviteRow({
   invite: OrganizationInvite;
   canManage: boolean;
 }) {
-  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -376,8 +374,8 @@ export function OrganizationInviteRow({
                 try {
                   const r = await revokeOrganizationInviteAction(organizationId, invite.id);
                   if (r.error) setError(r.error);
-                  else router.refresh();
-                } catch {
+                } catch (err) {
+                  unstable_rethrow(err);
                   setError("Network error. Try again.");
                 }
               })

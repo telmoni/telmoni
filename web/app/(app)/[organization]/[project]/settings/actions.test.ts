@@ -37,8 +37,19 @@ vi.mock("@/lib/server/entities/projects", () => ({
   fetchProject: vi.fn(),
 }));
 const mockRevalidate = vi.fn();
+const mockRefresh = vi.fn();
 vi.mock("next/cache", () => ({
   revalidatePath: (...a: unknown[]) => mockRevalidate(...a),
+  refresh: (...a: unknown[]) => mockRefresh(...a),
+}));
+const mockRedirect = vi.fn();
+vi.mock("next/navigation", () => ({
+  redirect: (...a: unknown[]) => mockRedirect(...a),
+  RedirectType: { push: "push", replace: "replace" },
+}));
+// The page the action was posted from, whose path the proxy hands on.
+vi.mock("next/headers", () => ({
+  headers: async () => new Headers({ "x-telmoni-path": "/acme/web/settings" }),
 }));
 const mockPublishEvent = vi.fn<(...args: unknown[]) => Promise<boolean>>(async () => true);
 vi.mock("@/lib/events/publisher", () => ({
@@ -121,19 +132,27 @@ describe("updateProjectNameAction", () => {
     expect(mockRevalidate).toHaveBeenCalledWith("/(app)/[organization]/[project]", "layout");
     // Its paths are where they were: nobody has anywhere to follow it to.
     expect(mockPublishEvent).not.toHaveBeenCalled();
+    expect(mockRedirect).not.toHaveBeenCalled();
   });
 
   // ⚠ A rename moves the project's slug with its name, out from under the
-  // path this was posted from. The page follows it; rendering the old path
-  // again first, as a revalidation would, answers "not found".
-  it("says where a rename moved the project, and revalidates nothing", async () => {
+  // path this was posted from. The page goes on to the same page at the new
+  // path, drawn there: drawing the old path again answers "not found".
+  it("sends the page on to the path a rename moved the project to", async () => {
     wentBy("web");
     fetchMock.mockResolvedValue(renamed("marketing-site"));
-    expect(await updateProjectNameAction(PROJECT, "Marketing Site")).toEqual({
-      error: null,
-      movedTo: "marketing-site",
-    });
-    expect(mockRevalidate).not.toHaveBeenCalled();
+    await updateProjectNameAction(PROJECT, "Marketing Site");
+    expect(mockRedirect).toHaveBeenCalledWith("/acme/marketing-site/settings", "replace");
+  });
+
+  it("sends a move it cannot spell a path for to the console's way in", async () => {
+    wentBy("web");
+    vi.mocked(getServerContext).mockResolvedValue(null);
+    fetchMock.mockResolvedValue(renamed("marketing-site"));
+    await updateProjectNameAction(PROJECT, "Marketing Site");
+    expect(mockRedirect).toHaveBeenCalledWith("/console", "replace");
+    // Nobody can be told which organization's path moved.
+    expect(mockPublishEvent).not.toHaveBeenCalled();
   });
 
   // Everybody else with one of its pages open is on a path that now names
@@ -162,6 +181,7 @@ describe("updateProjectNameAction", () => {
     expect(await updateProjectNameAction(PROJECT, "Marketing Site")).toEqual({ error: null });
     expect(mockRevalidate).toHaveBeenCalledWith("/(app)/[organization]/[project]", "layout");
     expect(mockPublishEvent).not.toHaveBeenCalled();
+    expect(mockRedirect).not.toHaveBeenCalled();
   });
 
   it("surfaces auth's refusal, and tells nobody", async () => {
@@ -256,11 +276,14 @@ describe("updateContentModeAction", () => {
 
   // Who may, and which modes are open, are the server's to say: an admin, or
   // a mode it does not offer yet, is refused there and the refusal shown.
-  it("surfaces the server's refusal, and draws nothing again", async () => {
+  // A refusal can mean the page is out of date — the owner changed, or a mode
+  // closed — so the page is drawn again with the answer, nothing revalidated.
+  it("surfaces the server's refusal, and draws the page again", async () => {
     for (const status of [403, 409]) {
       fetchMock.mockResolvedValueOnce(new Response(null, { status }));
       expect(await updateContentModeAction(PROJECT, "on")).toEqual({ error: "problem" });
     }
+    expect(mockRefresh).toHaveBeenCalledTimes(2);
     expect(mockRevalidate).not.toHaveBeenCalled();
   });
 
@@ -271,6 +294,7 @@ describe("updateContentModeAction", () => {
       error: "Failed to change the content mode. Please try again.",
     });
     expect(mockRevalidate).not.toHaveBeenCalled();
+    expect(mockRefresh).not.toHaveBeenCalled();
   });
 
   it("refuses without asking the server when the session has ended", async () => {
@@ -294,9 +318,9 @@ describe("deleteProjectAction", () => {
   // Everybody in the organization is told on its channel, the owner and
   // admins who hold no seat included: a tab on the project leaves it, and
   // every other draws its rail again.
-  it("deletes the project by its id and tells the organization it is gone", async () => {
+  it("deletes the project by its id, tells the organization it is gone, and leaves its page", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-    expect(await deleteProjectAction(PROJECT)).toEqual({ error: null });
+    await deleteProjectAction(PROJECT);
     expect(fetchMock).toHaveBeenCalledWith(
       `http://auth.test/internal/projects/${PROJECT}`,
       expect.objectContaining({
@@ -313,6 +337,9 @@ describe("deleteProjectAction", () => {
       data: { organizationId: ORGANIZATION, projectId: PROJECT },
     });
     expect(mockRevalidate).toHaveBeenCalledWith("/", "layout");
+    // Off the deleted project's own page, in its place in the history, so
+    // Back does not return to it.
+    expect(mockRedirect).toHaveBeenCalledWith("/console", "replace");
   });
 
   it("surfaces auth's refusal, and tells nobody", async () => {
@@ -320,5 +347,6 @@ describe("deleteProjectAction", () => {
     expect(await deleteProjectAction(PROJECT)).toEqual({ error: "problem" });
     expect(mockPublishEvent).not.toHaveBeenCalled();
     expect(mockRevalidate).not.toHaveBeenCalled();
+    expect(mockRedirect).not.toHaveBeenCalled();
   });
 });

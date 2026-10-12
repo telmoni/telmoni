@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { usePathname } from "next/navigation";
+import { unstable_rethrow, usePathname } from "next/navigation";
 import { ArrowUp, HistoryIcon, Info, MessageSquare, Plus, Square } from "lucide-react";
 
 import { deleteAgentConversationAction } from "@/app/(app)/agent-actions";
@@ -246,7 +246,16 @@ export function AgentPanel() {
   const deleteConversation = useCallback(
     async (conversationId: string) => {
       if (!projectId) return;
-      const res = await deleteAgentConversationAction(projectId, conversationId);
+      let res: { error: string | null };
+      try {
+        res = await deleteAgentConversationAction(projectId, conversationId);
+      } catch (err) {
+        // Called from a click, outside any transition, so a failure that is
+        // not Next's own would otherwise go unhandled, with the confirm closed
+        // and nothing said.
+        unstable_rethrow(err);
+        res = { error: "Couldn't delete that conversation — try again shortly." };
+      }
       if (shown.current.projectId !== projectId) return;
       if (res.error) {
         setNotice(res.error);

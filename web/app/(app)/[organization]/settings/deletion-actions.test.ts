@@ -321,12 +321,15 @@ describe("deleteOrganizationAction", () => {
     });
   });
 
-  it("sends a session ended elsewhere to sign in, and deletes nothing", async () => {
+  // Said, not redirected: an action's redirect is fetched by the server
+  // before the browser goes, and sign-in's own lane is no page to fetch.
+  it("tells a session ended elsewhere to sign in again, and deletes nothing", async () => {
     vi.mocked(isSessionBlacklisted).mockResolvedValue(true);
-    await expect(deleteOrganizationAction(ORGANIZATION, "123456")).rejects.toThrow(
-      "REDIRECT:/auth/login",
-    );
+    expect(await deleteOrganizationAction(ORGANIZATION, "123456")).toEqual({
+      error: "Your session expired — sign in again.",
+    });
     expect(isSessionBlacklisted).toHaveBeenCalledWith("sess_1");
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockRedirect).not.toHaveBeenCalled();
   });
 });

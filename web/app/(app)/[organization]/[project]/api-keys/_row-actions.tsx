@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { unstable_rethrow } from "next/navigation";
+import { startTransition, useState, useTransition } from "react";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { PlaintextTokenDialog } from "@/components/plaintext-token-dialog";
@@ -21,37 +21,36 @@ export function TokenRowActions({
   name: string;
   canManage?: boolean;
 }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [rotated, setRotated] = useState<MintResult | null>(null);
 
   if (!canManage) return null;
 
   function revoke() {
-    startTransition(async () => {
+    start(async () => {
       setError(null);
       try {
         const r = await revokeTokenAction(projectId, tokenId);
         if (r.error) setError(r.error);
-        else router.refresh();
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         setError("Network error. Try again.");
       }
     });
   }
 
   function rotate() {
-    startTransition(async () => {
+    start(async () => {
       setError(null);
       try {
         const r = await rotateTokenAction(projectId, tokenId);
         if (r.status === "error") setError(r.error ?? "Rotation failed");
-        else {
-          setRotated(r);
-          router.refresh();
-        }
-      } catch {
+        // In the transition, with the list the action drew again: the new
+        // key's dialog opens as the list shows it.
+        else startTransition(() => setRotated(r));
+      } catch (err) {
+        unstable_rethrow(err);
         setError("Network error. Try again.");
       }
     });

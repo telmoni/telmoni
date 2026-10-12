@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { unstable_rethrow } from "next/navigation";
+import { startTransition, useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -48,36 +48,33 @@ export function ConnectionActions({
   // whose repair is a rotation.
   reconnectHref: string | null;
 }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const [pending, start] = useTransition();
   const [rotated, setRotated] = useState<SecretResult | null>(null);
   const [rotating, setRotating] = useState(false);
   const [editingEvents, setEditingEvents] = useState(false);
   const isWebhook = connection.provider === "webhook";
 
   function sendTest() {
-    startTransition(async () => {
+    start(async () => {
       try {
         const r = await sendTestMessageAction(projectId, connection.id);
         if (r.error) toast.error(r.error);
         else toast.success(`Test message sent to ${label}.`);
-        router.refresh();
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         toast.error("Network error. Try again.");
       }
     });
   }
 
   function disconnect() {
-    startTransition(async () => {
+    start(async () => {
       try {
         const r = await disconnectConnectorAction(projectId, connection.id);
         if (r.error) toast.error(r.error);
-        else {
-          toast.success(`${label} disconnected.`);
-          router.refresh();
-        }
-      } catch {
+        else toast.success(`${label} disconnected.`);
+      } catch (err) {
+        unstable_rethrow(err);
         toast.error("Network error. Try again.");
       }
     });
@@ -188,7 +185,6 @@ function EventsDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
-  const router = useRouter();
   const [events, setEvents] = useState<EventChoice>(() => choiceFrom(connection.event_kinds));
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -204,10 +200,11 @@ function EventsDialog({
           setError(r.error);
           return;
         }
-        onOpenChange(false);
+        // In the transition, with the list the action drew again.
+        startTransition(() => onOpenChange(false));
         toast.success(`Events updated for ${label}.`);
-        router.refresh();
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         setError("Network error. Try again.");
       }
     });
@@ -289,7 +286,6 @@ function RotateDialog({
   onOpenChange: (v: boolean) => void;
   onRotated: (r: SecretResult) => void;
 }) {
-  const router = useRouter();
   const [hours, setHours] = useState<OverlapHours>("24");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -303,10 +299,13 @@ function RotateDialog({
           setError(r.error);
           return;
         }
-        onOpenChange(false);
-        onRotated(r);
-        router.refresh();
-      } catch {
+        // In the transition, with the list the action drew again.
+        startTransition(() => {
+          onOpenChange(false);
+          onRotated(r);
+        });
+      } catch (err) {
+        unstable_rethrow(err);
         setError("Network error. Try again.");
       }
     });

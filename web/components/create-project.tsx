@@ -1,8 +1,8 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { unstable_rethrow, useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
-import { useState, useTransition } from "react";
+import { startTransition, useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { PageAction } from "@/components/page-action";
@@ -64,15 +64,20 @@ export function CreateProjectDialog({
           setError(res.error);
           return;
         }
-        onOpenChange(false);
+        // On to the project; an answer that could not be read leaves this
+        // page, which the action's revalidation draws again with it listed.
+        // The dialog closes in one transition with either, so it goes as the
+        // page it leaves for lands rather than a frame before.
+        startTransition(() => {
+          onOpenChange(false);
+          if (res.project) {
+            addProject(res.project);
+            router.push(projectPath(organization.slug, res.project.slug));
+          }
+        });
         toast.success("Project created.");
-        if (res.project) {
-          addProject(res.project);
-          router.push(projectPath(organization.slug, res.project.slug));
-        } else {
-          router.refresh();
-        }
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         setError("Something went wrong. Please try again.");
       }
     });

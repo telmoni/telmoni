@@ -1,5 +1,6 @@
 "use client";
 
+import { unstable_rethrow } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -49,7 +50,8 @@ export function DeleteAccountForm({
           return;
         }
         setCodeSent(true);
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         setError("Network error. Try again.");
       }
     });
@@ -66,7 +68,8 @@ export function DeleteAccountForm({
         }
         setErased(r.deleted === true);
         setFarewell(true);
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         setError("Network error. Try again.");
       }
     });

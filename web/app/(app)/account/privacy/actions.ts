@@ -1,6 +1,6 @@
 "use server";
 
-import { redirect } from "next/navigation";
+import { refresh } from "next/cache";
 
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
@@ -25,7 +25,9 @@ export async function requestAccountDeletionCodeAction(): Promise<{
   ok?: boolean;
 }> {
   const session = await getServerSession();
-  if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) redirect("/auth/login");
+  if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
+    return { error: "Your session expired — sign in again." };
+  }
 
   const limited = await rateLimit(sessionKey(session, "auth:delete-code"), {
     limit: 3,
@@ -49,7 +51,9 @@ export async function deleteAccountAction(
   code: string,
 ): Promise<{ error?: string; ok?: boolean; deleted?: boolean }> {
   const session = await getServerSession();
-  if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) redirect("/auth/login");
+  if (!session || (await isSessionBlacklisted(sessionEndKey(session)))) {
+    return { error: "Your session expired — sign in again." };
+  }
 
   if (!/^\d{6}$/.test(code)) {
     return { error: "Enter the 6-digit code from your email." };
@@ -122,6 +126,7 @@ export async function revokeSessionAction(
     return { error: message };
   }
   await blacklistSession(sessionId);
+  refresh();
   return { error: null };
 }
 
@@ -153,5 +158,6 @@ export async function setAnalyticsPreferenceAction(
     const { message } = await extractProblem(res);
     return { error: message };
   }
+  refresh();
   return { error: null };
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { PasswordInput } from "@/components/password-input";
@@ -27,7 +28,8 @@ export function SignInForm({ state, email: initialEmail }: { state: string; emai
         // The callback, with the code and the state the door sealed: the
         // same hop an external provider's page makes, from here.
         if (res.next) window.location.replace(res.next);
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         setError("Network error. Try again.");
       }
     });

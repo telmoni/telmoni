@@ -1,11 +1,11 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
+import { refresh, revalidatePath } from "next/cache";
 
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import type { SessionData } from "@/lib/auth/session";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
+import { isProjectId } from "@/lib/connect";
 import { env } from "@/lib/env";
 import { Flag } from "@/lib/flags";
 import { featureOff } from "@/lib/server/flags";
@@ -24,7 +24,12 @@ import {
   userChannel,
 } from "@/lib/events/publisher";
 import { displayName } from "@/lib/user-display";
-import { answerMemberAction, extractInviteLink } from "@/lib/members/shared";
+import {
+  NOT_A_GIVEN_ROLE,
+  answerMemberAction,
+  extractInviteLink,
+  isGivenRole,
+} from "@/lib/members/shared";
 
 export interface ActionResult {
   error: string | null;
@@ -35,6 +40,7 @@ export async function inviteMemberAction(
   email: string,
   role: "admin" | "member",
 ): Promise<ActionResult & { link?: string }> {
+  if (!isGivenRole(role)) return { error: NOT_A_GIVEN_ROLE };
   const gate = await open("members:invite", 10, projectId);
   if ("error" in gate) return gate;
   const off = await featureOff(Flag.Members);
@@ -91,6 +97,7 @@ export async function inviteMemberAction(
     });
   }
 
+  refresh();
   return { error: null, link };
 }
 
@@ -116,6 +123,7 @@ export async function revokeInviteAction(
     ],
     { type: "invite:revoked", data: { inviteId } },
   );
+  refresh();
   return ans;
 }
 
@@ -124,6 +132,7 @@ export async function updateMemberRoleAction(
   memberId: string,
   role: "admin" | "member",
 ): Promise<ActionResult> {
+  if (!isGivenRole(role)) return { error: NOT_A_GIVEN_ROLE };
   const gate = await open("members:role", 30, projectId);
   if ("error" in gate) return gate;
   // The channel told is the member's own console, so their address comes
@@ -148,6 +157,7 @@ export async function updateMemberRoleAction(
       data: { organizationId: gate.organizationId, projectId: gate.projectId },
     });
   }
+  refresh();
   return answer(res);
 }
 
@@ -175,6 +185,7 @@ export async function removeMemberAction(
       data: { organizationId: gate.organizationId, projectId: gate.projectId },
     });
   }
+  refresh();
   return answer(res);
 }
 
@@ -244,6 +255,8 @@ export async function leaveProjectAction(
     `${gate.base}/internal/memberships/${encodeURIComponent(projectId)}`,
     { method: "DELETE", headers: gate.headers },
   );
+  if (!res?.ok) return answer(res);
+  refresh();
   return answer(res);
 }
 
@@ -279,12 +292,17 @@ async function open(
   | { error: string; base?: undefined }
 > {
   const session = await getServerSession();
-  if (!session) redirect("/auth/login");
+  if (!session) return { error: "Your session expired — sign in again." };
   const limited = await rateLimit(sessionKey(session, bucket), {
     limit,
     windowMs: 60_000,
   });
   if (limited) return { error: "Too many requests — slow down a moment." };
+  // The id becomes a header and a path segment of the upstream URL: anything
+  // but a project id is refused before it can aim the request elsewhere.
+  if (!isProjectId(projectId)) {
+    return { error: "Couldn't resolve that project. Reload and try again." };
+  }
   const ctx = await identityContext();
   if (!ctx) return { error: await unplacedOrganization() };
   return {

@@ -1,5 +1,6 @@
 "use server";
 
+import { refresh } from "next/cache";
 import { z } from "zod";
 
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
@@ -200,5 +201,7 @@ export async function setDefaultOrganizationAction(
     const { message } = await extractProblem(res);
     return { error: message };
   }
+  // The page names the default auth answers, which this has just moved.
+  refresh();
   return { error: null };
 }

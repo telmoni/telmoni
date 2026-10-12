@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { unstable_rethrow } from "next/navigation";
 import { Bell, Check, ChevronRight, Download, Loader2, X } from "lucide-react";
 import { useState, useTransition } from "react";
 
@@ -273,7 +273,6 @@ function ProjectOfferRow({ offer }: { offer: ProjectOffer }) {
 // holding two real buttons keeps the menu open, which is the whole point of
 // answering from here rather than from the page.
 function InviteRow({ invite }: { invite: IncomingInvite }) {
-  const router = useRouter();
   const removeIncomingInvite = useRemoveIncomingInvite();
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -290,11 +289,11 @@ function InviteRow({ invite }: { invite: IncomingInvite }) {
           setError(res.error);
           return;
         }
-        // Drop it from the store first: the row leaves immediately, and the
-        // refresh behind it is what re-reads the projects the accept just granted.
+        // The row leaves at once; the projects the accept just granted come
+        // with the page the action's revalidation draws again.
         removeIncomingInvite(invite.id);
-        router.refresh();
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         setError(failure);
       }
     });

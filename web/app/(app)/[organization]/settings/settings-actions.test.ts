@@ -32,9 +32,14 @@ vi.mock("@/lib/server/entities/organization", () => ({
   }) => ctx.organizations.find((o) => o.organizationId === ctx.activeOrganizationId) ?? null,
 }));
 vi.mock("next/navigation", () => ({
-  redirect: (to: string) => {
-    throw new Error(`REDIRECT:${to}`);
+  redirect: (to: string, type?: string) => {
+    throw new Error(`REDIRECT:${to}${type ? ` (${type})` : ""}`);
   },
+  RedirectType: { push: "push", replace: "replace" },
+}));
+// The page the action was posted from, whose path the proxy hands on.
+vi.mock("next/headers", () => ({
+  headers: async () => new Headers({ "x-telmoni-path": "/acme-robotics/settings" }),
 }));
 const mockRevalidate = vi.fn();
 vi.mock("next/cache", () => ({
@@ -175,12 +180,14 @@ describe("renameOrganizationAction", () => {
 // admin chooses, which auth holds to being free and none of the console's own
 // words.
 describe("changeOrganizationUrlAction", () => {
-  it("changes the URL of the organization the page rendered, and says where it went", async () => {
+  // ⚠ The page was posted from the path the organization went by; it goes on
+  // to the same page at the new one, drawn there, since drawing the old path
+  // again answers "not found".
+  it("changes the URL of the organization the page rendered, and takes the page there", async () => {
     fetchMock.mockResolvedValue(renamed("acme"));
-    expect(await changeOrganizationUrlAction(ORGANIZATION, " acme ")).toEqual({
-      error: null,
-      movedTo: "acme",
-    });
+    await expect(changeOrganizationUrlAction(ORGANIZATION, " acme ")).rejects.toThrow(
+      "REDIRECT:/acme/settings (replace)",
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       "http://auth.test/internal/organization",
       expect.objectContaining({
@@ -192,6 +199,8 @@ describe("changeOrganizationUrlAction", () => {
         body: JSON.stringify({ slug: "acme" }),
       }),
     );
+    // The new path comes drawn whole with the answer; a revalidation on top
+    // would have the router read it all again as soon as it landed.
     expect(mockRevalidate).not.toHaveBeenCalled();
   });
 
@@ -199,7 +208,7 @@ describe("changeOrganizationUrlAction", () => {
   // names nothing: the organization's channel tells them where it went.
   it("tells the organization's channel where the URL moved", async () => {
     fetchMock.mockResolvedValue(renamed("acme"));
-    await changeOrganizationUrlAction(ORGANIZATION, "acme");
+    await expect(changeOrganizationUrlAction(ORGANIZATION, "acme")).rejects.toThrow("REDIRECT:");
     expect(mockPublishEvent).toHaveBeenCalledTimes(1);
     expect(mockPublishEvent).toHaveBeenCalledWith(`bfev:organization:${ORGANIZATION}`, {
       type: "slug:moved",

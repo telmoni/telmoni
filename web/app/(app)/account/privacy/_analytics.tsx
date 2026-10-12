@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
@@ -9,7 +9,6 @@ import { Switch } from "@/components/ui/switch";
 import { setAnalyticsPreferenceAction } from "./actions";
 
 export function AnalyticsPreference({ optIn }: { optIn: boolean }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [checked, setChecked] = useState(optIn);
 
@@ -21,10 +20,9 @@ export function AnalyticsPreference({ optIn }: { optIn: boolean }) {
         if (res.error) {
           setChecked(!next);
           toast.error(res.error);
-          return;
         }
-        router.refresh();
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         setChecked(!next);
         toast.error("Network error. Please try again.");
       }

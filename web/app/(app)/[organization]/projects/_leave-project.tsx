@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -15,7 +15,6 @@ export function LeaveProject({
   projectId: string;
   name: string;
 }) {
-  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -43,8 +42,8 @@ export function LeaveProject({
             try {
               const r = await leaveProjectAction(projectId);
               if (r.error) setError(r.error);
-              else router.refresh();
-            } catch {
+            } catch (err) {
+              unstable_rethrow(err);
               setError("Network error. Try again.");
             }
           })

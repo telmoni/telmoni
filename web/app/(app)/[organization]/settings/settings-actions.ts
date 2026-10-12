@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
+import { redirect, RedirectType } from "next/navigation";
 import { z } from "zod";
 
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
@@ -12,20 +12,19 @@ import { MAX_ORGANIZATION_NAME } from "@/lib/organization-name";
 import { identityContext, organizationHeaders } from "@/lib/server/entities/identity-context";
 import { activeOrganization, getServerContext } from "@/lib/server/entities/organization";
 import { SWITCHED_ORGANIZATION, unplacedOrganization } from "@/lib/server/identity";
+import { canonicalPath } from "@/lib/server/path";
 import { getServerSession } from "@/lib/server/session";
 import { SLUG_MAX_LENGTH, isOrganizationSlug, isSlug } from "@/lib/slug";
 
 const Updated = z.object({ slug: z.string() });
 
-/// What the organization's two settings answer. `movedTo` is the slug the
-/// organization goes by now, when the write moved it: a URL changed on
-/// purpose. The page follows it there, and so does everybody else with one of
-/// the organization's pages open, who is told. Nothing is revalidated then —
-/// the path this was posted from names no organization any more, and rendering
-/// it again would answer "not found" before the page had moved.
+/// What the organization's two settings answer. A write that moved the
+/// organization's slug — a URL changed on purpose — answers with the same page
+/// at the new path instead, drawn there rather than here, where the old path
+/// names no organization any more; everybody else with one of the
+/// organization's pages open is told, and follows it too.
 interface Answer {
   error: string | null;
-  movedTo?: string;
 }
 
 /// `PATCH /internal/organization` for the organization the page rendered: the
@@ -37,7 +36,7 @@ async function patchOrganization(
   body: { name?: string; slug?: string },
 ): Promise<Answer> {
   const session = await getServerSession();
-  if (!session) redirect("/auth/login");
+  if (!session) return { error: "Your session expired — sign in again." };
 
   const limited = await rateLimit(sessionKey(session, bucket), {
     limit: 10,
@@ -67,7 +66,11 @@ async function patchOrganization(
       type: "slug:moved",
       data: { organizationId, from: was, to: updated.data.slug },
     });
-    return { error: null, movedTo: updated.data.slug };
+    // `replace`, so Back does not return to a path that names nothing.
+    // Nothing is revalidated first: the new path is drawn whole with this
+    // answer, and a revalidation would have the router read it all again as
+    // soon as it lands.
+    redirect(await canonicalPath([updated.data.slug]), RedirectType.replace);
   }
   revalidatePath("/", "layout");
   return { error: null };

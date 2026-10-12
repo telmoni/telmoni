@@ -20,7 +20,7 @@ export default async function SettingsPage({
 }: {
   params: Promise<{ organization: string; project: string }>;
 }) {
-  const { organization, project: slug } = await params;
+  const { project: slug } = await params;
 
   const [gate, project] = await Promise.all([
     getServerContext(),
@@ -56,7 +56,6 @@ export default async function SettingsPage({
           <Card>
             <RenameProjectForm
               projectId={project.id}
-              organization={organization}
               slug={project.slug}
               initialName={project.name}
               canEdit={canEdit}

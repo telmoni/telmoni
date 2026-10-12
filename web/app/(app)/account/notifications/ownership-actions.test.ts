@@ -126,9 +126,13 @@ describe.each([
     expect(mockRevalidate).not.toHaveBeenCalled();
   });
 
-  it("sends a signed-out caller to sign in, and asks auth nothing", async () => {
+  // Said, not redirected: an action's redirect is fetched by the server
+  // before the browser goes, and sign-in's own lane is no page to fetch.
+  it("tells a signed-out caller to sign in again, and asks auth nothing", async () => {
     vi.mocked(getServerSession).mockResolvedValue(null);
-    await expect(answer("org_offered")).rejects.toThrow("REDIRECT:/auth/login");
+    expect(await answer("org_offered")).toEqual({
+      error: "Your session expired — sign in again.",
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -165,12 +169,12 @@ describe("answering the offer of a project", () => {
         { status: 200 },
       ),
     );
-    // The path names the organization the project landed in, and the slug it
-    // landed under — which is auth's to say: a name taken there is numbered.
-    expect(await acceptProjectOfferAction("project_offered", "org_own")).toEqual({
-      error: null,
-      href: "/own/payments-2",
-    });
+    // On to the project: the path names the organization it landed in, and
+    // the slug it landed under — which is auth's to say: a name taken there
+    // is numbered.
+    await expect(acceptProjectOfferAction("project_offered", "org_own")).rejects.toThrow(
+      "REDIRECT:/own/payments-2",
+    );
 
     expect(fetchMock).toHaveBeenCalledWith(
       "http://auth.test/internal/projects/project_offered/transfer/accept",
@@ -200,10 +204,12 @@ describe("answering the offer of a project", () => {
     expect(mockPublishEvent).toHaveBeenCalledTimes(2);
     expect(mockPublishEvent).toHaveBeenCalledWith("bfev:organization:org_own", changed);
     expect(mockPublishEvent).toHaveBeenCalledWith("bfev:organization:org_from", changed);
-    expect(mockRevalidate).toHaveBeenCalledWith("/", "layout");
+    // The project's page comes drawn whole with the answer; a revalidation on
+    // top would have the router read it all again as soon as it landed.
+    expect(mockRevalidate).not.toHaveBeenCalled();
   });
 
-  it("answers nowhere to go when auth does not say where the project landed", async () => {
+  it("stays, drawn again, when auth does not say where the project landed", async () => {
     fetchMock.mockResolvedValue(
       new Response(
         JSON.stringify({ projectId: "project_offered", organizationId: "org_own" }),
@@ -213,6 +219,8 @@ describe("answering the offer of a project", () => {
     expect(await acceptProjectOfferAction("project_offered", "org_own")).toEqual({
       error: null,
     });
+    expect(mockRedirect).not.toHaveBeenCalled();
+    expect(mockRevalidate).toHaveBeenCalledWith("/", "layout");
   });
 
   it("declines, and tells the organization the project stays in", async () => {

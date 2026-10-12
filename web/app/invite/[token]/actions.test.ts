@@ -86,10 +86,15 @@ describe("acceptInviteAction", () => {
     );
   });
 
-  it("redirects to login when session is absent", async () => {
+  // Said, not redirected: an action's redirect is fetched by the server
+  // before the browser goes, and sign-in's own lane is no page to fetch.
+  it("tells a session that ran out since the page to sign in again, and accepts nothing", async () => {
     vi.mocked(getServerSession).mockResolvedValue(null);
-    await acceptInviteAction("token_abc");
-    expect(mockRedirect).toHaveBeenCalledWith("/auth/login?returnTo=/invite/token_abc");
+    expect(await acceptInviteAction("token_abc")).toEqual({
+      error: "Your session expired — sign in again.",
+    });
+    expect(mockRedirect).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("returns rate limit error when limited", async () => {
@@ -99,9 +104,9 @@ describe("acceptInviteAction", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("calls /internal/invites/accept and publishes invite:resolved", async () => {
-    const res = await acceptInviteAction("token_abc");
-    expect(res).toEqual({ error: null });
+  it("calls /internal/invites/accept, publishes invite:resolved, and goes on to the console", async () => {
+    await acceptInviteAction("token_abc");
+    expect(mockRedirect).toHaveBeenCalledWith("/console");
     expect(fetchMock).toHaveBeenCalledWith(
       "http://auth.test/internal/invites/accept",
       expect.objectContaining({
@@ -161,6 +166,7 @@ describe("acceptInviteAction", () => {
     );
     const res = await acceptInviteAction("token_abc");
     expect(res.error).toBe("invitation already used");
+    expect(mockRedirect).not.toHaveBeenCalled();
   });
 
   // ⚠ **An invitation is how somebody in no organization gets into one.**
@@ -168,7 +174,8 @@ describe("acceptInviteAction", () => {
   // running under the person's bearer alone.
   it("accepts for somebody in no organization, naming none", async () => {
     vi.mocked(identityContext).mockResolvedValue(null);
-    expect(await acceptInviteAction("token_abc")).toEqual({ error: null });
+    await acceptInviteAction("token_abc");
+    expect(mockRedirect).toHaveBeenCalledWith("/console");
     const [, init] = fetchMock.mock.calls[0]! as [string, { headers: Record<string, string> }];
     expect(init.headers.authorization).toBe("Bearer at_1");
     expect(init.headers).not.toHaveProperty("x-organization-id");

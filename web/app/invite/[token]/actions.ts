@@ -18,11 +18,10 @@ import {
 export async function acceptInviteAction(
   token: string,
 ): Promise<{ error: string | null }> {
+  // The page offers the signed-out its own links to sign in, back to it: a
+  // session that ran out since it was drawn is told so.
   const session = await getServerSession();
-  if (!session) {
-    redirect(`/auth/login?returnTo=/invite/${encodeURIComponent(token)}`);
-    return { error: "Authentication required." };
-  }
+  if (!session) return { error: "Your session expired — sign in again." };
 
   const limited = await rateLimit(sessionKey(session, "invites:accept"), {
     limit: 10,
@@ -61,12 +60,12 @@ export async function acceptInviteAction(
     { type: "invite:resolved", data: { inviteId: data?.inviteId || "" } },
   );
 
-  // The page goes on to `/console`, which asks `/me` for the cookie's
-  // organization. A new invitee has no cookie, and `/me` would fall back to
-  // their default, the organization their own sign-in provisioned; the one
-  // they just joined is where they are going.
+  // On to `/console`, which asks `/me` for the cookie's organization. A new
+  // invitee has no cookie, and `/me` would fall back to their default, the
+  // organization their own sign-in provisioned; the one they just joined is
+  // where they are going.
   if (data?.ownerOrganizationId) await setActiveOrganizationCookie(data.ownerOrganizationId);
 
   revalidatePath("/(app)/[organization]/projects", "page");
-  return { error: null };
+  redirect("/console");
 }

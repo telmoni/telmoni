@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { redirect } from "next/navigation";
+import { Component, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { OrganizationEntry, ProjectOffer } from "@/lib/server/entities/organization";
@@ -24,9 +26,28 @@ vi.mock("./_incoming-invites", () => ({
 
 const refresh = vi.hoisted(() => vi.fn());
 const push = vi.hoisted(() => vi.fn());
-vi.mock("next/navigation", () => ({
+// Next's own redirect and `unstable_rethrow`; only the router is a stand-in.
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
   useRouter: () => ({ refresh, push }),
 }));
+
+// Where a redirect thrown out of the page lands, as Next's router's own
+// boundary catches it in the console.
+class RouterStandIn extends Component<{ children: ReactNode }, { error: unknown }> {
+  state = { error: null as unknown };
+  static getDerivedStateFromError(error: unknown) {
+    return { error };
+  }
+  render() {
+    const { error } = this.state;
+    return error ? (
+      <p data-testid="redirected">{(error as Error).message}</p>
+    ) : (
+      this.props.children
+    );
+  }
+}
 
 const acceptOwnershipAction = vi.hoisted(() =>
   vi.fn<(organizationId: string) => Promise<{ error: string | null }>>(async () => ({
@@ -39,9 +60,9 @@ const declineOwnershipAction = vi.hoisted(() =>
   })),
 );
 const acceptProjectOfferAction = vi.hoisted(() =>
-  vi.fn<
-    (projectId: string, organizationId?: string) => Promise<{ error: string | null; href?: string }>
-  >(async () => ({ error: null, href: "/project_offered" })),
+  vi.fn<(projectId: string, organizationId?: string) => Promise<{ error: string | null }>>(
+    async () => ({ error: null }),
+  ),
 );
 const declineProjectOfferAction = vi.hoisted(() =>
   vi.fn<(projectId: string) => Promise<{ error: string | null }>>(async () => ({
@@ -141,6 +162,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   acceptOwnershipAction.mockResolvedValue({ error: null });
   declineOwnershipAction.mockResolvedValue({ error: null });
+  acceptProjectOfferAction.mockResolvedValue({ error: null });
   me([OWN, OFFERED, NOT_OFFERED]);
 });
 
@@ -179,7 +201,9 @@ describe("AccountNotificationsPage: ownership offers", () => {
 
     await press("Become the owner");
     expect(acceptOwnershipAction).toHaveBeenCalledWith("org_offered");
-    expect(refresh).toHaveBeenCalled();
+    // The action's revalidation draws the page again: a refresh here on top
+    // would draw it twice.
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("declines for the organization offered", async () => {
@@ -187,7 +211,7 @@ describe("AccountNotificationsPage: ownership offers", () => {
     await press("Decline");
     expect(declineOwnershipAction).toHaveBeenCalledWith("org_offered");
     expect(acceptOwnershipAction).not.toHaveBeenCalled();
-    expect(refresh).toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("shows auth's refusal, and keeps the offer on the page", async () => {
@@ -216,10 +240,13 @@ describe("AccountNotificationsPage: project offers", () => {
 
   // ⚠ Accepting takes the project's keys and members into the caller's own
   // organization, so it is confirmed first — and it lands where the caller
-  // said, then takes them there.
+  // said, then the action takes them there: its redirect goes back to the
+  // router, with nothing navigated from here.
   it("accepts, once confirmed, into the one organization the caller owns and goes to the project", async () => {
+    acceptProjectOfferAction.mockImplementation(async () => redirect("/own/project-offered"));
     me([OWN, NOT_OFFERED], [], [PROJECT_OFFERED]);
-    render(await AccountNotificationsPage());
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<RouterStandIn>{await AccountNotificationsPage()}</RouterStandIn>);
     await press("Accept");
     expect(acceptProjectOfferAction, "accepted before it was confirmed").not.toHaveBeenCalled();
     const dialog = screen.getByRole("dialog");
@@ -229,8 +256,10 @@ describe("AccountNotificationsPage: project offers", () => {
     await act(async () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Take it over" }));
     });
+    quiet.mockRestore();
     expect(acceptProjectOfferAction).toHaveBeenCalledWith("project_offered", "org_own");
-    expect(push).toHaveBeenCalledWith("/project_offered");
+    expect(screen.getByTestId("redirected")).toHaveTextContent("NEXT_REDIRECT");
+    expect(push).not.toHaveBeenCalled();
   });
 
   it("asks which organization when the caller owns several", async () => {
@@ -260,7 +289,7 @@ describe("AccountNotificationsPage: project offers", () => {
 
     await press("Decline");
     expect(declineProjectOfferAction).toHaveBeenCalledWith("project_offered");
-    expect(refresh).toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("shows auth's refusal, and keeps the offer on the page", async () => {

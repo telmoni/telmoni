@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
@@ -21,7 +21,6 @@ export function OrganizationNameForm({
   initialName: string;
   canEdit: boolean;
 }) {
-  const router = useRouter();
   const [name, setName] = useState(initialName);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -51,10 +50,11 @@ export function OrganizationNameForm({
           toast.error(res.error);
           return;
         }
+        // A name moves no URL: the page stays where it is, redrawn by the
+        // action's revalidation.
         toast.success("Organization renamed.");
-        // A name moves no URL: the page stays where it is.
-        router.refresh();
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         const msg = "Network error. Please try again.";
         setError(msg);
         toast.error(msg);

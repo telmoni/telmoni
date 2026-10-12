@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { unstable_rethrow } from "next/navigation";
 import { useId, useState, useTransition } from "react";
 import { toast } from "sonner";
 
@@ -33,7 +33,6 @@ export function ContentModeForm({
   /** The organization's owner alone may change it. */
   canEdit: boolean;
 }) {
-  const router = useRouter();
   const labelId = useId();
   const noteId = useId();
   const [choice, setChoice] = useState<ContentMode>(mode);
@@ -88,16 +87,16 @@ export function ContentModeForm({
       try {
         const res = await updateContentModeAction(projectId, choice);
         if (res.error) {
+          // A refusal the server gave also redraws the page (the action's
+          // `refresh()`): it can mean the page is out of date.
           setError(res.error);
           toast.error(res.error);
-          // A refusal can mean the page is out of date — the owner changed,
-          // or a mode closed — so it is drawn again from the server.
-          router.refresh();
         } else {
           // The action's revalidation sends the page back with the new mode.
           toast.success(`Content mode set to ${LABELS[choice]}.`);
         }
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         const msg = "Network error. Please try again.";
         setError(msg);
         toast.error(msg);

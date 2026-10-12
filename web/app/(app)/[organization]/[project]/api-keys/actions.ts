@@ -1,6 +1,6 @@
 "use server";
 
-import { redirect } from "next/navigation";
+import { refresh } from "next/cache";
 import { z } from "zod";
 
 import { isApiKeyScope } from "@/lib/api-key-scopes";
@@ -22,8 +22,10 @@ const TTL_OPTIONS = {
 } as const satisfies Record<string, number | null>;
 type TtlOption = keyof typeof TTL_OPTIONS;
 
+// Its own keys alone: `in` would also let "toString" through, whose value is
+// a function JSON drops, minting a key with no expiry asked for.
 function isTtl(s: unknown): s is TtlOption {
-  return typeof s === "string" && s in TTL_OPTIONS;
+  return typeof s === "string" && Object.hasOwn(TTL_OPTIONS, s);
 }
 
 const MintedToken = z.object({ id: z.string(), token: z.string() });
@@ -36,16 +38,21 @@ export interface MintResult {
   error?:  string;
 }
 
-export async function mintTokenAction(
-  _prev: MintResult | undefined,
-  formData: FormData,
-): Promise<MintResult> {
-  const projectId = String(formData.get("projectId") ?? "");
+/** What the mint dialog sends: what the browser could send, before each field
+ *  is checked below. */
+const MintInputSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  ttl: z.string(),
+  scopes: z.array(z.string()),
+});
+
+export async function mintTokenAction(projectId: string, input: unknown): Promise<MintResult> {
   if (!projectId) {
     return { status: "error", error: "API keys are scoped by project, not organization." };
   }
   const session = await getServerSession();
-  if (!session) redirect("/auth/login");
+  if (!session) return { status: "error", error: "Your session expired — sign in again." };
 
   const limited = await rateLimit(
     sessionKey(session, "tokens:mint"),
@@ -55,14 +62,16 @@ export async function mintTokenAction(
   const off = await featureOff(Flag.ApiTokens);
   if (off) return { status: "error", error: off };
 
-  const name = String(formData.get("name") ?? "").trim();
+  const asked = MintInputSchema.safeParse(input);
+  if (!asked.success) return { status: "error", error: "That key could not be read." };
+  const name = asked.data.name.trim();
   if (!name || name.length > 100) {
     return { status: "error", error: "Name is required (≤100 chars)." };
   }
-  const description = String(formData.get("description") ?? "").trim() || null;
-  const ttl = formData.get("ttl");
+  const description = asked.data.description.trim() || null;
+  const ttl = asked.data.ttl;
   if (!isTtl(ttl)) return { status: "error", error: "Invalid TTL selection." };
-  const scopes = String(formData.get("scopes") ?? "").split(",").filter(Boolean);
+  const scopes = asked.data.scopes;
   if (scopes.length === 0 || !scopes.every(isApiKeyScope)) {
     return { status: "error", error: "Choose what the key opens: sending spans, reading the API, or both." };
   }
@@ -91,6 +100,9 @@ export async function mintTokenAction(
     return { status: "error", error: message };
   }
 
+  // The key exists from here on, whatever its answer reads as: the list is
+  // drawn again with it.
+  refresh();
   const parsed = MintedToken.safeParse(await res.json().catch(() => null));
   if (!parsed.success) {
     return { status: "error", error: "Unexpected response from the key service." };
@@ -109,7 +121,7 @@ export async function rotateTokenAction(
     return { status: "error", error: "API keys are scoped by project, not organization." };
   }
   const session = await getServerSession();
-  if (!session) redirect("/auth/login");
+  if (!session) return { status: "error", error: "Your session expired — sign in again." };
 
   const limited = await rateLimit(
     sessionKey(session, "tokens:rotate"),
@@ -138,6 +150,7 @@ export async function rotateTokenAction(
     const { message } = await extractProblem(res);
     return { status: "error", error: message };
   }
+  refresh();
   const parsed = MintedToken.safeParse(await res.json().catch(() => null));
   if (!parsed.success) {
     return { status: "error", error: "Unexpected response from the key service." };
@@ -154,7 +167,7 @@ export async function revokeTokenAction(
     return { error: "API keys are scoped by project, not organization." };
   }
   const session = await getServerSession();
-  if (!session) redirect("/auth/login");
+  if (!session) return { error: "Your session expired — sign in again." };
 
   const limited = await rateLimit(
     sessionKey(session, "tokens:revoke"),
@@ -177,5 +190,6 @@ export async function revokeTokenAction(
     const { message } = await extractProblem(res);
     return { error: message };
   }
+  refresh();
   return {};
 }

@@ -1,7 +1,7 @@
 "use server";
 
 import { cookies } from "next/headers";
-import { revalidatePath } from "next/cache";
+import { refresh, revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
@@ -27,7 +27,12 @@ import {
 } from "@/lib/events/publisher";
 import { displayName } from "@/lib/user-display";
 import { organizationLabel } from "@/lib/identity";
-import { answerMemberAction, extractInviteLink } from "@/lib/members/shared";
+import {
+  NOT_A_GIVEN_ROLE,
+  answerMemberAction,
+  extractInviteLink,
+  isGivenRole,
+} from "@/lib/members/shared";
 
 export interface ActionResult {
   error: string | null;
@@ -38,6 +43,7 @@ export async function inviteOrganizationMemberAction(
   email: string,
   role: "admin" | "member",
 ): Promise<ActionResult & { link?: string }> {
+  if (!isGivenRole(role)) return { error: NOT_A_GIVEN_ROLE };
   const gate = await open("members:invite", 10, organizationId);
   if ("error" in gate) return gate;
   const off = await featureOff(Flag.Members);
@@ -95,6 +101,7 @@ export async function inviteOrganizationMemberAction(
     });
   }
 
+  refresh();
   return { error: null, link };
 }
 
@@ -120,6 +127,7 @@ export async function revokeOrganizationInviteAction(
     ],
     { type: "invite:revoked", data: { inviteId } },
   );
+  refresh();
   return ans;
 }
 
@@ -128,6 +136,7 @@ export async function updateOrganizationMemberRoleAction(
   memberId: string,
   role: "admin" | "member",
 ): Promise<ActionResult> {
+  if (!isGivenRole(role)) return { error: NOT_A_GIVEN_ROLE };
   const gate = await open("members:role", 30, organizationId);
   if ("error" in gate) return gate;
   // The channel told is the member's own console, so their address comes
@@ -152,6 +161,7 @@ export async function updateOrganizationMemberRoleAction(
       data: { organizationId: gate.organizationId },
     });
   }
+  refresh();
   return answer(res);
 }
 
@@ -179,6 +189,7 @@ export async function removeOrganizationMemberAction(
       data: { organizationId: gate.organizationId },
     });
   }
+  refresh();
   return answer(res);
 }
 
@@ -239,7 +250,7 @@ export async function leaveOrganizationAction(
   organizationId: string,
 ): Promise<ActionResult> {
   const session = await getServerSession();
-  if (!session) redirect("/auth/login");
+  if (!session) return { error: "Your session expired — sign in again." };
   const limited = await rateLimit(sessionKey(session, "members:leave"), {
     limit: 20,
     windowMs: 60_000,
@@ -294,7 +305,7 @@ async function open(
   | { error: string; base?: undefined }
 > {
   const session = await getServerSession();
-  if (!session) redirect("/auth/login");
+  if (!session) return { error: "Your session expired — sign in again." };
   const limited = await rateLimit(sessionKey(session, bucket), {
     limit,
     windowMs: 60_000,

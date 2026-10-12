@@ -1,6 +1,6 @@
 "use server";
 
-import { redirect } from "next/navigation";
+import { refresh } from "next/cache";
 
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
@@ -18,7 +18,7 @@ export async function markOrganizationReadAction(organizationId: string): Promis
   error: string | null;
 }> {
   const session = await getServerSession();
-  if (!session) redirect("/auth/login");
+  if (!session) return { error: "Your session expired — sign in again." };
 
   const limited = await rateLimit(sessionKey(session, "notifications:read"), {
     limit: 20,
@@ -40,5 +40,6 @@ export async function markOrganizationReadAction(organizationId: string): Promis
     };
   }
   if (!res.ok) return { error: (await extractProblem(res)).message };
+  refresh();
   return { error: null };
 }

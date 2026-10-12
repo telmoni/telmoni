@@ -97,8 +97,9 @@ describe("ContentModeForm", () => {
   });
 
   // A refusal can mean the page is out of date — the owner changed, or a
-  // mode closed — so the page is drawn again, and the choice kept to retry.
-  it("shows the server's refusal, keeps the choice, and draws the page again", async () => {
+  // mode closed — so the action draws the page again (its `refresh()`), and
+  // the choice is kept to retry: a refresh here on top would draw it twice.
+  it("shows the server's refusal, keeps the choice, and draws nothing twice", async () => {
     updateContentModeAction.mockResolvedValue({
       error: "insufficient role: required owner, have admin",
     });
@@ -110,7 +111,7 @@ describe("ContentModeForm", () => {
     expect(screen.getByText("insufficient role: required owner, have admin")).toBeInTheDocument();
     expect(radio("On")).toHaveAttribute("aria-checked", "true");
     expect(isHeld(save())).toBe(false);
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("holds every control while a save is on its way, and sends it once", async () => {

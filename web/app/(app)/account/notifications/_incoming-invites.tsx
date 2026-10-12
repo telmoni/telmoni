@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { Check, X } from "lucide-react";
+import { unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -58,7 +58,6 @@ export function IncomingInvitesSection({
 }
 
 function IncomingInviteRow({ invite }: { invite: IncomingInvite }) {
-  const router = useRouter();
   const removeIncomingInvite = useRemoveIncomingInvite();
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -73,8 +72,8 @@ function IncomingInviteRow({ invite }: { invite: IncomingInvite }) {
           return;
         }
         removeIncomingInvite(invite.id);
-        router.refresh();
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         setError(failure);
       }
     });

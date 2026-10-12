@@ -1,7 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { startTransition, useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { DataTable, THead, Th, Td } from "@/components/data-table";
@@ -57,21 +56,21 @@ export function ActiveSessions({
   sessions: ActiveSession[] | null;
   currentId: string | null;
 }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const [pending, start] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const revoke = (id: string) => {
     setBusyId(id);
-    startTransition(async () => {
+    start(async () => {
       const { error } = await revokeSessionAction(id);
-      setBusyId(null);
+      // In the transition, with the list the action drew again: the row goes
+      // as it stops being busy, rather than a frame after.
+      startTransition(() => setBusyId(null));
       if (error) {
         toast.error(error);
         return;
       }
       toast.success("Session ended. That device signs out within a few minutes.");
-      router.refresh();
     });
   };
 

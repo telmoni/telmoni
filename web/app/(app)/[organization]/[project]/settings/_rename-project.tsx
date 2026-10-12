@@ -1,31 +1,27 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { projectPath } from "@/lib/slug";
 import { useRenameProject } from "@/lib/store";
 
 import { updateProjectNameAction } from "./actions";
 
 export function RenameProjectForm({
   projectId,
-  organization,
   slug,
   initialName,
   canEdit,
 }: {
   projectId: string;
-  /// The slugs this page's path is spelled with.
-  organization: string;
+  /// The project's slug, which this page's path is spelled with.
   slug: string;
   initialName: string;
   canEdit: boolean;
 }) {
-  const router = useRouter();
   const renameProject = useRenameProject();
   const [name, setName] = useState(initialName);
   const [error, setError] = useState<string | null>(null);
@@ -56,15 +52,14 @@ export function RenameProjectForm({
           setError(res.error);
           toast.error(res.error);
         } else {
+          // Only a rename that kept the slug answers here: one that moved it
+          // takes the page on to the new path in the action itself, and its
+          // redirect goes on to the router from the catch below.
           toast.success("Project name updated.");
-          renameProject(projectId, trimmed, res.movedTo ?? slug);
-          // Its slug follows its name, and so does this page.
-          if (res.movedTo) {
-            router.replace(projectPath(organization, res.movedTo, "/settings"));
-          }
-          router.refresh();
+          renameProject(projectId, trimmed, slug);
         }
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         const msg = "Network error. Please try again.";
         setError(msg);
         toast.error(msg);

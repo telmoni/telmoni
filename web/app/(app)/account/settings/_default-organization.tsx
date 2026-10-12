@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
@@ -30,7 +30,6 @@ export function DefaultOrganization({
   organizations: DefaultOrganizationChoice[];
   current: string;
 }) {
-  const router = useRouter();
   const [chosen, setChosen] = useState(current);
   const [pending, startTransition] = useTransition();
 
@@ -43,9 +42,8 @@ export function DefaultOrganization({
           return;
         }
         toast.success("Default organization saved.");
-        // The page names the default auth answers, which this has just moved.
-        router.refresh();
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         toast.error("Network error. Please try again.");
       }
     });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { unstable_rethrow } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 
@@ -42,7 +42,6 @@ export function DeliveriesButton({
   label: string;
   canResend: boolean;
 }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [load, setLoad] = useState<Load>({ state: "loading" });
   const [olderError, setOlderError] = useState<string | null>(null);
@@ -99,9 +98,9 @@ export function DeliveriesButton({
       const r = await redeliverAction(projectId, connectionId, deliveryId);
       if (r.error) toast.error(r.error);
       else toast.success(`Delivered to ${label}.`);
-      router.refresh();
       await loadFirst();
-    } catch {
+    } catch (err) {
+      unstable_rethrow(err);
       toast.error("Network error. Try again.");
     } finally {
       setResending(null);

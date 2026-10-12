@@ -1,5 +1,6 @@
 "use client";
 
+import { unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -45,7 +46,8 @@ export function DeleteOrganizationForm({
           return;
         }
         setCodeSent(true);
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         setError("Network error. Try again.");
       }
     });
@@ -61,7 +63,8 @@ export function DeleteOrganizationForm({
           return;
         }
         setDone({ organization, purged: r.purged });
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         setError("Network error. Try again.");
       }
     });

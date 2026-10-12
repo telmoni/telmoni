@@ -1,5 +1,6 @@
 "use client";
 
+import { unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -63,7 +64,8 @@ export function ChangeEmail({
         setSentTo(res.email ?? trimmed);
         setCurrentCode("");
         setNewCode("");
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         setError("Network error. Try again.");
       }
     });
@@ -82,7 +84,8 @@ export function ChangeEmail({
         // would redirect to sign-out mid-sentence, before the person has read
         // which address the account now has and why they are signed out.
         setChangedTo(res.email ?? sentTo);
-      } catch {
+      } catch (err) {
+        unstable_rethrow(err);
         setError("Network error. Try again.");
       }
     });
