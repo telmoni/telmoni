@@ -157,8 +157,8 @@ From a checkout, wire the build into Cursor; once published, the package
 installs with npm and brings the same command:
 
 ```sh
-node ./cursor-observability-plugin/dist/telmoni-cursor.mjs setup   # from a checkout
-npm install -g telmoni-cursor-observability-plugin && telmoni-cursor setup   # once published
+node ./cursor-observability-plugin/dist/telmoni-cursor-observability.mjs setup   # from a checkout
+npm install -g telmoni-cursor-observability-plugin && telmoni-cursor-observability setup   # once published
 ```
 
 `setup` asks for the key, or takes `TELMONI_API_KEY`, checks that it is shaped
@@ -169,7 +169,7 @@ path, so a Cursor opened from the Dock finds it. Its log is
 `~/.cursor/telmoni/hook.log`.
 
 Cursor's cloud agents read the repository's hooks alone:
-`telmoni-cursor setup --project` writes `.cursor/hooks.json` there, to commit,
+`telmoni-cursor-observability setup --project` writes `.cursor/hooks.json` there, to commit,
 with the package installed in the agents' environment and the key as the Cloud
 Agents secret `TELMONI_API_KEY`. On a machine where both are set up, the
 repository's hooks record its conversations and your own stand aside.
