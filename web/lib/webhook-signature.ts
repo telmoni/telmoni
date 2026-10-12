@@ -1,5 +1,5 @@
 // The receiver's half of the signed-webhook contract, as a receiver would
-// write it. `/docs/webhooks` prints this function as the reference verifier,
+// write it. `/docs/integrations/webhooks` prints this function as the reference verifier,
 // and `webhook-signature.test.ts` proves it against the golden vector the
 // Rust signer pins — so the snippet a customer copies is one that has been run
 // against the bytes the platform actually sends, not prose that resembles it.

@@ -535,8 +535,8 @@ pub struct AgentTurnRecord {
     pub steps: Vec<AgentStep>,
 }
 
-/// What records the console agent's own questions — the telemetry module,
-/// once it exists, each as a run of the platform's own project — handed
+/// What records the console agent's own questions — the telemetry module's
+/// dogfood, each as a run of the operator's own project — handed
 /// each question once it ends: its model calls with their tokens and
 /// timings, its tool calls, and how it ended. A question whose answer was
 /// withheld for an erasure in its organization is never handed over.

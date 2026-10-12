@@ -16,7 +16,7 @@
 //! organization past `erase_after` is **finalized** (every sibling's purge,
 //! then the hard delete), and one still inside its wait is **purged** (the
 //! hook purge the request could not land, so nothing outside keeps acting on
-//! a closed organization while its owner decides whether to bring it back).
+//! a closed organization through the grace before its erasure).
 //! Then every pending person's erasure, second, because a person who owns an
 //! organization is refused until its row is gone, and both then finish in
 //! one tick.

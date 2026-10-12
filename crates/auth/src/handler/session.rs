@@ -84,7 +84,7 @@ impl std::fmt::Debug for ExchangeRequest {
     }
 }
 
-/// `POST /internal/auth/device/start` response — what the CLI shows the
+/// `POST /cli/auth/device` response — what the CLI shows the
 /// person and what it polls with (RFC 8628 § 3.2).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -115,7 +115,7 @@ impl std::fmt::Debug for DeviceStartResponse {
     }
 }
 
-/// `POST /internal/auth/device/poll` request.
+/// `POST /cli/auth/device/poll` request.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DevicePollRequest {
@@ -138,7 +138,7 @@ pub struct DeviceDecisionRequest {
     pub user_code: String,
 }
 
-/// `POST /internal/auth/device/poll` answer while nothing has been granted:
+/// `POST /cli/auth/device/poll` answer while nothing has been granted:
 /// a 202 carrying the RFC's own word for why.
 #[derive(Debug, Serialize)]
 struct DevicePending {
@@ -370,7 +370,7 @@ pub async fn start(
     Ok(Json(StartResponse { authorize_url: url }))
 }
 
-/// `POST /internal/auth/device/start` — begin a device authorization for a
+/// `POST /cli/auth/device` — begin a device authorization for a
 /// client with no browser of its own. The person approves it on the
 /// console's device page from any browser on any machine, which is what
 /// lets the CLI sign in over SSH or in a container.
@@ -388,7 +388,7 @@ pub async fn device_start(
     }))
 }
 
-/// `POST /internal/auth/device/poll` — one poll of the device-code grant,
+/// `POST /cli/auth/device/poll` — one poll of the device-code grant,
 /// as a public client. Granted is a 200 with the same `AuthnResult` the
 /// console's exchange answers. Not yet is a 202 saying
 /// `authorization_pending` or `slow_down`; refused is a 403; lapsed is a 400.

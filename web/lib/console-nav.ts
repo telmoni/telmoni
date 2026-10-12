@@ -195,16 +195,16 @@ interface GroupSpec {
 // unique within a rail (two rails may share one: `p` is Projects on an
 // organization's and Privacy on a project's and on Account's), never `g`, `?` or shift-`O`, the
 // one sequence that crosses rails (`lib/keys.ts`). `,` reaches Settings on
-// every rail, as `⌘,` opens preferences on a Mac; `c` is Connectors and also
-// the page's action, which `lib/keys.ts` explains is no collision.
+// every rail, as `⌘,` opens preferences on a Mac; `c` is Conversations and
+// also the page's action, which `lib/keys.ts` explains is no collision.
 
 const CORE_GROUPS: GroupSpec[] = [
   {
     title: "Project",
-    // Dashboards, Traces, Conversations, Users and Alerts stand in the rail before
-    // their pages exist, so the console shows the product's shape while
-    // telemetry is built: each opens a placeholder that the real page
-    // replaces. The Observability
+    // Alerts and Dashboards stand in the rail before their pages exist (3.12
+    // and 8.5), so the console shows the product's shape while the rest is
+    // built: each opens a placeholder that the real page replaces, as Traces,
+    // Conversations and Users were until theirs landed. The Observability
     // block is headed because its five rows are the product, and the Project
     // block because the rest of the rail is the project's own housekeeping;
     // Overview stands alone above both.

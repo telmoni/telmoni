@@ -89,7 +89,7 @@ describe("ActiveSessions", () => {
     expect(revoke).toHaveBeenCalledWith("s-other");
   });
 
-  it("tells the customer the sign-out is not instant", async () => {
+  it("tells the person the sign-out is not instant", async () => {
     render(<ActiveSessions sessions={rows} currentId="s-current" />);
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /End session/i }));

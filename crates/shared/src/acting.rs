@@ -1,7 +1,7 @@
-//! An upstream's answer to `/internal/authorize`.
+//! Who a request acts as: what auth's seam answers ([`crate::seam::Auth`]).
 //!
-//! Every sibling service that checks permissions with auth resolves the
-//! incoming request to an [`Acting`], which names the person, the organization
+//! Every module that checks permissions resolves the incoming request through
+//! auth, in process, to an [`Acting`], which names the person, the organization
 //! they are acting on, and if the request was scoped to a project, the role
 //! they hold within it.
 

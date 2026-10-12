@@ -46,8 +46,8 @@ config:
   legalUrl: ""
   mailFrom: "Telmoni <no-reply@localhost>"
   connectorKek: "local:dev_key"
-  # The key each project's hashing key is sealed under, which the customer
-  # ids its spans carry are hashed with. A Cloud KMS key name in a pod, as
+  # The key each project's hashing key is sealed under, which the user ids
+  # its spans carry are hashed with. A Cloud KMS key name in a pod, as
   # `connectorKek` is; required, where that one may be empty.
   telemetryKek: "local:dev_key"
   # A project of the operator's own the console agent's questions are

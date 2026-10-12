@@ -140,7 +140,7 @@ impl TelmoniError {
         }
     }
 
-    /// Classify a sibling service's non-2xx answer on an `/internal/*` hop.
+    /// Classify a non-2xx answer from another service reached over HTTP.
     #[must_use]
     pub fn upstream(service: &str, op: &str, status: u16) -> Self {
         if status == 401 || status == 403 {
@@ -287,8 +287,9 @@ pub enum AuthError {
     #[error("service credential rejected")]
     ServiceCredentialRejected,
 
-    /// The person could not be checked: the provider's key set is unreadable
-    /// with nothing cached, or auth is unreachable from a sibling. Maps to
+    /// The person or key could not be checked: the provider's key set is
+    /// unreadable with nothing cached, or auth could not read its own
+    /// database, or is not yet up in this process. Maps to
     /// **503**, never a 401: a bearer nobody could look at is not a refused one.
     #[error("identity could not be confirmed")]
     IdentityUnavailable,

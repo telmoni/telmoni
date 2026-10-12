@@ -22,7 +22,7 @@ const KEEPALIVE_MS = 30_000;
 // written for. Neither bounds a command sent to a server that holds the socket
 // open and never replies — a node mid-failover, a black-holed route, an
 // instance stalled on its own snapshot. That command hangs forever, and the
-// limiter is awaited inline in Server Actions and in the `/v1` proxy, so the
+// limiter is awaited inline in Server Actions and route handlers, so the
 // request hangs with it. A timeout turns that into the error the callers
 // already handle. Generous on purpose: this is a circuit breaker for a stalled
 // server, not a latency budget, and a value tight enough to trip on a slow-ish

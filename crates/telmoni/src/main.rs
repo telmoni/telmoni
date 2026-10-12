@@ -11,8 +11,8 @@
 //! ```
 //!
 //! Every command reads the same environment (`.env` on a laptop). `serve`
-//! and the sweeps need each module's DSN, telemetry's ClickHouse URL and the
-//! service secret; `migrate`
+//! and the sweeps need each module's DSN, telemetry's ClickHouse URL and key
+//! (`TELEMETRY_KEK`), Redis (`REDIS_URL`) and the service secret; `migrate`
 //! and `rotate` need the migrator's Postgres DSN and its ClickHouse URL. The
 //! commands themselves are [`telmoni::run`]; this binary hands it the process
 //! as the environment describes it. A deployment's own binary hands it its

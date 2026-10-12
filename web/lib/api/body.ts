@@ -5,10 +5,10 @@
  * ⚠ **`content-length` is a claim, not a limit.** A sender that omits it, or
  * chunks the body, or simply lies, gets past a check on the header alone —
  * and `request.arrayBuffer()` then buffers everything it sends before any
- * code can look at the size. The two webhook relays are public, unauthenticated
- * doors that must forward the raw bytes for a signature check downstream, so
- * they were exactly the place to be handed a body the size of the process's
- * heap. This reads the stream and stops the moment the ceiling is crossed.
+ * code can look at the size. The agent's turn route takes a body from any
+ * signed-in browser and relays it to the server, so a body the size of the
+ * process's heap is one request away. This reads the stream and stops the
+ * moment the ceiling is crossed.
  *
  * `null` means "over the ceiling": the caller answers 413 and never sees the
  * bytes. The declared length is still checked first, so an honest oversize

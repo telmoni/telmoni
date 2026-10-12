@@ -24,8 +24,9 @@ ENGINE = MergeTree
 ORDER BY applied_at;
 
 -- One row per finished span — a run, a step, a model or tool call, or any
--- other span under a run — written once, when it arrives, so the table is
--- append-only and read without FINAL. A span carries its project and nothing
+-- other span under a run — written once, when it arrives, and never updated,
+-- so the table is read without FINAL; a row leaves only with its day's
+-- retention or its project's deletion. A span carries its project and nothing
 -- above it: a project moves between organizations without a row rewritten.
 --
 -- Partitioned by the day it ARRIVED, by the server's clock, so the nightly

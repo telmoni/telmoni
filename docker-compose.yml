@@ -71,9 +71,9 @@ services:
     image: redis:7-alpine
     container_name: telmoni-redis
     restart: unless-stopped
-    # No RDB snapshot: this holds only the BFF's rate-limit windows, every key
-    # carries a PEXPIRE, and state surviving a restart is state the limiter is
-    # required to ignore.
+    # No RDB snapshot: this holds only what may be lost — the console's and
+    # the machine lanes' rate-limit windows, the signed-out sessions, the live
+    # events, the announcement and ingest's claims on each export.
     command: redis-server --save "" --loglevel warning
     ports:
       - "127.0.0.1:6379:6379"

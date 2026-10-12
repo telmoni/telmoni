@@ -196,8 +196,9 @@ pub struct AgentParts {
     /// Its pool, opened as the `agent` role.
     pub pool: PgPool,
     /// What records each of the agent's questions
-    /// ([`telmoni_shared::seam::AgentObserver`]): the telemetry module, once
-    /// it records them; `None` until then.
+    /// ([`telmoni_shared::seam::AgentObserver`]), where the binary brings its
+    /// own; `None` leaves it to the telemetry module's dogfood, which records
+    /// them where `TELEMETRY_DOGFOOD_PROJECT_ID` names a project.
     pub observer: Option<Arc<dyn telmoni_shared::seam::AgentObserver>>,
 }
 

@@ -63,8 +63,9 @@ pub enum Resource {
     /// members do not; the resource exists to deny the write verbs structurally.
     Audit,
     /// A project's traces: the runs its agents recorded, which every role on
-    /// the project reads. Ingest alone writes a span and the nightly purge
-    /// alone removes one, so the write verbs are denied structurally.
+    /// the project reads. Ingest alone writes a span, and only the nightly
+    /// purge or the project's own deletion removes one, so the write verbs
+    /// are denied structurally.
     Trace,
     // The product built on this platform adds its resources here WITH their
     // handlers, never before, or the matrix grants a capability no endpoint
