@@ -318,12 +318,13 @@ function SectionHead({
 }
 
 // A hairline grid: the cells share one rule, as a product site draws them.
-// ⚠ Each cell draws the rule itself, a one-pixel ring, rather than the grid
-// showing its ink through a one-pixel gap: an uneven split — a third and two
-// thirds — lands the gap on a fraction of a pixel, which the browser paints
-// as two, and the rule read doubled. A ring sits on the cell's own edge, so
-// it is one pixel whatever the columns measure, and the frame clips the
-// rings on the outside.
+// ⚠ Each cell draws the rule itself, its top and left borders, pulled a pixel
+// up and left so the first row's and column's fall under the frame, which
+// clips them. Not the grid's ink through a one-pixel gap: an uneven split — a
+// third and two thirds — lands the gap on a fraction of a pixel, which the
+// browser paints as two, and the rule reads doubled. Not a ring either: a
+// shadow is not snapped to the screen's pixels as a border is, so on a 1.25×
+// or 1.5× display it draws heavier than the frame.
 function Cells({ className, children }: { className?: string; children: React.ReactNode }) {
   return (
     <div
@@ -339,7 +340,12 @@ function Cells({ className, children }: { className?: string; children: React.Re
 
 function Cell({ className, children }: { className?: string; children: React.ReactNode }) {
   return (
-    <div className={cn("flex flex-col gap-3 bg-card p-5 ring-1 ring-border", className)}>
+    <div
+      className={cn(
+        "-mt-px -ml-px flex flex-col gap-3 border-t border-l border-border bg-card p-5",
+        className,
+      )}
+    >
       {children}
     </div>
   );
