@@ -242,6 +242,157 @@ needs neither.
 
 ---
 
+## A run recorded after it ended
+
+A job that keeps its own log, or a hook that runs once the work it reports is
+over, hands the finished run over whole, as data: its id, a UUID you give and
+keep with the log; its agent, user, session and tags; its start and end and
+how it ended; and its steps and calls, each with its own times. A step holds
+the calls made inside it.
+
+<Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
+  <Tab value="Python">
+    ```python
+    from datetime import datetime, timezone
+
+    from telmoni import ModelCallRecord, RunRecord, ToolCallRecord, Usage
+
+    at = lambda s: datetime(2026, 10, 12, 9, 0, s, tzinfo=timezone.utc)
+
+    telmoni.record_run(
+        RunRecord(
+            run_id="3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
+            agent="nightly-triage",
+            session_id="conv_7",
+            start=at(0),
+            end=at(9),
+            inside=[
+                ModelCallRecord(
+                    model="gpt-4o-mini", provider="openai", start=at(0), end=at(2),
+                    usage=Usage(input_tokens=1200, output_tokens=85),
+                ),
+                ToolCallRecord(name="search", start=at(2), end=at(3), error_type="TimeoutError"),
+            ],
+        )
+    )
+    telmoni.flush()
+    ```
+
+    Times carry their timezone. A blank agent, a run id that is not a UUID or
+    is the nil UUID, a time without its timezone or a span that ends before it
+    starts raises `ValueError`, and nothing is sent.
+  </Tab>
+  <Tab value="TypeScript">
+    ```ts
+    telmoni.recordRun({
+      runId: '3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d',
+      agent: 'nightly-triage',
+      sessionId: 'conv_7',
+      start: new Date('2026-10-12T09:00:00Z'),
+      end: new Date('2026-10-12T09:00:09Z'),
+      inside: [
+        {
+          type: 'model_call',
+          model: 'gpt-4o-mini',
+          provider: 'openai',
+          start: new Date('2026-10-12T09:00:00Z'),
+          end: new Date('2026-10-12T09:00:02Z'),
+          usage: { inputTokens: 1200, outputTokens: 85 },
+        },
+        {
+          type: 'tool_call',
+          name: 'search',
+          start: new Date('2026-10-12T09:00:02Z'),
+          end: new Date('2026-10-12T09:00:03Z'),
+          errorType: 'TimeoutError',
+        },
+      ],
+    });
+    await telmoni.flush();
+    ```
+
+    A time is a `Date` or milliseconds since the Unix epoch; a step is
+    `{ type: 'step', name, start, end, calls }`. A blank agent, a run id that
+    is not a UUID or is the nil UUID, a time that is not one or an item of no
+    known `type` throws a `TypeError`, and a span that ends before it starts a
+    `RangeError`; either sends nothing.
+  </Tab>
+  <Tab value="Go">
+    ```go
+    start := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
+    err := client.RecordRun(ctx, telmoni.RunRecord{
+        RunID:     "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
+        Agent:     "nightly-triage",
+        SessionID: "conv_7",
+        Start:     start,
+        End:       start.Add(9 * time.Second),
+        Inside: []telmoni.RecordItem{
+            telmoni.ModelCallRecord{
+                Model: "gpt-4o-mini", Provider: "openai",
+                Start: start, End: start.Add(2 * time.Second),
+                Usage: &telmoni.Usage{InputTokens: 1200, OutputTokens: 85},
+            },
+            telmoni.ToolCallRecord{
+                Name: "search", ErrorType: "TimeoutError",
+                Start: start.Add(2 * time.Second), End: start.Add(3 * time.Second),
+            },
+        },
+    })
+    client.Flush(ctx)
+    ```
+
+    A step is a `telmoni.StepRecord` with its `Calls`. A blank agent, a run
+    id that is not a UUID or is the nil UUID, a zero time, a nil item or a
+    span that ends before it starts returns an error, and nothing is sent.
+  </Tab>
+  <Tab value="Rust">
+    ```rust
+    use std::time::{Duration, SystemTime};
+
+    use telmoni_sdk::{ModelCallRecord, RunRecord, ToolCallRecord, Usage};
+
+    // 2026-10-12T09:00:00Z, and what came after it.
+    let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_791_795_600);
+    let at = |millis| start + Duration::from_millis(millis);
+
+    telmoni.record_run(RunRecord {
+        session_id: Some("conv_7".into()),
+        inside: vec![
+            ModelCallRecord {
+                provider: Some("openai".into()),
+                usage: Some(Usage { input_tokens: Some(1200), output_tokens: Some(85), ..Usage::default() }),
+                ..ModelCallRecord::new("gpt-4o-mini", start, at(2_000))
+            }
+            .into(),
+            ToolCallRecord {
+                error_type: Some("TimeoutError".into()),
+                ..ToolCallRecord::new("search", at(2_000), at(3_000))
+            }
+            .into(),
+        ],
+        ..RunRecord::new("3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d", "nightly-triage", start, at(9_000))
+    })?;
+    telmoni.flush();
+    ```
+
+    A step is a `StepRecord` with its `calls`. A blank agent
+    (`Error::EmptyAgent`), a run id that is not a UUID or is the nil UUID
+    (`Error::RunId`) or a span that ends before it starts
+    (`Error::EndBeforeStart`) is returned as an error, and nothing is sent.
+  </Tab>
+</Tabs>
+
+The run is sent as the live calls would have sent it, through the same
+exporter, content rules and sample rate, in a trace of its own named by the
+run's id, whatever trace is current. Each span's id is derived from the run's
+id and the span's place in the record, so the same record sent again is the
+same bytes, which Telmoni answers within the hour as it answered the first,
+storing nothing twice: give a run the same id each time you send it. A record
+holds no content.
+The [coding-agent plugins](/docs/api/coding-agents) are built on it.
+
+---
+
 ## What a run sends
 
 A run is a span of its own, named `invoke_agent <agent>`, inside your current
