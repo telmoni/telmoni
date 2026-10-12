@@ -54,7 +54,8 @@ pub enum Resource {
     Project,
     /// The organization's member list: every role reads it, owner and admin write.
     Member,
-    /// `telmoni_` API tokens — the keys an organization mints to call the public API.
+    /// `telmoni_` API tokens — the keys a project's admins mint, to read the
+    /// public API and to send spans.
     Token,
     /// A project's Slack or webhook connection.
     Connector,

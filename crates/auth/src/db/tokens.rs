@@ -77,7 +77,7 @@ pub struct ValidatedToken {
     /// The project the token was minted on: the roster `/v1/members` reads,
     /// since a project admin may mint a key and may see no more than that.
     pub project_id: ProjectId,
-    /// The organization's name, which the console's validate lane answers;
+    /// The organization's name, which `/internal/tokens/validate` answers;
     /// `/v1/organization` reads its own answer, owner and all, through
     /// `organizations::summary_with_owner`.
     pub name: String,

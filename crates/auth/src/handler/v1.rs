@@ -61,14 +61,20 @@ pub const V1_LANES: &[V1Lane] = &[
                           The slug is what the console's URLs name it by: set \
                           from the name it was created under, when that reads \
                           as one, and moved only when the URL is changed in \
-                          Settings; the id never moves. A \
-                          key IS an organization, so this answers for the \
-                          caller and for nobody else.",
+                          Settings; the id never moves. A key is minted on \
+                          one project of one organization, so this answers \
+                          for the caller's organization and for no other.",
             params: &[],
-            answers: &[Answer {
-                status: 200,
-                description: "The organization.",
-            }],
+            answers: &[
+                Answer {
+                    status: 200,
+                    description: "The organization.",
+                },
+                Answer {
+                    status: 403,
+                    description: "A live key without the `read` scope.",
+                },
+            ],
         },
     },
     V1Lane {
@@ -84,10 +90,16 @@ pub const V1_LANES: &[V1Lane] = &[
                           no more than the project admin who minted it could; \
                           the organization's roster is the console's alone.",
             params: &[],
-            answers: &[Answer {
-                status: 200,
-                description: "The members: the owner, then the project's seats.",
-            }],
+            answers: &[
+                Answer {
+                    status: 200,
+                    description: "The members: the owner, then the project's seats.",
+                },
+                Answer {
+                    status: 403,
+                    description: "A live key without the `read` scope.",
+                },
+            ],
         },
     },
 ];

@@ -357,11 +357,12 @@ impl std::fmt::Debug for ValidateTokenRequest {
     }
 }
 
-/// What `/internal/tokens/validate` answers. A token acts AS its organization,
-/// which holds no seats anywhere, so there is no membership list to carry.
+/// What `/internal/tokens/validate` answers. A token acts for the project it
+/// was minted on and holds no seat, so there is no membership list to carry.
 #[derive(Debug, Serialize)]
 pub struct ValidateTokenResponse {
     /// The organization the token belongs to — the tenancy boundary a `/v1`
+    /// lane reads within.
     pub organization_id: OrganizationId,
     /// What to PRINT for that organization — its name, else a generic label.
     /// A name, never a key: nothing may match on it.

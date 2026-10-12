@@ -119,9 +119,9 @@ pub fn document(
                     "type": "http",
                     "scheme": "bearer",
                     "description":
-                        "A `telmoni_` API token, minted on the Keys page. The token \
-                         IS the organization; there is no second credential and no \
-                         scope below the organization.",
+                        "A `telmoni_` API key, minted on a project's API keys page. \
+                         It reads its organization and that project, within the \
+                         scopes it was minted with: every lane here needs `read`.",
                 },
             },
             "schemas": { "Problem": problem_schema() },

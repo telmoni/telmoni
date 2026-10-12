@@ -31,7 +31,7 @@
     },
     "securitySchemes": {
       "bearerAuth": {
-        "description": "A `telmoni_` API token, minted on the Keys page. The token IS the organization; there is no second credential and no scope below the organization.",
+        "description": "A `telmoni_` API key, minted on a project's API keys page. It reads its organization and that project, within the scopes it was minted with: every lane here needs `read`.",
         "scheme": "bearer",
         "type": "http"
       }
@@ -61,6 +61,16 @@
             },
             "description": "No live `telmoni_` API key was presented. A revoked, expired or unknown key answers the same way."
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A live key without the `read` scope."
+          },
           "429": {
             "content": {
               "application/problem+json": {
@@ -87,7 +97,7 @@
     },
     "/v1/organization": {
       "get": {
-        "description": "The organization the key belongs to — its id, its slug, its name and its owner's address and name. The slug is what the console's URLs name it by: set from the name it was created under, when that reads as one, and moved only when the URL is changed in Settings; the id never moves. A key IS an organization, so this answers for the caller and for nobody else.",
+        "description": "The organization the key belongs to — its id, its slug, its name and its owner's address and name. The slug is what the console's URLs name it by: set from the name it was created under, when that reads as one, and moved only when the URL is changed in Settings; the id never moves. A key is minted on one project of one organization, so this answers for the caller's organization and for no other.",
         "responses": {
           "200": {
             "description": "The organization."
@@ -101,6 +111,16 @@
               }
             },
             "description": "No live `telmoni_` API key was presented. A revoked, expired or unknown key answers the same way."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A live key without the `read` scope."
           },
           "429": {
             "content": {
