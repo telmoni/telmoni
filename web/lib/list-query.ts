@@ -13,6 +13,18 @@ export const MAX_DAYS = 360;
 export const MAX_LIMIT = 500;
 /** The windows a page offers, in days. */
 export const WINDOWS = [1, 7, 30, 90] as const;
+/** The week a list opens on when its URL names no window, as the server's. */
+const OPENING_DAYS = 7;
+
+/** The narrowest window a page offers that reaches back to `iso`, or none
+ *  where the week a list opens on already does: a link from a run to its
+ *  user's traces or its conversation then finds the run it came from, and
+ *  the runs beside it, however old it is. */
+export function windowReaching(iso: string, now: number = Date.now()): number | undefined {
+  const age = Math.ceil((now - Date.parse(iso)) / 86_400_000);
+  if (age <= OPENING_DAYS) return undefined;
+  return WINDOWS.find((w) => w >= age) ?? MAX_DAYS;
+}
 
 /** Next's `searchParams`, as a page receives them. */
 export type SearchParams = Record<string, string | string[] | undefined>;

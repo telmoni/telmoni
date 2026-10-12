@@ -12,7 +12,23 @@ import {
   sortAfterClick,
   sortInForce,
   whole,
+  windowReaching,
 } from "./list-query";
+
+describe("a window that reaches a run", () => {
+  const now = Date.parse("2026-10-11T12:00:00Z");
+
+  it("names none while the week a list opens on holds it", () => {
+    expect(windowReaching("2026-10-11T11:00:00Z", now)).toBeUndefined();
+    expect(windowReaching("2026-10-04T12:00:00Z", now)).toBeUndefined();
+  });
+
+  it("names the narrowest window offered past that, and the longest kept past those", () => {
+    expect(windowReaching("2026-10-03T12:00:00Z", now)).toBe(30);
+    expect(windowReaching("2026-08-01T12:00:00Z", now)).toBe(90);
+    expect(windowReaching("2026-01-01T00:00:00Z", now)).toBe(360);
+  });
+});
 
 describe("reading a list's URL", () => {
   it("takes a parameter's first value, trimmed, and none when it is empty", () => {

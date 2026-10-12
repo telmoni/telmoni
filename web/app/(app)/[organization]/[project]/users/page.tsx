@@ -110,7 +110,7 @@ export default async function UsersPage({
                   <UserTableRow
                     key={u.user_id}
                     user={u}
-                    traces={tracesHref(organization, slug, { user: u.user_id })}
+                    traces={tracesHref(organization, slug, { user: u.user_id, days: query.days })}
                   />
                 ))}
               </tbody>

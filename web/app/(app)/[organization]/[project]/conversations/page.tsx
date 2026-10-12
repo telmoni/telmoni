@@ -122,8 +122,10 @@ export default async function ConversationsPage({
                   <ConversationTableRow
                     key={c.conversation_id}
                     conversation={c}
-                    open={conversationHref(organization, slug, c.conversation_id)}
-                    user={tracesHref(organization, slug, { user: c.user_id })}
+                    open={conversationHref(organization, slug, c.conversation_id, {
+                      days: query.days,
+                    })}
+                    user={tracesHref(organization, slug, { user: c.user_id, days: query.days })}
                   />
                 ))}
               </tbody>

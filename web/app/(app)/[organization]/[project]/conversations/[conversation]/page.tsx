@@ -22,7 +22,6 @@ import {
 } from "@/lib/server/data";
 import { projectPath } from "@/lib/slug";
 import { formatCount, formatDuration, shortId, traceHref, tracesHref } from "@/lib/traces";
-import { SpanStatus } from "@/lib/types/enums";
 
 export const metadata = { title: "Conversation" };
 
@@ -43,7 +42,7 @@ export default async function ConversationPage({
   const [gate, project] = await Promise.all([getServerContext(), fetchProjectBySlug(slug)]);
   if (!gate || !project) return <ServiceUnavailable />;
 
-  const list = conversationsHref(organization, slug, {});
+  const list = conversationsHref(organization, slug, { days: query.days });
   const access = await fetchConversation(project.id, conversationId, query);
   if (access.kind === "unavailable") return <ServiceUnavailable />;
   if (access.kind === "forbidden") {
@@ -80,7 +79,9 @@ export default async function ConversationPage({
   const traces = conversation.traces;
   const first = traces[0]!;
   const user = traces.find((t) => t.user_id)?.user_id ?? "";
-  const errors = traces.filter((t) => t.ended && t.status === SpanStatus.Error).length;
+  // As the list counts a conversation's errors: the runs with a span that
+  // failed, a run that recovered from a failed call among them.
+  const errors = traces.filter((t) => t.errors > 0).length;
   const steps = traces.reduce((sum, t) => sum + t.steps, 0);
   const inputTokens = traces.reduce((sum, t) => sum + t.input_tokens, 0);
   const outputTokens = traces.reduce((sum, t) => sum + t.output_tokens, 0);
@@ -109,7 +110,7 @@ export default async function ConversationPage({
             <Row label="User" hint="The end user, as stored.">
               {user ? (
                 <Link
-                  href={tracesHref(organization, slug, { user })}
+                  href={tracesHref(organization, slug, { user, days: query.days })}
                   className="font-mono text-xs underline-offset-4 hover:underline"
                 >
                   {user}

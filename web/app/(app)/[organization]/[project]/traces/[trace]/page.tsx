@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { conversationHref } from "@/lib/conversations";
 import { ownerContact } from "@/lib/identity";
-import type { SearchParams } from "@/lib/list-query";
+import { windowReaching, type SearchParams } from "@/lib/list-query";
 import {
   activeOrganization,
   fetchProjectBySlug,
@@ -98,12 +98,18 @@ export default async function TracePage({
     first.ended_at,
   );
   const duration = Math.max(0, new Date(endedAt).getTime() - new Date(startedAt).getTime());
+  // The user's and the conversation's pages open on a week: one older run
+  // links to a window that still holds it.
+  const reaching = windowReaching(startedAt);
   const calls = trace.spans.filter(
     (s) => s.kind === SpanKind.ModelCall || s.kind === SpanKind.ToolCall,
   );
-  const tokens = trace.spans.reduce((sum, s) => sum + s.input_tokens + s.output_tokens, 0);
-  const inputTokens = trace.spans.reduce((sum, s) => sum + s.input_tokens, 0);
-  const outputTokens = trace.spans.reduce((sum, s) => sum + s.output_tokens, 0);
+  // The model calls' tokens alone, as the list sums them: a span of another
+  // kind may repeat its calls' usage, and would count it twice.
+  const modelCalls = calls.filter((c) => c.kind === SpanKind.ModelCall);
+  const inputTokens = modelCalls.reduce((sum, s) => sum + s.input_tokens, 0);
+  const outputTokens = modelCalls.reduce((sum, s) => sum + s.output_tokens, 0);
+  const tokens = inputTokens + outputTokens;
   const tags = Object.entries(root.tags);
   const bounds = [
     root.bound_stall_after_s !== null && `stall after ${formatDuration(root.bound_stall_after_s * 1000)}`,
@@ -128,16 +134,16 @@ export default async function TracePage({
               <span className="tabular-nums">{formatDuration(duration)}</span>
             </Row>
             <Row label="User" hint="The end user, as stored.">
-              <Value mono value={root.user_id} href={tracesHref(organization, slug, { user: root.user_id })} />
+              <Value mono value={root.user_id} href={tracesHref(organization, slug, { user: root.user_id, days: reaching })} />
             </Row>
             <Row label="Conversation" hint="The one this run was part of, as the application named it.">
-              <Value mono value={root.conversation_id} href={conversationHref(organization, slug, root.conversation_id)} />
+              <Value mono value={root.conversation_id} href={conversationHref(organization, slug, root.conversation_id, { days: reaching })} />
             </Row>
             <Row label="Calls">
               <span className="text-sm">
                 {formatCount(groups.filter((g) => g.step).length)} steps, {formatCount(calls.length)} calls:{" "}
                 <span className="text-muted-foreground">
-                  {formatCount(calls.filter((c) => c.kind === SpanKind.ModelCall).length)} to a model,{" "}
+                  {formatCount(modelCalls.length)} to a model,{" "}
                   {formatCount(calls.filter((c) => c.kind === SpanKind.ToolCall).length)} to a tool
                 </span>
               </span>
@@ -250,7 +256,8 @@ function StatusBadge({ status, errorType }: { status: SpanStatus; errorType: str
 }
 
 // The steps as a flat list, each followed by its calls, indented. Calls made
-// straight under the run come first, under the run's own heading.
+// straight under the run sit together under the run's own heading, placed
+// where the first of them started.
 function StepsTable({ groups }: { groups: StepGroup[] }) {
   if (groups.length === 0) {
     return (
