@@ -120,15 +120,27 @@ async fn admit(
     next: Next,
 ) -> Response {
     let source = client_address(&request, door.trusted_proxy_hops);
-    let credential = request
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .map(RateLimit::digest);
+    let credential = bearer_token(&request).map(RateLimit::digest);
     match door.admit(lane, &source, credential.as_deref()).await {
         Ok(()) => next.run(request).await,
         Err(refused) => refused.into_response(),
     }
+}
+
+/// ⚠ **The token, as the gates read it, and never the header's spelling.**
+/// The lanes take the scheme in any case and the token trimmed, so a bucket
+/// keyed by the raw header would hand `bEaReR` or one more space a fresh
+/// one per request. Anything that is no bearer is no credential here: the
+/// gate refuses it, and the source's limit has already counted it.
+fn bearer_token(request: &Request) -> Option<&str> {
+    let value = request
+        .headers()
+        .get(header::AUTHORIZATION)?
+        .to_str()
+        .ok()?;
+    let (scheme, token) = value.split_at_checked(7)?;
+    let token = token.trim();
+    (scheme.eq_ignore_ascii_case("bearer ") && !token.is_empty()).then_some(token)
 }
 
 /// ⚠ **`X-Forwarded-For`, counted back from the end, and nothing a caller
@@ -138,34 +150,60 @@ async fn admit(
 /// then its own (two), a reverse proxy appends the client's (one). Read from
 /// the front, or with any header another vendor's edge would set, a caller
 /// picks a fresh bucket per request and walks past every per-address
-/// ceiling. Fewer entries than proxies is a request that came in beside
-/// them, and its first entry is all there is. With nothing in front (zero)
-/// the socket's own peer is the address, and the last entry the caller's
-/// word where it sent a header anyway, as the console reads it.
+/// ceiling. A line is read whatever bytes a caller put in it, since the
+/// proxies append to the caller's own line and a byte past ASCII must not
+/// hide the entries after it. Fewer entries than proxies is a request that
+/// came in beside them, every entry its own word, so the socket's peer is
+/// the address where it is known. With nothing in front (zero) the peer is
+/// the address too, and the last entry the caller's word where no peer is
+/// known, as the console reads it. An IPv6 address is keyed by its /64, the
+/// block one subscriber holds, or one host would walk its own block.
 fn client_address(request: &Request, hops: u8) -> String {
-    let forwarded: Vec<&str> = request
+    let forwarded: Vec<String> = request
         .headers()
         .get_all("x-forwarded-for")
         .iter()
-        .filter_map(|v| v.to_str().ok())
-        .flat_map(|v| v.split(','))
-        .map(str::trim)
+        .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
+        .flat_map(|v| {
+            v.split(',')
+                .map(|part| part.trim().to_owned())
+                .collect::<Vec<_>>()
+        })
         .filter(|part| !part.is_empty())
         .collect();
-    if (hops == 0 || forwarded.is_empty())
-        && let Some(ConnectInfo(peer)) = request.extensions().get::<ConnectInfo<SocketAddr>>()
-    {
-        return peer.ip().to_string();
+    let peer = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ConnectInfo(peer)| peer.ip());
+    let beside = hops == 0 || forwarded.len() < usize::from(hops);
+    if beside && let Some(peer) = peer {
+        return bucket_of(&peer.to_string());
     }
-    if let Some(last) = forwarded.last() {
-        let index = if hops == 0 {
-            forwarded.len() - 1
-        } else {
-            forwarded.len().saturating_sub(usize::from(hops))
-        };
-        return forwarded.get(index).copied().unwrap_or(last).to_owned();
+    let index = if hops == 0 {
+        forwarded.len().checked_sub(1)
+    } else {
+        Some(forwarded.len().saturating_sub(usize::from(hops)))
+    };
+    index
+        .and_then(|index| forwarded.get(index))
+        .map_or_else(|| "unknown".to_owned(), |address| bucket_of(address))
+}
+
+/// An address as its bucket: an IPv4 one whole, written as IPv4 where it
+/// came mapped into IPv6; an IPv6 one by its /64; anything that does not
+/// parse as it came, since the caller's word is all there is.
+fn bucket_of(address: &str) -> String {
+    match address.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V6(v6)) => match v6.to_ipv4_mapped() {
+            Some(v4) => v4.to_string(),
+            None => {
+                let [a, b, c, d, ..] = v6.segments();
+                format!("{}/64", std::net::Ipv6Addr::new(a, b, c, d, 0, 0, 0, 0))
+            }
+        },
+        Ok(ip) => ip.to_string(),
+        Err(_) => address.to_owned(),
     }
-    "unknown".to_owned()
 }
 
 #[cfg(test)]
@@ -225,5 +263,68 @@ mod tests {
 
         let nothing = request(&[], None);
         assert_eq!(client_address(&nothing, 2), "unknown");
+    }
+
+    #[test]
+    fn fewer_entries_than_proxies_is_the_peer_where_it_is_known() {
+        let beside = request(&["203.0.113.9"], Some("10.0.0.5:4"));
+        assert_eq!(
+            client_address(&beside, 2),
+            "10.0.0.5",
+            "an entry no proxy vouched for names nobody"
+        );
+    }
+
+    #[test]
+    fn a_byte_past_ascii_hides_no_entry_after_it() {
+        let mut behind_google = request(&[], Some("10.0.0.5:4"));
+        behind_google.headers_mut().insert(
+            "x-forwarded-for",
+            axum::http::HeaderValue::from_bytes(b"\xff\xfe, 203.0.113.9, 198.51.100.7")
+                .expect("a header of opaque bytes"),
+        );
+        assert_eq!(client_address(&behind_google, 2), "203.0.113.9");
+    }
+
+    #[test]
+    fn an_ipv6_caller_is_one_bucket_for_its_slash_64() {
+        let one = request(&["2001:db8:1:2:aaaa::1, 198.51.100.7"], None);
+        let two = request(&["2001:db8:1:2:bbbb::9, 198.51.100.7"], None);
+        assert_eq!(client_address(&one, 2), "2001:db8:1:2::/64");
+        assert_eq!(client_address(&one, 2), client_address(&two, 2));
+        let mapped = request(&["::ffff:203.0.113.9, 198.51.100.7"], None);
+        assert_eq!(client_address(&mapped, 2), "203.0.113.9");
+    }
+
+    fn with_authorization(value: &str) -> Request {
+        Request::builder()
+            .uri("/v1/organization")
+            .header(header::AUTHORIZATION, value)
+            .body(Body::empty())
+            .expect("a request")
+    }
+
+    #[test]
+    fn a_credential_is_its_token_however_the_header_spells_it() {
+        let plain = with_authorization("Bearer telmoni_abc");
+        assert_eq!(bearer_token(&plain), Some("telmoni_abc"));
+        for spelling in [
+            "bEaReR telmoni_abc",
+            "BEARER   telmoni_abc ",
+            "bearer telmoni_abc\t",
+        ] {
+            assert_eq!(
+                bearer_token(&with_authorization(spelling)),
+                Some("telmoni_abc"),
+                "{spelling:?}"
+            );
+        }
+        for not_a_bearer in ["Basic dXNlcjpwYXNz", "Bearer ", "Bearer", "telmoni_abc"] {
+            assert_eq!(
+                bearer_token(&with_authorization(not_a_bearer)),
+                None,
+                "{not_a_bearer:?}"
+            );
+        }
     }
 }

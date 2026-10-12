@@ -9,7 +9,7 @@ use telmoni_shared::ProjectId;
 use telmoni_shared::digest::sha256_hex;
 
 use crate::contract::{CLAIM_ANSWER_SECS, CLAIM_PENDING_SECS};
-use crate::replica::{Redis, stood_in};
+use crate::replica::Redis;
 
 /// The marker a claim holds while the rows are being written.
 const PENDING: &[u8] = b"pending";
@@ -70,7 +70,7 @@ impl Guard {
             .query_async(&mut connection)
             .await;
         if let Err(error) = stored {
-            stood_in("holding an answer", &error);
+            redis.stood_in("holding an answer", &error);
         }
     }
 
@@ -87,7 +87,7 @@ impl Guard {
             .query_async(&mut connection)
             .await;
         if let Err(error) = released {
-            stood_in("releasing a claim", &error);
+            redis.stood_in("releasing a claim", &error);
         }
     }
 }
@@ -125,13 +125,13 @@ pub async fn claim(redis: &Redis, project_id: &ProjectId, digest: &str) -> Claim
                 // out with no answer, so this copy is the one to write.
                 Ok(None) => Claim::Fresh(Guard { key: None }),
                 Err(error) => {
-                    stood_in("reading a claim", &error);
+                    redis.stood_in("reading a claim", &error);
                     Claim::Fresh(Guard { key: None })
                 }
             }
         }
         Err(error) => {
-            stood_in("claiming a body", &error);
+            redis.stood_in("claiming a body", &error);
             Claim::Fresh(Guard { key: None })
         }
     }

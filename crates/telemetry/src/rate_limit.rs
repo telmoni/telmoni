@@ -13,7 +13,7 @@ use sha2::{Digest as _, Sha256};
 
 use telmoni_shared::{TelmoniError, TenantError};
 
-use crate::replica::{Redis, stood_in};
+use crate::replica::Redis;
 
 /// GCRA in one round trip: `KEYS[1]` the subject's key, `ARGV[1]` the
 /// emission interval, `ARGV[2]` the burst and `ARGV[3]` now, all in
@@ -104,7 +104,7 @@ impl RateLimit {
                     Ok((1, _)) => Decision::Admit,
                     Ok((_, wait_ms)) => Decision::Wait(u64::try_from(wait_ms).unwrap_or(0)),
                     Err(error) => {
-                        stood_in("a rate limit", &error);
+                        redis.stood_in("a rate limit", &error);
                         self.admit_locally(subject, now)
                     }
                 }
