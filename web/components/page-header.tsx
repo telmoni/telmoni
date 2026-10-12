@@ -2,13 +2,13 @@
 
 import { useEffect, type ReactNode } from "react";
 import { InfoIcon } from "lucide-react";
+import { usePathname } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { usePageHeaderSet } from "./page-header-context";
 import { recordVisit } from "@/lib/search-recent";
-import { PRODUCT_NAME } from "@/lib/site";
 
 export function PageHeader({
   title,
@@ -31,15 +31,15 @@ export function PageHeader({
   backLabel?: string;
 }) {
   const set = usePageHeaderSet();
+  const pathname = usePathname();
   useEffect(() => {
     const my = { backHref, backLabel };
     set(my);
-    if (title) {
-      document.title = `${title} · ${PRODUCT_NAME}`;
-      recordVisit({ href: window.location.pathname, label: title });
-    }
+    // Not the tab's title, which is each page's `metadata` alone: written here
+    // as well, it was one more change after Next's own.
+    if (title) recordVisit({ href: pathname, label: title });
     return () => set((cur) => (cur === my ? null : cur));
-  }, [title, backHref, backLabel, set]);
+  }, [title, backHref, backLabel, set, pathname]);
 
   if (!title && !action) return null;
   // As tall as a page action, 36px, so a page with one and a page without

@@ -30,11 +30,14 @@ function NavRow({
   step?: boolean;
   className?: string;
 }) {
-  const onClick = () => {
-    if (item.title && !step) {
-      document.title = `${item.title} · ${PRODUCT_NAME}`;
-    }
-  };
+  // The drawer closes on `onNavigate`, not a click: a ⌘-click to a new tab
+  // navigates nothing here, so it leaves the drawer open.
+  const { closeOnMobile } = useSidebar();
+  // No title is written here: the tab's title is each page's `metadata`, which
+  // Next sets as the page lands. Written on the click as well, it went up
+  // before the page came, and wrong on the overviews: the row says Overview
+  // where the page is titled by its name.
+  //
   // A row is the docs sidebar's (Fumadocs, `/docs`): 36px tall, 2px apart, 8px
   // corners, muted at rest, the sidebar accent at half under the pointer, and
   // the primary colour at a tenth behind primary text when it is where you
@@ -48,7 +51,7 @@ function NavRow({
     return (
       <Link
         href={item.url}
-        onClick={onClick}
+        onNavigate={closeOnMobile}
         aria-label={item.title}
         title={item.title}
         aria-current={item.isActive ? "page" : undefined}
@@ -87,7 +90,7 @@ function NavRow({
   return (
     <Link
       href={item.url}
-      onClick={onClick}
+      onNavigate={closeOnMobile}
       aria-current={item.isActive ? "page" : undefined}
       {...(step ? { ["data-rail-step"]: "" } : {})}
       className={rowClass}
@@ -129,7 +132,7 @@ export function ConsoleSidebar({
   version: string;
 }) {
   const pathname = usePathname();
-  const { collapsed, toggle, closeOnMobile, animating } = useSidebar();
+  const { collapsed, toggle, animating } = useSidebar();
   const expanded = !collapsed;
 
   const trail = useConsoleTrail();
@@ -186,11 +189,7 @@ export function ConsoleSidebar({
           : "transition-none",
       )}
       onClick={(e) => {
-        if ((e.target as HTMLElement).closest("a[href]")) {
-          closeOnMobile();
-        } else if (collapsed) {
-          toggle();
-        }
+        if (collapsed && !(e.target as HTMLElement).closest("a[href]")) toggle();
       }}
       aria-label="Console sidebar"
     >

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState, useTransition } from "react";
 
 import { PasswordInput } from "@/components/password-input";
@@ -21,9 +20,12 @@ export function ResetForm({ userId, token }: { userId: string; token: string }) 
       <div className="grid gap-3 text-sm">
         <p>Your password is changed. Sign in with it from now on.</p>
         <div>
-          <Link href="/auth/login" className={buttonVariants()}>
+          {/* A Route Handler, not a page, so never a <Link>: a link's prefetch
+              would run it, starting a sign-in nobody asked for. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a href="/auth/login" className={buttonVariants()}>
             Sign in
-          </Link>
+          </a>
         </div>
       </div>
     );

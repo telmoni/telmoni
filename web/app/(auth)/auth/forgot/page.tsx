@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 import { ForgotForm } from "./_form";
@@ -19,9 +17,12 @@ export default function ForgotPage() {
       <CardContent className="grid gap-3">
         <ForgotForm />
         <p className="text-sm text-muted-foreground">
-          <Link href="/auth/login" className="underline underline-offset-4">
+          {/* A Route Handler, not a page, so never a <Link>: a link's prefetch
+              would run it, starting a sign-in nobody asked for. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a href="/auth/login" className="underline underline-offset-4">
             Back to sign in
-          </Link>
+          </a>
         </p>
       </CardContent>
     </Card>

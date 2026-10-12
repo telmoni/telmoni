@@ -93,7 +93,7 @@ export function MobileNav({ signedIn }: { signedIn: boolean }) {
               {signedIn ? (
                 <div className="flex flex-col gap-3">
                   <Button asChild size="sm" variant="outline" className={NAV_TYPE}>
-                    <Link href="/console" onClick={() => setOpen(false)}>
+                    <Link href="/console" onNavigate={() => setOpen(false)}>
                       Console
                     </Link>
                   </Button>
@@ -169,8 +169,11 @@ function Row({ link, onDone }: { link: NavLink; onDone: () => void }) {
     >
       <Link
         href={link.href}
-        {...(link.newTab && { target: "_blank", rel: "noreferrer" })}
-        onClick={onDone}
+        // `onNavigate` closes the menu for a navigation in this tab alone, never
+        // for a ⌘-click; a new tab is no navigation here, so its click does.
+        {...(link.newTab
+          ? { target: "_blank", rel: "noreferrer", onClick: onDone }
+          : { onNavigate: onDone })}
       >
         {link.label}
       </Link>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 import { letterKeysOn } from "@/lib/use-accessibility";
 
@@ -11,6 +12,7 @@ import { letterKeysOn } from "@/lib/use-accessibility";
 // a key a page has already answered is that page's. Off with every letter-key
 // shortcut, in Accessibility (`lib/accessibility.ts`).
 export function HeaderShortcuts({ signedIn }: { signedIn: boolean }) {
+  const router = useRouter();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing) return;
@@ -24,11 +26,13 @@ export function HeaderShortcuts({ signedIn }: { signedIn: boolean }) {
         return;
       if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"]')) return;
       const key = e.key.toLowerCase();
+      // `/auth/signup` is a Route Handler, which only a full load reaches;
+      // `/console` is a page, which the router reaches as the button does.
       if (!signedIn && key === "s") window.location.assign("/auth/signup");
-      if (signedIn && key === "c") window.location.assign("/console");
+      if (signedIn && key === "c") router.push("/console");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [signedIn]);
+  }, [signedIn, router]);
   return null;
 }

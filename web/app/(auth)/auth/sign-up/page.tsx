@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getSignInConfig } from "@/lib/auth/oidc";
 
@@ -43,9 +41,12 @@ export default async function SignUpPage({
         />
         <p className="text-sm text-muted-foreground">
           Already have one?{" "}
-          <Link href="/auth/login" className="underline underline-offset-4">
+          {/* A Route Handler, not a page, so never a <Link>: a link's prefetch
+              would run it, starting another sign-in over this sign-up. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a href="/auth/login" className="underline underline-offset-4">
             Sign in
-          </Link>
+          </a>
         </p>
       </CardContent>
     </Card>

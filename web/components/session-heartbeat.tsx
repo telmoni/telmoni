@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
 
 import { afterRefusedHeartbeat } from "@/lib/auth/heartbeat";
 
@@ -18,7 +17,6 @@ export function SessionHeartbeat({
   expiresAt: initialExpiresAt,
   needsReseal,
 }: SessionHeartbeatProps) {
-  const router = useRouter();
   const expiresAtRef = useRef(initialExpiresAt);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -59,12 +57,10 @@ export function SessionHeartbeat({
         });
         if (unmounted) return;
         if (res.status === 401) {
-          const where = afterRefusedHeartbeat(await res.json().catch(() => null));
-          if (where === "/auth/logout") {
-            window.location.replace(where);
-          } else {
-            router.push(where);
-          }
+          // Both ways out are Route Handlers, which `router.push` is not for
+          // (it fetches a page's payload): a full load runs them and follows
+          // where they redirect.
+          window.location.replace(afterRefusedHeartbeat(await res.json().catch(() => null)));
           return;
         }
         if (res.ok) {
@@ -137,7 +133,7 @@ export function SessionHeartbeat({
       document.removeEventListener("visibilitychange", onVisibilityOrFocus);
       window.removeEventListener("focus", onVisibilityOrFocus);
     };
-  }, [initialExpiresAt, needsReseal, router]);
+  }, [initialExpiresAt, needsReseal]);
 
   return null;
 }

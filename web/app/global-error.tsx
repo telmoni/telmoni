@@ -1,15 +1,23 @@
 "use client";
 
+import { PRODUCT_NAME } from "@/lib/site";
+
+// "Try again" is `retry`, which fetches the page afresh: `reset` would draw
+// the same failed answer again. The tab's title is React's `<title>`: this
+// stands in for the root layout, so the Metadata API's title, the root
+// layout's template among it, cannot reach it, and a client file may export
+// no metadata of its own.
 export default function GlobalError({
   error,
-  reset,
+  retry,
 }: {
   error: Error & { digest?: string };
-  reset: () => void;
+  retry: () => void;
 }) {
   return (
     <html lang="en">
       <body style={{ fontFamily: "monospace", padding: "6rem 4vw", maxWidth: "36rem" }}>
+        <title>{`Something went wrong · ${PRODUCT_NAME}`}</title>
         <p style={{ fontSize: "10px", letterSpacing: "0.4em", textTransform: "uppercase", color: "#ef4444" }}>
           critical error
         </p>
@@ -26,7 +34,7 @@ export default function GlobalError({
         )}
         <button
           type="button"
-          onClick={reset}
+          onClick={() => retry()}
           style={{
             marginTop: "1.5rem",
             border: "1px solid #333",

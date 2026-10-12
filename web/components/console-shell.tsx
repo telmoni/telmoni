@@ -5,13 +5,16 @@ import { usePathname } from "next/navigation";
 
 import { AgentPanel } from "@/components/agent-panel";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { PRODUCT_NAME } from "@/lib/site";
 
 export function ConsoleShell({ children }: { children: ReactNode }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
 
+  // A new page opens at its top. Next's own scrolling on a navigation is the
+  // document's, and keeps the old offset while the page's top is in view
+  // (`scroll` in the Link docs); the console scrolls in this viewport instead,
+  // where a new page would otherwise open where the last one was left.
   useEffect(() => {
     rootRef.current
       ?.querySelector('[data-slot="scroll-area-viewport"]')
@@ -35,23 +38,6 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.body.classList.add("theme-console");
     return () => document.body.classList.remove("theme-console");
-  }, []);
-
-  useEffect(() => {
-    let lastTitle = document.title || PRODUCT_NAME;
-    const observer = new MutationObserver(() => {
-      if (document.title) {
-        lastTitle = document.title;
-      } else if (lastTitle) {
-        document.title = lastTitle;
-      }
-    });
-    observer.observe(document.head, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-    });
-    return () => observer.disconnect();
   }, []);
 
   return (

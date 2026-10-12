@@ -67,9 +67,13 @@ export default async function SignInPage({
             {config.allowSignUp && (
               <>
                 {" · "}
-                <Link href="/auth/signup" className="underline underline-offset-4">
+                {/* A Route Handler, not a page, so never a <Link>: a link's
+                    prefetch would run it, starting another sign-up over the
+                    sign-in this page is part of. */}
+                {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+                <a href="/auth/signup" className="underline underline-offset-4">
                   Create an account
-                </Link>
+                </a>
               </>
             )}
           </p>
