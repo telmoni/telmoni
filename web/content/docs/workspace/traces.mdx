@@ -1,6 +1,6 @@
 ---
 title: "Traces"
-description: "A project's Traces page: every run of its agents as a row, newest first, filtered and sorted by user, conversation, status, model or tool, and each run's own page with its steps, calls and timeline — all of it metadata."
+description: "A project's Traces page: every run of its agents as a row, newest first, filtered and sorted by user, session, status, model or tool, and each run's own page with its steps, calls and timeline — all of it metadata."
 ---
 
 A **trace** is one run's record: the run's own span and every span recorded
@@ -20,15 +20,15 @@ row each:
 | Started | When the run's first span started, in your time zone |
 | Agent | The run's agent (`telmoni.agent`), which will name its monitor once monitors are built |
 | User | The end user the run was for (`user.id`), as stored: hashed under the project's own key |
-| Conversation | The conversation the run belongs to (`gen_ai.conversation.id`), as the application set it |
+| Session | The session the run belongs to (`gen_ai.conversation.id`), as the application set it |
 | Status | **OK**, **Error** or **Cancelled** once the run's own span has arrived; **Running** until it has |
 | Steps | How many steps the run took; hover for its model and tool calls |
 | Tokens | Its model calls' input and output tokens, summed; hover for the split |
 | Duration | From its first span's start to its last span's end |
 
-**Filter** by any of agent, user, conversation, status, model or tool with the
-form above the list, or click an agent, a user or a conversation in a row to
-see its runs together: one user's traces, or one conversation's, stand as a
+**Filter** by any of agent, user, session, status, model or tool with the
+form above the list, or click an agent, a user or a session in a row to
+see its runs together: one user's traces, or one session's, stand as a
 list of their own. **Sort** by any column by clicking its heading; a second click turns
 it round. Names sort in the alphabet's order, and the newest, the longest and
 the most come first on the others.
@@ -43,8 +43,8 @@ the view you were looking at.
 ## A trace
 
 A trace's page names its run and sums it: status, when it started, how long it
-ran, its user — a link to the runs that share it — and its conversation, a link
-to [its page](/docs/workspace/conversations#a-conversation), how many steps and calls it
+ran, its user — a link to the runs that share it — and its session, a link
+to [its page](/docs/workspace/sessions#a-session), how many steps and calls it
 made, its tokens, the bounds it declared, its sample rate, its tags, and its
 run id in full.
 

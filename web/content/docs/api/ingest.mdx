@@ -64,7 +64,7 @@ current ones (`gen_ai.system`, `gen_ai.usage.prompt_tokens`,
 | `model`, `provider` | `gen_ai.response.model` (else `gen_ai.request.model`), `gen_ai.provider.name` | up to 128 characters each |
 | `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_write_input_tokens` | `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.cache_write.input_tokens` | integers, 0 or more |
 | `user_id` | `user.id` | up to 128 characters; stored as its HMAC-SHA-256 under a key of the project's own, the first 16 bytes in hex, so no stored id names a person |
-| `conversation_id` | `gen_ai.conversation.id` | up to 200 characters, kept as sent |
+| `session_id` | `gen_ai.conversation.id` | up to 200 characters, kept as sent |
 | `tags` | each `telmoni.tag.<key>` | up to 32; a key up to 64 characters, a value up to 256 |
 | `bounds`, `sample_rate` | `telmoni.bound.stall_after_s`, `telmoni.bound.max_steps`, `telmoni.bound.max_cost_usd`, `telmoni.sample_rate` | on a run |
 | `attributes` | the attributes the field inventory names, and any other whose value is a number or a boolean | up to 64, the resource's among them, which keep at most 2 KiB together since every span of the export carries them; a key up to 128 characters, a value up to 1,024; a named array as its JSON |

@@ -95,7 +95,7 @@ holding the **ingest** scope.
     with telmoni.run(
         "support-bot",
         user_id="user_42",
-        conversation_id="conv_7",
+        session_id="conv_7",
         tags={"env": "prod"},
         bounds=Bounds(stall_after_s=60, max_steps=10, max_cost_usd=1.5),
     ) as run:
@@ -116,7 +116,7 @@ holding the **ingest** scope.
 
     const text = await telmoni.run(
       'support-bot',
-      { userId: 'user_42', conversationId: 'conv_7', tags: { env: 'prod' } },
+      { userId: 'user_42', sessionId: 'conv_7', tags: { env: 'prod' } },
       async (run) => {
         const reply = await run.step('plan', (step) =>
           step.modelCall('gpt-4o-mini', { provider: 'openai' }, async (call) => {
@@ -151,10 +151,10 @@ holding the **ingest** scope.
     defer client.Shutdown(context.Background())
 
     ctx, run := client.Run(ctx, "support-bot", telmoni.RunOptions{
-    	UserID:         "user_42",
-    	ConversationID: "conv_7",
-    	Tags:           map[string]string{"env": "prod"},
-    	Bounds:         &telmoni.Bounds{StallAfterS: 60, MaxSteps: 10, MaxCostUSD: 1.5},
+    	UserID:    "user_42",
+    	SessionID: "conv_7",
+    	Tags:      map[string]string{"env": "prod"},
+    	Bounds:    &telmoni.Bounds{StallAfterS: 60, MaxSteps: 10, MaxCostUSD: 1.5},
     })
     defer run.End()
 
@@ -198,7 +198,7 @@ holding the **ingest** scope.
         "support-bot",
         RunOptions {
             user_id: Some("user_42".into()),
-            conversation_id: Some("conv_7".into()),
+            session_id: Some("conv_7".into()),
             tags: [("env".to_owned(), "prod".to_owned())].into(),
             bounds: Bounds { stall_after_s: Some(60), max_steps: Some(10), max_cost_usd: Some(1.5) },
             ..RunOptions::default()
@@ -250,7 +250,7 @@ run's id (`telmoni.run_id`, a UUID), its agent (`telmoni.agent`), the user
 and conversation you named (`user.id`, `gen_ai.conversation.id`), each tag as
 `telmoni.tag.<key>`, the bounds and the sample rate; a `telmoni.run.start`
 span of no duration goes out at once under it. Every span inside the run
-carries the run's id, agent, user and conversation, so Telmoni knows each
+carries the run's id, agent, user and session, so Telmoni knows each
 span's run without waiting
 for the trace's tree. A step is a span named as you named it; a model call is
 `chat <model>` (or the operation you gave) with the model asked for, the
