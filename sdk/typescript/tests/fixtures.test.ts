@@ -40,7 +40,7 @@ interface Scenario {
   run: {
     agent: string;
     user_id: string;
-    conversation_id: string;
+    session_id: string;
     tags: Record<string, string>;
     bounds: { stall_after_s: number; max_steps: number; max_cost_usd: number };
     sample_rate: number;
@@ -123,7 +123,7 @@ async function perform(telmoni: Telmoni, scenario: Scenario, transport: FakeTran
     spec.agent,
     {
       userId: spec.user_id,
-      conversationId: spec.conversation_id,
+      sessionId: spec.session_id,
       tags: spec.tags,
       bounds: {
         stallAfterSeconds: spec.bounds.stall_after_s,

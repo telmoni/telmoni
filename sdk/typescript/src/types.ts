@@ -73,7 +73,7 @@ export interface Usage {
 export interface RunOptions {
   /** The end user the run is for, as your own id for them; ingest hashes it. */
   userId?: string | undefined;
-  conversationId?: string | undefined;
+  sessionId?: string | undefined;
   tags?: Readonly<Record<string, string>> | undefined;
   bounds?: Bounds | undefined;
   /** This run's share, over the client's `sampleRate`. */

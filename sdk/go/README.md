@@ -37,10 +37,10 @@ func main() {
 	defer client.Shutdown(context.Background())
 
 	ctx, run := client.Run(context.Background(), "support-bot", telmoni.RunOptions{
-		UserID:         "user_42",
-		ConversationID: "conv_7",
-		Tags:           map[string]string{"env": "prod"},
-		Bounds:         &telmoni.Bounds{StallAfterS: 60, MaxSteps: 10, MaxCostUSD: 1.5},
+		UserID:    "user_42",
+		SessionID: "conv_7",
+		Tags:      map[string]string{"env": "prod"},
+		Bounds:    &telmoni.Bounds{StallAfterS: 60, MaxSteps: 10, MaxCostUSD: 1.5},
 	})
 	defer run.End()
 

@@ -11,7 +11,7 @@ import (
 
 func TestAStepNestsUnderItsRunAndCarriesItsIDs(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{UserID: "c", ConversationID: "v"})
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{UserID: "c", SessionID: "v"})
 	planCtx, plan := run.Step(ctx, "plan")
 	_, inner := run.Step(planCtx, "plan.inner")
 	inner.End()

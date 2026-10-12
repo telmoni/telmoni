@@ -72,7 +72,7 @@ def perform(
     with telmoni.run(
         run_spec["agent"],
         user_id=run_spec["user_id"],
-        conversation_id=run_spec["conversation_id"],
+        session_id=run_spec["session_id"],
         tags=run_spec["tags"],
         bounds=Bounds(
             stall_after_s=bounds["stall_after_s"],

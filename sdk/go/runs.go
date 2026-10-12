@@ -21,8 +21,9 @@ type RunOptions struct {
 	// UserID is the end user the run is for, as the application's own id for
 	// them, sent as given for ingest to hash.
 	UserID string
-	// ConversationID is the conversation the run belongs to.
-	ConversationID string
+	// SessionID is the session the run belongs to, as the application's own
+	// id for it.
+	SessionID string
 	// Tags travel as telmoni.tag.<key>.
 	Tags map[string]string
 	// Bounds are what a monitor holds the run to.
@@ -120,7 +121,7 @@ func errorTypeName(err error) string {
 
 // Run is a run of an agent: a span of its own in whatever trace was current,
 // opened by telmoni.run.start. Every span inside it carries the run's id,
-// agent, user and conversation, so ingest knows each span's run without
+// agent, user and session, so ingest knows each span's run without
 // waiting for the trace's tree.
 type Run struct {
 	handle
@@ -196,8 +197,8 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 	if opts.UserID != "" {
 		inherited = append(inherited, attribute.String(attrUserID, opts.UserID))
 	}
-	if opts.ConversationID != "" {
-		inherited = append(inherited, attribute.String(attrConversationID, opts.ConversationID))
+	if opts.SessionID != "" {
+		inherited = append(inherited, attribute.String(attrSessionID, opts.SessionID))
 	}
 	common := append(boundAttributes(opts.Bounds), attribute.Float64(attrSampleRate, rate))
 	attrs := make([]attribute.KeyValue, 0, 2+len(inherited)+len(common)+len(opts.Tags))

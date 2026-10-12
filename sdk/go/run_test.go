@@ -33,10 +33,10 @@ func runSpan(t *testing.T, h *harness) map[string]any {
 func TestARunIsASpanWithTheContractAttributes(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	ctx, run := h.client.Run(context.Background(), "support-bot", telmoni.RunOptions{
-		UserID:         "user_1",
-		ConversationID: "conv_1",
-		Tags:           map[string]string{"env": "test", "team": "a"},
-		Bounds:         &telmoni.Bounds{StallAfterS: 30, MaxSteps: 5, MaxCostUSD: 0.5},
+		UserID:    "user_1",
+		SessionID: "conv_1",
+		Tags:      map[string]string{"env": "test", "team": "a"},
+		Bounds:    &telmoni.Bounds{StallAfterS: 30, MaxSteps: 5, MaxCostUSD: 0.5},
 	})
 	if !uuidV4.MatchString(run.ID()) {
 		t.Errorf("run id %q is not a lowercase version 4 UUID", run.ID())

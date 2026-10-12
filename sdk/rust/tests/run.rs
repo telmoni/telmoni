@@ -47,7 +47,7 @@ fn a_run_is_a_span_with_the_contract_attributes() -> Outcome {
         "support-bot",
         RunOptions {
             user_id: Some("user_1".to_owned()),
-            conversation_id: Some("conv_1".to_owned()),
+            session_id: Some("conv_1".to_owned()),
             tags: tags(&[("env", "test"), ("team", "a")]),
             bounds: Bounds {
                 stall_after_s: Some(30),

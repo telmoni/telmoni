@@ -22,7 +22,7 @@ describe('a run', () => {
       'support-bot',
       {
         userId: 'user_1',
-        conversationId: 'conv_1',
+        sessionId: 'conv_1',
         tags: { env: 'test', team: 'a' },
         bounds: { stallAfterSeconds: 30, maxSteps: 5, maxCostUsd: 0.5 },
       },
@@ -176,7 +176,7 @@ describe('the wrapper', () => {
   });
 
   it('works with async callees and the options', async () => {
-    const think = h.telmoni.wrap('bot', { conversationId: 'conv' }, async (depth: number, run: Run) => {
+    const think = h.telmoni.wrap('bot', { sessionId: 'conv' }, async (depth: number, run: Run) => {
       await run.step('think', async () => {
         await Promise.resolve();
       });

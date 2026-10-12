@@ -14,7 +14,7 @@ afterEach(async () => {
 
 describe('a step', () => {
   it('nests under its run and carries its ids', async () => {
-    const run = h.telmoni.run('bot', { userId: 'c', conversationId: 'v' }, (run) => {
+    const run = h.telmoni.run('bot', { userId: 'c', sessionId: 'v' }, (run) => {
       run.step('plan', (plan) => {
         plan.step('plan.inner', () => {});
       });

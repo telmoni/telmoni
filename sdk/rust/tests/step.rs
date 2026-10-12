@@ -14,7 +14,7 @@ fn a_step_nests_under_its_run_and_carries_its_ids() -> Outcome {
         "bot",
         RunOptions {
             user_id: Some("c".to_owned()),
-            conversation_id: Some("v".to_owned()),
+            session_id: Some("v".to_owned()),
             ..RunOptions::default()
         },
     )?;

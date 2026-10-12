@@ -34,7 +34,7 @@ const (
 	attrOutputTokens          = "gen_ai.usage.output_tokens"
 	attrCacheReadInputTokens  = "gen_ai.usage.cache_read.input_tokens"
 	attrCacheWriteInputTokens = "gen_ai.usage.cache_write.input_tokens"
-	attrConversationID        = "gen_ai.conversation.id"
+	attrSessionID             = "gen_ai.conversation.id"
 
 	attrInputMessages      = "gen_ai.input.messages"
 	attrOutputMessages     = "gen_ai.output.messages"

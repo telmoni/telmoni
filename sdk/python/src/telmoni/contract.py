@@ -38,7 +38,7 @@ INPUT_TOKENS = "gen_ai.usage.input_tokens"
 OUTPUT_TOKENS = "gen_ai.usage.output_tokens"
 CACHE_READ_INPUT_TOKENS = "gen_ai.usage.cache_read.input_tokens"
 CACHE_WRITE_INPUT_TOKENS = "gen_ai.usage.cache_write.input_tokens"
-CONVERSATION_ID = "gen_ai.conversation.id"
+SESSION_ID = "gen_ai.conversation.id"
 
 INPUT_MESSAGES = "gen_ai.input.messages"
 OUTPUT_MESSAGES = "gen_ai.output.messages"

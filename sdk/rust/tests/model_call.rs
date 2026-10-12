@@ -14,7 +14,7 @@ fn a_model_call_carries_the_conventions_names() -> Outcome {
     let run = harness.telmoni.run(
         "bot",
         RunOptions {
-            conversation_id: Some("conv".to_owned()),
+            session_id: Some("conv".to_owned()),
             ..RunOptions::default()
         },
     )?;

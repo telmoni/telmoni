@@ -28,11 +28,11 @@ var versioned = map[string]bool{"telemetry.sdk.version": true, "telemetry.distro
 type runFixture struct {
 	Scenario struct {
 		Run struct {
-			Agent          string            `json:"agent"`
-			UserID         string            `json:"user_id"`
-			ConversationID string            `json:"conversation_id"`
-			Tags           map[string]string `json:"tags"`
-			Bounds         struct {
+			Agent     string            `json:"agent"`
+			UserID    string            `json:"user_id"`
+			SessionID string            `json:"session_id"`
+			Tags      map[string]string `json:"tags"`
+			Bounds    struct {
 				StallAfterS int     `json:"stall_after_s"`
 				MaxSteps    int     `json:"max_steps"`
 				MaxCostUSD  float64 `json:"max_cost_usd"`
@@ -223,9 +223,9 @@ func perform(t *testing.T, h *harness, fixture runFixture) {
 	t.Helper()
 	spec := fixture.Scenario.Run
 	ctx, run := h.client.Run(context.Background(), spec.Agent, telmoni.RunOptions{
-		UserID:         spec.UserID,
-		ConversationID: spec.ConversationID,
-		Tags:           spec.Tags,
+		UserID:    spec.UserID,
+		SessionID: spec.SessionID,
+		Tags:      spec.Tags,
 		Bounds: &telmoni.Bounds{
 			StallAfterS: spec.Bounds.StallAfterS,
 			MaxSteps:    spec.Bounds.MaxSteps,

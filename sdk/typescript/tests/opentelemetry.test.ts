@@ -202,7 +202,7 @@ describe('beside the application', () => {
     vi.stubEnv('OTEL_BSP_MAX_QUEUE_SIZE', '1');
     const ours = harness();
     try {
-      ours.telmoni.run('bot', { userId: 'c', conversationId: 'v', tags: { a: 'b' } }, (run) => {
+      ours.telmoni.run('bot', { userId: 'c', sessionId: 'v', tags: { a: 'b' } }, (run) => {
         run.step('s', () => {});
       });
       expect(await ours.telmoni.flush()).toBe(true);

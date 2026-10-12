@@ -37,7 +37,7 @@ export const INPUT_TOKENS = 'gen_ai.usage.input_tokens';
 export const OUTPUT_TOKENS = 'gen_ai.usage.output_tokens';
 export const CACHE_READ_INPUT_TOKENS = 'gen_ai.usage.cache_read.input_tokens';
 export const CACHE_WRITE_INPUT_TOKENS = 'gen_ai.usage.cache_write.input_tokens';
-export const CONVERSATION_ID = 'gen_ai.conversation.id';
+export const SESSION_ID = 'gen_ai.conversation.id';
 
 export const INPUT_MESSAGES = 'gen_ai.input.messages';
 export const OUTPUT_MESSAGES = 'gen_ai.output.messages';

@@ -179,9 +179,9 @@ func TestOTELVariablesChangeNothingOfOurs(t *testing.T) {
 	}
 	h := newHarness(t, telmoni.Config{APIKey: "k"}, nil)
 	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{
-		UserID:         "c",
-		ConversationID: "v",
-		Tags:           map[string]string{"a": "b"},
+		UserID:    "c",
+		SessionID: "v",
+		Tags:      map[string]string{"a": "b"},
 	})
 	run.End()
 	h.flush()

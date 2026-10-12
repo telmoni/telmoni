@@ -125,7 +125,7 @@ def test_otel_variables_change_nothing_of_ours(transport: FakeTransport) -> None
     with mock.patch.dict(os.environ, env):
         client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        with client.run("bot", user_id="c", conversation_id="v", tags={"a": "b"}):
+        with client.run("bot", user_id="c", session_id="v", tags={"a": "b"}):
             pass
         assert client.flush()
     finally:

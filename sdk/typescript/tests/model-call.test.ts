@@ -18,7 +18,7 @@ function calls(transport: FakeTransport): JsonSpan[] {
 
 describe('a model call', () => {
   it("carries the conventions' names", async () => {
-    const run = h.telmoni.run('bot', { conversationId: 'conv' }, (run) => {
+    const run = h.telmoni.run('bot', { sessionId: 'conv' }, (run) => {
       run.modelCall('gpt-4o-mini', { provider: 'openai' }, (call) => {
         call.answered({
           responseModel: 'gpt-4o-mini-2024-07-18',

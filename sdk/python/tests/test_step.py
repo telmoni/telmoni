@@ -17,7 +17,7 @@ def test_a_step_nests_under_its_run_and_carries_its_ids(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
     with (
-        telmoni.run("bot", user_id="c", conversation_id="v") as run,
+        telmoni.run("bot", user_id="c", session_id="v") as run,
         telmoni.step("plan"),
         telmoni.step("plan.inner"),
     ):

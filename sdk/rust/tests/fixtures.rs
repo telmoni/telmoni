@@ -142,7 +142,7 @@ fn perform(harness: &Harness, scenario: &Value) -> Outcome {
         text(run_spec, "agent")?,
         RunOptions {
             user_id: Some(text(run_spec, "user_id")?.to_owned()),
-            conversation_id: Some(text(run_spec, "conversation_id")?.to_owned()),
+            session_id: Some(text(run_spec, "session_id")?.to_owned()),
             tags,
             bounds: Bounds {
                 stall_after_s: Some(int(bounds, "stall_after_s")?),

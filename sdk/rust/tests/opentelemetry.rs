@@ -247,7 +247,7 @@ fn otel_variables_change_nothing_of_ours() -> Outcome {
             "bot",
             RunOptions {
                 user_id: Some("c".to_owned()),
-                conversation_id: Some("v".to_owned()),
+                session_id: Some("v".to_owned()),
                 tags: tags(&[("a", "b")]),
                 ..RunOptions::default()
             },

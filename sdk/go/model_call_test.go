@@ -27,7 +27,7 @@ func contentOn() scripted {
 
 func TestAModelCallCarriesTheConventionsNames(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{ConversationID: "conv"})
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{SessionID: "conv"})
 	_, call := run.ModelCall(ctx, "gpt-4o-mini", telmoni.ModelCallOptions{Provider: "openai"})
 	call.Answered(telmoni.Answer{
 		ResponseModel: "gpt-4o-mini-2024-07-18",

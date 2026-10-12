@@ -13,7 +13,7 @@ def test_a_model_call_carries_the_conventions_names(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
     with (
-        telmoni.run("bot", conversation_id="conv") as run,
+        telmoni.run("bot", session_id="conv") as run,
         telmoni.model_call("gpt-4o-mini", provider="openai") as call,
     ):
         call.answered(

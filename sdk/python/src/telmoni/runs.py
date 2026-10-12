@@ -2,7 +2,7 @@
 
 A run is a span of its own in whatever trace is current, opened by
 ``telmoni.run.start``; every span inside it carries the run's id, agent,
-user and conversation, so ingest knows each span's run without waiting
+user and session, so ingest knows each span's run without waiting
 for the trace's tree. Nothing is sent outside a run.
 """
 
@@ -250,7 +250,7 @@ class Opener:
         agent: str,
         *,
         user_id: str | None,
-        conversation_id: str | None,
+        session_id: str | None,
         tags: Mapping[str, str] | None,
         bounds: Bounds | None,
         sample_rate: float | None,
@@ -264,8 +264,8 @@ class Opener:
         inherited: dict[str, str] = {contract.RUN_ID: run_id, contract.AGENT: agent}
         if user_id:
             inherited[contract.USER_ID] = user_id
-        if conversation_id:
-            inherited[contract.CONVERSATION_ID] = conversation_id
+        if session_id:
+            inherited[contract.SESSION_ID] = session_id
         attributes: dict[str, Any] = {
             contract.OPERATION: "invoke_agent",
             contract.AGENT_NAME: agent,

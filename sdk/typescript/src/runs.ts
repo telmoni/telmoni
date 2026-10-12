@@ -3,7 +3,7 @@
  *
  * A run is a span of its own in whatever trace is current, opened by
  * `telmoni.run.start`; every span inside it carries the run's id, agent,
- * user and conversation, so ingest knows each span's run without waiting
+ * user and session, so ingest knows each span's run without waiting
  * for the trace's tree. Steps and calls open on a run's handle, or a step's,
  * so nothing can be opened — or sent — outside a run.
  */
@@ -225,7 +225,7 @@ export class Opener {
     const runId = randomUUID();
     const inherited: Attributes = { [contract.RUN_ID]: runId, [contract.AGENT]: agent };
     if (options.userId) inherited[contract.USER_ID] = options.userId;
-    if (options.conversationId) inherited[contract.CONVERSATION_ID] = options.conversationId;
+    if (options.sessionId) inherited[contract.SESSION_ID] = options.sessionId;
     const bounds = boundsOf(options.bounds);
     const attributes: Attributes = {
       [contract.OPERATION]: 'invoke_agent',

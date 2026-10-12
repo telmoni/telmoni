@@ -26,7 +26,7 @@ const telmoni = Telmoni.fromEnv();
 
 const reply = await telmoni.run(
   'support-bot',
-  { userId: 'user_42', conversationId: 'conv_7', bounds: { maxSteps: 10, maxCostUsd: 1.5 } },
+  { userId: 'user_42', sessionId: 'conv_7', bounds: { maxSteps: 10, maxCostUsd: 1.5 } },
   async (run) => {
     const plan = await run.step('plan', (step) =>
       step.modelCall('gpt-4o-mini', { provider: 'openai', inputMessages: messages }, async (call) => {

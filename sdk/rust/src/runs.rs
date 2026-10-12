@@ -2,7 +2,7 @@
 //!
 //! A run is a span of its own in whatever trace is current, opened by
 //! `telmoni.run.start`; every span inside it carries the run's id, agent,
-//! user and conversation, so ingest knows each span's run without waiting
+//! user and session, so ingest knows each span's run without waiting
 //! for the trace's tree. A step, a model call or a tool call is opened from
 //! the handle it belongs under, so nothing can be opened outside a run.
 
@@ -56,8 +56,8 @@ pub struct RunOptions {
     /// The end user the run is for, as the application's own id for them;
     /// ingest hashes it. Blank reads as none.
     pub user_id: Option<String>,
-    /// The conversation the run belongs to. Blank reads as none.
-    pub conversation_id: Option<String>,
+    /// The session the run belongs to. Blank reads as none.
+    pub session_id: Option<String>,
     /// Tags, sent as `telmoni.tag.<key>`.
     pub tags: BTreeMap<String, String>,
     /// What a monitor holds the run to.
@@ -560,8 +560,8 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
     if let Some(user) = options.user_id.filter(|id| !id.is_empty()) {
         inherited.push(KeyValue::new(contract::USER_ID, user));
     }
-    if let Some(conversation) = options.conversation_id.filter(|id| !id.is_empty()) {
-        inherited.push(KeyValue::new(contract::CONVERSATION_ID, conversation));
+    if let Some(session) = options.session_id.filter(|id| !id.is_empty()) {
+        inherited.push(KeyValue::new(contract::SESSION_ID, session));
     }
     let bounds = bound_attributes(&options.bounds);
 

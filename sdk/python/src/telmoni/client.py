@@ -82,7 +82,7 @@ class Telmoni:
         agent: str,
         *,
         user_id: str | None = None,
-        conversation_id: str | None = None,
+        session_id: str | None = None,
         tags: Mapping[str, str] | None = None,
         bounds: Bounds | None = None,
         sample_rate: float | None = None,
@@ -92,7 +92,7 @@ class Telmoni:
             lambda: self._opener.run(
                 agent,
                 user_id=user_id,
-                conversation_id=conversation_id,
+                session_id=session_id,
                 tags=tags,
                 bounds=bounds,
                 sample_rate=sample_rate,

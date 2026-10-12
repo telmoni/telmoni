@@ -25,7 +25,7 @@ def test_a_run_is_a_span_with_the_contract_attributes(
     with telmoni.run(
         "support-bot",
         user_id="user_1",
-        conversation_id="conv_1",
+        session_id="conv_1",
         tags={"env": "test", "team": "a"},
         bounds=Bounds(stall_after_s=30, max_steps=5, max_cost_usd=0.5),
     ) as run:

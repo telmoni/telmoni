@@ -35,7 +35,7 @@ pub(crate) const INPUT_TOKENS: &str = "gen_ai.usage.input_tokens";
 pub(crate) const OUTPUT_TOKENS: &str = "gen_ai.usage.output_tokens";
 pub(crate) const CACHE_READ_INPUT_TOKENS: &str = "gen_ai.usage.cache_read.input_tokens";
 pub(crate) const CACHE_WRITE_INPUT_TOKENS: &str = "gen_ai.usage.cache_write.input_tokens";
-pub(crate) const CONVERSATION_ID: &str = "gen_ai.conversation.id";
+pub(crate) const SESSION_ID: &str = "gen_ai.conversation.id";
 
 pub(crate) const INPUT_MESSAGES: &str = "gen_ai.input.messages";
 pub(crate) const OUTPUT_MESSAGES: &str = "gen_ai.output.messages";

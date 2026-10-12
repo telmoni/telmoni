@@ -44,7 +44,7 @@ def answer(question: str) -> str:
 with telmoni.run(
     "support-bot",
     user_id="user_42",
-    conversation_id="conv_7",
+    session_id="conv_7",
     tags={"env": "prod"},
     bounds=Bounds(stall_after_s=60, max_steps=10, max_cost_usd=1.5),
 ) as run:
