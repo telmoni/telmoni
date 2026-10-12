@@ -40,7 +40,7 @@ export default async function SettingsPage({
       <div className="grid gap-6">
         <Section
           title="Project ID"
-          description="Unique identifier for this project used in API requests and SDK configuration."
+          description="This project's identifier, which never changes when its name or URL does; the audit log names the project by it."
         >
           <Rows>
             <SettingsRow label="Project ID" mono copy={project.id}>

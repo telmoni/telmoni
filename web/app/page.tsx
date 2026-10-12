@@ -6,7 +6,7 @@ import { PaperShell } from "@/components/paper-shell";
 import { SplashHero } from "@/components/splash-hero";
 import { Button } from "@/components/ui/button";
 import { getServerSession } from "@/lib/server/session";
-import { DOCS_URL, REPO_URL, SKILLS_URL } from "@/lib/site";
+import { DOCS_URL, REPO_URL, SECURITY_POLICY_URL, SKILLS_URL } from "@/lib/site";
 import { cn } from "@/lib/utils";
 
 // No `metadata` here on purpose. `layout.tsx` templates a page title as
@@ -26,9 +26,9 @@ const HIGHLIGHT = "stall, loop or overspend";
 const PITCH =
   "Every run and the steps inside it, every model and tool call with its tokens, latency and cost, the bounds each agent keeps, and the alert when one breaks them. Prompts and completions stay out unless an organization owner turns them on for a project.";
 
-// True today, and the sentence that goes when the first run is recorded.
+// True today; it moves as the roadmap does, and says what is not built yet.
 const STATUS =
-  "Telmoni has not launched. What runs today is the foundation — organizations and roles, API keys, the audit log, notifications and the console agent — and the telemetry is built on it in the open.";
+  "Telmoni has not launched. What runs today is the foundation — organizations and roles, API keys, the audit log, notifications and the console agent — and the first of the telemetry on it: SDKs in four languages that record an agent's runs, ingest that keeps them as metadata, and a console that reads them as traces, conversations and users. Monitors and alerts are next, built in the open.";
 
 // What the product is for, one cell per goal, in the order they are built:
 // a small motion that says it, a line, then three points.
@@ -39,7 +39,7 @@ const GOALS = [
     lead: "Every run and the steps inside it, from any framework.",
     points: [
       "Runs, steps, model and tool calls over OpenTelemetry's own protocol, or a curl from a crontab",
-      "Tokens, latency, cost and failures, per run, per project, per end customer",
+      "Tokens, latency, cost and failures, per run, per project, per end user",
       "Spans kept as long as retention says; hourly totals a year back",
     ],
   },
@@ -103,10 +103,10 @@ const OPEN: { title: string; blurb: string; links: Pointer[] }[] = [
     title: "Security as mechanism",
     blurb: "Isolation the database enforces, an audit record in the same transaction as the change, and deletion that ends.",
     links: [
-      { label: "Tenant isolation", href: docs("/legal/security/#tenant-isolation") },
-      { label: "Secrets", href: docs("/legal/security/#secrets") },
-      { label: "Audit", href: docs("/legal/security/#audit") },
-      { label: "Data deletion", href: docs("/legal/security/#data-deletion") },
+      { label: "Tenant isolation", href: `${SECURITY_POLICY_URL}#tenant-isolation` },
+      { label: "Secrets", href: `${SECURITY_POLICY_URL}#secrets` },
+      { label: "Audit", href: docs("/workspace/audit-log") },
+      { label: "Data deletion", href: docs("/workspace/data-deletion") },
     ],
   },
 ];
@@ -156,7 +156,7 @@ const DOORS: Door[] = [
 const WHY = [
   {
     title: "Privacy first",
-    body: "Metadata by default, and the content switch is the organization owner's, per project: on, off or sealed.",
+    body: "Metadata by default. What a project keeps of content is its organization owner's switch: off today, with on and sealed to come.",
   },
   {
     title: "Open source",
@@ -164,11 +164,11 @@ const WHY = [
   },
   {
     title: "One binary",
-    body: "The server is one Rust binary and the console one Next.js app, with a database and a cache beside them.",
+    body: "The server is one Rust binary and the console one Next.js app, with two databases and a cache beside them.",
   },
   {
     title: "OpenTelemetry native",
-    body: "Our SDKs, any instrumentation that speaks the GenAI conventions, or a curl from a crontab.",
+    body: "Our SDKs today, on OpenTelemetry's own SDK and protocol; any instrumentation that speaks the GenAI conventions, and a curl from a crontab, next.",
   },
   {
     title: "Built in the open",
@@ -185,12 +185,12 @@ const FAQ = [
   {
     question: "Has it launched?",
     answer:
-      "Not yet. What runs today is the foundation: organizations and roles, API keys, the audit log, notifications, the console agent and the CLI. Nothing records a run yet; the telemetry is being built on it in the open.",
+      "Not yet. What runs today is the foundation — organizations and roles, API keys, the audit log, notifications, the console agent and the CLI — and the first of the telemetry: the SDKs record an agent's runs, ingest keeps them as metadata, and the console reads them as traces, conversations and users. Monitors and alerts are not built yet.",
   },
   {
     question: "What does it store?",
     answer:
-      "Metadata: timings, statuses, counts, model and tool names, costs. Prompts, completions and tool payloads are not sent by the SDKs and are dropped at the door, unless an organization owner turns content on for a project.",
+      "Metadata: timings, statuses, counts, model and tool names, costs. Prompts, completions and tool payloads are not sent by the SDKs and are dropped at the door. A content mode that keeps them, for an organization owner to turn on per project, is planned; today the only mode is off.",
   },
   {
     question: "Can I self-host it?",
@@ -200,7 +200,7 @@ const FAQ = [
   {
     question: "How do I get started?",
     answer:
-      "Sign up, create an organization and a project, make an API key and install the CLI; or install the agent skill and let a coding agent do it.",
+      "Sign up, create a project in the organization your first sign-in makes, make an API key and install the CLI; or install the agent skill and let a coding agent do it.",
   },
 ];
 
@@ -563,7 +563,7 @@ export default async function SplashPage() {
                 Start in <Mark>a minute</Mark>.
               </>
             }
-            blurb="Sign up, create an organization and a project, make an API key and install the CLI. Or hand it to a coding agent."
+            blurb="Sign up, create a project in the organization your first sign-in makes, make an API key and install the CLI. Or hand it to a coding agent."
           />
           <Cells className="lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
             <Cell className="gap-4">

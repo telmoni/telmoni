@@ -8,7 +8,11 @@ export const REPO_URL: string | null = "https://github.com/telmoni/telmoni";
 export const DOCS_URL = "/docs";
 export const PRODUCT_NAME = "Telmoni";
 export const PRODUCT_DESCRIPTION =
-  "A foundation for organizations and their projects: members and roles, API keys, and a hash-chained audit log.";
+  "Privacy-first telemetry for AI agents: every run kept as metadata, for organizations and their projects, with roles, API keys and an audit log.";
+// The security policy every repository shares, which also describes the hosted
+// service's controls: it is published with the hosted service's legal pages,
+// so every deployment links it on telmoni.com, where it exists.
+export const SECURITY_POLICY_URL = "https://telmoni.com/docs/legal/security";
 export const TWITTER_URL: string | null = null;
 export const STATUS_URL: string | null = null;
 export const DISCUSSIONS_URL: string | null = null;

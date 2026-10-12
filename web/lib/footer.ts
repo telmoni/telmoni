@@ -3,6 +3,7 @@ import {
   DISCUSSIONS_URL,
   DOCS_URL,
   REPO_URL,
+  SECURITY_POLICY_URL,
   SPONSORS_URL,
   STATUS_URL,
   SUPPORT_URL,
@@ -61,7 +62,10 @@ export function footerColumns(
       title: "Resources",
       links: [
         ...(SUPPORT_URL ? [{ label: "Support", href: SUPPORT_URL }] : []),
-        docs("Security", "/legal/security"),
+        // The legal pages are the hosted service's, not this book's: the
+        // policy is linked where it lives, so a self-hosted console's link
+        // reaches it too.
+        { label: "Security", href: SECURITY_POLICY_URL },
         docs("Contributing", "/contributing/introduction"),
         ...(DISCUSSIONS_URL ? [{ label: "Discussions", href: DISCUSSIONS_URL }] : []),
         ...(SPONSORS_URL ? [{ label: "Sponsor", href: SPONSORS_URL }] : []),
