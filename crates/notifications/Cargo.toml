@@ -1,6 +1,6 @@
 [package]
 name        = "telmoni-notifications"
-description = "Notifications service — the in-app feed, and the connectors that repeat it (Slack, Discord, signed webhooks), with durable at-least-once delivery on a Postgres-native leased-row loop."
+description = "Notifications service — the in-app feed, and the connectors that repeat it (Slack, signed webhooks), with durable at-least-once delivery on a Postgres-native leased-row loop."
 version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true
