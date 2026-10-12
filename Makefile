@@ -104,6 +104,17 @@ env-scaffold:
 		done; \
 		echo "· minted a SERVICE_SECRET into .env and $(WEB_DIR)/.env.local (same value in both)"; \
 	fi
+	@if grep -qE '^TELEMETRY_KEK=[[:space:]]*$$' .env 2>/dev/null; then \
+		key=$$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'); \
+		if [ -z "$$key" ]; then \
+			echo "✗ env-scaffold: could not generate a TELEMETRY_KEK (no openssl, no /dev/urandom)."; \
+			echo "  Set TELEMETRY_KEK=local:<64 hex characters> in .env by hand."; \
+			exit 1; \
+		fi; \
+		tmp=$$(mktemp) || exit 1; \
+		sed "s|^TELEMETRY_KEK=[[:space:]]*$$|TELEMETRY_KEK=local:$$key|" .env > "$$tmp" && mv "$$tmp" .env; \
+		echo "· minted a local TELEMETRY_KEK into .env"; \
+	fi
 
 .PHONY: port-check
 port-check:
