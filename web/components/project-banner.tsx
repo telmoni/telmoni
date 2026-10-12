@@ -14,14 +14,14 @@ export function ProjectBanner({
 }) {
   const [dismissed, setDismissed] = useState(false);
 
-  const envAnnouncement = process.env.NEXT_PUBLIC_TELMONI_ANNOUNCEMENT;
+  // The server's alone (`fetchProjectAnnouncement`: Redis, then
+  // `TELMONI_ANNOUNCEMENT`), read per request: a `NEXT_PUBLIC_` variable read
+  // here would be the build's, frozen into the one image every deployment runs.
   const activeNotification: ProjectNotification | null = notification
     ? typeof notification === "string"
       ? { message: notification }
       : notification
-    : envAnnouncement
-      ? { message: envAnnouncement }
-      : null;
+    : null;
 
   const contentKey = activeNotification
     ? `${activeNotification.id ?? ""}:${activeNotification.message}`

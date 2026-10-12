@@ -5,7 +5,6 @@ import { one, pendingSignIn } from "../_accounts/pending";
 import { SignUpForm } from "./_form";
 
 export const metadata = { title: "Create an account" };
-export const dynamic = "force-dynamic";
 
 // Where `/auth/signup` sends the browser while the login form is on. Reached
 // with sign-ups closed too: an invitation's "Create an account" lands here,

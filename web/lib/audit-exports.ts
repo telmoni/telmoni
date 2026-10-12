@@ -69,7 +69,8 @@ export function rangeLabel(
   return from === to ? from : `${from} – ${to}`;
 }
 
-const COUNT = new Intl.NumberFormat();
+// Grouped as every other count in the console is (`formatCount`).
+const COUNT = new Intl.NumberFormat("en-US");
 
 export function eventsLabel(count: number): string {
   return count === 1 ? "1 event" : `${COUNT.format(count)} events`;

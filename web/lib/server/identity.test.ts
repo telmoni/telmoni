@@ -42,6 +42,14 @@ describe("activeProjectForMutation", () => {
     expect(identityContext).not.toHaveBeenCalled();
   });
 
+  // The id becomes a header: a Server Action is handed whatever was posted.
+  it("refuses anything but a project id before it asks auth anything", async () => {
+    for (const id of ["project_1\r\nx-service-secret: leaked", "../organization", "a/b"]) {
+      expect((await activeProjectForMutation(id)).error, JSON.stringify(id)).toMatch(/which project/i);
+    }
+    expect(identityContext).not.toHaveBeenCalled();
+  });
+
   it("refuses rather than guessing when auth is unreachable", async () => {
     vi.mocked(identityContext).mockResolvedValue(null);
     const active = await activeProjectForMutation("project_1");

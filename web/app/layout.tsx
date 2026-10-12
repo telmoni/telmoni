@@ -6,7 +6,6 @@ import { ACCESSIBILITY_BOOT_SCRIPT } from "@/lib/accessibility";
 import { CORNERS_BOOT_SCRIPT } from "@/lib/corners";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
-import { RootProvider } from "fumadocs-ui/provider/next";
 import { env } from "@/lib/env";
 import { PRODUCT_DESCRIPTION, PRODUCT_NAME } from "@/lib/site";
 
@@ -66,12 +65,8 @@ export default async function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          {/* Fumadocs' context for the book's sidebar and search dialog; the
-              theme is the provider above's, so its own stays off. */}
-          <RootProvider theme={{ enabled: false }}>
-            {children}
-            <Toaster />
-          </RootProvider>
+          {children}
+          <Toaster />
         </ThemeProvider>
       </body>
     </html>

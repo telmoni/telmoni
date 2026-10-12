@@ -6,7 +6,6 @@ import { one } from "../_accounts/pending";
 import { ResetForm } from "./_form";
 
 export const metadata = { title: "Choose a new password" };
-export const dynamic = "force-dynamic";
 
 // The page the reset mail links to.
 export default async function ResetPage({

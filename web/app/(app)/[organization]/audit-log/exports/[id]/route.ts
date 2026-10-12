@@ -5,9 +5,6 @@ import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { activeOrganization, auditExportFile, getServerContext } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
 
-export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
-
 /** Downloads a person may make in an hour. A person takes a file once or
  *  twice; a script looping on this route would pull a whole file each time —
  *  up to 24 MiB, held in auth's memory and the console's on its way out — so

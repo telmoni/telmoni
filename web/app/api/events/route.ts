@@ -13,9 +13,6 @@ import { RealtimeEventSchema, type RealtimeEvent } from "@/lib/events/types";
 import { getServerContext } from "@/lib/server/entities/organization";
 import { logger } from "@/lib/logger";
 
-export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
-
 const STREAM_OPENS = { limit: 60, windowMs: 60_000 };
 
 export async function GET(request: NextRequest) {

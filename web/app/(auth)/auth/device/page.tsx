@@ -7,7 +7,6 @@ import { one } from "../_accounts/pending";
 import { DeviceForm } from "./_form";
 
 export const metadata = { title: "Sign in a device" };
-export const dynamic = "force-dynamic";
 
 // The page a device (the CLI) sends the person to, with the code it shows.
 // Under `/auth`, which the proxy leaves open, so the session is checked

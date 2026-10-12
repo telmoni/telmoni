@@ -6,7 +6,9 @@ import { PRODUCT_NAME } from "@/lib/site";
 
 import { AcceptInvite } from "./_accept";
 
-export const metadata = { title: "Invitation" };
+// The page names who sent the invitation, to which address and for what, to
+// anybody holding its link: no index keeps it, whichever crawler found it.
+export const metadata = { title: "Invitation", robots: { index: false, follow: false } };
 
 export default async function InvitePage({
   params,

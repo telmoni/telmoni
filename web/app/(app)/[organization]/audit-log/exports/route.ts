@@ -5,9 +5,6 @@ import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { listAuditExports, startAuditExport } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
 
-export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
-
 const NO_STORE = { "Cache-Control": "no-store, private" };
 
 /** Starts a person may make in an hour: a build reads up to a file's worth of

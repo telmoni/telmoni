@@ -1,6 +1,7 @@
 import { ConsoleUiProvider } from "@/components/console-ui-context";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 
 import { ConsoleHeader } from "@/components/console-header";
 import { ConsoleShell } from "@/components/console-shell";
@@ -107,13 +108,22 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               <KeyboardShortcuts />
               <ConsoleSearch />
               <ProjectBanner notification={projectAnnouncement} />
-              <ExtensionBanner />
+              {/* The two slots a console built on this one fills may read
+                  what they need themselves, after this layout's reads; each
+                  streams in on its own rather than holding the shell back. */}
+              <Suspense fallback={null}>
+                <ExtensionBanner />
+              </Suspense>
               {/* The console's host, ahead of a new organization's URL, as
                   its Settings show it; the badge beside the organization's
                   name is a slot, filled by a console built on this one. */}
               <ConsoleHeader
                 host={new URL(env.AUTH_URL).host}
-                organizationBadge={<ExtensionOrganizationBadge />}
+                organizationBadge={
+                  <Suspense fallback={null}>
+                    <ExtensionOrganizationBadge />
+                  </Suspense>
+                }
               />
               <div className="flex min-h-0 flex-1">
                 <ConsoleSidebar version={VERSION} />

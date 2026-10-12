@@ -1,26 +1,29 @@
 
-export async function onRequestError(
-  err: unknown,
-  request: { path: string; method: string },
-  context: { routerKind: string; routePath: string; renderSource?: string },
-) {
+import type { Instrumentation } from "next";
+
+export const onRequestError: Instrumentation.onRequestError = async (err, request, context) => {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   const { logger } = await import("./lib/logger");
   // The route, never the path: a path spells an organization and a project by
   // the slugs of their names, and carries an invitation's token or a
-  // callback's code.
+  // callback's code; nor the headers, which carry the session's cookie.
+  // `routeType` tells a page's render from a Server Action's or a Route
+  // Handler's on the same route.
   logger.error(
     {
       err,
-      digest: (err as { digest?: string } | null)?.digest,
+      digest:
+        typeof err === "object" && err !== null && "digest" in err ? String(err.digest) : undefined,
       method: request.method,
       routerKind: context.routerKind,
       routePath: context.routePath,
+      routeType: context.routeType,
       renderSource: context.renderSource,
+      revalidateReason: context.revalidateReason,
     },
     "unhandled request error",
   );
-}
+};
 
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;

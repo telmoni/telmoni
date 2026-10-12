@@ -10,8 +10,6 @@ import { logger } from "@/lib/logger";
 import { fetchProjectAnywhere, identityContext, projectHeaders } from "@/lib/server/data";
 import { FeatureOffProblemSchema } from "@/lib/server/flags";
 
-export const dynamic = "force-dynamic";
-
 const Authorized = z.object({ url: z.string().url(), state: z.string().min(1) });
 
 // Every press past the session check mints a state row in the service and a

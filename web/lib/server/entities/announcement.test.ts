@@ -16,7 +16,14 @@ describe("fetchProjectAnnouncement", () => {
     vi.clearAllMocks();
     process.env = { ...originalEnv };
     delete process.env.TELMONI_ANNOUNCEMENT;
-    delete process.env.NEXT_PUBLIC_TELMONI_ANNOUNCEMENT;
+  });
+
+  // A `NEXT_PUBLIC_` name is inlined when the image is built, and the
+  // published image is built with none: only the runtime name is read.
+  it("reads no NEXT_PUBLIC_ name for the banner", async () => {
+    mockGet.mockResolvedValue(null);
+    process.env.NEXT_PUBLIC_TELMONI_ANNOUNCEMENT = "frozen at build";
+    expect(await fetchProjectAnnouncement()).toBeNull();
   });
 
   it("returns null when neither Redis nor environment variable is set", async () => {

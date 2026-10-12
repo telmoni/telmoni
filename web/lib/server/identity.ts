@@ -1,3 +1,4 @@
+import { isProjectId } from "@/lib/connect";
 import { identityContext } from "@/lib/server/entities/identity-context";
 import { getServerContext } from "@/lib/server/entities/organization";
 
@@ -39,7 +40,9 @@ export async function activeProjectForMutation(projectId: string): Promise<
   | { organizationId: string; projectId: string; error: null }
   | { organizationId?: undefined; projectId?: undefined; error: string }
 > {
-  if (!projectId) {
+  // The id becomes a header of the lane's request: anything but a project id
+  // is refused here, as a Server Action takes whatever is posted to it.
+  if (!isProjectId(projectId)) {
     return { error: "Couldn't tell which project this is. Reload and try again." };
   }
   const ident = await identityContext();

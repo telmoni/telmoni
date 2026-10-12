@@ -13,9 +13,6 @@ import { logger } from "@/lib/logger";
 import { AGENT_STREAM_TIMEOUT_MS, agentHeaders } from "@/lib/server/entities/agent";
 import { AGENT_MESSAGE_MAX } from "@/lib/types/agent";
 
-export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
-
 // Six bytes a character at the message ceiling — what JSON makes of a control
 // character (`\u0001`) — and room for the ids around them. Anything past it
 // is not a turn this lane would forward.

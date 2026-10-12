@@ -1,5 +1,6 @@
 import { cache } from "react";
 import { cookies, headers } from "next/headers";
+import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 
 import { fetchWithTimeout } from "@/lib/api/fetch";
@@ -129,12 +130,14 @@ export function defaultOrganization(ctx: ServerContext): OrganizationEntry | nul
   return ctx.organizations.find((o) => o.organizationId === ctx.defaultOrganizationId) ?? null;
 }
 
-// `headers()` is request-scoped and throws outside one (a test, a build-time
-// render); a missing user agent is not a reason to skip `/me`.
+// `headers()` is request-scoped and throws outside one (a test); a missing
+// user agent is not a reason to skip `/me`. What it throws in a build-time
+// render is Next's word that the route is dynamic, and goes on to Next.
 async function userAgent(): Promise<string | null> {
   try {
     return (await headers()).get("user-agent");
-  } catch {
+  } catch (err) {
+    unstable_rethrow(err);
     return null;
   }
 }
@@ -146,13 +149,16 @@ async function requestedOrganization(): Promise<{ slug: string } | { id: string 
   try {
     const named = (await headers()).get(ORGANIZATION_HEADER);
     if (named) return { slug: named };
-  } catch {
-    // Outside a request (a test, a build-time render) there is no path.
+  } catch (err) {
+    // Outside a request (a test) there is no path; a build-time render's
+    // word that the route is dynamic is Next's (see `userAgent`).
+    unstable_rethrow(err);
   }
   try {
     const remembered = (await cookies()).get(ACTIVE_ORGANIZATION_COOKIE)?.value;
     return remembered ? { id: remembered } : null;
-  } catch {
+  } catch (err) {
+    unstable_rethrow(err);
     return null;
   }
 }

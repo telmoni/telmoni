@@ -8,7 +8,6 @@ import { one, pendingSignIn } from "../_accounts/pending";
 import { SignInForm } from "./_form";
 
 export const metadata = { title: "Sign in" };
-export const dynamic = "force-dynamic";
 
 // What the page offers when auth cannot say: the form alone, whose action
 // answers for auth being down on the first press.

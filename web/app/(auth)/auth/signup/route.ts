@@ -5,8 +5,6 @@ import { safeReturnTo } from "@/lib/api/fetch";
 import { clientKey, rateLimitRetryAfter } from "@/lib/api/rate-limit";
 import { logger } from "@/lib/logger";
 
-export const dynamic = "force-dynamic";
-
 const AUTH_START_CEILING = { limit: 60, windowMs: 60_000 };
 
 function tooManyStarts(retryAfterSecs: number): NextResponse {

@@ -4,7 +4,6 @@ import { one } from "../_accounts/pending";
 import { ConfirmEmail } from "./_confirm";
 
 export const metadata = { title: "Confirm your email address" };
-export const dynamic = "force-dynamic";
 
 // The page the verification mail links to. It spends nothing on load: a mail
 // scanner that opens every link would otherwise spend it before the person

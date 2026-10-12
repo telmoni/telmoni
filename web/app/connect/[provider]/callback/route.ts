@@ -7,8 +7,6 @@ import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { fetchProjectAnywhere, identityContext, projectHeaders } from "@/lib/server/data";
 
-export const dynamic = "force-dynamic";
-
 // The vendor sends the browser back here with `code` and `state`, or with
 // `error` when the person pressed Cancel. The project it is all for rides the
 // sealed cookie the start route set — the query string is the vendor's to

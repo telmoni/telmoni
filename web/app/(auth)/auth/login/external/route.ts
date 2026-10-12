@@ -5,8 +5,6 @@ import { clientKey, rateLimitRetryAfter } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 
-export const dynamic = "force-dynamic";
-
 // The same bucket as the two doors: this is the same call to auth.
 const AUTH_START_CEILING = { limit: 60, windowMs: 60_000 };
 

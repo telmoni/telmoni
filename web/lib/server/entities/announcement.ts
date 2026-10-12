@@ -35,9 +35,9 @@ export const fetchProjectAnnouncement = cache(
       // environment below, or to nothing.
     }
 
-    const envRaw =
-      process.env.TELMONI_ANNOUNCEMENT ||
-      process.env.NEXT_PUBLIC_TELMONI_ANNOUNCEMENT;
+    // Read at runtime: a `NEXT_PUBLIC_` name would be inlined at build time,
+    // and the published image is built with none.
+    const envRaw = process.env.TELMONI_ANNOUNCEMENT;
     if (envRaw && envRaw.trim().length > 0) {
       try {
         const parsed = JSON.parse(envRaw);
