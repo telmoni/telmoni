@@ -36,6 +36,13 @@ spec:
   parentRefs:
     - name: web
       sectionName: https
+  {{- /* With a machine host of its own, the console answers on its host
+  alone: a route naming none would take every path of the machine host the
+  lanes do not, and serve the console to machines there. */}}
+  {{- if .Values.ingress.apiHost }}
+  hostnames:
+    - {{ regexReplaceAll ":[0-9]+$" (urlParse .Values.config.appUrl).host "" | quote }}
+  {{- end }}
   rules:
     - backendRefs:
         - name: web

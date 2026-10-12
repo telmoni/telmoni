@@ -343,7 +343,7 @@ flowchart LR
   Internet --> GW["Gateway, when ingress is on"]
   subgraph Cluster["Kubernetes: the chart"]
     GW --> Web["web :3000"]
-    GW -->|"/otlp, by host or by path"| API["server-api: the machine lanes"]
+    GW -->|"/otlp, /v1, /cli, /webhooks/slack: by host or by path"| API["server-api: the machine lanes"]
     Web --> Server["server :8082"]
     API --> Server
     Migrate["migrate: pre-install and pre-upgrade hook"]
