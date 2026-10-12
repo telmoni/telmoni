@@ -88,10 +88,9 @@ export function ChangeEmail({
     });
   };
 
-  // ⚠ **NOTHING, not an explanation.** `managed`, `provider` and `unknown`
-  // each used to return a paragraph on why there was no form here — the
-  // directory owns the address, Google would assert it back at the next
-  // sign-in, the session does not say. The page no longer renders the Email
+  // ⚠ **NOTHING, not an explanation.** `provider` and `unknown` each used to
+  // return a paragraph on why there was no form here — the provider would
+  // assert the address back at the next sign-in, the session does not say. The page no longer renders the Email
   // section for any of them at all, so this is unreachable from `page.tsx` and
   // exists to fail closed if some other caller ever mounts this: a form drawn
   // for an ineligible account would be refused by the Server Action anyway,

@@ -32,7 +32,7 @@ export function PasswordReset({ method }: { method: string | null }) {
 
   // ⚠ **NOTHING, not an explanation** — and still no offer to "add" a password
   // for a provider account; see `passwordPosture` for why the second way in was
-  // the same way in. `managed`, `provider` and `unknown` each used to return a
+  // the same way in. `provider` and `unknown` each used to return a
   // paragraph here. The page no longer renders the Password section for any of
   // them, so this is unreachable from `page.tsx` and is the fail-closed guard
   // for any other caller: drawing the button would offer to mint a credential
