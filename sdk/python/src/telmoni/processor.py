@@ -14,7 +14,8 @@ import os
 import threading
 import time
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
@@ -50,6 +51,7 @@ class Processor(SpanProcessor):
         self._dropped = 0
         self._urgent = False
         self._flushing = 0
+        self._held = 0
         self._shutdown = False
         self._exporting = False
         self._thread = threading.Thread(
@@ -71,6 +73,7 @@ class Processor(SpanProcessor):
         self._dropped = 0
         self._urgent = False
         self._flushing = 0
+        self._held = 0
         self._exporting = False
         if not self._shutdown:
             self._thread = threading.Thread(
@@ -82,6 +85,20 @@ class Processor(SpanProcessor):
         """Drop every span of this run, the run's own among them."""
         with self._lock:
             self._sampled_out.add(run_id)
+
+    @contextmanager
+    def hold(self) -> Iterator[None]:
+        """Take no batch until the block ends, so the spans a record queues
+        inside it travel together, in their order, and the record sent again
+        is the same bytes."""
+        with self._lock:
+            self._held += 1
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._held -= 1
+                self._wake.notify_all()
 
     def on_start(self, span: Span, parent_context: Context | None = None) -> None:
         return None
@@ -137,6 +154,8 @@ class Processor(SpanProcessor):
                     self._wake.wait(timeout=self._schedule_delay_s)
                 if self._shutdown and not self._queue:
                     return
+                if self._held and not self._shutdown:
+                    continue
                 size = min(len(self._queue), self._max_batch_size)
                 batch = [self._queue.popleft() for _ in range(size)]
                 dropped, self._dropped = self._dropped, 0
@@ -154,6 +173,8 @@ class Processor(SpanProcessor):
 
     def _due(self) -> bool:
         """Under the lock: whether the worker should export without waiting."""
+        if self._held and not self._shutdown:
+            return False
         return (
             self._shutdown
             or self._flushing > 0

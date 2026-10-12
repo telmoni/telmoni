@@ -103,6 +103,65 @@ export interface ToolCallOptions {
   arguments?: unknown;
 }
 
+/** When something in a record happened: a `Date`, or milliseconds since the Unix epoch. */
+export type RecordTime = Date | number;
+
+/** What a recorded span ended as; neither field set is ok. */
+export interface RecordOutcome {
+  /** The error's class, never its message; marks the span failed. */
+  errorType?: string | undefined;
+  /** Cancelled by the agent, which is neither ok nor an error. */
+  cancelled?: boolean | undefined;
+}
+
+/** A model call that has ended: its model, its times and its tokens. */
+export interface ModelCallRecord extends RecordOutcome {
+  type: 'model_call';
+  model: string;
+  provider?: string | undefined;
+  /** `chat` (default, and what a blank one means), `generate_content`, `text_completion` or `embeddings`. */
+  operation?: string | undefined;
+  start: RecordTime;
+  end: RecordTime;
+  usage?: Usage | undefined;
+}
+
+/** A tool call that has ended: its name and its times. */
+export interface ToolCallRecord extends RecordOutcome {
+  type: 'tool_call';
+  name: string;
+  start: RecordTime;
+  end: RecordTime;
+}
+
+export type CallRecord = ModelCallRecord | ToolCallRecord;
+
+/** A step that has ended, with the calls made inside it. */
+export interface StepRecord extends RecordOutcome {
+  type: 'step';
+  name: string;
+  start: RecordTime;
+  end: RecordTime;
+  calls?: readonly CallRecord[] | undefined;
+}
+
+/**
+ * A run that has ended, as `recordRun` sends it: its id, a UUID the caller
+ * gives and gives again whenever the same run is sent, and everything in it,
+ * each with its own times.
+ */
+export interface RunRecord extends RecordOutcome {
+  runId: string;
+  agent: string;
+  /** The end user the run was for, as your own id for them; ingest hashes it. */
+  userId?: string | undefined;
+  sessionId?: string | undefined;
+  tags?: Readonly<Record<string, string>> | undefined;
+  start: RecordTime;
+  end: RecordTime;
+  inside?: readonly (StepRecord | CallRecord)[] | undefined;
+}
+
 /** What the transport gives back: the shape of `fetch`'s `Response` the exporter reads. */
 export interface TransportResponse {
   status: number;

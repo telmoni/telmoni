@@ -55,6 +55,10 @@
 //! methods take a closure instead and return its value; their `try_` forms
 //! mark an `Err` on the span with the error type's name and return it
 //! unchanged.
+//!
+//! A run that has already ended — a job's own log, a hook that runs after the
+//! turn it reports — is sent whole from its [`RunRecord`] by
+//! [`Telmoni::record_run`].
 
 #![warn(missing_docs)]
 
@@ -63,7 +67,9 @@ mod config;
 mod contract;
 mod error;
 mod exporter;
+mod ids;
 mod processor;
+mod records;
 mod runs;
 mod sampler;
 pub mod transport;
@@ -73,6 +79,7 @@ pub use client::{Hooks, Telmoni};
 pub use config::{Config, DEFAULT_ENDPOINT};
 pub use error::Error;
 pub use processor::Batching;
+pub use records::{CallRecord, ModelCallRecord, RecordItem, RunRecord, StepRecord, ToolCallRecord};
 pub use runs::{
     Bounds, Content, ModelCall, ModelCallOptions, Reply, Run, RunOptions, Step, ToolCall,
     ToolCallOptions, Usage,

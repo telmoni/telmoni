@@ -131,14 +131,15 @@ func New(cfg Config, opts ...Option) (*Client, error) {
 	// WithSampler and WithRawSpanLimits replace what OTEL_TRACES_SAMPLER and
 	// the OTEL_SPAN_* variables would have set. OpenTelemetry merges
 	// OTEL_RESOURCE_ATTRIBUTES into the provider's resource whatever is given
-	// here, so the exporter writes a resource of its own. The default id
-	// generator reads nothing.
+	// here, so the exporter writes a resource of its own. The id generator is
+	// ours, for a record's derived ids, and reads nothing either.
 	provider := sdktrace.NewTracerProvider(
 		sdktrace.WithResource(resource.NewSchemaless(
 			attribute.String(distroName, distro),
 			attribute.String("telemetry.distro.version", Version),
 		)),
 		sdktrace.WithSampler(recordingSampler{root: root}),
+		sdktrace.WithIDGenerator(ids{}),
 		sdktrace.WithRawSpanLimits(sdktrace.SpanLimits{
 			AttributeValueLengthLimit:   -1,
 			AttributeCountLimit:         128,

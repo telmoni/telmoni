@@ -78,6 +78,58 @@ A run's `context()` carries it into a future (`FutureExt::with_context`) or
 another thread, and `attach()` makes it current for synchronous code, so the
 application's own spans nest under it.
 
+## A run recorded after it ended
+
+A job that keeps its own log, or a hook that runs once the turn it reports is
+over, hands the finished run to `record_run` as data:
+
+```rust
+use std::time::{Duration, SystemTime};
+
+use telmoni_sdk::{ModelCallRecord, RunRecord, ToolCallRecord, Usage};
+
+// 2026-10-12T09:00:00Z, and what came after it.
+let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_791_795_600);
+let at = |millis| start + Duration::from_millis(millis);
+
+telmoni.record_run(RunRecord {
+    session_id: Some("conv_7".into()),
+    inside: vec![
+        ModelCallRecord {
+            provider: Some("openai".into()),
+            usage: Some(Usage {
+                input_tokens: Some(1200),
+                output_tokens: Some(85),
+                ..Usage::default()
+            }),
+            ..ModelCallRecord::new("gpt-4o-mini", at(100), at(2_000))
+        }
+        .into(),
+        ToolCallRecord {
+            error_type: Some("TimeoutError".into()),
+            ..ToolCallRecord::new("search", at(2_000), at(3_000))
+        }
+        .into(),
+    ],
+    // Yours, kept with the log.
+    ..RunRecord::new("3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d", "nightly-triage", start, at(9_000))
+})?;
+telmoni.flush();
+```
+
+A step holds its own calls: `StepRecord { calls: vec![..], ..StepRecord::new(..) }`.
+Times are `SystemTime`s, which `chrono`'s and `time`'s convert into with
+`SystemTime::from`.
+
+It is sent as the live calls would have sent it, through the same exporter,
+content rules and sample rate, in a trace of its own named by the run's id,
+whatever trace is current. Each span's id is derived from the run's id and the
+span's place in the record, so the same record sent again is the same bytes,
+which ingest answers once: give a run the same id each time you send it. A
+record holds no content. A blank agent (`Error::EmptyAgent`), a run id that is
+not a UUID or is the nil UUID (`Error::RunId`) or a span that ends before it starts
+(`Error::EndBeforeStart`) is returned as an error, and nothing is sent.
+
 ## Configuration
 
 `Config::from_env()` reads three variables, a blank value being unset:

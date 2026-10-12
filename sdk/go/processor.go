@@ -45,6 +45,7 @@ type processor struct {
 	dropped    int
 	urgent     bool
 	flushing   int
+	held       int
 	exporting  bool
 	stopped    bool
 	// drained is closed for each Flush waiting, once the queue is empty.
@@ -74,6 +75,21 @@ func (p *processor) sampleOut(runID string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.sampledOut[runID] = struct{}{}
+}
+
+// hold has the worker take no batch, unless it is stopping, until release is
+// called, so the spans a record queues in between travel together, in their
+// order, and the record sent again is the same bytes.
+func (p *processor) hold() (release func()) {
+	p.mu.Lock()
+	p.held++
+	p.mu.Unlock()
+	return func() {
+		p.mu.Lock()
+		p.held--
+		p.signal()
+		p.mu.Unlock()
+	}
 }
 
 func (p *processor) OnStart(context.Context, sdktrace.ReadWriteSpan) {}
@@ -206,6 +222,11 @@ func (p *processor) work() {
 			p.mu.Unlock()
 			return
 		}
+		if p.held > 0 && !p.stopped {
+			// The hold's release wakes the worker again.
+			p.mu.Unlock()
+			continue
+		}
 		n := min(len(p.queue), p.limits.maxBatch)
 		batch := make([]sdktrace.ReadOnlySpan, n)
 		copy(batch, p.queue)
@@ -255,6 +276,9 @@ func (p *processor) warn(text string) {
 
 // due is whether the worker should export without waiting; under the lock.
 func (p *processor) due() bool {
+	if p.held > 0 && !p.stopped {
+		return false
+	}
 	return p.stopped || p.flushing > 0 || p.urgent || len(p.queue) >= p.limits.maxBatch
 }
 

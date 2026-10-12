@@ -4,13 +4,13 @@ from collections.abc import Callable, Mapping
 
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import SpanLimits, TracerProvider
-from opentelemetry.sdk.trace.id_generator import RandomIdGenerator
 from opentelemetry.trace import Tracer
 
 from . import contract
 from ._version import __version__
 from .exporter import Exporter, Transport
-from .models import Bounds, Config
+from .ids import Ids
+from .models import Bounds, Config, RunRecord
 from .processor import Processor
 from .runs import ModelCall, Opener, Run, RunScope, Scope, Step, ToolCall
 from .sampler import RecordingSampler
@@ -48,7 +48,7 @@ class Telmoni:
             sampler=RecordingSampler(self.config.sampler),
             resource=resource,
             shutdown_on_exit=True,
-            id_generator=RandomIdGenerator(),
+            id_generator=Ids(),
             span_limits=SpanLimits(
                 max_attributes=128,
                 max_events=0,
@@ -130,6 +130,18 @@ class Telmoni:
     ) -> Scope[ToolCall]:
         """A tool call inside the current run; ``returned()`` records its result."""
         return Scope(lambda: self._opener.tool_call(name, run, arguments=arguments))
+
+    def record_run(self, record: RunRecord) -> None:
+        """Send a run that has already ended, from its record, as the live
+        calls would have sent it: for a job that keeps its own log, or a hook
+        that runs after the turn it reports. The same record sent again is the
+        same bytes, which ingest answers once.
+
+        Raises ``ValueError``, sending nothing, for a blank agent, a run id
+        that is not a UUID, a time without its timezone, or a span that ends
+        before it starts.
+        """
+        self._opener.record(record)
 
     def flush(self, timeout_s: float = 30.0) -> bool:
         """Send everything queued; True once the platform has it."""

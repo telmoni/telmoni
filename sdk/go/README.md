@@ -78,7 +78,60 @@ its own type, since a stalled call is what a monitor is for.
 The SDK never panics: a blank agent name opens a run that does nothing and
 warns once, and a run's `SampleRate` outside (0, 1] falls back to the client's
 with one warning. `New` returns an error for a client-wide `SampleRate` outside
-that range, and for a plain-HTTP endpoint whose host is not this machine.
+that range, and for a plain-HTTP endpoint whose host is not this machine;
+`RecordRun`, below, for a record it refuses.
+
+## A run recorded after it ended
+
+A job that keeps its own log, or a hook that runs once the turn it reports is
+over, hands the finished run to `RecordRun` as data:
+
+```go
+start := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
+err := client.RecordRun(ctx, telmoni.RunRecord{
+	RunID:     "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d", // yours, kept with the log
+	Agent:     "nightly-triage",
+	SessionID: "conv_7",
+	Start:     start,
+	End:       start.Add(9 * time.Second),
+	Inside: []telmoni.RecordItem{
+		telmoni.ModelCallRecord{
+			Model:    "gpt-4o-mini",
+			Provider: "openai",
+			Start:    start.Add(100 * time.Millisecond),
+			End:      start.Add(2 * time.Second),
+			Usage:    &telmoni.Usage{InputTokens: 1200, OutputTokens: 85},
+		},
+		telmoni.StepRecord{
+			Name:  "look-up",
+			Start: start.Add(2 * time.Second),
+			End:   start.Add(3 * time.Second),
+			Calls: []telmoni.CallRecord{
+				telmoni.ToolCallRecord{
+					Name:      "search",
+					Start:     start.Add(2 * time.Second),
+					End:       start.Add(3 * time.Second),
+					ErrorType: "TimeoutError",
+				},
+			},
+		},
+	},
+})
+if err != nil {
+	log.Print(err) // refused whole: nothing was sent
+}
+client.Flush(ctx)
+```
+
+It is sent as the live calls would have sent it, through the same exporter,
+content rules and sample rate, in a trace of its own named by the run's id,
+whatever span `ctx` carries. Each span's id is derived from the run's id and
+the span's place in the record, so the same record sent again is the same
+bytes, which ingest answers once: give a run the same id each time you send
+it. A record holds no content. A blank agent, a run id that is not a UUID or
+is the nil UUID, a zero time, a nil item or a span that ends before it starts
+returns an error,
+and nothing is sent: a record is handed over whole, so it is refused whole.
 
 ## Content
 

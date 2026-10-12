@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"time"
 
 	telmoni "github.com/telmoni/telmoni/sdk/go"
 )
@@ -49,6 +50,50 @@ func Example() {
 		tool.Returned(result)
 	}
 	tool.End()
+}
+
+func ExampleClient_RecordRun() {
+	client, err := telmoni.NewFromEnv()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer client.Shutdown(context.Background())
+
+	// A run read back from the agent's own log, under the id kept with it:
+	// sent again, it is the same bytes, which ingest answers once.
+	start := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
+	err = client.RecordRun(context.Background(), telmoni.RunRecord{
+		RunID:     "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
+		Agent:     "nightly-triage",
+		SessionID: "conv_7",
+		Start:     start,
+		End:       start.Add(9 * time.Second),
+		Inside: []telmoni.RecordItem{
+			telmoni.ModelCallRecord{
+				Model:    "gpt-4o-mini",
+				Provider: "openai",
+				Start:    start.Add(100 * time.Millisecond),
+				End:      start.Add(2 * time.Second),
+				Usage:    &telmoni.Usage{InputTokens: 1200, OutputTokens: 85},
+			},
+			telmoni.StepRecord{
+				Name:  "look-up",
+				Start: start.Add(2 * time.Second),
+				End:   start.Add(3 * time.Second),
+				Calls: []telmoni.CallRecord{
+					telmoni.ToolCallRecord{
+						Name:      "search",
+						Start:     start.Add(2 * time.Second),
+						End:       start.Add(3 * time.Second),
+						ErrorType: "TimeoutError",
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		log.Print(err) // refused whole: nothing was sent
+	}
 }
 
 func ExampleRunFromContext() {

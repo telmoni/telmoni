@@ -1,14 +1,15 @@
 import { isIP } from 'node:net';
 
 import { resourceFromAttributes } from '@opentelemetry/resources';
-import { BasicTracerProvider, RandomIdGenerator } from '@opentelemetry/sdk-trace-base';
+import { BasicTracerProvider } from '@opentelemetry/sdk-trace-base';
 
 import * as contract from './contract.js';
 import { Exporter, fetchTransport, realSleep } from './exporter.js';
+import { Ids } from './ids.js';
 import { Processor } from './processor.js';
 import { Opener, Run, split, within } from './runs.js';
 import { RecordingSampler } from './sampler.js';
-import type { Config, Hooks, ResolvedConfig, RunOptions } from './types.js';
+import type { Config, Hooks, ResolvedConfig, RunOptions, RunRecord } from './types.js';
 import { VERSION } from './version.js';
 
 /** The machine host; the console's, `https://telmoni.com`, serves people. */
@@ -93,6 +94,7 @@ export class Telmoni {
       warn,
     });
     this.#processor = new Processor(this.#exporter, warn, hooks?.processor);
+    const ids = new Ids();
     // sdk-trace-base's provider merges what it reads from OTEL_* under the
     // options given; with every option given, nothing of the environment's
     // survives the merge.
@@ -111,10 +113,10 @@ export class Telmoni {
         attributePerLinkCountLimit: 0,
       },
       generalLimits: { attributeCountLimit: 128, attributeValueLengthLimit: Infinity },
-      idGenerator: new RandomIdGenerator(),
+      idGenerator: ids,
       spanProcessors: [this.#processor],
     });
-    this.#opener = new Opener(this.#provider.getTracer(contract.SCOPE, VERSION), this.#processor, this.config);
+    this.#opener = new Opener(this.#provider.getTracer(contract.SCOPE, VERSION), this.#processor, this.config, ids);
   }
 
   /**
@@ -172,6 +174,21 @@ export class Telmoni {
     // Logs and stack traces still name the callee, as under Python's functools.wraps.
     Object.defineProperty(wrapped, 'name', { value: fn.name, configurable: true });
     return wrapped;
+  }
+
+  /**
+   * Send a run that has already ended, from its record, as the live calls
+   * would have sent it: for a job that keeps its own log, or a hook that runs
+   * after the turn it reports. The same record sent again is the same bytes,
+   * which ingest answers once.
+   *
+   * Throws, sending nothing, a `TypeError` for a blank agent, a run id that
+   * is not a UUID, a time that is neither a `Date` nor a finite number, or an
+   * item of no known `type`; a `RangeError` for a span that ends before it
+   * starts.
+   */
+  recordRun(record: RunRecord): void {
+    this.#opener.record(record);
   }
 
   /** Send everything queued; true once the platform has it, false past the timeout. */

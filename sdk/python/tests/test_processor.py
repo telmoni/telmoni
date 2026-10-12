@@ -103,3 +103,21 @@ def test_a_forked_child_gets_a_worker_of_its_own(transport: FakeTransport) -> No
         assert os.waitstatus_to_exitcode(status) == 0, "the child sent nothing"
     finally:
         client.shutdown()
+
+
+def test_a_hold_keeps_what_is_queued_inside_it_together(
+    transport: FakeTransport,
+) -> None:
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    try:
+        with client.processor.hold(), client.run("bot"):
+            # The run's start would have woken the worker at once.
+            assert not transport.wait_for(1, timeout=0.2)
+        assert client.flush()
+    finally:
+        client.shutdown()
+    assert len(transport.requests) == 1
+    assert [s["name"] for s in transport.spans()] == [
+        "telmoni.run.start",
+        "invoke_agent bot",
+    ]

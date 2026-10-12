@@ -12,7 +12,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
-use opentelemetry::trace::{Span as _, SpanKind, Status, TraceContextExt as _, Tracer as _};
+use opentelemetry::trace::{
+    Span as _, SpanKind, SpanRef, Status, TraceContextExt as _, Tracer as _,
+};
 use opentelemetry::{Context, ContextGuard, KeyValue};
 use serde::Serialize;
 use uuid::Uuid;
@@ -191,19 +193,7 @@ impl Handle {
     }
 
     fn model_call(&self, model: &str, options: ModelCallOptions) -> ModelCall {
-        // Sent blank, the span would be named ` <model>` and ingest would
-        // read it as a step.
-        let operation = options
-            .operation
-            .filter(|operation| !operation.trim().is_empty())
-            .unwrap_or_else(|| contract::MODEL_OPERATION_DEFAULT.to_owned());
-        let mut attributes = vec![
-            KeyValue::new(contract::OPERATION, operation.clone()),
-            KeyValue::new(contract::REQUEST_MODEL, model.to_owned()),
-        ];
-        if let Some(provider) = options.provider.filter(|provider| !provider.is_empty()) {
-            attributes.push(KeyValue::new(contract::PROVIDER, provider));
-        }
+        let (name, mut attributes) = model_call_opening(model, options.operation, options.provider);
         if let Some(messages) = options.input_messages {
             attributes.push(KeyValue::new(contract::INPUT_MESSAGES, messages.0));
         }
@@ -211,38 +201,27 @@ impl Handle {
             attributes.push(KeyValue::new(contract::SYSTEM_INSTRUCTIONS, instructions.0));
         }
         ModelCall {
-            handle: self.child(format!("{operation} {model}"), SpanKind::Client, attributes),
+            handle: self.child(name, SpanKind::Client, attributes),
         }
     }
 
     fn tool_call(&self, name: &str, options: ToolCallOptions) -> ToolCall {
-        let mut attributes = vec![
-            KeyValue::new(contract::OPERATION, contract::TOOL_OPERATION),
-            KeyValue::new(contract::TOOL_NAME, name.to_owned()),
-        ];
+        let (name, mut attributes) = tool_call_opening(name);
         if let Some(arguments) = options.arguments {
             attributes.push(KeyValue::new(contract::TOOL_CALL_ARGUMENTS, arguments.0));
         }
         ToolCall {
-            handle: self.child(
-                format!("{} {name}", contract::TOOL_OPERATION),
-                SpanKind::Internal,
-                attributes,
-            ),
+            handle: self.child(name, SpanKind::Internal, attributes),
         }
     }
 
     fn fail(&self, error_type: &str) {
-        let span = self.cx.span();
-        span.set_attribute(KeyValue::new(contract::ERROR_TYPE, error_type.to_owned()));
-        span.set_status(Status::error(""));
+        mark_failed(&self.cx.span(), error_type.to_owned());
         self.failed.store(true, Ordering::Relaxed);
     }
 
     fn cancel(&self) {
-        self.cx
-            .span()
-            .set_attribute(KeyValue::new(contract::CANCELLED, true));
+        mark_cancelled(&self.cx.span());
     }
 
     fn finish(&mut self) {
@@ -509,22 +488,7 @@ impl ModelCall {
             span.set_attribute(KeyValue::new(contract::RESPONSE_MODEL, model));
         }
         if let Some(usage) = reply.usage {
-            for (key, count) in [
-                (contract::INPUT_TOKENS, usage.input_tokens),
-                (contract::OUTPUT_TOKENS, usage.output_tokens),
-                (
-                    contract::CACHE_READ_INPUT_TOKENS,
-                    usage.cache_read_input_tokens,
-                ),
-                (
-                    contract::CACHE_WRITE_INPUT_TOKENS,
-                    usage.cache_write_input_tokens,
-                ),
-            ] {
-                if let Some(count) = count {
-                    span.set_attribute(KeyValue::new(key, count));
-                }
-            }
+            span.set_attributes(usage_attributes(usage));
         }
         if let Some(messages) = reply.output_messages {
             span.set_attribute(KeyValue::new(contract::OUTPUT_MESSAGES, messages.0));
@@ -553,31 +517,9 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
     }
 
     let run_id = Uuid::new_v4().to_string();
-    let mut inherited = vec![
-        KeyValue::new(contract::RUN_ID, run_id.clone()),
-        KeyValue::new(contract::AGENT, agent.to_owned()),
-    ];
-    if let Some(user) = options.user_id.filter(|id| !id.is_empty()) {
-        inherited.push(KeyValue::new(contract::USER_ID, user));
-    }
-    if let Some(session) = options.session_id.filter(|id| !id.is_empty()) {
-        inherited.push(KeyValue::new(contract::SESSION_ID, session));
-    }
+    let inherited = inherited(&run_id, agent, options.user_id, options.session_id);
     let bounds = bound_attributes(&options.bounds);
-
-    let mut attributes = vec![
-        KeyValue::new(contract::OPERATION, contract::RUN_OPERATION),
-        KeyValue::new(contract::AGENT_NAME, agent.to_owned()),
-    ];
-    attributes.extend(inherited.iter().cloned());
-    attributes.extend(bounds.iter().cloned());
-    attributes.push(KeyValue::new(contract::SAMPLE_RATE, rate));
-    for (key, value) in options.tags {
-        attributes.push(KeyValue::new(
-            format!("{}{key}", contract::TAG_PREFIX),
-            value,
-        ));
-    }
+    let attributes = run_attributes(agent, &inherited, &bounds, rate, options.tags);
 
     let parent = Context::current();
     let start = SystemTime::now();
@@ -595,13 +537,10 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
 
     // OpenTelemetry sends a span only once it ends; without this one a run
     // stalled in its first call would never be heard.
-    let mut start_attributes = inherited.clone();
-    start_attributes.extend(bounds);
-    start_attributes.push(KeyValue::new(contract::SAMPLE_RATE, rate));
     let mut opener = tracer
         .span_builder(contract::RUN_START)
         .with_kind(SpanKind::Internal)
-        .with_attributes(start_attributes)
+        .with_attributes(start_attributes(&inherited, &bounds, rate))
         .with_start_time(start)
         .start_with_context(tracer, &cx);
     opener.end_with_timestamp(start);
@@ -617,6 +556,131 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
         run_id,
         agent: agent.to_owned(),
     })
+}
+
+/// What every span inside a run carries: its id and agent, and its user and
+/// session when it has them.
+pub(crate) fn inherited(
+    run_id: &str,
+    agent: &str,
+    user_id: Option<String>,
+    session_id: Option<String>,
+) -> Vec<KeyValue> {
+    let mut inherited = vec![
+        KeyValue::new(contract::RUN_ID, run_id.to_owned()),
+        KeyValue::new(contract::AGENT, agent.to_owned()),
+    ];
+    if let Some(user) = user_id.filter(|id| !id.is_empty()) {
+        inherited.push(KeyValue::new(contract::USER_ID, user));
+    }
+    if let Some(session) = session_id.filter(|id| !id.is_empty()) {
+        inherited.push(KeyValue::new(contract::SESSION_ID, session));
+    }
+    inherited
+}
+
+/// The run span's own attributes: the operation and the agent, what every
+/// span inside carries, the bounds, the sample rate and the tags.
+pub(crate) fn run_attributes(
+    agent: &str,
+    inherited: &[KeyValue],
+    bounds: &[KeyValue],
+    rate: f64,
+    tags: BTreeMap<String, String>,
+) -> Vec<KeyValue> {
+    let mut attributes = vec![
+        KeyValue::new(contract::OPERATION, contract::RUN_OPERATION),
+        KeyValue::new(contract::AGENT_NAME, agent.to_owned()),
+    ];
+    attributes.extend_from_slice(inherited);
+    attributes.extend_from_slice(bounds);
+    attributes.push(KeyValue::new(contract::SAMPLE_RATE, rate));
+    for (key, value) in tags {
+        attributes.push(KeyValue::new(
+            format!("{}{key}", contract::TAG_PREFIX),
+            value,
+        ));
+    }
+    attributes
+}
+
+/// What `telmoni.run.start` carries: what every span inside the run carries,
+/// the bounds and the sample rate.
+pub(crate) fn start_attributes(
+    inherited: &[KeyValue],
+    bounds: &[KeyValue],
+    rate: f64,
+) -> Vec<KeyValue> {
+    let mut attributes = inherited.to_vec();
+    attributes.extend_from_slice(bounds);
+    attributes.push(KeyValue::new(contract::SAMPLE_RATE, rate));
+    attributes
+}
+
+/// A model call's span name, `<operation> <model>`, and what it opens with
+/// besides what the run carries and any content.
+pub(crate) fn model_call_opening(
+    model: &str,
+    operation: Option<String>,
+    provider: Option<String>,
+) -> (String, Vec<KeyValue>) {
+    // Sent blank, the span would be named ` <model>` and ingest would read it
+    // as a step.
+    let operation = operation
+        .filter(|operation| !operation.trim().is_empty())
+        .unwrap_or_else(|| contract::MODEL_OPERATION_DEFAULT.to_owned());
+    let name = format!("{operation} {model}");
+    let mut attributes = vec![
+        KeyValue::new(contract::OPERATION, operation),
+        KeyValue::new(contract::REQUEST_MODEL, model.to_owned()),
+    ];
+    if let Some(provider) = provider.filter(|provider| !provider.is_empty()) {
+        attributes.push(KeyValue::new(contract::PROVIDER, provider));
+    }
+    (name, attributes)
+}
+
+/// A tool call's span name, `execute_tool <name>`, and what it opens with
+/// besides what the run carries and any content.
+pub(crate) fn tool_call_opening(name: &str) -> (String, Vec<KeyValue>) {
+    (
+        format!("{} {name}", contract::TOOL_OPERATION),
+        vec![
+            KeyValue::new(contract::OPERATION, contract::TOOL_OPERATION),
+            KeyValue::new(contract::TOOL_NAME, name.to_owned()),
+        ],
+    )
+}
+
+/// The counts `usage` holds, as the conventions name them.
+pub(crate) fn usage_attributes(usage: Usage) -> impl Iterator<Item = KeyValue> {
+    [
+        (contract::INPUT_TOKENS, usage.input_tokens),
+        (contract::OUTPUT_TOKENS, usage.output_tokens),
+        (
+            contract::CACHE_READ_INPUT_TOKENS,
+            usage.cache_read_input_tokens,
+        ),
+        (
+            contract::CACHE_WRITE_INPUT_TOKENS,
+            usage.cache_write_input_tokens,
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(key, count)| count.map(|count| KeyValue::new(key, count)))
+}
+
+/// Marks `span` failed: `error.type` set to `error_type`, and status `ERROR`
+/// with no description, since a description is a message and a message is
+/// content.
+pub(crate) fn mark_failed(span: &SpanRef<'_>, error_type: String) {
+    span.set_attribute(KeyValue::new(contract::ERROR_TYPE, error_type));
+    span.set_status(Status::error(""));
+}
+
+/// Marks `span` cancelled by the agent, which is neither ok nor an error.
+pub(crate) fn mark_cancelled(span: &SpanRef<'_>) {
+    span.set_attribute(KeyValue::new(contract::CANCELLED, true));
 }
 
 fn bound_attributes(bounds: &Bounds) -> Vec<KeyValue> {

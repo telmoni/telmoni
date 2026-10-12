@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import ipaddress
 import os
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
@@ -156,3 +158,61 @@ class Usage:
     output_tokens: int | None = None
     cache_read_input_tokens: int | None = None
     cache_write_input_tokens: int | None = None
+
+
+@dataclass(frozen=True)
+class ModelCallRecord:
+    """A model call that has ended: its model, its times and its tokens."""
+
+    model: str
+    start: datetime
+    end: datetime
+    provider: str | None = None
+    operation: str = "chat"
+    usage: Usage | None = None
+    error_type: str | None = None
+    cancelled: bool = False
+
+
+@dataclass(frozen=True)
+class ToolCallRecord:
+    """A tool call that has ended: its name and its times."""
+
+    name: str
+    start: datetime
+    end: datetime
+    error_type: str | None = None
+    cancelled: bool = False
+
+
+CallRecord = ModelCallRecord | ToolCallRecord
+
+
+@dataclass(frozen=True)
+class StepRecord:
+    """A step that has ended, with the calls made inside it."""
+
+    name: str
+    start: datetime
+    end: datetime
+    calls: Sequence[CallRecord] = ()
+    error_type: str | None = None
+    cancelled: bool = False
+
+
+@dataclass(frozen=True)
+class RunRecord:
+    """A run that has ended, as ``record_run`` sends it: its id, a UUID the
+    caller gives, and everything in it, each with its own times. Times carry
+    their timezone, since a naive one would be read as this machine's."""
+
+    run_id: str
+    agent: str
+    start: datetime
+    end: datetime
+    user_id: str | None = None
+    session_id: str | None = None
+    tags: Mapping[str, str] | None = None
+    inside: Sequence[StepRecord | CallRecord] = ()
+    error_type: str | None = None
+    cancelled: bool = False

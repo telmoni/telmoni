@@ -10,20 +10,27 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { SpanKind, SpanStatusCode, context, createContextKey, trace } from '@opentelemetry/api';
+import { ROOT_CONTEXT, SpanKind, SpanStatusCode, context, createContextKey, trace } from '@opentelemetry/api';
 import type { Attributes, Context, HrTime, Span, SpanOptions, Tracer } from '@opentelemetry/api';
 import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 
 import * as contract from './contract.js';
 import { errorType, isAbort } from './errors.js';
+import { type Ids, spanIdAt } from './ids.js';
 import type { Processor } from './processor.js';
 import type {
   Bounds,
+  CallRecord,
   ModelAnswer,
   ModelCallOptions,
+  RecordOutcome,
+  RecordTime,
   ResolvedConfig,
   RunOptions,
+  RunRecord,
+  StepRecord,
   ToolCallOptions,
+  Usage,
 } from './types.js';
 
 const RUN_KEY = createContextKey('telmoni.run');
@@ -146,17 +153,7 @@ export class ModelCall extends Handle {
     if (answer.responseModel !== undefined) {
       this.span.setAttribute(contract.RESPONSE_MODEL, answer.responseModel);
     }
-    const usage = answer.usage;
-    if (usage !== undefined) {
-      for (const [key, value] of [
-        [contract.INPUT_TOKENS, usage.inputTokens],
-        [contract.OUTPUT_TOKENS, usage.outputTokens],
-        [contract.CACHE_READ_INPUT_TOKENS, usage.cacheReadInputTokens],
-        [contract.CACHE_WRITE_INPUT_TOKENS, usage.cacheWriteInputTokens],
-      ] as const) {
-        if (value !== undefined) this.span.setAttribute(key, Math.trunc(value));
-      }
-    }
+    this.span.setAttributes(usageOf(answer.usage));
     if (answer.outputMessages !== undefined) {
       this.span.setAttribute(contract.OUTPUT_MESSAGES, asJson(answer.outputMessages));
     }
@@ -211,11 +208,13 @@ export class Opener {
   readonly #tracer: Tracer;
   readonly #processor: Processor;
   readonly #config: ResolvedConfig;
+  readonly #ids: Ids;
 
-  constructor(tracer: Tracer, processor: Processor, config: ResolvedConfig) {
+  constructor(tracer: Tracer, processor: Processor, config: ResolvedConfig, ids: Ids) {
     this.#tracer = tracer;
     this.#processor = processor;
     this.#config = config;
+    this.#ids = ids;
   }
 
   run(agent: string, options: RunOptions): Run {
@@ -294,9 +293,172 @@ export class Opener {
     return new ToolCall(span, parent, run);
   }
 
+  /**
+   * A run that has ended, sent as the live calls would have sent it.
+   *
+   * Its trace is its own, named by the run's id, whatever context is active;
+   * each span's id is derived from that id and the span's place in the record.
+   * The spans end in one synchronous pass, the run's start first and the run's
+   * own last, and the processor's worker is a timer, which runs only once
+   * this returns: so they are queued together, and the same record sent again
+   * is the same bytes.
+   */
+  record(record: RunRecord): void {
+    if (typeof record.agent !== 'string' || record.agent.trim() === '') {
+      throw new TypeError("a run needs its agent's name");
+    }
+    const runHex = uuidHex(record.runId);
+    // Checked whole before anything is queued, so a record refused sends
+    // nothing rather than half a run.
+    for (const item of walk(record)) {
+      if (later(hrTimeOf(item.start), hrTimeOf(item.end))) {
+        throw new RangeError('a recorded span cannot end before it starts');
+      }
+    }
+    const rate = this.#config.sampleRate;
+    const runId = [
+      runHex.slice(0, 8),
+      runHex.slice(8, 12),
+      runHex.slice(12, 16),
+      runHex.slice(16, 20),
+      runHex.slice(20),
+    ].join('-');
+    const inherited: Attributes = { [contract.RUN_ID]: runId, [contract.AGENT]: record.agent };
+    if (record.userId) inherited[contract.USER_ID] = record.userId;
+    if (record.sessionId) inherited[contract.SESSION_ID] = record.sessionId;
+    const attributes: Attributes = {
+      [contract.OPERATION]: 'invoke_agent',
+      [contract.AGENT_NAME]: record.agent,
+      ...inherited,
+      [contract.SAMPLE_RATE]: rate,
+    };
+    for (const [key, value] of Object.entries(record.tags ?? {})) {
+      attributes[`${contract.TAG_PREFIX}${key}`] = value;
+    }
+    if (rate < 1 && Math.random() >= rate) this.#processor.sampleOut(runId);
+    let place = 0;
+    const open = (name: string, parent: Context, spanAttributes: Attributes, kind: SpanKind, at: RecordTime): Span =>
+      this.#ids.given(runHex, spanIdAt(runHex, place++), () =>
+        this.#tracer.startSpan(name, { kind, attributes: spanAttributes, startTime: hrTimeOf(at) }, parent),
+      );
+    const call = (item: CallRecord, parent: Context): void => {
+      if (item.type === 'model_call') {
+        const operation = typeof item.operation === 'string' && item.operation.trim() !== '' ? item.operation : 'chat';
+        const callAttributes: Attributes = {
+          ...inherited,
+          [contract.OPERATION]: operation,
+          [contract.REQUEST_MODEL]: item.model,
+        };
+        if (item.provider) callAttributes[contract.PROVIDER] = item.provider;
+        Object.assign(callAttributes, usageOf(item.usage));
+        close(open(`${operation} ${item.model}`, parent, callAttributes, SpanKind.CLIENT, item.start), item);
+      } else {
+        const callAttributes: Attributes = {
+          ...inherited,
+          [contract.OPERATION]: contract.TOOL_OPERATION,
+          [contract.TOOL_NAME]: item.name,
+        };
+        close(open(`execute_tool ${item.name}`, parent, callAttributes, SpanKind.INTERNAL, item.start), item);
+      }
+    };
+    const span = open(`invoke_agent ${record.agent}`, ROOT_CONTEXT, attributes, SpanKind.INTERNAL, record.start);
+    const ctx = trace.setSpan(ROOT_CONTEXT, span);
+    const at = hrTimeOf(record.start);
+    open(contract.RUN_START, ctx, { ...inherited, [contract.SAMPLE_RATE]: rate }, SpanKind.INTERNAL, record.start).end(
+      at,
+    );
+    for (const item of record.inside ?? []) {
+      if (item.type === 'step') {
+        const step = open(item.name, ctx, inherited, SpanKind.INTERNAL, item.start);
+        const inner = trace.setSpan(ctx, step);
+        for (const each of item.calls ?? []) call(each, inner);
+        close(step, item);
+      } else {
+        call(item, ctx);
+      }
+    }
+    close(span, record);
+  }
+
   #start(name: string, parent: Context, attributes: Attributes, kind: SpanKind): Span {
     return this.#tracer.startSpan(name, { kind, attributes }, parent);
   }
+}
+
+const UUID = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
+
+/** A run id's 32 hex digits, lowercase: the trace's id. */
+function uuidHex(runId: unknown): string {
+  if (typeof runId !== 'string' || !UUID.test(runId) || ![32, 36].includes(runId.length)) {
+    throw new TypeError("a recorded run's id must be a UUID");
+  }
+  const hex = runId.replaceAll('-', '').toLowerCase();
+  // The run's id is its trace's, and a trace id of zeros is no trace at all.
+  if (/^0+$/.test(hex)) throw new TypeError("a recorded run's id must be a UUID other than the nil UUID");
+  return hex;
+}
+
+/**
+ * A recorded time as `[seconds, nanoseconds]`, worked out here: a span handed
+ * a number no larger than `performance.now()` reads it as a performance
+ * reading rather than milliseconds since the epoch, while it takes an
+ * `HrTime` as given.
+ */
+function hrTimeOf(time: RecordTime): HrTime {
+  const ms = time instanceof Date ? time.getTime() : time;
+  if (typeof ms !== 'number' || !Number.isFinite(ms)) {
+    throw new TypeError('a recorded time must be a Date or milliseconds since the Unix epoch');
+  }
+  const seconds = Math.floor(ms / 1000);
+  const nanos = Math.round((ms - seconds * 1000) * 1_000_000);
+  return nanos >= 1_000_000_000 ? [seconds + 1, nanos - 1_000_000_000] : [seconds, nanos];
+}
+
+function later(a: HrTime, b: HrTime): boolean {
+  return a[0] > b[0] || (a[0] === b[0] && a[1] > b[1]);
+}
+
+type Recorded = RunRecord | StepRecord | CallRecord;
+
+function* walk(record: RunRecord): Generator<Recorded> {
+  yield record;
+  for (const item of record.inside ?? []) {
+    if (item.type !== 'step' && item.type !== 'model_call' && item.type !== 'tool_call') {
+      throw new TypeError("a recorded item's type must be 'step', 'model_call' or 'tool_call'");
+    }
+    yield item;
+    if (item.type === 'step') {
+      for (const each of item.calls ?? []) {
+        if (each.type !== 'model_call' && each.type !== 'tool_call') {
+          throw new TypeError("a step's recorded call's type must be 'model_call' or 'tool_call'");
+        }
+        yield each;
+      }
+    }
+  }
+}
+
+function close(span: Span, outcome: RecordOutcome & { end: RecordTime }): void {
+  if (outcome.errorType) {
+    span.setAttribute(contract.ERROR_TYPE, outcome.errorType);
+    span.setStatus({ code: SpanStatusCode.ERROR });
+  }
+  if (outcome.cancelled) span.setAttribute(contract.CANCELLED, true);
+  span.end(hrTimeOf(outcome.end));
+}
+
+function usageOf(usage: Usage | undefined): Attributes {
+  const out: Attributes = {};
+  if (usage === undefined) return out;
+  for (const [key, value] of [
+    [contract.INPUT_TOKENS, usage.inputTokens],
+    [contract.OUTPUT_TOKENS, usage.outputTokens],
+    [contract.CACHE_READ_INPUT_TOKENS, usage.cacheReadInputTokens],
+    [contract.CACHE_WRITE_INPUT_TOKENS, usage.cacheWriteInputTokens],
+  ] as const) {
+    if (value !== undefined) out[key] = Math.trunc(value);
+  }
+  return out;
 }
 
 function boundsOf(bounds: Bounds | undefined): Attributes {

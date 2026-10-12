@@ -22,4 +22,7 @@
 // The context a run or step returns carries its span, so a span the
 // application opens with it nests under the run, and the run is found from it
 // again with RunFromContext.
+//
+// A run that has already ended, kept in a job's own log or reported by a hook
+// once its turn is over, is sent whole from its record with RecordRun.
 package telmoni

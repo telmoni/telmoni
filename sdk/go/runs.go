@@ -303,12 +303,7 @@ func (r *Run) ModelCall(ctx context.Context, model string, opts ModelCallOptions
 	if r == nil || r.span == nil {
 		return ctx, &ModelCall{}
 	}
-	operation := opts.Operation
-	// Sent blank, the span would be named " <model>" and ingest would read
-	// it as a step.
-	if strings.TrimSpace(operation) == "" {
-		operation = defaultModelOperation
-	}
+	operation := modelOperation(opts.Operation)
 	attrs := []attribute.KeyValue{
 		attribute.String(attrOperation, operation),
 		attribute.String(attrRequestModel, model),
@@ -369,14 +364,7 @@ func (m *ModelCall) Answered(a Answer) {
 	if a.ResponseModel != "" {
 		attrs = append(attrs, attribute.String(attrResponseModel, a.ResponseModel))
 	}
-	if a.Usage != nil {
-		attrs = append(attrs,
-			attribute.Int(attrInputTokens, a.Usage.InputTokens),
-			attribute.Int(attrOutputTokens, a.Usage.OutputTokens),
-			attribute.Int(attrCacheReadInputTokens, a.Usage.CacheReadInputTokens),
-			attribute.Int(attrCacheWriteInputTokens, a.Usage.CacheWriteInputTokens),
-		)
-	}
+	attrs = append(attrs, usageAttributes(a.Usage)...)
 	if a.OutputMessages != nil {
 		attrs = append(attrs, attribute.String(attrOutputMessages, asJSON(a.OutputMessages)))
 	}
@@ -392,6 +380,27 @@ func (t *ToolCall) Returned(result any) {
 		return
 	}
 	t.span.SetAttributes(attribute.String(attrToolCallResult, asJSON(result)))
+}
+
+// modelOperation is a model call's operation, chat when blank: sent blank, the
+// span would be named " <model>" and ingest would read it as a step.
+func modelOperation(operation string) string {
+	if strings.TrimSpace(operation) == "" {
+		return defaultModelOperation
+	}
+	return operation
+}
+
+func usageAttributes(u *Usage) []attribute.KeyValue {
+	if u == nil {
+		return nil
+	}
+	return []attribute.KeyValue{
+		attribute.Int(attrInputTokens, u.InputTokens),
+		attribute.Int(attrOutputTokens, u.OutputTokens),
+		attribute.Int(attrCacheReadInputTokens, u.CacheReadInputTokens),
+		attribute.Int(attrCacheWriteInputTokens, u.CacheWriteInputTokens),
+	}
 }
 
 func boundAttributes(b *Bounds) []attribute.KeyValue {
@@ -434,5 +443,5 @@ func newUUID() string {
 	_, _ = rand.Read(b[:])
 	b[6] = b[6]&0x0f | 0x40
 	b[8] = b[8]&0x3f | 0x80
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:])
+	return formatUUID(b)
 }

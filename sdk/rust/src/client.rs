@@ -7,9 +7,7 @@ use std::time::Duration;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::{InstrumentationScope, KeyValue};
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::trace::{
-    RandomIdGenerator, SdkTracer, SdkTracerProvider, SpanLimits, SpanProcessor as _,
-};
+use opentelemetry_sdk::trace::{SdkTracer, SdkTracerProvider, SpanLimits, SpanProcessor as _};
 use uuid::Uuid;
 
 use crate::VERSION;
@@ -17,7 +15,9 @@ use crate::config::Config;
 use crate::contract;
 use crate::error::Error;
 use crate::exporter::Exporter;
+use crate::ids::Ids;
 use crate::processor::{Batching, Processor};
+use crate::records::{self, RunRecord};
 use crate::runs::{self, Run, RunOptions};
 use crate::sampler::RecordingSampler;
 use crate::transport::{Reqwest, Transport};
@@ -37,8 +37,8 @@ pub struct Hooks {
     /// Takes each warning; `tracing::warn!` under the target `telmoni` unless
     /// given.
     pub warn: Box<dyn Fn(&str) + Send + Sync>,
-    /// A number in `[0, 1)` drawn as a run starts: the run is kept when it
-    /// falls below the sample rate.
+    /// A number in `[0, 1)` drawn as a run starts or a record is sent: the
+    /// run is kept when it falls below the sample rate.
     pub random: Box<dyn Fn() -> f64 + Send + Sync>,
     /// How spans are batched on their way out.
     pub batching: Batching,
@@ -139,7 +139,7 @@ impl Telmoni {
                 max_attributes_per_event: 0,
                 max_attributes_per_link: 0,
             })
-            .with_id_generator(RandomIdGenerator::default())
+            .with_id_generator(Ids::default())
             .with_span_processor(processor.clone())
             .build();
         let tracer = provider.tracer_with_scope(
@@ -220,6 +220,77 @@ impl Telmoni {
         let result = run.on_result(f(&run));
         run.end();
         result
+    }
+
+    /// Sends a run that has already ended, from its record, as the live calls
+    /// would have sent it: for a job that keeps its own log, or a hook that
+    /// runs after the turn it reports. The same exporter, content rules and
+    /// sample rate apply.
+    ///
+    /// Its trace is its own, named by the run's id, whatever trace is
+    /// current, and each span's id is derived from that id and the span's
+    /// place in the record, so the same record sent again is the same bytes,
+    /// which ingest answers once: give a run the same id each time it is
+    /// sent. Its spans leave together, in one export when it holds no more
+    /// than a batch, its start first and the run's own span last.
+    ///
+    /// ```no_run
+    /// use std::time::{Duration, SystemTime};
+    ///
+    /// use telmoni_sdk::{Config, ModelCallRecord, RunRecord, Telmoni, ToolCallRecord, Usage};
+    ///
+    /// # fn main() -> Result<(), telmoni_sdk::Error> {
+    /// let telmoni = Telmoni::new(Config::from_env());
+    /// // 2026-10-12T09:00:00Z, and what came after it.
+    /// let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_791_795_600);
+    /// let at = |millis| start + Duration::from_millis(millis);
+    ///
+    /// telmoni.record_run(RunRecord {
+    ///     session_id: Some("conv_7".into()),
+    ///     inside: vec![
+    ///         ModelCallRecord {
+    ///             provider: Some("openai".into()),
+    ///             usage: Some(Usage {
+    ///                 input_tokens: Some(1200),
+    ///                 output_tokens: Some(85),
+    ///                 ..Usage::default()
+    ///             }),
+    ///             ..ModelCallRecord::new("gpt-4o-mini", at(100), at(2_000))
+    ///         }
+    ///         .into(),
+    ///         ToolCallRecord {
+    ///             error_type: Some("TimeoutError".into()),
+    ///             ..ToolCallRecord::new("search", at(2_000), at(3_000))
+    ///         }
+    ///         .into(),
+    ///     ],
+    ///     // Yours, kept with the log.
+    ///     ..RunRecord::new("3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d", "nightly-triage", start, at(9_000))
+    /// })?;
+    /// telmoni.flush();
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// [`Error::EmptyAgent`] for a blank agent; [`Error::RunId`] for a run id
+    /// that is not a UUID; [`Error::EndBeforeStart`] for a span — the run's
+    /// own, a step's or a call's — that ends before it starts;
+    /// [`Error::SampleRate`] for a configured rate not above 0 and up to 1.
+    /// A record refused sends nothing.
+    pub fn record_run(&self, record: RunRecord) -> Result<(), Error> {
+        records::send(&self.inner, record)
+    }
+
+    /// Runs `f` with every batch held back until it returns, so the spans
+    /// that end meanwhile leave together, in their order: what
+    /// [`Self::record_run`] does with a record's spans. For the processor's
+    /// own tests, and not part of the API.
+    #[doc(hidden)]
+    pub fn with_exports_held<R>(&self, f: impl FnOnce() -> R) -> R {
+        let _hold = self.inner.processor.hold();
+        f()
     }
 
     /// Sends everything queued and waits, up to 30 seconds; `true` once the

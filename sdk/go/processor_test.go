@@ -140,6 +140,33 @@ func TestAFlushWithoutADeadlineWaitsThirtySeconds(t *testing.T) {
 	})
 }
 
+// Under a hold the worker takes no batch, not even for a run's start, which
+// would wake it at once; the release alone wakes it, and it sends what was
+// queued in one export, in its order. The bubble's Wait returns only once the
+// worker is blocked again, the bubble's clock where it was: what was not sent
+// by then waits for no timer.
+func TestAHoldKeepsWhatIsQueuedInsideItTogether(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarness(t, testConfig(), nil)
+		release := telmoni.Hold(h.client)
+		_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+		run.End()
+		synctest.Wait()
+		if sent := len(h.transport.all()); sent != 0 {
+			t.Fatalf("sent %d exports under the hold", sent)
+		}
+		release()
+		synctest.Wait()
+		bodies := h.transport.bodies(t)
+		if len(bodies) != 1 {
+			t.Fatalf("sent %d exports, want what the hold kept in one", len(bodies))
+		}
+		if got := names(spansIn(bodies[0])); !reflect.DeepEqual(got, []string{"telmoni.run.start", "invoke_agent bot"}) {
+			t.Errorf("the export holds %v", got)
+		}
+	})
+}
+
 // panicking is a slog handler that panics on every record, as a broken
 // handler of the application's would.
 type panicking struct{}

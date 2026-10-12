@@ -18,6 +18,19 @@ Before comparing, a suite normalizes what it captured:
 
 The content the scenario hands the model call (`gen_ai.input.messages`, `gen_ai.output.messages`) is absent from the export: the exporter takes content off every span unless the code asked for it and the project's mode allows.
 
+## `recorded.json`
+
+`scenario.record` is a run that has already ended, handed whole to `record_run` (`recordRun`, `RecordRun`): its id, its agent, user, session and tags, its times, and what ran inside it, a step holding its own calls. Times are RFC 3339 in UTC, to the millisecond, which every language holds exactly. `export` is the one body the SDK must send for it: a record travels in a single export when it holds no more spans than a batch, its `telmoni.run.start` first, then each span as it ended — a step after its calls — and the run's own last.
+
+Nothing is derived at random, so the export is compared nearly whole:
+
+1. Exactly one body was sent.
+2. Every `attributes` array is sorted by `key`, the resource's too; spans keep the order they were sent in.
+3. `telemetry.sdk.language` is replaced by `<language>`; `telemetry.sdk.version`, `telemetry.distro.version` and the scope's `version` by `<version>`.
+4. Everything else is compared as JSON, ids and times included. The trace's id is the run's, without its hyphens. Each span's id is the first eight bytes, in hex, of the version 5 UUID (RFC 9562) named by the span's place in the record, in decimal, under the run's id: `0` the run, `1` its start, then each step and call in the record's order, a step before its calls.
+
+The same record sent twice must be the same bytes, which ingest's claim on a body answers once.
+
 ## `answers/`
 
 Each file is one answer from `POST /otlp/v1/traces` — `status`, `headers`, `body` — and `expect`, what the SDK must do with it. A suite's fake transport answers from these files; the asserted behaviour is the `expect` line.

@@ -59,6 +59,52 @@ failed with the exception's class, never its message, and is raised again; a
 `KeyboardInterrupt` or `asyncio.CancelledError` marks it cancelled. `fail()`
 and `cancel()` do the same by hand.
 
+## A run recorded after it ended
+
+A job that keeps its own log, or a hook that runs once the turn it reports is
+over, hands the finished run to `record_run` as data:
+
+```python
+from datetime import datetime, timezone
+
+from telmoni import ModelCallRecord, RunRecord, StepRecord, ToolCallRecord, Usage
+
+telmoni.record_run(
+    RunRecord(
+        run_id="3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",  # yours, kept with the log
+        agent="nightly-triage",
+        session_id="conv_7",
+        start=datetime(2026, 10, 12, 9, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 10, 12, 9, 0, 9, tzinfo=timezone.utc),
+        inside=[
+            ModelCallRecord(
+                model="gpt-4o-mini",
+                provider="openai",
+                start=datetime(2026, 10, 12, 9, 0, 0, 100000, tzinfo=timezone.utc),
+                end=datetime(2026, 10, 12, 9, 0, 2, tzinfo=timezone.utc),
+                usage=Usage(input_tokens=1200, output_tokens=85),
+            ),
+            ToolCallRecord(
+                name="search",
+                start=datetime(2026, 10, 12, 9, 0, 2, tzinfo=timezone.utc),
+                end=datetime(2026, 10, 12, 9, 0, 3, tzinfo=timezone.utc),
+                error_type="TimeoutError",
+            ),
+        ],
+    )
+)
+telmoni.flush()
+```
+
+It is sent as the live calls would have sent it, through the same exporter,
+content rules and sample rate, in a trace of its own named by the run's id,
+whatever trace is current. Each span's id is derived from the run's id and the
+span's place in the record, so the same record sent again is the same bytes,
+which ingest answers once: give a run the same id each time you send it. A
+record holds no content. A blank agent, a run id that is not a UUID or is the
+nil UUID, a time without its timezone or a span that ends before it starts
+raises `ValueError` and sends nothing.
+
 ## Content
 
 Prompts, completions, tool arguments and results (`input_messages`,

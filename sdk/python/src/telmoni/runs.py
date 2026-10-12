@@ -11,20 +11,30 @@ from __future__ import annotations
 import asyncio
 import functools
 import inspect
+import itertools
 import json
 import logging
 import random
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextvars import Token
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from opentelemetry import context, trace
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.trace import Span, SpanKind, Status, StatusCode
 
-from . import contract
-from .models import Bounds, Usage
+from . import contract, ids
+from .models import (
+    Bounds,
+    CallRecord,
+    ModelCallRecord,
+    RunRecord,
+    StepRecord,
+    ToolCallRecord,
+    Usage,
+)
 
 if TYPE_CHECKING:
     from .client import Telmoni
@@ -141,15 +151,7 @@ class ModelCall(Handle):
         """What the model answered: its name, its tokens, and its messages."""
         if response_model is not None:
             self._span.set_attribute(contract.RESPONSE_MODEL, response_model)
-        if usage is not None:
-            for key, value in (
-                (contract.INPUT_TOKENS, usage.input_tokens),
-                (contract.OUTPUT_TOKENS, usage.output_tokens),
-                (contract.CACHE_READ_INPUT_TOKENS, usage.cache_read_input_tokens),
-                (contract.CACHE_WRITE_INPUT_TOKENS, usage.cache_write_input_tokens),
-            ):
-                if value is not None:
-                    self._span.set_attribute(key, value)
+        self._span.set_attributes(_usage(usage))
         if output_messages is not None:
             self._span.set_attribute(
                 contract.OUTPUT_MESSAGES, _as_json(output_messages)
@@ -354,6 +356,116 @@ class Opener:
             run, ToolCall, f"execute_tool {name}", attributes, SpanKind.INTERNAL
         )
 
+    def record(self, record: RunRecord) -> None:
+        """Send a run that has ended as the live calls would have sent it.
+
+        Its trace is its own, named by the run's id, whatever trace is current;
+        each span's id is derived from that id and the span's place in the
+        record. Its spans are queued together under the processor's hold, the
+        run's start first and the run's own last, so the same record sent again
+        is the same bytes.
+        """
+        if not record.agent.strip():
+            raise ValueError("a run needs its agent's name")
+        try:
+            run_uuid = uuid.UUID(record.run_id)
+        except (TypeError, ValueError):
+            raise ValueError("a recorded run's id must be a UUID") from None
+        # The run's id is its trace's, and a trace id of zeros is no trace at all.
+        if run_uuid.int == 0:
+            raise ValueError(
+                "a recorded run's id must be a UUID other than the nil UUID"
+            )
+        # Checked whole before anything is queued, so a record refused sends
+        # nothing rather than half a run.
+        for item in _walk(record):
+            if _nanos(item.end) < _nanos(item.start):
+                raise ValueError("a recorded span cannot end before it starts")
+        rate = self._client.config.sample_rate
+        run_id = str(run_uuid)
+        inherited: dict[str, str] = {
+            contract.RUN_ID: run_id,
+            contract.AGENT: record.agent,
+        }
+        if record.user_id:
+            inherited[contract.USER_ID] = record.user_id
+        if record.session_id:
+            inherited[contract.SESSION_ID] = record.session_id
+        attributes: dict[str, Any] = {
+            contract.OPERATION: "invoke_agent",
+            contract.AGENT_NAME: record.agent,
+            **inherited,
+            contract.SAMPLE_RATE: float(rate),
+        }
+        for key, value in (record.tags or {}).items():
+            attributes[f"{contract.TAG_PREFIX}{key}"] = value
+        if rate < 1 and random.random() >= rate:
+            self._client.processor.sample_out(run_id)
+        places = itertools.count()
+
+        def open_span(
+            name: str,
+            parent: context.Context,
+            attributes: Mapping[str, Any],
+            kind: SpanKind,
+            at: datetime,
+        ) -> Span:
+            span_id = ids.span_id(run_uuid, next(places))
+            with ids.given(run_uuid.int, span_id):
+                return self._start(name, parent, attributes, kind, _nanos(at))
+
+        def call(item: CallRecord, parent: context.Context) -> None:
+            if isinstance(item, ModelCallRecord):
+                operation = item.operation if item.operation.strip() else "chat"
+                attributes: dict[str, Any] = {
+                    **inherited,
+                    contract.OPERATION: operation,
+                    contract.REQUEST_MODEL: item.model,
+                }
+                if item.provider:
+                    attributes[contract.PROVIDER] = item.provider
+                attributes.update(_usage(item.usage))
+                name, kind = f"{operation} {item.model}", SpanKind.CLIENT
+            else:
+                attributes = {
+                    **inherited,
+                    contract.OPERATION: contract.TOOL_OPERATION,
+                    contract.TOOL_NAME: item.name,
+                }
+                name, kind = f"execute_tool {item.name}", SpanKind.INTERNAL
+            _close(open_span(name, parent, attributes, kind, item.start), item)
+
+        with self._client.processor.hold():
+            root = context.Context()
+            span = open_span(
+                f"invoke_agent {record.agent}",
+                root,
+                attributes,
+                SpanKind.INTERNAL,
+                record.start,
+            )
+            ctx = trace.set_span_in_context(span, root)
+            opener = open_span(
+                contract.RUN_START,
+                ctx,
+                {**inherited, contract.SAMPLE_RATE: float(rate)},
+                SpanKind.INTERNAL,
+                record.start,
+            )
+            opener.end(end_time=_nanos(record.start))
+            for item in record.inside:
+                if isinstance(item, StepRecord):
+                    step = open_span(
+                        item.name, ctx, inherited, SpanKind.INTERNAL, item.start
+                    )
+                    inner = trace.set_span_in_context(step, ctx)
+                    for each in item.calls:
+                        call(each, inner)
+                    _close(step, item)
+                else:
+                    call(item, ctx)
+            _close(span, record)
+
     def _outside(self, what: str) -> Run | None:
         run = current_run()
         if run is None and not self._warned_outside:
@@ -403,6 +515,50 @@ class Opener:
             record_exception=False,
             set_status_on_exception=False,
         )
+
+
+def _usage(usage: Usage | None) -> dict[str, int]:
+    if usage is None:
+        return {}
+    counts = (
+        (contract.INPUT_TOKENS, usage.input_tokens),
+        (contract.OUTPUT_TOKENS, usage.output_tokens),
+        (contract.CACHE_READ_INPUT_TOKENS, usage.cache_read_input_tokens),
+        (contract.CACHE_WRITE_INPUT_TOKENS, usage.cache_write_input_tokens),
+    )
+    return {key: value for key, value in counts if value is not None}
+
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _nanos(at: datetime) -> int:
+    """A recorded time as OpenTelemetry's nanoseconds, in whole microseconds,
+    as a datetime holds it."""
+    if at.tzinfo is None or at.utcoffset() is None:
+        raise ValueError("a recorded time needs its timezone")
+    return (at - _EPOCH) // timedelta(microseconds=1) * 1000
+
+
+def _walk(
+    record: RunRecord,
+) -> Iterator[RunRecord | StepRecord | ModelCallRecord | ToolCallRecord]:
+    yield record
+    for item in record.inside:
+        yield item
+        if isinstance(item, StepRecord):
+            yield from item.calls
+
+
+def _close(
+    span: Span, item: RunRecord | StepRecord | ModelCallRecord | ToolCallRecord
+) -> None:
+    if item.error_type:
+        span.set_attribute(contract.ERROR_TYPE, item.error_type)
+        span.set_status(Status(StatusCode.ERROR))
+    if item.cancelled:
+        span.set_attribute(contract.CANCELLED, True)
+    span.end(end_time=_nanos(item.end))
 
 
 def _bounds(bounds: Bounds | None) -> dict[str, Any]:

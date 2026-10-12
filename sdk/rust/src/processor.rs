@@ -5,7 +5,8 @@
 //! run's own sample rate is applied here, by run, never through the trace's
 //! flag. The queue is bounded, so a slow Telmoni never slows an agent: past
 //! its size, spans are dropped and counted. `telmoni.run.start` wakes the
-//! worker at once.
+//! worker at once, unless a hold keeps every batch back until what is queued
+//! under it is whole.
 
 use std::collections::{HashSet, VecDeque};
 use std::fmt;
@@ -65,6 +66,9 @@ struct State {
     dropped: usize,
     urgent: bool,
     flushing: usize,
+    /// How many holds are on: while any is, the worker takes no batch unless
+    /// shutting down.
+    held: usize,
     shutdown: bool,
     exporting: bool,
     /// Whether the worker has returned, which `shutdown` waits for.
@@ -105,6 +109,14 @@ impl Processor {
         lock(&self.shared.state)
             .sampled_out
             .insert(run_id.to_owned());
+    }
+
+    /// Takes no batch until the guard drops, so the spans a record queues
+    /// meanwhile travel together, in their order, and the record sent again
+    /// is the same bytes.
+    pub(crate) fn hold(&self) -> Hold<'_> {
+        lock(&self.shared.state).held += 1;
+        Hold(&self.shared)
     }
 
     /// Everything queued sent, waiting up to `timeout`.
@@ -217,6 +229,9 @@ fn work(shared: &Shared, exporter: &Exporter, warner: &Warner) {
             if state.shutdown && state.queue.is_empty() {
                 return;
             }
+            if state.held > 0 && !state.shutdown {
+                continue;
+            }
             let size = state.queue.len().min(shared.batching.max_batch_size);
             let batch: Vec<SpanData> = state.queue.drain(..size).collect();
             let dropped = std::mem::take(&mut state.dropped);
@@ -255,10 +270,25 @@ fn work(shared: &Shared, exporter: &Exporter, warner: &Warner) {
 
 /// Under the lock: whether the worker should export without waiting.
 fn due(state: &State, batching: &Batching) -> bool {
+    if state.held > 0 && !state.shutdown {
+        return false;
+    }
     state.shutdown
         || state.flushing > 0
         || state.urgent
         || state.queue.len() >= batching.max_batch_size
+}
+
+/// A hold on the worker's batches, lifted when dropped, a panic unwinding
+/// through included.
+pub(crate) struct Hold<'a>(&'a Shared);
+
+impl Drop for Hold<'_> {
+    fn drop(&mut self) {
+        lock(&self.0.state).held -= 1;
+        // The worker may have slept through what was queued under the hold.
+        self.0.wake.notify_all();
+    }
 }
 
 /// Marks the worker finished however it returns, so a shutdown never waits

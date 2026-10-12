@@ -32,8 +32,9 @@ pub struct Config {
     /// content mode, learned from the platform's answers, is `on`.
     pub capture_content: bool,
     /// The share of runs sent, above 0 and up to 1. Decided per run as it
-    /// starts, in the SDK's own processor, never through the trace's sampled
-    /// flag, so an application's own sampling is untouched.
+    /// starts or its record is sent, in the SDK's own processor, never through
+    /// the trace's sampled flag, so an application's own sampling is
+    /// untouched.
     pub sample_rate: f64,
     /// The sampler whose decision a run takes when it starts a trace of its
     /// own, so an application sampling at a tenth keeps a tenth of its own

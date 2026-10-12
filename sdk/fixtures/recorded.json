@@ -1,0 +1,286 @@
+{
+  "scenario": {
+    "record": {
+      "run_id": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
+      "agent": "claude-code",
+      "user_id": "user_42",
+      "session_id": "session_7",
+      "tags": {
+        "skills": "review"
+      },
+      "start": "2026-10-12T09:00:00.000Z",
+      "end": "2026-10-12T09:00:09.250Z",
+      "cancelled": true,
+      "inside": [
+        {
+          "model_call": {
+            "model": "claude-opus-4-5",
+            "provider": "anthropic",
+            "start": "2026-10-12T09:00:00.100Z",
+            "end": "2026-10-12T09:00:02.000Z",
+            "usage": {
+              "input_tokens": 1200,
+              "output_tokens": 85,
+              "cache_read_input_tokens": 1000,
+              "cache_write_input_tokens": 150
+            }
+          }
+        },
+        {
+          "tool_call": {
+            "name": "Bash",
+            "start": "2026-10-12T09:00:02.010Z",
+            "end": "2026-10-12T09:00:03.500Z",
+            "error_type": "ToolError"
+          }
+        },
+        {
+          "step": {
+            "name": "Task",
+            "start": "2026-10-12T09:00:03.600Z",
+            "end": "2026-10-12T09:00:08.000Z",
+            "calls": [
+              {
+                "model_call": {
+                  "model": "claude-haiku-4-5",
+                  "provider": "anthropic",
+                  "start": "2026-10-12T09:00:03.700Z",
+                  "end": "2026-10-12T09:00:05.000Z",
+                  "usage": {
+                    "input_tokens": 300,
+                    "output_tokens": 40,
+                    "cache_read_input_tokens": 0,
+                    "cache_write_input_tokens": 0
+                  }
+                }
+              },
+              {
+                "tool_call": {
+                  "name": "Read",
+                  "start": "2026-10-12T09:00:05.010Z",
+                  "end": "2026-10-12T09:00:05.200Z"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "model_call": {
+            "model": "claude-opus-4-5",
+            "provider": "anthropic",
+            "operation": " ",
+            "start": "2026-10-12T09:00:08.010Z",
+            "end": "2026-10-12T09:00:08.090Z",
+            "usage": {
+              "input_tokens": 1450,
+              "output_tokens": 12,
+              "cache_read_input_tokens": 1300,
+              "cache_write_input_tokens": 0
+            }
+          }
+        },
+        {
+          "tool_call": {
+            "name": "WebFetch",
+            "start": "2026-10-12T09:00:08.100Z",
+            "end": "2026-10-12T09:00:09.200Z",
+            "cancelled": true
+          }
+        }
+      ]
+    },
+    "capture_content": false
+  },
+  "export": {
+    "resourceSpans": [
+      {
+        "resource": {
+          "attributes": [
+            { "key": "telemetry.distro.name", "value": { "stringValue": "telmoni" } },
+            { "key": "telemetry.distro.version", "value": { "stringValue": "<version>" } },
+            { "key": "telemetry.sdk.language", "value": { "stringValue": "<language>" } },
+            { "key": "telemetry.sdk.name", "value": { "stringValue": "opentelemetry" } },
+            { "key": "telemetry.sdk.version", "value": { "stringValue": "<version>" } }
+          ]
+        },
+        "scopeSpans": [
+          {
+            "scope": { "name": "telmoni", "version": "<version>" },
+            "spans": [
+              {
+                "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
+                "spanId": "40ee8bbb83b45236",
+                "parentSpanId": "98f0a67d3b8b56b9",
+                "name": "telmoni.run.start",
+                "kind": 1,
+                "startTimeUnixNano": "1791795600000000000",
+                "endTimeUnixNano": "1791795600000000000",
+                "attributes": [
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "session_7" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
+                  { "key": "telmoni.sample_rate", "value": { "doubleValue": 1.0 } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ]
+              },
+              {
+                "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
+                "spanId": "a0317a36306c5b53",
+                "parentSpanId": "98f0a67d3b8b56b9",
+                "name": "chat claude-opus-4-5",
+                "kind": 3,
+                "startTimeUnixNano": "1791795600100000000",
+                "endTimeUnixNano": "1791795602000000000",
+                "attributes": [
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "session_7" } },
+                  { "key": "gen_ai.operation.name", "value": { "stringValue": "chat" } },
+                  { "key": "gen_ai.provider.name", "value": { "stringValue": "anthropic" } },
+                  { "key": "gen_ai.request.model", "value": { "stringValue": "claude-opus-4-5" } },
+                  { "key": "gen_ai.usage.cache_read.input_tokens", "value": { "intValue": "1000" } },
+                  { "key": "gen_ai.usage.cache_write.input_tokens", "value": { "intValue": "150" } },
+                  { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "1200" } },
+                  { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "85" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ]
+              },
+              {
+                "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
+                "spanId": "8ec41731d61b59db",
+                "parentSpanId": "98f0a67d3b8b56b9",
+                "name": "execute_tool Bash",
+                "kind": 1,
+                "startTimeUnixNano": "1791795602010000000",
+                "endTimeUnixNano": "1791795603500000000",
+                "attributes": [
+                  { "key": "error.type", "value": { "stringValue": "ToolError" } },
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "session_7" } },
+                  { "key": "gen_ai.operation.name", "value": { "stringValue": "execute_tool" } },
+                  { "key": "gen_ai.tool.name", "value": { "stringValue": "Bash" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ],
+                "status": { "code": 2 }
+              },
+              {
+                "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
+                "spanId": "429477561e6f525e",
+                "parentSpanId": "464a001e80215c8d",
+                "name": "chat claude-haiku-4-5",
+                "kind": 3,
+                "startTimeUnixNano": "1791795603700000000",
+                "endTimeUnixNano": "1791795605000000000",
+                "attributes": [
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "session_7" } },
+                  { "key": "gen_ai.operation.name", "value": { "stringValue": "chat" } },
+                  { "key": "gen_ai.provider.name", "value": { "stringValue": "anthropic" } },
+                  { "key": "gen_ai.request.model", "value": { "stringValue": "claude-haiku-4-5" } },
+                  { "key": "gen_ai.usage.cache_read.input_tokens", "value": { "intValue": "0" } },
+                  { "key": "gen_ai.usage.cache_write.input_tokens", "value": { "intValue": "0" } },
+                  { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "300" } },
+                  { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "40" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ]
+              },
+              {
+                "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
+                "spanId": "d92e4747917e5a08",
+                "parentSpanId": "464a001e80215c8d",
+                "name": "execute_tool Read",
+                "kind": 1,
+                "startTimeUnixNano": "1791795605010000000",
+                "endTimeUnixNano": "1791795605200000000",
+                "attributes": [
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "session_7" } },
+                  { "key": "gen_ai.operation.name", "value": { "stringValue": "execute_tool" } },
+                  { "key": "gen_ai.tool.name", "value": { "stringValue": "Read" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ]
+              },
+              {
+                "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
+                "spanId": "464a001e80215c8d",
+                "parentSpanId": "98f0a67d3b8b56b9",
+                "name": "Task",
+                "kind": 1,
+                "startTimeUnixNano": "1791795603600000000",
+                "endTimeUnixNano": "1791795608000000000",
+                "attributes": [
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "session_7" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ]
+              },
+              {
+                "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
+                "spanId": "24268760615f58c4",
+                "parentSpanId": "98f0a67d3b8b56b9",
+                "name": "chat claude-opus-4-5",
+                "kind": 3,
+                "startTimeUnixNano": "1791795608010000000",
+                "endTimeUnixNano": "1791795608090000000",
+                "attributes": [
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "session_7" } },
+                  { "key": "gen_ai.operation.name", "value": { "stringValue": "chat" } },
+                  { "key": "gen_ai.provider.name", "value": { "stringValue": "anthropic" } },
+                  { "key": "gen_ai.request.model", "value": { "stringValue": "claude-opus-4-5" } },
+                  { "key": "gen_ai.usage.cache_read.input_tokens", "value": { "intValue": "1300" } },
+                  { "key": "gen_ai.usage.cache_write.input_tokens", "value": { "intValue": "0" } },
+                  { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "1450" } },
+                  { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "12" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ]
+              },
+              {
+                "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
+                "spanId": "db0480f72cc653a3",
+                "parentSpanId": "98f0a67d3b8b56b9",
+                "name": "execute_tool WebFetch",
+                "kind": 1,
+                "startTimeUnixNano": "1791795608100000000",
+                "endTimeUnixNano": "1791795609200000000",
+                "attributes": [
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "session_7" } },
+                  { "key": "gen_ai.operation.name", "value": { "stringValue": "execute_tool" } },
+                  { "key": "gen_ai.tool.name", "value": { "stringValue": "WebFetch" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
+                  { "key": "telmoni.cancelled", "value": { "boolValue": true } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ]
+              },
+              {
+                "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
+                "spanId": "98f0a67d3b8b56b9",
+                "name": "invoke_agent claude-code",
+                "kind": 1,
+                "startTimeUnixNano": "1791795600000000000",
+                "endTimeUnixNano": "1791795609250000000",
+                "attributes": [
+                  { "key": "gen_ai.agent.name", "value": { "stringValue": "claude-code" } },
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "session_7" } },
+                  { "key": "gen_ai.operation.name", "value": { "stringValue": "invoke_agent" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
+                  { "key": "telmoni.cancelled", "value": { "boolValue": true } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
+                  { "key": "telmoni.sample_rate", "value": { "doubleValue": 1.0 } },
+                  { "key": "telmoni.tag.skills", "value": { "stringValue": "review" } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

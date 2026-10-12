@@ -78,6 +78,51 @@ await answer('why is the sky blue?');
 Nothing can be opened outside a run: steps and calls exist on a run's handle,
 or a step's, and nothing is sent outside one.
 
+## A run recorded after it ended
+
+A job that keeps its own log, or a hook that runs once the turn it reports is
+over, hands the finished run to `recordRun` as data:
+
+```ts
+telmoni.recordRun({
+  runId: '3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d', // yours, kept with the log
+  agent: 'nightly-triage',
+  sessionId: 'conv_7',
+  start: new Date('2026-10-12T09:00:00.000Z'),
+  end: new Date('2026-10-12T09:00:09.000Z'),
+  inside: [
+    {
+      type: 'model_call',
+      model: 'gpt-4o-mini',
+      provider: 'openai',
+      start: new Date('2026-10-12T09:00:00.100Z'),
+      end: new Date('2026-10-12T09:00:02.000Z'),
+      usage: { inputTokens: 1200, outputTokens: 85 },
+    },
+    {
+      type: 'tool_call',
+      name: 'search',
+      start: new Date('2026-10-12T09:00:02.000Z'),
+      end: new Date('2026-10-12T09:00:03.000Z'),
+      errorType: 'TimeoutError',
+    },
+  ],
+});
+await telmoni.flush();
+```
+
+A time is a `Date` or milliseconds since the Unix epoch; a step (`type: 'step'`)
+holds its own `calls`. The run is sent as the live calls would have sent it,
+through the same exporter, content rules and sample rate, in a trace of its own
+named by the run's id, whatever context is active. Each span's id is derived
+from the run's id and the span's place in the record, so the same record sent
+again is the same bytes, which ingest answers once: give a run the same id each
+time you send it. A record holds no content. A blank agent, a run id that is
+not a UUID or is the nil UUID, a time that is not one or an item of no known
+`type` throws a
+`TypeError`, and a span that ends before it starts a `RangeError`; either
+sends nothing.
+
 ## Configuration
 
 ```ts
