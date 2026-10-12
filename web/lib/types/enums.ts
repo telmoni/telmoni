@@ -73,16 +73,46 @@ export type SpanStatus = typeof SpanStatus[keyof typeof SpanStatus];
 
 /** Wire vocabulary of the Rust `TraceSort`: a column of the trace list, named in the URL. */
 export const TraceSort = {
-  Started:  "started",
-  Agent:    "agent",
-  User:     "user",
-  Session:  "session",
-  Status:   "status",
-  Steps:    "steps",
-  Tokens:   "tokens",
-  Duration: "duration",
+  Started:      "started",
+  Agent:        "agent",
+  User:         "user",
+  Session:      "session",
+  Status:       "status",
+  Steps:        "steps",
+  ModelCalls:   "model_calls",
+  ToolCalls:    "tool_calls",
+  Errors:       "errors",
+  InputTokens:  "input_tokens",
+  OutputTokens: "output_tokens",
+  Tokens:       "tokens",
+  Duration:     "duration",
 } as const;
 export type TraceSort = typeof TraceSort[keyof typeof TraceSort];
+
+/** Wire vocabulary of the Rust `TraceColumn`: a column of the trace list a
+ *  person shows or hides, named in a saved view. */
+export const TraceColumn = {
+  Started:          "started",
+  Ended:            "ended",
+  Agent:            "agent",
+  User:             "user",
+  Session:          "session",
+  Status:           "status",
+  Steps:            "steps",
+  ModelCalls:       "model_calls",
+  ToolCalls:        "tool_calls",
+  Errors:           "errors",
+  Spans:            "spans",
+  InputTokens:      "input_tokens",
+  OutputTokens:     "output_tokens",
+  CacheReadTokens:  "cache_read_tokens",
+  CacheWriteTokens: "cache_write_tokens",
+  Tokens:           "tokens",
+  Duration:         "duration",
+  Models:           "models",
+  Tools:            "tools",
+} as const;
+export type TraceColumn = typeof TraceColumn[keyof typeof TraceColumn];
 
 /** Wire vocabulary of the Rust `UserSort`: a column of the users page, named in the URL. */
 export const UserSort = {

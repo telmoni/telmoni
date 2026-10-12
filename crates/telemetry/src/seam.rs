@@ -2,11 +2,12 @@
 //! [`telmoni_shared::seam::Telemetry`], on a handle to the module's state.
 //! Auth runs its purges and a project's move through this.
 //!
-//! A purge takes a project's spans and totals with its settings: the rows
-//! marked deleted in ClickHouse first, so a settings row stands for as long
-//! as its project's spans do and a purge cut short finds them again, then
-//! the row removed. An organization's projects are the ones its settings
-//! rows name, since a span names no organization.
+//! A purge takes a project's spans and totals with its settings and saved
+//! views: the rows marked deleted in ClickHouse first, so a settings row
+//! stands for as long as its project's spans do and a purge cut short finds
+//! them again, then the views and the row removed. An organization's
+//! projects are the ones its settings rows name, since neither a span nor a
+//! view names an organization.
 
 use std::sync::Arc;
 
@@ -65,7 +66,7 @@ impl Telemetry for TelemetrySeam {
             organization_id = %organization_id,
             projects = projects.len(),
             purged,
-            "telemetry purge: the organization's projects' rows marked deleted and their settings removed"
+            "telemetry purge: the organization's projects' rows marked deleted and their settings and views removed"
         );
         Ok(purged)
     }
@@ -78,7 +79,7 @@ impl Telemetry for TelemetrySeam {
         tracing::info!(
             project_id = %project_id,
             purged,
-            "telemetry purge: the project's rows marked deleted and its settings removed"
+            "telemetry purge: the project's rows marked deleted and its settings and views removed"
         );
         Ok(purged)
     }

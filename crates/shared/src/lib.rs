@@ -11,6 +11,7 @@ pub const PRODUCT_NAME: &str = "Telmoni";
 pub mod acting;
 pub mod audit;
 pub mod config;
+pub mod csv;
 pub mod db;
 pub mod digest;
 pub mod envelope;
@@ -42,5 +43,5 @@ pub use types::{
     ApiKeyScope, AuditAction, ContentMode, Flag, FlagSet, NotificationKind, OrganizationId,
     OrganizationIdError, OrganizationRole, OrganizationStatus, ParseEnumError, ProjectId,
     ProjectIdError, Redacted, Role, SessionSort, SortDirection, SpanKind, SpanStatus,
-    TelmoniResourceKind, TraceSort, UserId, UserIdError, UserSort,
+    TelmoniResourceKind, TraceColumn, TraceSort, UserId, UserIdError, UserSort,
 };

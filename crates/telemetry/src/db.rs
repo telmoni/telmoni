@@ -1,4 +1,8 @@
-//! The telemetry module's Postgres: each project's settings.
+//! The telemetry module's Postgres: each project's settings, and its saved
+//! views of the trace list.
+
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
 
 use telmoni_shared::db::tenant_session::{
     HasProject, Lane, Maintenance, MaintenanceLane, ProjectAndOrganization, Scoped,
@@ -84,31 +88,153 @@ pub async fn projects_of(
     .await
 }
 
-/// Every settings row of an organization's projects.
+/// Every settings row of an organization's projects, and their saved views,
+/// found through those rows before they go: a view names no organization.
 pub async fn purge_organization(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     organization_id: &OrganizationId,
 ) -> sqlx::Result<u64> {
-    Ok(
-        sqlx::query("DELETE FROM telemetry.project_settings WHERE organization_id = $1")
-            .bind(organization_id)
-            .execute(tx.conn())
-            .await?
-            .rows_affected(),
+    let views = sqlx::query(
+        "DELETE FROM telemetry.trace_views
+          WHERE project_id IN (SELECT project_id FROM telemetry.project_settings
+                                WHERE organization_id = $1)",
     )
+    .bind(organization_id)
+    .execute(tx.conn())
+    .await?
+    .rows_affected();
+    let settings = sqlx::query("DELETE FROM telemetry.project_settings WHERE organization_id = $1")
+        .bind(organization_id)
+        .execute(tx.conn())
+        .await?
+        .rows_affected();
+    Ok(views + settings)
 }
 
-/// One project's settings row.
+/// One project's saved views and settings row.
 pub async fn purge_project(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     project_id: &ProjectId,
 ) -> sqlx::Result<u64> {
+    let views = sqlx::query("DELETE FROM telemetry.trace_views WHERE project_id = $1")
+        .bind(project_id)
+        .execute(tx.conn())
+        .await?
+        .rows_affected();
+    let settings = sqlx::query("DELETE FROM telemetry.project_settings WHERE project_id = $1")
+        .bind(project_id)
+        .execute(tx.conn())
+        .await?
+        .rows_affected();
+    Ok(views + settings)
+}
+
+/// A saved view as its row keeps it. Its query is the JSON the lane checked
+/// when it was written; its columns, `TraceColumn`'s words.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ViewRow {
+    pub id: Uuid,
+    pub name: String,
+    pub query: serde_json::Value,
+    pub columns: Vec<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// What saving a view writes.
+#[derive(Debug, Clone, Copy)]
+pub struct ViewWrite<'a> {
+    pub name: &'a str,
+    pub query: &'a serde_json::Value,
+    pub columns: &'a [String],
+}
+
+/// The project's saved views, by name.
+pub async fn views<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+) -> sqlx::Result<Vec<ViewRow>> {
+    sqlx::query_as(
+        "SELECT id, name, query, columns, created_at, updated_at
+           FROM telemetry.trace_views
+          WHERE project_id = $1
+          ORDER BY lower(name), id",
+    )
+    .bind(project_id)
+    .fetch_all(tx.conn())
+    .await
+}
+
+/// How many views the project keeps.
+pub async fn view_count<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar("SELECT count(*) FROM telemetry.trace_views WHERE project_id = $1")
+        .bind(project_id)
+        .fetch_one(tx.conn())
+        .await
+}
+
+/// A new view of the project. Its name taken already, in any case, is the
+/// unique index's refusal, `trace_views_project_name_idx`.
+pub async fn insert_view(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    id: Uuid,
+    view: ViewWrite<'_>,
+) -> sqlx::Result<ViewRow> {
+    sqlx::query_as(
+        "INSERT INTO telemetry.trace_views (id, project_id, name, query, columns)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, name, query, columns, created_at, updated_at",
+    )
+    .bind(id)
+    .bind(project_id)
+    .bind(view.name)
+    .bind(view.query)
+    .bind(view.columns)
+    .fetch_one(tx.conn())
+    .await
+}
+
+/// One of the project's views, written over, or `None` where it has no view
+/// by that id.
+pub async fn update_view<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    id: Uuid,
+    view: ViewWrite<'_>,
+) -> sqlx::Result<Option<ViewRow>> {
+    sqlx::query_as(
+        "UPDATE telemetry.trace_views
+            SET name = $3, query = $4, columns = $5, updated_at = now()
+          WHERE project_id = $1 AND id = $2
+         RETURNING id, name, query, columns, created_at, updated_at",
+    )
+    .bind(project_id)
+    .bind(id)
+    .bind(view.name)
+    .bind(view.query)
+    .bind(view.columns)
+    .fetch_optional(tx.conn())
+    .await
+}
+
+/// One of the project's views, removed. Answers whether there was one.
+pub async fn delete_view<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    id: Uuid,
+) -> sqlx::Result<bool> {
     Ok(
-        sqlx::query("DELETE FROM telemetry.project_settings WHERE project_id = $1")
+        sqlx::query("DELETE FROM telemetry.trace_views WHERE project_id = $1 AND id = $2")
             .bind(project_id)
+            .bind(id)
             .execute(tx.conn())
             .await?
-            .rows_affected(),
+            .rows_affected()
+            > 0,
     )
 }
 

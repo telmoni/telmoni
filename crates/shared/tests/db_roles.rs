@@ -504,6 +504,13 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             "telemetry.project_settings",
             &["SELECT", "DELETE"],
         ),
+        // The purges delete a project's saved views with it; a transfer
+        // moves none, since a view names no organization.
+        (
+            "telemetry_maintenance",
+            "telemetry.trace_views",
+            &["SELECT", "DELETE"],
+        ),
     ];
     for (lane, table, allowed) in NARROWED {
         for verb in ["SELECT", "INSERT", "UPDATE", "DELETE"] {

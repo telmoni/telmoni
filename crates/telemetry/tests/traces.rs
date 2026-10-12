@@ -1,8 +1,11 @@
 //! The trace lanes against a real ClickHouse: the list sums each run's spans
-//! into one row, newest first, filtered by any of its columns and sorted by
-//! any, and names only the project's own runs; a trace is its run's spans in
-//! the order they started, and another project's run id is a 404 here; a
-//! query a parameter does not take is a 400 that echoes none of it.
+//! into one row, newest first, filtered by any of its columns — by several
+//! values of one — sorted by any, paged and counted, and names only the
+//! project's own runs; the facets count each value under the other filters,
+//! the histogram each run in the bar it started in, and a download is the
+//! list's rows as a file; a trace is its run's spans in the order they
+//! started, and another project's run id is a 404 here; a query a parameter
+//! does not take is a 400 that echoes none of it.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
 mod common;
@@ -101,12 +104,62 @@ impl Projects {
 
     /// The list as `MEMBER` reads it, with `query` (`"?agent=…"` or empty).
     async fn list(&self, query: &str) -> Value {
-        let (status, body) = self
-            .send(self.request(MEMBER, &self.ours, &format!("{LANE}{query}")))
-            .await;
-        assert_eq!(status, StatusCode::OK, "{query}: {body}");
+        self.get(&format!("{LANE}{query}")).await
+    }
+
+    /// Any of the trace lanes as `MEMBER` reads it, `path` with its query.
+    async fn get(&self, path: &str) -> Value {
+        let (status, body) = self.send(self.request(MEMBER, &self.ours, path)).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {body}");
         body
     }
+
+    /// A download as `user` asks for it: its status, its content type and
+    /// its bytes.
+    async fn download(&self, user: &str, query: &str) -> (StatusCode, String, Vec<u8>) {
+        let response = self
+            .app
+            .clone()
+            .oneshot(self.request(user, &self.ours, &format!("{LANE}/export{query}")))
+            .await
+            .expect("the router answers");
+        let status = response.status();
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_owned();
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("a body")
+            .to_bytes();
+        (status, content_type, bytes.to_vec())
+    }
+}
+
+/// A facet's values and their counts, in the answer's order.
+fn values(facets: &Value, facet: &str) -> Vec<(String, u64)> {
+    facets
+        .get(facet)
+        .and_then(|f| f.get("values"))
+        .and_then(Value::as_array)
+        .expect("values")
+        .iter()
+        .map(|v| {
+            (
+                v["value"].as_str().expect("a value").to_owned(),
+                v["runs"].as_u64().expect("a count"),
+            )
+        })
+        .collect()
+}
+
+/// `pairs` as [`values`] answers them.
+fn owned(pairs: &[(&str, u64)]) -> Vec<(String, u64)> {
+    pairs.iter().map(|(v, n)| ((*v).to_owned(), *n)).collect()
 }
 
 /// The runs a list answers, in its order.
@@ -305,6 +358,8 @@ async fn the_list_sums_each_run_newest_first_and_names_only_the_projects_runs(po
     let list = p.list("").await;
     assert_eq!(ids(&list), [c, b, a], "newest first, and none of {d}");
     assert_eq!(list["more"], false);
+    assert_eq!(list["total"], 3);
+    assert_eq!(list["page"], 1);
     assert_eq!(list["days"], 7);
     assert_eq!(list["limit"], 100);
     assert_eq!(list["sort"], "started");
@@ -372,6 +427,18 @@ async fn the_list_filters_by_any_column_and_sorts_by_any(pool: PgPool) {
     assert_eq!(ids(&p.list("?tool=search_docs").await), [a]);
     assert!(ids(&p.list("?agent=nobody").await).is_empty());
     assert_eq!(ids(&p.list("?model=gpt-x&status=error").await), [b]);
+    // A filter given again admits a run matching any of its values; an empty
+    // value, a form's untouched field, admits every run.
+    assert_eq!(ids(&p.list("?agent=support-bot&agent=zeta").await), [c, b]);
+    assert_eq!(ids(&p.list("?status=error&status=ok").await), [c, b, a]);
+    assert_eq!(ids(&p.list("?user=user-a&user=user-b").await), [b, a]);
+    assert_eq!(
+        ids(&p
+            .list("?model=gpt-x&model=claude-sonnet-5-5&tool=search_docs")
+            .await),
+        [a]
+    );
+    assert_eq!(ids(&p.list("?agent=&user=").await), [c, b, a]);
 
     assert_eq!(ids(&p.list("?sort=tokens").await), [a, b, c], "most first");
     assert_eq!(ids(&p.list("?sort=tokens&dir=asc").await), [c, b, a]);
@@ -396,14 +463,209 @@ async fn the_list_filters_by_any_column_and_sorts_by_any(pool: PgPool) {
     assert_eq!(ids(&p.list("?sort=session&dir=desc").await), [b, a, c]);
     assert_eq!(ids(&p.list("?sort=status").await)[0], b, "error before ok");
     assert_eq!(ids(&p.list("?sort=started&dir=asc").await), [a, b, c]);
+    assert_eq!(
+        ids(&p.list("?sort=errors").await),
+        [b, a, c],
+        "the most first, the newer of two alike"
+    );
+    assert_eq!(ids(&p.list("?sort=input_tokens").await), [a, b, c]);
+    assert_eq!(ids(&p.list("?sort=output_tokens&dir=asc").await), [c, b, a]);
+    assert_eq!(ids(&p.list("?sort=tool_calls").await), [a, c, b]);
+    assert_eq!(ids(&p.list("?sort=model_calls").await), [c, b, a]);
 
+    // A page of two, and how many the list holds on every page, past the
+    // last one too.
     let two = p.list("?limit=2").await;
     assert_eq!(ids(&two), [c, b]);
     assert_eq!(two["more"], true);
     assert_eq!(two["limit"], 2);
+    assert_eq!(two["total"], 3);
+    let second = p.list("?limit=2&page=2").await;
+    assert_eq!(ids(&second), [a]);
+    assert_eq!(second["more"], false);
+    assert_eq!(second["page"], 2);
+    let past = p.list("?limit=2&page=3").await;
+    assert!(ids(&past).is_empty());
+    assert_eq!(past["total"], 3);
+    assert_eq!(p.list("?status=error").await["total"], 1);
     let one_day = p.list("?days=1").await;
     assert_eq!(ids(&one_day).len(), 3);
     assert_eq!(one_day["days"], 1);
+}
+
+/// Each facet names its values among the project's runs and how many runs
+/// carry each, counted under every filter but its own: a value beside a
+/// ticked one still says what ticking it would add, and a ticked value comes
+/// first.
+#[sqlx::test]
+async fn the_facets_count_each_value_under_every_other_filter(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    seed(&ch, &p).await;
+    let lane = format!("{LANE}/facets");
+
+    let all = p.get(&lane).await;
+    assert_eq!(all["days"], 7);
+    assert_eq!(
+        values(&all, "agent"),
+        owned(&[("nightly-report", 1), ("support-bot", 1), ("zeta", 1)]),
+        "another project's run is not counted"
+    );
+    assert_eq!(values(&all, "status"), owned(&[("ok", 2), ("error", 1)]));
+    assert_eq!(
+        values(&all, "model"),
+        owned(&[("gpt-x", 2), ("claude-sonnet-5-5", 1)])
+    );
+    assert_eq!(values(&all, "tool"), owned(&[("search_docs", 1)]));
+    assert_eq!(values(&all, "user"), owned(&[("user-a", 1), ("user-b", 1)]));
+    assert_eq!(
+        values(&all, "session"),
+        owned(&[("conv-1", 1), ("conv-2", 1)])
+    );
+    assert_eq!(all["agent"]["more"], false);
+
+    let by_model = p.get(&format!("{lane}?model=gpt-x")).await;
+    assert_eq!(
+        values(&by_model, "agent"),
+        owned(&[("support-bot", 1), ("zeta", 1)])
+    );
+    assert_eq!(
+        values(&by_model, "model"),
+        owned(&[("gpt-x", 2), ("claude-sonnet-5-5", 1)]),
+        "the model filter does not narrow its own facet"
+    );
+    assert_eq!(
+        values(&by_model, "status"),
+        owned(&[("error", 1), ("ok", 1)])
+    );
+
+    let ticked = p.get(&format!("{lane}?agent=zeta")).await;
+    assert_eq!(
+        values(&ticked, "agent"),
+        owned(&[("zeta", 1), ("nightly-report", 1), ("support-bot", 1)]),
+        "the ticked value first"
+    );
+
+    let (status, _) = p.send(p.request(STRANGER, &p.ours, &lane)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+/// The histogram counts each run in the bar its first span started in, the
+/// bars starting on the reader's clock and running from the window's opening
+/// to now, the empty ones with no durations.
+#[sqlx::test]
+async fn the_histogram_counts_each_run_in_the_bar_it_started_in(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    seed(&ch, &p).await;
+
+    // Five and a half hours east of UTC: its hours start on UTC's half hours.
+    let histogram = p
+        .get(&format!("{LANE}/histogram?days=1&utc_offset=330"))
+        .await;
+    assert_eq!(histogram["bucket_seconds"], 3_600);
+    assert_eq!(histogram["utc_offset"], 330);
+    let bars = histogram["bars"].as_array().expect("bars");
+    assert!((25..=26).contains(&bars.len()), "{} bars", bars.len());
+    let sum = |key: &str| -> u64 { bars.iter().map(|b| b[key].as_u64().expect("a count")).sum() };
+    assert_eq!((sum("ok"), sum("error"), sum("cancelled")), (2, 1, 0));
+    assert_eq!(sum("tokens"), 1_515);
+    for bar in bars {
+        let at: DateTime<Utc> = bar["at"]
+            .as_str()
+            .expect("a time")
+            .parse()
+            .expect("RFC 3339");
+        assert_eq!(
+            at.timestamp() % 3_600,
+            1_800,
+            "{at} starts on the reader's hour"
+        );
+    }
+    let empty = bars
+        .iter()
+        .find(|b| b["ok"] == 0 && b["error"] == 0 && b["cancelled"] == 0)
+        .expect("an hour no run started in");
+    assert_eq!(empty["duration_p50_ms"], Value::Null);
+
+    let failed = p
+        .get(&format!("{LANE}/histogram?days=1&status=error"))
+        .await;
+    let bars = failed["bars"].as_array().expect("bars");
+    let errors: u64 = bars
+        .iter()
+        .map(|b| b["error"].as_u64().expect("a count"))
+        .sum();
+    let ok: u64 = bars
+        .iter()
+        .map(|b| b["ok"].as_u64().expect("a count"))
+        .sum();
+    assert_eq!((errors, ok), (1, 0));
+}
+
+/// A download is the list's rows under its filters and sort, as CSV for a
+/// spreadsheet or JSON, or the runs chosen by id; a run of another project
+/// named by id is not in it.
+#[sqlx::test]
+async fn a_download_is_the_lists_rows_as_csv_or_json(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    let Seeded { a, b, c, d } = seed(&ch, &p).await;
+
+    let (status, content_type, body) = p.download(MEMBER, "").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(content_type, "text/csv; charset=utf-8");
+    let text = String::from_utf8(body).expect("UTF-8");
+    let text = text.strip_prefix('\u{feff}').expect("the byte-order mark");
+    let lines: Vec<&str> = text.split("\r\n").filter(|l| !l.is_empty()).collect();
+    assert_eq!(lines.len(), 4, "the header and a row a run");
+    assert!(lines[0].starts_with("run_id,agent,user_id,session_id,ended,status,started_at"));
+    assert!(
+        lines[1].starts_with(&format!("{c},zeta,,,false,ok,")),
+        "{}",
+        lines[1]
+    );
+    assert!(
+        lines[3].ends_with(",claude-sonnet-5-5,search_docs"),
+        "{}",
+        lines[3]
+    );
+
+    let (status, content_type, body) = p.download(MEMBER, "?format=json&sort=tokens").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(content_type, "application/json");
+    let rows: Value = serde_json::from_slice(&body).expect("JSON");
+    let run_ids = |rows: &Value| -> Vec<String> {
+        rows.as_array()
+            .expect("rows")
+            .iter()
+            .map(|r| r["run_id"].as_str().expect("a run id").to_owned())
+            .collect()
+    };
+    assert_eq!(run_ids(&rows), [a, b, c].map(|r| r.to_string()));
+
+    let (_, _, body) = p
+        .download(MEMBER, &format!("?format=json&run={a}&run={b}&run={d}"))
+        .await;
+    let chosen: Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(
+        run_ids(&chosen),
+        [b, a].map(|r| r.to_string()),
+        "the chosen runs, and none of another project's"
+    );
+
+    for query in ["?format=xlsx", "?run=not-a-run", "?page=2"] {
+        let (status, _, _) = p.download(MEMBER, query).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{query}");
+    }
+    let (status, _, _) = p.download(STRANGER, "").await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[sqlx::test]
@@ -493,10 +755,20 @@ async fn a_query_a_parameter_does_not_take_is_a_400_that_echoes_nothing(pool: Pg
         "?days=361",
         "?limit=0",
         "?limit=501",
+        "?page=0",
+        "?page=1001",
         "?status=maybe%3Cscript%3E",
         "?sort=spend",
+        "?sort=agent&sort=user",
         "?dir=sideways",
         "?nonsense=1",
+        "?format=csv",
+        "?utc_offset=60",
+        "/facets?sort=agent",
+        "/histogram?utc_offset=900",
+        "/histogram?page=2",
+        "/export?format=xlsx%3Cscript%3E",
+        "/export?run=not-a-run",
     ] {
         let request = Request::builder()
             .method("GET")

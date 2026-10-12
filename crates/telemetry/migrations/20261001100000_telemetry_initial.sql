@@ -87,3 +87,47 @@ CREATE POLICY maintenance_access ON telemetry.project_settings
 GRANT SELECT, DELETE ON telemetry.project_settings TO telemetry_maintenance;
 -- A transfer moves a row to the organization that now holds its project.
 GRANT UPDATE (organization_id) ON telemetry.project_settings TO telemetry_maintenance;
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 2. SAVED VIEWS
+-- ══════════════════════════════════════════════════════════════════════════════
+-- A project's trace list as somebody left it, under a name: its filters, sort
+-- and window as the list's query takes them, and the columns it showed. Every
+-- role on the project applies one; its owners and admins save them. Filed under
+-- the project alone: the purges find a project by its settings row, which the
+-- first view saved makes where the project has none.
+CREATE TABLE telemetry.trace_views (
+    id          UUID        PRIMARY KEY,
+    project_id  TEXT        NOT NULL,
+    name        TEXT        NOT NULL,
+    -- The list's query, each filter's values a list (`{"agent": ["…"],
+    -- "sort": "tokens", "days": 30}`); the lane checks it as the list would.
+    query       JSONB       NOT NULL,
+    -- The columns shown, by `TraceColumn`'s words, in the list's order.
+    columns     TEXT[]      NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT trace_views_name_check CHECK (char_length(name) BETWEEN 1 AND 60),
+    CONSTRAINT trace_views_query_check CHECK (jsonb_typeof(query) = 'object')
+);
+
+-- One name per view in a project, whatever its case: a menu that offered two
+-- "Errors" would make a person guess.
+CREATE UNIQUE INDEX trace_views_project_name_idx ON telemetry.trace_views (project_id, lower(name));
+
+ALTER TABLE telemetry.trace_views ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.trace_views FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON telemetry.trace_views
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.trace_views
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- The purges delete a deleted project's views, and those of an organization's
+-- projects. A transfer moves nothing: a view names no organization.
+GRANT SELECT, DELETE ON telemetry.trace_views TO telemetry_maintenance;

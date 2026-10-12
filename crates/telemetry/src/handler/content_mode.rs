@@ -4,7 +4,6 @@
 //! is liable for. The project is the one `x-project-id` names.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::extract::State;
 use axum::http::HeaderMap;
@@ -12,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use telmoni_shared::acting::Acting;
-use telmoni_shared::audit::{Actor, AuditEvent, emit_audit, lock_chain};
+use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
 use telmoni_shared::extract::{Json, correlation_id};
 use telmoni_shared::rbac::{Resource, Verb};
@@ -22,6 +21,7 @@ use telmoni_shared::{
     TelmoniResourceKind,
 };
 
+use crate::handler::chain;
 use crate::{AppState, db};
 
 /// The modes an owner may switch a project to: `off` alone, until a table
@@ -29,21 +29,6 @@ use crate::{AppState, db};
 /// with nowhere to keep content would tell the SDK, in every answer, to send
 /// what ingest must then drop.
 pub const OFFERED: &[ContentMode] = &[ContentMode::Off];
-
-/// The longest a change waits for the organization's chain lock: the
-/// role's own `lock_timeout` on a tier, set on the transaction too, so that a
-/// deployment whose roles carry none — the Compose quickstart connects as the
-/// superuser — never holds a connection on it for as long as another holds
-/// the lock.
-const CHAIN_LOCK_WAIT: Duration = Duration::from_secs(2);
-
-/// How long a change waits for auth's second answer while it holds the
-/// organization's chain lock: well inside the two seconds every other writer
-/// in the organization waits for that lock before giving up.
-const READ_AGAIN_BUDGET: Duration = Duration::from_secs(1);
-
-/// Postgres's `lock_not_available`: a `lock_timeout` ran out.
-const LOCK_NOT_AVAILABLE: &str = "55P03";
 
 /// What both lanes answer: the project's mode, and the modes it may be
 /// switched to.
@@ -177,49 +162,9 @@ async fn switch_content_mode(
 ) -> Result<Switched, TelmoniError> {
     let organization_id = &acting.organization_id;
 
-    // ⚠ The organization's chain lock before anything is read. A transfer's
-    // accept holds it from its audit rows to its commit and moves this row
-    // in between, as an ownership hand-over and a deletion hold it over
-    // theirs: under it, the answer auth gives again is the one that stands,
-    // and a change resolved before one of them committed is refused rather
-    // than written under an organization that no longer holds the project.
-    sqlx::query("SELECT set_config('lock_timeout', $1, true)")
-        .bind(format!("{}ms", CHAIN_LOCK_WAIT.as_millis()))
-        .execute(tx.conn())
-        .await?;
-    if let Err(e) = lock_chain(tx.conn(), organization_id).await {
-        let timed_out = e
-            .as_database_error()
-            .and_then(|db| db.code())
-            .is_some_and(|code| code == LOCK_NOT_AVAILABLE);
-        if !timed_out {
-            return Err(e.into());
-        }
-        tracing::warn!(
-            project_id = %project_id,
-            organization_id = %organization_id,
-            "telemetry: a content mode change gave up on the organization's chain lock"
-        );
-        return Err(AuthError::Conflict(
-            "another change to this project's organization is under way; try again".into(),
-        )
-        .into());
-    }
-    let Ok(now) = tokio::time::timeout(READ_AGAIN_BUDGET, auth.resolve_again(acting)).await else {
-        tracing::warn!(
-            project_id = %project_id,
-            organization_id = %organization_id,
-            "telemetry: auth did not answer a content mode change again in time"
-        );
-        return Err(AuthError::IdentityUnavailable.into());
-    };
-    let now = now?;
-    if now.organization_id != *organization_id {
-        return Err(AuthError::Conflict(
-            "the project has moved to another organization; reload and try again".into(),
-        )
-        .into());
-    }
+    // ⚠ The organization's chain lock before anything is read, and the role
+    // checked again on auth's second answer, the one that stands.
+    let now = chain::hold(auth, acting, project_id, tx).await?;
     now.require_project_owner()?;
 
     let (filed_under, held) = db::settings_for_update(tx, project_id).await?.unzip();

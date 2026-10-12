@@ -231,18 +231,19 @@ pub async fn get_session(
         limit: parse_limit(&query.limit)?,
     };
     let filter = TraceFilter {
-        session_id: session_id.clone(),
+        session_ids: vec![session_id.clone()],
         days: window.days,
-        // One past the limit, so the answer can say whether there were more.
-        limit: window.limit + 1,
         ..TraceFilter::default()
     };
+    // One past the limit, so the answer can say whether there were more.
     let rows = traces::list(
         &state.store,
         &Projects::one(project_id),
         &filter,
         TraceSort::Started,
         SortDirection::Asc,
+        window.limit + 1,
+        0,
     )
     .await
     .map_err(read_failed)?;

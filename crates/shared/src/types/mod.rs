@@ -16,6 +16,7 @@ pub mod sort_direction;
 pub mod span_kind;
 pub mod span_status;
 pub mod tenant_id;
+pub mod trace_column;
 pub mod trace_sort;
 pub mod user_sort;
 
@@ -38,5 +39,6 @@ pub use tenant_id::{
     API_TOKEN_PREFIX, OrganizationId, OrganizationIdError, ProjectId, ProjectIdError, UserId,
     UserIdError,
 };
+pub use trace_column::TraceColumn;
 pub use trace_sort::TraceSort;
 pub use user_sort::UserSort;

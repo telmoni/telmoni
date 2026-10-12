@@ -3,9 +3,11 @@
 //! module holds no grant on auth's roster; and ingest's, `/otlp/v1/traces`,
 //! which a machine reaches with a project API key auth verifies the same way.
 
+mod chain;
 pub mod content_mode;
 pub mod field_inventory;
 pub mod ingest;
 pub mod sessions;
 pub mod traces;
 pub mod users;
+pub mod views;

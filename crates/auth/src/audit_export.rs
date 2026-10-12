@@ -19,6 +19,7 @@ use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
+use telmoni_shared::csv;
 use telmoni_shared::db::tenant_session::{
     PersonAndOrganization, Scoped, maintenance_scope, organization_scope,
 };
@@ -576,11 +577,8 @@ impl FileWriter {
                 serde_json::to_writer(&mut out, &claimed.range_to).map_err(unwritable)?;
                 out.extend_from_slice(b",\"events\":[");
             }
-            // The byte-order mark is how a spreadsheet knows the file is
-            // UTF-8: without it, Excel reads a name with an accent as two
-            // wrong characters.
             ExportFormat::Csv => {
-                out.extend_from_slice("\u{feff}".as_bytes());
+                out.extend_from_slice(csv::BOM.as_bytes());
                 out.extend_from_slice(CSV_HEADER.as_bytes());
             }
         }
@@ -617,13 +615,8 @@ impl FileWriter {
                     row.prev_hash.clone().unwrap_or_default(),
                     row.row_hash.clone(),
                 ];
-                for (i, cell) in cells.iter().enumerate() {
-                    if i > 0 {
-                        self.out.push(b',');
-                    }
-                    csv_cell(&mut self.out, cell);
-                }
-                self.out.extend_from_slice(b"\r\n");
+                // The JSON file is the one that verifies.
+                csv::row(&mut self.out, &cells);
             }
         }
         self.rows += 1;
@@ -642,27 +635,6 @@ impl FileWriter {
     }
 }
 
-/// One CSV cell, as RFC 4180 has it: quoted when it holds a comma, a quote or
-/// a line break, its quotes doubled. And defused, as OWASP advises: a cell a
-/// spreadsheet would run as a formula — one starting with `=`, `+`, `-`, `@`,
-/// a tab or a carriage return — starts with `'` inside its quotes instead,
-/// since an event's details carry names people typed, and the file opens in
-/// somebody's spreadsheet. The JSON file is the one that verifies.
-fn csv_cell(out: &mut Vec<u8>, cell: &str) {
-    let defuse = cell.starts_with(['=', '+', '-', '@', '\t', '\r']);
-    let quote = defuse || cell.contains([',', '"', '\n', '\r']);
-    if quote {
-        out.push(b'"');
-    }
-    if defuse {
-        out.push(b'\'');
-    }
-    out.extend_from_slice(cell.replace('"', "\"\"").as_bytes());
-    if quote {
-        out.push(b'"');
-    }
-}
-
 /// Writing into memory has no I/O to fail; this is serde's own refusal.
 fn unwritable(e: serde_json::Error) -> TelmoniError {
     TelmoniError::Internal(format!("an audit export could not be written: {e}"))
@@ -671,38 +643,6 @@ fn unwritable(e: serde_json::Error) -> TelmoniError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn cell(value: &str) -> String {
-        let mut out = Vec::new();
-        csv_cell(&mut out, value);
-        String::from_utf8(out).unwrap()
-    }
-
-    #[test]
-    fn a_plain_cell_is_written_as_it_is() {
-        assert_eq!(cell("created"), "created");
-        assert_eq!(cell(""), "");
-    }
-
-    #[test]
-    fn a_cell_with_a_comma_a_quote_or_a_line_break_is_quoted() {
-        assert_eq!(cell("a,b"), "\"a,b\"");
-        assert_eq!(cell("say \"hi\""), "\"say \"\"hi\"\"\"");
-        assert_eq!(cell("two\nlines"), "\"two\nlines\"");
-        assert_eq!(
-            cell("{\"name\":\"Ada\",\"role\":\"admin\"}"),
-            "\"{\"\"name\"\":\"\"Ada\"\",\"\"role\"\":\"\"admin\"\"}\""
-        );
-    }
-
-    #[test]
-    fn a_cell_a_spreadsheet_would_run_is_defused() {
-        assert_eq!(cell("=HYPERLINK(\"x\")"), "\"'=HYPERLINK(\"\"x\"\")\"");
-        assert_eq!(cell("+1"), "\"'+1\"");
-        assert_eq!(cell("-1"), "\"'-1\"");
-        assert_eq!(cell("@SUM(A1)"), "\"'@SUM(A1)\"");
-        assert_eq!(cell("\tx"), "\"'\tx\"");
-    }
 
     fn row(seq: i64, metadata: Option<serde_json::Value>) -> ExportRow {
         ExportRow {

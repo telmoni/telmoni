@@ -24,6 +24,16 @@ pub enum TraceSort {
     Status,
     /// How many steps the run took.
     Steps,
+    /// How many model calls it made.
+    ModelCalls,
+    /// How many tool calls it made.
+    ToolCalls,
+    /// How many of its spans failed.
+    Errors,
+    /// Its model calls' input tokens.
+    InputTokens,
+    /// Their output tokens.
+    OutputTokens,
     /// Its input and output tokens, summed.
     Tokens,
     /// How long it ran.
@@ -31,9 +41,9 @@ pub enum TraceSort {
 }
 
 impl TraceSort {
-    /// Every column, in wire order.
+    /// Every column, in wire order: the list's own, left to right.
     #[must_use]
-    pub const fn all() -> [Self; 8] {
+    pub const fn all() -> [Self; 13] {
         [
             Self::Started,
             Self::Agent,
@@ -41,6 +51,11 @@ impl TraceSort {
             Self::Session,
             Self::Status,
             Self::Steps,
+            Self::ModelCalls,
+            Self::ToolCalls,
+            Self::Errors,
+            Self::InputTokens,
+            Self::OutputTokens,
             Self::Tokens,
             Self::Duration,
         ]
@@ -56,6 +71,11 @@ impl fmt::Display for TraceSort {
             Self::Session => write!(f, "session"),
             Self::Status => write!(f, "status"),
             Self::Steps => write!(f, "steps"),
+            Self::ModelCalls => write!(f, "model_calls"),
+            Self::ToolCalls => write!(f, "tool_calls"),
+            Self::Errors => write!(f, "errors"),
+            Self::InputTokens => write!(f, "input_tokens"),
+            Self::OutputTokens => write!(f, "output_tokens"),
             Self::Tokens => write!(f, "tokens"),
             Self::Duration => write!(f, "duration"),
         }
@@ -72,11 +92,17 @@ impl FromStr for TraceSort {
             "session" => Ok(Self::Session),
             "status" => Ok(Self::Status),
             "steps" => Ok(Self::Steps),
+            "model_calls" => Ok(Self::ModelCalls),
+            "tool_calls" => Ok(Self::ToolCalls),
+            "errors" => Ok(Self::Errors),
+            "input_tokens" => Ok(Self::InputTokens),
+            "output_tokens" => Ok(Self::OutputTokens),
             "tokens" => Ok(Self::Tokens),
             "duration" => Ok(Self::Duration),
             _ => Err(ParseEnumError::new(
                 s,
-                "started, agent, user, session, status, steps, tokens, duration",
+                "started, agent, user, session, status, steps, model_calls, tool_calls, errors, \
+                 input_tokens, output_tokens, tokens, duration",
             )),
         }
     }
@@ -86,7 +112,7 @@ impl FromStr for TraceSort {
 mod tests {
     use super::*;
 
-    const ALL: [TraceSort; 8] = TraceSort::all();
+    const ALL: [TraceSort; 13] = TraceSort::all();
 
     /// `all()` is a hand-written array, so nothing but a `match` forces it to
     /// stay complete: a new variant fails to compile here until it is listed.
@@ -100,6 +126,11 @@ mod tests {
                 | TraceSort::Session
                 | TraceSort::Status
                 | TraceSort::Steps
+                | TraceSort::ModelCalls
+                | TraceSort::ToolCalls
+                | TraceSort::Errors
+                | TraceSort::InputTokens
+                | TraceSort::OutputTokens
                 | TraceSort::Tokens
                 | TraceSort::Duration => {}
             }

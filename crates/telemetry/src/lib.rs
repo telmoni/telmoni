@@ -32,7 +32,7 @@ use std::sync::Arc;
 
 use axum::{
     Router, middleware,
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use sqlx::PgPool;
 
@@ -121,6 +121,15 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(handler::field_inventory::get_field_inventory),
         )
         .route("/telemetry/traces", get(handler::traces::list_traces))
+        .route("/telemetry/traces/facets", get(handler::traces::get_facets))
+        .route(
+            "/telemetry/traces/histogram",
+            get(handler::traces::get_histogram),
+        )
+        .route(
+            "/telemetry/traces/export",
+            get(handler::traces::export_traces),
+        )
         .route(
             "/telemetry/traces/{run_id}",
             get(handler::traces::get_trace),
@@ -130,6 +139,14 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/telemetry/sessions/{session_id}",
             get(handler::sessions::get_session),
+        )
+        .route(
+            "/telemetry/views",
+            get(handler::views::list_views).post(handler::views::create_view),
+        )
+        .route(
+            "/telemetry/views/{id}",
+            put(handler::views::update_view).delete(handler::views::delete_view),
         )
         .layer(middleware::from_fn_with_state(
             state.service_secrets.clone(),

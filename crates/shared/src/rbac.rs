@@ -67,6 +67,11 @@ pub enum Resource {
     /// purge or the project's own deletion removes one, so the write verbs
     /// are denied structurally.
     Trace,
+    /// A project's saved views of its trace list: a filter, a sort and the
+    /// columns shown, under a name. Every role on the project applies them;
+    /// its owners and admins save them, as they change everything else the
+    /// project's members share.
+    View,
     // The product built on this platform adds its resources here WITH their
     // handlers, never before, or the matrix grants a capability no endpoint
     // exposes.
@@ -75,7 +80,7 @@ pub enum Resource {
 impl Resource {
     /// Every resource, in the matrix's order.
     #[must_use]
-    pub const fn all() -> [Self; 6] {
+    pub const fn all() -> [Self; 7] {
         [
             Self::Project,
             Self::Member,
@@ -83,6 +88,7 @@ impl Resource {
             Self::Connector,
             Self::Audit,
             Self::Trace,
+            Self::View,
         ]
     }
 
@@ -96,6 +102,7 @@ impl Resource {
             Self::Connector => "connector",
             Self::Audit => "audit",
             Self::Trace => "trace",
+            Self::View => "view",
         }
     }
 }
@@ -175,7 +182,7 @@ mod tests {
     use super::*;
 
     const VERBS: [Verb; 4] = Verb::all();
-    const RESOURCES: [Resource; 6] = Resource::all();
+    const RESOURCES: [Resource; 7] = Resource::all();
 
     /// A new variant fails to compile here until `all()` lists it, and two
     /// variants never share a word.
@@ -193,7 +200,8 @@ mod tests {
                 | Resource::Token
                 | Resource::Connector
                 | Resource::Audit
-                | Resource::Trace => {}
+                | Resource::Trace
+                | Resource::View => {}
             }
         }
         let mut words: Vec<&str> = VERBS.iter().map(|v| v.as_str()).collect();
@@ -271,6 +279,11 @@ mod tests {
         assert!(!can(Role::Admin, Verb::Create, Resource::Trace));
         assert!(!can(Role::Admin, Verb::Update, Resource::Trace));
         assert!(!can(Role::Admin, Verb::Delete, Resource::Trace));
+
+        assert!(can(Role::Admin, Verb::Read, Resource::View));
+        assert!(can(Role::Admin, Verb::Create, Resource::View));
+        assert!(can(Role::Admin, Verb::Update, Resource::View));
+        assert!(can(Role::Admin, Verb::Delete, Resource::View));
     }
 
     /// The answer a refusal gives has to be reachable and has to be true.
@@ -333,6 +346,11 @@ mod tests {
             Some(Role::Member)
         );
         assert_eq!(minimum_role(Verb::Delete, Resource::Trace), None);
+        assert_eq!(minimum_role(Verb::Read, Resource::View), Some(Role::Member));
+        assert_eq!(
+            minimum_role(Verb::Create, Resource::View),
+            Some(Role::Admin)
+        );
     }
 
     #[test]
