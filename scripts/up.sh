@@ -58,6 +58,9 @@ PORT="$SERVER_PORT" "$BINARY" serve &
 server=$!
 (cd web && PORT=3000 exec npm run dev) &
 console=$!
+# `make up` laid the book in before this ran; this lays each edit in ../docs
+# over it within a second, and stops when this script does.
+scripts/book.sh "${DOCS_DIR:-../docs}" --watch &
 
 stop() {
     trap '' INT TERM

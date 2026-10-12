@@ -5,13 +5,14 @@
 
 A foundation for organizations and their projects: members and roles, API keys, notifications, a hash-chained audit log, a console agent, telemetry's ingest and stores for agents' spans, and the SDKs that send them. One Rust binary runs all of it behind a Next.js console.
 
-Telmoni has not launched yet. The customer documentation is this repository's, `web/content/docs`, served by the console at [telmoni.com/docs](https://telmoni.com/docs), and so are the four SDKs, under `sdk/`; the CLI is [`telmoni/telmoni-cli`](https://github.com/telmoni/telmoni-cli).
+Telmoni has not launched yet. The four SDKs are this repository's, under `sdk/`. The customer documentation is [`telmoni/docs`](https://github.com/telmoni/docs), which the console builds in and serves at [telmoni.com/docs](https://telmoni.com/docs); the CLI is [`telmoni/telmoni-cli`](https://github.com/telmoni/telmoni-cli).
 
 ## Getting started
 
-You need Rust (the version `rust-toolchain.toml` pins, which `rustup` installs for you), Node (`web/.nvmrc`) and Docker.
+You need Rust (the version `rust-toolchain.toml` pins, which `rustup` installs for you), Node (`web/.nvmrc`), Docker and `rsync`, and the docs checked out beside this repository, since the console builds them in.
 
 ```console
+git clone https://github.com/telmoni/docs.git ../docs   # once: the docs, which `make book` lays into the console
 make first-run   # once: env files, dependencies, Postgres and ClickHouse, migrations
 make up          # Postgres, ClickHouse, Redis, Mailpit, the server on :8082, the console on :3000
 ```
@@ -32,11 +33,11 @@ crates/
   migrator/       the migration runner, grants, role hardening, the audit schema;
                   runs telemetry's ClickHouse file and purge
   shared/         errors, RBAC, tenancy, the seams between modules
-web/              the console, a thin proxy in front of the server, and the docs it serves (`web/content/docs`)
+web/              the console, a thin proxy in front of the server, and the docs it serves, laid in from ../docs (`web/content/docs`)
 sdk/              the SDKs: python/, typescript/, go/, rust/, and the fixtures every suite replays
 contract/         the generated wire contract and OpenAPI document
 deploy/           the Helm chart and the self-host compose file
-scripts/          `up.sh` behind `make up`, and the webhook tunnel and receiver for testing a connector
+scripts/          `up.sh` behind `make up`, `book.sh` behind `make book`, and the webhook tunnel and receiver for testing a connector
 ARCHITECTURE.md   how it is built, and why, on one page
 ```
 

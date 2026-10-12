@@ -9,6 +9,8 @@ endif
 export DATABASE_URL ?= postgresql://telmoni:telmoni_dev@localhost:5432/telmoni
 
 WEB_DIR     ?= web
+# The book's checkout, telmoni/docs, which `make book` lays into the console.
+DOCS_DIR    ?= ../docs
 CRATES_DIR  ?= crates
 SERVER_PORT ?= 8082
 # The console's: scripts/up.sh pins 3000, and a stack built on this one, on
@@ -41,6 +43,7 @@ help:
 	@echo "    make docker-up            run postgres, clickhouse + redis in Docker (headless)"
 	@echo "    make server-dev           run the server alone (telmoni serve)"
 	@echo "    make web-dev              run the console alone"
+	@echo "    make book                 lay the docs (telmoni/docs, at ../docs) into the console; up and web-dev keep them in step"
 	@echo "    make sweep SWEEP=deletion run one sweep by hand (deletion, audit-verify, retention, agent-reindex, audit-exports)"
 	@echo "    make webhook-receiver SECRET=whsec_...   receive an outbound webhook behind a named Cloudflare route"
 	@echo "    make webhook-tunnel       the same, with no dashboard: a quick tunnel prints a throwaway URL (needs cloudflared)"
@@ -54,6 +57,7 @@ help:
 	@echo "    make check                the fast half: types, clippy, fmt, rustdoc"
 	@echo "    make sdk-check            the SDKs: the TypeScript, Go and Python suites, and the Rust crate's tests"
 	@echo "    make test                 vitest (web) + cargo test (the crates)"
+	@echo "    make book-check           the docs' gate: the console built with them, and the tests that read its pages"
 	@echo "    make fmt                  cargo fmt + prettier"
 	@echo ""
 	@echo "  More"
@@ -212,10 +216,10 @@ env-check-web:
 up-preflight: env-scaffold env-check port-check deps-check docker-up db-wait clickhouse-wait roles-check schema-check
 
 .PHONY: up
-up: up-preflight
+up: up-preflight book
 	@echo "building the server (so it boots alongside web, not a minute after)…"
 	cargo build -p telmoni --quiet
-	SERVER_PORT=$(SERVER_PORT) bash scripts/up.sh
+	SERVER_PORT=$(SERVER_PORT) DOCS_DIR=$(DOCS_DIR) bash scripts/up.sh
 
 .PHONY: local
 local: up
@@ -241,16 +245,25 @@ doctor:
 	@printf "%-16s" "docker-compose:"; docker compose version > /dev/null 2>&1 && docker compose version | head -1 || echo "MISSING"
 	@printf "%-16s" "docker daemon:"; docker ps             > /dev/null 2>&1 && echo "running"      || echo "NOT RUNNING  (start docker)"
 	@printf "%-16s" "gh:";            command -v gh         > /dev/null 2>&1 && gh --version | head -1 || echo "MISSING  (PR/issue work only)"
+	@printf "%-16s" "rsync:";         command -v rsync      > /dev/null 2>&1 && rsync --version | head -1 || echo "MISSING  (make book lays the docs in with it)"
+	@printf "%-16s" "docs:";          test -d $(DOCS_DIR)/content         && echo "present ($(DOCS_DIR))" || echo "MISSING  (git clone https://github.com/telmoni/docs.git $(DOCS_DIR))"
 	@printf "%-16s" ".env:";          test -f .env                       && echo "present"           || echo "MISSING  (cp .env.example .env)"
 	@printf "%-16s" "web/.env.local:"; test -f $(WEB_DIR)/.env.local      && echo "present"           || echo "MISSING  (cp $(WEB_DIR)/.env.local.example $(WEB_DIR)/.env.local)"
 
 .PHONY: web-dev
-web-dev:
-	cd $(WEB_DIR) && npm run dev
+web-dev: book
+	@scripts/book.sh $(DOCS_DIR) --watch & \
+		cd $(WEB_DIR) && npm run dev
 
 .PHONY: web-prod
-web-prod:
+web-prod: book
 	cd $(WEB_DIR) && npm run build && PORT=$(WEB_PORT) npm run start
+
+# The docs live in telmoni/docs, checked out as $(DOCS_DIR); the console builds
+# them in from web/content/docs, which git ignores (scripts/book.sh).
+.PHONY: book
+book:
+	@scripts/book.sh $(DOCS_DIR)
 
 .PHONY: server-dev
 server-dev:
@@ -279,9 +292,19 @@ doc:
 ci: check lint test web-gate deny typos sdk-check
 
 .PHONY: web-gate
-web-gate:
+web-gate: book
 	cd $(WEB_DIR) && npm run knip
 	cd $(WEB_DIR) && npm run build
+
+# The docs repository's gate, which its `make check` runs here against its own
+# checkout: every page compiled into the console, and the two tests that hold a
+# page to the code. The filter leaves out field_inventory.rs's third test, the
+# one that needs Postgres.
+.PHONY: book-check
+book-check: book
+	cd $(WEB_DIR) && npm run build
+	cargo test --locked -p telmoni-shared --test error_catalog
+	cargo test --locked -p telmoni-telemetry --test field_inventory -- the_page_and_the_code
 
 .PHONY: lint
 lint:
@@ -293,12 +316,12 @@ test test-svc: export MIGRATOR_CLICKHOUSE_URL := $(or $(MIGRATOR_CLICKHOUSE_URL)
 test test-svc: export TELEMETRY_CLICKHOUSE_URL := $(or $(TELEMETRY_CLICKHOUSE_URL),http://telemetry:telemetry_dev@localhost:8123)
 
 .PHONY: test
-test: docker-up db-wait clickhouse-wait
+test: docker-up db-wait clickhouse-wait book
 	cd $(WEB_DIR) && npm run test
 	cargo test --workspace --locked --no-fail-fast -- --test-threads=$(TEST_THREADS)
 
 .PHONY: e2e
-e2e: deps-check docker-up db-wait clickhouse-wait schema-check
+e2e: deps-check docker-up db-wait clickhouse-wait schema-check book
 	cargo build -p telmoni
 	cd $(WEB_DIR) && npm run test:e2e
 
@@ -309,7 +332,7 @@ contract:
 	@echo "wrote contract/wire-contract.json + contract/openapi.json"
 
 .PHONY: test-svc
-test-svc:
+test-svc: book
 	cargo test -p $(if $(filter telmoni,$(SVC)),telmoni,telmoni-$(SVC)) $(if $(TEST_BIN),--test $(TEST_BIN)) --no-fail-fast -- --test-threads=$(TEST_THREADS) $(TEST_FILTER)
 
 .PHONY: deny

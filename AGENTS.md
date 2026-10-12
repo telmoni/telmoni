@@ -18,35 +18,37 @@ The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni
 | `crates/telemetry` | Each project's settings and content mode in Postgres, the mode read and set through the console's lane under `/internal/telemetry` (`handler/`); the spans and their hourly totals in ClickHouse, which the module reads and writes only through `store.rs`, each read naming its projects. `clickhouse/` holds ClickHouse's one migration file, which `migrate` applies (`schema.rs`), its settings and its local users; `rotate` drops the expired days and months (`retention.rs`), both as the migrator's user. |
 | `crates/shared` | `TelmoniError`, RBAC (`rbac.rs`), tenancy scopes, the seams between modules (`seam.rs`), audit, `Redacted`. `tests/` holds the cross-module suites. |
 | `crates/migrator` | The migration runner and the `audit` schema; grants, role hardening and the local roles and extensions in `sql/`. Each module's SQL is in `crates/<module>/migrations/`, and telemetry's ClickHouse file in `crates/telemetry/clickhouse/`. |
-| `web/` | `app/` routes and their tests, `lib/` logic and its tests, `components/` UI (no tests), `content/docs/` the book (the customer docs, served at `/docs`), `e2e/` Playwright, `proxy.ts` middleware, `lib/extension/` and `components/extension/` the slots a console built on this one fills. |
+| `web/` | `app/` routes and their tests, `lib/` logic and its tests, `components/` UI (no tests), `content/docs/` the book (the customer docs, served at `/docs`), laid in from `../docs` by `make book` and ignored by git, `e2e/` Playwright, `proxy.ts` middleware, `lib/extension/` and `components/extension/` the slots a console built on this one fills. |
 | `sdk/` | The four SDKs (`python/`, `typescript/`, `go/`, `rust/`): an agent's runs, steps, model calls and tool calls as OpenTelemetry spans, sent to `/otlp/v1/traces` by an exporter of each one's own and nowhere else; `fixtures/`, the golden export and the answers every suite replays. `crates/telemetry/src/contract.rs` names what ingest reads, and each SDK's `contract` module copies it. |
 | `contract/` | Generated wire contract and OpenAPI document (`make contract`); never hand-edited. |
-| `scripts/` | `up.sh` and the webhook tunnel and receiver. Ask before adding one. |
+| `scripts/` | `up.sh`, `book.sh` (the book, laid into the console) and the webhook tunnel and receiver. Ask before adding one. |
 | `deploy/` | The Helm chart (`charts/telmoni`) and the self-host compose (`compose/`). |
 | `ARCHITECTURE.md` | How the platform is built, and why, on one page: the repository's one internal document. |
 | `scratch/` | The maintainer's notes, gitignored. Never write to it. |
+| [`telmoni/docs`](https://github.com/telmoni/docs) | Sibling repo, checked out as `../docs`: the book, `content/`, which `make book` lays into `web/content/docs`, and `hosted/`, the hosted service's own pages, which this console never serves. |
 | [`telmoni/telmoni-cli`](https://github.com/telmoni/telmoni-cli) | Sibling repo, checked out as `../telmoni-cli`: the CLI, a client of the `/cli` and `/v1` lanes and nothing else. |
 
 ## Commands
 - **After every change** (no permission needed; report failures verbatim): `make check` (typecheck, cargo check, fmt, clippy, rustdoc), then `make lint`.
 - **After a change under `sdk/`:** `make sdk-check` too (the TypeScript, Go and Python suites, and `cargo test -p telmoni-sdk`, which needs no database); the Rust SDK is a workspace member, so `make check` already covers it.
+- **After a change in `../docs`:** `make book-check` too, the book's own gate (its `make check` runs the same): the console built with the pages, and the tests that read them.
 - **Only when asked:** `make test TEST_THREADS=2`, `make test-svc SVC=<crate> TEST_THREADS=2 [TEST_FILTER=<name>]`, `make ci`, `make e2e`, `npm run test` in `web/`, `make db-reset`. Never bare `cargo test`: `make test` starts Postgres and ClickHouse, and `make test-svc` expects both running. Unasked, say "untested" and name the command (`make db-reset` first if a migration changed).
 - **After a wire-contract change:** `make contract`, then update `web/lib/types/enums.ts` (and `web/lib/slug.ts`, which it also pins) until `contract.test.ts` passes.
-- **Locally:** `make up` starts `docker-compose.yml` (Postgres, ClickHouse, Redis, Mailpit; Ollama with `COMPOSE_PROFILES=ollama`), then runs the server (`:8082`) and console (`:3000`) in one terminal; `make server-dev` and `make web-dev` run either alone.
+- **Locally:** `make up` starts `docker-compose.yml` (Postgres, ClickHouse, Redis, Mailpit; Ollama with `COMPOSE_PROFILES=ollama`), then runs the server (`:8082`) and console (`:3000`) in one terminal, with the book laid in from `../docs` and each edit there laid in within a second; `make server-dev` and `make web-dev` run either alone.
 
 ## Code Rules
-- **Rust owns the logic:** business rules, queries, audit, RBAC and tenancy, session resolution. Log only through `tracing` (no `println!` or `dbg!` outside tests). Return `TelmoniError` as RFC 9457 problem details; every `type` needs a row in the book's `web/content/docs/errors.mdx` (`crates/shared/tests/error_catalog.rs`). Never leak a panic or stack trace.
+- **Rust owns the logic:** business rules, queries, audit, RBAC and tenancy, session resolution. Log only through `tracing` (no `println!` or `dbg!` outside tests). Return `TelmoniError` as RFC 9457 problem details; every `type` needs a row in the book's `errors.mdx`, `../docs/content/errors.mdx` (`crates/shared/tests/error_catalog.rs`). Never leak a panic or stack trace.
 - **Never log secrets or PII**, at any level, nor put them in an error `detail` or panic: no keys, tokens, signing or service secrets, confirmation codes, `Authorization`/`Cookie`/`x-service-secret` headers, emails, names or free text. Log ids. Hold secrets in `Redacted` and read them with `.expose()`.
 - **`web/` is a thin proxy:** no database access or business logic. Call the server only with `fetchWithTimeout`/`tryFetchWithTimeout` (`web/lib/api/fetch.ts`) and headers from `web/lib/server/entities/identity-context.ts` (`organizationHeaders`, `projectHeaders`, `personHeaders`, `sessionHeaders`, `accountHeaders`). Log through `@/lib/logger`, never `console.*`. App Router only; server components by default, `"use client"` only at interactive leaves. Test in `web/lib/` and `web/app/`, never `web/components/`.
 - **The SDKs grow together:** a behaviour added to one lands in all four in the same change, with its row in `ARCHITECTURE.md`'s parity table (*The SDKs*) and, where the wire or an answer changes, a fixture in `sdk/fixtures/`. No SDK reads an `OTEL_*` variable, prints or serializes its key, sends a span outside a run, follows a redirect, or calls anything but ingest.
 - **Twelve-factor:** config and backing services (Postgres, ClickHouse, Redis, the model, embeddings and rerank URLs) come only from the environment; both processes are stateless; each binds `PORT`; both drain on `SIGTERM`/`SIGINT`; logs are JSON on stdout; admin tasks are subcommands of the binary, never part of the request loop.
 
 ## Contracts
-- `ARCHITECTURE.md` is how the code is built, for whoever changes it; a change that alters what it says updates it in the same change. What the product does for a customer is the book: MDX under `web/content/docs`, served at `/docs` by `web/app/docs/[[...slug]]`.
-- Runnable specs (golden vectors, constants, tests) live in the code, and the book prints them. When one changes: change the code, grep `web/content/docs` for the old value, check constants no test reads (TTLs, retention days, limits) by hand, and fix every page left wrong in the same change. For example, `integrations/webhooks.mdx` prints the golden vector in `web/lib/webhook-signature.ts`.
+- `ARCHITECTURE.md` is how the code is built, for whoever changes it; a change that alters what it says updates it in the same change. What the product does for a customer is the book: MDX in `telmoni/docs`, `../docs/content`, which `make book` lays into `web/content/docs` and `web/app/docs/[[...slug]]` serves at `/docs`.
+- Runnable specs (golden vectors, constants, tests) live in the code, and the book prints them. When one changes: change the code, grep `../docs/content` for the old value, check constants no test reads (TTLs, retention days, limits) by hand, and fix every page left wrong in the same task. For example, `integrations/webhooks.mdx` prints the golden vector in `web/lib/webhook-signature.ts`.
 
 ## Agent Hygiene
-- **This repo only:** change nothing in another repository (`telmoni/telmoni-cli`, any other) unless the user says so for this task; that binds subagents too. Reading is fine.
+- **This repo only:** change nothing in another repository (`telmoni/telmoni-cli`, any other) unless the user says so for this task; that binds subagents too. Reading is fine. The book is the exception: a change here that leaves a page in `../docs` wrong fixes that page there, in the same task.
 - Edit `AGENTS.md` (`.github/copilot-instructions.md` points here) only when the user asks outright; otherwise propose a diff. Delete any Next.js-generated `web/AGENTS.md`.
 - Comments say *why*, never *what*. No AI signatures anywhere.
 - No scripted bulk edits: edit each file deliberately (formatters, generators and an approved lockfile write excepted). One-off scripts, backups and logs go in `/tmp/telmoni/`.
@@ -61,5 +63,5 @@ The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni
 ## Definition of Done
 - [ ] `make check` and `make lint` pass, or the failure is reported verbatim.
 - [ ] No secret or PII reaches a log, an error `detail` or a commit.
-- [ ] The README still describes the tree, `ARCHITECTURE.md` and the book say what the change does, and every page left wrong in another repository is named.
+- [ ] The README still describes the tree, `ARCHITECTURE.md` and the book (`../docs`) say what the change does, and every page left wrong in another repository is named.
 - [ ] Nothing that needs asking happened unasked (tests, `make db-reset`, dependencies, external state, other repos, commits), and anything untested is reported with its command.

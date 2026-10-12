@@ -40,8 +40,8 @@ It is **one Rust binary**, `telmoni`, and **a Next.js console** beside it, deplo
 
 | For | Read |
 |---|---|
-| What the product does for a customer | The console's book, `web/content/docs`, served at `/docs` |
-| Running it yourself | The book's self-host pages, `web/content/docs/self-host` |
+| What the product does for a customer | The book, [`telmoni/docs`](https://github.com/telmoni/docs), which the console builds in from `web/content/docs` and serves at `/docs` |
+| Running it yourself | The book's self-host pages, `content/self-host` in `telmoni/docs` |
 | Developing it | `README.md` and `AGENTS.md` |
 
 ## Goals and constraints
@@ -153,7 +153,7 @@ flowchart TB
 | `telemetry` | Ingest at `/otlp/v1/traces`: the contract (`contract.rs`, with the field inventory as a table the docs page and the console are held to), the span read by it with its content dropped (`ingest/`), the claim on each export and the rate limit in Redis, and each project's hashing key (`hashing.rs`); each project's settings, and the switch its organization's owner sets its content mode with; the console's reads — the trace list and a trace's spans (`traces.rs`, `handler/traces.rs`), the users and the conversations, a run's spans summed by user and by conversation (`users.rs`, `conversations.rs`, their handlers), the field inventory (`handler/field_inventory.rs`) — each through the one query module for ClickHouse, which names the reader's projects on every read; the dogfood observer, which records the console agent's own questions as runs of a project of the operator's (`dogfood.rs`); the purge that marks a deleted project's rows in both tables, as auth's deletions ask through the seam (`seam.rs`, `store.rs`); the ClickHouse file and its nightly purge | The `telemetry` schema, and ClickHouse's `telemetry` database |
 | `shared` | Errors and problems, RBAC, `Acting`, scoped transactions, the seams, the audit writer and verifier, envelope encryption, the egress guard, logging, configuration, `Redacted`, slugs | — |
 | `migrator` | The migration runner, `rotate`, the `audit` schema, role hardening and grants; ClickHouse's file, its purge and the rewrite of the rows deleted projects left, run as its user there | The `audit` schema |
-| `web/` | The console: pages, the session, the edge's rate limits, the relays; no database access and no business logic | Nothing but what Redis holds |
+| `web/` | The console: pages, the session, the edge's rate limits, the relays, and the book, which lives in its own repository, `telmoni/docs`, and is laid into `content/docs` before the console builds (`scripts/book.sh`); no database access and no business logic | Nothing but what Redis holds |
 | `sdk/` | The four SDKs, in an agent's own process: a tracer provider of each one's own, a batch processor, and an exporter that takes content off and sends OTLP JSON to ingest (*The SDKs*); `fixtures/`, the golden export and the answers every suite replays | A bounded queue, in memory, until it is sent |
 | Postgres | One database: a schema per module, each written by its own role alone | Everything durable but the spans and their totals |
 | ClickHouse | One node: telemetry's spans and their hourly totals, metadata alone, read under a row policy | The spans, until the retention line, and their hourly totals for 13 months |
@@ -365,12 +365,12 @@ flowchart LR
   Rotate --> PG & CH
 ```
 
-- **Two images**, `server` (a static musl binary on distroless) and `web` (Node on distroless), published to GHCR once CI passes on `main`.
+- **Two images**, `server` (a static musl binary on distroless) and `web` (Node on distroless, with the book as `telmoni/docs`'s `main` held it at the build), published to GHCR once CI passes on `main`.
 - **The chart** runs the console, the server, the migrate hook and the rotate CronJob, reads one ConfigMap and three Secrets the operator makes, denies all traffic by default, runs every pod non-root with every capability dropped, and offers high availability and a Gateway as switches. Postgres, ClickHouse, Redis and the key are the operator's, outside it.
 - **Two doors.** The console's, for people; and the machine lanes' — ingest at `/otlp/v1/traces`, the read API under `/v1`, the CLI's session lanes under `/cli` and Slack's events at `/webhooks/slack` — on a Service of their own, `server-api`, routed on a host of their own (`ingress.apiHost`) or by path on the console's host, whose slugs are reserved for them, and only the lanes' paths either way: every other lane of the server is the console's to call, behind the service secret, and each machine lane has a gate of its own, a project API key, the CLI's device code or bearer, or Slack's signature. The server reads `TRUSTED_PROXY_HOPS` from the same ConfigMap value the console does (`web.trustedProxyHops`), since both sit behind the same Gateway.
 - **Order:** the ConfigMap and the migrator's account as hooks, then the migration, then the rollout; a failed migration fails the upgrade before anything rolls.
 - **Compose** runs the whole of it on one machine, every module as one superuser, ClickHouse as one user, and `rotate` by hand; it publishes the console, and the server's port on loopback alone, for the reverse proxy on the host to forward the machine lanes to.
-- **CI** checks, and tests against Postgres and ClickHouse; `publish.yml` pushes the images once CI passes on `main`; nothing deploys.
+- **CI** checks, and tests against Postgres and ClickHouse; the jobs that build the console or read its pages check `telmoni/docs` out beside this repository first, and so does `publish.yml` for the `web` image, which it pushes, with `server`, once CI passes on `main`; nothing deploys.
 
 ## Extending the core
 

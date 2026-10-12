@@ -1,6 +1,6 @@
 //! Every problem `type` a service can answer is documented, and nothing more.
-//! The page is the console's own, `web/content/docs/errors.mdx`; without it
-//! the test fails.
+//! The page is the book's `errors.mdx`, from `telmoni/docs`, which `make book`
+//! lays into `web/content/docs`; without it the test fails.
 
 #![expect(clippy::unwrap_used, reason = "test scaffolding")]
 

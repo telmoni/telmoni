@@ -1,5 +1,0 @@
-{
-  "title": "Developer tools & API",
-  "defaultOpen": true,
-  "pages": ["cli", "sdks", "api-keys", "ingest", "field-inventory", "reference", "..."]
-}

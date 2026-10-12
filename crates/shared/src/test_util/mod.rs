@@ -75,50 +75,35 @@ pub fn project_root() -> std::path::PathBuf {
         .to_path_buf()
 }
 
-/// A page of the customer documentation, by its path under the book
-/// (`"errors.mdx"`, `"workspace/billing.mdx"`): the console's own
-/// `web/content/docs`. Cargo names the package under test when it runs it, so
-/// a repository built on this one reads its own pages first, the ones it lays
-/// over the console, and this repository's for the rest.
+/// A page of the customer documentation, by its path in the book
+/// (`"errors.mdx"`, `"api/field-inventory.mdx"`): `telmoni/docs`, laid into
+/// the console's `web/content/docs` by `make book`, and by CI from its own
+/// checkout.
 ///
 /// ⚠ **A page the book lacks panics.** That is a page that moved, and passing
 /// over it once let a test check nothing for as long as its page lived
-/// somewhere else.
+/// somewhere else. A book that was never laid in panics too, with the command
+/// that lays it, rather than as a page that moved.
 #[must_use]
 #[expect(
     clippy::panic,
     reason = "a book that lacks the page is a failing test, not a skipped one"
 )]
 pub fn customer_docs_page(page: &str) -> String {
-    let core = project_root();
-    // `project_root` is fixed when this crate is compiled, so it is this
-    // repository even under another's tests; the package under test is only
-    // known when the test runs.
-    let built_on_it = std::env::var_os("CARGO_MANIFEST_DIR")
-        .and_then(|manifest| {
-            let manifest = std::path::PathBuf::from(manifest);
-            Some(manifest.parent()?.parent()?.to_path_buf())
-        })
-        .filter(|root| *root != core);
-    let homes: Vec<std::path::PathBuf> = built_on_it
-        .into_iter()
-        .chain(std::iter::once(core))
-        .map(|root| root.join("web/content/docs"))
-        .collect();
-    let Some(path) = homes
-        .iter()
-        .map(|home| home.join(page))
-        .find(|path| path.is_file())
-    else {
+    let book = project_root().join("web/content/docs");
+    if !book.is_dir() {
+        panic!(
+            "no book at {}: `make book` lays it in from telmoni/docs, checked out as ../docs",
+            book.display()
+        );
+    }
+    let path = book.join(page);
+    if !path.is_file() {
         panic!(
             "no {page} under {}: the page moved, so point this test at its new path",
-            homes
-                .iter()
-                .map(|home| home.display().to_string())
-                .collect::<Vec<_>>()
-                .join(" or ")
+            book.display()
         );
-    };
+    }
     std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("{} cannot be read: {e}", path.display()))
 }
