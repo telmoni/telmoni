@@ -20,6 +20,7 @@ Telemetry is kept only while its project is active.
 | A deleted project's spans and totals | Until the project is deleted | Marked deleted the moment the project goes, and gone from every read within moments, as the store applies the mark; `rotate` rewrites them off the disk that night |
 | The claim on an export's bytes, which answers a retry with the first answer rather than writing twice | 1 hour | Expires |
 | A project's telemetry settings: its content mode, whether end-user ids are hashed, and the key they are hashed under | While the project exists | Purged with the project |
+| A project's saved views of its traces: each one's name, filters, sort, window and columns | Until an Owner or Admin deletes it, or the project goes | Purged with the project |
 
 Content — prompts, completions, system instructions, tool inputs and outputs,
 retrieved documents, error messages and every attribute that names a person —

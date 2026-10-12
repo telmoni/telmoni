@@ -20,7 +20,7 @@ after typing the project's name
 - **In the same purge:** every span and every hour of totals the project
   sent is marked deleted, gone from every read within moments as the store
   applies the mark, and the nightly rotation removes them from disk; its
-  telemetry settings, and the key its
+  telemetry settings, its saved views of its traces, and the key its
   end-user ids were hashed under, go with them. Its connectors, their
   delivery history and its activity feed are purged right after, and the
   console agent removes what it holds about the project within the hour.
@@ -41,8 +41,8 @@ Only the **Owner** can, with a confirmation code sent to their address
   minutes, erases it: its projects, with everything a project's deletion
   removes above; memberships and pending invitations; API keys; connectors
   and the notices queued for them; the audit log's exports; the console
-  agent's conversations and search index; and telemetry's settings and
-  hashing keys. Usually within the hour. A part that cannot finish is
+  agent's conversations and search index; and telemetry's settings, saved
+  views and hashing keys. Usually within the hour. A part that cannot finish is
   retried every ten minutes until it does.
 - **What stays:** the audit log, which is append-only and outlives the
   organization; invoices, which Stripe holds; and copies already delivered

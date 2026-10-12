@@ -46,11 +46,14 @@ as a **Member**.
 ## Project roles
 
 Inside each project, a project role decides what you can do with project
-resources: API keys, connectors, and project audit events.
+resources: API keys, connectors, saved views of its traces, and project audit
+events.
 
 | Permission | Owner | Admin | Member |
 |---|---|---|---|
 | View project overview and resources | Yes | Yes | Yes |
+| Open the project's [saved views](/docs/workspace/traces#saved-views) of its traces | Yes | Yes | Yes |
+| Save, rename, and delete saved views | Yes | Yes | No |
 | View API keys (names and dates, never the raw key) | Yes | Yes | Yes |
 | Create, rotate, and revoke API keys | Yes | Yes | No |
 | View connectors and delivery logs | Yes | Yes | Yes |
@@ -69,12 +72,12 @@ resources: API keys, connectors, and project audit events.
   organization Owner holds Owner privileges across all projects in the
   organization.
 - **Admin**: Operates the project: creates, rotates, and revokes API keys;
-  manages Slack and webhook connectors; manages project seats; and
-  reads the project audit log. Cannot change the project's content mode, or
+  manages Slack and webhook connectors; manages project seats; saves the
+  trace list's views; and reads the project audit log. Cannot change the project's content mode, or
   delete or transfer the project.
 - **Member**: Read-only access to project resources. Can inspect active
   connectors, delivery logs, and API key metadata (name, creation date, last
-  used date). Cannot view the project audit log and cannot mutate any resources.
+  used date), and open the project's saved views. Cannot view the project audit log and cannot mutate any resources.
 
 ## What a refusal tells you
 
@@ -94,8 +97,8 @@ do and the one you hold:
 ```
 
 Every other refusal answers `/errors/authz/forbidden`, and `detail` says what
-is refused and to whom: API keys, connectors and the audit log (decided by the
-same role matrix), an organization's name and URL, the console agent, creating
+is refused and to whom: API keys, connectors, saved views and the audit log
+(decided by the same role matrix), an organization's name and URL, the console agent, creating
 a project, the organization's roster, its deletion and transfer, a
 project's transfer and, on the hosted service, billing. The server checks every
 request against the caller's roles; nothing is left to the browser.
