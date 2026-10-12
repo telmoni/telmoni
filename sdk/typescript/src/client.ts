@@ -194,9 +194,11 @@ export class Telmoni {
   /** Send everything queued; true once the platform has it, false past the timeout. */
   async flush(timeoutSeconds = 30): Promise<boolean> {
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // Held, unlike the worker's timer: a flush is what a short-lived process
+    // awaits last, and with nothing else holding it the process would exit
+    // before the worker ran, its spans unsent. Cleared as the flush settles.
     const expired = new Promise<boolean>((resolve) => {
       timer = setTimeout(() => resolve(false), timeoutSeconds * 1000);
-      timer.unref();
     });
     try {
       return await Promise.race([this.#processor.forceFlush().then(() => true), expired]);
