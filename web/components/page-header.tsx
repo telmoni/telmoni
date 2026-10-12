@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, type ReactNode } from "react";
+import { InfoIcon } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { usePageHeaderSet } from "./page-header-context";
 import { recordVisit } from "@/lib/search-recent";
@@ -10,6 +13,7 @@ import { PRODUCT_NAME } from "@/lib/site";
 export function PageHeader({
   title,
   count,
+  info,
   action,
   backHref,
   backLabel,
@@ -18,6 +22,10 @@ export function PageHeader({
   /** How many the page lists, beside its title, as the Projects page counts
    *  its projects; none while that count cannot be read. */
   count?: number;
+  /** What the page is, behind an ⓘ beside its title, as Langfuse's tracing
+   *  page says what it lists: for a page whose toolbar leaves no room for a
+   *  sentence. */
+  info?: string;
   action?: ReactNode;
   backHref?: string;
   backLabel?: string;
@@ -50,6 +58,22 @@ export function PageHeader({
             <Badge variant="secondary" className="shrink-0 text-xs">
               {count}
             </Badge>
+          )}
+          {info && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="shrink-0 cursor-help rounded-sm text-muted-foreground hover:text-foreground"
+                    aria-label={`About ${title}`}
+                  >
+                    <InfoIcon className="size-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">{info}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
         </div>
       )}
