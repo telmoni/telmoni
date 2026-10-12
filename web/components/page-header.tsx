@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { InfoIcon } from "lucide-react";
 import { usePathname } from "next/navigation";
 
@@ -41,6 +41,17 @@ export function PageHeader({
     return () => set((cur) => (cur === my ? null : cur));
   }, [title, backHref, backLabel, set, pathname]);
 
+  // A page that came after its loading state finds the focus where the
+  // console shell parked it, on the main region, as no heading stood there
+  // yet (`console-shell.tsx`): the heading takes it, as it would have had the
+  // page come at once. Focus anywhere else is the person's, and stays.
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (document.activeElement?.id === "console-main") {
+      heading.current?.focus({ preventScroll: true });
+    }
+  }, []);
+
   if (!title && !action) return null;
   // As tall as a page action, 36px, so a page with one and a page without
   // start their content at the same height and nothing jumps between them.
@@ -49,6 +60,7 @@ export function PageHeader({
       {title && (
         <div className="flex min-w-0 items-center gap-2">
           <h1
+            ref={heading}
             tabIndex={-1}
             className="min-w-0 truncate text-base font-medium outline-none"
           >

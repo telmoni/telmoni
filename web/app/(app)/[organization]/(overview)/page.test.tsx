@@ -11,7 +11,7 @@ const leaveOrganizationAction = vi.hoisted(() =>
     error: null,
   })),
 );
-vi.mock("./members/actions", () => ({ leaveOrganizationAction }));
+vi.mock("../members/actions", () => ({ leaveOrganizationAction }));
 
 // The title as the real header draws it, the page's one `h1`.
 vi.mock("@/components/page-header", () => ({
@@ -27,7 +27,7 @@ vi.mock("@/components/service-unavailable", () => ({
   ServiceUnavailable: () => <div data-testid="outage">unavailable</div>,
 }));
 
-vi.mock("./notice-actions", () => ({
+vi.mock("../notice-actions", () => ({
   markOrganizationReadAction: vi.fn(async () => ({ error: null })),
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {} }) }));

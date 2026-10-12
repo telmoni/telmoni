@@ -15,9 +15,9 @@ import {
 } from "@/lib/server/data";
 import { cn } from "@/lib/utils";
 
-import { Overview } from "../_overview";
-import { LeaveOrganization } from "./_leave-organization";
-import { MarkOrganizationRead } from "./_organization-notices";
+import { Overview } from "../../_overview";
+import { LeaveOrganization } from "../_leave-organization";
+import { MarkOrganizationRead } from "../_organization-notices";
 
 // The tab is titled as the page is, by the organization's name. The context
 // is read again for it, a second call auth answers from its cache.
