@@ -63,6 +63,10 @@ pub const ATTRIBUTES_MAX: usize = 64;
 pub const ATTRIBUTE_KEY_MAX: usize = 128;
 /// An attribute's value, a named array's JSON among them.
 pub const ATTRIBUTE_VALUE_MAX: usize = 1_024;
+/// What a resource's kept attributes may take together, keys and values in
+/// bytes: every span of its export carries a copy, so a resource near the
+/// per-attribute caps would cost a thousand times its size.
+pub const RESOURCE_ATTRIBUTES_BYTES_MAX: usize = 2 * 1_024;
 
 // ── Units ────────────────────────────────────────────────────────────────────
 
@@ -101,9 +105,9 @@ pub const CANCELLED: &str = "telmoni.cancelled";
 pub const CONTENT_MARK: &str = "telmoni.content";
 /// The span of no duration that opens a run, sent at once; never a row.
 pub const RUN_START: &str = "telmoni.run.start";
-/// Our SDKs' and the CLI's instrumentation scope.
+/// Our SDKs' instrumentation scope.
 pub const SCOPE: &str = "telmoni";
-/// The resource attribute our SDKs and the CLI name themselves by.
+/// The resource attribute our SDKs name themselves by.
 pub const DISTRO_NAME: &str = "telemetry.distro.name";
 /// Its value.
 pub const DISTRO: &str = "telmoni";
@@ -285,7 +289,9 @@ pub fn is_field(key: &str) -> bool {
 // reads; this table is what a person reads of them, and a test holds the two
 // to each other.
 
-/// The spans an attribute is read on.
+/// The spans an attribute belongs on, where our SDKs and the conventions put
+/// it. Ingest reads it from whichever span carries it, a model's name or
+/// tokens on a step among them, and keeps it as its row says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReadOn {
     /// Every span of a run, the run among them.
@@ -363,7 +369,7 @@ impl Needs {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::AnyMode => "any",
-            Self::Content => "on, or sealed from our SDK",
+            Self::Content => "on, or sealed from Telmoni's SDK",
         }
     }
 }
@@ -403,7 +409,8 @@ pub const TAG_FAMILY: &str = "telmoni.tag.<key>";
 
 const KEPT_ATTRIBUTE: &str = "attributes, under its own name";
 const RULE_ATTRIBUTE: &str = "a key up to 128 characters and a value up to 1,024, an array as its JSON; \
-                              up to 64 attributes a span, its resource's among them";
+                              up to 64 attributes a span, its resource's among them, which keep \
+                              2 KiB together";
 const KEPT_CONTENT: &str = "dropped at the door on a project whose content mode is off, the span kept and \
                             the field named in the answer; kept in Postgres alone, never in a column, once \
                             a project may keep content";
@@ -856,7 +863,7 @@ pub const INVENTORY: &[InventoryRow] = &[
         ReadOn::AnySpan,
         KEPT_ATTRIBUTE,
         Needs::AnyMode,
-        "a measurement no person writes; on the resource too",
+        "a measurement no person writes; on the resource, dropped without a word",
     ),
     row(
         "any other text or array",

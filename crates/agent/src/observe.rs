@@ -191,6 +191,11 @@ impl Model for RecordingModel<'_> {
     }
 }
 
+/// How a model call the loop gave up on — past the turn's deadline, or with
+/// the asker gone — is classed: a class, as a failed call's problem type is,
+/// never a sentence, since it becomes the span's `error.type`.
+const GIVEN_UP: &str = "GivenUp";
+
 /// A model call under way. Recorded when it finishes; one dropped first,
 /// which the loop does to a call past its deadline, is recorded as given up.
 struct PendingGeneration<'a> {
@@ -252,7 +257,7 @@ impl Drop for PendingGeneration<'_> {
         if let Some(mut generation) = self.generation.take() {
             generation.ended_at = Utc::now();
             generation.first_token_at = self.first_token_at;
-            generation.error = Some("given up: the turn's deadline, or the asker gone".to_owned());
+            generation.error = Some(GIVEN_UP.to_owned());
             self.recorder.push(AgentStep::Generation(generation));
         }
     }

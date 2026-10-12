@@ -72,16 +72,26 @@ pub struct Dropped {
 }
 
 /// The attributes of a resource the inventory names, as `attributes` keeps
-/// them. Any other is dropped without a word: an SDK's resource detectors add
-/// them, and nothing the sender does to a span lifts that.
+/// them, under the caps a span's own are held to and a budget of their own
+/// together ([`contract::RESOURCE_ATTRIBUTES_BYTES_MAX`]). Any other is
+/// dropped without a word — an SDK's resource detectors add them, and
+/// nothing the sender does to a span lifts that — and so is one past a cap
+/// or the budget: the resource's list is copied onto every span of the
+/// export, so what it holds is paid for a thousand times over.
 #[must_use]
 pub fn resource_attributes(resource: Option<&Resource>) -> Vec<(String, String)> {
     let mut kept = Vec::new();
+    let mut bytes = 0usize;
     for kv in resource
         .map(|r| r.attributes.as_slice())
         .unwrap_or_default()
     {
-        if !contract::is_inventory_resource(&kv.key) {
+        if kept.len() >= ATTRIBUTES_MAX {
+            break;
+        }
+        if !contract::is_inventory_resource(&kv.key)
+            || kv.key.chars().count() > contract::ATTRIBUTE_KEY_MAX
+        {
             continue;
         }
         if let Some(text) = kv
@@ -89,7 +99,13 @@ pub fn resource_attributes(resource: Option<&Resource>) -> Vec<(String, String)>
             .as_ref()
             .and_then(|v| v.value.as_ref())
             .and_then(as_text)
+            .filter(|text| text.chars().count() <= contract::ATTRIBUTE_VALUE_MAX)
         {
+            let taken = bytes + kv.key.len() + text.len();
+            if taken > contract::RESOURCE_ATTRIBUTES_BYTES_MAX {
+                continue;
+            }
+            bytes = taken;
             kept.push((kv.key.clone(), text));
         }
     }
@@ -223,14 +239,12 @@ pub fn map(
 }
 
 /// What a row counts against its plan: one unit per started KiB of its text
-/// as kept, and [`SPAN_FIXED_BYTES`] for its ids, times and counts.
+/// as kept, and [`SPAN_FIXED_BYTES`] for its ids, times and counts — the ids
+/// counted there alone, never again as text.
 #[must_use]
 pub fn units_of(row: &SpanRow) -> u32 {
     let text = [
         &row.agent,
-        &row.trace_id,
-        &row.span_id,
-        &row.parent_span_id,
         &row.name,
         &row.error_type,
         &row.model,
@@ -968,6 +982,17 @@ mod tests {
             ..row
         };
         assert_eq!(units_of(&heavy), 7, "6,000-odd bytes of attributes");
+        let long_ids = SpanRow {
+            trace_id: "f".repeat(2_048),
+            span_id: "f".repeat(2_048),
+            parent_span_id: "f".repeat(2_048),
+            ..heavy.clone()
+        };
+        assert_eq!(
+            units_of(&long_ids),
+            units_of(&heavy),
+            "the ids are in the fixed bytes, not the text"
+        );
     }
 
     #[test]
@@ -989,5 +1014,45 @@ mod tests {
             ]
         );
         assert!(resource_attributes(None).is_empty());
+    }
+
+    /// Copied onto every span of the export, so held to a span's own caps.
+    #[test]
+    fn the_resource_is_held_to_a_spans_caps() {
+        let mut attributes = vec![
+            kv("service.name", s(&"x".repeat(1_025))),
+            kv(&format!("telemetry.sdk.{}", "k".repeat(128)), s("long key")),
+        ];
+        attributes.extend((0..100).map(|n| kv(&format!("telemetry.sdk.extra{n}"), s("v"))));
+        let resource = Resource {
+            attributes,
+            ..Resource::default()
+        };
+        let kept = resource_attributes(Some(&resource));
+        assert_eq!(kept.len(), ATTRIBUTES_MAX);
+        assert!(
+            kept.iter()
+                .all(|(k, v)| k.starts_with("telemetry.sdk.extra") && v == "v"),
+            "an over-long value or key is dropped: {:?}",
+            kept.first()
+        );
+
+        let heavy = Resource {
+            attributes: ["a", "b", "c"]
+                .iter()
+                .map(|n| kv(&format!("telemetry.sdk.{n}"), s(&"x".repeat(990))))
+                .chain([kv("service.name", s("reporter"))])
+                .collect(),
+            ..Resource::default()
+        };
+        let kept: Vec<String> = resource_attributes(Some(&heavy))
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+        assert_eq!(
+            kept,
+            ["telemetry.sdk.a", "telemetry.sdk.b", "service.name"],
+            "past the resource's budget an attribute is dropped, and a smaller one after it kept"
+        );
     }
 }

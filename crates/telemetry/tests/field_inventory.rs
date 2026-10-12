@@ -65,6 +65,43 @@ fn the_page_and_the_code_name_the_same_attributes() {
     );
 }
 
+/// Each row's attribute, and its On and Needs cells, as the page writes them.
+fn page_cells(page: &str) -> Vec<(String, String, String)> {
+    page.lines()
+        .filter(|line| line.starts_with('|'))
+        .filter_map(|line| {
+            let cells: Vec<&str> = line.split('|').map(str::trim).collect();
+            let attribute = cells.get(1)?.trim_matches('`');
+            if attribute == "Attribute" || attribute.starts_with("---") {
+                return None;
+            }
+            Some((
+                attribute.to_owned(),
+                (*cells.get(2)?).to_owned(),
+                (*cells.get(4)?).to_owned(),
+            ))
+        })
+        .collect()
+}
+
+/// ⚠ The page and the Privacy page say the same of each attribute — where it
+/// belongs and the content mode it needs, in the same words — since a reader
+/// of either decides from them what may leave their process.
+#[test]
+fn the_page_and_the_code_say_the_same_of_each_attribute() {
+    let page = customer_docs_page("api/field-inventory.mdx");
+    let cells = page_cells(&page);
+    assert!(!cells.is_empty(), "the page's tables did not parse");
+    for (attribute, on, needs) in cells {
+        // A row the code lacks is the names test's to report.
+        let Some(row) = INVENTORY.iter().find(|row| row.attribute == attribute) else {
+            continue;
+        };
+        assert_eq!(on, row.on.as_str(), "{attribute}: On");
+        assert_eq!(needs, row.needs.as_str(), "{attribute}: Needs");
+    }
+}
+
 /// A request as the console sends one: the service secret, the person's
 /// bearer, their organization and the project.
 fn request(user: &str, organization: &OrganizationId, project: &ProjectId) -> Request<Body> {

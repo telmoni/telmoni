@@ -272,6 +272,9 @@ fn decode_error(error: DecodeError) -> TelmoniError {
         DecodeError::TooLarge => TelemetryError::BatchTooLarge {
             max_bytes: BATCH_MAX_BYTES,
         },
+        DecodeError::TooManySpans(count) => TelemetryError::InvalidBatch(format!(
+            "the export holds {count} spans; at most {BATCH_SPANS_MAX}"
+        )),
         DecodeError::Invalid(detail) => TelemetryError::InvalidBatch(detail),
     }
     .into()
