@@ -63,6 +63,10 @@ a run and is never a row.
 | `telmoni.cancelled` | any span | the column `status`, as `cancelled` | any | `true` on a span the agent cancelled |
 | `telmoni.content` | any span | read and not kept: `sealed` marks content the SDK encrypted, which a `sealed` project alone keeps | any | `sealed` |
 
+The [coding-agent plugins](/docs/api/coding-agents) set one tag of their own:
+`skills` on Claude Code's runs, the names of the skills the turn ran, joined by
+commas. It is kept as any tag is.
+
 ## The conventions' fields
 
 | Attribute | On | Kept as | Needs | Rule |

@@ -1,0 +1,178 @@
+---
+title: "Coding agents"
+description: "Telmoni's plugins for Claude Code, Codex, OpenCode and Cursor: each turn of the coding agent you already run, recorded as a run, metadata only, with no code."
+---
+
+The coding-agent plugins record each turn of a coding agent you already run as
+a [run](/docs/api/sdks#a-run) in Telmoni, with no code: the models it called
+and their tokens, the tools it used and the subagents it started, each with its
+times and whether it failed. They never send a prompt, a reply, a thought, a
+tool's input or output, a command, a file's path or the folder you work in.
+
+| Agent | Plugin | Package | Runs as |
+|---|---|---|---|
+| **Claude Code** | [`telmoni/claude-observability-plugin`](https://github.com/telmoni/claude-observability-plugin) | `telmoni-claude-observability-plugin` | `claude-code` |
+| **Codex** | [`telmoni/codex-observability-plugin`](https://github.com/telmoni/codex-observability-plugin) | `telmoni-codex-observability-plugin` | `codex` |
+| **OpenCode** | [`telmoni/opencode-observability-plugin`](https://github.com/telmoni/opencode-observability-plugin) | `telmoni-opencode-observability-plugin` | `opencode` |
+| **Cursor** | [`telmoni/cursor-observability-plugin`](https://github.com/telmoni/cursor-observability-plugin) | `telmoni-cursor-observability-plugin` | `cursor` |
+
+Each plugin is built on the [TypeScript SDK](/docs/api/sdks), which it carries
+inside its own package, and sends what the SDKs send, under a
+[project API key](/docs/api/api-keys) holding only the **ingest** scope (**Send
+spans**). Each needs Node.js 22 or later. None is published to npm yet: until
+it is, a plugin runs from a checkout of its repository, built beside a checkout
+of the platform, whose TypeScript SDK it is built on:
+
+```sh
+git clone https://github.com/telmoni/telmoni.git
+git clone https://github.com/telmoni/claude-observability-plugin.git   # or the codex-, opencode- or cursor-observability-plugin
+(cd telmoni/sdk/typescript && npm install && npm run build)
+(cd claude-observability-plugin && npm install && npm run build)
+```
+
+---
+
+## What a turn records
+
+A turn — from your prompt to the agent's last reply, or to your interruption —
+is one run of the agent, and your session (Cursor's conversation) is the run's
+session (`gen_ai.conversation.id`), so the console shows a session as a session
+of traces. Inside the run:
+
+- **the model's work**, a model call with its model and its token counts, the
+  cache's reads and writes among them, counted as the GenAI conventions count
+  them: a call per reply for Claude Code, Codex and OpenCode, and one for the
+  whole turn for Cursor, which gives its tokens a turn at a time;
+- **each tool call**, by its name, with its time, and failed where the tool
+  failed;
+- **each subagent**, a step named by its kind (`subagent Explore`), holding its
+  own model and tool calls where the agent writes them down;
+- for Claude Code, **the skills the turn ran**, by name, as the tag `skills`.
+
+An interrupted turn is a cancelled run, and a turn an error ended a failed one,
+named by the error's kind (`rate_limit`), never its message. A turn is sent
+once it has ended. If Telmoni cannot be reached, the turn is sent again later,
+and a turn sent twice is stored once: its run's id is derived from the session
+and the turn, and every span's from the run's.
+
+**What is never read.** Of what an agent writes down, a plugin reads each
+entry's kind, id, time and outcome, a reply's model and token counts, a tool
+call's name, and the kinds of the subagents a turn ran. It never keeps or
+sends a prompt or a reply, the model's thinking, a tool's input or output, a
+command, a file's path or contents, the working folder, a session's title or
+anyone's email, whatever the project's content mode.
+
+Each plugin's failures are lines in a log of its own, naming the kind of thing
+that went wrong and nothing from your session. None of them slows the agent: a
+plugin that runs as a hook hands its work to a process of its own and returns
+at once.
+
+---
+
+## Claude Code
+
+From a checkout, start Claude Code with the plugin and your key in its
+environment:
+
+```sh
+TELMONI_API_KEY=telmoni_… claude --plugin-dir ./claude-observability-plugin
+```
+
+Once published, it installs from its own marketplace, added sparse so that
+nothing but its manifest is fetched, and its key is set with Claude Code's own
+configuration, which keeps it with Claude Code's credentials:
+
+```sh
+claude plugin marketplace add telmoni/claude-observability-plugin --sparse .claude-plugin
+claude plugin install telmoni-observability@telmoni-plugins
+claude plugin configure telmoni-observability@telmoni-plugins
+```
+
+The key and the endpoint are the plugin's own configuration, or
+`TELMONI_API_KEY` and `TELMONI_ENDPOINT`; the endpoint defaults to
+`https://api.telmoni.com`. The hook runs when a turn stops, when an API error
+ends one, and when the session ends. Its log is `~/.claude/telmoni/hook.log`
+(under `CLAUDE_CONFIG_DIR` where you set one). Inside Cursor, which runs Claude
+Code's hooks too, the plugin does nothing: Cursor's own plugin records those
+conversations.
+
+---
+
+## Codex
+
+You need Codex 0.143 or later. Once published, the plugin installs from its own
+marketplace, added sparse, and Codex enables it in `~/.codex/config.toml`:
+
+```sh
+codex plugin marketplace add telmoni/codex-observability-plugin --sparse .agents/plugins
+codex plugin add telmoni-observability@telmoni-plugins
+```
+
+Codex runs no plugin's hooks until you trust them: restart Codex and trust the
+plugin's four — at `Stop`, `SubagentStop`, `Interrupt` and `SessionEnd` — when
+Codex asks, or in `/hooks`. `codex exec` asks nothing, so trust them once in
+Codex itself. Until the package is published, its repository's `AGENTS.md`
+says how to run it from a checkout.
+
+The key goes in `~/.codex/telmoni.json`, readable by you alone (`chmod 600`),
+as `{ "apiKey": "telmoni_…" }`, with `"endpoint"` beside it for a self-hosted
+Telmoni; `TELMONI_API_KEY` and `TELMONI_ENDPOINT` in Codex's environment — your
+shell's, or `~/.codex/.env` — come first. Its log is `~/.codex/telmoni/hook.log`
+(under `CODEX_HOME` where you set one).
+
+Codex's older session files hold a shell command's exit code only in its
+output, which the plugin never reads: there, a command that failed is recorded
+as one that ran.
+
+---
+
+## OpenCode
+
+You need OpenCode 1.18.29 or later, or OpenCode 2, whose plugin systems differ;
+the one package serves both. Once published, name it under one key, never
+both — OpenCode 2 reads OpenCode 1's list too, and would load it twice:
+
+```json
+{ "plugin": ["telmoni-opencode-observability-plugin"] }
+```
+
+on OpenCode 1, or `"plugins"` on OpenCode 2, in your `opencode.json`. Until it
+is published, its repository's `AGENTS.md` says how to run it from a checkout.
+
+The key goes in `telmoni.json` beside your OpenCode configuration
+(`~/.config/opencode/telmoni.json`), as `{ "apiKey": "telmoni_…" }`; the plugin
+reads it only while it is yours and shut to everyone else (`chmod 600`), and
+never writes it. `TELMONI_API_KEY` and `TELMONI_ENDPOINT` in the environment
+OpenCode starts in come first. The plugin runs inside OpenCode and keeps
+nothing on disk but its log, `~/.local/state/telmoni/opencode/plugin.log`
+(under `XDG_STATE_HOME` where you set one). A turn Telmoni could not take is
+sent again as the next turn ends; as OpenCode shuts down it waits three
+seconds at most for what is still to send.
+
+---
+
+## Cursor
+
+From a checkout, wire the build into Cursor; once published, the package
+installs with npm and brings the same command:
+
+```sh
+node ./cursor-observability-plugin/dist/telmoni-cursor.mjs setup   # from a checkout
+npm install -g telmoni-cursor-observability-plugin && telmoni-cursor setup   # once published
+```
+
+`setup` asks for the key, or takes `TELMONI_API_KEY`, checks that it is shaped
+like one, and keeps it in `~/.cursor/telmoni.json`, readable by you alone; then
+it adds the plugin's hooks to `~/.cursor/hooks.json`, beside any other tool's,
+and `remove` takes them out. The hooks run the Node that ran `setup`, by its
+path, so a Cursor opened from the Dock finds it. Its log is
+`~/.cursor/telmoni/hook.log`.
+
+Cursor's cloud agents read the repository's hooks alone:
+`telmoni-cursor setup --project` writes `.cursor/hooks.json` there, to commit,
+with the package installed in the agents' environment and the key as the Cloud
+Agents secret `TELMONI_API_KEY`. On a machine where both are set up, the
+repository's hooks record its conversations and your own stand aside.
+
+Cursor gives a turn's tokens, not each reply's, so a Cursor run holds one model
+call spanning the turn.
