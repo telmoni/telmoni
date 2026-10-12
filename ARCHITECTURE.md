@@ -105,7 +105,7 @@ flowchart LR
 
 | Party | What it is to the core | What crosses |
 |---|---|---|
-| **People** | An organization's owner, admins and members, in a browser | Pages and Server Actions, under a sealed session cookie |
+| **People** | An organization's owner, admins and members, in a browser | Pages, Server Actions and the console's reads under `/api`, under a sealed session cookie |
 | **The CLI** | `telmoni/telmoni-cli`, signed in by a device grant | The `/cli` lanes: start, poll, refresh, `/me`, sign-out |
 | **Scripts** | Whoever holds a project's API key | `/v1`, read-only today |
 | **The SDKs** | `sdk/`: Python, TypeScript, Go and Rust, linked into an agent's own process (*The SDKs*) | `/otlp/v1/traces` on the server: a run's spans as OTLP JSON, content taken off, under a project API key with the `ingest` scope |
@@ -124,7 +124,7 @@ flowchart TB
   subgraph Web["web: the Next.js console"]
     Proxy["proxy.ts: sign-in gate, CSP"]
     Pages["Server Components and Server Actions"]
-    Relays["relays: agent turns, live events"]
+    Relays["Route Handlers: reads, agent turns, live events"]
   end
   Redis[("Redis: limits, blacklist, live events, announcement, ingest's claims")]
   subgraph Server["server: telmoni serve, one process"]
@@ -153,7 +153,7 @@ flowchart TB
 | `telemetry` | Ingest at `/otlp/v1/traces`: the contract (`contract.rs`, with the field inventory as a table the docs page and the console are held to), the span read by it with its content dropped (`ingest/`), the claim on each export and the rate limit in Redis, and each project's hashing key (`hashing.rs`); each project's settings, and the switch its organization's owner sets its content mode with; the console's reads — the trace list, a page at a time with its total, each filter's values counted, the runs over the window as a histogram on the reader's clock, a download of it, and a trace's spans (`traces.rs`, `handler/traces.rs`), the users and the sessions, a run's spans summed by user and by session (`users.rs`, `sessions.rs`, their handlers), the field inventory (`handler/field_inventory.rs`) — each through the one query module for ClickHouse, which names the reader's projects on every read; each project's saved views of its trace list, in Postgres (`handler/views.rs`); the dogfood observer, which records the console agent's own questions as runs of a project of the operator's (`dogfood.rs`); the purge that marks a deleted project's rows in both tables, as auth's deletions ask through the seam (`seam.rs`, `store.rs`); the ClickHouse file and its nightly purge | The `telemetry` schema, and ClickHouse's `telemetry` database |
 | `shared` | Errors and problems, RBAC, `Acting`, scoped transactions, the seams, the audit writer and verifier, envelope encryption, the egress guard, logging, configuration, `Redacted`, slugs | — |
 | `migrator` | The migration runner, `rotate`, the `audit` schema, role hardening and grants; ClickHouse's file, its purge and the rewrite of the rows deleted projects left, run as its user there | The `audit` schema |
-| `web/` | The console: pages, the session, the edge's rate limits, the relays, and the book, which lives in its own repository, `telmoni/docs`, and is laid into `content/docs` before the console builds (`scripts/book.sh`); no database access and no business logic | Nothing but what Redis holds |
+| `web/` | The console: pages, the session, the edge's rate limits, the Route Handlers — the reads a page makes after it loads, and the relays of agent turns and live events — and the book, which lives in its own repository, `telmoni/docs`, and is laid into `content/docs` before the console builds (`scripts/book.sh`); no database access and no business logic | Nothing but what Redis holds |
 | `sdk/` | The four SDKs, in an agent's own process: a tracer provider of each one's own, a batch processor, and an exporter that takes content off and sends OTLP JSON to ingest (*The SDKs*); `fixtures/`, the golden export and the answers every suite replays | A bounded queue, in memory, until it is sent |
 | Postgres | One database: a schema per module, each written by its own role alone | Everything durable but the spans and their totals |
 | ClickHouse | One node: telemetry's spans and their hourly totals, metadata alone, read under a row policy | The spans, until the retention line, and their hourly totals for 13 months |
@@ -178,13 +178,13 @@ sequenceDiagram
   C-->>B: the page, a role notice, or a retryable outage
 ```
 
-A write takes the same path through a Server Action, its audit row committed with the change.
+A write takes the same path through a Server Action, its audit row committed with the change, and answers with the page drawn again, or with the next one when the write moves it (a rename, a deletion). A read a page makes after it loads — the search palette's index, the agent's history, a connector's deliveries — takes it through a Route Handler under `/api`, as a `GET`: an action is for writes, and a browser sends them one at a time.
 
 Every way in:
 
 | Way in | Path | Gate |
 |---|---|---|
-| A page or a Server Action | Browser → console → the server's `/internal` lanes | The sealed cookie, then the service secret and the bearer, then the matrix, then RLS |
+| A page, a Server Action or a read under `/api` | Browser → console → the server's `/internal` lanes | The sealed cookie, then the service secret and the bearer, then the matrix, then RLS |
 | `/v1` | A script → the machine host → the server's door → auth's lanes | The door's limits by address and key; the API key's `read` scope; the organization's switch |
 | `/cli` | The CLI → the machine host → the server's door → auth's lanes | The door's limits by address and bearer; the device code, or the bearer; never a browser |
 | Ingest | An SDK, or any OTLP exporter → the machine host → the server's `/otlp/v1/traces` | The API key's `ingest` scope, the project's own limit, then the contract: a span outside a run refused, content dropped |
