@@ -278,6 +278,9 @@ services:
       # TLS and appending the client's address is assumed; 0 when the console
       # is reached directly, which leaves those limits to the caller's word.
       TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-1}
+      # Seconds a Traces, Sessions or Users page holds between redraws as its
+      # project's spans arrive; unset is 30, and 0 draws on every export.
+      LIVE_REFRESH_HOLD_SECS: ${LIVE_REFRESH_HOLD_SECS:-}
       # The identity provider's origins, space separated: signing out from the
       # account menu is a form post that ends in a redirect to the provider, and the console's
       # Content Security Policy lets the browser follow it there and nowhere

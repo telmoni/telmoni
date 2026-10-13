@@ -341,3 +341,114 @@ describe("RealtimeListener - membership:changed", () => {
     },
   );
 });
+
+// Ingest's nudge: a page reading the project's spans is drawn again, the
+// trace page for its own run alone, and nothing else moves.
+describe("RealtimeListener - spans:ingested", () => {
+  const nudge = (projectId: string, runs: string[] = ["run_1"], more = false) =>
+    MockEventSource.instances[0].emit("spans:ingested", {
+      organizationId: "org_1",
+      projectId,
+      runs,
+      more,
+    });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    MockEventSource.instances = [];
+    mockActiveOrgId = "org_1";
+    mockProjects = [
+      { id: "project_1", slug: "web" },
+      { id: "project_10", slug: "web-2" },
+    ];
+  });
+
+  it.each(["/acme/web/traces", "/acme/web/sessions", "/acme/web/sessions/s_1", "/acme/web/users"])(
+    "draws %s again for the project on screen",
+    (pathname) => {
+      mockPathname = pathname;
+      render(<RealtimeListener />);
+      nudge("project_1");
+      expect(mockRefresh).toHaveBeenCalledTimes(1);
+      expect(mockReplace).not.toHaveBeenCalled();
+    },
+  );
+
+  it("leaves a page of another project, and a page reading no spans, alone", () => {
+    mockPathname = "/acme/web/traces";
+    render(<RealtimeListener />);
+    nudge("project_10");
+    expect(mockRefresh).not.toHaveBeenCalled();
+
+    mockPathname = "/acme/web/members";
+    render(<RealtimeListener />);
+    MockEventSource.instances[1].emit("spans:ingested", {
+      organizationId: "org_1",
+      projectId: "project_1",
+      runs: ["run_1"],
+      more: false,
+    });
+    expect(mockRefresh).not.toHaveBeenCalled();
+  });
+
+  it("draws a trace's page for its own run, or when the batch held more than the nudge names", () => {
+    mockPathname = "/acme/web/traces/run_7";
+    render(<RealtimeListener />);
+    nudge("project_1", ["run_1", "run_2"]);
+    expect(mockRefresh).not.toHaveBeenCalled();
+    nudge("project_1", ["run_1", "run_7"]);
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("draws a trace's page when its run may be among the ones the nudge left out", () => {
+    mockPathname = "/acme/web/traces/run_7";
+    render(<RealtimeListener />);
+    nudge("project_1", ["run_1"], true);
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds between redraws for as long as the layout says", () => {
+    vi.useFakeTimers();
+    try {
+      mockPathname = "/acme/web/traces";
+      render(<RealtimeListener liveHoldMs={100} />);
+      nudge("project_1");
+      nudge("project_1");
+      nudge("project_1");
+      expect(mockRefresh).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(100);
+      expect(mockRefresh).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves the download's route alone", () => {
+    mockPathname = "/acme/web/traces/export";
+    render(<RealtimeListener />);
+    nudge("project_1", ["run_1"], true);
+    expect(mockRefresh).not.toHaveBeenCalled();
+  });
+
+  // jsdom pretends to be visual, so a hidden tab has to be said outright.
+  it("draws a hidden tab once when it comes back into view, whatever landed meanwhile", () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get");
+    try {
+      visibility.mockReturnValue("hidden");
+      mockPathname = "/acme/web/traces";
+      render(<RealtimeListener liveHoldMs={100} />);
+      nudge("project_1");
+      nudge("project_1");
+      expect(mockRefresh).not.toHaveBeenCalled();
+
+      visibility.mockReturnValue("visible");
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(mockRefresh).toHaveBeenCalledTimes(1);
+
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(mockRefresh, "nothing landed since").toHaveBeenCalledTimes(1);
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+});

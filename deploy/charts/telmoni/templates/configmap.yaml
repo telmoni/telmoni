@@ -14,6 +14,7 @@ data:
   # Gateway, and each keys its per-address limits on the address that many
   # X-Forwarded-For entries back from the end.
   TRUSTED_PROXY_HOPS: {{ .Values.web.trustedProxyHops | quote }}
+  LIVE_REFRESH_HOLD_SECS: {{ .Values.web.liveRefreshHoldSeconds | quote }}
   APP_URL: {{ .Values.config.appUrl | quote }}
   AUTH_URL: {{ .Values.config.authUrl | quote }}
   OIDC_REDIRECT_URI: {{ .Values.config.oidcRedirectUri | quote }}

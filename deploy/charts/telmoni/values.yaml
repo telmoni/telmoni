@@ -105,6 +105,11 @@ web:
   # which read the same count from the ConfigMap, since both sit behind the
   # same Gateway: it appends the client's address and then its own.
   trustedProxyHops: 2
+  # Seconds a Traces, Sessions or Users page holds between redraws as its
+  # project's spans arrive — the server tells the console on Redis: the first
+  # export after a quiet spell draws at once, the rest once, when the hold
+  # ends. 0 draws on every export.
+  liveRefreshHoldSeconds: 30
   extraEnv: []
   resources:
     requests:

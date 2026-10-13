@@ -219,7 +219,7 @@ up-preflight: env-scaffold env-check port-check deps-check docker-up db-wait cli
 up: up-preflight book
 	@echo "building the server (so it boots alongside web, not a minute after)…"
 	cargo build -p telmoni --quiet
-	SERVER_PORT=$(SERVER_PORT) DOCS_DIR=$(DOCS_DIR) bash scripts/up.sh
+	SERVER_PORT=$(SERVER_PORT) DOCS_DIR=$(DOCS_DIR) $(if $(LIVE_REFRESH_HOLD_SECS),LIVE_REFRESH_HOLD_SECS=$(LIVE_REFRESH_HOLD_SECS)) bash scripts/up.sh
 
 .PHONY: local
 local: up
@@ -253,7 +253,7 @@ doctor:
 .PHONY: web-dev
 web-dev: book
 	@scripts/book.sh $(DOCS_DIR) --watch & \
-		cd $(WEB_DIR) && npm run dev
+		cd $(WEB_DIR) && $(if $(LIVE_REFRESH_HOLD_SECS),LIVE_REFRESH_HOLD_SECS=$(LIVE_REFRESH_HOLD_SECS)) npm run dev
 
 .PHONY: web-prod
 web-prod: book

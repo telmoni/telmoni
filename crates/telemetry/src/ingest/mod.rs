@@ -6,5 +6,6 @@
 pub mod batch;
 pub mod claims;
 pub mod decode;
+pub mod live;
 pub mod report;
 pub mod span;

@@ -49,6 +49,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   if (!session || !seed) redirect("/auth/logout");
 
+  // The listener runs in the browser and reads no environment of its own.
+  const liveHoldMs = env.LIVE_REFRESH_HOLD_SECS * 1_000;
+
   // Every route under (app) answers this way while the gate is up, so no page
   // below renders for somebody with no organization to render it in.
   if (ctx && accountOnly(ctx)) {
@@ -70,7 +73,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         {/* The screen promises that an invitation shows up here: the listener
             refreshes it from the person's channel, so it does without a
             reload. */}
-        <RealtimeListener />
+        <RealtimeListener liveHoldMs={liveHoldMs} />
         <AccountOnly
           email={session.email}
           authMethod={session.authMethod}
@@ -99,7 +102,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <ConsoleTrailRecorder />
       <StoreProvider {...seed}>
         <OrganizationSync rendered={(ctx && activeOrganization(ctx)?.slug) ?? null} />
-        <RealtimeListener />
+        <RealtimeListener liveHoldMs={liveHoldMs} />
         <InviteToastNotifier />
         <ConsoleUiProvider>
           <PageHeaderProvider>

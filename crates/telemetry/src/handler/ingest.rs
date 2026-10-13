@@ -5,7 +5,8 @@
 //! body, no further than its cap; its digest claimed, so a retry with the
 //! same bytes is answered rather than written again; then the spans read by
 //! the contract, their content dropped, and the rows written once ClickHouse
-//! holds them. Every answer is OTLP's, in the request's encoding: the
+//! holds them, the organization's open consoles told of them
+//! ([`crate::ingest::live`]). Every answer is OTLP's, in the request's encoding: the
 //! response on `200`, and on a refusal a `Status` whose message opens with
 //! the problem type, since OTLP asks that shape where every other lane
 //! answers a problem document.
@@ -30,6 +31,7 @@ use crate::contract::{BATCH_MAX_BYTES, BATCH_SPANS_MAX};
 use crate::ingest::batch::{self, BatchError};
 use crate::ingest::claims::{self, Claim, Guard, StoredAnswer};
 use crate::ingest::decode::{self, DecodeError, Encoding};
+use crate::ingest::live;
 use crate::{AppState, db, hashing};
 
 /// The header every `200` carries: the project's content mode, so an SDK
@@ -53,7 +55,7 @@ pub async fn export(State(state): State<Arc<AppState>>, request: Request) -> Res
 }
 
 async fn handle(
-    state: &AppState,
+    state: &Arc<AppState>,
     key: &ActingKey,
     headers: &HeaderMap,
     body: Body,
@@ -135,10 +137,11 @@ async fn handle(
     }
 }
 
-/// The claimed body, written: the spans read by the contract and the rows
-/// put in ClickHouse; the answer's mode and body on success.
+/// The claimed body, written: the spans read by the contract, the rows put
+/// in ClickHouse and the console told of them; the answer's mode and body on
+/// success.
 async fn write(
-    state: &AppState,
+    state: &Arc<AppState>,
     key: &ActingKey,
     headers: &HeaderMap,
     encoding: Encoding,
@@ -178,6 +181,17 @@ async fn write(
         request_id = ?correlation_id(headers),
         "ingest: export kept"
     );
+    // The organization's open consoles are told, so a page reading this
+    // project's spans draws itself again — of a batch that kept something:
+    // one refused whole stored nothing to read. The answer is not held for it.
+    if !batch.rows.is_empty() {
+        live::tell(
+            Arc::clone(state),
+            key.organization_id.as_str(),
+            key.project_id.as_str(),
+            batch.rows.iter().map(|row| row.run_id),
+        );
+    }
     let response = ExportTraceServiceResponse {
         partial_success: batch.report.partial_success(content_mode),
     };

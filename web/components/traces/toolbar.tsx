@@ -173,7 +173,9 @@ export function TraceHeaderControls({ days }: { days: number }) {
 }
 
 /** A refresh now, and how often the page reads itself again: only while it
- *  is in view, so a tab left open asks nothing of the server. */
+ *  is in view, so a tab left open asks nothing of the server. The list is
+ *  also drawn as the project's runs land (`RealtimeListener`), so the
+ *  interval is for a console whose live events are paused. */
 function RefreshControl() {
   const router = useRouter();
   const { refresh } = useTracePrefs();

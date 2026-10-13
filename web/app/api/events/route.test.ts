@@ -260,6 +260,35 @@ describe("GET /api/events (SSE)", () => {
     await reader.cancel();
   });
 
+  // Ingest's nudge comes on the organization's channel as the console's own
+  // events do, spelled by the server (`crates/telemetry/src/ingest/live.rs`),
+  // and is relayed as it came: the listener decides which page it moves.
+  it("relays ingest's spans:ingested nudge on the organization's channel as it came", async () => {
+    mockGetSession.mockResolvedValue(LIVE_SESSION);
+    const res = await GET(new NextRequest("http://localhost:3000/api/events"));
+    const reader = res.body!.getReader();
+    await reader.read();
+
+    messageListener?.(
+      organizationChannel("org_own"),
+      JSON.stringify({
+        type: "spans:ingested",
+        data: {
+          organizationId: "org_own",
+          projectId: "project_1",
+          runs: ["d86dd262-54c7-445a-8647-8623af421fa5"],
+          more: false,
+        },
+      }),
+    );
+
+    const chunk = await reader.read();
+    expect(new TextDecoder().decode(chunk.value)).toBe(
+      'event: spans:ingested\ndata: {"organizationId":"org_own","projectId":"project_1","runs":["d86dd262-54c7-445a-8647-8623af421fa5"],"more":false}\n\n',
+    );
+    await reader.cancel();
+  });
+
   it("relays a membership:removed event on the user personal channel as it came", async () => {
     mockGetSession.mockResolvedValue(LIVE_SESSION);
     const res = await GET(new NextRequest("http://localhost:3000/api/events"));

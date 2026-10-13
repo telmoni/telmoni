@@ -6,6 +6,7 @@
 // package behind it.
 import "server-only";
 
+import { LIVE_HOLD_SECS } from "./live-refresh";
 import { DOCS_URL } from "./site";
 
 const REQUIRED = [
@@ -56,7 +57,10 @@ export function validateEnv(): void {
 
   void env.AUTH_URL;
   void env.TRUSTED_PROXY_HOPS;
+  void env.LIVE_REFRESH_HOLD_SECS;
 }
+
+const LIVE_REFRESH_HOLD_MAX_SECS = 3_600;
 
 export function isSecureOrigin(value: string): boolean {
   let url: URL;
@@ -131,6 +135,23 @@ export const env = {
       throw new InvalidEnvError(
         "TRUSTED_PROXY_HOPS",
         "must be the number of proxies in front of the console (0 when there is none)",
+      );
+    }
+    return Number(raw);
+  },
+
+  // How long a Traces, Sessions or Users page holds after it was drawn for
+  // ingest's "spans arrived" before it is drawn again for the next, in
+  // seconds (`lib/live-refresh.ts`): the first after a quiet spell draws at
+  // once, the rest once, when the hold ends, so a flood costs at most two
+  // redraws a hold. Unset is thirty; 0 draws on every export.
+  get LIVE_REFRESH_HOLD_SECS(): number {
+    const raw = process.env.LIVE_REFRESH_HOLD_SECS?.trim();
+    if (!raw) return LIVE_HOLD_SECS;
+    if (!/^\d{1,4}$/.test(raw) || Number(raw) > LIVE_REFRESH_HOLD_MAX_SECS) {
+      throw new InvalidEnvError(
+        "LIVE_REFRESH_HOLD_SECS",
+        `must be the seconds a live page holds between redraws, 0 to ${LIVE_REFRESH_HOLD_MAX_SECS}`,
       );
     }
     return Number(raw);

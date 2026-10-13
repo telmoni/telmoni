@@ -14,12 +14,18 @@ import {
 } from "@/lib/store";
 import { movedPath, projectAt } from "@/lib/console-nav";
 import { RealtimeEventDataSchema } from "@/lib/events/types";
+import { LIVE_HOLD_MS, liveRefresher } from "@/lib/live-refresh";
 import { projectPath } from "@/lib/slug";
 
 const RETRY_MS = 30_000;
 
 // A roster or an audit log: a project's, or the organization's own.
 const ROSTER_PAGES = /^\/[^/]+(?:\/[^/]+)?\/(members|audit-log)$/;
+
+// A page reading a project's spans: its traces, sessions or users, the list
+// or one of them. A trace's page names its run, which a nudge is compared
+// with; `traces/export` is the download's route, not a page.
+const SPAN_PAGES = /^\/[^/]+\/[^/]+\/(traces|sessions|users)(?:\/(?!export$)([^/]+))?$/;
 
 function payload<K extends keyof typeof RealtimeEventDataSchema>(
   e: MessageEvent,
@@ -37,7 +43,11 @@ function payload<K extends keyof typeof RealtimeEventDataSchema>(
     : undefined;
 }
 
-export function RealtimeListener() {
+/// `liveHoldMs` is how long a page reading spans holds between the redraws
+/// ingest's nudges ask for: the layout passes the deployment's
+/// (`LIVE_REFRESH_HOLD_SECS`), since this runs in the browser and reads no
+/// environment of its own.
+export function RealtimeListener({ liveHoldMs = LIVE_HOLD_MS }: { liveHoldMs?: number }) {
   const router = useRouter();
   const pathname = usePathname();
   const addInvite = useAddIncomingInvite();
@@ -73,6 +83,14 @@ export function RealtimeListener() {
     let everOpened = false;
     let refused = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    // A page reading spans is drawn only while it is in view, whether a nudge
+    // asks now or a hold's end does, as the Traces timer leaves a hidden tab
+    // alone; what landed meanwhile is drawn once when the tab returns.
+    let dirty = false;
+    const live = liveRefresher(() => {
+      if (document.visibilityState === "visible") router.refresh();
+      else dirty = true;
+    }, liveHoldMs);
 
     function settled(inviteId: string | undefined) {
       if (
@@ -189,6 +207,19 @@ export function RealtimeListener() {
         router.refresh();
       });
 
+      // A project's spans arrived: a page reading them is drawn again, the
+      // nudges coalesced (`liveRefresher`). A trace's page is drawn for its
+      // own run alone.
+      es.addEventListener("spans:ingested", (e: MessageEvent) => {
+        const data = payload(e, "spans:ingested");
+        if (!data || data.projectId !== projectIdRef.current) return;
+        const page = SPAN_PAGES.exec(pathnameRef.current);
+        if (!page) return;
+        const [, section, one] = page;
+        if (section === "traces" && one && !data.more && !data.runs.includes(one)) return;
+        live.nudge();
+      });
+
       es.addEventListener("close", () => {
         active = false;
         es.close();
@@ -209,6 +240,10 @@ export function RealtimeListener() {
         if (!esRef.current || esRef.current.readyState === EventSource.CLOSED) {
           connect();
         }
+        if (dirty) {
+          dirty = false;
+          live.flush();
+        }
       }
     };
 
@@ -217,6 +252,7 @@ export function RealtimeListener() {
 
     return () => {
       active = false;
+      live.dispose();
       if (retryTimer) clearTimeout(retryTimer);
       document.removeEventListener("visibilitychange", handleVisibilityOrOnline);
       window.removeEventListener("online", handleVisibilityOrOnline);
@@ -225,7 +261,7 @@ export function RealtimeListener() {
         esRef.current = null;
       }
     };
-  }, [addInvite, removeInvite, router, membershipKey]);
+  }, [addInvite, removeInvite, router, membershipKey, liveHoldMs]);
 
   return null;
 }
