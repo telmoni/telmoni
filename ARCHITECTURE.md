@@ -385,14 +385,21 @@ A deployment that needs more builds on the core rather than forking it, and the 
 
 | Seam | What a deployment does |
 |---|---|
-| **The binary** | Calls `App::assemble(Parts)` with its own `AuthProvider`, `MailSender`, `PurgeHook` and agent parts, mounts its own `Module`s, and hands `run` its builder |
-| **The seams** | A mounted module reaches the core only through `seam::Auth` and the notifier; `organization_standing`, `organization_slugs` and the `organization_alert` notice exist for such a module |
+| **The binary** | Calls `App::assemble(Parts)` with its own `AuthProvider`, `MailSender`, `PurgeHook`, `OwnershipHook`, `Entitlements` and agent parts, mounts its own `Module`s, and hands `run` its builder |
+| **The seams** | A mounted module reaches the core only through `seam::Auth` and the notifier; `organization_standing`, `organization_slugs`, the three reads of who owns what (`organizations_owned_by`, `owner_of`, `owners_of_several`) and the `organization_alert` notice exist for such a module |
 | **The database** | Builds on the server image, adding `/app/migrations/<schema>` and `/app/grants/*.sql`; a grants file names its grantees and is skipped where they do not exist |
-| **The console** | Lays its files over the core's six slots, and imports the core only through `@/lib/extension/ui` and `@/lib/extension/server`; the book's `meta.json` files take its pages in |
+| **The console** | Lays its files over the core's eight slots, and imports the core only through `@/lib/extension/ui` and `@/lib/extension/server`; the book's `meta.json` files take its pages in |
 | **The chart** | Wraps this one, setting `global.imageRegistry` and `extraEnv` |
 | **Paths** | Takes only words the core reserves for it, so no organization or project can land on its pages |
 
 **What a deployment cannot replace:** the issuer, the core's routes and request layers, the loops' cadences, and the subcommands.
+
+**A deployment that sells plans** has three hooks into what the core does, each `None` in the core's own binary, which then caps nothing and asks nobody:
+- **`PurgeHook`** drops what it holds of an organization before the organization goes ([Data](#data)).
+- **`OwnershipHook`** is asked whether someone may come to own an organization — before an owner's offer and before the admin's accept, ahead of any lock, since it reads auth back on auth's own pool — and its refusal is the person's answer; it is told once an organization is founded, on request or by `/me`, and once one changes hands, within three seconds and logged when it fails, its own catching up covering what it missed. Creating an organization is never refused.
+- **`Entitlements`** answers what an organization may take in, as `Grants`, read at each door before anything new is taken — ingest before the body, the agent before a question, both invitation lanes — through `seam::admit_new`; a dormant organization is answered `402` `/errors/plan/limit-reached` with the deployment's own words and the `entitlement` that lifts it, reads and deletion never asked, and an answer it cannot get lets the request in. `NoLimits` stands in where no deployment sells.
+
+**The owner of two organizations moves a project between them** with `POST /internal/projects/{project_id}/move`, the transfer's own steps with nobody to ask: the keys follow, the telemetry settings move, the connectors are purged, the seat holders join the destination's roster, a live offer of the project ends, and both chains record it (`project_moved`). A deployment's console merges one organization into another with it, project by project, then deletes the emptied one.
 
 ## Conventions everywhere
 
