@@ -35,8 +35,9 @@ shows the same list on a project's **Privacy** page, served from the same code.
 - **Kept as**: the column of `spans` it fills, `attributes` under its own
   name, or what the drop does with it.
 - **Needs**: the project [content mode](/docs/api/ingest#what-is-dropped-at-the-door)
-  it takes to keep it. Metadata is kept in every mode; content needs `on`, or
-  `sealed` for what Telmoni's SDK encrypted.
+  it takes to keep it. Metadata is kept in every mode. Content would need `on`,
+  or `sealed` for what Telmoni's SDK encrypted, but no project can be switched
+  from `off` today, so content is dropped in every mode.
 - **Rule**: its cap or format. A span whose field breaks its rule is refused
   whole; an attribute past its cap is dropped and the span kept. The
   resource's attributes are copied onto every span of its export, so they
@@ -53,15 +54,15 @@ a run and is never a row.
 | Attribute | On | Kept as | Needs | Rule |
 |---|---|---|---|---|
 | `telmoni.run_id` | every span | the column `run_id` | any | a UUID, the same on every span of a run; a span without it is refused |
-| `telmoni.agent` | every span | the column `agent`, and a run's `name` where `gen_ai.agent.name` is unset | any | 1 to 128 characters; a span without it is refused |
-| `user.id` | any span | the column `user_id`, as its HMAC-SHA-256 under a key of the project's own, the first 16 bytes in hex, unless the project keeps it plain | any | up to 128 characters |
+| `telmoni.agent` | every span | the column `agent`, and a run's `name` where `gen_ai.agent.name` and `gen_ai.workflow.name` are unset | any | 1 to 128 characters; a span without it is refused |
+| `user.id` | any span | the column `user_id`, as its HMAC-SHA-256 under a key of the project's own, the first 16 bytes in hex | any | 1 to 128 characters |
 | `telmoni.tag.<key>` | any span | `tags`, under `<key>` | any | up to 32 tags; a key up to 64 characters, a value up to 256 |
-| `telmoni.bound.stall_after_s` | the run | the column `bound_stall_after_s` | any | seconds, a whole number |
-| `telmoni.bound.max_steps` | the run | the column `bound_max_steps` | any | a whole number |
-| `telmoni.bound.max_cost_usd` | the run | the column `bound_max_cost_usd` | any | US dollars |
+| `telmoni.bound.stall_after_s` | the run | the column `bound_stall_after_s` | any | seconds, a whole number, 1 or more |
+| `telmoni.bound.max_steps` | the run | the column `bound_max_steps` | any | a whole number, 1 or more |
+| `telmoni.bound.max_cost_usd` | the run | the column `bound_max_cost_usd` | any | US dollars, above 0 |
 | `telmoni.sample_rate` | the run | the column `sample_rate` | any | above 0, up to 1: the share of runs the SDK sends |
 | `telmoni.cancelled` | any span | the column `status`, as `cancelled` | any | `true` on a span the agent cancelled |
-| `telmoni.content` | any span | read and not kept: `sealed` marks content the SDK encrypted, which a `sealed` project alone keeps | any | `sealed` |
+| `telmoni.content` | any span | read and not kept: `sealed` would mark content the SDK encrypted, which no SDK does today and no project can keep | any | `sealed` |
 
 The [coding-agent plugins](/docs/api/coding-agents) set one tag of their own:
 `skills` on Claude Code's runs, the names of the skills the turn ran, joined by
@@ -75,15 +76,15 @@ commas. It is kept as any tag is.
 | `gen_ai.agent.name` | the run | the column `name` | any | 1 to 128 characters |
 | `gen_ai.workflow.name` | the run | the column `name`, where `gen_ai.agent.name` is unset | any | 1 to 128 characters |
 | `gen_ai.tool.name` | a tool call | the column `name` | any | 1 to 128 characters |
-| `error.type` | any span | the column `error_type` | any | up to 128 characters: the exception's class, never its message |
-| `gen_ai.response.model` | a model call | the column `model` | any | up to 128 characters, as the provider spells it |
-| `gen_ai.request.model` | a model call | the column `model`, where the response names none | any | up to 128 characters, as the provider spells it |
-| `gen_ai.provider.name` | a model call | the column `provider` | any | up to 128 characters, as the conventions spell it: `openai`, `anthropic`, `gcp.vertex_ai`, `aws.bedrock` |
+| `error.type` | any span | the column `error_type` | any | 1 to 128 characters: the exception's class, never its message |
+| `gen_ai.response.model` | a model call | the column `model` | any | 1 to 128 characters, as the provider spells it |
+| `gen_ai.request.model` | a model call | the column `model`, where the response names none | any | 1 to 128 characters, as the provider spells it |
+| `gen_ai.provider.name` | a model call | the column `provider` | any | 1 to 128 characters, as the conventions spell it: `openai`, `anthropic`, `gcp.vertex_ai`, `aws.bedrock` |
 | `gen_ai.usage.input_tokens` | a model call | the column `input_tokens` | any | a whole number, 0 or more: every input token, the cache's reads and writes among them |
 | `gen_ai.usage.output_tokens` | a model call | the column `output_tokens` | any | a whole number, 0 or more: every output token, reasoning among them |
 | `gen_ai.usage.cache_read.input_tokens` | a model call | the column `cache_read_input_tokens` | any | a whole number, 0 or more |
 | `gen_ai.usage.cache_write.input_tokens` | a model call | the column `cache_write_input_tokens` | any | a whole number, 0 or more |
-| `gen_ai.conversation.id` | any span | the column `session_id` | any | up to 200 characters, kept as sent |
+| `gen_ai.conversation.id` | any span | the column `session_id` | any | 1 to 200 characters, kept as sent |
 
 ## Names the conventions replaced
 
@@ -126,33 +127,32 @@ them.
 
 ## Content
 
-Content is what a person or a model wrote, and the people a span names. On a
-project whose content mode is `off` — every project today — each of these is
-dropped at the door, the span kept and the field named in the answer, and
-nothing of it reaches a store. Once a project may keep content, it is kept in
-Postgres alone, never in a column of `spans`, and every read of it is audited.
+Content is what a person or a model wrote, and the people a span names. Each of
+these is dropped at the door in every content mode, the span kept and the field
+named in the answer, and nothing of it reaches a store: every project's mode is
+`off`, and none can be switched to another today.
 
 | Attribute | On | Kept as | Needs | Rule |
 |---|---|---|---|---|
-| `gen_ai.input.messages` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `gen_ai.output.messages` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `gen_ai.system_instructions` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `gen_ai.tool.definitions` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `gen_ai.tool.call.arguments` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `gen_ai.tool.call.result` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `gen_ai.retrieval.query.text` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `gen_ai.retrieval.documents` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `gen_ai.memory.query.text` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `gen_ai.memory.records` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `gen_ai.prompt.variable` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
-| `user.email` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | names a person: content, whatever else the span carries |
-| `user.full_name` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | names a person: content, whatever else the span carries |
-| `user.name` | any span | dropped on an `off` project, the span kept; kept in Postgres alone once a project may keep content | on, or sealed from Telmoni's SDK | names a person: content, whatever else the span carries |
+| `gen_ai.input.messages` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `gen_ai.output.messages` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `gen_ai.system_instructions` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `gen_ai.tool.definitions` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `gen_ai.tool.call.arguments` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `gen_ai.tool.call.result` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `gen_ai.retrieval.query.text` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `gen_ai.retrieval.documents` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `gen_ai.memory.query.text` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `gen_ai.memory.records` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `gen_ai.prompt.variable` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | content: what a person or a model wrote |
+| `user.email` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | names a person: content, whatever else the span carries |
+| `user.full_name` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | names a person: content, whatever else the span carries |
+| `user.name` | any span | dropped in every mode, the span kept | on, or sealed from Telmoni's SDK | names a person: content, whatever else the span carries |
 
 ## Everything else
 
 | Attribute | On | Kept as | Needs | Rule |
 |---|---|---|---|---|
-| any other number or boolean | any span | `attributes`, under its own name | any | a measurement no person writes; on the resource, dropped without a word |
+| any other number or boolean | any span | `attributes`, under its own name, except a name under `telmoni.`, which is dropped as `unlisted` | any | a measurement no person writes; on the resource, dropped without a word |
 | any other text or array | any span | dropped in every mode, the span kept and the attribute named in the answer as `unlisted` | any | content arrives under names no convention gave it; on the resource, dropped without a word |
 | the span's events and status message | any span | never kept | any | where an exception writes its message and stack trace |

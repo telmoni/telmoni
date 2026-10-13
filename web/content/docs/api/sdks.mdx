@@ -22,7 +22,8 @@ platform's repository, [`telmoni/telmoni`](https://github.com/telmoni/telmoni),
 which holds them beside the ingest they send to; a `telmoni` package found on
 npm, PyPI or crates.io is not Telmoni's. Each is built on its language's
 OpenTelemetry SDK and sends with the language's own HTTP client, Rust with
-reqwest; none carries anything else.
+reqwest. Python, TypeScript and Go carry nothing else; Rust also carries serde,
+serde_json, tracing and uuid.
 
 ---
 
@@ -226,8 +227,9 @@ holding the **ingest** scope.
 
     Each handle is a guard that ends its span when dropped or on `end()`.
     `run` returns an error for a blank agent name or a sample rate outside
-    its range, and nothing else in the SDK fails: an export that fails is
-    warned about, never returned. The closure forms `run_with`, `step_with`,
+    its range, and `record_run` for the cases
+    [below](#a-run-recorded-after-it-ended); nothing else in the SDK fails: an
+    export that fails is warned about, never returned. The closure forms `run_with`, `step_with`,
     `model_call_with` and `tool_call_with` end the span when the closure
     returns, and their `try_` forms mark an `Err` on the span with the
     error's type name before returning it unchanged. `fail("TimeoutError")`
@@ -377,18 +379,21 @@ the calls made inside it.
 
     A step is a `StepRecord` with its `calls`. A blank agent
     (`Error::EmptyAgent`), a run id that is not a UUID or is the nil UUID
-    (`Error::RunId`) or a span that ends before it starts
-    (`Error::EndBeforeStart`) is returned as an error, and nothing is sent.
+    (`Error::RunId`), a span that ends before it starts
+    (`Error::EndBeforeStart`) or a configured sample rate outside its range
+    (`Error::SampleRate`) is returned as an error, and nothing is sent.
   </Tab>
 </Tabs>
 
 The run is sent as the live calls would have sent it, through the same
 exporter, content rules and sample rate, in a trace of its own named by the
 run's id, whatever trace is current. Each span's id is derived from the run's
-id and the span's place in the record, so the same record sent again is the
-same bytes, which Telmoni answers within the hour as it answered the first,
-storing nothing twice: give a run the same id each time you send it. A record
-holds no content.
+id and the span's place in the record, so the same record sent again by a
+client with nothing else waiting to be sent, such as a hook's own process, is
+the same bytes, which Telmoni answers within the hour as it answered the first,
+storing nothing twice: give a run the same id each time you send it. A client
+that is also sending live runs may send the record in one body with their
+spans, which Telmoni stores again. A record holds no content.
 The [coding-agent plugins](/docs/api/coding-agents) are built on it.
 
 ---
@@ -418,8 +423,9 @@ Prompts, completions, tool arguments and results — `input_messages`,
 recorded on the span and taken off by the exporter before anything leaves
 the process. They are sent only when the client is built with
 `capture_content` on **and** the project's content mode, which the SDK learns
-from the server's first answer, is `on`. The server's own drop at the door is
-the second lock, not the first.
+from the server's first answer, is `on`. No project can be switched to `on`
+today, so content never leaves the process. The server's own drop at the door
+is the second lock, not the first.
 
 ### Sampling
 
@@ -436,17 +442,19 @@ neither replaces your provider nor sends your spans to Telmoni. A run joins
 the trace that is current where it begins, and your spans opened inside it
 nest under the run. The run's sampled flag follows the trace it joins; a run
 that starts a trace of its own takes the decision your own sampler gives it —
-read from your provider in Python, and given as the `sampler` option in the
-others — so your application keeps its own sampling rate inside runs as
+given as the `sampler` option in every SDK, Python falling back to your
+provider's sampler when you give none — so your application keeps its own sampling rate inside runs as
 outside them. A run inside a trace your application does not sample is still
 sent.
 
 ### Answers and warnings
 
 The SDK batches spans and sends them in the background, on a bounded queue,
-so a slow Telmoni never slows an agent. It retries `429` and `503` after
-`Retry-After`, three attempts in all, and drops the batch after that with one
-warning; any other refusal is logged once and never retried. An attribute the
+so a slow Telmoni never slows an agent. Each request times out after 10
+seconds. It retries a `429` or a `503` after its `Retry-After`, waiting at most
+60 seconds, and a request that failed or timed out after 1 second, then 2;
+after three attempts in all it drops the batch with one warning. Any other
+refusal is logged once and never retried. A flush waits up to 30 seconds. An attribute the
 server drops is logged once: content with the project's content mode, which
 decides the drop, and a link to [what is dropped at the
 door](/docs/api/ingest#what-is-dropped-at-the-door); text the field inventory
