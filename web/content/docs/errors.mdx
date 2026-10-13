@@ -60,6 +60,7 @@ your code can branch on.
 | `/errors/telemetry/invalid-batch` | 400 | An export to `/otlp/v1/traces` did not decode as OTLP in the encoding its `Content-Type` named, held no span, or held more than 1,000. On that lane the body is OTLP's `Status` rather than a problem document, its message opening with the type. | |
 | `/errors/telemetry/batch-too-large` | 413 | An export was larger than 1 MiB once decompressed. Send fewer spans per export. | `max_bytes` |
 | `/errors/telemetry/store-unavailable` | 503 | The store that keeps spans, or the key service that seals a project's hashing key, did not answer. Nothing was kept; retry after the second `Retry-After` gives. | `retry_after_secs` |
+| `/errors/plan/limit-reached` | 402 | What was asked is past what the organization's plan holds. Only a deployment that sells plans answers it, never a self-hosted one: on the hosted service, a dormant organization's exports, agent questions and invitations, and an organization offered to someone whose free plan is already taken ([Billing](https://telmoni.com/docs/workspace/billing)). `detail` says what lifts it; on `/otlp/v1/traces` it is OTLP's `Status`, its message opening with the type, and an exporter drops the export rather than retrying it. | `entitlement` |
 
 `feature-off` answers `503` with a retry hint, not `404`, on purpose: the route
 exists and the switch is Telmoni's, so a program should wait and retry rather
