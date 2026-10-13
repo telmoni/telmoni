@@ -33,12 +33,16 @@ import { cn } from "@/lib/utils";
 export function ConsoleHeader({
   host,
   organizationBadge,
+  createOrganizationNotice,
 }: {
   /// The console's host, for the switcher's new organization's URL.
   host: string;
   /// Drawn beside the organization's name in the switcher: a console built
   /// on this one puts the organization's plan there.
   organizationBadge?: React.ReactNode;
+  /// Drawn in the switcher's new-organization dialog: a console built on
+  /// this one says there what a new organization starts on.
+  createOrganizationNotice?: React.ReactNode;
 }) {
   const header = usePageHeaderValue();
   const { collapsed, toggle } = useSidebar();
@@ -147,7 +151,11 @@ export function ConsoleHeader({
             {back.label}
           </Link>
         )}
-        <ResourceSelector host={host} organizationBadge={organizationBadge} />
+        <ResourceSelector
+          host={host}
+          organizationBadge={organizationBadge}
+          createOrganizationNotice={createOrganizationNotice}
+        />
       </div>
       <div className="flex shrink-0 items-center justify-end gap-3 pr-3.5">
         <SearchButton />

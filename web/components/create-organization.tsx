@@ -32,12 +32,16 @@ export function CreateOrganizationDialog({
   open,
   onOpenChange,
   host,
+  notice,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   /// The console's host, shown ahead of the URL as the organization's Settings
   /// show it.
   host: string;
+  /// Drawn under the description: what a console built on this one says a
+  /// new organization starts on there.
+  notice?: React.ReactNode;
 }) {
   const router = useRouter();
   const [name, setName] = useState("");
@@ -96,6 +100,7 @@ export function CreateOrganizationDialog({
               You will be its owner, and can rename it or change its URL later
               in its settings.
             </DialogDescription>
+            {notice}
             <div className="grid gap-2">
               <Label htmlFor="organization-name">Name</Label>
               <Input

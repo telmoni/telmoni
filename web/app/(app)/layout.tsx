@@ -13,6 +13,7 @@ import { PagePrimaryActionProvider } from "@/components/page-action";
 import { SidebarProvider } from "@/components/sidebar-context";
 import { ProjectBanner } from "@/components/project-banner";
 import { ExtensionBanner } from "@/components/extension/banner";
+import { ExtensionCreateOrganizationNotice } from "@/components/extension/create-organization-notice";
 import { ExtensionOrganizationBadge } from "@/components/extension/organization-badge";
 import { InviteToastNotifier } from "@/components/invite-toast-notifier";
 import { OrganizationSync } from "@/components/organization-sync";
@@ -116,12 +117,18 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               </Suspense>
               {/* The console's host, ahead of a new organization's URL, as
                   its Settings show it; the badge beside the organization's
-                  name is a slot, filled by a console built on this one. */}
+                  name, and what the new-organization dialog says, are slots,
+                  filled by a console built on this one. */}
               <ConsoleHeader
                 host={new URL(env.AUTH_URL).host}
                 organizationBadge={
                   <Suspense fallback={null}>
                     <ExtensionOrganizationBadge />
+                  </Suspense>
+                }
+                createOrganizationNotice={
+                  <Suspense fallback={null}>
+                    <ExtensionCreateOrganizationNotice />
                   </Suspense>
                 }
               />

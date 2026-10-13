@@ -133,12 +133,17 @@ function NewRow({ onSelect, children }: { onSelect: () => void; children: string
 export function ResourceSelector({
   host,
   organizationBadge,
+  createOrganizationNotice,
 }: {
   /// The console's host, shown ahead of a new organization's URL.
   host: string;
   /// Drawn beside the organization's name: a console built on this one puts
   /// the organization's plan there (`components/extension/organization-badge.tsx`).
   organizationBadge?: React.ReactNode;
+  /// Drawn in the new-organization dialog: a console built on this one says
+  /// there what a new organization starts on
+  /// (`components/extension/create-organization-notice.tsx`).
+  createOrganizationNotice?: React.ReactNode;
 }) {
   const [organizationsOpen, setOrganizationsOpen] = useState(false);
   const [projectsOpen, setProjectsOpen] = useState(false);
@@ -338,6 +343,7 @@ export function ResourceSelector({
         open={newOrganizationOpen}
         onOpenChange={setNewOrganizationOpen}
         host={host}
+        notice={createOrganizationNotice}
       />
     </div>
   );

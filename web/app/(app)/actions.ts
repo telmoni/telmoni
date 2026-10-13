@@ -7,6 +7,7 @@ import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
 import { publishEvent, userChannel } from "@/lib/events/publisher";
+import { createdOrganizationHref } from "@/lib/extension/created-organization";
 import { FlagOffDetail } from "@/lib/flags";
 import { logger } from "@/lib/logger";
 import { MAX_ORGANIZATION_NAME } from "@/lib/organization-name";
@@ -139,9 +140,10 @@ export type CreateOrganizationField = "name" | "slug";
 export interface CreateOrganizationResult {
   error: string | null;
   field?: CreateOrganizationField;
-  /// The new organization's Overview, for the dialog to open. Not a
-  /// `redirect()`: the switcher's dialog lives in a layout the move keeps, and
-  /// would be left open over the page it moved to.
+  /// The new organization's Overview, or wherever a console built on this one
+  /// sends it (`lib/extension/created-organization.ts`), for the dialog to
+  /// open. Not a `redirect()`: the switcher's dialog lives in a layout the
+  /// move keeps, and would be left open over the page it moved to.
   href?: string;
 }
 
@@ -231,5 +233,7 @@ export async function createOrganizationAction(
     });
   }
   revalidatePath("/", "layout");
-  return { error: null, href: organizationPath(created.data.slug) };
+  // Its Overview, unless a console built on this one sends it elsewhere.
+  const href = (await createdOrganizationHref(created.data)) ?? organizationPath(created.data.slug);
+  return { error: null, href };
 }

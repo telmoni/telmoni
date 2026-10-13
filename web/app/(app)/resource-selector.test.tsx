@@ -24,7 +24,7 @@ vi.mock("@/components/create-project", () => ({
   useCanCreateProjects: () => canCreate,
 }));
 vi.mock("@/components/create-organization", () => ({
-  CreateOrganizationDialog: () => null,
+  CreateOrganizationDialog: ({ notice }: { notice?: React.ReactNode }) => <>{notice}</>,
 }));
 
 function organization(slug: string, role: OrganizationEntry["role"]): OrganizationEntry {
@@ -45,6 +45,7 @@ const elsewhere: ProjectEverywhere = {
 function renderSelector(
   badge?: React.ReactNode,
   projects: Project[] = [project("p1", "Atlas"), project("p2", "Beacon")],
+  notice?: React.ReactNode,
 ) {
   return render(
     <StoreProvider
@@ -58,7 +59,11 @@ function renderSelector(
       projects={projects}
       projectsElsewhere={[elsewhere]}
     >
-      <ResourceSelector host="console.test" organizationBadge={badge} />
+      <ResourceSelector
+        host="console.test"
+        organizationBadge={badge}
+        createOrganizationNotice={notice}
+      />
     </StoreProvider>,
   );
 }
@@ -114,6 +119,13 @@ describe("the switcher", () => {
     renderSelector(<span data-testid="plan">Hobby</span>);
     const trigger = screen.getByRole("button", { name: "Select an organization" });
     expect(within(trigger).getByTestId("plan")).toHaveTextContent("Hobby");
+  });
+
+  // `components/extension/create-organization-notice.tsx`: what a console
+  // built on this one says a new organization starts on, in the dialog.
+  it("hands the new-organization dialog the notice it is handed", () => {
+    renderSelector(undefined, undefined, <p data-testid="notice">A new one starts on Pro.</p>);
+    expect(screen.getByTestId("notice")).toHaveTextContent("A new one starts on Pro.");
   });
 
   it("lists every organization the person can stand in, the active one first, with its settings", () => {

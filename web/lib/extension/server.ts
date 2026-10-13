@@ -1,6 +1,7 @@
 // The console's server surface for a console built on this one: the session,
 // the identity headers every server call carries, the fetch and rate-limit
-// wrappers, and the server-rendered shell. See `./ui` for why this exists.
+// wrappers, the organization's roster, the channels open consoles are told
+// on, and the server-rendered shell. See `./ui` for why this exists.
 // `PaperShell` is here, not there, because its footer reads the environment.
 import "server-only";
 
@@ -8,6 +9,7 @@ export { extractProblem, fetchWithTimeout, tryFetchWithTimeout } from "@/lib/api
 export { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 export type { SessionData } from "@/lib/auth/session";
 export { env } from "@/lib/env";
+export { organizationChannel, publishToAll, userChannel } from "@/lib/events/publisher";
 export { Flag } from "@/lib/flags";
 export { ownerContact } from "@/lib/identity";
 export { logger } from "@/lib/logger";
@@ -19,6 +21,7 @@ export {
   sessionHeaders,
   type IdentityContext,
 } from "@/lib/server/entities/identity-context";
+export { fetchOrganizationMembers } from "@/lib/server/entities/organization-member";
 export { featureOff } from "@/lib/server/flags";
 export { SWITCHED_ORGANIZATION, unplacedOrganization } from "@/lib/server/identity";
 export { getServerSession } from "@/lib/server/session";

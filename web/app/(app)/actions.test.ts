@@ -40,6 +40,13 @@ vi.mock("@/lib/events/publisher", () => ({
 vi.mock("@/lib/env", () => ({ env: { SERVER_URL: "http://auth.test" } }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/logger", () => ({ logger: { warn: vi.fn() } }));
+// The slot a console built on this one fills; empty here, as the core ships it.
+const mockCreatedHref = vi.fn<(created: { id: string; slug: string }) => Promise<string | null>>(
+  async () => null,
+);
+vi.mock("@/lib/extension/created-organization", () => ({
+  createdOrganizationHref: (created: { id: string; slug: string }) => mockCreatedHref(created),
+}));
 let mockIdentity: IdentityContext | null = null;
 
 import { revalidatePath } from "next/cache";
@@ -262,6 +269,16 @@ describe("createOrganizationAction", () => {
   it("sends a URL when one is given, and leaves a blank one to auth to derive", async () => {
     await createOrganizationAction("Acme", " acme-labs ");
     expect(JSON.parse(sent()![1].body)).toEqual({ name: "Acme", slug: "acme-labs" });
+  });
+
+  // `lib/extension/created-organization.ts`: a console built on this one may
+  // send a new organization somewhere other than its Overview, asked with the
+  // organization auth answered.
+  it("goes where a console built on this one sends the new organization", async () => {
+    mockCreatedHref.mockResolvedValueOnce("/acme/billing");
+    const r = await createOrganizationAction("Acme", "");
+    expect(r).toEqual({ error: null, href: "/acme/billing" });
+    expect(mockCreatedHref).toHaveBeenCalledWith({ id: "org_new", slug: "acme", name: "Acme" });
   });
 
   it("is throttled per person, as project creation is", async () => {
