@@ -1,10 +1,10 @@
 //! What ingest tells the console's open pages: that a project's spans
-//! arrived, on its organization's channel, so a Traces, Sessions or Users
-//! page draws itself again instead of polling. The message is a nudge, not
-//! the data: the batch's run ids, which a trace's page compares with its own,
-//! and nothing a span holds. It goes out on its own task, never waited on,
-//! and a Redis that stands in loses it, as the console's own events are lost
-//! then — the page's Refresh is there for that.
+//! arrived, on its organization's channel, so a page reading them draws
+//! itself again, or counts them for the reader, instead of polling. The
+//! message is a nudge, not the data: the batch's run ids, which a trace's
+//! page compares with its own, and nothing a span holds. It goes out on its
+//! own task, never waited on, and a Redis that stands in loses it, as the
+//! console's own events are lost then — the page's Refresh is there for that.
 
 use std::sync::Arc;
 

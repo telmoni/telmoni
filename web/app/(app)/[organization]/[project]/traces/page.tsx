@@ -8,6 +8,7 @@ import { ServiceUnavailable } from "@/components/service-unavailable";
 import { TraceCharts, TraceHistogramStrip } from "@/components/traces/charts";
 import { TraceFacetsPanel } from "@/components/traces/facets";
 import { TraceFilterBar } from "@/components/traces/filter-bar";
+import { NewTraces } from "@/components/traces/new-traces";
 import { TracePagination } from "@/components/traces/pagination";
 import { TraceTable } from "@/components/traces/table";
 import { TraceHeaderControls, TraceToolbar } from "@/components/traces/toolbar";
@@ -87,6 +88,9 @@ export default async function TracesPage({
   const canSave = project.role === Role.Owner || project.role === Role.Admin;
   const last = pageCount(list.total, list.limit);
   const lastPage = last > 1 ? last : undefined;
+  // The rows this render drew, as one token: the table is keyed by it, and
+  // the new-traces bar reads a change in it as the list drawn again.
+  const drawn = list.traces.map((t) => t.run_id).join();
 
   // What the page says in place of its rows and its charts when the window
   // holds no trace the filters admit.
@@ -157,6 +161,14 @@ export default async function TracesPage({
             />
             <div className={cn("grid min-w-0 flex-1 gap-3", LIST_DIMS_WHILE_PENDING)}>
               <TraceFilterBar organization={organization} slug={slug} query={query} ui={ui} />
+              {/* What landed since this render, counted rather than drawn in:
+                  the rows stay under the reader's hand until they ask. */}
+              <NewTraces
+                key={project.id}
+                projectId={project.id}
+                drawn={drawn}
+                empty={list.total === 0}
+              />
               {none ??
                 (ui.display === "chart" ? (
                   histogram.kind === "ok" ? (
@@ -169,7 +181,7 @@ export default async function TracesPage({
                     {histogram.kind === "ok" && <TraceHistogramStrip histogram={histogram.histogram} />}
                     {list.traces.length > 0 ? (
                       <TraceTable
-                        key={list.traces.map((t) => t.run_id).join()}
+                        key={drawn}
                         organization={organization}
                         slug={slug}
                         query={query}

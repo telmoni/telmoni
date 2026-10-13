@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { render } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RealtimeListener } from "@/components/realtime-listener";
+import { listDrawn, newTraces } from "@/lib/use-new-traces";
 
 const mockReplace = vi.fn();
 const mockRefresh = vi.fn();
@@ -342,8 +343,9 @@ describe("RealtimeListener - membership:changed", () => {
   );
 });
 
-// Ingest's nudge: a page reading the project's spans is drawn again, the
-// trace page for its own run alone, and nothing else moves.
+// Ingest's nudge: a page reading the project's spans is drawn again — the
+// trace page for its own run alone, the Traces list counting instead unless
+// it is empty — and nothing else moves.
 describe("RealtimeListener - spans:ingested", () => {
   const nudge = (projectId: string, runs: string[] = ["run_1"], more = false) =>
     MockEventSource.instances[0].emit("spans:ingested", {
@@ -363,7 +365,13 @@ describe("RealtimeListener - spans:ingested", () => {
     ];
   });
 
-  it.each(["/acme/web/traces", "/acme/web/sessions", "/acme/web/sessions/s_1", "/acme/web/users"])(
+  afterEach(() => {
+    for (const project of ["project_1", "project_10"]) {
+      listDrawn(project, { rows: [], empty: false, first: true });
+    }
+  });
+
+  it.each(["/acme/web/sessions", "/acme/web/sessions/s_1", "/acme/web/users"])(
     "draws %s again for the project on screen",
     (pathname) => {
       mockPathname = pathname;
@@ -374,11 +382,35 @@ describe("RealtimeListener - spans:ingested", () => {
     },
   );
 
+  it("counts the Traces list's new traces for its bar rather than drawing the list", () => {
+    listDrawn("project_1", { rows: ["r1"], empty: false, first: true });
+    mockPathname = "/acme/web/traces";
+    render(<RealtimeListener />);
+    nudge("project_1", ["run_1", "run_2"]);
+    nudge("project_1", ["run_2", "r1"], true);
+    expect(mockRefresh).not.toHaveBeenCalled();
+    expect(newTraces("project_1"), "r1 is on the list already").toEqual({ count: 2, more: true });
+  });
+
+  // Nothing on an empty list can move, so its first trace shows itself —
+  // under the hold and only in view, as the other pages are drawn.
+  it("draws an empty Traces list rather than counting for it", () => {
+    listDrawn("project_1", { rows: [], empty: true, first: true });
+    mockPathname = "/acme/web/traces";
+    render(<RealtimeListener />);
+    nudge("project_1", ["run_1"]);
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
+    expect(newTraces("project_1")).toEqual({ count: 0, more: false });
+  });
+
   it("leaves a page of another project, and a page reading no spans, alone", () => {
+    listDrawn("project_1", { rows: ["r1"], empty: false, first: true });
     mockPathname = "/acme/web/traces";
     render(<RealtimeListener />);
     nudge("project_10");
     expect(mockRefresh).not.toHaveBeenCalled();
+    expect(newTraces("project_10")).toEqual({ count: 0, more: false });
+    expect(newTraces("project_1")).toEqual({ count: 0, more: false });
 
     mockPathname = "/acme/web/members";
     render(<RealtimeListener />);
@@ -410,7 +442,7 @@ describe("RealtimeListener - spans:ingested", () => {
   it("holds between redraws for as long as the layout says", () => {
     vi.useFakeTimers();
     try {
-      mockPathname = "/acme/web/traces";
+      mockPathname = "/acme/web/sessions";
       render(<RealtimeListener liveHoldMs={100} />);
       nudge("project_1");
       nudge("project_1");
@@ -435,7 +467,7 @@ describe("RealtimeListener - spans:ingested", () => {
     const visibility = vi.spyOn(document, "visibilityState", "get");
     try {
       visibility.mockReturnValue("hidden");
-      mockPathname = "/acme/web/traces";
+      mockPathname = "/acme/web/sessions";
       render(<RealtimeListener liveHoldMs={100} />);
       nudge("project_1");
       nudge("project_1");

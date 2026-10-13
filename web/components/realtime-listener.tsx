@@ -16,6 +16,7 @@ import { movedPath, projectAt } from "@/lib/console-nav";
 import { RealtimeEventDataSchema } from "@/lib/events/types";
 import { LIVE_HOLD_MS, liveRefresher } from "@/lib/live-refresh";
 import { projectPath } from "@/lib/slug";
+import { listIsEmpty, tracesArrived } from "@/lib/use-new-traces";
 
 const RETRY_MS = 30_000;
 
@@ -208,14 +209,20 @@ export function RealtimeListener({ liveHoldMs = LIVE_HOLD_MS }: { liveHoldMs?: n
       });
 
       // A project's spans arrived: a page reading them is drawn again, the
-      // nudges coalesced (`liveRefresher`). A trace's page is drawn for its
-      // own run alone.
+      // nudges coalesced (`liveRefresher`) — but the Traces list, whose rows
+      // would move under the reader's hand, counts them in a bar above itself
+      // instead (`NewTraces`), unless it is empty and has nothing to move;
+      // and a trace's page is drawn for its own run alone.
       es.addEventListener("spans:ingested", (e: MessageEvent) => {
         const data = payload(e, "spans:ingested");
         if (!data || data.projectId !== projectIdRef.current) return;
         const page = SPAN_PAGES.exec(pathnameRef.current);
         if (!page) return;
         const [, section, one] = page;
+        if (section === "traces" && !one && !listIsEmpty(data.projectId)) {
+          tracesArrived(data.projectId, data.runs, data.more);
+          return;
+        }
         if (section === "traces" && one && !data.more && !data.runs.includes(one)) return;
         live.nudge();
       });

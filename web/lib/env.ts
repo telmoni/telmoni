@@ -140,11 +140,12 @@ export const env = {
     return Number(raw);
   },
 
-  // How long a Traces, Sessions or Users page holds after it was drawn for
-  // ingest's "spans arrived" before it is drawn again for the next, in
-  // seconds (`lib/live-refresh.ts`): the first after a quiet spell draws at
-  // once, the rest once, when the hold ends, so a flood costs at most two
-  // redraws a hold. Unset is thirty; 0 draws on every export.
+  // How long a trace's or a session's page, or a Sessions or Users list,
+  // holds after it was drawn for ingest's "spans arrived" before it is drawn
+  // again for the next, in seconds (`lib/live-refresh.ts`): the first after
+  // a quiet spell draws at once, the rest once, when the hold ends, so a
+  // flood costs at most two redraws a hold; the Traces list counts them in a
+  // bar instead. Unset is thirty; 0 draws on every export.
   get LIVE_REFRESH_HOLD_SECS(): number {
     const raw = process.env.LIVE_REFRESH_HOLD_SECS?.trim();
     if (!raw) return LIVE_HOLD_SECS;

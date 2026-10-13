@@ -182,8 +182,9 @@ async fn write(
         "ingest: export kept"
     );
     // The organization's open consoles are told, so a page reading this
-    // project's spans draws itself again — of a batch that kept something:
-    // one refused whole stored nothing to read. The answer is not held for it.
+    // project's spans draws itself again, or counts them for the reader — of
+    // a batch that kept something: one refused whole stored nothing to read.
+    // The answer is not held for it.
     if !batch.rows.is_empty() {
         live::tell(
             Arc::clone(state),

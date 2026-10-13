@@ -52,7 +52,8 @@ const SlugMovedSchema = z.object({
 });
 
 /// A project's spans just arrived — one export's worth, kept — so a page
-/// reading them draws itself again. `runs` names the batch's runs, so the
+/// reading them draws itself again, or counts them for the reader. `runs`
+/// names the batch's runs, so the
 /// trace page knows whether its own is among them, and `more` that the batch
 /// held runs past the cap the nudge carries. Nothing a span holds is in it:
 /// the nudge says "read again", never what to read. The server publishes it
