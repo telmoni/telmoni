@@ -22,8 +22,9 @@ after typing the project's name
   applies the mark, and the nightly rotation removes them from disk; its
   telemetry settings, its saved views of its traces, and the key its
   end-user ids were hashed under, go with them. Its connectors, their
-  delivery history and its activity feed are purged right after, and the
-  console agent removes what it holds about the project within the hour.
+  delivery history and its activity feed are purged in the same request,
+  just before its telemetry, and the console agent removes what it holds
+  about the project within the hour.
 - **What stays:** the project's events in the organization's audit log.
 - **If a step fails** — a store that did not answer — the organization's own
   deletion finishes it: telemetry finds the project again through the
@@ -35,8 +36,7 @@ Only the **Owner** can, with a confirmation code sent to their address
 ([steps](/docs/workspace/organizations-and-projects#deleting-an-organization)).
 
 - **At once:** the organization is closed, every API key stops
-  authenticating and member access ends. On the hosted service its
-  subscription is cancelled and the unused part of the period refunded.
+  authenticating and member access ends.
 - **After a 15-minute grace**, the deletion sweep, which runs every ten
   minutes, erases it: its projects, with everything a project's deletion
   removes above; memberships and pending invitations; API keys; connectors
@@ -45,7 +45,7 @@ Only the **Owner** can, with a confirmation code sent to their address
   views and hashing keys. Usually within the hour. A part that cannot finish is
   retried every ten minutes until it does.
 - **What stays:** the audit log, which is append-only and outlives the
-  organization; invoices, which Stripe holds; and copies already delivered
+  organization; and copies already delivered
   to a Slack channel or a webhook the organization connected, which are the
   organization's.
 - On a self-hosted deployment, an operator can close an organization from
@@ -92,7 +92,7 @@ no organization that has other members
 ## Backups and copies
 
 On the hosted service, deleted data leaves the backups as they expire: the
-database keeps thirty daily backups, telemetry's store thirty nightly ones,
-and nothing older than thirty days is kept of either. On a self-hosted
+database keeps thirty daily backups and telemetry's store nightly ones, and
+nothing older than thirty days is kept of either. On a self-hosted
 deployment, your backups are yours. Files you downloaded and notices already
 delivered to your channels are yours too, and nothing recalls them.

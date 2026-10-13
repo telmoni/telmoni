@@ -18,7 +18,7 @@ row each, fifty to a page:
 |---|---|
 | Trace | The first eight characters of the run's id; opens the trace |
 | Started | When the run's first span started, in your time zone |
-| Agent | The run's agent (`telmoni.agent`), which will name its monitor once monitors are built |
+| Agent | The run's agent (`telmoni.agent`) |
 | User | The end user the run was for (`user.id`), as stored: hashed under the project's own key |
 | Session | The session the run belongs to (`gen_ai.conversation.id`), as the application set it |
 | Status | **OK**, **Error** or **Cancelled** once the run's own span has arrived; **Running** until it has |
@@ -42,9 +42,10 @@ user and session among the window's runs, with how many runs carry it —
 counted under every other filter, so a value beside a ticked one says what
 ticking it would add. Tick values to narrow the list: the values of one
 filter add to each other, and filters narrow together. The panel names fifty
-values of each at most, the most runs first; a user's or a session's id can
-be typed in as well (**Text**). Click an agent, a user or a session in a row
-to narrow the list to it alone. The filters in force stand above the rows:
+values of each at most, the most runs first; a session's id can be typed in as
+well (**Text**), and so can a user's as it is stored, the hashed id the User
+column shows. Click an agent, a user, a session, a model or a tool in a row to
+narrow the list to it alone. The filters in force stand above the rows:
 clear one with its ×, or all of them at once. The button beside the panel's
 heading hides it, and opens it again.
 
@@ -54,7 +55,8 @@ first. Click one again to take it off.
 
 ### Sort, pages and the window
 
-**Sort** by any column with a heading by clicking it; a second click turns it
+**Sort** by clicking a column's heading; every column sorts but Trace, Ended,
+Spans, Cache read, Cache write, Models and Tools. A second click turns it
 round. Names sort in the alphabet's order, and the newest, the longest and the
 most come first on the others.
 
@@ -109,7 +111,8 @@ together under the run's own heading, where the first of them started.
 
 **Timeline**, one view away, draws every span of the run — the steps, the
 calls, and any other span an exporter recorded inside it — as a bar on one
-line of time, nested as it was recorded, with its duration beside it.
+line of time, nested as it was recorded, with its duration beside it. The
+page holds a run's first 5,000 spans; a run with more says so under them.
 
 A run whose own span has not arrived yet is shown as running. A trace that
 is not in the project — a run that has passed its retention, or one of another

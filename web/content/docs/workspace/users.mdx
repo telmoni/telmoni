@@ -12,8 +12,8 @@ nobody by it.
 
 ## Naming the user
 
-Name the user when you open a run — `user_id` in the [SDKs](/docs/api/sdks),
-`user.id` on the span, which is OpenTelemetry's own name for it — and every
+Name the user when you open a run — `user_id` in the [SDKs](/docs/api/sdks)
+(`userId` in TypeScript, `UserID` in Go), `user.id` on the span, which is OpenTelemetry's own name for it — and every
 span inside the run carries it. A run that names no user is nobody's and counts on
 no row here; a project whose runs name none sees the page say so, with the
 attribute to set.
@@ -30,9 +30,8 @@ attribute to set.
 | First seen | When their first run in the window started, in your time zone |
 | Last seen | When their last run in the window ended |
 
-**Sort** by any column by clicking its heading; most tokens first until a
-call is priced, when spend will take its place. A second click turns the sort
-round. Ids and first seen sort the alphabet's and the calendar's way; the most
+**Sort** by any column by clicking its heading; the list opens with the most
+tokens first. A second click turns the sort round. Ids and first seen sort the alphabet's and the calendar's way; the most
 and the latest come first on the others.
 
 **The window** is the last day, week, 30 or 90 days, by the day each span

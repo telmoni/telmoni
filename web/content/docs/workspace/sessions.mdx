@@ -17,7 +17,8 @@ is not a sign-in: those are listed under
 ## Naming the session
 
 Name the session when you open a run — `session_id` in the
-[SDKs](/docs/api/sdks), `gen_ai.conversation.id` on the span — and every span
+[SDKs](/docs/api/sdks) (`sessionId` in TypeScript, `SessionID` in Go),
+`gen_ai.conversation.id` on the span — and every span
 inside the run carries it. A run that names no session belongs to none; a
 project whose runs name none sees the page say so, with the attribute to set.
 

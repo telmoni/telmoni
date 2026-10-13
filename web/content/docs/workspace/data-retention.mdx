@@ -34,7 +34,7 @@ lists. An end user's id is stored only as a keyed hash
 | Data | Kept | Then |
 |---|---|---|
 | Organizations, projects, members and roles | While they exist | Deleted with the organization, or the project |
-| Invitations | Until accepted, declined or withdrawn, or 7 days; the record 30 days past expiry or withdrawal | The retention sweep deletes the record |
+| Invitations | Until accepted, declined or withdrawn, or 7 days; an unaccepted one's record 30 days past expiry or withdrawal, an accepted one's until its acceptor's account is erased or its project or organization is deleted | The retention sweep deletes an unaccepted one's record |
 | API keys | While live; a revoked or expired key's record 7 days | The retention sweep deletes the record |
 | Connectors: Slack grants, webhook endpoints and their signing secrets | While connected | Revoked at the vendor and erased when disconnected, or with the project or the organization |
 | Activity feed notices | 90 days | The notifications sweep deletes them |
@@ -47,8 +47,8 @@ lists. An end user's id is stored only as a keyed hash
 | Data | Kept | Then |
 |---|---|---|
 | Your account: the name and address your identity provider or password account gave | While the account exists | Erased when you delete the account |
-| Sessions | Until signed out or revoked, or 30 days unused; a revoked session's row 90 days | The retention sweep deletes the row |
-| Sign-in codes, device authorizations and the tokens nobody can use any more | Minutes | The retention sweep deletes them |
+| Sessions | Until signed out or revoked; one unused for 30 days can no longer be resumed, but its row stays until you end it or delete your account; a revoked session's row 90 days | The retention sweep deletes a revoked session's row |
+| Sign-in codes, device authorizations and the tokens nobody can use any more | Usable for minutes; the daily retention sweep deletes them once expired or spent, a spent refresh token after a day | The retention sweep deletes them |
 | Confirmation codes, for a deletion or an email change | 15 minutes | Expire; five wrong guesses burn one |
 
 ## The console agent
@@ -66,13 +66,9 @@ What the agent sends its model provider is on the account's
 
 - **Backups.** The database is backed up daily, with seven days of
   point-in-time recovery, and thirty daily backups are kept. Telemetry's
-  store is backed up nightly, thirty nights are kept, and the bucket deletes
-  anything older than thirty days whatever the tool left. Deleted data leaves
-  the backups as they expire, within thirty days.
+  store is backed up nightly, and none of its backups is kept past thirty
+  days. Deleted data leaves the backups as they expire, within thirty days.
 - **Operational logs** are kept thirty days. They name ids, never addresses.
-- **Billing.** The subscription's status, period and Stripe's identifiers
-  while the organization exists; Stripe holds the invoices under its own
-  terms.
 - **The console agent's model provider** keeps each request 55 days to detect
   abuse, as the [Subprocessors](https://telmoni.com/docs/legal/subprocessors) page states.
 
