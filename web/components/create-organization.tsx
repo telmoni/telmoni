@@ -157,11 +157,11 @@ export function CreateOrganizationDialog({
             )}
           </DialogBody>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
             <Button type="submit" disabled={!canSubmit}>
               {pending ? "Creating…" : "Create organization"}
+            </Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
             </Button>
           </DialogFooter>
         </form>

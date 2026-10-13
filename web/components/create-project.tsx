@@ -121,15 +121,15 @@ export function CreateProjectDialog({
             )}
           </DialogBody>
           <DialogFooter>
+            <Button type="submit" disabled={!canSubmit}>
+              {pending ? "Creating…" : "Create project"}
+            </Button>
             <Button
               type="button"
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
               Cancel
-            </Button>
-            <Button type="submit" disabled={!canSubmit}>
-              {pending ? "Creating…" : "Create project"}
             </Button>
           </DialogFooter>
         </form>

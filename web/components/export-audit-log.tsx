@@ -280,6 +280,9 @@ function ExportDialog({
             )}
           </DialogBody>
           <DialogFooter>
+            <Button type="submit" disabled={!canSubmit}>
+              {pending ? "Starting…" : "Start export"}
+            </Button>
             <Button
               type="button"
               variant="outline"
@@ -287,9 +290,6 @@ function ExportDialog({
               onClick={() => onOpenChange(false)}
             >
               Cancel
-            </Button>
-            <Button type="submit" disabled={!canSubmit}>
-              {pending ? "Starting…" : "Start export"}
             </Button>
           </DialogFooter>
         </form>

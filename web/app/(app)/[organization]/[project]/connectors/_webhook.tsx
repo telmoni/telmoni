@@ -185,11 +185,11 @@ function AddEndpointDialog({
             )}
           </DialogBody>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
             <Button type="submit" disabled={!canSubmit}>
               {pending ? "Connecting…" : "Connect"}
+            </Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
             </Button>
           </DialogFooter>
         </form>

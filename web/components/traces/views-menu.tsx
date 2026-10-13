@@ -311,11 +311,11 @@ function NameDialog({
             </div>
           </DialogBody>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
             <Button type="submit" disabled={pending || !trimmed}>
               {submitLabel}
+            </Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
             </Button>
           </DialogFooter>
         </form>

@@ -207,11 +207,11 @@ function MintDialog({
             )}
           </DialogBody>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
             <Button type="submit" disabled={!canSubmit}>
               {pending ? "Minting…" : "Mint key"}
+            </Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
             </Button>
           </DialogFooter>
         </form>

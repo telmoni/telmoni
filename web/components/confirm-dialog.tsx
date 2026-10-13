@@ -83,7 +83,6 @@ export function ConfirmDialog({
           )}
         </AlertDialogBody>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
             variant={destructive ? "destructive" : "default"}
             disabled={!unlocked}
@@ -91,6 +90,7 @@ export function ConfirmDialog({
           >
             {confirmLabel}
           </AlertDialogAction>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

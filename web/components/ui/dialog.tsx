@@ -9,7 +9,9 @@ import { cn } from "@/lib/utils";
 // Every part below is the one modal chassis; `alert-dialog.tsx` carries the
 // same classes, part for part, so the two draw one shape. A dialog is
 // `DialogHeader` (the title, and the close), `DialogBody` (the description and
-// everything else) and `DialogFooter` (the actions), in that order.
+// everything else) and `DialogFooter` (the actions), in that order. In the
+// footer the action that commits comes first and the one that dismisses
+// (Cancel, Keep) last, at the right edge, so the Tab order ends on the way out.
 
 function Dialog({
   ...props
