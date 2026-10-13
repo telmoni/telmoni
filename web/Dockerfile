@@ -17,13 +17,13 @@
 # pins it: `gcr.io/distroless/nodejsNN-debian13` publishes 22, 24 and 26 only. A
 # mismatch builds and runs until newer output meets the older runtime, and the
 # failure lands in a distroless image with no shell to open.
-FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS deps
+FROM node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
 # ── Stage 2: build the standalone bundle ─────────────────────────────────────
-FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS builder
+FROM node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS builder
 WORKDIR /app
 # CA roots for any HTTPS the build performs (e.g. next/font fetches).
 RUN apt-get update \
