@@ -97,6 +97,14 @@ pub struct Siblings {
     /// outside this database — a subscription, say — run when a deletion is
     /// confirmed and again before the row goes.
     pub purge_hook: Option<Arc<dyn telmoni_shared::seam::PurgeHook>>,
+    /// The deployment's own module whose answer depends on who owns an
+    /// organization — a plan limited to one per person, say: asked before an
+    /// organization is offered or taken, and told once one is founded or
+    /// changes hands.
+    pub ownership_hook: Option<Arc<dyn telmoni_shared::seam::OwnershipHook>>,
+    /// What each organization may take in, read before an invitation is
+    /// sent. `None` is no limits.
+    pub entitlements: Option<Arc<dyn telmoni_shared::seam::Entitlements>>,
 }
 
 /// The module's pool, opened as its own database role.

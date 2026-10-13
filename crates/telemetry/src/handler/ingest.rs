@@ -1,6 +1,7 @@
 //! `POST /otlp/v1/traces` — ingest, OTLP/HTTP, behind a project API key
 //! holding the ingest scope ([`telmoni_shared::middleware::api_key`]). The
-//! order is the contract's: the rate limit, before the body is read; the
+//! order is the contract's: the rate limit, and then the organization's
+//! grants ([`telmoni_shared::seam::admit_new`]), before the body is read; the
 //! body, no further than its cap; its digest claimed, so a retry with the
 //! same bytes is answered rather than written again; then the spans read by
 //! the contract, their content dropped, and the rows written once ClickHouse
@@ -81,6 +82,9 @@ async fn handle(
         .rate_limit
         .admit(&state.redis, key.project_id.as_str())
         .await?;
+    // A dormant organization keeps what it holds and takes in nothing new: a
+    // 402, which an exporter drops rather than retries.
+    telmoni_shared::seam::admit_new(state.entitlements.as_ref(), &key.organization_id).await?;
 
     // One byte past the cap is read, so that past it is known; a body that
     // fails to arrive gets no answer anyway.
@@ -259,6 +263,9 @@ const fn rpc_code(status: StatusCode) -> i32 {
     match status {
         StatusCode::BAD_REQUEST => 3,
         StatusCode::UNAUTHORIZED => 16,
+        // A plan's refusal: the organization is not in a state to take the
+        // export, which asking again will not change.
+        StatusCode::PAYMENT_REQUIRED => 9,
         StatusCode::FORBIDDEN => 7,
         StatusCode::NOT_FOUND => 5,
         StatusCode::PAYLOAD_TOO_LARGE | StatusCode::TOO_MANY_REQUESTS => 8,
@@ -352,6 +359,7 @@ mod tests {
     fn http_statuses_map_to_grpc_codes() {
         assert_eq!(rpc_code(StatusCode::BAD_REQUEST), 3);
         assert_eq!(rpc_code(StatusCode::UNAUTHORIZED), 16);
+        assert_eq!(rpc_code(StatusCode::PAYMENT_REQUIRED), 9);
         assert_eq!(rpc_code(StatusCode::FORBIDDEN), 7);
         assert_eq!(rpc_code(StatusCode::PAYLOAD_TOO_LARGE), 8);
         assert_eq!(rpc_code(StatusCode::TOO_MANY_REQUESTS), 8);

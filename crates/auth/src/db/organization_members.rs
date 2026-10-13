@@ -310,6 +310,42 @@ pub async fn active_organizations_owned_by(
     .await
 }
 
+/// The ACTIVE organizations this person owns with the moment each was
+/// founded, oldest first: what a module beside auth decides per owner reads
+/// ([`telmoni_shared::seam::Auth::organizations_owned_by`]).
+pub async fn active_owned_with_founding(
+    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+    user_id: &UserId,
+) -> sqlx::Result<Vec<(OrganizationId, DateTime<Utc>)>> {
+    sqlx::query_as(
+        "SELECT m.organization_id, o.created_at FROM auth.organization_members m
+           JOIN auth.organizations o
+             ON o.external_id = m.organization_id AND o.status = 'active'
+          WHERE m.user_id = $1 AND m.role = 'owner'
+          ORDER BY o.created_at, m.organization_id",
+    )
+    .bind(user_id)
+    .fetch_all(tx.conn())
+    .await
+}
+
+/// Everybody who owns two or more ACTIVE organizations, in id order.
+pub async fn owners_of_several(
+    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+) -> sqlx::Result<Vec<UserId>> {
+    sqlx::query_scalar(
+        "SELECT m.user_id FROM auth.organization_members m
+           JOIN auth.organizations o
+             ON o.external_id = m.organization_id AND o.status = 'active'
+          WHERE m.role = 'owner'
+          GROUP BY m.user_id
+         HAVING count(*) > 1
+          ORDER BY m.user_id",
+    )
+    .fetch_all(tx.conn())
+    .await
+}
+
 /// What labels an organization: the name it was given.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct LabelParts {

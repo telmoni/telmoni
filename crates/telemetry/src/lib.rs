@@ -73,6 +73,9 @@ pub struct AppState {
     /// Auth, in process: who is behind a lane's bearer, and what role they
     /// hold on the project it names.
     pub auth: Arc<dyn telmoni_shared::seam::Auth>,
+    /// What each organization may take in, read at ingest's door: a binary
+    /// that sells nothing hands it no limits.
+    pub entitlements: Arc<dyn telmoni_shared::seam::Entitlements>,
     /// The client Cloud KMS is called through, where `TELEMETRY_KEK` names a
     /// key there.
     pub http: reqwest::Client,

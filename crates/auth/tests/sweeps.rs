@@ -71,6 +71,8 @@ fn state(
             telemetry: None,
             agent: None,
             purge_hook: Some(hook),
+            ownership_hook: None,
+            entitlements: None,
         },
     });
     (state, provider)

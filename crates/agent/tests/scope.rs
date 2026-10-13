@@ -120,6 +120,7 @@ fn state_with(pool: &PgPool, embedder: Arc<SameVector>, auth: Arc<dyn Auth>) -> 
         service_secrets: ServiceSecrets::new("secret", None::<String>),
         auth,
         notifications: Arc::new(Absent),
+        entitlements: Arc::new(telmoni_shared::seam::NoLimits),
         model: None,
         embedder: Some(embedder),
         reranker: None,

@@ -103,6 +103,8 @@ fn build(
             telemetry: telemetry.map(|t| t as Arc<dyn telmoni_shared::seam::Telemetry>),
             agent: None,
             purge_hook: None,
+            ownership_hook: None,
+            entitlements: None,
         },
     });
     router(state)

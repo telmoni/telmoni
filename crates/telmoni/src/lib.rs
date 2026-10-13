@@ -34,10 +34,11 @@ use telmoni_shared::acting::{Acting, ActingKey};
 use telmoni_shared::config::env_parse;
 use telmoni_shared::middleware::service_auth::{ServiceSecrets, require_service_secret};
 use telmoni_shared::seam::{
-    AuditEventsQuery, Auth, DocumentCursor, ProjectHome, PurgeHook, SourceDocument,
+    AuditEventsQuery, Auth, DocumentCursor, Entitlements, NoLimits, OwnedOrganization,
+    OwnershipHook, ProjectHome, PurgeHook, SourceDocument,
 };
 use telmoni_shared::{
-    AuthError, FlagSet, OrganizationId, OrganizationStatus, ProjectId, TelmoniError,
+    AuthError, FlagSet, OrganizationId, OrganizationStatus, ProjectId, TelmoniError, UserId,
 };
 
 use cli::{Command, Sweep};
@@ -68,7 +69,8 @@ pub trait Module: Send + Sync {
 }
 
 /// What a binary supplies to build the process: each module's configuration
-/// and pool, auth's providers, and the deployment's own purge hook, if any.
+/// and pool, auth's providers, and the deployment's own hooks and
+/// entitlements, if any.
 pub struct Parts {
     /// Auth's configuration.
     pub auth_config: telmoni_auth::Config,
@@ -91,6 +93,13 @@ pub struct Parts {
     /// A module of the deployment's own that holds something of an
     /// organization's outside these tables, run before the organization goes.
     pub purge_hook: Option<Arc<dyn PurgeHook>>,
+    /// A module of the deployment's own whose answer depends on who owns an
+    /// organization: asked before one changes hands, and told when one is
+    /// founded or does. `None` asks nobody.
+    pub ownership_hook: Option<Arc<dyn OwnershipHook>>,
+    /// What each organization may take in, answered by a deployment that
+    /// sells plans; `None` is [`NoLimits`], everything for everybody.
+    pub entitlements: Option<Arc<dyn Entitlements>>,
     /// How many `X-Forwarded-For` entries the proxies in front of the server
     /// append (`TRUSTED_PROXY_HOPS`), which the machine door's per-address
     /// limits read the caller's address past ([`door`]).
@@ -167,6 +176,24 @@ impl Auth for LateAuth {
         self.get()?.organization_standing(organization_id).await
     }
 
+    async fn organizations_owned_by(
+        &self,
+        user_id: &UserId,
+    ) -> Result<Vec<OwnedOrganization>, TelmoniError> {
+        self.get()?.organizations_owned_by(user_id).await
+    }
+
+    async fn owner_of(
+        &self,
+        organization_id: &OrganizationId,
+    ) -> Result<Option<UserId>, TelmoniError> {
+        self.get()?.owner_of(organization_id).await
+    }
+
+    async fn owners_of_several(&self) -> Result<Vec<UserId>, TelmoniError> {
+        self.get()?.owners_of_several().await
+    }
+
     async fn audit_documents(
         &self,
         after: Option<&DocumentCursor>,
@@ -225,6 +252,8 @@ impl App {
             parts.auth_config.service_secret_next.clone(),
         );
         let late_auth = Arc::new(LateAuth::default());
+        let entitlements: Arc<dyn Entitlements> =
+            parts.entitlements.unwrap_or_else(|| Arc::new(NoLimits));
         let notifications = Arc::new(telmoni_notifications::boot::state_from_env(
             parts.notifications_config,
             parts.notifications_pool,
@@ -237,6 +266,7 @@ impl App {
             parts.telemetry_pool,
             secrets.clone(),
             late_auth.clone(),
+            entitlements.clone(),
         )?);
         let agent = parts
             .agent
@@ -263,6 +293,7 @@ impl App {
                     secrets.clone(),
                     late_auth.clone(),
                     notifier.clone(),
+                    entitlements.clone(),
                     observer,
                 )
                 .map(Arc::new)
@@ -282,6 +313,8 @@ impl App {
                         as Arc<dyn telmoni_shared::seam::Agent>
                 }),
                 purge_hook: parts.purge_hook,
+                ownership_hook: parts.ownership_hook,
+                entitlements: Some(entitlements),
             },
         ));
         if late_auth.0.set(auth.clone()).is_err() {
@@ -302,15 +335,18 @@ impl App {
     /// Link a module of the deployment's own beside the core's. Built after
     /// [`App::assemble`], so it holds auth and notifications as they are
     /// (`app.auth` is the [`Auth`] seam, `Notifier` the notifications one);
-    /// what the core asks of it — a purge hook — went in through
-    /// [`Parts`], late-bound on the deployment's side.
+    /// what the core asks of it — a purge hook, an ownership hook, the
+    /// entitlements — went in through [`Parts`], late-bound on the
+    /// deployment's side.
     pub fn mount(&mut self, module: Arc<dyn Module>) {
         self.modules.push(module);
     }
 
     /// The process as the environment describes it: each module's pool as its
     /// own role, auth's providers from the `OIDC_*` and `SMTP_URL` variables
-    /// ([`telmoni_auth::boot`]), and no purge hook.
+    /// ([`telmoni_auth::boot`]), and no hook of a deployment's own: nothing
+    /// purged beside the core's modules, nothing asked of a handover, and no
+    /// limits.
     pub async fn from_env() -> anyhow::Result<Self> {
         let auth_config = telmoni_auth::Config::from_env()?;
         let notifications_config = telmoni_notifications::Config::from_env()?;
@@ -335,6 +371,8 @@ impl App {
             telemetry_pool,
             agent,
             purge_hook: None,
+            ownership_hook: None,
+            entitlements: None,
             trusted_proxy_hops: env_parse("TRUSTED_PROXY_HOPS", 2_u8)?,
         })
     }

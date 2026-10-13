@@ -19,6 +19,7 @@ use serde_json::json;
 
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
+use telmoni_shared::seam::OwnershipChange;
 use telmoni_shared::{
     AuthError, Flag, OrganizationId, OrganizationRole, TelmoniError, TenantError, UserId,
 };
@@ -225,7 +226,8 @@ pub struct CreateOrganizationRequest {
 /// as its owner. It names no existing organization, so it reads no
 /// `x-organization-id`. Nothing caps how many a person makes or owns; the
 /// global `signup` flag closes it, as it closes provisioning, and a closed one
-/// is a refusal here, since the person asked.
+/// is a refusal here, since the person asked. A deployment's ownership hook
+/// is told once it is founded, and decides what, if anything, follows.
 ///
 /// ⚠ **On the person's lock, which their account's deletion holds while it
 /// reads what they own.** A creation that waited on it is refused once the
@@ -277,6 +279,14 @@ pub async fn create_organization(
     }
     let founded =
         found_organization(tx, organization, &founder, &name, url, Founding::OnRequest).await?;
+    crate::handler::ownership::tell_ownership_hook(
+        &state,
+        OwnershipChange::Founded {
+            organization_id: founded.id.clone(),
+            owner: founder.clone(),
+        },
+    )
+    .await;
 
     tracing::info!(organization_id = %founded.id, user_id = %founder, "organization created");
     Ok((

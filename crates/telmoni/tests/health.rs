@@ -79,6 +79,8 @@ fn assemble() -> App {
         telemetry_pool: unreachable_pool(),
         agent: None,
         purge_hook: None,
+        ownership_hook: None,
+        entitlements: None,
         trusted_proxy_hops: 2,
     })
     .expect("the modules wire together")

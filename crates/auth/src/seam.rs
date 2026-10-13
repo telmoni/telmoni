@@ -16,7 +16,8 @@ use telmoni_shared::acting::{Acting, ActingKey, ActingProject};
 use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope};
 use telmoni_shared::rbac::{Resource, Verb, can};
 use telmoni_shared::seam::{
-    Audience, AuditEventsQuery, Auth, DocumentCursor, ProjectHome, SourceDocument,
+    Audience, AuditEventsQuery, Auth, DocumentCursor, OwnedOrganization, ProjectHome,
+    SourceDocument,
 };
 use telmoni_shared::{
     AuthError, AuthzError, FlagSet, OrganizationId, OrganizationRole, OrganizationStatus,
@@ -25,7 +26,9 @@ use telmoni_shared::{
 
 use crate::AppState;
 use crate::db::audit::{self, AuditQuery};
-use crate::db::{AuthLane, access_tokens, flags, members, organizations, projects, tokens};
+use crate::db::{
+    AuthLane, access_tokens, flags, members, organization_members, organizations, projects, tokens,
+};
 use crate::handler::{
     acting_organization, acting_project, authorize, parse_organization_id, parse_project_id,
 };
@@ -154,6 +157,39 @@ impl Auth for AppState {
         let status = organizations::status(&mut tx, organization_id).await?;
         tx.commit().await?;
         Ok(status)
+    }
+
+    async fn organizations_owned_by(
+        &self,
+        user_id: &UserId,
+    ) -> Result<Vec<OwnedOrganization>, TelmoniError> {
+        let mut tx = maintenance_scope(&self.db, AuthLane).await?;
+        let owned = organization_members::active_owned_with_founding(&mut tx, user_id).await?;
+        tx.commit().await?;
+        Ok(owned
+            .into_iter()
+            .map(|(organization_id, created_at)| OwnedOrganization {
+                organization_id,
+                created_at,
+            })
+            .collect())
+    }
+
+    async fn owner_of(
+        &self,
+        organization_id: &OrganizationId,
+    ) -> Result<Option<UserId>, TelmoniError> {
+        let mut tx = maintenance_scope(&self.db, AuthLane).await?;
+        let owner = organization_members::owner_of(&mut tx, organization_id).await?;
+        tx.commit().await?;
+        Ok(owner)
+    }
+
+    async fn owners_of_several(&self) -> Result<Vec<UserId>, TelmoniError> {
+        let mut tx = maintenance_scope(&self.db, AuthLane).await?;
+        let owners = organization_members::owners_of_several(&mut tx).await?;
+        tx.commit().await?;
+        Ok(owners)
     }
 
     async fn audit_documents(

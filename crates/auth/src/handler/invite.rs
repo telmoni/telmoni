@@ -90,6 +90,10 @@ pub async fn create_invite(
     let acting = acting_project(&state, &project_id, &actor).await?;
     authorize(acting.role, Verb::Create, Resource::Member)?;
     let organization = acting.organization.clone();
+    // A dormant organization takes no new members.
+    if let Some(entitlements) = state.siblings.entitlements.as_deref() {
+        telmoni_shared::seam::admit_new(entitlements, &organization).await?;
+    }
 
     // ⚠ **Under the owning organization's scope.** Its flag overrides, its
     // roster and every address on it are the organization's rows; with only

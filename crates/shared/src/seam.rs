@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::acting::{Acting, ActingKey};
 use crate::{
-    AuditAction, FlagSet, NotificationKind, OrganizationId, OrganizationStatus, ProjectId,
+    AuditAction, FlagSet, Grants, NotificationKind, OrganizationId, OrganizationStatus, ProjectId,
     TelmoniError, UserId,
 };
 
@@ -118,6 +118,17 @@ pub struct ProjectHome {
     pub organization_slug: String,
 }
 
+/// One active organization a person owns, as auth answers a module that
+/// decides something for each owner rather than each organization.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedOrganization {
+    /// The organization.
+    pub organization_id: OrganizationId,
+    /// When it was founded, which orders a person's organizations oldest
+    /// first.
+    pub created_at: DateTime<Utc>,
+}
+
 /// What auth answers the modules beside it.
 #[async_trait]
 pub trait Auth: Send + Sync {
@@ -187,6 +198,32 @@ pub trait Auth: Send + Sync {
         &self,
         organization_id: &OrganizationId,
     ) -> Result<Option<OrganizationStatus>, TelmoniError>;
+
+    /// The active organizations the person owns, oldest first. One waiting
+    /// out its deletion is left out: it holds nothing for anybody any more.
+    async fn organizations_owned_by(
+        &self,
+        user_id: &UserId,
+    ) -> Result<Vec<OwnedOrganization>, TelmoniError> {
+        let _ = user_id;
+        Err(not_linked("the organizations a person owns"))
+    }
+
+    /// Who owns the organization now, in any status: one waiting out its
+    /// deletion still has its owner. `None` for one that does not exist.
+    async fn owner_of(
+        &self,
+        organization_id: &OrganizationId,
+    ) -> Result<Option<UserId>, TelmoniError> {
+        let _ = organization_id;
+        Err(not_linked("an organization's owner"))
+    }
+
+    /// Everybody who owns two or more active organizations, for a module
+    /// whose answer for one of them depends on the others.
+    async fn owners_of_several(&self) -> Result<Vec<UserId>, TelmoniError> {
+        Err(not_linked("the owners of several organizations"))
+    }
 
     /// The next page of audit events, oldest first after `after`, for the
     /// agent's index, read in auth's own lane. Nothing by default.
@@ -386,6 +423,99 @@ pub trait PurgeHook: Send + Sync {
         &self,
         organization_id: &OrganizationId,
     ) -> Result<(), TelmoniError>;
+}
+
+/// A change in who owns which organization, as auth tells an
+/// [`OwnershipHook`] once it has committed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OwnershipChange {
+    /// `owner` founded the organization: one they asked for, or the first
+    /// `/me` provisioned for them.
+    Founded {
+        /// The new organization.
+        organization_id: OrganizationId,
+        /// Its founder and owner.
+        owner: UserId,
+    },
+    /// The organization changed hands: its admin accepted the owner's offer.
+    HandedOver {
+        /// The organization.
+        organization_id: OrganizationId,
+        /// Who owned it until now; `None` where the roster held no owner.
+        from: Option<UserId>,
+        /// Who owns it now.
+        to: UserId,
+    },
+}
+
+/// A module of the deployment's own whose answer for an organization depends
+/// on who owns it — a plan limited to one per person, say — and so has a say
+/// in an organization changing hands, and is told when one is founded or
+/// changes hands. An organization's deletion reaches it as a [`PurgeHook`]
+/// does, since that is where the deployment already hears of it.
+///
+/// ⚠ **Asked before any lock, told after the commit.** Auth asks
+/// [`OwnershipHook::may_take_ownership`] before it takes the locks an offer
+/// or an accept writes under, because the hook reads auth back through
+/// [`Auth`] on auth's own pool; it tells [`OwnershipHook::ownership_changed`]
+/// once the change has committed, within a bound, and logs a failure, which
+/// the module's own catching up must cover.
+#[async_trait]
+pub trait OwnershipHook: Send + Sync {
+    /// Whether `recipient` may come to own the organization: asked before the
+    /// owner offers it to them and again before they accept it. An `Err` is
+    /// the refusal the person reads.
+    async fn may_take_ownership(
+        &self,
+        organization_id: &OrganizationId,
+        recipient: &UserId,
+    ) -> Result<(), TelmoniError>;
+
+    /// One change, once committed. Idempotent: the module's own catching up
+    /// may arrive at the same answer.
+    async fn ownership_changed(&self, change: OwnershipChange) -> Result<(), TelmoniError>;
+}
+
+/// What an organization may take in, as a deployment that sells plans
+/// answers it: a module of its own, handed to the core empty and filled once
+/// it exists, as a [`PurgeHook`] is. A binary that sells nothing answers
+/// [`NoLimits`]. Its answer is read at each door, before anything new is
+/// taken in ([`admit_new`]).
+#[async_trait]
+pub trait Entitlements: Send + Sync {
+    /// The organization's grants now.
+    async fn grants(&self, organization_id: &OrganizationId) -> Result<Grants, TelmoniError>;
+}
+
+/// A binary that sells nothing: every organization holds everything.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoLimits;
+
+#[async_trait]
+impl Entitlements for NoLimits {
+    async fn grants(&self, organization_id: &OrganizationId) -> Result<Grants, TelmoniError> {
+        let _ = organization_id;
+        Ok(Grants::unlimited())
+    }
+}
+
+/// What a door asks before it takes in anything new for an organization —
+/// an export, a question, an invitation: refused while its grants refuse it.
+/// An answer that cannot be had lets it in, logged, since an outage of ours
+/// must never stop an agent reporting, and nothing it would refuse costs
+/// more than an outage lasts.
+pub async fn admit_new(
+    entitlements: &dyn Entitlements,
+    organization_id: &OrganizationId,
+) -> Result<(), TelmoniError> {
+    match entitlements.grants(organization_id).await {
+        Ok(grants) => grants.admit_new(),
+        Err(e) => {
+            tracing::warn!(organization_id = %organization_id, error = %e,
+                "entitlements could not be read; let in");
+            Ok(())
+        }
+    }
 }
 
 /// The tokens one model call used, counted as the GenAI conventions count

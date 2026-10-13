@@ -378,6 +378,14 @@ async fn provision_first_organization(
     founder_under_lock(state, &mut tx, user_id).await?;
     let founded =
         found_organization(tx, organization, user_id, &name, url, Founding::Provisioned).await?;
+    crate::handler::ownership::tell_ownership_hook(
+        state,
+        telmoni_shared::seam::OwnershipChange::Founded {
+            organization_id: founded.id.clone(),
+            owner: user_id.clone(),
+        },
+    )
+    .await;
     tracing::info!(organization_id = %founded.id, user_id = %user_id, "organization provisioned");
     Ok(Provisioning::Provisioned)
 }

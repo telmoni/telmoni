@@ -240,6 +240,8 @@ fn build_around(
             telemetry: telemetry.map(|t| t as Arc<dyn telmoni_shared::seam::Telemetry>),
             agent: None,
             purge_hook: hook.map(|h| h as Arc<dyn telmoni_shared::seam::PurgeHook>),
+            ownership_hook: None,
+            entitlements: None,
         },
     });
     (

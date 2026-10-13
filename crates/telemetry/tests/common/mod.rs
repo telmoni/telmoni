@@ -20,10 +20,10 @@ use uuid::Uuid;
 use telmoni_shared::acting::{Acting, ActingKey, ActingProject};
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::rbac::project_role;
-use telmoni_shared::seam::{Auth, ProjectHome};
+use telmoni_shared::seam::{Auth, Entitlements, NoLimits, ProjectHome};
 use telmoni_shared::test_util::{ServiceRole, chain_lock_held, service_pool};
 use telmoni_shared::{
-    ApiKeyScope, AuthError, AuthzError, FlagSet, OrganizationId, OrganizationRole,
+    ApiKeyScope, AuthError, AuthzError, Dormant, FlagSet, Grants, OrganizationId, OrganizationRole,
     OrganizationStatus, ProjectId, Role, SpanKind, SpanStatus, TelmoniError, UserId,
 };
 use telmoni_telemetry::store::{self, SpanRow, Store};
@@ -317,6 +317,16 @@ impl Auth for AuthStub {
 /// who acts. ClickHouse is named and never dialled: nothing a suite that
 /// reads no span asks of it.
 pub(crate) fn state(pool: &PgPool, auth: Arc<dyn Auth>) -> Arc<AppState> {
+    state_with_entitlements(pool, auth, Arc::new(NoLimits))
+}
+
+/// [`state`], with `entitlements` answering what each organization may take
+/// in, as a deployment that sells plans answers it.
+pub(crate) fn state_with_entitlements(
+    pool: &PgPool,
+    auth: Arc<dyn Auth>,
+    entitlements: Arc<dyn Entitlements>,
+) -> Arc<AppState> {
     // Nothing listens on either: the replica stands in for Redis, as it does
     // on a laptop with none, and a lane that reaches for ClickHouse fails.
     state_at(
@@ -324,7 +334,27 @@ pub(crate) fn state(pool: &PgPool, auth: Arc<dyn Auth>) -> Arc<AppState> {
         auth,
         "http://telemetry:telemetry@127.0.0.1:1",
         "redis://127.0.0.1:1",
+        entitlements,
     )
+}
+
+/// Entitlements under which one organization is dormant, as a deployment that
+/// sells plans holds an organization it will not take anything new for.
+pub(crate) struct DormantOrganization(pub(crate) OrganizationId);
+
+#[async_trait]
+impl Entitlements for DormantOrganization {
+    async fn grants(&self, organization_id: &OrganizationId) -> Result<Grants, TelmoniError> {
+        if *organization_id != self.0 {
+            return Ok(Grants::unlimited());
+        }
+        Ok(Grants {
+            dormant: Some(Dormant {
+                entitlement: "pro".into(),
+                detail: "This organization is dormant.".into(),
+            }),
+        })
+    }
 }
 
 /// The module over `pool`, with the stores a suite can reach: ClickHouse as
@@ -336,7 +366,7 @@ pub(crate) fn state_with_stores(pool: &PgPool, auth: Arc<dyn Auth>) -> Arc<AppSt
         "state_with_stores: TELEMETRY_CLICKHOUSE_URL is set, checked by clickhouse_or_skip",
     );
     let redis = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_owned());
-    state_at(pool, auth, &clickhouse, &redis)
+    state_at(pool, auth, &clickhouse, &redis, Arc::new(NoLimits))
 }
 
 fn state_at(
@@ -344,6 +374,7 @@ fn state_at(
     auth: Arc<dyn Auth>,
     clickhouse_url: &str,
     redis_url: &str,
+    entitlements: Arc<dyn Entitlements>,
 ) -> Arc<AppState> {
     let config = Config {
         dogfood_project_id: None,
@@ -362,6 +393,7 @@ fn state_at(
             service_pool(pool, ServiceRole::Telemetry),
             ServiceSecrets::new(SECRET, None::<String>),
             auth,
+            entitlements,
         )
         .expect("the module's state over a laptop's key"),
     )

@@ -112,6 +112,9 @@ pub async fn post_turn(
             "message is 1-{MESSAGE_MAX_CHARS} characters"
         )));
     }
+    // A dormant organization asks nothing new; its conversations stay open
+    // to read.
+    telmoni_shared::seam::admit_new(state.entitlements.as_ref(), &acting.organization_id).await?;
 
     let mut tx = author_scope(&state, &acting).await?;
     let (asked, oldest) = db::recent_questions(&mut tx, &acting.user_id).await?;

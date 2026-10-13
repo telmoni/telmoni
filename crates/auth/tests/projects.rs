@@ -569,6 +569,8 @@ async fn deleting_a_project_purges_its_connectors_and_its_telemetry(pool: PgPool
                 telemetry: Some(telemetry.clone()),
                 agent: None,
                 purge_hook: None,
+                ownership_hook: None,
+                entitlements: None,
             },
         )
     };

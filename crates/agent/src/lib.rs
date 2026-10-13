@@ -52,6 +52,9 @@ pub struct AppState {
     pub auth: Arc<dyn Auth>,
     /// The feed, the connectors and their deliveries the tools read.
     pub notifications: Arc<dyn Notifications>,
+    /// What each organization may ask, read before a question is taken: a
+    /// binary that sells nothing hands it no limits.
+    pub entitlements: Arc<dyn telmoni_shared::seam::Entitlements>,
     /// `None` while the agent is off.
     pub model: Option<Arc<dyn model::Model>>,
     /// `None` while the agent is off.

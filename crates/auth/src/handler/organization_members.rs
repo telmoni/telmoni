@@ -316,6 +316,10 @@ pub async fn create_organization_invite(
         }
         .into());
     }
+    // A dormant organization takes no new members.
+    if let Some(entitlements) = state.siblings.entitlements.as_deref() {
+        telmoni_shared::seam::admit_new(entitlements, &organization).await?;
+    }
 
     // The invitation's mail calls the organization by its name.
     let Some(name) = organizations::get(&mut tx, &organization)

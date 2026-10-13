@@ -22,6 +22,10 @@ pub enum TelmoniError {
     #[error(transparent)]
     Telemetry(#[from] TelemetryError),
 
+    /// A plan's refusal, from a deployment that sells plans.
+    #[error(transparent)]
+    Plan(#[from] PlanError),
+
     /// Database error (surfaced as redacted 500).
     #[error(transparent)]
     Database(#[from] sqlx::Error),
@@ -164,6 +168,7 @@ impl TelmoniError {
             Self::Authz(e) => e.to_problem_details(),
             Self::Tenant(e) => e.to_problem_details(),
             Self::Telemetry(e) => e.to_problem_details(),
+            Self::Plan(e) => e.to_problem_details(),
             Self::Database(sqlx::Error::Database(e)) if e.is_unique_violation() => {
                 AuthError::Conflict("That already exists. Refresh and try again.".into())
                     .to_problem_details()
@@ -461,6 +466,51 @@ impl TelemetryError {
     }
 }
 
+/// A plan's refusals. Nothing in the core decides one: they come from a
+/// deployment that sells plans, through [`crate::seam::Entitlements`] and
+/// [`crate::seam::OwnershipHook`], so a binary that sells none never answers
+/// one.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum PlanError {
+    /// The organization's plan does not hold what was asked. Maps to **402**,
+    /// with the one thing that lifts it as `entitlement`.
+    #[error("plan limit reached; lifted by {entitlement}")]
+    LimitReached {
+        /// The one thing that lifts the refusal. Rides the problem as the
+        /// `entitlement` extension, for a program to switch on.
+        entitlement: String,
+        /// The sentence a person reads, in the deployment's words.
+        detail: String,
+    },
+}
+
+impl PlanError {
+    /// Render this error as RFC 9457 problem-details.
+    #[must_use]
+    pub fn to_problem_details(&self) -> ProblemDetails {
+        match self {
+            Self::LimitReached {
+                entitlement,
+                detail,
+            } => {
+                let mut pd = ProblemDetails {
+                    type_uri: "/errors/plan/limit-reached".into(),
+                    title: "plan limit reached".into(),
+                    status: 402,
+                    detail: Some(detail.clone()),
+                    ..Default::default()
+                };
+                pd.extensions.insert(
+                    "entitlement".into(),
+                    serde_json::Value::String(entitlement.clone()),
+                );
+                pd
+            }
+        }
+    }
+}
+
 /// Tenant-isolation errors (rate-limit, cross-project access, feature flags).
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -736,6 +786,27 @@ mod tests {
                 .get("retry_after_secs")
                 .and_then(serde_json::Value::as_u64),
             Some(90)
+        );
+    }
+
+    /// The refusal is the deployment's to word; the core carries its words
+    /// and the one thing that lifts it, and invents neither.
+    #[test]
+    fn a_plan_limit_is_a_402_naming_what_lifts_it() {
+        let pd = TelmoniError::from(PlanError::LimitReached {
+            entitlement: "pro".into(),
+            detail: "Move it to Pro.".into(),
+        })
+        .to_problem_details();
+        assert_eq!(pd.type_uri, "/errors/plan/limit-reached");
+        assert_eq!(pd.status, 402);
+        assert_eq!(pd.title, "plan limit reached");
+        assert_eq!(pd.detail.as_deref(), Some("Move it to Pro."));
+        assert_eq!(
+            pd.extensions
+                .get("entitlement")
+                .and_then(serde_json::Value::as_str),
+            Some("pro")
         );
     }
 

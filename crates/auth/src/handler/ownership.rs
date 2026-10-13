@@ -14,6 +14,10 @@
 //! the admin's roster row (`transfer_offered_at`), so removing them, their
 //! leaving, or demoting them ends it with no bookkeeping of its own.
 //!
+//! A deployment with an ownership hook ([`crate::Siblings::ownership_hook`])
+//! has a say on the admin coming to own it, asked before the offer and again
+//! before the accept, and is told of the accept once it commits.
+//!
 //! ⚠ **Every lane here takes the organization's lock and reads the roles again
 //! under it.** Accept races removal, demotion, a second offer and deletion;
 //! without the lock a removal blocked behind an accept would re-check its WHERE
@@ -34,6 +38,7 @@ use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
 use telmoni_shared::db::tenant_session::{Organization, Scoped, organization_scope};
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
+use telmoni_shared::seam::OwnershipChange;
 use telmoni_shared::{
     AuditAction, AuthError, AuthzError, OrganizationId, OrganizationRole, TelmoniError,
     TelmoniResourceKind, UserId,
@@ -53,6 +58,83 @@ pub struct OfferRequest {
     /// The admin to offer the organization to — their user id, as the roster
     /// lists it.
     pub member_id: String,
+}
+
+/// The longest auth waits on the deployment's ownership hook, asked or told.
+/// The console abandons the whole request at ten seconds.
+const HOOK_BUDGET: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The deployment's say on whether `recipient` may come to own the
+/// organization ([`telmoni_shared::seam::OwnershipHook`]): no hook is a yes,
+/// and so is one that does not answer within [`HOOK_BUDGET`], logged, since
+/// nothing it guards costs more than its outage lasts. Asked before any lock:
+/// the hook reads auth back on auth's own pool.
+async fn may_take_ownership(
+    state: &AppState,
+    organization: &OrganizationId,
+    recipient: &UserId,
+) -> Result<(), TelmoniError> {
+    let Some(hook) = state.siblings.ownership_hook.as_ref() else {
+        return Ok(());
+    };
+    match tokio::time::timeout(
+        HOOK_BUDGET,
+        hook.may_take_ownership(organization, recipient),
+    )
+    .await
+    {
+        Ok(answer) => answer,
+        Err(_) => {
+            tracing::warn!(organization_id = %organization,
+                "the ownership hook did not answer in time; the change is let through");
+            Ok(())
+        }
+    }
+}
+
+/// Tell the deployment's ownership hook of a change that has committed. It
+/// stands whatever the hook answers, so a refusal or a silence past
+/// [`HOOK_BUDGET`] is logged and nothing more: the hook's own catching up
+/// covers a change it missed.
+pub(crate) async fn tell_ownership_hook(state: &AppState, change: OwnershipChange) {
+    let Some(hook) = state.siblings.ownership_hook.as_ref() else {
+        return;
+    };
+    let organization = match &change {
+        OwnershipChange::Founded {
+            organization_id, ..
+        }
+        | OwnershipChange::HandedOver {
+            organization_id, ..
+        } => organization_id.clone(),
+    };
+    match tokio::time::timeout(HOOK_BUDGET, hook.ownership_changed(change)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            tracing::warn!(organization_id = %organization, error = %e,
+                "the ownership hook failed on a change; it catches up on its own");
+        }
+        Err(_) => {
+            tracing::warn!(organization_id = %organization,
+                "the ownership hook did not answer in time; it catches up on its own");
+        }
+    }
+}
+
+/// Whether the caller holds the organization's live offer, read before any
+/// lock and without one, for deciding whether the hook is asked at all: only
+/// somebody who could take the organization is shown its answer. A stranger
+/// is refused here as `locked` would refuse them.
+async fn holds_the_offer(
+    state: &AppState,
+    organization: &OrganizationId,
+    user_id: &UserId,
+) -> Result<bool, TelmoniError> {
+    let mut tx = organization_scope(&state.db, organization).await?;
+    organization_role_or_forbidden(&mut tx, organization, user_id).await?;
+    let holder = organization_members::live_offer_holder(&mut tx, organization).await?;
+    tx.commit().await?;
+    Ok(holder.as_ref() == Some(user_id))
 }
 
 /// Which locks [`locked`] takes.
@@ -136,6 +218,20 @@ pub async fn offer(
     let target = parse_user_id(&req.member_id)?;
     if target == user_id {
         return Err(AuthError::BadRequest("you already own this organization".into()).into());
+    }
+
+    // The deployment's say on the admin coming to own it, before any lock,
+    // and asked only for its owner offering it to one of its admins: anybody
+    // else is refused below by auth's own rules, and learns nothing from it.
+    if state.siblings.ownership_hook.is_some() {
+        let mut tx = organization_scope(&state.db, &organization).await?;
+        let role = organization_role_or_forbidden(&mut tx, &organization, &user_id).await?;
+        let target_role =
+            organization_members::role_on_organization(&mut tx, &organization, &target).await?;
+        tx.commit().await?;
+        if role == OrganizationRole::Owner && target_role == Some(OrganizationRole::Admin) {
+            may_take_ownership(&state, &organization, &target).await?;
+        }
     }
 
     // `locked` refuses an organization being deleted, under its lock.
@@ -386,6 +482,14 @@ pub async fn accept(
     let organization = organization_of(&headers)?;
     let user_id = principal.user_id;
 
+    // The deployment's say, before any lock, asked only for whoever holds the
+    // live offer; the offer itself is checked again under the locks.
+    if state.siblings.ownership_hook.is_some()
+        && holds_the_offer(&state, &organization, &user_id).await?
+    {
+        may_take_ownership(&state, &organization, &user_id).await?;
+    }
+
     let (tx, role) = locked(
         &state,
         &organization,
@@ -483,6 +587,16 @@ pub async fn accept(
         .await?
         .map(|o| o.name);
     tx.commit().await?;
+
+    tell_ownership_hook(
+        &state,
+        OwnershipChange::HandedOver {
+            organization_id: organization.clone(),
+            from: previous.clone(),
+            to: user_id.clone(),
+        },
+    )
+    .await;
 
     if let (Some(previous), Some(new_owner), Some(name)) = (previous_contact, new_owner, name)
         && let Err(e) = state
