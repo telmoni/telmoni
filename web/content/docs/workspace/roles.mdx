@@ -102,3 +102,8 @@ is refused and to whom: API keys, connectors, saved views and the audit log
 a project, the organization's roster, its deletion and transfer, a
 project's transfer and, on the hosted service, billing. The server checks every
 request against the caller's roles; nothing is left to the browser.
+
+On the hosted service an organization's plan can refuse too, whatever your
+role: a `402` `/errors/plan/limit-reached`, as a dormant organization's
+invitations are refused
+([One Hobby organization](https://telmoni.com/docs/workspace/billing#one-hobby-organization)).
