@@ -74,7 +74,7 @@ $ make check
 $ claude --plugin-dir .
 ```
 
-`make check` is the gate CI runs: it validates each skill against the Agent Skills spec, `plugin.json` against the Agent Plugins schema, `.cursor-plugin/plugin.json` against Cursor's, and the plugin and its marketplace with `claude plugin validate .`. `claude --plugin-dir .` starts a Claude Code session with your checkout's plugin loaded. `make eval` runs the eval suite, each case with and without the plugin, and spends model usage; on Linux its runs need `bubblewrap` and `socat`. The repository's `AGENTS.md` says what a skill may say and how to test a change.
+`make check` is the gate CI runs: it validates each skill against the Agent Skills spec, `plugin.json` against the Agent Plugins schema, `.cursor-plugin/plugin.json` against Cursor's, and the plugin and its marketplace with `claude plugin validate .`. CI lints its workflows with actionlint beside it. `claude --plugin-dir .` starts a Claude Code session with your checkout's plugin loaded. `make eval` runs the eval suite, each case with and without the plugin, and spends model usage; on Linux its runs need `bubblewrap` and `socat`. The repository's `AGENTS.md` says what a skill may say and how to test a change.
 
 ## The docs
 
@@ -91,4 +91,4 @@ $ claude --plugin-dir .
 $ make check
 ```
 
-`make check` is the gate CI runs: with the platform checked out beside these docs, it builds the console with them, which compiles every page and fails on invalid MDX, and runs those two tests (`make book-check` in the platform). The same pages are served as Markdown for a model, `/llms.txt` (the index) and `/llms-full.txt` (every page), which is the corpus the console agent indexes.
+`make check` and `typos` are the gate CI runs. With the platform checked out beside these docs, `make check` builds the console with them, which compiles every page and fails on invalid MDX, and runs those two tests (`make book-check` in the platform). The same pages are served as Markdown for a model, `/llms.txt` (the index) and `/llms-full.txt` (every page), which is the corpus the console agent indexes.

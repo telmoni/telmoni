@@ -8,7 +8,7 @@ Telmoni's open-source core is [`telmoni/telmoni`](https://github.com/telmoni/tel
 ## Four repositories
 
 - [`telmoni/telmoni`](https://github.com/telmoni/telmoni), the platform and the four SDKs (`sdk/`). [Developing it](/docs/contributing/developing#the-platform) takes two commands; [`ARCHITECTURE.md`](https://github.com/telmoni/telmoni/blob/main/ARCHITECTURE.md) explains how it is built on one page: the place to read before changing anything structural. `make ci` is the gate.
-- [`telmoni/docs`](https://github.com/telmoni/docs), these pages, which the platform's console serves at `/docs`. [The docs](/docs/contributing/developing#the-docs) says how a page is wired, and every claim on one is checked against the code first. `make check` is the gate, with the platform checked out beside it.
+- [`telmoni/docs`](https://github.com/telmoni/docs), these pages, which the platform's console serves at `/docs`. [The docs](/docs/contributing/developing#the-docs) says how a page is wired, and every claim on one is checked against the code first. `make check` and `typos` are the gate, with the platform checked out beside it.
 - [`telmoni/telmoni-cli`](https://github.com/telmoni/telmoni-cli), the CLI. [Developing it](/docs/contributing/developing#the-cli); its [`ARCHITECTURE.md`](https://github.com/telmoni/telmoni-cli/blob/main/ARCHITECTURE.md) explains how it is built on one page. `cargo xtask ci` is the gate.
 - [`telmoni/skills`](https://github.com/telmoni/skills), the agent skills. [Developing them](/docs/contributing/developing#the-skills); its [`AGENTS.md`](https://github.com/telmoni/skills/blob/main/AGENTS.md) holds the rules a skill is held to, and how to test one. `make check` is the gate.
 
@@ -24,7 +24,7 @@ Open an issue first for a new feature, a schema change or anything architectural
 
 ## Before you push
 
-Run the repository's gate, which is what its CI runs: `make ci` in the platform (formatting, clippy, rustdoc, the Rust tests against a local Postgres and ClickHouse, the console's typecheck, lint, dead-code check, tests and build, the SDK suites, and the dependency and spelling checks), `make check` in the docs, `cargo xtask ci` in the CLI, and `make check` in the skills. A pull request is reviewed once its gate passes.
+Run the repository's gate, which is what its CI runs: `make ci` in the platform (formatting, clippy, rustdoc, the Rust tests against a local Postgres and ClickHouse, the console's typecheck, lint, dead-code check, tests and build, the SDK suites, and the dependency and spelling checks), `make check` and `typos` in the docs, `cargo xtask ci` in the CLI, and `make check` in the skills, CI linting the CLI's and the skills' workflows with actionlint beside them. A pull request is reviewed once its gate passes.
 
 ## Commits and pull requests
 
