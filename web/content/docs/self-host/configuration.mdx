@@ -156,13 +156,13 @@ The embedded AI assistant searches 768-dimensional embeddings of the documentati
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `AGENT_MODEL_PROVIDER` | *Optional* | Model provider protocol: `anthropic` or `openai`. (OpenAI protocol supports OpenAI, Gemini compatible endpoints, Ollama, and vLLM). |
-| `AGENT_MODEL_URL` | `https://api.anthropic.com` (anthropic) / `https://api.openai.com/v1` (openai) | The API's base URL. The server appends `/v1/messages` for `anthropic` and `/chat/completions` for `openai`, so an Anthropic base has no `/v1` and an OpenAI-protocol base ends in it (`http://ollama:11434/v1`). |
+| `AGENT_MODEL_URL` | `https://api.anthropic.com` (anthropic) / `https://api.openai.com/v1` (openai) | The API's base URL. The server appends `/v1/messages` for `anthropic` and `/chat/completions` for `openai`, so an Anthropic base has no `/v1`, and an OpenAI-protocol base is the one `/chat/completions` follows (`http://ollama:11434/v1`; Gemini's `https://generativelanguage.googleapis.com/v1beta/openai`). |
 | `AGENT_MODEL` | `claude-sonnet-5` (anthropic) / *Required* (openai) | LLM model identifier. |
 | `AGENT_MODEL_API_KEY` | *Optional* | API key for the model provider. Required when `AGENT_MODEL_URL` is a hosted API (`api.anthropic.com`, `api.openai.com`, `generativelanguage.googleapis.com`); the server refuses to start without it. |
 | `AGENT_MAX_TOKENS` | `8192` | The longest reply one model call may write (at least 1). |
 | `AGENT_MODEL_TIMEOUT_SECS` | `60` | How long, in seconds, one model call may go without sending anything: before its first byte, or between two parts of its answer. It does not limit the whole call. Allowed range is 1 to 100. |
 | `AGENT_MESSAGES_PER_HOUR` | `60` | The most questions a person may ask over the last 60 minutes (at least 1); with the hardened database roles, each organization counts its own. |
-| `EMBEDDINGS_URL` | `http://localhost:11434/v1` | URL for the OpenAI-compatible vector embedding endpoint. (The Compose file sets `http://ollama:11434/v1`). |
+| `EMBEDDINGS_URL` | `http://localhost:11434/v1` | The base URL of an OpenAI-compatible embeddings API; the server appends `/embeddings` (`https://api.openai.com/v1`, not `…/v1/embeddings`). The Compose file sets `http://ollama:11434/v1`. |
 | `EMBEDDINGS_MODEL` | `nomic-embed-text` | Embedding model identifier. Vector columns are fixed at 768 dimensions. |
 | `EMBEDDINGS_API_KEY` | *Optional* | API key for the embeddings provider. Required when `EMBEDDINGS_URL` is a hosted API. |
 | `EMBEDDINGS_REQUEST_DIMENSIONS` | `false` | When `true`, requests 768-wide vectors from hosted models that shorten on request. |

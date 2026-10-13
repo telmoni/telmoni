@@ -3,12 +3,12 @@ title: Self-Hosted AI Agent
 description: Architecture, vector search, tool permissions, and local or hosted model options for the Telmoni AI assistant.
 ---
 
-Telmoni includes an embedded AI context agent directly in the console. Asked from a project, the agent answers questions about that project, its delivery failures, its members and, where the deployment indexes it, the documentation. The sources an answer cites as `[n]` are listed under it, each linking to the documentation section or console page it came from. A self-hosted server indexes this site's documentation unless `DOCS_CORPUS_URL=off`; the hosted service runs the agent on Google's Gemini API and indexes no documentation.
+Telmoni includes an embedded AI context agent directly in the console. Asked from a project, the agent answers questions about that project, its delivery failures, its members and, where the deployment indexes it, the documentation. The sources an answer cites as `[n]` are listed under it, each linking to the documentation section or console page it came from. A self-hosted server indexes this site's documentation unless `DOCS_CORPUS_URL=off`; the hosted service runs the agent on Google's Gemini API.
 
 In self-hosted environments, the chat model and the embeddings are configured separately, and each can run on your own hosts or at a vendor's API:
 1. **Local models**: A local Ollama serves both the embeddings and the chat model, and prompts and embeddings go to it alone. The indexer reads this deployment's own documentation (the console's `/llms-full.txt`: the compose file and the chart name the console service directly) on its first run, 30 seconds after boot once the embeddings endpoint answers, and every 24 hours after, so it fetches nothing from outside unless `DOCS_CORPUS_URL` names another corpus. One thing still reaches out unless you stop it: Ollama pulls its models from the internet. On Compose, pull them before cutting the network off; the chart's embeddings pod pulls into an empty volume at every start and exits if it cannot, so on Kubernetes the model registry has to stay reachable.
 2. **A hosted model**: Embeddings from Ollama, and the chat model at a vendor's API: Anthropic's (`AGENT_MODEL_PROVIDER=anthropic`), or OpenAI's or Google's Gemini API through the OpenAI protocol (`AGENT_MODEL_PROVIDER=openai`; Gemini's endpoint is `https://generativelanguage.googleapis.com/v1beta/openai`).
-3. **Hosted embeddings**: `EMBEDDINGS_URL` at a vendor's OpenAI-compatible endpoint, with `EMBEDDINGS_API_KEY`, and `EMBEDDINGS_REQUEST_DIMENSIONS=true` for a model that is wider than 768 unless asked (see the [configuration reference](/docs/self-host/configuration#ai-agent--vector-search)).
+3. **Hosted embeddings**: `EMBEDDINGS_URL` at the base of a vendor's OpenAI-compatible API, to which the server appends `/embeddings`, with `EMBEDDINGS_API_KEY`, and `EMBEDDINGS_REQUEST_DIMENSIONS=true` for a model that is wider than 768 unless asked (see the [configuration reference](/docs/self-host/configuration#ai-agent--vector-search)).
 
 ---
 
@@ -85,8 +85,8 @@ When indexing passages from audit logs, feed notices, deliveries, and documentat
 - **Passage retries and truncation**: A passage that fails on its own is requested a second time. If it fails again, it is cut in half and retried, so a passage too long for the model is embedded from its opening.
 - **Unembeddable passages**: A passage that fails at every length is left out of the index when another passage of the same page embedded, or one of the page's rows was indexed by this model before; otherwise the page fails.
 - **Rate limiting**: A rate limit (429) is waited out, a minute at a time, at most twice for one request; a third counts as a failure.
-- **Transient failures and backoff**: A timeout, 408, 503, or 529 on a single passage fails the page, which is retried after five minutes.
-- **Documentation corpus**: Documentation search requires the documentation site to publish `llms-full.txt` (the default `DOCS_CORPUS_URL`), which the agent polls every 24 hours (or retries after one hour if a fetch fails).
+- **Transient failures and backoff**: A timeout, 408, 503, or 529 on a single passage fails the page: an audit, feed or delivery page is retried after five minutes, and a documentation refresh an hour later.
+- **Documentation corpus**: Documentation search requires the documentation site to publish `llms-full.txt` (the default `DOCS_CORPUS_URL`), which the agent polls every 24 hours (or retries after one hour if a refresh fails).
 
 ---
 

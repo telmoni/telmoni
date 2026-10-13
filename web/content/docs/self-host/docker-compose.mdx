@@ -199,11 +199,22 @@ docker compose -f deploy/compose/docker-compose.yml logs -f web
 
 ### Rotating partitions
 
-The audit log uses monthly PostgreSQL partitions, and ClickHouse keeps your spans a day to a partition. Run `rotate` once a day, from the host's cron: it keeps the audit log's 4-month forward runway, and drops each day of spans once every span in it arrived more than 360 days ago. Without it, no span is ever dropped.
+The audit log uses monthly PostgreSQL partitions, and ClickHouse keeps your spans a day to a partition. Run `rotate` once a day, from the host's cron: it keeps the audit log's 4-month forward runway, and drops each day of spans once every span in it arrived more than 360 days ago. Without it, no span is ever dropped, and from the fourth month after the first migration every change the audit log records fails, for want of a partition.
 
 ```bash
 docker compose -f deploy/compose/docker-compose.yml run --rm migrate rotate
 ```
+
+### Upgrading
+
+The Compose file runs the images tagged `latest`, unless `TELMONI_IMAGE_SERVER` and `TELMONI_IMAGE_WEB` name others, and `up -d` pulls an image only when the host has none, so pull first (with `--profile agent` on both if you run the agent):
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml pull
+docker compose -f deploy/compose/docker-compose.yml up -d
+```
+
+The `migrate` service runs the new release's migrations before the server starts.
 
 ### Stopping the stack
 
