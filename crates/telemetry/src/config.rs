@@ -1,15 +1,11 @@
 //! Telemetry configuration, loaded once from the environment.
 
-use telmoni_shared::config::{optional, optional_base_url, require};
-use telmoni_shared::{ProjectId, Redacted};
+use telmoni_shared::Redacted;
+use telmoni_shared::config::{optional_base_url, require};
 
 /// Loaded-once telemetry configuration.
 #[derive(Clone, Debug)]
 pub struct Config {
-    /// The project of the platform's own the console agent's questions are
-    /// recorded as runs of (`TELEMETRY_DOGFOOD_PROJECT_ID`); unset, nothing
-    /// records them. A project id, as the console's Settings page shows it.
-    pub dogfood_project_id: Option<ProjectId>,
     /// Postgres URL (`TELEMETRY_DATABASE_URL`) — each project's settings,
     /// opened as this module's own role. It carries the role's password.
     pub database_url: Redacted,
@@ -36,15 +32,7 @@ pub struct Config {
 impl Config {
     /// Build the configuration from process environment variables.
     pub fn from_env() -> anyhow::Result<Self> {
-        let dogfood_project_id = optional("TELEMETRY_DOGFOOD_PROJECT_ID")
-            .map(|id| {
-                ProjectId::try_new(&id).map_err(|e| {
-                    anyhow::anyhow!("TELEMETRY_DOGFOOD_PROJECT_ID is not a project id: {e}")
-                })
-            })
-            .transpose()?;
         Ok(Self {
-            dogfood_project_id,
             database_url: require("TELEMETRY_DATABASE_URL")?.into(),
             clickhouse_url: require("TELEMETRY_CLICKHOUSE_URL")?.into(),
             telemetry_kek: require("TELEMETRY_KEK")?.into(),

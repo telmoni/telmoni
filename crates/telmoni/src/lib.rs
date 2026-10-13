@@ -222,11 +222,6 @@ pub struct AgentParts {
     pub config: telmoni_agent::Config,
     /// Its pool, opened as the `agent` role.
     pub pool: PgPool,
-    /// What records each of the agent's questions
-    /// ([`telmoni_shared::seam::AgentObserver`]), where the binary brings its
-    /// own; `None` leaves it to the telemetry module's dogfood, which records
-    /// them where `TELEMETRY_DOGFOOD_PROJECT_ID` names a project.
-    pub observer: Option<Arc<dyn telmoni_shared::seam::AgentObserver>>,
 }
 
 impl AgentParts {
@@ -236,11 +231,7 @@ impl AgentParts {
             return Ok(None);
         };
         let pool = telmoni_agent::boot::open_pool(&config).await?;
-        Ok(Some(Self {
-            config,
-            pool,
-            observer: None,
-        }))
+        Ok(Some(Self { config, pool }))
     }
 }
 
@@ -271,22 +262,6 @@ impl App {
         let agent = parts
             .agent
             .map(|agent| {
-                // The telemetry module records the agent's questions as runs
-                // of the platform's own project, where one is named and the
-                // binary handed no observer of its own.
-                let observer = agent.observer.or_else(|| {
-                    telemetry
-                        .config
-                        .dogfood_project_id
-                        .clone()
-                        .map(|project_id| {
-                            Arc::new(telmoni_telemetry::dogfood::Dogfood::new(
-                                telemetry.clone(),
-                                project_id,
-                            ))
-                                as Arc<dyn telmoni_shared::seam::AgentObserver>
-                        })
-                });
                 telmoni_agent::boot::state(
                     agent.config,
                     agent.pool,
@@ -294,7 +269,6 @@ impl App {
                     late_auth.clone(),
                     notifier.clone(),
                     entitlements.clone(),
-                    observer,
                 )
                 .map(Arc::new)
             })

@@ -354,7 +354,7 @@ async fn run_turn(
     events: Events,
 ) {
     let acting = &asker.acting;
-    let recorder = Recorder::start(state.observer.clone(), acting, conversation_id);
+    let recorder = Recorder::start(state.telmoni.clone(), acting, conversation_id);
     let system = prompt::system(acting, &Utc::now().format("%Y-%m-%d").to_string());
     let specs = tools::specs();
     let mut runner = LiveRunner {

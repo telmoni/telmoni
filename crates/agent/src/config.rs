@@ -20,6 +20,29 @@ pub const DEFAULT_EMBEDDINGS_MODEL: &str = "nomic-embed-text";
 /// otherwise refuse every write, or a truncated vector would search nonsense.
 pub const EMBEDDING_DIMENSIONS: usize = 768;
 
+/// The port `telmoni serve` listens on when `PORT` is unset: the binary's
+/// own default, spelled here too because this crate cannot read it.
+const DEFAULT_PORT: &str = "8082";
+
+/// The SDK's configuration for the agent's own runs, read as the SDK reads
+/// it — `TELMONI_ENDPOINT`, `TELMONI_API_KEY`, `TELMONI_ORG` — with one
+/// difference from a customer's: with no endpoint set, the runs go to this
+/// server's own address, `http://127.0.0.1:$PORT`, never to the SDK's default
+/// of the hosted service, so a server never calls another on its own.
+/// `endpoint` and `port` are the raw variables; `sdk` is what the SDK read.
+fn reporting(
+    mut sdk: telmoni_sdk::Config,
+    endpoint: Option<&str>,
+    port: Option<&str>,
+) -> anyhow::Result<telmoni_sdk::Config> {
+    if endpoint.is_none() {
+        sdk.endpoint = format!("http://127.0.0.1:{}", port.unwrap_or(DEFAULT_PORT));
+    }
+    reqwest::Url::parse(&sdk.endpoint)
+        .map_err(|e| anyhow::anyhow!("TELMONI_ENDPOINT is not a URL: {e}"))?;
+    Ok(sdk)
+}
+
 /// The docs corpus when `DOCS_CORPUS_URL` is unset: the console's own
 /// `/llms-full.txt` under `APP_URL`, every page of the docs at the version
 /// this deployment runs. The compose file and the chart name the console
@@ -124,6 +147,11 @@ pub struct Config {
     pub docs_corpus_url: Option<String>,
     /// `AGENT_MESSAGES_PER_HOUR`: the questions one person may ask in an hour.
     pub messages_per_hour: i64,
+    /// The SDK, reporting each question as a run of the operator's own
+    /// project the way any agent reports its runs (`report.rs`): on while
+    /// `TELMONI_API_KEY` holds an ingest key of that project; unset, nothing
+    /// records them.
+    pub telmoni: Option<telmoni_sdk::Config>,
 }
 
 impl Config {
@@ -147,6 +175,14 @@ impl Config {
             Some(url) => Some(url),
             None => Some(default_docs_corpus_url()),
         };
+        let telmoni = match optional("TELMONI_API_KEY") {
+            None => None,
+            Some(_) => Some(reporting(
+                telmoni_sdk::Config::from_env(),
+                optional("TELMONI_ENDPOINT").as_deref(),
+                optional("PORT").as_deref(),
+            )?),
+        };
         let config = Self {
             database_url,
             model,
@@ -168,6 +204,7 @@ impl Config {
             },
             docs_corpus_url,
             messages_per_hour: env_parse("AGENT_MESSAGES_PER_HOUR", 60)?,
+            telmoni,
         };
         if config.messages_per_hour < 1 {
             anyhow::bail!("AGENT_MESSAGES_PER_HOUR must be at least 1");
@@ -254,6 +291,32 @@ mod tests {
         );
         assert_eq!("openai".parse::<Provider>().unwrap(), Provider::OpenAi);
         assert!("gemini".parse::<Provider>().is_err());
+    }
+
+    /// With no endpoint set, the agent's runs go to this server's own port,
+    /// never to the SDK's default; an endpoint set is kept, and one that is
+    /// no URL refuses boot.
+    #[test]
+    fn the_runs_go_to_this_server_unless_an_endpoint_is_set() {
+        let sdk = || telmoni_sdk::Config::new("", None, Some("telmoni_key".into()));
+        assert_eq!(sdk().endpoint, telmoni_sdk::DEFAULT_ENDPOINT);
+        let own = reporting(sdk(), None, Some("8083")).unwrap();
+        assert_eq!(own.endpoint, "http://127.0.0.1:8083");
+        let default_port = reporting(sdk(), None, None).unwrap();
+        assert_eq!(default_port.endpoint, "http://127.0.0.1:8082");
+        let set = reporting(
+            telmoni_sdk::Config::new("https://api.example.com/", None, Some("telmoni_key".into())),
+            Some("https://api.example.com/"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(set.endpoint, "https://api.example.com");
+        assert_eq!(own.api_key.as_deref(), Some("telmoni_key"));
+        let bad = telmoni_sdk::Config {
+            endpoint: "not a url".into(),
+            ..sdk()
+        };
+        assert!(reporting(bad, Some("not a url"), None).is_err());
     }
 
     #[test]

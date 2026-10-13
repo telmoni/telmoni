@@ -70,7 +70,6 @@ fn assemble() -> App {
         telemetry_config: telmoni_telemetry::Config {
             database_url: "".into(),
             clickhouse_url: "http://telemetry:telemetry@127.0.0.1:1".into(),
-            dogfood_project_id: None,
             telemetry_kek: format!("local:{}", "0".repeat(64)).into(),
             kms_api_base: "http://127.0.0.1:1".into(),
             metadata_api_base: "http://127.0.0.1:1".into(),

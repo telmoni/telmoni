@@ -44,7 +44,6 @@ pub mod boot;
 pub mod config;
 pub mod contract;
 pub mod db;
-pub mod dogfood;
 pub mod handler;
 pub mod hashing;
 pub mod ingest;

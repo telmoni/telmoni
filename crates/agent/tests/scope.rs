@@ -116,6 +116,7 @@ fn state_with(pool: &PgPool, embedder: Arc<SameVector>, auth: Arc<dyn Auth>) -> 
             rerank: None,
             docs_corpus_url: None,
             messages_per_hour: 60,
+            telmoni: None,
         },
         service_secrets: ServiceSecrets::new("secret", None::<String>),
         auth,
@@ -124,7 +125,7 @@ fn state_with(pool: &PgPool, embedder: Arc<SameVector>, auth: Arc<dyn Auth>) -> 
         model: None,
         embedder: Some(embedder),
         reranker: None,
-        observer: None,
+        telmoni: None,
     }
 }
 

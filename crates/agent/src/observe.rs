@@ -1,62 +1,150 @@
-//! What a turn hands whatever records the agent's questions
-//! ([`AgentObserver`]): each model call and tool call, timed as the loop
-//! makes them, and how the question ended. The model and the tools are
-//! wrapped rather than the loop changed, so the loop runs as it did whether
-//! anything records it or not.
+//! What a turn reports: each model call and tool call, timed as the loop
+//! makes them, and how the question ended — sent, as the turn ends, as a run
+//! of the operator's own project with the SDK, the way any agent reports its
+//! runs ([`crate::report`]). The model and the tools are wrapped rather than
+//! the loop changed, so the loop runs as it did whether anything reports it
+//! or not.
+//!
+//! ⚠ **Ids and counts, never what anyone wrote.** No question, answer,
+//! prompt or tool result reaches a record, nor the person who asked. The
+//! model quotes members' names and addresses, and an erasure scrubs them by
+//! their text from the agent's own tables; it cannot reach a copy kept
+//! anywhere else. A question whose answer was withheld for an erasure in its
+//! organization is never reported.
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Mutex, PoisonError};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use telmoni_shared::TelmoniError;
+use telmoni_sdk::Telmoni;
 use telmoni_shared::acting::Acting;
-use telmoni_shared::seam::{
-    AgentGeneration, AgentObserver, AgentStep, AgentToolCall, AgentTurnEnding, AgentTurnRecord,
-};
+use telmoni_shared::{OrganizationId, ProjectId, TelmoniError};
 use uuid::Uuid;
 
 use crate::config::ModelConfig;
-use crate::model::{Message, Model, ModelTurn, TextSink, ToolCall, ToolResult, ToolSpec};
+use crate::model::{
+    Message, Model, ModelTurn, TextSink, TokenUsage, ToolCall, ToolResult, ToolSpec,
+};
+use crate::report;
 use crate::tools::tool_name;
-use crate::turn::{Ending, Runner};
+use crate::turn::{Ending, Runner, StoppedShort};
 
-/// One question as it runs, handed to the observer when it drops — on
-/// whichever return the turn takes — unless it was withheld.
+/// How a console question ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TurnEnding {
+    /// The model answered.
+    Answered {
+        /// Why the answer ends early when it does, as the person was told in
+        /// a note.
+        stopped_short: Option<StoppedShort>,
+    },
+    /// The turn failed.
+    Failed {
+        /// The problem type, never its detail, which can carry what the
+        /// person wrote.
+        problem_type: String,
+    },
+    /// The turn left by a path that named no ending: not an answer, and no
+    /// problem the person was shown.
+    Unfinished,
+    /// The asker left, or is no longer who began it; nothing was saved.
+    Cancelled,
+}
+
+/// One model call of a console question: what the SDK's record carries of
+/// it, and nothing it cannot.
+#[derive(Debug, Clone)]
+pub(crate) struct Generation {
+    /// When it was sent.
+    pub(crate) started_at: DateTime<Utc>,
+    /// When it ended, or was given up.
+    pub(crate) ended_at: DateTime<Utc>,
+    /// The wire protocol it was made over: `anthropic` or `openai`.
+    pub(crate) provider: &'static str,
+    /// The model that answered as the provider spells it, or the configured
+    /// one where the stream named none.
+    pub(crate) model: String,
+    /// `None` when the provider reported none.
+    pub(crate) usage: Option<TokenUsage>,
+    /// Why it failed: the kind, never the provider's body, which can echo the
+    /// request back.
+    pub(crate) error: Option<String>,
+}
+
+/// One tool call of a console question.
+#[derive(Debug, Clone)]
+pub(crate) struct ToolUse {
+    /// When it began.
+    pub(crate) started_at: DateTime<Utc>,
+    /// When it ended, or was given up.
+    pub(crate) ended_at: DateTime<Utc>,
+    /// The tool, by the agent's name for it, or `unknown` for a name the
+    /// model made up, which a passage it read can steer.
+    pub(crate) name: &'static str,
+    /// Whether it answered the model with an error, or was given up.
+    pub(crate) is_error: bool,
+}
+
+/// One step of a console question, in the order it happened.
+#[derive(Debug, Clone)]
+pub(crate) enum Step {
+    /// A model call.
+    Generation(Generation),
+    /// A tool call.
+    Tool(ToolUse),
+}
+
+/// One console question, once it has ended.
+#[derive(Debug, Clone)]
+pub(crate) struct TurnRecord {
+    /// A fresh id for the question: its run's.
+    pub(crate) trace_id: Uuid,
+    /// The conversation it was asked in.
+    pub(crate) conversation_id: Uuid,
+    /// The asker's organization, which the run names as its user.
+    pub(crate) organization_id: OrganizationId,
+    /// The project it was asked about.
+    pub(crate) project_id: Option<ProjectId>,
+    /// When the turn began.
+    pub(crate) started_at: DateTime<Utc>,
+    /// When its outcome was known.
+    pub(crate) ended_at: DateTime<Utc>,
+    /// How it ended.
+    pub(crate) ending: TurnEnding,
+    /// Its model and tool calls, in the order they happened.
+    pub(crate) steps: Vec<Step>,
+}
+
+/// One question as it runs, reported when it drops — on whichever return the
+/// turn takes — unless it was withheld.
 pub(crate) struct Recorder {
-    observer: Option<Arc<dyn AgentObserver>>,
+    telmoni: Option<Telmoni>,
     trace: Mutex<Trace>,
 }
 
 struct Trace {
-    record: AgentTurnRecord,
-    generations: usize,
+    record: TurnRecord,
     ended: bool,
     withheld: bool,
 }
 
 impl Recorder {
-    /// Begin a question's record; with no observer, nothing is kept.
-    pub(crate) fn start(
-        observer: Option<Arc<dyn AgentObserver>>,
-        acting: &Acting,
-        conversation_id: Uuid,
-    ) -> Self {
+    /// Begin a question's record; with no SDK, nothing is kept.
+    pub(crate) fn start(telmoni: Option<Telmoni>, acting: &Acting, conversation_id: Uuid) -> Self {
         let now = Utc::now();
         Self {
-            observer,
+            telmoni,
             trace: Mutex::new(Trace {
-                record: AgentTurnRecord {
+                record: TurnRecord {
                     trace_id: Uuid::new_v4(),
                     conversation_id,
                     organization_id: acting.organization_id.clone(),
                     project_id: acting.project.as_ref().map(|p| p.project_id.clone()),
-                    user_id: acting.user_id.clone(),
                     started_at: now,
                     ended_at: now,
-                    ending: AgentTurnEnding::Cancelled,
+                    ending: TurnEnding::Cancelled,
                     steps: Vec::new(),
                 },
-                generations: 0,
                 ended: false,
                 withheld: false,
             }),
@@ -86,28 +174,35 @@ impl Recorder {
 
     pub(crate) fn answered(&self, ending: Ending) {
         let stopped_short = ending.stopped_short();
-        self.end(|record| record.ending = AgentTurnEnding::Answered { stopped_short });
+        self.end(|record| record.ending = TurnEnding::Answered { stopped_short });
     }
 
     pub(crate) fn failed(&self, e: &TelmoniError) {
         let problem_type = e.to_problem_details().type_uri;
-        self.end(|record| record.ending = AgentTurnEnding::Failed { problem_type });
+        self.end(|record| record.ending = TurnEnding::Failed { problem_type });
     }
 
     pub(crate) fn cancelled(&self) {
-        self.end(|record| record.ending = AgentTurnEnding::Cancelled);
+        self.end(|record| record.ending = TurnEnding::Cancelled);
     }
 
     /// The answer is withheld for an erasure in its organization
     /// (`db::erased_during`): nothing of the question goes anywhere, the
-    /// observer included.
+    /// report included.
     pub(crate) fn withhold(&self) {
         self.trace().withheld = true;
     }
 
+    /// The question's record as it stands, for the tests to read before the
+    /// recorder drops and reports it.
+    #[cfg(test)]
+    pub(crate) fn record(&self) -> TurnRecord {
+        self.trace().record.clone()
+    }
+
     /// The question's end is when its outcome is known, not when the record
-    /// is handed over, which can come after the exchange is indexed.
-    fn end(&self, how: impl FnOnce(&mut AgentTurnRecord)) {
+    /// is reported, which can come after the exchange is indexed.
+    fn end(&self, how: impl FnOnce(&mut TurnRecord)) {
         let mut trace = self.trace();
         how(&mut trace.record);
         trace.record.ended_at = Utc::now();
@@ -118,21 +213,8 @@ impl Recorder {
         self.trace.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// The round of the model call being made now, from 0.
-    fn next_round(&self) -> usize {
-        let mut trace = self.trace();
-        let round = trace.generations;
-        trace.generations += 1;
-        round
-    }
-
-    /// The round whose model call asked for the tools running now.
-    fn current_round(&self) -> usize {
-        self.trace().generations.saturating_sub(1)
-    }
-
-    fn push(&self, step: AgentStep) {
-        if self.observer.is_some() {
+    fn push(&self, step: Step) {
+        if self.telmoni.is_some() {
             self.trace().record.steps.push(step);
         }
     }
@@ -140,7 +222,7 @@ impl Recorder {
 
 impl Drop for Recorder {
     fn drop(&mut self) {
-        let Some(observer) = self.observer.take() else {
+        let Some(telmoni) = self.telmoni.take() else {
             return;
         };
         let trace = self.trace.get_mut().unwrap_or_else(PoisonError::into_inner);
@@ -152,9 +234,9 @@ impl Drop for Recorder {
             // Every return of the turn names its ending; one that did not
             // left by a path nobody wrote, and is not an answer.
             record.ended_at = Utc::now();
-            record.ending = AgentTurnEnding::Unfinished;
+            record.ending = TurnEnding::Unfinished;
         }
-        observer.observe(record);
+        report::send(&telmoni, &record);
     }
 }
 
@@ -176,16 +258,7 @@ impl Model for RecordingModel<'_> {
         on_text: TextSink<'_>,
     ) -> Result<ModelTurn, TelmoniError> {
         let mut call = PendingGeneration::new(self);
-        let first = Mutex::new(None::<DateTime<Utc>>);
-        let sink = |delta: &str| {
-            first
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .get_or_insert_with(Utc::now);
-            on_text(delta);
-        };
-        let answered = self.inner.stream(system, transcript, tools, &sink).await;
-        call.first_token_at = *first.lock().unwrap_or_else(PoisonError::into_inner);
+        let answered = self.inner.stream(system, transcript, tools, on_text).await;
         call.finish(&answered);
         answered
     }
@@ -200,8 +273,7 @@ const GIVEN_UP: &str = "GivenUp";
 /// which the loop does to a call past its deadline, is recorded as given up.
 struct PendingGeneration<'a> {
     recorder: &'a Recorder,
-    generation: Option<AgentGeneration>,
-    first_token_at: Option<DateTime<Utc>>,
+    generation: Option<Generation>,
 }
 
 impl<'a> PendingGeneration<'a> {
@@ -210,21 +282,14 @@ impl<'a> PendingGeneration<'a> {
         let config = model.config;
         Self {
             recorder,
-            generation: recorder.observer.is_some().then(|| AgentGeneration {
-                id: Uuid::new_v4(),
-                round: recorder.next_round(),
+            generation: recorder.telmoni.is_some().then(|| Generation {
                 started_at: Utc::now(),
-                first_token_at: None,
                 ended_at: Utc::now(),
                 provider: config.map_or("unknown", |c| c.provider.as_str()),
                 model: config.map(|c| c.model.clone()).unwrap_or_default(),
-                max_tokens: config.map_or(0, |c| c.max_tokens),
                 usage: None,
-                stop_reason: None,
                 error: None,
-                tool_calls: Vec::new(),
             }),
-            first_token_at: None,
         }
     }
 
@@ -233,22 +298,18 @@ impl<'a> PendingGeneration<'a> {
             return;
         };
         generation.ended_at = Utc::now();
-        generation.first_token_at = self.first_token_at;
         match answered {
             Ok(turn) => {
                 if let Some(model) = &turn.model {
                     model.clone_into(&mut generation.model);
                 }
                 generation.usage = turn.usage;
-                generation.stop_reason = Some(turn.stop_reason.as_str());
-                generation.tool_calls =
-                    turn.tool_calls.iter().map(|c| tool_name(&c.name)).collect();
             }
             // The problem type, as the turn's own ending records one: a
             // kind, never the provider's words, which can echo the request.
             Err(e) => generation.error = Some(e.to_problem_details().type_uri),
         }
-        self.recorder.push(AgentStep::Generation(generation));
+        self.recorder.push(Step::Generation(generation));
     }
 }
 
@@ -256,9 +317,8 @@ impl Drop for PendingGeneration<'_> {
     fn drop(&mut self) {
         if let Some(mut generation) = self.generation.take() {
             generation.ended_at = Utc::now();
-            generation.first_token_at = self.first_token_at;
             generation.error = Some(GIVEN_UP.to_owned());
-            self.recorder.push(AgentStep::Generation(generation));
+            self.recorder.push(Step::Generation(generation));
         }
     }
 }
@@ -290,16 +350,14 @@ impl Runner for RecordingRunner<'_> {
 /// A tool call under way, recorded as [`PendingGeneration`] is.
 struct PendingTool<'a> {
     recorder: &'a Recorder,
-    call: Option<AgentToolCall>,
+    call: Option<ToolUse>,
 }
 
 impl<'a> PendingTool<'a> {
     fn new(recorder: &'a Recorder, call: &ToolCall) -> Self {
         Self {
             recorder,
-            call: recorder.observer.is_some().then(|| AgentToolCall {
-                id: Uuid::new_v4(),
-                round: recorder.current_round(),
+            call: recorder.telmoni.is_some().then(|| ToolUse {
                 started_at: Utc::now(),
                 ended_at: Utc::now(),
                 name: tool_name(&call.name),
@@ -312,7 +370,7 @@ impl<'a> PendingTool<'a> {
         if let Some(mut call) = self.call.take() {
             call.ended_at = Utc::now();
             call.is_error = result.is_error;
-            self.recorder.push(AgentStep::Tool(call));
+            self.recorder.push(Step::Tool(call));
         }
     }
 }
@@ -322,7 +380,7 @@ impl Drop for PendingTool<'_> {
         if let Some(mut call) = self.call.take() {
             call.ended_at = Utc::now();
             call.is_error = true;
-            self.recorder.push(AgentStep::Tool(call));
+            self.recorder.push(Step::Tool(call));
         }
     }
 }
@@ -332,24 +390,13 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use serde_json::json;
-    use telmoni_shared::{OrganizationId, UserId};
+    use telmoni_shared::UserId;
     use tokio::time::{Duration, Instant};
 
     use super::*;
     use crate::model::StopReason;
+    use crate::report::testing::{Capture, client, spans};
     use crate::turn;
-
-    /// An observer that keeps what it is handed.
-    #[derive(Default)]
-    struct Kept {
-        records: Mutex<Vec<AgentTurnRecord>>,
-    }
-
-    impl AgentObserver for Kept {
-        fn observe(&self, record: AgentTurnRecord) {
-            self.records.lock().unwrap().push(record);
-        }
-    }
 
     /// A model that calls the tool it is given once, then answers.
     struct CallsThenAnswers(&'static str, AtomicUsize);
@@ -378,7 +425,7 @@ mod tests {
             Ok(ModelTurn {
                 text: "Two members.".into(),
                 stop_reason: StopReason::Finished,
-                usage: Some(telmoni_shared::seam::TokenUsage {
+                usage: Some(TokenUsage {
                     input_tokens: 40,
                     output_tokens: 3,
                     ..Default::default()
@@ -413,12 +460,10 @@ mod tests {
         }
     }
 
-    async fn ask(observer: Arc<Kept>, tool: &'static str, then: impl FnOnce(&Recorder)) {
-        let recorder = Recorder::start(
-            Some(observer as Arc<dyn AgentObserver>),
-            &acting(),
-            Uuid::new_v4(),
-        );
+    /// One question through the recorder on `telmoni`, `then` given the
+    /// recorder once it has answered and before it drops and reports.
+    async fn ask(telmoni: Telmoni, tool: &'static str, then: impl FnOnce(&Recorder)) {
+        let recorder = Recorder::start(Some(telmoni), &acting(), Uuid::new_v4());
         let model = CallsThenAnswers(tool, AtomicUsize::new(0));
         let mut runner = Roster;
         let outcome = {
@@ -441,62 +486,81 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn each_call_is_a_step_in_order_and_the_record_is_handed_over_once() {
-        let observer = Arc::new(Kept::default());
-        ask(observer.clone(), "list_members", |_| {}).await;
-        let records = observer.records.lock().unwrap();
-        assert_eq!(records.len(), 1);
-        let record = &records[0];
-        assert_eq!(
-            record.ending,
-            AgentTurnEnding::Answered {
-                stopped_short: None
-            }
-        );
-        let steps: Vec<(&str, usize)> = record
-            .steps
+    async fn each_call_is_a_step_in_order_and_the_run_is_reported_once() {
+        let capture = Capture::default();
+        ask(client(&capture), "list_members", |recorder| {
+            let record = recorder.record();
+            assert_eq!(
+                record.ending,
+                TurnEnding::Answered {
+                    stopped_short: None
+                }
+            );
+            let steps: Vec<&str> = record
+                .steps
+                .iter()
+                .map(|step| match step {
+                    Step::Generation(_) => "generation",
+                    Step::Tool(_) => "tool",
+                })
+                .collect();
+            assert_eq!(
+                steps,
+                ["generation", "tool", "generation"],
+                "the tool between the call that asked for it and the one that answered"
+            );
+            let Step::Generation(last) = &record.steps[2] else {
+                panic!("the last step is the answer");
+            };
+            assert_eq!(last.model, "model-x");
+            assert_eq!(last.usage.map(|u| u.input_tokens), Some(40));
+            let Step::Tool(roster) = &record.steps[1] else {
+                panic!("the second step is the tool");
+            };
+            assert_eq!(roster.name, "list_members");
+        })
+        .await;
+
+        // Reported once the recorder dropped: one export, the run's spans
+        // with the tool among them and the run's own last.
+        let (_, _, body) = capture.first().await;
+        assert_eq!(capture.exports().len(), 1);
+        let names: Vec<String> = spans(&body)
             .iter()
-            .map(|step| match step {
-                AgentStep::Generation(g) => ("generation", g.round),
-                AgentStep::Tool(t) => ("tool", t.round),
-            })
+            .map(|span| span["name"].as_str().unwrap_or_default().to_owned())
             .collect();
-        assert_eq!(
-            steps,
-            [("generation", 0), ("tool", 0), ("generation", 1)],
-            "a tool belongs to the round that asked for it"
+        assert!(
+            names.contains(&"execute_tool list_members".to_owned()),
+            "{names:?}"
         );
-        let AgentStep::Generation(last) = &record.steps[2] else {
-            panic!("the last step is the answer");
-        };
-        assert_eq!(last.model, "model-x");
-        assert_eq!(last.usage.map(|u| u.input_tokens), Some(40));
-        assert!(last.first_token_at.is_some());
-        let AgentStep::Tool(roster) = &record.steps[1] else {
-            panic!("the second step is the tool");
-        };
-        assert_eq!(roster.name, "list_members");
+        assert_eq!(
+            names.last().map(String::as_str),
+            Some("invoke_agent console-agent")
+        );
     }
 
+    /// A name the model made up is a name a passage it read can steer: it
+    /// is kept as `unknown`, and never reaches the export.
     #[tokio::test]
     async fn a_tool_name_the_model_made_up_is_never_kept() {
-        let observer = Arc::new(Kept::default());
-        ask(observer.clone(), "ada@example.com", |_| {}).await;
-        let records = observer.records.lock().unwrap();
-        let AgentStep::Generation(asked) = &records[0].steps[0] else {
-            panic!("the first step is a model call");
-        };
-        let AgentStep::Tool(ran) = &records[0].steps[1] else {
-            panic!("the second step is the tool");
-        };
-        assert_eq!(asked.tool_calls, ["unknown"]);
-        assert_eq!(ran.name, "unknown");
+        let capture = Capture::default();
+        ask(client(&capture), "ada@example.com", |recorder| {
+            let record = recorder.record();
+            let Step::Tool(ran) = &record.steps[1] else {
+                panic!("the second step is the tool");
+            };
+            assert_eq!(ran.name, "unknown");
+        })
+        .await;
+        let (_, _, body) = capture.first().await;
+        assert!(!String::from_utf8_lossy(&body).contains("ada@example.com"));
     }
 
     #[tokio::test]
-    async fn a_withheld_answer_is_never_handed_over() {
-        let observer = Arc::new(Kept::default());
-        ask(observer.clone(), "list_members", Recorder::withhold).await;
-        assert!(observer.records.lock().unwrap().is_empty());
+    async fn a_withheld_answer_is_never_reported() {
+        let capture = Capture::default();
+        ask(client(&capture), "list_members", Recorder::withhold).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(capture.exports().is_empty());
     }
 }

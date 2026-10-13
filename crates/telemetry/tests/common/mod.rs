@@ -377,7 +377,6 @@ fn state_at(
     entitlements: Arc<dyn Entitlements>,
 ) -> Arc<AppState> {
     let config = Config {
-        dogfood_project_id: None,
         database_url: "".into(),
         clickhouse_url: clickhouse_url.into(),
         // A laptop's key: the suites seal and open on their own machine, and

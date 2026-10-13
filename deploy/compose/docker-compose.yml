@@ -186,9 +186,10 @@ services:
       # The key each project's hashing key is sealed under; no default, since
       # one shipped here would be the same on every install.
       TELEMETRY_KEK: ${TELEMETRY_KEK}
-      # A project of your own the console agent's questions are recorded as
-      # runs of, by its id; empty for none.
-      TELEMETRY_DOGFOOD_PROJECT_ID: ${TELEMETRY_DOGFOOD_PROJECT_ID:-}
+      # An ingest key of a project of your own: the console agent reports its
+      # questions as runs through this server's own door, as any agent does;
+      # empty for none.
+      TELMONI_API_KEY: ${TELMONI_API_KEY:-}
       # The console's Redis, which ingest's claims and rate limits share.
       REDIS_URL: redis://redis:6379
       # The one reverse proxy in front appends the caller's address once;

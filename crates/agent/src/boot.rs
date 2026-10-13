@@ -4,8 +4,9 @@
 
 use std::sync::Arc;
 
+use telmoni_sdk::Telmoni;
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
-use telmoni_shared::seam::{AgentObserver, Auth, Entitlements, Notifications};
+use telmoni_shared::seam::{Auth, Entitlements, Notifications};
 
 use crate::config::{Config, EMBEDDING_DIMENSIONS};
 use crate::embed::{Embedder, OpenAiEmbedder};
@@ -26,9 +27,9 @@ pub async fn open_pool(config: &Config) -> anyhow::Result<sqlx::PgPool> {
 }
 
 /// The state the binary runs the module on, with the siblings it reads
-/// through, what each organization may ask, and what records its questions,
-/// if anything does. The model and the embedder exist only when the agent is
-/// on.
+/// through, what each organization may ask, and the SDK its own questions
+/// are reported with, when they are. The model and the embedder exist only
+/// when the agent is on.
 pub fn state(
     config: Config,
     db: sqlx::PgPool,
@@ -36,7 +37,6 @@ pub fn state(
     auth: Arc<dyn Auth>,
     notifications: Arc<dyn Notifications>,
     entitlements: Arc<dyn Entitlements>,
-    observer: Option<Arc<dyn AgentObserver>>,
 ) -> anyhow::Result<AppState> {
     let (model, embedder, reranker) = match &config.model {
         None => (None, None, None),
@@ -56,6 +56,9 @@ pub fn state(
             )
         }
     };
+    // As a customer builds it: nothing blocking until its own thread's first
+    // export.
+    let telmoni = config.telmoni.clone().map(Telmoni::new);
     tracing::info!(
         enabled = config.enabled(),
         provider = config.model.as_ref().map(|m| m.provider.as_str()),
@@ -63,7 +66,7 @@ pub fn state(
         embeddings_model = %config.embeddings.model,
         rerank = config.rerank.is_some(),
         docs = config.docs_corpus_url.is_some(),
-        traced = observer.is_some(),
+        reported_to = config.telmoni.as_ref().map(|t| t.endpoint.as_str()),
         "agent configured"
     );
     Ok(AppState {
@@ -76,7 +79,7 @@ pub fn state(
         model,
         embedder,
         reranker,
-        observer,
+        telmoni,
     })
 }
 

@@ -7,7 +7,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use telmoni_shared::TelmoniError;
-use telmoni_shared::seam::StoppedShort;
 use tokio::time::Instant;
 
 use crate::model::{
@@ -101,7 +100,7 @@ impl Ending {
         }
     }
 
-    /// Why the answer stopped short, as an observer is told it: each
+    /// Why the answer stopped short, as the run's record tags it: each
     /// ending that [`Ending::note`] says, and no other.
     #[must_use]
     pub const fn stopped_short(self) -> Option<StoppedShort> {
@@ -111,6 +110,33 @@ impl Ending {
             Self::TimedOut => Some(StoppedShort::TimedOut),
             Self::Interrupted => Some(StoppedShort::Interrupted),
             Self::Answered | Self::Cancelled => None,
+        }
+    }
+}
+
+/// Why an answer ends early, as the person was told in a note and the run's
+/// record tags it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoppedShort {
+    /// The tool loop ran out of rounds first.
+    Capped,
+    /// The answer ran past the token ceiling.
+    Truncated,
+    /// The deadline passed first.
+    TimedOut,
+    /// The model's stream broke off after it had written something.
+    Interrupted,
+}
+
+impl StoppedShort {
+    /// The word the run's tag gives it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Capped => "capped",
+            Self::Truncated => "truncated",
+            Self::TimedOut => "timed_out",
+            Self::Interrupted => "interrupted",
         }
     }
 }

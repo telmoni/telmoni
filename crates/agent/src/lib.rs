@@ -22,6 +22,7 @@ pub mod index;
 pub mod model;
 mod observe;
 pub mod prompt;
+mod report;
 pub mod rerank;
 pub mod retention;
 pub mod retrieve;
@@ -39,7 +40,7 @@ use sqlx::PgPool;
 
 use telmoni_shared::TelmoniError;
 use telmoni_shared::middleware::service_auth::{ServiceSecrets, require_service_secret};
-use telmoni_shared::seam::{AgentObserver, Auth, Notifications};
+use telmoni_shared::seam::{Auth, Notifications};
 
 pub use config::Config;
 
@@ -60,8 +61,9 @@ pub struct AppState {
     /// `None` while the agent is off.
     pub embedder: Option<Arc<dyn embed::Embedder>>,
     pub reranker: Option<Arc<rerank::Reranker>>,
-    /// What records each question as it ends; `None` while nothing does.
-    pub observer: Option<Arc<dyn AgentObserver>>,
+    /// The SDK each question is reported with as it ends, as any agent
+    /// reports its runs; `None` while `TELMONI_API_KEY` is unset.
+    pub telmoni: Option<telmoni_sdk::Telmoni>,
 }
 
 impl AppState {

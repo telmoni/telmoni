@@ -57,12 +57,6 @@ pub fn state(
     let redis =
         Redis::connect(config.redis_url.expose()).context("REDIS_URL is not a Redis URL")?;
     tracing::info!(kek = kek.kind(), "telemetry: hashing keys are sealed");
-    if let Some(project_id) = &config.dogfood_project_id {
-        tracing::info!(
-            project_id = %project_id,
-            "telemetry: the console agent's questions are recorded as runs of this project"
-        );
-    }
     Ok(AppState {
         db,
         config,

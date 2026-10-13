@@ -91,7 +91,7 @@ pub async fn storage_for(state: &AppState, key: &ActingKey) -> Result<UserIdStor
 }
 
 /// [`storage_for`], for a project named by itself and the organization that
-/// holds it: what the dogfood observer asks, which holds no key.
+/// holds it, with no key in hand.
 ///
 /// # Errors
 ///

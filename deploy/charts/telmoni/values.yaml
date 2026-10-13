@@ -50,10 +50,6 @@ config:
   # its spans carry are hashed with. A Cloud KMS key name in a pod, as
   # `connectorKek` is; required, where that one may be empty.
   telemetryKek: "local:dev_key"
-  # A project of the operator's own the console agent's questions are
-  # recorded as runs of (`TELEMETRY_DOGFOOD_PROJECT_ID`): a project id, or
-  # empty for none.
-  dogfoodProjectId: ""
   # The console agent. Off while modelProvider is empty; on, it needs
   # `AGENT_DATABASE_URL` in `server-secrets` (the `agent` role's DSN), and
   # `AGENT_MODEL_API_KEY` there for a hosted model. modelProvider is the
@@ -131,7 +127,10 @@ web:
 # templates/network-policies.yaml), `REDIS_URL` (the console's Redis, which
 # ingest's claims on each export and its rate limits share), the
 # agent's `AGENT_MODEL_API_KEY`, `EMBEDDINGS_API_KEY` and `RERANK_API_KEY`
-# when its endpoints need them, `SERVICE_SECRET`, `ADMIN_EMAIL` and `ADMIN_PASSWORD`
+# when its endpoints need them, `TELMONI_API_KEY` (an ingest key of a project
+# of your own: the console agent reports its questions as that project's runs
+# with the Rust SDK, to this server's own door, as any agent does),
+# `SERVICE_SECRET`, `ADMIN_EMAIL` and `ADMIN_PASSWORD`
 # for the first account, `OIDC_ISSUER`, `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` for an
 # OpenID Connect provider beside the login form, `SMTP_URL`
 # (`smtps://user:password@host:465`) for the mail it sends — without it nothing

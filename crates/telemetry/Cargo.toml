@@ -44,6 +44,8 @@ reqwest     = { workspace = true }
 [dev-dependencies]
 tower          = { workspace = true, features = ["util"] }
 http-body-util = "0.1"
+# The door reached as a customer reaches it (`tests/sdk.rs`).
+telmoni-sdk    = { path = "../../sdk/rust" }
 
 [lints]
 workspace = true

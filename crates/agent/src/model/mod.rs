@@ -18,10 +18,26 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::Value;
-pub use telmoni_shared::seam::TokenUsage;
 use telmoni_shared::{ModelFailure, TelmoniError};
 
 use crate::config::{ModelConfig, Provider};
+
+/// The tokens one model call used, counted as the GenAI conventions count
+/// them: the input every input token, a cache's reads and writes among
+/// them, and the output every output token, reasoning among them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TokenUsage {
+    /// Every input token, the cache's reads and writes among them.
+    pub input_tokens: u64,
+    /// Every output token, reasoning among them.
+    pub output_tokens: u64,
+    /// Input tokens read from the provider's cache.
+    pub cache_read_tokens: u64,
+    /// Input tokens written to the provider's cache.
+    pub cache_write_tokens: u64,
+    /// Output tokens spent reasoning, where the provider counts them apart.
+    pub reasoning_tokens: u64,
+}
 
 /// A tool the model may call.
 #[derive(Debug, Clone)]

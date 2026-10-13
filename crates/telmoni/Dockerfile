@@ -15,7 +15,7 @@
 #   file is compiled into the binary)
 # Optional:
 #   PORT (default 8082), LOG_LEVEL (default info), RUN_SWEEPS (default true),
-#   TRUSTED_PROXY_HOPS (default 2), TELEMETRY_DOGFOOD_PROJECT_ID,
+#   TRUSTED_PROXY_HOPS (default 2), TELMONI_API_KEY and TELMONI_ENDPOINT,
 #   the OIDC_* provider, SMTP_URL, MAIL_FROM, the SLACK_* app,
 #   CONNECTOR_KEK, DATABASE_CA_CERT (required in a pod), and the agent:
 #   AGENT_DATABASE_URL, AGENT_MODEL_* and EMBEDDINGS_* (crates/agent/src/config.rs)
