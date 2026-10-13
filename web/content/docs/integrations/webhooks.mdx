@@ -10,6 +10,10 @@ it answers with a signing secret shown exactly once. This page is the receiver's
 side of that contract: what arrives, how to verify it, and what your response
 means.
 
+On a self-hosted deployment without `CONNECTOR_KEK`, the webhook tile shows
+**Soon**, with **Connect** turned off (see
+[Connectors & secret encryption](/docs/self-host/configuration#connectors--secret-encryption)).
+
 The endpoint must be `https://`, carry no username or password, and be at most
 2,048 characters. Connecting refuses an IP address that is private, loopback,
 link-local (a cloud's metadata address among them), shared carrier space or
