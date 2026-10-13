@@ -7,7 +7,10 @@ The Telmoni API is a read-only HTTP interface under `/v1`. Authenticated by a
 [project API key](/docs/api/api-keys), it provides programmatic access to
 organization metadata and roster details. It has no write routes; spans go to a
 lane of their own, [`/otlp/v1/traces`](/docs/api/ingest), with a key holding the
-`ingest` scope, where the routes here need `read`.
+`ingest` scope, where the routes here need `read`. The routes are also described
+as an OpenAPI 3.1 document,
+[`contract/openapi.json`](https://github.com/telmoni/telmoni/blob/main/contract/openapi.json)
+in the platform's repository, generated from the same table the server routes by.
 
 ## Base URL and authentication
 
@@ -154,4 +157,6 @@ or a path no lane takes.
 
 If the API is switched off for your organization or the deployment, requests
 respond with `503 Service Unavailable` and the `/errors/tenant/feature-off`
-problem type.
+problem type. A `503` with `/errors/auth/identity-unavailable`, and no
+`Retry-After`, means Telmoni could not read the key or the API's switch just
+then: retry, and don't take the key for revoked.
