@@ -170,7 +170,8 @@ days and is replaced at every renewal; a session unused for 30 days ends. Your
 account's **Privacy** page (`/account/privacy`) lists every session not yet
 signed out or revoked, one that lapsed after 30 days unused included, with
 device details and when each was last active. You
-can revoke any other session remotely, and the device signs out within a few
+can revoke any other session remotely: the device is refused at its next
+request, and a console tab left open there is sent to sign in within 15
 minutes.
 
 Changing your email address ends all your sessions immediately, and so does

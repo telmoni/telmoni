@@ -16,8 +16,9 @@ been signed out or revoked, one that lapsed after 30 days unused included: a
 device label derived from the browser or CLI (such as `Chrome (macOS)` or
 `Telmoni CLI (Linux)`), when each session started, and when it was last seen.
 
-You can end any session but the current one from here; the device signs out
-within a few minutes. To end your current session, sign out from the user
+You can end any session but the current one from here; the device is refused
+at its next request, and a console tab left open there is sent to sign in
+within 15 minutes. To end your current session, sign out from the user
 menu.
 
 ## Product analytics
