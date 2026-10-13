@@ -19,7 +19,8 @@ tool's input or output, a command, a file's path or the folder you work in.
 Each plugin is built on the [TypeScript SDK](/docs/api/sdks), which it carries
 inside its own package, and sends what the SDKs send, under a
 [project API key](/docs/api/api-keys) holding only the **ingest** scope (**Send
-spans**). Each needs Node.js 22 or later. None is published to npm yet: until
+spans**). The Claude Code, Codex and Cursor plugins need Node.js 22 or later;
+the OpenCode plugin runs inside OpenCode. None is published to npm yet: until
 it is, a plugin runs from a checkout of its repository, built beside a checkout
 of the platform, whose TypeScript SDK it is built on:
 
@@ -46,20 +47,27 @@ of traces. Inside the run:
 - **each tool call**, by its name, with its time, and failed where the tool
   failed;
 - **each subagent**, a step named by its kind (`subagent Explore`), holding its
-  own model and tool calls where the agent writes them down;
+  own model and tool calls where the agent writes them down; a Codex
+  subagent's turns are instead runs of their own, in the same session;
 - for Claude Code, **the skills the turn ran**, by name, as the tag `skills`.
 
 An interrupted turn is a cancelled run, and a turn an error ended a failed one,
-named by the error's kind (`rate_limit`), never its message. A turn is sent
-once it has ended. If Telmoni cannot be reached, the turn is sent again later,
-and a turn sent twice is stored once: its run's id is derived from the session
-and the turn, and every span's from the run's.
+named by the error's kind where the agent gives one (`rate_limit`; Cursor gives
+none, so its run fails as `AgentError`), never its message. A turn is sent
+once it has ended. If Telmoni cannot be reached, the next turn of the same
+session sends it again; OpenCode's plugin holds it in memory, so a turn still
+unsent a few seconds after OpenCode exits is lost. A copy that reaches Telmoni
+within the hour of the first is stored once: its run's id is derived from the
+session and the turn, and every span's from the run's.
 
 **What is never read.** Of what an agent writes down, a plugin reads each
 entry's kind, id, time and outcome, a reply's model and token counts, a tool
-call's name, and the kinds of the subagents a turn ran. It never keeps or
-sends a prompt or a reply, the model's thinking, a tool's input or output, a
-command, a file's path or contents, the working folder, a session's title or
+call's name, and the kinds of the subagents a turn ran. The Claude Code plugin
+also reads the skill a `Skill` call names, which it sends as the tag `skills`,
+and whether a prompt opens with a tag or an interruption's marker, from its
+first 32 characters, which it never keeps. It never keeps or sends a prompt or
+a reply, the model's thinking, a tool's input or output beyond that skill's
+name, a command, a file's path or contents, the working folder, a session's title or
 anyone's email, whatever the project's content mode.
 
 Each plugin's failures are lines in a log of its own, naming the kind of thing
