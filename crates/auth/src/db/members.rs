@@ -54,6 +54,9 @@ impl SeatRead for Maintenance<AuthLane> {}
 pub trait OfferWrite: Binding {}
 impl OfferWrite for Project {}
 impl OfferWrite for ProjectAndOrganization {}
+/// The lane a project's move runs in, which ends a live offer of the project
+/// as it moves.
+impl OfferWrite for Maintenance<AuthLane> {}
 
 /// How long an offer of a project stands — the organization's window, so a
 /// person holding one of each is not asked to remember two.

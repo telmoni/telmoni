@@ -122,6 +122,9 @@ pub enum AuditKind {
     ProjectTransferred,
     /// The same handover, on the chain it joined.
     ProjectReceived,
+    /// A project its owner moved between two organizations they own, on both
+    /// chains.
+    ProjectMoved,
     /// The admin's seat a project's previous owner keeps on it.
     PreviousOwnerSeated,
     /// The roster row a project's previous owner takes in its new organization.
@@ -142,7 +145,7 @@ pub enum AuditKind {
 impl AuditKind {
     /// Every kind.
     #[must_use]
-    pub const fn all() -> [Self; 31] {
+    pub const fn all() -> [Self; 32] {
         [
             Self::AutoProvision,
             Self::OnRequest,
@@ -168,6 +171,7 @@ impl AuditKind {
             Self::ProjectOfferDeclined,
             Self::ProjectTransferred,
             Self::ProjectReceived,
+            Self::ProjectMoved,
             Self::PreviousOwnerSeated,
             Self::PreviousOwnerEnrolled,
             Self::SeatHolderEnrolled,
@@ -206,6 +210,7 @@ impl AuditKind {
             Self::ProjectOfferDeclined => "project_offer_declined",
             Self::ProjectTransferred => "project_transferred",
             Self::ProjectReceived => "project_received",
+            Self::ProjectMoved => "project_moved",
             Self::PreviousOwnerSeated => "previous_owner_seated",
             Self::PreviousOwnerEnrolled => "previous_owner_enrolled",
             Self::SeatHolderEnrolled => "seat_holder_enrolled",
@@ -458,6 +463,7 @@ mod tests {
                 | AuditKind::ProjectOfferDeclined
                 | AuditKind::ProjectTransferred
                 | AuditKind::ProjectReceived
+                | AuditKind::ProjectMoved
                 | AuditKind::PreviousOwnerSeated
                 | AuditKind::PreviousOwnerEnrolled
                 | AuditKind::SeatHolderEnrolled
@@ -501,6 +507,7 @@ mod tests {
                 "project_offer_declined",
                 "project_transferred",
                 "project_received",
+                "project_moved",
                 "previous_owner_seated",
                 "previous_owner_enrolled",
                 "seat_holder_enrolled",

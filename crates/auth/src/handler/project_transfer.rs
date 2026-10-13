@@ -26,6 +26,10 @@
 //! admin's seat (`transfer_offered_at`), so removing them, their leaving, or
 //! demoting them ends it with no bookkeeping of its own.
 //!
+//! The owner of two organizations moves a project between them without an
+//! offer — `/internal/projects/{project_id}/move` — the accept's own steps with
+//! nobody to ask and nothing changing hands.
+//!
 //! ⚠ **Offer, withdraw and decline take the owning organization's lock and
 //! read the roles again under it; accept takes the caller's own lock, then
 //! both organizations' in id order** — the order account deletion takes them
@@ -905,6 +909,259 @@ pub async fn accept(
         "previousOwner": previous,
         "name": name,
     })))
+}
+
+/// Body of `POST /internal/projects/{project_id}/move`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MoveRequest {
+    /// The organization of the caller's the project moves into.
+    pub organization_id: String,
+}
+
+/// `POST /internal/projects/{project_id}/move` — the owner of two
+/// organizations moves a project from one into the other, as an accept would
+/// hand it over but with nobody to ask: its API keys follow, its telemetry
+/// moves with it, its connectors are purged, its seats stay on it and their
+/// holders join the destination's roster as members, and a live offer of it
+/// ends. Nothing changes hands, so nothing is mailed. What a deployment calls
+/// merging two organizations is this, once for each project, and the emptied
+/// one deleted.
+///
+/// ⚠ **The caller's own lock first, then both organizations' by id**, as the
+/// accept takes them, and every role and status read again under them.
+pub async fn move_project(
+    State(state): State<Arc<AppState>>,
+    Path(project_id): Path<String>,
+    principal: Principal,
+    Json(req): Json<MoveRequest>,
+) -> Result<impl IntoResponse, TelmoniError> {
+    let project_id = parse_project_id(&project_id)?;
+    let user_id = principal.user_id;
+    let destination = parse_organization_id(&req.organization_id)?;
+
+    let mut tx = maintenance_scope(&state.db, AuthLane).await?;
+
+    // Ownership before any lock: the project's id arrives from the caller,
+    // and a stranger must not stand in a queue holding a pooled connection.
+    let Some(standing) = projects::standing(&mut tx, &project_id).await? else {
+        return Err(AuthError::NotFound("project not found".into()).into());
+    };
+    let source = standing.organization_id.clone();
+    if organization_members::role_on_organization(&mut tx, &source, &user_id).await?
+        != Some(OrganizationRole::Owner)
+    {
+        return Err(AuthzError::Forbidden(
+            "only the project's owner — its organization's owner — can move it".into(),
+        )
+        .into());
+    }
+    if destination == source {
+        return Err(
+            AuthError::BadRequest("the project is already in that organization".into()).into(),
+        );
+    }
+
+    locks::lock_person(&mut tx, &user_id).await?;
+    let Some(person) = identities::get(&mut tx, &user_id).await? else {
+        return Err(AuthError::NotFound("sign in again to move this project".into()).into());
+    };
+    if person.deletion_requested_at.is_some() {
+        return Err(AuthError::Conflict(
+            "your account is being deleted — it cannot move a project".into(),
+        )
+        .into());
+    }
+    let owned = organization_members::active_organizations_owned_by(&mut tx, &user_id).await?;
+    if !owned.contains(&destination) {
+        return Err(AuthzError::Forbidden(
+            "you do not own that organization — a project moves only into one of yours".into(),
+        )
+        .into());
+    }
+
+    lock_transfer_organizations(&mut tx, &source, &destination).await?;
+
+    // Under the locks, everything again.
+    if organizations::status(&mut tx, &source).await? != Some(OrganizationStatus::Active) {
+        return Err(AuthzError::Forbidden(BEING_DELETED.to_string()).into());
+    }
+    if organizations::status(&mut tx, &destination).await? != Some(OrganizationStatus::Active) {
+        return Err(AuthzError::Forbidden("that organization is being deleted".into()).into());
+    }
+    for organization in [&source, &destination] {
+        if organization_members::role_on_organization(&mut tx, organization, &user_id).await?
+            != Some(OrganizationRole::Owner)
+        {
+            return Err(AuthError::Conflict("you no longer own both organizations".into()).into());
+        }
+    }
+
+    // An offer of the project to one of its admins was an offer to take it
+    // out of the organization it is leaving.
+    members::clear_project_offers(&mut tx, &project_id).await?;
+    let held = usize::try_from(projects::count_in(&mut tx, &destination).await?).unwrap_or(0);
+    let family = match numbered(&standing.name) {
+        Some((base, n)) => projects::holds_name(&mut tx, &destination, base)
+            .await?
+            .then_some((base, n)),
+        None => None,
+    };
+    let candidates = landing_names(&standing.name, held, family);
+    let name = projects::first_free_name(&mut tx, &destination, &candidates)
+        .await?
+        .unwrap_or_else(|| standing.name.clone());
+    let Some(slug) =
+        projects::move_to_organization(&mut tx, &project_id, &source, &destination, &name)
+            .await
+            .map_err(|e| name_taken_in(e, &name))?
+    else {
+        return Err(AuthError::Conflict("the project is no longer where it was".into()).into());
+    };
+    let organization_slug = organizations::slug_of(&mut tx, &destination).await?;
+    // Every seat holder on the destination's roster, as the accept enrols
+    // them: `/me` lists a seat only in an organization its holder can open.
+    let staying = members::seats_on(&mut tx, &project_id).await?;
+    let mut holders_enrolled = Vec::new();
+    for seat in &staying {
+        if organization_members::add_member(
+            &mut tx,
+            &destination,
+            &seat.user_id,
+            OrganizationRole::Member,
+            &user_id,
+        )
+        .await?
+        {
+            holders_enrolled.push(seat);
+        }
+    }
+
+    emit_project_move_audits(
+        &mut tx,
+        MoveAudits {
+            source: &source,
+            destination: &destination,
+            project_id: &project_id,
+            user_id: &user_id,
+            project_name: &name,
+            renamed_from: (name != standing.name).then_some(standing.name.as_str()),
+            holders_enrolled: &holders_enrolled,
+        },
+    )
+    .await?;
+
+    let settle = SettleTelemetry::arm(&state, &project_id, &source, &destination);
+    if let Err(e) = move_purge_and_commit(&state, tx, &project_id, &destination).await {
+        settle.settle().await;
+        return Err(e);
+    }
+    settle.disarm();
+
+    tracing::info!(
+        project_id = %project_id,
+        from = %source,
+        to = %destination,
+        "project moved"
+    );
+    Ok(Json(json!({
+        "projectId": project_id,
+        "slug": slug,
+        "organizationId": destination,
+        "organizationSlug": organization_slug,
+        "previousOrganizationId": source,
+        "name": name,
+    })))
+}
+
+struct MoveAudits<'a> {
+    source: &'a OrganizationId,
+    destination: &'a OrganizationId,
+    project_id: &'a ProjectId,
+    user_id: &'a UserId,
+    project_name: &'a str,
+    /// The name it had, when a clash in the destination renamed it.
+    renamed_from: Option<&'a str>,
+    holders_enrolled: &'a [&'a members::Seat],
+}
+
+async fn emit_project_move_audits(
+    conn: &mut sqlx::PgConnection,
+    audits: MoveAudits<'_>,
+) -> Result<(), TelmoniError> {
+    // Both chains, the source's first, as a transfer's: every other writer of
+    // two chains takes the same locks this holds.
+    emit_audit(
+        conn,
+        AuditEvent {
+            organization_id: audits.source,
+            in_project: Some(audits.project_id),
+            actor: Actor::User(audits.user_id.as_str()),
+            action: AuditAction::Updated,
+            resource_kind: TelmoniResourceKind::Project,
+            resource_id: Some(audits.project_id.as_str()),
+            request_id: None,
+            ip_address: None,
+            user_agent: None,
+            metadata: Some(json!({
+                "kind": AuditKind::ProjectMoved,
+                "to_organization": audits.destination.as_str(),
+            })),
+        },
+    )
+    .await?;
+    emit_audit(
+        conn,
+        AuditEvent {
+            organization_id: audits.destination,
+            in_project: Some(audits.project_id),
+            actor: Actor::User(audits.user_id.as_str()),
+            action: AuditAction::Updated,
+            resource_kind: TelmoniResourceKind::Project,
+            resource_id: Some(audits.project_id.as_str()),
+            request_id: None,
+            ip_address: None,
+            user_agent: None,
+            metadata: Some({
+                let mut arrived = json!({
+                    "kind": AuditKind::ProjectMoved,
+                    "from_organization": audits.source.as_str(),
+                    "name": audits.project_name,
+                });
+                // Only when it happened, as the transfer records it.
+                if let (Some(renamed_from), Some(fields)) =
+                    (audits.renamed_from, arrived.as_object_mut())
+                {
+                    fields.insert("renamed_from".into(), json!(renamed_from));
+                }
+                arrived
+            }),
+        },
+    )
+    .await?;
+    for seat in audits.holders_enrolled {
+        emit_audit(
+            conn,
+            AuditEvent {
+                organization_id: audits.destination,
+                in_project: None,
+                actor: Actor::User(audits.user_id.as_str()),
+                action: AuditAction::Created,
+                resource_kind: TelmoniResourceKind::Member,
+                resource_id: Some(seat.user_id.as_str()),
+                request_id: None,
+                ip_address: None,
+                user_agent: None,
+                metadata: Some(json!({
+                    "kind": AuditKind::SeatHolderEnrolled,
+                    "role": OrganizationRole::Member,
+                    "seat": seat.role,
+                })),
+            },
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 /// The accept's last steps, in order: telemetry's move, the one that can be

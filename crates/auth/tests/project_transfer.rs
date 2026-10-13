@@ -1768,3 +1768,157 @@ async fn a_move_over_its_budget_refuses_the_transfer_and_is_settled(pool: PgPool
     );
     assert_eq!(organization_of_project(&pool, &h.project).await, h.source);
 }
+
+/// The owner founds another organization of theirs; answers its id.
+async fn found(pool: &PgPool, caller: &str, name: &str) -> String {
+    let (status, body) = call(
+        pool,
+        "POST",
+        "/internal/organizations",
+        caller,
+        None,
+        Some(json!({ "name": name })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "founding {name}: {body}");
+    body["id"]
+        .as_str()
+        .expect("the organization's id")
+        .to_owned()
+}
+
+/// `caller` moves the project into `destination`, standing in `organization`.
+async fn move_into(
+    pool: &PgPool,
+    h: &Handover,
+    caller: &str,
+    organization: &str,
+    destination: &str,
+) -> (StatusCode, Value) {
+    call(
+        pool,
+        "POST",
+        &format!("/internal/projects/{}/move", h.project),
+        caller,
+        Some(organization),
+        Some(json!({ "organizationId": destination })),
+    )
+    .await
+}
+
+/// The owner of two organizations moves a project between them with nobody to
+/// ask: its keys follow, its seats stay with their holders enrolled where it
+/// lands, an offer of it ends, and both chains record it.
+#[sqlx::test]
+async fn the_owner_moves_a_project_into_another_of_their_organizations(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let (status, minted) = send(
+        app(pool.clone()),
+        &pool,
+        "POST",
+        "/internal/tokens",
+        OWNER,
+        Some(&h.source),
+        Some(&h.project),
+        Some(json!({ "name": "ci", "created_by": OWNER, "scopes": ["read"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{minted}");
+    assert_eq!(
+        offer(&pool, &h, OWNER, &h.source, ADMIN).await.0,
+        StatusCode::OK
+    );
+    let second = found(&pool, OWNER, "Second").await;
+
+    let (status, body) = move_into(&pool, &h, OWNER, &h.source, &second).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["projectId"], h.project);
+    assert_eq!(body["organizationId"], second);
+    assert_eq!(body["previousOrganizationId"], h.source);
+    assert_eq!(body["name"], PROJECT_NAME);
+
+    assert_eq!(organization_of_project(&pool, &h.project).await, second);
+    let key_organization: String =
+        sqlx::query_scalar("SELECT organization_id FROM auth.api_tokens WHERE id::text = $1")
+            .bind(minted["id"].as_str().unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(key_organization, second, "the key stayed behind");
+    assert_eq!(
+        seat_of(&pool, &h.project, ADMIN).await,
+        Some(("admin".to_owned(), false)),
+        "the admin's seat did not stay, or its offer outlived the move"
+    );
+    assert_eq!(
+        seat_of(&pool, &h.project, MEMBER).await,
+        Some(("member".to_owned(), false))
+    );
+    assert_eq!(
+        seat_of(&pool, &h.project, OWNER).await,
+        None,
+        "the owner of both was seated on a project they own"
+    );
+    for holder in [ADMIN, MEMBER] {
+        assert_eq!(
+            roster_role(&pool, &second, holder).await.as_deref(),
+            Some("member"),
+            "{holder} holds a seat in an organization they cannot open"
+        );
+    }
+    assert_eq!(offers_on_project(&pool, &h.project).await, 0);
+    assert_eq!(
+        chain(&pool, &h.source, &h.project).await,
+        vec!["project_offered", "project_moved"]
+    );
+    assert_eq!(
+        chain(&pool, &second, &h.project).await,
+        vec!["project_moved"]
+    );
+    let enrolled: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit.events
+          WHERE organization_id = $1 AND metadata->>'kind' = 'seat_holder_enrolled'",
+    )
+    .bind(&second)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(enrolled, 2, "each seat holder's enrolment is on the chain");
+}
+
+#[sqlx::test]
+async fn only_the_owner_of_both_moves_a_project_and_only_between_live_ones(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let second = found(&pool, OWNER, "Second").await;
+
+    let (status, body) = move_into(&pool, &h, ADMIN, &h.source, &h.admins).await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "a project admin moved it: {body}"
+    );
+    let (status, body) = move_into(&pool, &h, OWNER, &h.source, &h.admins).await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "it moved into an organization its owner does not own: {body}"
+    );
+    let (status, body) = move_into(&pool, &h, OWNER, &h.source, &h.source).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+
+    set_pending(&pool, &second, true).await;
+    let (status, body) = move_into(&pool, &h, OWNER, &h.source, &second).await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "it moved into an organization being deleted: {body}"
+    );
+    set_pending(&pool, &second, false).await;
+    set_pending(&pool, &h.source, true).await;
+    let (status, body) = move_into(&pool, &h, OWNER, &h.source, &second).await;
+    assert!(
+        status.is_client_error(),
+        "it moved out of an organization being deleted: {status} {body}"
+    );
+    assert_eq!(organization_of_project(&pool, &h.project).await, h.source);
+}

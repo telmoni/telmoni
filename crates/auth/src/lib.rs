@@ -355,6 +355,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(handler::project_transfer::decline),
         )
         .route(
+            "/projects/{project_id}/move",
+            post(handler::project_transfer::move_project),
+        )
+        .route(
             "/organizations",
             post(handler::organization::create_organization),
         )

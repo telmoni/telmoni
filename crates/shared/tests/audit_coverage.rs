@@ -224,6 +224,21 @@ const MUTATIONS: &[Mutation] = &[
         resource_kind: "Member",
         actor_id: ActorPattern::Variable,
     },
+    // `move_project`'s audit rows, on both organizations' chains.
+    Mutation {
+        file: "crates/auth/src/handler/project_transfer.rs",
+        fn_name: "emit_project_move_audits",
+        action: "Updated",
+        resource_kind: "Project",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
+        file: "crates/auth/src/handler/project_transfer.rs",
+        fn_name: "emit_project_move_audits",
+        action: "Created",
+        resource_kind: "Member",
+        actor_id: ActorPattern::Variable,
+    },
     Mutation {
         file: "crates/auth/src/handler/export.rs",
         fn_name: "export_organization",

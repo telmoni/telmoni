@@ -118,6 +118,7 @@ const PERSON_ROUTES: &[(&str, &str)] = &[
     ("DELETE", "/internal/projects/{project_id}/transfer"),
     ("POST", "/internal/projects/{project_id}/transfer/accept"),
     ("POST", "/internal/projects/{project_id}/transfer/decline"),
+    ("POST", "/internal/projects/{project_id}/move"),
     ("POST", "/internal/organizations"),
     ("DELETE", "/internal/organization"),
     ("POST", "/internal/organization/deletion-code"),
