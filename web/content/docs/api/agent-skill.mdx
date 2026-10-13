@@ -1,0 +1,96 @@
+---
+title: "Agent skill"
+description: "The telmoni skill: what it teaches a coding agent about Telmoni, and how to install it in Claude Code, Codex, Cursor, Antigravity, OpenCode and other agents that read SKILL.md."
+---
+
+The agent skill, [`telmoni/skills`](https://github.com/telmoni/skills), teaches
+a coding agent to work with Telmoni on your behalf: to record your agents' runs
+with the [SDKs](/docs/api/sdks), drive the [CLI](/docs/api/cli), call the
+read-only [API](/docs/api/reference) with an [API key](/docs/api/api-keys),
+build and test a receiver for [signed webhooks](/docs/integrations/webhooks),
+and [self-host](/docs/self-host/overview) with Docker Compose or Kubernetes. It
+sends the agent to these pages for the details, and adds what the pages alone
+don't give it: which path fits which situation, the mistakes agents make, and
+the guardrails around keys and your infrastructure.
+
+Every install below fetches the repository's `release` branch, which holds only
+what an agent loads: the plugin manifests, the skill, `LICENSE` and `NOTICE`.
+
+## Claude Code
+
+In Claude Code:
+
+```text
+/plugin marketplace add telmoni/skills@release
+/plugin install telmoni@telmoni
+```
+
+From a shell, the same is:
+
+```console
+$ claude plugin marketplace add telmoni/skills@release
+$ claude plugin install telmoni@telmoni
+```
+
+The skill loads by itself when a task involves Telmoni, and `/telmoni:telmoni`
+calls it by name. Claude Code doesn't update a third-party marketplace on its
+own: `claude plugin update telmoni@telmoni` fetches the latest, or turn on
+auto-update for it under `/plugin` → **Marketplaces**.
+
+## Codex
+
+```console
+$ codex plugin marketplace add telmoni/skills@release
+$ codex plugin add telmoni@telmoni
+```
+
+## Cursor
+
+The skill is not in the Cursor Marketplace yet. Until it is, clone it into
+Cursor's local plugins folder, then restart Cursor or run **Developer: Reload
+Window**:
+
+```console
+$ git clone --depth 1 --branch release https://github.com/telmoni/skills.git ~/.cursor/plugins/local/telmoni
+```
+
+`git pull` in that folder, then a reload, brings a newer version. Cursor skips
+a symlink to a clone elsewhere, so clone into the folder itself. On Teams and
+Enterprise plans, an admin allows local plugins with **Allow Local Plugin
+Imports**, which is off by default on Enterprise.
+
+## Antigravity
+
+The `agy` CLI installs a clone as a plugin, for the IDE and the CLI alike:
+
+```console
+$ git clone --depth 1 --branch release https://github.com/telmoni/skills.git telmoni-skills
+$ agy plugin install ./telmoni-skills
+```
+
+`git pull` in the clone, then the same install again, brings a newer version.
+
+## OpenCode, GitHub Copilot, Gemini CLI and others
+
+The [skills CLI](https://github.com/vercel-labs/skills) installs the skill into
+the agents it finds in your project; `-a` picks one (`opencode`, `cursor`,
+`github-copilot`, `gemini-cli`, …), and `-g` installs it for your user instead:
+
+```console
+$ npx skills add https://github.com/telmoni/skills/tree/release
+```
+
+By hand, clone the `release` branch and link `skills/telmoni` into your agent's
+skills folder: `~/.claude/skills/` for Claude Code, `~/.agents/skills/` for
+Codex, Cursor, Copilot and Gemini CLI, `~/.config/opencode/skills/` for
+OpenCode, or `~/.gemini/config/skills/` for Antigravity.
+
+## Before you start
+
+- **Keys stay out of the chat.** Put an API key in `TELMONI_API_KEY`, and a
+  webhook signing secret in your secret store, before you start: the skill has
+  the agent check that a key is set, and never ask for or print one.
+- **Self-hosted?** Set `TELMONI_ENDPOINT` to your deployment's machine host;
+  without it, the CLI and the SDKs talk to `https://api.telmoni.com`.
+- **The CLI is optional:** the skill installs it when a task needs it, with
+  your go-ahead.

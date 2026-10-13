@@ -1,5 +1,5 @@
 {
   "title": "Developer tools & API",
   "defaultOpen": true,
-  "pages": ["cli", "sdks", "coding-agents", "api-keys", "ingest", "field-inventory", "reference", "..."]
+  "pages": ["cli", "sdks", "coding-agents", "agent-skill", "api-keys", "ingest", "field-inventory", "reference", "..."]
 }
