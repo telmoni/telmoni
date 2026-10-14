@@ -29,6 +29,15 @@ export const MODAL_SELECTOR =
 // hand on one finds the other.
 export const AGENT_MODIFIER_KEY = "j";
 
+// What a keydown says was pressed, or "" for one that says nothing. A
+// password manager or another extension dispatches a plain Event under the
+// keydown name, with no `key` on it at all, and `e.key.toLowerCase()` in a
+// document-level handler threw on one. A KeyboardEvent never says less than
+// "", so that is what such an event reads as, and every chord returns.
+export function pressedKey(e: KeyboardEvent): string {
+  return typeof e.key === "string" ? e.key : "";
+}
+
 export const ACCOUNT_MENU_EVENT = "telmoni:account-menu";
 
 export const SEQUENCE_TIMEOUT_MS = 1000;

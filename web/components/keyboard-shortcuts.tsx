@@ -26,6 +26,7 @@ import {
   goSequences,
   MODAL_SELECTOR,
   PAGE_ACTION_KEY,
+  pressedKey,
   resolveSequence,
   SEQUENCE_TIMEOUT_MS,
   SEARCH_KEY,
@@ -90,9 +91,10 @@ export function KeyboardShortcuts() {
         return;
       }
       if (!letterKeysOn()) return;
-      if (e.key.length > 1) return;
+      const key = pressedKey(e);
+      if (key.length !== 1) return;
       if (e.repeat) return;
-      const k = e.shiftKey ? e.key : e.key.toLowerCase();
+      const k = e.shiftKey ? key : key.toLowerCase();
 
       if (pendingG.current) {
         clearPending();

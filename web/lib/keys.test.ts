@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { buildConsoleNav } from "./console-nav";
-import { ORGANIZATION_KEY, PAGE_ACTION_KEY, goSequences, resolveSequence } from "./keys";
+import {
+  ORGANIZATION_KEY,
+  PAGE_ACTION_KEY,
+  goSequences,
+  pressedKey,
+  resolveSequence,
+} from "./keys";
 
 // One path on each rail: a project's, an organization's, the person's.
 const RAILS = ["/acme/web/api-keys", "/acme/settings", "/account/settings"];
@@ -74,5 +80,17 @@ describe("the go sequences", () => {
     expect(resolveSequence(k, "/")).toBeNull();
     expect(resolveSequence(k, "/", "acme")).toBeNull();
     expect(resolveSequence(k, "/console", "acme")).toBeNull();
+  });
+});
+
+// The chords once threw on a plain Event dispatched under the keydown name,
+// as a password manager sends one, since it carries no key at all.
+describe("the pressed key", () => {
+  it("is the KeyboardEvent's key, as typed", () => {
+    expect(pressedKey({ key: "K" } as KeyboardEvent)).toBe("K");
+  });
+
+  it("is nothing for an event that names none", () => {
+    expect(pressedKey(new Event("keydown") as KeyboardEvent)).toBe("");
   });
 });

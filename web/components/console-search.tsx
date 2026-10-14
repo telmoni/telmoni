@@ -29,7 +29,7 @@ import {
 import { consolePlace, projectAt } from "@/lib/console-nav";
 import { projectPath } from "@/lib/slug";
 import { useActiveOrganization, useProjects } from "@/lib/store";
-import { SEARCH_MODIFIER_KEY } from "@/lib/keys";
+import { SEARCH_MODIFIER_KEY, pressedKey } from "@/lib/keys";
 import {
   GROUP_LABELS,
   groupItems,
@@ -89,7 +89,7 @@ export function ConsoleSearch() {
   // Shift and that one requires it.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== SEARCH_MODIFIER_KEY) return;
+      if (pressedKey(e).toLowerCase() !== SEARCH_MODIFIER_KEY) return;
       if (!(e.ctrlKey || e.metaKey)) return;
       if (e.defaultPrevented || e.altKey || e.shiftKey) return;
       e.preventDefault();

@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
+import { pressedKey } from "@/lib/keys";
 import { letterKeysOn } from "@/lib/use-accessibility";
 
 // The keycap on the header's filled button is a real shortcut: one bare
@@ -25,7 +26,7 @@ export function HeaderShortcuts({ signedIn }: { signedIn: boolean }) {
       )
         return;
       if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"]')) return;
-      const key = e.key.toLowerCase();
+      const key = pressedKey(e).toLowerCase();
       // `/auth/signup` is a Route Handler, which only a full load reaches;
       // `/console` is a page, which the router reaches as the button does.
       if (!signedIn && key === "s") window.location.assign("/auth/signup");

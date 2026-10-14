@@ -37,7 +37,7 @@ import {
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { CORNERS_DEFAULT, type Corners } from "@/lib/corners";
 import { setCorners, useCorners } from "@/lib/use-corners";
-import { ACCOUNT_MENU_EVENT } from "@/lib/keys";
+import { ACCOUNT_MENU_EVENT, pressedKey } from "@/lib/keys";
 import { DOCS_URL, REPO_URL, STATUS_URL } from "@/lib/site";
 import { useUser } from "@/lib/store";
 import { displayName } from "@/lib/user-display";
@@ -84,7 +84,7 @@ export function NavUser() {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== "k" || !(e.ctrlKey || e.metaKey)) return;
+      if (pressedKey(e).toLowerCase() !== "k" || !(e.ctrlKey || e.metaKey)) return;
       if (e.defaultPrevented || e.altKey || !e.shiftKey) return;
       if (
         document.querySelector(
