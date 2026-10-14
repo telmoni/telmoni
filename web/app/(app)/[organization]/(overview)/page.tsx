@@ -1,20 +1,11 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
-import { LocalTime } from "@/components/local-time";
-import { Row, Rows } from "@/components/rows";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { organizationLabel } from "@/lib/identity";
-import { eventKindLabel } from "@/lib/notification-kinds";
-import {
-  activeOrganization,
-  fetchNotifications,
-  getServerContext,
-  type FeedItem,
-  type NotificationFeed,
-} from "@/lib/server/data";
-import { cn } from "@/lib/utils";
+import { activeOrganization, fetchNotifications, getServerContext } from "@/lib/server/data";
 
+import { Notices } from "../../_notices";
 import { Overview } from "../../_overview";
 import { LeaveOrganization } from "../_leave-organization";
 import { MarkOrganizationRead } from "../_organization-notices";
@@ -71,58 +62,14 @@ export default async function OrganizationOverviewPage() {
       action={markRead ?? undefined}
       sections={
         <>
-          {notices && notices.items.length > 0 && <OrganizationNotices feed={notices} />}
+          {notices && notices.items.length > 0 && (
+            <Notices label="Organization notices" feed={notices} />
+          )}
           {canLeave && (
             <LeaveOrganization organizationId={organization.organizationId} name={name} />
           )}
         </>
       }
     />
-  );
-}
-
-function OrganizationNotices({ feed }: { feed: NotificationFeed }) {
-  return (
-    <section className="grid gap-3" aria-label="Organization notices">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-medium">Organization notices</h3>
-      </div>
-      <Rows>
-        {feed.items.map((item) => (
-          <OrganizationNoticeRow key={item.id} item={item} />
-        ))}
-      </Rows>
-    </section>
-  );
-}
-
-function OrganizationNoticeRow({ item }: { item: FeedItem }) {
-  const unread = item.read_at === null;
-  return (
-    <Row
-      label={
-        <span
-          className={cn(
-            "block min-w-0 truncate",
-            unread ? "font-bold text-foreground" : "font-normal text-muted-foreground",
-          )}
-        >
-          <span>{item.title}</span>
-          {unread && <span className="sr-only"> Unread</span>}
-        </span>
-      }
-      hint={
-        <span className="block">
-          <span className={cn(unread ? "text-foreground/80" : "text-muted-foreground")}>
-            {item.body}
-          </span>
-          <span className="mt-0.5 block text-xs opacity-70">{eventKindLabel(item.kind)}</span>
-        </span>
-      }
-    >
-      <span className={cn(unread ? "font-medium text-foreground" : "text-muted-foreground")}>
-        <LocalTime iso={item.created_at} mode="datetime" />
-      </span>
-    </Row>
   );
 }
