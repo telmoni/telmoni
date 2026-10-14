@@ -769,7 +769,7 @@ html.a11y-no-letter-keys [data-letter-key] {
 
 /* ── The splash's motion (`components/mark.tsx`, `app/page.tsx`) ──────────────
    Small movements that say what the product does: spans arriving, a
-   schedule's pulse, content masked while the metadata stays; and the page's
+   schedule's pulse, a prompt's words under a marker while its fields stay; and the page's
    own: a highlighter stroke drawn, a block rising into view. A dot that must
    stay round under the sharp theme, which squares every `rounded` class, sets
    `[border-radius:9999px]` instead. Each stands still under reduced motion. */
@@ -785,15 +785,21 @@ html.a11y-no-letter-keys [data-letter-key] {
   @media (prefers-reduced-motion: reduce) { animation: none; transform: scaleX(1); }
 }
 
+/* The marker holds, lifts, and is drawn over the words again from the left;
+   the loop's first and last frames are the words covered, which is where a
+   reduced-motion setting that ends every animation at once leaves it. */
 @keyframes redact {
-  0%, 15% { transform: translateX(-101%); }
-  45%, 70% { transform: translateX(0); }
-  100% { transform: translateX(101%); }
+  0%, 52% { transform: scaleX(1); opacity: 1; }
+  58% { transform: scaleX(1); opacity: 0; }
+  58.5% { transform: scaleX(0); opacity: 0; }
+  59%, 68% { transform: scaleX(0); opacity: 1; }
+  100% { transform: scaleX(1); opacity: 1; }
 }
 
 @utility redact {
-  animation: redact 4.2s ease-in-out infinite;
-  @media (prefers-reduced-motion: reduce) { animation: none; transform: translateX(0); }
+  transform-origin: left;
+  animation: redact 4.2s ease-in-out infinite backwards;
+  @media (prefers-reduced-motion: reduce) { animation: none; transform: scaleX(1); opacity: 1; }
 }
 
 /* The highlighter's stroke, drawn rather than there: the hero's once the

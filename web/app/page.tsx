@@ -229,9 +229,30 @@ function Out({
   );
 }
 
+// Privacy first, as a document reads once it is through the door: on each
+// line one short field kept — a timing, a status, a count — and the words
+// beside it, the prompt, under a marker. Widths in pixels of the glyph's 64,
+// two apart; the marker covers the words that are not the field, which sit
+// together at one end of the line.
+const GLYPH_GAP = 2;
+const REDACTED_LINES = [
+  { words: [12, 22, 9, 15], kept: 0, delay: 0 },
+  { words: [18, 10, 14, 16], kept: 3, delay: 300 },
+  { words: [9, 20, 13], kept: 0, delay: 600 },
+] as const;
+
+function markerOver(words: readonly number[], kept: number) {
+  const starts = words.map((_, i) => words.slice(0, i).reduce((at, w) => at + w + GLYPH_GAP, 0));
+  const content = words.map((_, i) => i).filter((i) => i !== kept);
+  const first = content[0] ?? 0;
+  const last = content[content.length - 1] ?? 0;
+  return { left: starts[first], width: starts[last] + (words[last] ?? 0) - (starts[first] ?? 0) };
+}
+
 // A goal's motion, in a cell's corner: spans arriving one under another, a
-// schedule's pulse, and content masked while the lines around it stay.
-// Decorative, and still under reduced motion.
+// schedule's pulse, and a document's words going under a marker line by line
+// while the field kept on each line stays. Decorative, and still under
+// reduced motion.
 function Glyph({ kind }: { kind: "spans" | "pulse" | "redact" }) {
   if (kind === "spans") {
     return (
@@ -263,11 +284,27 @@ function Glyph({ kind }: { kind: "spans" | "pulse" | "redact" }) {
   }
   return (
     <span aria-hidden="true" className="flex w-16 flex-col gap-1">
-      <span className="block h-1 w-3/4 rounded-sm bg-foreground/60" />
-      <span className="relative block h-1 w-full overflow-hidden rounded-sm bg-foreground/25">
-        <span className="redact absolute inset-0 bg-foreground" />
-      </span>
-      <span className="block h-1 w-1/2 rounded-sm bg-foreground/60" />
+      {REDACTED_LINES.map(({ words, kept, delay }, line) => {
+        const marker = markerOver(words, kept);
+        return (
+          <span key={line} className="relative flex h-1 gap-0.5">
+            {words.map((width, i) => (
+              <span
+                key={i}
+                className={cn(
+                  "block h-1 shrink-0 rounded-sm",
+                  i === kept ? "bg-foreground/70" : "bg-foreground/30",
+                )}
+                style={{ width }}
+              />
+            ))}
+            <span
+              className="redact absolute -inset-y-px rounded-sm bg-foreground"
+              style={{ left: marker.left, width: marker.width, animationDelay: `${delay}ms` }}
+            />
+          </span>
+        );
+      })}
     </span>
   );
 }
