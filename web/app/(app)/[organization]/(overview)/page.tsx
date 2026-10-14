@@ -19,6 +19,11 @@ import { Overview } from "../../_overview";
 import { LeaveOrganization } from "../_leave-organization";
 import { MarkOrganizationRead } from "../_organization-notices";
 
+// In a route group of its own so that whatever stands in for a page while it
+// loads can wrap the overview alone: beside the organization's layout it
+// would wrap the project's layout too, and stream that layout's redirect and
+// not-found after a page already answered 200.
+
 // The tab is titled as the page is, by the organization's name. The context
 // is read again for it, a second call auth answers from its cache.
 export async function generateMetadata(): Promise<Metadata> {

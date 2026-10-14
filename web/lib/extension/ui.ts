@@ -27,7 +27,6 @@ export {
 export { AccessDenied } from "@/components/access-denied";
 export { PageAction } from "@/components/page-action";
 export { PageHeader } from "@/components/page-header";
-export { PageLoading } from "@/components/page-loading";
 export { RoleRestricted } from "@/components/role-restricted";
 export { ServiceUnavailable } from "@/components/service-unavailable";
 export { DOCS_URL, PRODUCT_NAME, SPONSORS_URL } from "@/lib/site";
