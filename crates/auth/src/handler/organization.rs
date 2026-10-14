@@ -19,7 +19,7 @@ use serde_json::json;
 
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
-use telmoni_shared::seam::OwnershipChange;
+use telmoni_shared::seam::{FoundedOrganization, OrganizationFounding, OwnershipChange};
 use telmoni_shared::{
     AuthError, Flag, OrganizationId, OrganizationRole, TelmoniError, TenantError, UserId,
 };
@@ -258,6 +258,9 @@ pub async fn create_organization(
     if !signups_open(&state).await? {
         return Err(TenantError::FeatureOff { flag: Flag::Signup }.into());
     }
+    // The deployment's say on a second organization at the person's asking:
+    // one that has it paid for first refuses here, and founds it itself.
+    crate::handler::ownership::may_found(&state, &founder).await?;
     // ⚠ MINTED: an organization is nobody's id.
     let organization = OrganizationId::new();
     let url = match asked {
@@ -293,6 +296,88 @@ pub async fn create_organization(
         StatusCode::CREATED,
         Json(json!({ "id": founded.id, "slug": founded.slug, "name": name })),
     ))
+}
+
+/// What a deployment that founds an organization itself asks first
+/// ([`telmoni_shared::seam::Auth::check_founding`]): the name and the URL,
+/// refused as the founder's own asking would refuse them. Whether new
+/// organizations are open is the seam's to read, in the lane, before this.
+pub(crate) fn check_founding(name: &str, slug: Option<&str>) -> Result<(), TelmoniError> {
+    organization_name(name)?;
+    if let Some(asked) = slug.map(str::trim).filter(|asked| !asked.is_empty()) {
+        asked_url(asked)?;
+    }
+    Ok(())
+}
+
+/// Found an organization for a deployment that has what it asks for first
+/// ([`telmoni_shared::seam::Auth::found_organization`]): as
+/// [`create_organization`] founds one at the person's asking, under the same
+/// checks, but for the deployment's own say, which it has had; for new
+/// organizations closed, which [`check_founding`] refused before anything
+/// was taken of the founder and which does not refuse now, since the
+/// founding is owed; and for the URL, where one asked for that is no longer
+/// free is derived from the name rather than refused, for the same reason.
+/// Idempotent by the id the deployment minted: one already founded is
+/// answered as it stands.
+pub(crate) async fn found_for_deployment(
+    state: &AppState,
+    founding: &OrganizationFounding,
+) -> Result<FoundedOrganization, TelmoniError> {
+    let organization = &founding.organization_id;
+    let mut lane = maintenance_scope(&state.db, AuthLane).await?;
+    let standing = organizations::slug_of(&mut lane, organization).await?;
+    lane.commit().await?;
+    if let Some(slug) = standing {
+        return Ok(FoundedOrganization {
+            organization_id: organization.clone(),
+            slug,
+        });
+    }
+    let name = organization_name(&founding.name)?;
+    let asked = founding
+        .slug
+        .as_deref()
+        .map(str::trim)
+        .filter(|asked| !asked.is_empty())
+        .map(asked_url)
+        .transpose()?;
+    let mut candidates: Vec<String> = asked.into_iter().collect();
+    candidates.extend(slug::candidates(slug::Scope::Organization, &name));
+    let url = NewUrl::Derived(free_url(state, organization, &candidates).await?);
+
+    let founder = &founding.founder;
+    let mut tx = person_scope(&state.db, founder).await?;
+    locks::lock_person(&mut tx, founder).await?;
+    let person = founder_under_lock(state, &mut tx, founder).await?;
+    if person.default_organization_id.is_none()
+        && let Some(current) =
+            organization_members::default_while_owning_none(&mut tx, founder).await?
+    {
+        identities::set_default_organization(&mut tx, founder, &current).await?;
+    }
+    let founded = found_organization(
+        tx,
+        organization.clone(),
+        founder,
+        &name,
+        url,
+        Founding::OnRequest,
+    )
+    .await?;
+    crate::handler::ownership::tell_ownership_hook(
+        state,
+        OwnershipChange::Founded {
+            organization_id: founded.id.clone(),
+            owner: founder.clone(),
+        },
+    )
+    .await;
+    tracing::info!(organization_id = %founded.id, user_id = %founder, "organization founded for the deployment");
+    Ok(FoundedOrganization {
+        organization_id: founded.id,
+        slug: founded.slug,
+    })
 }
 
 /// Whether new organizations may be made: the global `signup` flag, read in

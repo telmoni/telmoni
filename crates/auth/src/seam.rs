@@ -16,12 +16,12 @@ use telmoni_shared::acting::{Acting, ActingKey, ActingProject};
 use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope};
 use telmoni_shared::rbac::{Resource, Verb, can};
 use telmoni_shared::seam::{
-    Audience, AuditEventsQuery, Auth, DocumentCursor, OwnedOrganization, ProjectHome,
-    SourceDocument,
+    Audience, AuditEventsQuery, Auth, DocumentCursor, FoundedOrganization, OrganizationFounding,
+    OwnedOrganization, ProjectHome, SourceDocument,
 };
 use telmoni_shared::{
-    AuthError, AuthzError, FlagSet, OrganizationId, OrganizationRole, OrganizationStatus,
-    ProjectId, TelmoniError, UserId,
+    AuthError, AuthzError, Flag, FlagSet, OrganizationId, OrganizationRole, OrganizationStatus,
+    ProjectId, TelmoniError, TenantError, UserId,
 };
 
 use crate::AppState;
@@ -190,6 +190,20 @@ impl Auth for AppState {
         let owners = organization_members::owners_of_several(&mut tx).await?;
         tx.commit().await?;
         Ok(owners)
+    }
+
+    async fn check_founding(&self, name: &str, slug: Option<&str>) -> Result<(), TelmoniError> {
+        if !crate::handler::organization::signups_open(self).await? {
+            return Err(TenantError::FeatureOff { flag: Flag::Signup }.into());
+        }
+        crate::handler::organization::check_founding(name, slug)
+    }
+
+    async fn found_organization(
+        &self,
+        founding: &OrganizationFounding,
+    ) -> Result<FoundedOrganization, TelmoniError> {
+        crate::handler::organization::found_for_deployment(self, founding).await
     }
 
     async fn audit_documents(

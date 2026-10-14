@@ -75,7 +75,7 @@ fn hash_invite_token(raw: &str) -> String {
     telmoni_shared::digest::sha256_hex(raw.as_bytes())
 }
 
-/// What the deployment says before a seat is promised or taken: a dormant
+/// What the deployment says before a seat is promised or taken: a paused
 /// organization's refusal now, and the ceiling its roster is held to once
 /// the count is read ([`admit_invitation`], [`admit_seat`]). Nothing in a
 /// binary that sells no plans. ⚠ Asked before the organization's lock is
@@ -186,7 +186,7 @@ pub async fn create_invite(
     let acting = acting_project(&state, &project_id, &actor).await?;
     authorize(acting.role, Verb::Create, Resource::Member)?;
     let organization = acting.organization.clone();
-    // A dormant organization takes no new members, and one at its ceiling
+    // A paused organization takes no new members, and one at its ceiling
     // promises no further seat.
     let ceiling = ceiling_of(&state, &organization).await?;
     admit_invitation(&state, &organization, ceiling, &email).await?;

@@ -10,16 +10,16 @@ use crate::error::{PlanError, TelmoniError};
 /// keeps what it already holds, whatever its grants say.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Grants {
-    /// Set while the organization is dormant: it keeps its projects, its
+    /// Set while the organization is paused: it keeps its projects, its
     /// data and its members, and takes in nothing new, each door refusing
-    /// with this. Why it is dormant is the deployment's to say, in the
+    /// with this. Why it is paused is the deployment's to say, in the
     /// refusal's own words.
-    pub dormant: Option<Dormant>,
+    pub paused: Option<Paused>,
 }
 
-/// The refusal a dormant organization's doors answer.
+/// The refusal a paused organization's doors answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Dormant {
+pub struct Paused {
     /// The one thing that lifts it, the 402's `entitlement`.
     pub entitlement: String,
     /// The sentence a person reads, which names nobody: every member of the
@@ -35,12 +35,12 @@ impl Grants {
     }
 
     /// Whether something new may arrive for the organization: a span, a
-    /// question, an invitation. Refused, as a 402, while it is dormant.
+    /// question, an invitation. Refused, as a 402, while it is paused.
     pub fn admit_new(&self) -> Result<(), TelmoniError> {
-        match &self.dormant {
-            Some(dormant) => Err(PlanError::LimitReached {
-                entitlement: dormant.entitlement.clone(),
-                detail: dormant.detail.clone(),
+        match &self.paused {
+            Some(paused) => Err(PlanError::LimitReached {
+                entitlement: paused.entitlement.clone(),
+                detail: paused.detail.clone(),
             }
             .into()),
             None => Ok(()),
@@ -91,20 +91,20 @@ mod tests {
     }
 
     #[test]
-    fn a_dormant_organization_is_refused_with_the_deployments_words() {
+    fn a_paused_organization_is_refused_with_the_deployments_words() {
         let grants = Grants {
-            dormant: Some(Dormant {
+            paused: Some(Paused {
                 entitlement: "pro".into(),
-                detail: "This organization is dormant.".into(),
+                detail: "This organization is paused.".into(),
             }),
         };
         let pd = grants
             .admit_new()
-            .expect_err("a dormant organization takes nothing new")
+            .expect_err("a paused organization takes nothing new")
             .to_problem_details();
         assert_eq!(pd.type_uri, "/errors/plan/limit-reached");
         assert_eq!(pd.status, 402);
-        assert_eq!(pd.detail.as_deref(), Some("This organization is dormant."));
+        assert_eq!(pd.detail.as_deref(), Some("This organization is paused."));
         assert_eq!(
             pd.extensions
                 .get("entitlement")

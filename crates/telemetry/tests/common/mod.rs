@@ -23,8 +23,8 @@ use telmoni_shared::rbac::project_role;
 use telmoni_shared::seam::{Auth, Entitlements, NoLimits, ProjectHome};
 use telmoni_shared::test_util::{ServiceRole, chain_lock_held, service_pool};
 use telmoni_shared::{
-    ApiKeyScope, AuthError, AuthzError, Dormant, FlagSet, Grants, OrganizationId, OrganizationRole,
-    OrganizationStatus, ProjectId, Role, SpanKind, SpanStatus, TelmoniError, UserId,
+    ApiKeyScope, AuthError, AuthzError, FlagSet, Grants, OrganizationId, OrganizationRole,
+    OrganizationStatus, Paused, ProjectId, Role, SpanKind, SpanStatus, TelmoniError, UserId,
 };
 use telmoni_telemetry::store::{self, SpanRow, Store};
 use telmoni_telemetry::{AppState, Config};
@@ -338,20 +338,20 @@ pub(crate) fn state_with_entitlements(
     )
 }
 
-/// Entitlements under which one organization is dormant, as a deployment that
+/// Entitlements under which one organization is paused, as a deployment that
 /// sells plans holds an organization it will not take anything new for.
-pub(crate) struct DormantOrganization(pub(crate) OrganizationId);
+pub(crate) struct PausedOrganization(pub(crate) OrganizationId);
 
 #[async_trait]
-impl Entitlements for DormantOrganization {
+impl Entitlements for PausedOrganization {
     async fn grants(&self, organization_id: &OrganizationId) -> Result<Grants, TelmoniError> {
         if *organization_id != self.0 {
             return Ok(Grants::unlimited());
         }
         Ok(Grants {
-            dormant: Some(Dormant {
+            paused: Some(Paused {
                 entitlement: "pro".into(),
-                detail: "This organization is dormant.".into(),
+                detail: "This organization is paused.".into(),
             }),
         })
     }

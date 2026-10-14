@@ -40,7 +40,8 @@ export function CreateOrganizationDialog({
   /// show it.
   host: string;
   /// Drawn under the description: what a console built on this one says a
-  /// new organization starts on there.
+  /// new organization starts on there, and any fields of its own it asks
+  /// for, which the action is handed by name.
   notice?: React.ReactNode;
 }) {
   const router = useRouter();
@@ -53,13 +54,20 @@ export function CreateOrganizationDialog({
   const under = (field: CreateOrganizationField) =>
     refusal?.field === field ? refusal.message : null;
 
-  function submit() {
+  function submit(extras: Record<string, string>) {
     setRefusal(null);
     start(async () => {
       try {
-        const res = await createOrganizationAction(name, slug);
+        const res = await createOrganizationAction(name, slug, extras);
         if (res.error) {
           setRefusal({ message: res.error, field: res.field });
+          return;
+        }
+        // A console built on this one may send the person off this console
+        // first — to pay for it — and founds it itself after: the page is
+        // left for that address, and nothing is created yet to say so.
+        if (res.href && /^https?:\/\//.test(res.href)) {
+          window.location.assign(res.href);
           return;
         }
         // On to its Overview. Without an address to follow, auth's answer
@@ -88,7 +96,14 @@ export function CreateOrganizationDialog({
           className="contents"
           onSubmit={(e) => {
             e.preventDefault();
-            if (canSubmit) submit();
+            if (!canSubmit) return;
+            // What the notice's own fields say, by name: the name and URL
+            // fields carry none, so they are not among them.
+            const extras: Record<string, string> = {};
+            for (const [key, value] of new FormData(e.currentTarget).entries()) {
+              if (typeof value === "string") extras[key] = value;
+            }
+            submit(extras);
           }}
         >
           <DialogHeader>

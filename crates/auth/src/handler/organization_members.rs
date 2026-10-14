@@ -319,7 +319,7 @@ pub async fn create_organization_invite(
         }
         .into());
     }
-    // A dormant organization takes no new members, and one at its ceiling
+    // A paused organization takes no new members, and one at its ceiling
     // promises no further seat.
     let ceiling = ceiling_of(&state, &organization).await?;
     admit_invitation(&state, &organization, ceiling, &email).await?;

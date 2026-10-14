@@ -129,6 +129,33 @@ pub struct OwnedOrganization {
     pub created_at: DateTime<Utc>,
 }
 
+/// An organization a deployment founds for a person once it has what it
+/// asks for first — a payment, say — rather than at the person's asking:
+/// what [`Auth::found_organization`] is handed. The deployment mints the id,
+/// so a founding tried again after a failure founds the same organization
+/// once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrganizationFounding {
+    /// The id the deployment minted for it, which it is founded under.
+    pub organization_id: OrganizationId,
+    /// Its founder and owner.
+    pub founder: UserId,
+    /// Its name, as the founder gave it.
+    pub name: String,
+    /// The URL the founder asked for, if any. One no longer free, or none,
+    /// is derived from the name, never refused: the founding is owed.
+    pub slug: Option<String>,
+}
+
+/// An organization founded for a deployment, as its founder is sent to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FoundedOrganization {
+    /// The organization, under the id the deployment minted.
+    pub organization_id: OrganizationId,
+    /// Its segment in console paths.
+    pub slug: String,
+}
+
 /// What auth answers the modules beside it.
 #[async_trait]
 pub trait Auth: Send + Sync {
@@ -223,6 +250,33 @@ pub trait Auth: Send + Sync {
     /// whose answer for one of them depends on the others.
     async fn owners_of_several(&self) -> Result<Vec<UserId>, TelmoniError> {
         Err(not_linked("the owners of several organizations"))
+    }
+
+    /// Whether a name and a URL could found an organization now, refused as
+    /// the founder's own asking would be refused — the name cleaning to
+    /// nothing, the URL a word the console keeps, new organizations closed
+    /// — for a deployment that takes something of the founder first, a
+    /// payment, and must refuse before it does rather than after.
+    async fn check_founding(&self, name: &str, slug: Option<&str>) -> Result<(), TelmoniError> {
+        let _ = (name, slug);
+        Err(not_linked("a founding's check"))
+    }
+
+    /// Found an organization for a deployment that has what it asks for
+    /// first ([`OrganizationFounding`]): its row, its owner and its audit
+    /// events, as the founder's own asking would make them, and the
+    /// deployment's ownership hook told. Idempotent by the id: one already
+    /// founded is answered as it stands. Never refused for the deployment's
+    /// own say, which it had at [`Auth::check_founding`], nor for new
+    /// organizations closed since: the organization is owed. Refused as a
+    /// `401` or `403` when the founder's account is gone, or being deleted,
+    /// which is for good.
+    async fn found_organization(
+        &self,
+        founding: &OrganizationFounding,
+    ) -> Result<FoundedOrganization, TelmoniError> {
+        let _ = founding;
+        Err(not_linked("founding an organization"))
     }
 
     /// The next page of audit events, oldest first after `after`, for the
@@ -474,6 +528,17 @@ pub trait OwnershipHook: Send + Sync {
     /// One change, once committed. Idempotent: the module's own catching up
     /// may arrive at the same answer.
     async fn ownership_changed(&self, change: OwnershipChange) -> Result<(), TelmoniError>;
+
+    /// Whether `founder` may found another organization at their asking:
+    /// asked before `POST /organizations` founds one, never before `/me`
+    /// provisions a person's first. An `Err` is the refusal the person
+    /// reads: a deployment that has a second organization paid for first
+    /// answers a 402 naming the plan, and founds it itself once it is
+    /// ([`Auth::found_organization`]). Yes, by default.
+    async fn may_found(&self, founder: &UserId) -> Result<(), TelmoniError> {
+        let _ = founder;
+        Ok(())
+    }
 }
 
 /// What an organization may take in, as a deployment that sells plans

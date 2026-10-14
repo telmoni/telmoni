@@ -7,6 +7,7 @@ import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
 import { publishEvent, userChannel } from "@/lib/events/publisher";
+import { createOrganizationElsewhere } from "@/lib/extension/create-organization";
 import { createdOrganizationHref } from "@/lib/extension/created-organization";
 import { FlagOffDetail } from "@/lib/flags";
 import { logger } from "@/lib/logger";
@@ -155,6 +156,7 @@ export interface CreateOrganizationResult {
 export async function createOrganizationAction(
   name: string,
   slug: string,
+  extras: Record<string, string> = {},
 ): Promise<CreateOrganizationResult> {
   const session = await getServerSession();
   if (!session) return { error: "Your session expired — sign in again." };
@@ -178,6 +180,15 @@ export async function createOrganizationAction(
   }
   if (url && !isOrganizationSlug(url)) {
     return { error: `${url} is a word the console's own pages use — choose another.`, field: "slug" };
+  }
+
+  // A console built on this one may take the founding elsewhere first — one
+  // that sells plans has a second organization paid for before it exists —
+  // and answers where to send the person, or what refused it; `null` founds
+  // it here.
+  const elsewhere = await createOrganizationElsewhere({ name: trimmed, slug: url, extras });
+  if (elsewhere) {
+    return "href" in elsewhere ? { error: null, href: elsewhere.href } : elsewhere;
   }
 
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/organizations`, {

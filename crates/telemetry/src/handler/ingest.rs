@@ -84,7 +84,7 @@ async fn handle(
         .rate_limit
         .admit(&state.redis, key.project_id.as_str())
         .await?;
-    // A dormant organization keeps what it holds and takes in nothing new: a
+    // A paused organization keeps what it holds and takes in nothing new: a
     // 402, which an exporter drops rather than retries.
     telmoni_shared::seam::admit_new(state.entitlements.as_ref(), &key.organization_id).await?;
 

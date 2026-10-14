@@ -92,6 +92,25 @@ async fn may_take_ownership(
     }
 }
 
+/// The deployment's say on whether `founder` may found another organization
+/// at their asking ([`telmoni_shared::seam::OwnershipHook::may_found`]): no
+/// hook is a yes, and so is one that does not answer within [`HOOK_BUDGET`],
+/// logged, since a founding let through costs no more than a second
+/// organization. Asked before any lock, as every ask of the hook is.
+pub(crate) async fn may_found(state: &AppState, founder: &UserId) -> Result<(), TelmoniError> {
+    let Some(hook) = state.siblings.ownership_hook.as_ref() else {
+        return Ok(());
+    };
+    match tokio::time::timeout(HOOK_BUDGET, hook.may_found(founder)).await {
+        Ok(answer) => answer,
+        Err(_) => {
+            tracing::warn!(user_id = %founder,
+                "the ownership hook did not answer in time; the founding is let through");
+            Ok(())
+        }
+    }
+}
+
 /// Tell the deployment's ownership hook of a change that has committed. It
 /// stands whatever the hook answers, so a refusal or a silence past
 /// [`HOOK_BUDGET`] is logged and nothing more: the hook's own catching up

@@ -47,6 +47,15 @@ const mockCreatedHref = vi.fn<(created: { id: string; slug: string }) => Promise
 vi.mock("@/lib/extension/created-organization", () => ({
   createdOrganizationHref: (created: { id: string; slug: string }) => mockCreatedHref(created),
 }));
+const mockElsewhere = vi.fn<
+  (input: { name: string; slug: string; extras: Record<string, string> }) => Promise<
+    { href: string } | { error: string; field?: "name" | "slug" } | null
+  >
+>(async () => null);
+vi.mock("@/lib/extension/create-organization", () => ({
+  createOrganizationElsewhere: (input: { name: string; slug: string; extras: Record<string, string> }) =>
+    mockElsewhere(input),
+}));
 let mockIdentity: IdentityContext | null = null;
 
 import { revalidatePath } from "next/cache";
@@ -279,6 +288,34 @@ describe("createOrganizationAction", () => {
     const r = await createOrganizationAction("Acme", "");
     expect(r).toEqual({ error: null, href: "/acme/billing" });
     expect(mockCreatedHref).toHaveBeenCalledWith({ id: "org_new", slug: "acme", name: "Acme" });
+  });
+
+  // `lib/extension/create-organization.ts`: a console built on this one may
+  // take the founding elsewhere first, handed the name and URL as checked
+  // and the notice's own fields by name, and auth is not asked.
+  it("goes where a console built on this one takes the founding first, with the notice's fields", async () => {
+    mockElsewhere.mockResolvedValueOnce({ href: "https://checkout.stripe.test/c/pay_1" });
+    const r = await createOrganizationAction("  Acme  ", " acme-labs ", { plan: "pro" });
+    expect(r).toEqual({ error: null, href: "https://checkout.stripe.test/c/pay_1" });
+    expect(mockElsewhere).toHaveBeenCalledWith({
+      name: "Acme",
+      slug: "acme-labs",
+      extras: { plan: "pro" },
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("reads a refusal from the console built on this one under its field", async () => {
+    mockElsewhere.mockResolvedValueOnce({ error: "Choose a plan first.", field: "name" });
+    const r = await createOrganizationAction("Acme", "");
+    expect(r).toEqual({ error: "Choose a plan first.", field: "name" });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("asks the console built on this one only once the name and URL pass", async () => {
+    const r = await createOrganizationAction("", "");
+    expect(r.field).toBe("name");
+    expect(mockElsewhere).not.toHaveBeenCalled();
   });
 
   it("is throttled per person, as project creation is", async () => {

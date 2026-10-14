@@ -25,10 +25,12 @@ use tower::ServiceExt;
 
 use telmoni_auth::test_provider::{ScriptedProvider, as_person};
 use telmoni_auth::{AppState, Config, Siblings, router};
-use telmoni_shared::seam::{Entitlements, OwnershipChange, OwnershipHook};
+use telmoni_shared::seam::{
+    Auth, Entitlements, OrganizationFounding, OwnershipChange, OwnershipHook,
+};
 use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, seed_identity, service_pool};
 use telmoni_shared::{
-    Dormant, Grants, MemberCeiling, OrganizationId, PlanError, TelmoniError, UserId,
+    Flag, Grants, MemberCeiling, OrganizationId, Paused, PlanError, TelmoniError, UserId,
 };
 
 const SERVICE_SECRET: &str = "test-service-secret";
@@ -43,6 +45,8 @@ enum Heard {
         organization: String,
         recipient: String,
     },
+    /// Whether `founder` may found another organization at their asking.
+    AskedToFound(String),
     Told(OwnershipChange),
 }
 
@@ -52,6 +56,8 @@ enum Heard {
 struct RecordingOwnership {
     heard: Mutex<Vec<Heard>>,
     refused: Mutex<HashSet<String>>,
+    /// Whoever is refused a second organization at their asking.
+    refused_founding: Mutex<HashSet<String>>,
 }
 
 impl RecordingOwnership {
@@ -64,9 +70,28 @@ impl RecordingOwnership {
             .into_iter()
             .filter_map(|heard| match heard {
                 Heard::Told(change) => Some(change),
-                Heard::Asked { .. } => None,
+                Heard::Asked { .. } | Heard::AskedToFound(_) => None,
             })
             .collect()
+    }
+
+    fn asked_to_found(&self) -> Vec<String> {
+        self.heard()
+            .into_iter()
+            .filter_map(|heard| match heard {
+                Heard::AskedToFound(founder) => Some(founder),
+                Heard::Asked { .. } | Heard::Told(_) => None,
+            })
+            .collect()
+    }
+
+    fn refuse_founding(&self, founder: &str, refused: bool) {
+        let mut set = self.refused_founding.lock().unwrap();
+        if refused {
+            set.insert(founder.to_owned());
+        } else {
+            set.remove(founder);
+        }
     }
 
     fn refuse(&self, recipient: &str, refused: bool) {
@@ -109,17 +134,33 @@ impl OwnershipHook for RecordingOwnership {
         self.heard.lock().unwrap().push(Heard::Told(change));
         Ok(())
     }
+
+    async fn may_found(&self, founder: &UserId) -> Result<(), TelmoniError> {
+        self.heard
+            .lock()
+            .unwrap()
+            .push(Heard::AskedToFound(founder.to_string()));
+        if self
+            .refused_founding
+            .lock()
+            .unwrap()
+            .contains(founder.as_str())
+        {
+            return Err(limit_reached());
+        }
+        Ok(())
+    }
 }
 
-/// Entitlements under which the organizations in `dormant` take nothing new,
+/// Entitlements under which the organizations in `paused` take nothing new,
 /// and each in `ceilings` holds at most so many people.
 #[derive(Default)]
-struct DormantEntitlements {
-    dormant: Mutex<HashSet<String>>,
+struct PausedEntitlements {
+    paused: Mutex<HashSet<String>>,
     ceilings: Mutex<HashMap<String, u32>>,
 }
 
-impl DormantEntitlements {
+impl PausedEntitlements {
     fn hold(&self, organization: &str, limit: u32) {
         self.ceilings
             .lock()
@@ -134,18 +175,18 @@ fn holds(limit: u32) -> String {
 }
 
 #[async_trait::async_trait]
-impl Entitlements for DormantEntitlements {
+impl Entitlements for PausedEntitlements {
     async fn grants(&self, organization_id: &OrganizationId) -> Result<Grants, TelmoniError> {
         if self
-            .dormant
+            .paused
             .lock()
             .unwrap()
             .contains(organization_id.as_str())
         {
             return Ok(Grants {
-                dormant: Some(Dormant {
+                paused: Some(Paused {
                     entitlement: "pro".into(),
-                    detail: "This organization is dormant.".into(),
+                    detail: "This organization is paused.".into(),
                 }),
             });
         }
@@ -173,11 +214,16 @@ impl Entitlements for DormantEntitlements {
 #[derive(Clone, Default)]
 struct Deployment {
     ownership: Arc<RecordingOwnership>,
-    entitlements: Arc<DormantEntitlements>,
+    entitlements: Arc<PausedEntitlements>,
 }
 
 impl Deployment {
     fn app(&self, pool: &PgPool) -> Router {
+        router(self.state(pool))
+    }
+
+    /// Auth's state over `pool`, which the seam is answered on.
+    fn state(&self, pool: &PgPool) -> Arc<AppState> {
         let config = Config {
             database_url: String::new(),
             service_secret: SERVICE_SECRET.into(),
@@ -190,7 +236,7 @@ impl Deployment {
             deletion_tail_budget_ms: 8_000,
         };
         let db = service_pool(pool, ServiceRole::Auth);
-        router(Arc::new(AppState {
+        Arc::new(AppState {
             issuer: telmoni_auth::test_provider::test_issuer(db.clone()),
             password: None,
             external: Some(telmoni_auth::test_provider::external(Arc::new(
@@ -207,7 +253,7 @@ impl Deployment {
                 telmoni_shared::mail::NoopSender,
             ))),
             exchange_cache: telmoni_auth::ExchangeCache::new(),
-        }))
+        })
     }
 
     /// One request as `caller`, standing in `organization` when given.
@@ -281,6 +327,18 @@ impl Deployment {
     }
 }
 
+/// What `make flag` writes: one append-only global row.
+async fn flip(pool: &PgPool, flag: Flag, on: bool) {
+    sqlx::query(
+        "INSERT INTO auth.feature_flags (key, enabled, note, actor) VALUES ($1, $2, 'test', 'test')",
+    )
+    .bind(flag.as_str())
+    .bind(on)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 fn founded(organization: &str, owner: &str) -> OwnershipChange {
     OwnershipChange::Founded {
         organization_id: OrganizationId::try_new(organization).unwrap(),
@@ -335,6 +393,148 @@ async fn the_hook_is_told_of_every_founding_once(pool: PgPool) {
         .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(deployment.ownership.told().len(), 2);
+}
+
+/// A second organization at the person's asking is the hook's to refuse —
+/// a deployment that has it paid for first does — and the person reads the
+/// hook's words; the first, provisioned by `/me`, is never asked about.
+#[sqlx::test]
+async fn a_founding_at_the_persons_asking_is_the_hooks_to_refuse_and_the_first_is_not(
+    pool: PgPool,
+) {
+    apply_audit_migrations(&pool).await;
+    let deployment = Deployment::default();
+    deployment.ownership.refuse_founding(OWNER, true);
+
+    let provisioned = deployment.sign_in(&pool, OWNER).await;
+    assert!(
+        deployment.ownership.asked_to_found().is_empty(),
+        "the hook was asked about a person's first organization"
+    );
+
+    let (status, body) = deployment
+        .call(
+            &pool,
+            "POST",
+            "/internal/organizations",
+            OWNER,
+            None,
+            Some(json!({ "name": "Second" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
+    assert_eq!(body["type"], "/errors/plan/limit-reached");
+    assert_eq!(body["entitlement"], "pro");
+    assert_eq!(
+        body["detail"],
+        "Its new owner already holds what a second would take."
+    );
+    assert_eq!(
+        deployment.ownership.asked_to_found(),
+        vec![OWNER.to_owned()]
+    );
+    assert_eq!(
+        deployment.ownership.told(),
+        vec![founded(&provisioned, OWNER)],
+        "a refused founding was told of"
+    );
+
+    deployment.ownership.refuse_founding(OWNER, false);
+    let (status, body) = deployment
+        .call(
+            &pool,
+            "POST",
+            "/internal/organizations",
+            OWNER,
+            None,
+            Some(json!({ "name": "Second" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(deployment.ownership.asked_to_found().len(), 2);
+}
+
+/// A deployment founds an organization itself, under an id it minted, once:
+/// the row, the owner and the hook told as the person's own asking would;
+/// founded again under the same id, answered as it stands; a URL asked for
+/// that is taken, derived from the name rather than refused; and a name or
+/// URL the person's asking would refuse, refused before anything is taken.
+#[sqlx::test]
+async fn the_deployment_founds_an_organization_under_its_own_id_once(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let deployment = Deployment::default();
+    let state = deployment.state(&pool);
+    let provisioned = deployment.sign_in(&pool, OWNER).await;
+
+    let minted = OrganizationId::new();
+    let founding = OrganizationFounding {
+        organization_id: minted.clone(),
+        founder: UserId::try_new(OWNER).unwrap(),
+        name: "Paid Labs".into(),
+        slug: Some("paid-labs".into()),
+    };
+    let founded_first = state.found_organization(&founding).await.unwrap();
+    assert_eq!(founded_first.organization_id, minted);
+    assert_eq!(founded_first.slug, "paid-labs");
+    assert_eq!(owner_of(&pool, minted.as_str()).await, OWNER);
+    assert_eq!(
+        deployment.ownership.told(),
+        vec![
+            founded(&provisioned, OWNER),
+            founded(minted.as_str(), OWNER)
+        ]
+    );
+
+    let again = state.found_organization(&founding).await.unwrap();
+    assert_eq!(again.slug, "paid-labs");
+    assert_eq!(
+        deployment.ownership.told().len(),
+        2,
+        "a founding under an id already founded was told of again"
+    );
+
+    // The URL asked for is taken now: derived from the name, never refused.
+    let other = OrganizationFounding {
+        organization_id: OrganizationId::new(),
+        ..founding.clone()
+    };
+    let derived = state.found_organization(&other).await.unwrap();
+    assert_ne!(derived.slug, "paid-labs");
+    assert!(
+        derived.slug.starts_with("paid-labs") || derived.slug.starts_with("org-"),
+        "{}",
+        derived.slug
+    );
+
+    for (name, slug) in [("   ", None), ("Acme", Some("Bad Slug"))] {
+        assert!(
+            state.check_founding(name, slug).await.is_err(),
+            "{name:?} {slug:?} passed the check"
+        );
+    }
+    assert!(state.check_founding("Acme", Some("acme")).await.is_ok());
+
+    // New organizations closed: the check refuses, before the deployment
+    // takes anything of the founder; a founding already paid for is owed,
+    // and founded all the same.
+    flip(&pool, Flag::Signup, false).await;
+    let closed = state
+        .check_founding("Acme", None)
+        .await
+        .expect_err("a founding was checked fine with new organizations closed")
+        .to_problem_details();
+    assert_eq!(closed.status, 503);
+    assert_eq!(closed.type_uri, "/errors/tenant/feature-off");
+    let owed = OrganizationFounding {
+        organization_id: OrganizationId::new(),
+        name: "Owed".into(),
+        slug: None,
+        ..founding.clone()
+    };
+    assert!(
+        state.found_organization(&owed).await.is_ok(),
+        "a paid founding was refused for new organizations closed since"
+    );
 }
 
 #[sqlx::test]
@@ -530,7 +730,7 @@ async fn only_the_owner_offering_to_an_admin_is_shown_the_hooks_answer(pool: PgP
 }
 
 #[sqlx::test]
-async fn a_dormant_organization_sends_no_invitation(pool: PgPool) {
+async fn a_paused_organization_sends_no_invitation(pool: PgPool) {
     apply_audit_migrations(&pool).await;
     let deployment = Deployment::default();
     let organization = deployment.sign_in(&pool, OWNER).await;
@@ -548,7 +748,7 @@ async fn a_dormant_organization_sends_no_invitation(pool: PgPool) {
     let project = body["id"].as_str().unwrap().to_owned();
     deployment
         .entitlements
-        .dormant
+        .paused
         .lock()
         .unwrap()
         .insert(organization.clone());
@@ -565,7 +765,7 @@ async fn a_dormant_organization_sends_no_invitation(pool: PgPool) {
         .await;
     assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
     assert_eq!(body["type"], "/errors/plan/limit-reached");
-    assert_eq!(body["detail"], "This organization is dormant.");
+    assert_eq!(body["detail"], "This organization is paused.");
 
     let (status, body) = deployment
         .call(
@@ -893,10 +1093,10 @@ async fn a_seat_is_held_to_the_ceiling_when_it_is_taken(pool: PgPool) {
     assert_eq!(seated(&pool, &organization).await, 2);
 }
 
-/// A dormant organization seats nobody either: an invitation sent while it
+/// A paused organization seats nobody either: an invitation sent while it
 /// took things in is refused at the accept, in the deployment's words.
 #[sqlx::test]
-async fn a_dormant_organization_seats_nobody(pool: PgPool) {
+async fn a_paused_organization_seats_nobody(pool: PgPool) {
     apply_audit_migrations(&pool).await;
     let deployment = Deployment::default();
     let organization = deployment.sign_in(&pool, OWNER).await;
@@ -908,13 +1108,13 @@ async fn a_dormant_organization_seats_nobody(pool: PgPool) {
     let invite = body["id"].as_str().unwrap().to_owned();
     deployment
         .entitlements
-        .dormant
+        .paused
         .lock()
         .unwrap()
         .insert(organization.clone());
 
     let (status, body) = deployment.accept(&pool, ADMIN, &invite).await;
     assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
-    assert_eq!(body["detail"], "This organization is dormant.");
+    assert_eq!(body["detail"], "This organization is paused.");
     assert_eq!(seated(&pool, &organization).await, 1);
 }

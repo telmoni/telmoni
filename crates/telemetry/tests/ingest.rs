@@ -265,18 +265,18 @@ async fn a_key_without_the_ingest_scope_or_no_key_is_refused_in_otlp_status(pool
     );
 }
 
-/// A dormant organization keeps what it holds and takes in nothing new: its
+/// A paused organization keeps what it holds and takes in nothing new: its
 /// export is refused whole, before its body is read, in OTLP's `Status` with
 /// the plan's own words, as a 402 an exporter drops rather than retries.
 #[sqlx::test]
-async fn a_dormant_organizations_export_is_refused_whole(pool: PgPool) {
+async fn a_paused_organizations_export_is_refused_whole(pool: PgPool) {
     let (organization, project) = (OrganizationId::new(), ProjectId::new());
     let auth = AuthStub::new();
     auth.key(INGEST_KEY, &organization, &project, &[ApiKeyScope::Ingest]);
     let state = common::state_with_entitlements(
         &pool,
         auth,
-        Arc::new(common::DormantOrganization(organization)),
+        Arc::new(common::PausedOrganization(organization)),
     );
     let lane = Lane {
         app: router(state.clone()),
@@ -295,12 +295,12 @@ async fn a_dormant_organizations_export_is_refused_whole(pool: PgPool) {
     assert_eq!(status, StatusCode::PAYMENT_REQUIRED);
     assert!(
         headers.get(header::RETRY_AFTER).is_none(),
-        "a dormant organization is not asked to retry"
+        "a paused organization is not asked to retry"
     );
     let answer = json_body(&answer);
     assert_eq!(answer["code"], 9, "{answer}");
     assert_eq!(
-        answer["message"], "/errors/plan/limit-reached: This organization is dormant.",
+        answer["message"], "/errors/plan/limit-reached: This organization is paused.",
         "{answer}"
     );
 }
