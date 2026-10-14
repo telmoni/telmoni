@@ -15,7 +15,9 @@ function Input({ className, type, ...props }: React.ComponentProps<"input">) {
         "disabled:cursor-not-allowed disabled:opacity-50",
         "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
         "aria-invalid:border-destructive aria-invalid:ring-destructive/20",
-        "dark:bg-input/30 dark:border-transparent dark:aria-invalid:ring-destructive/40",
+        // Outlined in the dark theme too, as the select's trigger is: a
+        // filled field with no edge reads as a panel, not a place to type.
+        "dark:border-border dark:bg-input/30 dark:aria-invalid:ring-destructive/40",
         className
       )}
       {...props}
