@@ -4,7 +4,9 @@
 //! `/start`, heard by its `/checkpoint`s, which hold it to its monitor's
 //! step cap, and ended by a bare ping or a `/fail`, when it waits in the
 //! outbox as a finished span and the monitor's state and next due time
-//! follow; the run a ping names by `rid`; a body is dropped and said so, the
+//! follow, or as `error` by the next ping that finds it never said it ended;
+//! the run a ping names by `rid`; every run's ceiling, and the stall timeout
+//! a discovered monitor is given; a body is dropped and said so, the
 //! query held to numbers, the methods and paths to the lane's; past the
 //! plan's limit, or past the monitors nobody has set up that a project may
 //! hold, nothing is made and the ping is refused with the bound's words; a
@@ -275,6 +277,20 @@ async fn open_runs(pool: &PgPool, project: &ProjectId) -> Vec<(Uuid, i32, f64)> 
     .expect("read a project's open runs")
 }
 
+/// Each open run's ceiling, in seconds past its start, oldest first.
+async fn ceilings_of(pool: &PgPool, project: &ProjectId) -> Vec<i64> {
+    sqlx::query_scalar(
+        "SELECT CAST(extract(epoch FROM ends_by - started_at) AS BIGINT)
+           FROM telemetry.open_runs
+          WHERE project_id = $1
+          ORDER BY started_at, id",
+    )
+    .bind(project)
+    .fetch_all(pool)
+    .await
+    .expect("read a project's open runs' ceilings")
+}
+
 /// What waits in the project's outbox, oldest first: each row's kind and
 /// payload.
 async fn outbox_of(pool: &PgPool, project: &ProjectId) -> Vec<(String, Value)> {
@@ -357,6 +373,11 @@ async fn a_ping_to_a_slug_no_monitor_has_makes_it_and_tells_the_owner_once(pool:
     assert_eq!(monitor["agent"], "nightly-report");
     assert!(monitor["schedule"].is_null());
     assert!(monitor["next_due_at"].is_null());
+    assert_eq!(
+        monitor["bounds"]["stall_after_s"], 3600,
+        "an hour's stall timeout until its owner sets one, so its runs are visited"
+    );
+    assert!(monitor["bounds"]["max_steps"].is_null());
 
     // Recorded on the chain as made by the key, which the row names.
     let chain = recorded(&pool, &p.organization).await;
@@ -530,8 +551,11 @@ async fn a_run_is_opened_heard_and_ended_by_its_pings(pool: PgPool) {
     assert_eq!(p.monitor("hourly-sync").await["state"], "healthy");
 
     // `?rid=` names the run when runs overlap: a `/start` sent again for it
-    // is heard, not a second run; a bare `/start` beside it opens another;
-    // and each ending ping ends the run it names, or the newest.
+    // is heard, not a second run; a `/start` naming another opens it
+    // beside; a bare `/start` ends them both as `error`, since a run that
+    // never said it ended is one that crashed, and opens its own; and each
+    // ending ping ends the run it names, or the newest with its verdict and
+    // whatever else is open as `error`.
     let first = rid();
     p.ping_ok(&format!("/{key}/hourly-sync/start?rid={first}"))
         .await;
@@ -542,17 +566,47 @@ async fn a_run_is_opened_heard_and_ended_by_its_pings(pool: PgPool) {
         "/{key}/hourly-sync/checkpoint?rid={first}&steps=1"
     ))
     .await;
-    p.ping_ok(&format!("/{key}/hourly-sync/start")).await;
+    let second = rid();
+    p.ping_ok(&format!("/{key}/hourly-sync/start?rid={second}"))
+        .await;
     let runs = open_runs(&pool, &p.project).await;
-    assert_eq!(runs.len(), 2);
+    assert_eq!(runs.len(), 2, "runs that name themselves overlap");
     assert_eq!(runs[0].0.to_string(), first);
     assert_eq!(runs[0].1, 1);
-    p.ping_ok(&format!("/{key}/hourly-sync?rid={first}")).await;
+    p.ping_ok(&format!("/{key}/hourly-sync/start")).await;
     let runs = open_runs(&pool, &p.project).await;
-    assert_eq!(runs.len(), 1);
+    assert_eq!(runs.len(), 1, "a bare start ended the runs it found open");
     assert_ne!(runs[0].0.to_string(), first);
+    let finished = finished_runs(&pool, &p.project).await;
+    assert_eq!(finished.len(), 5);
+    assert_eq!(finished[3]["run_id"].as_str(), Some(first.as_str()));
+    assert_eq!(finished[3]["status"], "error");
+    assert_eq!(finished[3]["steps"], 1);
+    assert!(finished[3]["exit_code"].is_null());
+    assert_eq!(finished[4]["run_id"].as_str(), Some(second.as_str()));
+    assert_eq!(finished[4]["status"], "error");
+    assert_eq!(p.monitor("hourly-sync").await["state"], "running");
+    let fourth = rid();
+    p.ping_ok(&format!("/{key}/hourly-sync/start?rid={fourth}"))
+        .await;
+    assert_eq!(open_runs(&pool, &p.project).await.len(), 2);
     p.ping_ok(&format!("/{key}/hourly-sync")).await;
-    assert!(open_runs(&pool, &p.project).await.is_empty());
+    assert!(
+        open_runs(&pool, &p.project).await.is_empty(),
+        "a bare end ping ends them all"
+    );
+    let finished = finished_runs(&pool, &p.project).await;
+    assert_eq!(finished.len(), 7);
+    assert_eq!(
+        finished[5]["status"], "error",
+        "the run the ping did not mean"
+    );
+    assert_eq!(finished[6]["run_id"].as_str(), Some(fourth.as_str()));
+    assert_eq!(
+        finished[6]["status"], "ok",
+        "the newest, which the ping meant"
+    );
+    assert_eq!(p.monitor("hourly-sync").await["state"], "healthy");
     let (status, _) = p
         .ping(&format!("/{key}/hourly-sync/start?rid={}", "not-a-run"))
         .await;
@@ -569,7 +623,104 @@ async fn a_run_is_opened_heard_and_ended_by_its_pings(pool: PgPool) {
     let monitor = p.monitor("hourly-sync").await;
     assert_eq!(monitor["state"], "paused");
     assert!(monitor["next_due_at"].is_null());
-    assert_eq!(finished_runs(&pool, &p.project).await.len(), 6);
+    assert_eq!(finished_runs(&pool, &p.project).await.len(), 8);
+}
+
+/// A run that never said it ended — a job that crashed after its `/start`,
+/// a `/checkpoint` that came after its run's end — is ended `error` with no
+/// exit code by the next ping that finds it: a `/start` naming no run ends
+/// what its monitor still has open, and an end ping naming none ends the
+/// newest with its verdict and the rest the same way; a `/start` naming a
+/// run leaves the others be. Every run carries its ceiling: four times what
+/// its monitor expects, or a day.
+#[sqlx::test]
+async fn a_run_that_never_said_it_ended_is_ended_by_the_ping_after_it(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.make(json!({
+        "name": "Long batch",
+        "slug": "long-batch",
+        "expected_duration_s": 8 * 60 * 60,
+    }))
+    .await;
+
+    // The job crashed after its `/start`: the next `/start` ends that run,
+    // at the moment it was last heard — its start.
+    p.ping_ok(&format!("/{key}/long-batch/start")).await;
+    let crashed = open_runs(&pool, &p.project).await;
+    assert_eq!(crashed.len(), 1);
+    assert_eq!(
+        ceilings_of(&pool, &p.project).await,
+        [32 * 60 * 60],
+        "four times the expected duration"
+    );
+    p.ping_ok(&format!("/{key}/long-batch/start")).await;
+    let runs = open_runs(&pool, &p.project).await;
+    assert_eq!(runs.len(), 1);
+    assert_ne!(runs[0].0, crashed[0].0);
+    let finished = finished_runs(&pool, &p.project).await;
+    assert_eq!(finished.len(), 1);
+    assert_eq!(
+        finished[0]["run_id"].as_str().map(str::to_owned),
+        Some(crashed[0].0.to_string())
+    );
+    assert_eq!(finished[0]["status"], "error");
+    assert!(finished[0]["exit_code"].is_null());
+    assert!(finished[0]["steps"].is_null());
+    assert_eq!(finished[0]["started_at"], finished[0]["ended_at"]);
+    assert_eq!(p.monitor("long-batch").await["state"], "running");
+
+    // The run ends; a `/checkpoint` sent again after that — a retried curl
+    // — opens a run as a lost `/start` would, which nothing but the next
+    // ping ends: a `/fail` naming no run ends the newest with its verdict
+    // and that one, and the run a `/start` named beside it, as `error`.
+    p.ping_ok(&format!("/{key}/long-batch/checkpoint?steps=2"))
+        .await;
+    p.ping_ok(&format!("/{key}/long-batch")).await;
+    assert!(open_runs(&pool, &p.project).await.is_empty());
+    p.ping_ok(&format!("/{key}/long-batch/checkpoint?steps=5"))
+        .await;
+    let late = open_runs(&pool, &p.project).await;
+    assert_eq!(late.len(), 1);
+    assert_eq!(late[0].1, 5);
+    let named = rid();
+    p.ping_ok(&format!("/{key}/long-batch/start?rid={named}"))
+        .await;
+    let last = rid();
+    p.ping_ok(&format!("/{key}/long-batch/start?rid={last}"))
+        .await;
+    assert_eq!(
+        open_runs(&pool, &p.project).await.len(),
+        3,
+        "a start naming a run leaves the others be"
+    );
+    p.ping_ok(&format!("/{key}/long-batch/fail?exit_code=9"))
+        .await;
+    assert!(open_runs(&pool, &p.project).await.is_empty());
+    let finished = finished_runs(&pool, &p.project).await;
+    assert_eq!(finished.len(), 5, "{finished:?}");
+    assert_eq!(finished[1]["status"], "ok");
+    assert_eq!(finished[1]["steps"], 2);
+    assert_eq!(
+        finished[2]["run_id"].as_str().map(str::to_owned),
+        Some(late[0].0.to_string()),
+        "the late checkpoint's run, oldest of the abandoned"
+    );
+    assert_eq!(finished[2]["status"], "error");
+    assert_eq!(finished[2]["steps"], 5);
+    assert!(finished[2]["exit_code"].is_null());
+    assert_eq!(finished[3]["run_id"].as_str(), Some(named.as_str()));
+    assert_eq!(finished[3]["status"], "error");
+    assert!(finished[3]["exit_code"].is_null());
+    assert_eq!(finished[4]["run_id"].as_str(), Some(last.as_str()));
+    assert_eq!(finished[4]["status"], "error");
+    assert_eq!(finished[4]["exit_code"], 9);
+    assert_eq!(p.monitor("long-batch").await["state"], "failed");
+
+    // A monitor a ping made expects nothing: its runs' ceiling is a day.
+    p.ping_ok(&format!("/{key}/found-by-ping/start")).await;
+    assert_eq!(ceilings_of(&pool, &p.project).await, [24 * 60 * 60]);
 }
 
 #[sqlx::test]

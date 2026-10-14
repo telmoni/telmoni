@@ -854,6 +854,9 @@ pub struct OpenRunRow {
     pub ping_key_id: Option<Uuid>,
     pub started_at: DateTime<Utc>,
     pub last_heard_at: DateTime<Utc>,
+    /// When the run is over whatever it says: its ceiling, past which the
+    /// ticker ends it as `error`.
+    pub ends_by: DateTime<Utc>,
     pub steps: i32,
     pub input_tokens: i64,
     pub output_tokens: i64,
@@ -865,8 +868,8 @@ pub struct OpenRunRow {
 
 /// The columns an [`OpenRunRow`] is read from, in its order.
 const OPEN_RUN_COLUMNS: &str = "id, monitor_id, agent, source, ping_key_id, started_at, \
-     last_heard_at, steps, input_tokens, output_tokens, cost_usd, stall_after_s, max_steps, \
-     max_cost_usd";
+     last_heard_at, ends_by, steps, input_tokens, output_tokens, cost_usd, stall_after_s, \
+     max_steps, max_cost_usd";
 
 /// What opening a run writes.
 #[derive(Debug, Clone, Copy)]
@@ -876,6 +879,7 @@ pub struct OpenRunWrite<'a> {
     pub source: &'a str,
     pub ping_key_id: Option<Uuid>,
     pub started_at: DateTime<Utc>,
+    pub ends_by: DateTime<Utc>,
     pub steps: i32,
     pub cost_usd: f64,
     pub stall_after_s: Option<i32>,
@@ -928,9 +932,9 @@ pub async fn insert_open_run(
 ) -> sqlx::Result<OpenRunRow> {
     sqlx::query_as(&format!(
         "INSERT INTO telemetry.open_runs (id, project_id, organization_id, monitor_id, agent, \
-             source, ping_key_id, started_at, last_heard_at, steps, cost_usd, stall_after_s, \
-             max_steps, max_cost_usd)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, $13)
+             source, ping_key_id, started_at, last_heard_at, ends_by, steps, cost_usd, \
+             stall_after_s, max_steps, max_cost_usd)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, $13, $14)
          RETURNING {OPEN_RUN_COLUMNS}"
     ))
     .bind(id)
@@ -941,6 +945,7 @@ pub async fn insert_open_run(
     .bind(run.source)
     .bind(run.ping_key_id)
     .bind(run.started_at)
+    .bind(run.ends_by)
     .bind(run.steps)
     .bind(run.cost_usd)
     .bind(run.stall_after_s)
@@ -993,6 +998,26 @@ pub async fn close_open_run<B: HasProject>(
     .bind(project_id)
     .bind(id)
     .fetch_optional(tx.conn())
+    .await
+}
+
+/// Every open run of the monitor's, ended: their rows gone, and answered as
+/// they were, in no order. What a `/start` naming no run finds open, and
+/// what an end ping naming none finds beside the run it means: the one the
+/// ping means and runs that never said they ended.
+pub async fn close_open_runs<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    monitor_id: Uuid,
+) -> sqlx::Result<Vec<OpenRunRow>> {
+    sqlx::query_as(&format!(
+        "DELETE FROM telemetry.open_runs
+          WHERE project_id = $1 AND monitor_id = $2
+         RETURNING {OPEN_RUN_COLUMNS}"
+    ))
+    .bind(project_id)
+    .bind(monitor_id)
+    .fetch_all(tx.conn())
     .await
 }
 

@@ -72,6 +72,32 @@ const RUN_TAKEN: &str = "open_runs_pkey";
 /// every monitor of the organization; this counts the unset ones of one
 /// project, so it holds on a binary that sells nothing too.
 pub const NEW_MONITORS_MAX: i64 = 50;
+/// The stall timeout a monitor its first ping made is given, in seconds:
+/// an hour, so its runs are among the ones the ticker visits for silence
+/// and a job that crashes after its `/start` is seen, until its owner sets
+/// the real one. The monitor is held to nothing until then, as `new` is.
+pub const DISCOVERED_STALL_AFTER_S: i32 = 60 * 60;
+/// How long a run may stay open whatever it says: its monitor's expected
+/// duration [`RUN_CEILING_FACTOR`] times over, or [`RUN_CEILING_MIN_S`]
+/// where that is shorter or the monitor expects nothing. Past it the ticker
+/// ends the run as `error`, since a run that never ends is one that crashed
+/// before its end ping: the backstop under the stall timeout, which the
+/// owner tunes and a run without one has none of, so no row is left for
+/// good.
+pub const RUN_CEILING_FACTOR: i32 = 4;
+pub const RUN_CEILING_MIN_S: i64 = 24 * 60 * 60;
+
+/// When a run opened at `started_at` is over whatever it says
+/// ([`RUN_CEILING_FACTOR`]), for its row's `ends_by`.
+#[must_use]
+pub fn ends_by(started_at: DateTime<Utc>, expected_duration_s: Option<i32>) -> DateTime<Utc> {
+    let ceiling = expected_duration_s
+        .map_or(RUN_CEILING_MIN_S, |expected| {
+            i64::from(expected) * i64::from(RUN_CEILING_FACTOR)
+        })
+        .max(RUN_CEILING_MIN_S);
+    started_at + chrono::Duration::seconds(ceiling)
+}
 
 /// Which ping came, and so what it means of its run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -525,7 +551,7 @@ async fn discover_monitor(
             timezone: DEFAULT_TIMEZONE,
             grace_s: None,
             expected_duration_s: None,
-            stall_after_s: None,
+            stall_after_s: Some(DISCOVERED_STALL_AFTER_S),
             max_steps: None,
             max_cost_usd: None,
             next_due_at: None,
@@ -602,7 +628,13 @@ enum RunEvent {
 
 /// The run recorded: opened, heard, or ended and handed to the outbox as a
 /// finished span, once — an end that finds the run ended beside it hands
-/// over nothing. Answers the run's id and what happened to it.
+/// over nothing. A run that never said it ended — a job that crashed after
+/// its `/start`, a `/checkpoint` that came after its run's end — is ended
+/// `error` by the next ping that finds it ([`abandon`]): a `/start` naming
+/// no run ends what its monitor still has open, and an end ping naming none
+/// ends the newest with its verdict and the rest the same way; a ping
+/// naming a run leaves the others be, since runs that overlap name
+/// themselves. Answers the run's id and what happened to it.
 async fn record(
     key: &ResolvedPingKey,
     monitor: &MonitorRow,
@@ -620,15 +652,21 @@ async fn record(
         None => db::newest_open_run(tx, project_id, monitor.id).await?,
     };
     match report {
-        Report::Start => match open {
+        Report::Start => match (open, progress.rid) {
             // A `/start` sent again for the run it named — a retried curl —
             // is heard, not a second run.
-            Some(run) if progress.rid.is_some() => {
+            (Some(run), Some(_)) => {
                 db::hear_open_run(tx, project_id, run.id, now, None, None).await?;
                 Ok((run.id, RunEvent::Heard))
             }
-            _ => {
-                let id = progress.rid.unwrap_or_else(Uuid::new_v4);
+            (_, rid) => {
+                // The monitor's next run: whatever it still has open never
+                // said it ended.
+                if rid.is_none() {
+                    let stale = db::close_open_runs(tx, project_id, monitor.id).await?;
+                    abandon(key, monitor, stale, now, tx).await?;
+                }
+                let id = rid.unwrap_or_else(Uuid::new_v4);
                 let run = open_run(key, monitor, id, now, 0, 0.0, tx).await?;
                 Ok((run.id, RunEvent::Opened))
             }
@@ -676,24 +714,31 @@ async fn record(
             } else {
                 SpanStatus::Error
             };
-            let (run_id, started_at, steps, cost_usd) = match open {
+            let (run_id, started_at, steps, cost_usd) = match (open, progress.rid) {
                 // The row's delete is the one record of the run's end: a
                 // second end ping racing this one finds the row gone, files
                 // no second run and leaves the monitor as the first left it.
-                Some(run) => match db::close_open_run(tx, project_id, run.id).await? {
-                    Some(run) => (
-                        run.id,
-                        run.started_at,
-                        (run.steps > 0).then_some(run.steps),
-                        (run.cost_usd > 0.0).then_some(run.cost_usd),
-                    ),
+                (Some(run), Some(_)) => match db::close_open_run(tx, project_id, run.id).await? {
+                    Some(run) => ended(run),
                     None => return Ok((run.id, RunEvent::Gone)),
                 },
+                // The newest is the run this ping means; the rest never said
+                // they ended.
+                (Some(run), None) => {
+                    let mut closed = db::close_open_runs(tx, project_id, monitor.id).await?;
+                    closed.sort_by(|a, b| b.started_at.cmp(&a.started_at).then(a.id.cmp(&b.id)));
+                    if closed.is_empty() {
+                        return Ok((run.id, RunEvent::Gone));
+                    }
+                    let newest = closed.remove(0);
+                    abandon(key, monitor, closed, now, tx).await?;
+                    ended(newest)
+                }
                 // No run open: one of no duration is recorded, under the
                 // `rid` given, so a retried end ping whose first copy got
                 // through files a second run of the same id — which the
                 // outbox drops before it reaches `spans`.
-                None => (progress.rid.unwrap_or_else(Uuid::new_v4), now, None, None),
+                (None, rid) => (rid.unwrap_or_else(Uuid::new_v4), now, None, None),
             };
             let finished = FinishedRun {
                 run_id,
@@ -715,6 +760,56 @@ async fn record(
             Ok((run_id, event))
         }
     }
+}
+
+/// What a run's row gives its finished span: its id, its start, and its
+/// steps and spend where it reported any.
+fn ended(run: OpenRunRow) -> (Uuid, DateTime<Utc>, Option<i32>, Option<f64>) {
+    (
+        run.id,
+        run.started_at,
+        (run.steps > 0).then_some(run.steps),
+        (run.cost_usd > 0.0).then_some(run.cost_usd),
+    )
+}
+
+/// Runs that never said they ended — a job that crashed after its `/start`,
+/// a `/checkpoint` that came after its run's end — ended `error` with no
+/// exit code, each handed to the outbox as a finished span that ends when
+/// the run was last heard, oldest first; their rows are gone already.
+/// Nothing else in the lane would end them: the ticker's scans, for
+/// silence and for a run past its ceiling ([`ends_by`]), are the backstop.
+async fn abandon(
+    key: &ResolvedPingKey,
+    monitor: &MonitorRow,
+    mut runs: Vec<OpenRunRow>,
+    now: DateTime<Utc>,
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+) -> Result<(), TelmoniError> {
+    runs.sort_by(|a, b| a.started_at.cmp(&b.started_at).then(a.id.cmp(&b.id)));
+    for run in runs {
+        let ended_at = run.last_heard_at;
+        let (run_id, started_at, steps, cost_usd) = ended(run);
+        let finished = FinishedRun {
+            run_id,
+            agent: monitor.agent.clone(),
+            started_at,
+            ended_at,
+            received_at: now,
+            status: SpanStatus::Error,
+            exit_code: None,
+            steps,
+            cost_usd,
+        };
+        outbox::enqueue_run(tx, &key.project_id, &key.organization_id, &finished).await?;
+        tracing::info!(
+            project_id = %key.project_id,
+            monitor_id = %monitor.id,
+            run_id = %run_id,
+            "ping: a run that never said it ended is ended as error by the ping after it"
+        );
+    }
+    Ok(())
 }
 
 /// A run opened under `id`, held to its monitor's bounds — a `curl` run
@@ -739,6 +834,7 @@ async fn open_run(
             source: SOURCE,
             ping_key_id: Some(key.id),
             started_at: now,
+            ends_by: ends_by(now, monitor.expected_duration_s),
             steps,
             cost_usd,
             stall_after_s: monitor.stall_after_s,
@@ -817,6 +913,21 @@ fn state_after(current: MonitorState, event: RunEvent) -> Option<MonitorState> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A run's ceiling is a day, or four times what its monitor expects
+    /// where that is longer.
+    #[test]
+    fn a_runs_ceiling_is_a_day_or_four_times_what_is_expected() {
+        let now = Utc::now();
+        let day = chrono::Duration::hours(24);
+        assert_eq!(ends_by(now, None), now + day);
+        assert_eq!(ends_by(now, Some(60)), now + day);
+        assert_eq!(ends_by(now, Some(6 * 60 * 60)), now + day);
+        assert_eq!(
+            ends_by(now, Some(8 * 60 * 60)),
+            now + chrono::Duration::hours(32)
+        );
+    }
 
     fn query(pairs: &[(&str, &str)]) -> Query<PingQuery> {
         let mut query = PingQuery::default();

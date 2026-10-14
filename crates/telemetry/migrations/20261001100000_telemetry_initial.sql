@@ -283,11 +283,16 @@ GRANT UPDATE (organization_id) ON telemetry.ping_keys TO telemetry_maintenance;
 -- A row per run still going: opened by a `/start` or a `/checkpoint` ping —
 -- and, once ingest opens runs, by a run's `telmoni.run.start` — heard by every
 -- ping after it, and gone when the run ends, its finished span handed to the
--- outbox below. What it holds is what the ticker reads to see a run gone
--- quiet or past a bound: when it started, when it was last heard, its steps
--- and spend so far, and the bounds it is held to — its monitor's, for a run
--- reported by pings, which declare none. A run goes with its monitor. Filed
--- under the project and its organization both, as a monitor is.
+-- outbox below. A run that never said it ended — a job that crashed after its
+-- `/start`, a `/checkpoint` that came after its run's end — is ended `error`
+-- by the next ping that finds it: a `/start` naming no run ends what its
+-- monitor still has open, and an end ping naming none ends the newest with
+-- its verdict and the rest the same way. What it holds is what the ticker
+-- reads to see a run gone quiet, past a bound or past its ceiling: when it
+-- started, when it was last heard, when it is over whatever it says, its
+-- steps and spend so far, and the bounds it is held to — its monitor's, for a
+-- run reported by pings, which declare none. A run goes with its monitor.
+-- Filed under the project and its organization both, as a monitor is.
 CREATE TABLE telemetry.open_runs (
     -- The run's id: the `rid` a ping names, or one minted for it, and the
     -- `run_id` of its span once it ends.
@@ -303,6 +308,12 @@ CREATE TABLE telemetry.open_runs (
     ping_key_id     UUID,
     started_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_heard_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- When the run is over whatever it says: its monitor's expected duration
+    -- four times over, or a day where that is shorter or nothing is expected
+    -- (`handler/pings.rs`, `ends_by`). The ticker ends a run still open past
+    -- it as `error`, since a run that never ends is one that crashed before
+    -- its end ping.
+    ends_by         TIMESTAMPTZ NOT NULL,
     steps           INTEGER     NOT NULL DEFAULT 0,
     input_tokens    BIGINT      NOT NULL DEFAULT 0,
     output_tokens   BIGINT      NOT NULL DEFAULT 0,
@@ -325,8 +336,13 @@ CREATE TABLE telemetry.open_runs (
 CREATE INDEX open_runs_monitor_idx ON telemetry.open_runs (monitor_id, started_at DESC);
 CREATE INDEX open_runs_project_idx ON telemetry.open_runs (project_id);
 -- The ticker's scan for silence: the runs held to a stall timeout, by when
--- they were last heard.
+-- they were last heard — every run under a monitor its first ping made has
+-- one, the lane's default, and one under a saved monitor its owner's or
+-- none.
 CREATE INDEX open_runs_heard_idx ON telemetry.open_runs (last_heard_at) WHERE stall_after_s IS NOT NULL;
+-- The ticker's scan for runs past their ceiling, which every run has, so a
+-- row no stall timeout covers is visited all the same.
+CREATE INDEX open_runs_ends_by_idx ON telemetry.open_runs (ends_by);
 
 ALTER TABLE telemetry.open_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE telemetry.open_runs FORCE ROW LEVEL SECURITY;
