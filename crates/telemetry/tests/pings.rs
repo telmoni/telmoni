@@ -881,6 +881,86 @@ async fn a_finished_run_reaches_clickhouse_through_the_outbox(pool: PgPool) {
     );
 }
 
+/// A run reaches `spans` once, however many rows carry it: an end ping sent
+/// again once its first copy got through files a second run of no duration
+/// under the same `rid`, and two such rows may wait in one batch; the loop
+/// drops each copy before the insert rather than write it twice, and
+/// answers every ping `OK`, since the run did end.
+#[sqlx::test]
+async fn a_run_ended_twice_is_one_row_of_spans(pool: PgPool) {
+    let Some(clickhouse) =
+        common::clickhouse_or_skip("a_run_ended_twice_is_one_row_of_spans").await
+    else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let (organization, project) = (OrganizationId::new(), ProjectId::new());
+    let auth = AuthStub::probing(&pool);
+    auth.seat(
+        OWNER,
+        &organization,
+        &project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let notices = NoticeLog::new();
+    let state = common::state_with_stores_and_notices(&pool, auth, notices.clone());
+    let p = Project::over(state, notices, organization, project);
+    let key = p.mint().await;
+    let spans = || async { common::rows_of(&clickhouse.store, &p.project).await.0 };
+
+    let run = rid();
+    p.ping_ok(&format!("/{key}/nightly-report/start?rid={run}"))
+        .await;
+    p.ping_ok(&format!("/{key}/nightly-report?rid={run}")).await;
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled { landed: 2, held: 0 },
+        "the notice and the run's row"
+    );
+    common::eventually("the run's row is in ClickHouse", || async {
+        spans().await == 1
+    })
+    .await;
+
+    // The end ping sent again, its first copy through: a run of no duration
+    // under the same id waits in the outbox, and is dropped as landed.
+    p.ping_ok(&format!("/{key}/nightly-report?rid={run}")).await;
+    assert_eq!(finished_runs(&pool, &p.project).await.len(), 1);
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled { landed: 1, held: 0 }
+    );
+    assert!(outbox_of(&pool, &p.project).await.is_empty());
+    assert_eq!(spans().await, 1, "a retried end ping wrote a second row");
+
+    // Two copies in one batch: the older is written, the other dropped.
+    let again = rid();
+    p.ping_ok(&format!(
+        "/{key}/nightly-report/fail?rid={again}&exit_code=3"
+    ))
+    .await;
+    p.ping_ok(&format!(
+        "/{key}/nightly-report/fail?rid={again}&exit_code=3"
+    ))
+    .await;
+    assert_eq!(finished_runs(&pool, &p.project).await.len(), 2);
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled { landed: 2, held: 0 }
+    );
+    assert!(outbox_of(&pool, &p.project).await.is_empty());
+    common::eventually("the second run's row is in ClickHouse", || async {
+        spans().await == 2
+    })
+    .await;
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled::default()
+    );
+    assert_eq!(spans().await, 2, "a copy in one batch wrote a second row");
+}
+
 #[sqlx::test]
 async fn the_purges_and_a_move_take_the_keys_runs_and_outbox_rows_with_the_project(pool: PgPool) {
     apply_audit_migrations(&pool).await;

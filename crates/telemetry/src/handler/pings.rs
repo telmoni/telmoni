@@ -596,10 +596,13 @@ enum RunEvent {
     OverBound,
     EndedOk,
     EndedError,
+    /// Ended beside this ping, by another: nothing of the monitor's to change.
+    Gone,
 }
 
 /// The run recorded: opened, heard, or ended and handed to the outbox as a
-/// finished span. Answers the run's id and what happened to it.
+/// finished span, once — an end that finds the run ended beside it hands
+/// over nothing. Answers the run's id and what happened to it.
 async fn record(
     key: &ResolvedPingKey,
     monitor: &MonitorRow,
@@ -674,16 +677,22 @@ async fn record(
                 SpanStatus::Error
             };
             let (run_id, started_at, steps, cost_usd) = match open {
-                Some(run) => {
-                    db::close_open_run(tx, project_id, run.id).await?;
-                    (
+                // The row's delete is the one record of the run's end: a
+                // second end ping racing this one finds the row gone, files
+                // no second run and leaves the monitor as the first left it.
+                Some(run) => match db::close_open_run(tx, project_id, run.id).await? {
+                    Some(run) => (
                         run.id,
                         run.started_at,
                         (run.steps > 0).then_some(run.steps),
                         (run.cost_usd > 0.0).then_some(run.cost_usd),
-                    )
-                }
-                // No run open: one of no duration is recorded.
+                    ),
+                    None => return Ok((run.id, RunEvent::Gone)),
+                },
+                // No run open: one of no duration is recorded, under the
+                // `rid` given, so a retried end ping whose first copy got
+                // through files a second run of the same id — which the
+                // outbox drops before it reaches `spans`.
                 None => (progress.rid.unwrap_or_else(Uuid::new_v4), now, None, None),
             };
             let finished = FinishedRun {
@@ -790,21 +799,19 @@ async fn settle(
 }
 
 /// The state a monitor is put in by what its run did, or `None` where its
-/// state is its owner's to set. Past a bound, a monitor stays past it while
-/// the run goes on, however many checkpoints follow.
+/// state is its owner's to set, or where the run ended beside this ping and
+/// the other decided it. Past a bound, a monitor stays past it while the run
+/// goes on, however many checkpoints follow.
 fn state_after(current: MonitorState, event: RunEvent) -> Option<MonitorState> {
-    match current {
-        MonitorState::New | MonitorState::Paused => None,
-        current => Some(match event {
-            RunEvent::Opened | RunEvent::Heard if current == MonitorState::OverBound => {
-                MonitorState::OverBound
-            }
-            RunEvent::Opened | RunEvent::Heard => MonitorState::Running,
-            RunEvent::OverBound => MonitorState::OverBound,
-            RunEvent::EndedOk => MonitorState::Healthy,
-            RunEvent::EndedError => MonitorState::Failed,
-        }),
-    }
+    let state = match (current, event) {
+        (MonitorState::New | MonitorState::Paused, _) | (_, RunEvent::Gone) => return None,
+        (MonitorState::OverBound, RunEvent::Opened | RunEvent::Heard) => MonitorState::OverBound,
+        (_, RunEvent::Opened | RunEvent::Heard) => MonitorState::Running,
+        (_, RunEvent::OverBound) => MonitorState::OverBound,
+        (_, RunEvent::EndedOk) => MonitorState::Healthy,
+        (_, RunEvent::EndedError) => MonitorState::Failed,
+    };
+    Some(state)
 }
 
 #[cfg(test)]
@@ -924,8 +931,22 @@ mod tests {
         assert_eq!(state_after(OverBound, EndedOk), Some(Healthy));
         assert_eq!(state_after(Running, EndedError), Some(Failed));
         assert_eq!(state_after(Failed, EndedOk), Some(Healthy));
+        for current in [Healthy, Running, OverBound, Failed, Late] {
+            assert_eq!(
+                state_after(current, RunEvent::Gone),
+                None,
+                "{current:?}: the run ended beside this ping, and the other decided it"
+            );
+        }
         for owners in [New, Paused] {
-            for event in [Opened, Heard, RunEvent::OverBound, EndedOk, EndedError] {
+            for event in [
+                Opened,
+                Heard,
+                RunEvent::OverBound,
+                EndedOk,
+                EndedError,
+                RunEvent::Gone,
+            ] {
                 assert_eq!(state_after(owners, event), None, "{owners:?} {event:?}");
             }
         }

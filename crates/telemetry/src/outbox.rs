@@ -3,8 +3,16 @@
 //! `spans`, and a notice for a project's feed is handed to notifications
 //! through the seam; each is written as a row here in the transaction that
 //! ends the run or makes the monitor, so a monitor is never late because
-//! ClickHouse was down, and nothing is told twice: the seam answers a
-//! replayed dedup key with its first row and queues nothing.
+//! ClickHouse was down. A notice is never told twice: the seam answers a
+//! replayed dedup key with its first row and queues nothing. A run is
+//! written once but for a sliver: `spans` is a plain `MergeTree`, read
+//! without `FINAL`, which keeps every copy it is given, so before each insert
+//! the loop reads which of the batch's runs the table holds already and
+//! drops those rows as landed — a batch leased again after a loop died
+//! between its insert and its delete, a retried end ping that filed a second
+//! run under the same `rid`, two end pings for one run — and writes no run
+//! twice within one batch. What is left is two replicas landing one run
+//! inside one insert's time, which no read can see.
 //!
 //! The loop is one every replica runs, on the delivery loop's pattern: each
 //! tick leases rows across every tenant, `FOR UPDATE SKIP LOCKED` under a
@@ -17,7 +25,7 @@
 //! ping's row unwritten, so the process exits and the restart is the
 //! recovery.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -63,6 +71,28 @@ const DEPTH_EVERY_TICKS: u64 = 60 / POLL_SECS;
 pub const KIND_SPAN: &str = "span";
 /// The `kind` of a row carrying a notice.
 pub const KIND_NOTICE: &str = "notice";
+
+/// How far back the loop looks for a run `spans` holds already: a double
+/// comes within minutes of its first copy — a retried ping, a batch leased
+/// again after two minutes, a row held for an hour at the outside — so a day
+/// bounds the read to the partitions it needs, and a crontab line that
+/// reuses one `rid` names one run a day.
+const HELD_RUNS_WINDOW_SECS: i64 = 24 * 60 * 60;
+
+/// Which of a batch's runs `spans` holds already, by project and run id,
+/// among the rows that arrived since `since`.
+const HELD_RUNS: &str = "SELECT project_id, run_id FROM telemetry.spans \
+     WHERE project_id IN {projects:Array(String)} \
+       AND run_id IN {runs:Array(UUID)} \
+       AND received_at >= {since:DateTime64(6, 'UTC')}";
+
+/// A run `spans` holds, as the read answers it.
+#[derive(Debug, clickhouse::Row, Deserialize)]
+struct HeldRun {
+    project_id: String,
+    #[serde(with = "clickhouse::serde::uuid")]
+    run_id: Uuid,
+}
 
 /// A run that ended, as its row carries it until it is a row of `spans`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -197,7 +227,7 @@ pub async fn enqueue_notice(
 /// What one tick, or one batch, came to.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Settled {
-    /// Rows that landed and are gone.
+    /// Rows that landed, or carried a run landed already, and are gone.
     pub landed: u32,
     /// Rows that did not, held for their next try.
     pub held: u32,
@@ -309,30 +339,30 @@ fn retry_wait(attempts: i32) -> i64 {
         .min(RETRY_CEILING_SECS)
 }
 
-/// The batch's finished runs, as rows of `spans` in one insert, and the
-/// organization's open consoles told of them once it holds them.
-async fn land_runs(
-    state: &Arc<AppState>,
-    rows: Vec<OutboxRow>,
-    landed: &mut Vec<Uuid>,
-    held: &mut Vec<(Uuid, i32)>,
-) {
-    let mut spans = Vec::with_capacity(rows.len());
-    let mut ids = Vec::with_capacity(rows.len());
-    let mut nudges: BTreeMap<(String, String), Vec<Uuid>> = BTreeMap::new();
+/// A finished run as its row carried it, with what the row says of it.
+struct QueuedRun {
+    id: Uuid,
+    attempts: i32,
+    project_id: ProjectId,
+    organization_id: OrganizationId,
+    run: FinishedRun,
+}
+
+/// The batch's finished runs, read from their rows, oldest row first. A row
+/// no version of this code wrote is held and said so, since dropping it
+/// would lose a run in silence.
+fn parse_runs(rows: Vec<OutboxRow>, held: &mut Vec<(Uuid, i32)>) -> Vec<QueuedRun> {
+    let mut runs = Vec::with_capacity(rows.len());
     for row in rows {
         match serde_json::from_value::<FinishedRun>(row.payload) {
-            Ok(run) => {
-                nudges
-                    .entry((row.organization_id.to_string(), row.project_id.to_string()))
-                    .or_default()
-                    .push(run.run_id);
-                spans.push(run.row(&row.project_id));
-                ids.push((row.id, row.attempts));
-            }
+            Ok(run) => runs.push(QueuedRun {
+                id: row.id,
+                attempts: row.attempts,
+                project_id: row.project_id,
+                organization_id: row.organization_id,
+                run,
+            }),
             Err(error) => {
-                // A row no version of this code wrote: held and said so,
-                // since dropping it would lose a run in silence.
                 tracing::error!(
                     outbox_id = %row.id,
                     error = %error,
@@ -341,6 +371,66 @@ async fn land_runs(
                 held.push((row.id, row.attempts));
             }
         }
+    }
+    // A row's id is its clock, so the oldest copy of a run is the one
+    // written, whichever order the lease took them in.
+    runs.sort_by_key(|queued| queued.id);
+    runs
+}
+
+/// The batch's finished runs, as rows of `spans` in one insert — but for the
+/// runs the table holds already, dropped as landed rather than written twice
+/// ([`held_runs`]) — and the organization's open consoles told of what
+/// landed. A read that fails holds the whole batch, as an insert that fails
+/// does.
+async fn land_runs(
+    state: &Arc<AppState>,
+    rows: Vec<OutboxRow>,
+    landed: &mut Vec<Uuid>,
+    held: &mut Vec<(Uuid, i32)>,
+) {
+    let runs = parse_runs(rows, held);
+    if runs.is_empty() {
+        return;
+    }
+    let mut written = match held_runs(state, &runs).await {
+        Ok(written) => written,
+        Err(error) => {
+            // ⚠ The error's text can carry ClickHouse's own message: its
+            // kind alone is logged.
+            let kind = store::error_kind(&error);
+            tracing::warn!(
+                kind,
+                rows = runs.len(),
+                "telemetry outbox: ClickHouse did not say which runs it holds; the rows are held"
+            );
+            held.extend(runs.iter().map(|queued| (queued.id, queued.attempts)));
+            return;
+        }
+    };
+    let mut spans = Vec::with_capacity(runs.len());
+    let mut ids = Vec::with_capacity(runs.len());
+    let mut nudges: BTreeMap<(String, String), Vec<Uuid>> = BTreeMap::new();
+    for queued in runs {
+        if !written.insert((queued.project_id.to_string(), queued.run.run_id)) {
+            tracing::info!(
+                outbox_id = %queued.id,
+                project_id = %queued.project_id,
+                run_id = %queued.run.run_id,
+                "telemetry outbox: a run spans holds already; its row is dropped, not written twice"
+            );
+            landed.push(queued.id);
+            continue;
+        }
+        nudges
+            .entry((
+                queued.organization_id.to_string(),
+                queued.project_id.to_string(),
+            ))
+            .or_default()
+            .push(queued.run.run_id);
+        spans.push(queued.run.row(&queued.project_id));
+        ids.push((queued.id, queued.attempts));
     }
     if spans.is_empty() {
         return;
@@ -372,6 +462,49 @@ async fn land_runs(
             held.extend(ids);
         }
     }
+}
+
+/// Which of the batch's runs `spans` holds already, by project and run id,
+/// among the rows that arrived within [`HELD_RUNS_WINDOW_SECS`] of the
+/// batch's earliest: read before the insert, under the row policy as every
+/// read is, so a copy is dropped rather than written. The insert that
+/// follows sees what the read saw, since every insert is waited for.
+async fn held_runs(
+    state: &AppState,
+    runs: &[QueuedRun],
+) -> clickhouse::error::Result<HashSet<(String, Uuid)>> {
+    let mut projects: Vec<ProjectId> = Vec::new();
+    for queued in runs {
+        if !projects.contains(&queued.project_id) {
+            projects.push(queued.project_id.clone());
+        }
+    }
+    let Some(projects) = store::Projects::of(projects) else {
+        return Ok(HashSet::new());
+    };
+    let run_ids: Vec<Uuid> = runs
+        .iter()
+        .map(|queued| queued.run.run_id)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let since = runs
+        .iter()
+        .map(|queued| queued.run.received_at)
+        .min()
+        .unwrap_or_else(Utc::now)
+        - chrono::Duration::seconds(HELD_RUNS_WINDOW_SECS);
+    let held: Vec<HeldRun> = state
+        .store
+        .read(&projects, HELD_RUNS)
+        .param("runs", &run_ids)
+        .param("since", since.format("%Y-%m-%d %H:%M:%S%.6f").to_string())
+        .fetch_all()
+        .await?;
+    Ok(held
+        .into_iter()
+        .map(|run| (run.project_id, run.run_id))
+        .collect())
 }
 
 /// One notice handed through the seam, under its dedup key.
