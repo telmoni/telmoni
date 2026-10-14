@@ -52,6 +52,7 @@ events.
 | Permission | Owner | Admin | Member |
 |---|---|---|---|
 | View project overview and resources | Yes | Yes | Yes |
+| Read the project's notices on its Overview, and mark them read for everyone on it | Yes | Yes | Yes |
 | Open the project's [saved views](/docs/workspace/traces#saved-views) of its traces | Yes | Yes | Yes |
 | Save, rename, and delete saved views | Yes | Yes | No |
 | View API keys (names and dates, never the raw key) | Yes | Yes | Yes |
@@ -77,7 +78,9 @@ events.
   delete or transfer the project.
 - **Member**: Read-only access to project resources. Can inspect active
   connectors, delivery logs, and API key metadata (name, creation date, last
-  used date), and open the project's saved views. Cannot view the project audit log and cannot mutate any resources.
+  used date), and open the project's saved views. Cannot view the project
+  audit log, and changes nothing but whether the project's notices are marked
+  read, which is the same for everyone on the project.
 
 ## What a refusal tells you
 
