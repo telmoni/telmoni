@@ -1,4 +1,3 @@
-| `/ping` | A crontab line → the machine host → the server's door → the ping lane | The door's limits by address and key, the key taken as minted; the key in the path, or a 404; the organization's standing |
 # Architecture
 
 Telmoni's core on one page: what it is for, what it is made of, how a request moves through it, how tenants are kept apart, how data lives and is erased, how it runs, how it fails, and why it is built this way. It is the repository's one document on how the core is built: the detail behind each line is in the code it names, the code's comments and its tests.
@@ -188,6 +187,7 @@ Every way in:
 | A page, a Server Action or a read under `/api` | Browser → console → the server's `/internal` lanes | The sealed cookie, then the service secret and the bearer, then the matrix, then RLS |
 | `/v1` | A script → the machine host → the server's door → auth's lanes | The door's limits by address and key; the API key's `read` scope; the organization's switch |
 | `/cli` | The CLI → the machine host → the server's door → auth's lanes | The door's limits by address and bearer; the device code, or the bearer; never a browser |
+| `/ping` | A crontab line → the machine host → the server's door → the ping lane | The door's limits by address and key, the key taken as minted; the key in the path, or a 404; the organization's standing |
 | Ingest | An SDK, or any OTLP exporter → the machine host → the server's `/otlp/v1/traces` | The API key's `ingest` scope, the project's own limit, then the contract: a span outside a run refused, content dropped |
 | Slack's events | Slack → the machine host → `POST /webhooks/slack` | Slack's signature |
 | An agent turn | The agent's window → `POST /api/agent/turns` → the server, streamed back | The session, then a turn as the asker, re-resolved as it runs |
