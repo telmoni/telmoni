@@ -288,7 +288,7 @@ telmoni terminate org_019a0b8c3f2e7d41
 
 ## Reverse proxy configuration
 
-In production, place Telmoni behind a reverse proxy that terminates TLS and forwards the console's host to the web console on port `3000`, and the machine lanes — ingest at `/otlp/v1/traces`, where the SDKs send; the read API under `/v1`; the CLI's sign-in under `/cli`; and Slack's signed events at `/webhooks/slack` — to the server on port `8082`: on a host of their own (`api.telmoni.example.com`, which is then the SDKs' and the CLI's `endpoint`) or under their paths on the console's host (then the endpoint). Forward only those paths to `8082`: on that port every other lane but the health probes (`/health`, `/livez`) requires the service secret and is the console's to call, and a person's every request enters through the console. Never expose either port directly to the public internet. The Compose file publishes `3000` on every interface of the host, so firewall it, or publish it on `127.0.0.1` alone with a Compose override; it publishes `8082` on `127.0.0.1` already, for the proxy on the same host. The server reads `TRUSTED_PROXY_HOPS` as the console does, so the machine lanes' per-address limits find the caller's address past the same proxies.
+In production, place Telmoni behind a reverse proxy that terminates TLS and forwards the console's host to the web console on port `3000`, and the machine lanes — ingest at `/otlp/v1/traces`, where the SDKs send; the read API under `/v1`; the CLI's sign-in under `/cli`; the ping lane at `/ping/{ping_key}/{slug}`, where a crontab's `curl` reports a run; and Slack's signed events at `/webhooks/slack` — to the server on port `8082`: on a host of their own (`api.telmoni.example.com`, which is then the SDKs' and the CLI's `endpoint`) or under their paths on the console's host (then the endpoint). Forward only those paths to `8082`: on that port every other lane but the health probes (`/health`, `/livez`) requires the service secret and is the console's to call, and a person's every request enters through the console. Never expose either port directly to the public internet. The Compose file publishes `3000` on every interface of the host, so firewall it, or publish it on `127.0.0.1` alone with a Compose override; it publishes `8082` on `127.0.0.1` already, for the proxy on the same host. The server reads `TRUSTED_PROXY_HOPS` as the console does, so the machine lanes' per-address limits find the caller's address past the same proxies.
 
 **What the console expects of the proxy.** The console's rate limiter takes each caller's address from `X-Forwarded-For`, counting `TRUSTED_PROXY_HOPS` entries back from the end: one for each entry the proxies in front append, so that entry is the first one no caller wrote. The Compose file sets `TRUSTED_PROXY_HOPS=1` for the single reverse proxy below, which may set `X-Forwarded-For` to the client's address, as both configurations do, or append it to whatever the client sent; either way the last entry is the client's. Count every entry an outer hop appends as well: a plain load balancer in front of the proxy adds one (`2`), Google's load balancer adds two — the client's address and then its own, which is why the Helm chart's default is `2` with nothing else in front, and `3` with an appending proxy behind it. `0` is for nothing in front at all, and leaves the per-address limits to the caller's own header. `X-Real-IP` is not read.
 
@@ -307,7 +307,7 @@ The console's live updates (server-sent events) and the agent's streamed answers
         # API, the CLI's sign-in and Slack's events. On a host of their own
         # instead, give that host a site block holding this handle alone, and
         # set it as the SDKs' and the CLI's endpoint.
-        @machines path /otlp/* /v1/* /cli/* /webhooks/slack
+        @machines path /otlp/* /v1/* /cli/* /ping/* /webhooks/slack
         handle @machines {
             reverse_proxy localhost:8082 {
                 header_up X-Forwarded-For {remote_host}
@@ -352,7 +352,7 @@ The console's live updates (server-sent events) and the agent's streamed answers
         # API, the CLI's sign-in and Slack's events. On a host of their own
         # instead, give that host a server block holding this location alone,
         # and set it as the SDKs' and the CLI's endpoint.
-        location ~ ^/(otlp|v1|cli)/|^/webhooks/slack$ {
+        location ~ ^/(otlp|v1|cli|ping)/|^/webhooks/slack$ {
             proxy_pass http://127.0.0.1:8082;
             proxy_http_version 1.1;
             proxy_set_header Host $host;
