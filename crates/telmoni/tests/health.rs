@@ -177,11 +177,15 @@ async fn the_modules_are_mounted_behind_their_gates() {
         .unwrap();
     assert_eq!(status(level).await, StatusCode::OK);
 
+    let nowhere = send(get("/nowhere")).await;
     assert_eq!(
-        status(get("/nowhere")).await,
+        nowhere.status(),
         StatusCode::NOT_FOUND,
         "an unmatched path is a 404, not a gate's 401"
     );
+    let body = problem(nowhere).await;
+    assert_eq!(body["type"], "/errors/not-found");
+    assert_eq!(body["detail"], "no such lane");
 }
 
 /// A deployment with no agent still answers the console's agent lanes, so
@@ -307,6 +311,10 @@ async fn the_public_api_is_served_at_v1_behind_its_key() {
     let missing = send(get("/v1/audit")).await;
     assert_eq!(missing.status(), StatusCode::NOT_FOUND);
     assert_eq!(problem(missing).await["type"], "/errors/not-found");
+
+    let root = send(get("/v1/")).await;
+    assert_eq!(root.status(), StatusCode::NOT_FOUND);
+    assert_eq!(problem(root).await["type"], "/errors/not-found");
 }
 
 /// The CLI's lanes are on the binary's `/cli`, each taking `POST` and its
@@ -344,6 +352,10 @@ async fn the_cli_lanes_are_served_at_cli_behind_their_gates() {
     let body = problem(nowhere).await;
     assert_eq!(body["type"], "/errors/not-found");
     assert_eq!(body["detail"], "no such lane");
+
+    let root = send(post("/cli/").body(Body::empty()).unwrap()).await;
+    assert_eq!(root.status(), StatusCode::NOT_FOUND);
+    assert_eq!(problem(root).await["type"], "/errors/not-found");
 
     let oversized = format!(r#"{{"refreshToken":"{}"}}"#, "x".repeat(9 * 1024));
     let too_large = send(
@@ -421,7 +433,8 @@ fn percent_encoded_last(key: &str) -> String {
 /// a word — is refused at the door with the lane's own answer for a key it
 /// does not hold, so an encoding of a key is never let in on a bucket of
 /// its own; nothing in the key's place, or a doubled slash before it, is
-/// the lane's own 404.
+/// the lane's own 404, and the lane's root with its trailing slash the
+/// server's.
 #[tokio::test]
 async fn the_ping_lane_is_served_at_ping_behind_the_door() {
     let key = mint_ping_key();
@@ -445,7 +458,7 @@ async fn the_ping_lane_is_served_at_ping_behind_the_door() {
     assert_eq!(problem(word).await["detail"], "no ping key by that value");
 
     // The lane's own 404 for a path under it with no key where one goes,
-    // and axum's bare one for the lane's root with its trailing slash, which
+    // and the server's for the lane's root with its trailing slash, which
     // the nesting's catch-all does not take: nothing to count either way.
     let doubled = format!("/ping//{key}/nightly");
     for nothing in ["/ping", doubled.as_str()] {
@@ -457,7 +470,9 @@ async fn the_ping_lane_is_served_at_ping_behind_the_door() {
             "{nothing}"
         );
     }
-    assert_eq!(send(get("/ping/")).await.status(), StatusCode::NOT_FOUND);
+    let root = send(get("/ping/")).await;
+    assert_eq!(root.status(), StatusCode::NOT_FOUND);
+    assert_eq!(problem(root).await["detail"], "no such lane");
 }
 
 /// The door meters the ping lane by the key, whatever addresses spend it,

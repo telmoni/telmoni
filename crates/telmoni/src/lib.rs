@@ -401,6 +401,11 @@ impl App {
         self.modules
             .iter()
             .fold(core, |router, module| router.merge(module.router()))
+            // A path no lane serves is the server's own problem document,
+            // as a lane's is for a path under it: a router nested at `/ping`
+            // takes `/ping` and whatever has a character after the slash,
+            // so `/ping/` itself falls through to here.
+            .fallback(not_found)
             .layer(telmoni_shared::middleware::http::trace_layer())
             .layer(telmoni_shared::middleware::http::request_id_layers())
     }
@@ -599,4 +604,11 @@ async fn health(
 /// must never restart the delivery loop.
 async fn livez() -> (StatusCode, Json<serde_json::Value>) {
     (StatusCode::OK, Json(json!({ "status": "ok" })))
+}
+
+/// A path no lane serves: `404` as a problem document, as each lane answers
+/// one for a path under it, so a client reads one shape from the server
+/// wherever it knocks.
+async fn not_found() -> axum::response::Response {
+    telmoni_shared::middleware::problem::not_found("no such lane")
 }
