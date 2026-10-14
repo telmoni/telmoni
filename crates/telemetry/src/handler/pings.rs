@@ -496,12 +496,13 @@ async fn ping(
 /// state `new` — no schedule, so never late; its pings and runs kept and
 /// counted; paused for its owner to set up — under the organization's chain
 /// lock, held to the monitors nobody has set up that the project may hold
-/// and to the plan's ceiling, recorded on the chain as made by the key, and
-/// the owner told once in the feed. Past either bound nothing is made and
-/// the ping is refused with the bound's own words — a 409 that says to set
-/// up or delete what the project holds, the ceiling's 402 that names what
-/// lifts it — since a notice a slug would cost more than the plan, and a
-/// refusal is what `curl -f` turns into cron's mail at the first run.
+/// and to the plan's ceiling — read before the lock, counted under it —
+/// recorded on the chain as made by the key, and the owner told once in the
+/// feed. Past either bound nothing is made and the ping is refused with the
+/// bound's own words — a 409 that says to set up or delete what the project
+/// holds, the ceiling's 402 that names what lifts it — since a notice a slug
+/// would cost more than the plan, and a refusal is what `curl -f` turns into
+/// cron's mail at the first run.
 async fn discover_monitor(
     state: &AppState,
     headers: &HeaderMap,
@@ -510,6 +511,7 @@ async fn discover_monitor(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
 ) -> Result<MonitorRow, TelmoniError> {
     let (project_id, organization_id) = (&key.project_id, &key.organization_id);
+    let ceiling = chain::ceiling(state.entitlements.as_ref(), organization_id).await;
     chain::lock(project_id, organization_id, tx).await?;
     // Another ping may have made it while this one waited for the lock.
     if let Some(monitor) = db::monitor(tx, project_id, slug).await? {
@@ -530,8 +532,7 @@ async fn discover_monitor(
         ))
         .into());
     }
-    if let Some(ceiling) = seam::monitor_ceiling(state.entitlements.as_ref(), organization_id).await
-    {
+    if let Some(ceiling) = ceiling {
         let held = db::monitor_count(tx, organization_id).await?;
         if let Err(refused) = ceiling.admit(u64::try_from(held).unwrap_or(u64::MAX)) {
             tracing::debug!(

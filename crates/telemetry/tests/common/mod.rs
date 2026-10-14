@@ -25,9 +25,9 @@ use telmoni_shared::seam::{
 };
 use telmoni_shared::test_util::{ServiceRole, chain_lock_held, service_pool};
 use telmoni_shared::{
-    ApiKeyScope, AuthError, AuthzError, FlagSet, Grants, NotificationKind, OrganizationId,
-    OrganizationRole, OrganizationStatus, Paused, ProjectId, Role, SpanKind, SpanStatus,
-    TelmoniError, UserId,
+    ApiKeyScope, AuthError, AuthzError, FlagSet, Grants, MonitorCeiling, NotificationKind,
+    OrganizationId, OrganizationRole, OrganizationStatus, Paused, ProjectId, Role, SpanKind,
+    SpanStatus, TelmoniError, UserId,
 };
 use telmoni_telemetry::store::{self, SpanRow, Store};
 use telmoni_telemetry::{AppState, Config};
@@ -351,6 +351,65 @@ impl Entitlements for PausedOrganization {
                 detail: "This organization is paused.".into(),
             }),
         })
+    }
+}
+
+/// Entitlements under which every organization holds `limit` monitors,
+/// answered after `after`, with whether the organization's chain lock was
+/// held at each ask recorded in order, probed from `pool` as auth's stub
+/// probes it: the lanes read the ceiling before the lock, never under it.
+pub(crate) struct Ceiling {
+    pool: PgPool,
+    limit: u32,
+    after: Duration,
+    asked: Mutex<Vec<bool>>,
+}
+
+impl Ceiling {
+    pub(crate) fn of(pool: &PgPool, limit: u32) -> Arc<Self> {
+        Self::answered_after(pool, limit, Duration::ZERO)
+    }
+
+    pub(crate) fn answered_after(pool: &PgPool, limit: u32, after: Duration) -> Arc<Self> {
+        Arc::new(Self {
+            pool: pool.clone(),
+            limit,
+            after,
+            asked: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// Whether the organization's chain lock was held at each ask, in order.
+    pub(crate) fn asked(&self) -> Vec<bool> {
+        self.asked
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
+#[async_trait]
+impl Entitlements for Ceiling {
+    async fn grants(&self, organization_id: &OrganizationId) -> Result<Grants, TelmoniError> {
+        let _ = organization_id;
+        Ok(Grants::unlimited())
+    }
+
+    async fn monitor_ceiling(
+        &self,
+        organization_id: &OrganizationId,
+    ) -> Result<Option<MonitorCeiling>, TelmoniError> {
+        let held = chain_lock_held(&self.pool, organization_id).await;
+        self.asked
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(held);
+        tokio::time::sleep(self.after).await;
+        Ok(Some(MonitorCeiling {
+            limit: self.limit,
+            entitlement: "pro".into(),
+            detail: "Move to Pro for more.".into(),
+        }))
     }
 }
 

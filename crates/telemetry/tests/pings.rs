@@ -18,8 +18,8 @@
 mod common;
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use async_trait::async_trait;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -30,15 +30,13 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use common::{Answer, AuthStub, NoticeLog, PausedOrganization, SECRET};
+use common::{Answer, AuthStub, Ceiling, NoticeLog, PausedOrganization, SECRET};
+use telmoni_shared::audit::lock_chain;
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::seam::{Entitlements, NoLimits};
 use telmoni_shared::test_util::apply_audit_migrations;
-use telmoni_shared::{
-    Grants, MonitorCeiling, NotificationKind, OrganizationId, OrganizationRole, ProjectId,
-    TelmoniError,
-};
+use telmoni_shared::{NotificationKind, OrganizationId, OrganizationRole, ProjectId};
 use telmoni_telemetry::db::{self, TelemetryLane};
 use telmoni_telemetry::handler::pings::NEW_MONITORS_MAX;
 use telmoni_telemetry::outbox::{self, Settled};
@@ -218,29 +216,6 @@ impl Project {
         let (status, media_type, body) = self.send_ping("GET", path, &[], Body::empty()).await;
         assert_eq!((status, body.as_str()), (StatusCode::OK, "OK"), "{path}");
         assert!(media_type.starts_with("text/plain"), "{path}: {media_type}");
-    }
-}
-
-/// Entitlements under which every organization holds `limit` monitors.
-struct Ceiling(u32);
-
-#[async_trait]
-impl Entitlements for Ceiling {
-    async fn grants(&self, organization_id: &OrganizationId) -> Result<Grants, TelmoniError> {
-        let _ = organization_id;
-        Ok(Grants::unlimited())
-    }
-
-    async fn monitor_ceiling(
-        &self,
-        organization_id: &OrganizationId,
-    ) -> Result<Option<MonitorCeiling>, TelmoniError> {
-        let _ = organization_id;
-        Ok(Some(MonitorCeiling {
-            limit: self.0,
-            entitlement: "pro".into(),
-            detail: "Move to Pro for more.".into(),
-        }))
     }
 }
 
@@ -916,7 +891,7 @@ async fn a_pings_body_is_dropped_its_query_held_to_numbers_and_the_lane_to_its_s
 #[sqlx::test]
 async fn past_the_plans_limit_a_ping_is_refused_with_the_ceilings_words(pool: PgPool) {
     apply_audit_migrations(&pool).await;
-    let p = project_under(&pool, OrganizationId::new(), Arc::new(Ceiling(1)));
+    let p = project_under(&pool, OrganizationId::new(), Ceiling::of(&pool, 1));
     let key = p.mint().await;
 
     p.ping_ok(&format!("/{key}/nightly-report")).await;
@@ -1422,4 +1397,58 @@ async fn the_purges_and_a_move_take_the_keys_runs_and_outbox_rows_with_the_proje
         .expect("purged");
     tx.commit().await.expect("committed");
     assert_eq!(purged, 5);
+}
+
+/// The plan's ceiling is read within a second, so a deployment slow to
+/// answer it — billing's pool spent — holds the lane on it no longer: an
+/// answer not had in time is no ceiling, and the monitor is made.
+#[sqlx::test]
+async fn a_ceiling_not_answered_in_time_is_no_ceiling(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let slow = Ceiling::answered_after(&pool, 0, Duration::from_secs(3));
+    let p = project_under(&pool, OrganizationId::new(), slow.clone());
+    let key = p.mint().await;
+    p.ping_ok(&format!("/{key}/nightly-report")).await;
+    assert_eq!(
+        monitors_of(&pool, &p.project).await,
+        1,
+        "no ceiling was held"
+    );
+    assert_eq!(
+        slow.asked(),
+        [false],
+        "asked once, with the chain lock not held"
+    );
+}
+
+/// The ceiling is read before the organization's chain lock is taken, so
+/// nobody else in the organization waits on the answer: with the lock held
+/// elsewhere, a ping to a new slug is refused for the lock as every other
+/// writer is, the ceiling asked all the same and never under it.
+#[sqlx::test]
+async fn the_ceiling_is_read_before_the_chain_lock(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let quick = Ceiling::of(&pool, 5);
+    let p = project_under(&pool, OrganizationId::new(), quick.clone());
+    let key = p.mint().await;
+    let mut held = pool.begin().await.expect("a transaction to hold the lock");
+    lock_chain(&mut held, &p.organization)
+        .await
+        .expect("the chain lock");
+    let (status, body) = p.ping(&format!("/{key}/nightly-report")).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        body.contains("another change to this project's organization is under way"),
+        "{body}"
+    );
+    assert_eq!(
+        quick.asked(),
+        [true],
+        "asked once, before the lane tried the lock"
+    );
+    assert_eq!(monitors_of(&pool, &p.project).await, 0);
+    held.rollback().await.expect("let the lock go");
+    p.ping_ok(&format!("/{key}/nightly-report")).await;
+    assert_eq!(quick.asked(), [true, false]);
+    assert_eq!(monitors_of(&pool, &p.project).await, 1);
 }

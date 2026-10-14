@@ -12,8 +12,8 @@
 mod common;
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use async_trait::async_trait;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -22,14 +22,13 @@ use serde_json::{Value, json};
 use sqlx::PgPool;
 use tower::ServiceExt;
 
-use common::{AuthStub, PausedOrganization, SECRET};
+use common::{AuthStub, Ceiling, PausedOrganization, SECRET};
+use telmoni_shared::audit::lock_chain;
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::seam::{Entitlements, NoLimits};
 use telmoni_shared::test_util::apply_audit_migrations;
-use telmoni_shared::{
-    Grants, MonitorCeiling, OrganizationId, OrganizationRole, ProjectId, Role, TelmoniError,
-};
+use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, Role};
 use telmoni_telemetry::db::{self, TelemetryLane};
 use telmoni_telemetry::{AppState, router};
 
@@ -149,30 +148,6 @@ impl Project {
                     .to_owned()
             })
             .collect()
-    }
-}
-
-/// Entitlements under which every organization holds `limit` monitors, as a
-/// deployment that sells plans answers for one on Hobby.
-struct Ceiling(u32);
-
-#[async_trait]
-impl Entitlements for Ceiling {
-    async fn grants(&self, organization_id: &OrganizationId) -> Result<Grants, TelmoniError> {
-        let _ = organization_id;
-        Ok(Grants::unlimited())
-    }
-
-    async fn monitor_ceiling(
-        &self,
-        organization_id: &OrganizationId,
-    ) -> Result<Option<MonitorCeiling>, TelmoniError> {
-        let _ = organization_id;
-        Ok(Some(MonitorCeiling {
-            limit: self.0,
-            entitlement: "pro".into(),
-            detail: "This plan holds so many monitors.".into(),
-        }))
     }
 }
 
@@ -426,7 +401,8 @@ async fn every_role_reads_the_monitors_and_owners_and_admins_make_them(pool: PgP
 #[sqlx::test]
 async fn a_monitor_is_held_to_the_plans_ceiling_across_the_organization(pool: PgPool) {
     apply_audit_migrations(&pool).await;
-    let p = project_under(&pool, OrganizationId::new(), Arc::new(Ceiling(1)));
+    let ceiling = Ceiling::of(&pool, 1);
+    let p = project_under(&pool, OrganizationId::new(), ceiling.clone());
     let (status, body) = p
         .send(p.on(
             &p.other,
@@ -443,12 +419,17 @@ async fn a_monitor_is_held_to_the_plans_ceiling_across_the_organization(pool: Pg
     assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{problem}");
     assert_eq!(problem["type"], "/errors/plan/limit-reached");
     assert_eq!(problem["entitlement"], "pro");
-    assert_eq!(problem["detail"], "This plan holds so many monitors.");
+    assert_eq!(problem["detail"], "Move to Pro for more.");
     assert_eq!(monitors_of(&pool, &p.project).await, 0);
     assert_eq!(
         p.auth.chain_held(),
         [true, true],
-        "counted under the organization's chain lock"
+        "auth asked again under the organization's chain lock"
+    );
+    assert_eq!(
+        ceiling.asked(),
+        [false, false],
+        "the ceiling asked before the lock, never under it"
     );
 
     let organization = OrganizationId::new();
@@ -679,4 +660,60 @@ async fn the_purges_take_a_projects_monitors_with_it(pool: PgPool) {
         1,
         "another organization's project keeps its monitor"
     );
+}
+
+/// The plan's ceiling is read within a second, before the transaction and
+/// the lock, so a deployment slow to answer it — billing's pool spent — holds
+/// nobody on it: an answer not had in time is no ceiling, and the monitor is
+/// made.
+#[sqlx::test]
+async fn a_ceiling_not_answered_in_time_is_no_ceiling(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let slow = Ceiling::answered_after(&pool, 0, Duration::from_secs(3));
+    let p = project_under(&pool, OrganizationId::new(), slow.clone());
+    let (status, body) = p
+        .send(p.request("POST", LANE, OWNER, Some(nightly())))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(monitors_of(&pool, &p.project).await, 1);
+    assert_eq!(
+        slow.asked(),
+        [false],
+        "asked once, with the chain lock not held"
+    );
+}
+
+/// The ceiling is read before the organization's chain lock is taken, so
+/// nobody else in the organization waits on the answer: with the lock held
+/// elsewhere, making a monitor is refused for the lock as every other change
+/// is, the ceiling asked all the same and never under it.
+#[sqlx::test]
+async fn the_ceiling_is_read_before_the_chain_lock(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let quick = Ceiling::of(&pool, 5);
+    let p = project_under(&pool, OrganizationId::new(), quick.clone());
+    let mut held = pool.begin().await.expect("a transaction to hold the lock");
+    lock_chain(&mut held, &p.organization)
+        .await
+        .expect("the chain lock");
+    let (status, problem) = p
+        .send(p.request("POST", LANE, OWNER, Some(nightly())))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{problem}");
+    assert_eq!(
+        problem["detail"],
+        "another change to this project's organization is under way; try again"
+    );
+    assert_eq!(
+        quick.asked(),
+        [true],
+        "asked once, before the lane tried the lock"
+    );
+    assert_eq!(monitors_of(&pool, &p.project).await, 0);
+    held.rollback().await.expect("let the lock go");
+    let (status, body) = p
+        .send(p.request("POST", LANE, OWNER, Some(nightly())))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(quick.asked(), [true, false]);
 }

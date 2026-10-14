@@ -25,7 +25,8 @@ use telmoni_shared::extract::{Json, correlation_id};
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam;
 use telmoni_shared::{
-    AuditAction, AuthError, MonitorState, ProjectId, TelmoniError, TelmoniResourceKind, slug,
+    AuditAction, AuthError, MonitorCeiling, MonitorState, ProjectId, TelmoniError,
+    TelmoniResourceKind, slug,
 };
 
 use crate::AppState;
@@ -518,8 +519,21 @@ pub async fn create_monitor(
         .clone();
     let monitor = input.checked(None)?;
     seam::admit_new(&*state.entitlements, &acting.organization_id).await?;
+    // The plan's ceiling, read before a transaction is opened and the lock
+    // taken: only the count under the lock needs it.
+    let ceiling = chain::ceiling(&*state.entitlements, &acting.organization_id).await;
     let mut tx = scoped(&state, &acting, &project_id).await?;
-    let row = match make_monitor(&state, &acting, &project_id, &mut tx, &headers, &monitor).await {
+    let row = match make_monitor(
+        &state,
+        &acting,
+        &project_id,
+        &mut tx,
+        &headers,
+        &monitor,
+        ceiling.as_ref(),
+    )
+    .await
+    {
         Ok(row) => row,
         Err(refused) => {
             rolled_back(tx.rollback().await, &project_id);
@@ -534,8 +548,8 @@ pub async fn create_monitor(
 /// The making itself, inside the transaction [`create_monitor`] opened:
 /// under the organization's chain lock, the role checked again on auth's
 /// second answer, the project's settings row made or re-filed, the
-/// organization's count held to its plan's ceiling, and the monitor written
-/// and recorded.
+/// organization's count held to the plan's `ceiling` the caller read before
+/// the lock, and the monitor written and recorded.
 async fn make_monitor(
     state: &AppState,
     acting: &Acting,
@@ -543,12 +557,13 @@ async fn make_monitor(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     headers: &HeaderMap,
     monitor: &Checked,
+    ceiling: Option<&MonitorCeiling>,
 ) -> Result<MonitorRow, TelmoniError> {
     let organization_id = &acting.organization_id;
     let now = chain::hold(&*state.auth, acting, project_id, tx).await?;
     now.require_project(Verb::Create, Resource::Monitor)?;
     db::ensure_settings(tx, project_id, organization_id).await?;
-    if let Some(ceiling) = seam::monitor_ceiling(&*state.entitlements, organization_id).await {
+    if let Some(ceiling) = ceiling {
         let held = db::monitor_count(tx, organization_id).await?;
         ceiling.admit(u64::try_from(held).unwrap_or_default())?;
     }

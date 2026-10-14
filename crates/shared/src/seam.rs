@@ -566,7 +566,9 @@ pub trait Entitlements: Send + Sync {
 
     /// How many monitors the organization may hold across its projects;
     /// `None` is as many as it makes. Asked where one is made, apart from
-    /// [`Entitlements::grants`], as [`Entitlements::member_ceiling`] is.
+    /// [`Entitlements::grants`], as [`Entitlements::member_ceiling`] is —
+    /// within a budget, and dropped where it runs out, so the answer must be
+    /// safe to cancel at any point: a read, never a write.
     async fn monitor_ceiling(
         &self,
         organization_id: &OrganizationId,
@@ -626,11 +628,11 @@ pub async fn member_ceiling(
     }
 }
 
-/// What the lane that makes a monitor asks before one is made: the
-/// organization's monitor ceiling, which the lane holds its count to
-/// ([`MonitorCeiling::admit`]) under the organization's chain lock. An
-/// answer that cannot be had is no ceiling, logged, as [`admit_new`] lets in
-/// what it cannot decide.
+/// What the lane that makes a monitor asks before one is made, and before
+/// it takes the organization's chain lock: the organization's monitor
+/// ceiling, which the lane holds its count to ([`MonitorCeiling::admit`])
+/// under the lock. An answer that cannot be had is no ceiling, logged, as
+/// [`admit_new`] lets in what it cannot decide.
 pub async fn monitor_ceiling(
     entitlements: &dyn Entitlements,
     organization_id: &OrganizationId,

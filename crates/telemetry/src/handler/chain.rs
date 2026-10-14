@@ -1,6 +1,8 @@
 //! The organization's chain lock, as a lane takes it before it files a row
 //! under a project's organization: a project's content mode, and the
-//! settings row the first view saved on a project makes.
+//! settings row the first view saved on a project makes; and what a change
+//! reads from across a seam, bounded, so that nobody waits under the lock on
+//! an answer another deployment's database gives.
 //!
 //! ⚠ A transfer's accept holds the lock from its audit rows to its commit and
 //! moves the project's settings in between, as an ownership hand-over and a
@@ -14,8 +16,8 @@ use std::time::Duration;
 use telmoni_shared::acting::Acting;
 use telmoni_shared::audit::lock_chain;
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped};
-use telmoni_shared::seam::Auth;
-use telmoni_shared::{AuthError, OrganizationId, ProjectId, TelmoniError};
+use telmoni_shared::seam::{self, Auth, Entitlements};
+use telmoni_shared::{AuthError, MonitorCeiling, OrganizationId, ProjectId, TelmoniError};
 
 /// The longest a change waits for the organization's chain lock: the
 /// role's own `lock_timeout` on a tier, set on the transaction too, so that a
@@ -24,10 +26,11 @@ use telmoni_shared::{AuthError, OrganizationId, ProjectId, TelmoniError};
 /// the lock.
 const CHAIN_LOCK_WAIT: Duration = Duration::from_secs(2);
 
-/// How long a change waits for auth's second answer while it holds the
-/// organization's chain lock: well inside the two seconds every other writer
-/// in the organization waits for that lock before giving up.
-const READ_AGAIN_BUDGET: Duration = Duration::from_secs(1);
+/// How long a change waits for an answer from across a seam: auth's second
+/// answer while it holds the organization's chain lock, well inside the two
+/// seconds every other writer in the organization waits for that lock before
+/// giving up, and the plan's ceiling before it takes the lock ([`ceiling`]).
+const ANSWER_BUDGET: Duration = Duration::from_secs(1);
 
 /// Postgres's `lock_not_available`: a `lock_timeout` ran out.
 const LOCK_NOT_AVAILABLE: &str = "55P03";
@@ -45,7 +48,7 @@ pub(crate) async fn hold(
 ) -> Result<Acting, TelmoniError> {
     let organization_id = &acting.organization_id;
     lock(project_id, organization_id, tx).await?;
-    let Ok(now) = tokio::time::timeout(READ_AGAIN_BUDGET, auth.resolve_again(acting)).await else {
+    let Ok(now) = tokio::time::timeout(ANSWER_BUDGET, auth.resolve_again(acting)).await else {
         tracing::warn!(
             project_id = %project_id,
             organization_id = %organization_id,
@@ -96,4 +99,34 @@ pub(crate) async fn lock(
         .into());
     }
     Ok(())
+}
+
+/// The organization's monitor ceiling, for a change to read before it takes
+/// the lock — only the count under the lock needs it — and within the same
+/// second auth's second answer gets. A deployment answers it from a database
+/// of its own, through a pool a burst can spend, and a read that waited on
+/// that under the lock would hold every other writer in the organization to
+/// the lock's two seconds and a 409 for as long as it waited; before the
+/// lock, and bounded, it costs this change alone a second at most. An answer
+/// not had in time is no ceiling, logged, as the seam answers one it cannot
+/// read.
+pub(crate) async fn ceiling(
+    entitlements: &dyn Entitlements,
+    organization_id: &OrganizationId,
+) -> Option<MonitorCeiling> {
+    match tokio::time::timeout(
+        ANSWER_BUDGET,
+        seam::monitor_ceiling(entitlements, organization_id),
+    )
+    .await
+    {
+        Ok(ceiling) => ceiling,
+        Err(_) => {
+            tracing::warn!(
+                organization_id = %organization_id,
+                "telemetry: the monitor ceiling was not answered in time; none is held"
+            );
+            None
+        }
+    }
 }
