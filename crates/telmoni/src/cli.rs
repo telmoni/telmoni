@@ -1,5 +1,5 @@
 //! The command line: one process, one command, then either a listener or an
-//! exit. Parsed by hand — six words are not worth a parser crate.
+//! exit. Parsed by hand — a few words are not worth a parser crate.
 
 use telmoni_shared::OrganizationId;
 
@@ -74,6 +74,10 @@ pub enum Command {
     Sweep(Sweep),
     /// Close an organization without its owner's code.
     Terminate(OrganizationId),
+    /// Give every outbox row past its tries — a finished run ClickHouse
+    /// refused, a notice the feed would not take — its tries back, for the
+    /// loop to take again, and exit.
+    ReleaseOutbox,
 }
 
 impl Command {
@@ -81,7 +85,7 @@ impl Command {
     #[must_use]
     pub fn usage() -> String {
         format!(
-            "usage: telmoni serve | migrate | rotate | sweep <{}> | terminate <org_id>",
+            "usage: telmoni serve | migrate | rotate | sweep <{}> | terminate <org_id> | release outbox",
             Sweep::names()
         )
     }
@@ -101,6 +105,7 @@ impl Command {
                     .map_err(|e| anyhow::anyhow!("{} (bad organization id: {e})", Self::usage()))?;
                 Ok(Self::Terminate(id))
             }
+            ["release", "outbox"] => Ok(Self::ReleaseOutbox),
             _ => anyhow::bail!("{} (got {args:?})", Self::usage()),
         }
     }
@@ -129,6 +134,10 @@ mod tests {
             parse(&["terminate", "org_abc"]).unwrap(),
             Command::Terminate(id) if id.as_str() == "org_abc"
         ));
+        assert_eq!(
+            parse(&["release", "outbox"]).unwrap(),
+            Command::ReleaseOutbox
+        );
 
         for bad in [
             vec![],
@@ -139,6 +148,9 @@ mod tests {
             vec!["terminate"],
             vec!["terminate", "not an id"],
             vec!["restore", "org_abc"],
+            vec!["release"],
+            vec!["release", "deliveries"],
+            vec!["outbox", "release"],
         ] {
             let err = parse(&bad).expect_err(&format!("{bad:?} parsed"));
             assert!(err.to_string().starts_with("usage:"), "{err}");

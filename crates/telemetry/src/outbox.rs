@@ -16,9 +16,16 @@
 //!
 //! The loop is one every replica runs, on the delivery loop's pattern: each
 //! tick leases rows across every tenant, `FOR UPDATE SKIP LOCKED` under a
-//! lease, lands each, deletes what landed and holds the rest for a while
-//! before they are tried again — up to a cap, past which a row stays for an
-//! operator to see and the depth line counts it.
+//! lease, lands each, deletes what landed and holds the rest. Whose fault a
+//! row's failure is decides what it costs (`Fault`): a store that could
+//! not be reached, would not answer, or said it cannot take rows now hands
+//! the row back for the next tick with its try returned, so an outage of
+//! ours strands nothing however long it lasts; a row the store refused, or
+//! whose payload does not parse, waits longer each time, up to a cap, past
+//! which it stays for an operator — named in the log as it crosses, counted
+//! in the depth line, and tried again by `telmoni release outbox` once what
+//! refused it is mended. A batch the store refused is written again one row
+//! at a time first, so one row stops one row.
 //!
 //! ⚠ The loop's handle is raced against the server in the binary's `serve`,
 //! as the delivery loop's is: a dead loop would leave a Ready pod with every
@@ -26,6 +33,7 @@
 //! recovery.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -51,16 +59,19 @@ use crate::{AppState, store};
 const POLL_SECS: u64 = 5;
 /// How many rows one lease takes.
 const BATCH: i64 = 100;
-/// How many batches one tick drains before it waits for the next.
+/// How many batches one tick drains before it waits for the next, while
+/// every batch lands whole.
 const DRAIN_ROUNDS: usize = 20;
 /// How long a leased row is held before another replica may take it:
 /// longer than an insert's deadline and a notice's write, so a row is never
 /// landed twice by two replicas.
 const LEASE_SECS: i64 = 120;
-/// How many times a row is tried before it is left for an operator: with
-/// the waits below, about an hour of a store that will not take it.
+/// How many times a row the store refused, or that does not parse, is tried
+/// before it is left for an operator: with the waits below, half an hour of
+/// refusals. A row the store was at fault for ([`Fault::Store`]) is handed
+/// back with its try, and never reaches it.
 const MAX_ATTEMPTS: i32 = 12;
-/// The wait before a row that did not land is tried again: five seconds,
+/// The wait before a row the store refused is tried again: five seconds,
 /// doubled each time, up to five minutes.
 const RETRY_FLOOR_SECS: i64 = 5;
 const RETRY_CEILING_SECS: i64 = 300;
@@ -229,8 +240,74 @@ pub async fn enqueue_notice(
 pub struct Settled {
     /// Rows that landed, or carried a run landed already, and are gone.
     pub landed: u32,
-    /// Rows that did not, held for their next try.
+    /// Rows that did not: held for their next try, or handed back for the
+    /// next tick with their try returned, where the store was at fault.
     pub held: u32,
+}
+
+/// Whose fault it is that a row did not land, which decides what its try
+/// costs: the delivery loop's posture, which hands a delivery back with its
+/// attempt when the KEK it needs cannot be reached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Fault {
+    /// The store's: not reached, not answering, or saying it cannot take
+    /// rows now. The row is handed back for the next tick with its try
+    /// returned, so an outage of ours never strands it.
+    Store,
+    /// The row's: refused by the store, or a payload that does not parse.
+    /// The row waits longer each time, up to [`MAX_ATTEMPTS`].
+    Row,
+}
+
+/// ClickHouse's codes for a server that is up and cannot take rows now —
+/// `TIMEOUT_EXCEEDED`, `CANNOT_ALLOCATE_MEMORY`,
+/// `TOO_MANY_SIMULTANEOUS_QUERIES`, `SOCKET_TIMEOUT`, `NETWORK_ERROR`,
+/// `ABORTED` (stopping), `MEMORY_LIMIT_EXCEEDED`, `TABLE_IS_READ_ONLY`,
+/// `NOT_ENOUGH_SPACE`, `TOO_MANY_PARTS`, `UNKNOWN_STATUS_OF_INSERT`,
+/// `CANNOT_SCHEDULE_TASK`, `SERVER_OVERLOADED` — its own state, not the
+/// rows', which its next hour or an operator mends.
+const STORE_UNWELL: [u32; 13] = [
+    159, 173, 202, 209, 210, 236, 241, 242, 243, 252, 319, 439, 745,
+];
+
+/// Whose fault a ClickHouse error is: the store's when it could not be
+/// reached or did not answer in time, and when it answered with one of
+/// [`STORE_UNWELL`], which it puts at the front of its message; the rows'
+/// otherwise — a shape it refused, or a row this side could not encode,
+/// which retrying will not mend.
+fn fault_of(error: &clickhouse::error::Error) -> Fault {
+    use clickhouse::error::Error;
+    match error {
+        Error::Network(_) | Error::TimedOut => Fault::Store,
+        Error::BadResponse(reason)
+            if exception_code(reason).is_some_and(|code| STORE_UNWELL.contains(&code)) =>
+        {
+            Fault::Store
+        }
+        _ => Fault::Row,
+    }
+}
+
+/// The code at the front of ClickHouse's message — `Code: 241. DB::Exception:
+/// …`, or `Code: 241` alone where the body could not be read and the header
+/// named it — or none where something else answered.
+fn exception_code(reason: &str) -> Option<u32> {
+    reason
+        .strip_prefix("Code: ")?
+        .split(|c: char| !c.is_ascii_digit())
+        .next()?
+        .parse()
+        .ok()
+}
+
+/// A row that did not land, and whose fault that was.
+struct Held {
+    id: Uuid,
+    /// How many times it has been leased, this time counted.
+    attempts: i32,
+    kind: &'static str,
+    project_id: ProjectId,
+    fault: Fault,
 }
 
 /// The outbox loop. A failed tick is logged and the next one runs.
@@ -257,6 +334,11 @@ pub async fn run(state: Arc<AppState>) {
         if ticks >= DEPTH_EVERY_TICKS {
             ticks = 0;
             match depth(&state).await {
+                // Empty is the outbox's usual state: a line a minute saying
+                // so, on every replica, would drown the ones that matter.
+                Ok((0, 0, _)) => {
+                    tracing::debug!(pending = 0, stuck = 0, "telemetry outbox depth");
+                }
                 Ok((pending, stuck, oldest_age_secs)) => tracing::info!(
                     pending,
                     stuck,
@@ -269,8 +351,9 @@ pub async fn run(state: Arc<AppState>) {
     }
 }
 
-/// What the loop logs once a minute as `telemetry outbox depth`: the rows
-/// still to land, those past their tries, and the oldest's age in seconds.
+/// What the loop logs once a minute as `telemetry outbox depth`, at info
+/// while anything waits: the rows still to land, those past their tries,
+/// and the oldest's age in seconds.
 pub async fn depth(state: &AppState) -> Result<(i64, i64, Option<i64>), TelmoniError> {
     let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
     let depth = db::outbox_depth(&mut tx, MAX_ATTEMPTS).await?;
@@ -278,15 +361,30 @@ pub async fn depth(state: &AppState) -> Result<(i64, i64, Option<i64>), TelmoniE
     Ok(depth)
 }
 
+/// Every row past its tries given them back, for the loop to take again:
+/// `telmoni release outbox`, an operator's once what refused the rows is
+/// mended — a row refused again waits out its tries again. Answers how many
+/// were released.
+pub async fn release(state: &AppState) -> Result<u64, TelmoniError> {
+    let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
+    let released = db::release_outbox(&mut tx, MAX_ATTEMPTS).await?;
+    tx.commit().await?;
+    Ok(released)
+}
+
 /// One tick: the outbox drained batch after batch, until a batch comes back
-/// short or the rounds run out. What landed and what was held, summed.
+/// short, holds anything, or the rounds run out. A batch with anything held
+/// ends the tick, as it ends the delivery loop's: a store that would not
+/// answer, or refused, is not helped by more batches of failing inserts,
+/// and the next tick is seconds away. What landed and what was held,
+/// summed.
 pub async fn tick_once(state: &Arc<AppState>) -> Result<Settled, TelmoniError> {
     let mut total = Settled::default();
     for _ in 0..DRAIN_ROUNDS {
         let settled = drain_batch(state).await?;
         total.landed = total.landed.saturating_add(settled.landed);
         total.held = total.held.saturating_add(settled.held);
-        if i64::from(settled.landed.saturating_add(settled.held)) < BATCH {
+        if settled.held > 0 || i64::from(settled.landed) < BATCH {
             break;
         }
     }
@@ -294,8 +392,10 @@ pub async fn tick_once(state: &Arc<AppState>) -> Result<Settled, TelmoniError> {
 }
 
 /// Lease one batch and land it: the runs in one insert, the notices one by
-/// one through the seam; then, in one transaction, what landed deleted and
-/// the rest held for their next try.
+/// one through the seam; then, in one transaction, what landed deleted,
+/// what the store was at fault for handed back with its try, and the rest
+/// held for their next try — a row crossing the cap named in the log, since
+/// nothing takes it again until an operator does.
 async fn drain_batch(state: &Arc<AppState>) -> Result<Settled, TelmoniError> {
     let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
     let leased = db::lease_outbox(&mut tx, BATCH, LEASE_SECS, MAX_ATTEMPTS).await?;
@@ -305,7 +405,7 @@ async fn drain_batch(state: &Arc<AppState>) -> Result<Settled, TelmoniError> {
     }
 
     let mut landed: Vec<Uuid> = Vec::new();
-    let mut held: Vec<(Uuid, i32)> = Vec::new();
+    let mut held: Vec<Held> = Vec::new();
     let (runs, notices): (Vec<OutboxRow>, Vec<OutboxRow>) =
         leased.into_iter().partition(|row| row.kind == KIND_SPAN);
     land_runs(state, runs, &mut landed, &mut held).await;
@@ -321,8 +421,26 @@ async fn drain_batch(state: &Arc<AppState>) -> Result<Settled, TelmoniError> {
     if !landed.is_empty() {
         db::delete_outbox(&mut tx, &landed).await?;
     }
-    for (id, attempts) in held {
-        db::hold_outbox(&mut tx, id, retry_wait(attempts)).await?;
+    let mut handed_back: Vec<Uuid> = Vec::new();
+    for row in held {
+        match row.fault {
+            Fault::Store => handed_back.push(row.id),
+            Fault::Row => {
+                db::hold_outbox(&mut tx, row.id, retry_wait(row.attempts)).await?;
+                if row.attempts >= MAX_ATTEMPTS {
+                    tracing::error!(
+                        outbox_id = %row.id,
+                        kind = row.kind,
+                        project_id = %row.project_id,
+                        attempts = row.attempts,
+                        "telemetry outbox: a row is past its tries and stays until `telmoni release outbox`"
+                    );
+                }
+            }
+        }
+    }
+    if !handed_back.is_empty() {
+        db::unlease_outbox(&mut tx, &handed_back).await?;
     }
     tx.commit().await?;
     Ok(settled)
@@ -348,10 +466,23 @@ struct QueuedRun {
     run: FinishedRun,
 }
 
+impl QueuedRun {
+    /// The row, not landed, with whose fault that was.
+    fn held(self, fault: Fault) -> Held {
+        Held {
+            id: self.id,
+            attempts: self.attempts,
+            kind: KIND_SPAN,
+            project_id: self.project_id,
+            fault,
+        }
+    }
+}
+
 /// The batch's finished runs, read from their rows, oldest row first. A row
 /// no version of this code wrote is held and said so, since dropping it
 /// would lose a run in silence.
-fn parse_runs(rows: Vec<OutboxRow>, held: &mut Vec<(Uuid, i32)>) -> Vec<QueuedRun> {
+fn parse_runs(rows: Vec<OutboxRow>, held: &mut Vec<Held>) -> Vec<QueuedRun> {
     let mut runs = Vec::with_capacity(rows.len());
     for row in rows {
         match serde_json::from_value::<FinishedRun>(row.payload) {
@@ -365,10 +496,17 @@ fn parse_runs(rows: Vec<OutboxRow>, held: &mut Vec<(Uuid, i32)>) -> Vec<QueuedRu
             Err(error) => {
                 tracing::error!(
                     outbox_id = %row.id,
+                    project_id = %row.project_id,
                     error = %error,
                     "telemetry outbox: a finished run does not parse; the row is held"
                 );
-                held.push((row.id, row.attempts));
+                held.push(Held {
+                    id: row.id,
+                    attempts: row.attempts,
+                    kind: KIND_SPAN,
+                    project_id: row.project_id,
+                    fault: Fault::Row,
+                });
             }
         }
     }
@@ -381,13 +519,14 @@ fn parse_runs(rows: Vec<OutboxRow>, held: &mut Vec<(Uuid, i32)>) -> Vec<QueuedRu
 /// The batch's finished runs, as rows of `spans` in one insert — but for the
 /// runs the table holds already, dropped as landed rather than written twice
 /// ([`held_runs`]) — and the organization's open consoles told of what
-/// landed. A read that fails holds the whole batch, as an insert that fails
-/// does.
+/// landed. A read that fails hands the whole batch back with its tries,
+/// whatever the read's fault: the rows did nothing. An insert the store
+/// refuses is tried again one row at a time ([`land_one_by_one`]).
 async fn land_runs(
     state: &Arc<AppState>,
     rows: Vec<OutboxRow>,
     landed: &mut Vec<Uuid>,
-    held: &mut Vec<(Uuid, i32)>,
+    held: &mut Vec<Held>,
 ) {
     let runs = parse_runs(rows, held);
     if runs.is_empty() {
@@ -399,69 +538,151 @@ async fn land_runs(
             // ⚠ The error's text can carry ClickHouse's own message: its
             // kind alone is logged.
             let kind = store::error_kind(&error);
-            tracing::warn!(
-                kind,
-                rows = runs.len(),
-                "telemetry outbox: ClickHouse did not say which runs it holds; the rows are held"
-            );
-            held.extend(runs.iter().map(|queued| (queued.id, queued.attempts)));
+            match fault_of(&error) {
+                Fault::Store => tracing::warn!(
+                    kind,
+                    rows = runs.len(),
+                    "telemetry outbox: ClickHouse did not say which runs it holds; the rows wait"
+                ),
+                // A read the server refused is this query's fault, which a
+                // deploy mends: said at error, every tick, until one does.
+                Fault::Row => tracing::error!(
+                    kind,
+                    rows = runs.len(),
+                    "telemetry outbox: ClickHouse refused the read of which runs it holds; the rows wait"
+                ),
+            }
+            held.extend(runs.into_iter().map(|queued| queued.held(Fault::Store)));
             return;
         }
     };
-    let mut spans = Vec::with_capacity(runs.len());
-    let mut ids = Vec::with_capacity(runs.len());
-    let mut nudges: BTreeMap<(String, String), Vec<Uuid>> = BTreeMap::new();
-    for queued in runs {
-        if !written.insert((queued.project_id.to_string(), queued.run.run_id)) {
+    let mut queued: Vec<QueuedRun> = Vec::with_capacity(runs.len());
+    let mut spans: Vec<SpanRow> = Vec::with_capacity(runs.len());
+    for run in runs {
+        if !written.insert((run.project_id.to_string(), run.run.run_id)) {
             tracing::info!(
-                outbox_id = %queued.id,
-                project_id = %queued.project_id,
-                run_id = %queued.run.run_id,
+                outbox_id = %run.id,
+                project_id = %run.project_id,
+                run_id = %run.run.run_id,
                 "telemetry outbox: a run spans holds already; its row is dropped, not written twice"
             );
-            landed.push(queued.id);
+            landed.push(run.id);
             continue;
         }
-        nudges
-            .entry((
-                queued.organization_id.to_string(),
-                queued.project_id.to_string(),
-            ))
-            .or_default()
-            .push(queued.run.run_id);
-        spans.push(queued.run.row(&queued.project_id));
-        ids.push((queued.id, queued.attempts));
+        spans.push(run.run.row(&run.project_id));
+        queued.push(run);
     }
     if spans.is_empty() {
         return;
     }
+    let mut nudges: BTreeMap<(String, String), Vec<Uuid>> = BTreeMap::new();
     match state.store.insert_spans(&spans).await {
         Ok(()) => {
-            landed.extend(ids.iter().map(|(id, _)| *id));
-            for ((organization, project), runs) in nudges {
-                live::tell(Arc::clone(state), &organization, &project, runs);
+            for run in &queued {
+                nudge(&mut nudges, run);
+                landed.push(run.id);
             }
         }
         Err(error) => {
             // ⚠ The error's text can carry ClickHouse's own message: its
             // kind alone is logged.
             let kind = store::error_kind(&error);
-            if kind == "ours" {
-                tracing::error!(
-                    kind,
-                    rows = spans.len(),
-                    "telemetry outbox: ClickHouse refused the runs' rows; they are held"
-                );
-            } else {
-                tracing::warn!(
-                    kind,
-                    rows = spans.len(),
-                    "telemetry outbox: ClickHouse did not take the runs' rows; they are held"
-                );
+            match fault_of(&error) {
+                Fault::Store => {
+                    tracing::warn!(
+                        kind,
+                        rows = spans.len(),
+                        "telemetry outbox: ClickHouse did not take the runs' rows; they wait with their tries"
+                    );
+                    held.extend(queued.into_iter().map(|run| run.held(Fault::Store)));
+                }
+                Fault::Row => {
+                    tracing::error!(
+                        kind,
+                        rows = spans.len(),
+                        "telemetry outbox: ClickHouse refused the runs' rows; each is tried alone"
+                    );
+                    land_one_by_one(&state.store, queued, &spans, landed, held, &mut nudges).await;
+                }
             }
-            held.extend(ids);
         }
     }
+    for ((organization, project), runs) in nudges {
+        live::tell(Arc::clone(state), &organization, &project, runs);
+    }
+}
+
+/// A batch the store refused, written again one row at a time, so one row
+/// stops one row: a row refused alone is held and its try counted; a row the
+/// store fails on — gone away mid-pass — and every row after it are handed
+/// back with their tries, and the pass ends.
+async fn land_one_by_one(
+    store: &store::Store,
+    queued: Vec<QueuedRun>,
+    spans: &[SpanRow],
+    landed: &mut Vec<Uuid>,
+    held: &mut Vec<Held>,
+    nudges: &mut BTreeMap<(String, String), Vec<Uuid>>,
+) {
+    let mut rows = queued.into_iter().zip(spans);
+    while let Some((run, span)) = rows.next() {
+        let took = store.insert_spans(std::slice::from_ref(span)).await;
+        if settle_one(took, run, landed, held, nudges).is_break() {
+            held.extend(rows.map(|(run, _)| run.held(Fault::Store)));
+            return;
+        }
+    }
+}
+
+/// One row's insert settled: landed and told of, held as the row's fault,
+/// or — the store gone away — handed back, which ends the pass
+/// ([`ControlFlow::Break`]) for every row after it to be handed back too.
+fn settle_one(
+    took: clickhouse::error::Result<()>,
+    run: QueuedRun,
+    landed: &mut Vec<Uuid>,
+    held: &mut Vec<Held>,
+    nudges: &mut BTreeMap<(String, String), Vec<Uuid>>,
+) -> ControlFlow<()> {
+    let error = match took {
+        Ok(()) => {
+            nudge(nudges, &run);
+            landed.push(run.id);
+            return ControlFlow::Continue(());
+        }
+        Err(error) => error,
+    };
+    // ⚠ The error's text can carry ClickHouse's own message: its kind alone
+    // is logged.
+    let kind = store::error_kind(&error);
+    match fault_of(&error) {
+        Fault::Row => {
+            tracing::warn!(
+                outbox_id = %run.id,
+                project_id = %run.project_id,
+                kind,
+                "telemetry outbox: ClickHouse refused a run's row; it is held"
+            );
+            held.push(run.held(Fault::Row));
+            ControlFlow::Continue(())
+        }
+        Fault::Store => {
+            tracing::warn!(
+                kind,
+                "telemetry outbox: ClickHouse did not take a run's row; it and the rest wait with their tries"
+            );
+            held.push(run.held(Fault::Store));
+            ControlFlow::Break(())
+        }
+    }
+}
+
+/// A landed run gathered for `live::tell`, by its organization and project.
+fn nudge(nudges: &mut BTreeMap<(String, String), Vec<Uuid>>, run: &QueuedRun) {
+    nudges
+        .entry((run.organization_id.to_string(), run.project_id.to_string()))
+        .or_default()
+        .push(run.run.run_id);
 }
 
 /// Which of the batch's runs `spans` holds already, by project and run id,
@@ -512,17 +733,24 @@ async fn land_notice(
     state: &AppState,
     row: OutboxRow,
     landed: &mut Vec<Uuid>,
-    held: &mut Vec<(Uuid, i32)>,
+    held: &mut Vec<Held>,
 ) {
     let notice = match serde_json::from_value::<QueuedNotice>(row.payload) {
         Ok(notice) => notice,
         Err(error) => {
             tracing::error!(
                 outbox_id = %row.id,
+                project_id = %row.project_id,
                 error = %error,
                 "telemetry outbox: a notice does not parse; the row is held"
             );
-            held.push((row.id, row.attempts));
+            held.push(Held {
+                id: row.id,
+                attempts: row.attempts,
+                kind: KIND_NOTICE,
+                project_id: row.project_id,
+                fault: Fault::Row,
+            });
             return;
         }
     };
@@ -544,13 +772,35 @@ async fn land_notice(
     match handed {
         Ok(_) => landed.push(row.id),
         Err(error) => {
-            tracing::warn!(
-                outbox_id = %row.id,
-                project_id = %row.project_id,
-                error = %error,
-                "telemetry outbox: notifications did not take a notice; the row is held"
-            );
-            held.push((row.id, row.attempts));
+            // A notice the seam refuses — a bound, a shape — is this code's
+            // to mend, and retrying will not land it; notifications that
+            // could not write it is an outage of ours, and will.
+            let fault = if error.to_problem_details().status >= 500 {
+                Fault::Store
+            } else {
+                Fault::Row
+            };
+            match fault {
+                Fault::Store => tracing::warn!(
+                    outbox_id = %row.id,
+                    project_id = %row.project_id,
+                    error = %error,
+                    "telemetry outbox: notifications did not take a notice; the row waits with its try"
+                ),
+                Fault::Row => tracing::error!(
+                    outbox_id = %row.id,
+                    project_id = %row.project_id,
+                    error = %error,
+                    "telemetry outbox: notifications refused a notice; the row is held"
+                ),
+            }
+            held.push(Held {
+                id: row.id,
+                attempts: row.attempts,
+                kind: KIND_NOTICE,
+                project_id: row.project_id,
+                fault,
+            });
         }
     }
 }
@@ -649,5 +899,188 @@ mod tests {
         assert_eq!(retry_wait(7), 300);
         assert_eq!(retry_wait(100), 300);
         assert_eq!(retry_wait(0), 5);
+    }
+
+    /// The store's fault — unreachable, silent, or saying it cannot take
+    /// rows now — hands a row back; a refusal, or a row this side could not
+    /// encode, is the row's.
+    #[test]
+    fn whose_fault_a_store_error_is() {
+        use clickhouse::error::Error;
+        assert_eq!(
+            fault_of(&Error::Network("connection refused".into())),
+            Fault::Store
+        );
+        assert_eq!(fault_of(&Error::TimedOut), Fault::Store);
+        assert_eq!(
+            fault_of(&Error::BadResponse(
+                "Code: 241. DB::Exception: Memory limit (total) exceeded: would use 3.72 GiB. \
+                 (MEMORY_LIMIT_EXCEEDED) (version 26.8.19.9 (official build))"
+                    .into()
+            )),
+            Fault::Store
+        );
+        assert_eq!(
+            fault_of(&Error::BadResponse("Code: 243".into())),
+            Fault::Store,
+            "a body the client could not read, the header naming the code"
+        );
+        assert_eq!(
+            fault_of(&Error::BadResponse(
+                "Code: 60. DB::Exception: Table telemetry.spans does not exist. (UNKNOWN_TABLE)"
+                    .into()
+            )),
+            Fault::Row
+        );
+        assert_eq!(
+            fault_of(&Error::BadResponse("503 Service Unavailable".into())),
+            Fault::Row,
+            "an answer with no code of ClickHouse's"
+        );
+        assert_eq!(fault_of(&Error::SequenceMustHaveLength), Fault::Row);
+        assert_eq!(
+            fault_of(&Error::Other("attempting to write an empty block".into())),
+            Fault::Row
+        );
+    }
+
+    /// The code is read from the front of the message and nowhere else.
+    #[test]
+    fn the_code_is_read_from_the_front_of_the_message() {
+        assert_eq!(
+            exception_code("Code: 252. DB::Exception: Too many parts (3001 with average size"),
+            Some(252)
+        );
+        assert_eq!(exception_code("Code: 252"), Some(252));
+        assert_eq!(exception_code("503 Service Unavailable"), None);
+        assert_eq!(exception_code("DB::Exception: Code: 252."), None);
+        assert_eq!(exception_code("Code: "), None);
+        assert_eq!(exception_code(""), None);
+    }
+
+    /// Three runs of one project, as a batch carries them.
+    fn a_batch() -> (Vec<QueuedRun>, Vec<SpanRow>) {
+        let now = Utc::now();
+        let project = ProjectId::from_trusted("project_a");
+        let queued: Vec<QueuedRun> = (0..3)
+            .map(|_| QueuedRun {
+                id: Uuid::now_v7(),
+                attempts: 3,
+                project_id: project.clone(),
+                organization_id: OrganizationId::from_trusted("org_a"),
+                run: FinishedRun {
+                    run_id: Uuid::new_v4(),
+                    agent: "nightly-report".into(),
+                    started_at: now,
+                    ended_at: now,
+                    received_at: now,
+                    status: SpanStatus::Ok,
+                    exit_code: None,
+                    steps: None,
+                    cost_usd: None,
+                },
+            })
+            .collect();
+        let spans = queued
+            .iter()
+            .map(|run| run.run.row(&run.project_id))
+            .collect();
+        (queued, spans)
+    }
+
+    /// A row written alone: landed and told of; refused, held with its try
+    /// counted and the pass going on; the store gone away, handed back and
+    /// the pass ended.
+    #[test]
+    fn one_row_settled_alone() {
+        use clickhouse::error::Error;
+
+        let (queued, spans) = a_batch();
+        let ids: Vec<Uuid> = queued.iter().map(|run| run.id).collect();
+        let mut rows = queued.into_iter();
+        let mut landed = Vec::new();
+        let mut held = Vec::new();
+        let mut nudges = BTreeMap::new();
+
+        let first = rows.next().expect("a row");
+        assert_eq!(
+            settle_one(Ok(()), first, &mut landed, &mut held, &mut nudges),
+            ControlFlow::Continue(())
+        );
+        assert_eq!(landed, [ids[0]]);
+        assert!(held.is_empty());
+        assert_eq!(
+            nudges
+                .get(&("org_a".to_owned(), "project_a".to_owned()))
+                .map(|runs| runs.as_slice()),
+            Some([spans[0].run_id].as_slice()),
+            "the consoles are told of what landed"
+        );
+
+        let second = rows.next().expect("a row");
+        assert_eq!(
+            settle_one(
+                Err(Error::BadResponse(
+                    "Code: 53. DB::Exception: Cannot convert: String to UInt32. (TYPE_MISMATCH)"
+                        .into()
+                )),
+                second,
+                &mut landed,
+                &mut held,
+                &mut nudges
+            ),
+            ControlFlow::Continue(()),
+            "one row stops one row"
+        );
+        assert_eq!(landed, [ids[0]]);
+        assert_eq!(held.len(), 1);
+        assert_eq!(held[0].id, ids[1]);
+        assert_eq!(held[0].fault, Fault::Row);
+        assert_eq!(held[0].attempts, 3, "the try counts");
+        assert_eq!(held[0].kind, KIND_SPAN);
+        assert_eq!(held[0].project_id.as_str(), "project_a");
+
+        let third = rows.next().expect("a row");
+        assert_eq!(
+            settle_one(
+                Err(Error::TimedOut),
+                third,
+                &mut landed,
+                &mut held,
+                &mut nudges
+            ),
+            ControlFlow::Break(()),
+            "the store gone away ends the pass"
+        );
+        assert_eq!(held.len(), 2);
+        assert_eq!(held[1].id, ids[2]);
+        assert_eq!(held[1].fault, Fault::Store);
+        assert_eq!(nudges.values().map(Vec::len).sum::<usize>(), 1);
+    }
+
+    /// A store that cannot be reached ends the pass at its first row: every
+    /// row is handed back with its try, and none is told of. Nothing listens
+    /// on the port the store names.
+    #[tokio::test]
+    async fn a_store_gone_away_hands_the_whole_pass_back() {
+        let store = store::Store::connect("http://127.0.0.1:1").expect("a store nobody runs");
+        let (queued, spans) = a_batch();
+        let ids: Vec<Uuid> = queued.iter().map(|run| run.id).collect();
+        let mut landed = Vec::new();
+        let mut held = Vec::new();
+        let mut nudges = BTreeMap::new();
+        land_one_by_one(&store, queued, &spans, &mut landed, &mut held, &mut nudges).await;
+        assert!(landed.is_empty());
+        assert_eq!(
+            held.iter()
+                .map(|row| (row.id, row.fault))
+                .collect::<Vec<_>>(),
+            [
+                (ids[0], Fault::Store),
+                (ids[1], Fault::Store),
+                (ids[2], Fault::Store)
+            ]
+        );
+        assert!(nudges.is_empty());
     }
 }

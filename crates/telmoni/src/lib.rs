@@ -484,7 +484,7 @@ impl App {
 /// `main` once the arguments are parsed. `migrate` and `rotate` never build
 /// the process — they run as the migrator, against Postgres and ClickHouse
 /// alone — and every other command builds it once, with every module the
-/// binary mounted, then serves or runs the one sweep.
+/// binary mounted, then serves or does its one thing.
 pub async fn run<F, Fut>(command: Command, build: F) -> anyhow::Result<()>
 where
     F: FnOnce() -> Fut,
@@ -552,6 +552,12 @@ where
                 purged = terminated.purged,
                 "terminate complete; the deletion sweep finishes it"
             );
+            Ok(())
+        }
+        Command::ReleaseOutbox => {
+            let app = build().await?;
+            let released = telmoni_telemetry::outbox::release(&app.telemetry).await?;
+            tracing::info!(released, "outbox release complete; the loop takes the rows");
             Ok(())
         }
     }

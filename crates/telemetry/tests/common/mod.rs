@@ -367,17 +367,36 @@ pub(crate) struct LoggedNotice {
     pub(crate) dedup_key: Option<String>,
 }
 
+/// How the fake answers a notice, where a suite has it fail: as notifications
+/// refusing one, or unable to write one.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum Answer {
+    #[default]
+    Taken,
+    Refused,
+    Down,
+}
+
 /// Notifications as this module holds it: every notice handed through the
 /// seam, kept for a suite to read, and a replayed dedup key answered with
 /// its first row and kept once, as the module answers one.
 #[derive(Default)]
 pub(crate) struct NoticeLog {
     notices: Mutex<Vec<LoggedNotice>>,
+    answer: Mutex<Answer>,
 }
 
 impl NoticeLog {
     pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self::default())
+    }
+
+    /// How every notice from now on is answered.
+    pub(crate) fn answer(&self, answer: Answer) {
+        *self
+            .answer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = answer;
     }
 
     /// Every notice handed over, in order.
@@ -397,6 +416,17 @@ impl Notifications for NoticeLog {
         project_id: Option<&ProjectId>,
         notice: Notice<'_>,
     ) -> Result<Emitted, TelmoniError> {
+        match *self
+            .answer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        {
+            Answer::Taken => {}
+            Answer::Refused => {
+                return Err(TelmoniError::BadRequest("the fake refuses notices".into()));
+            }
+            Answer::Down => return Err(TelmoniError::Internal("the fake is down".into())),
+        }
         let mut notices = self
             .notices
             .lock()

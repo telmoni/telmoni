@@ -45,6 +45,7 @@ help:
 	@echo "    make web-dev              run the console alone"
 	@echo "    make book                 lay the docs (telmoni/docs, at ../docs) into the console; up and web-dev keep them in step"
 	@echo "    make sweep SWEEP=deletion run one sweep by hand (deletion, audit-verify, retention, agent-reindex, audit-exports)"
+	@echo "    make release-outbox       give every outbox row past its tries another go, once what refused it is mended"
 	@echo "    make webhook-receiver SECRET=whsec_...   receive an outbound webhook behind a named Cloudflare route"
 	@echo "    make webhook-tunnel       the same, with no dashboard: a quick tunnel prints a throwaway URL (needs cloudflared)"
 	@echo "    make db-migrate           apply every migration set to the local Postgres, then ClickHouse's file"
@@ -273,6 +274,10 @@ server-dev:
 sweep:
 	@test -n "$(SWEEP)" || { echo "usage: make sweep SWEEP=<deletion|audit-verify|retention|agent-reindex|audit-exports>"; exit 2; }
 	cargo run -p telmoni -- sweep $(SWEEP)
+
+.PHONY: release-outbox
+release-outbox:
+	cargo run -p telmoni -- release outbox
 
 # ── Quality & Verification ─────────────────────────────────────
 

@@ -486,8 +486,10 @@ impl Read {
 
 /// What kind of failure a ClickHouse error is, for a log line. ⚠ The error's
 /// text can carry ClickHouse's own message, which may quote a row or a bound
-/// value: a caller logs the kind and never the text. `ours` is a shape of
-/// ours the server refused, which retrying will not mend.
+/// value: a caller logs the kind and never the text. `bad response` is an
+/// answer the server gave, a refusal or its own state, and `ours` a failure
+/// on this side of the wire — a row that would not encode, an answer the
+/// client could not read — which retrying will not mend.
 pub(crate) fn error_kind(error: &clickhouse::error::Error) -> &'static str {
     use clickhouse::error::Error;
     match error {

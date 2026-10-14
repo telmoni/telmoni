@@ -28,7 +28,7 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use common::{AuthStub, NoticeLog, PausedOrganization, SECRET};
+use common::{Answer, AuthStub, NoticeLog, PausedOrganization, SECRET};
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::seam::{Entitlements, NoLimits};
@@ -293,6 +293,19 @@ async fn finished_runs(pool: &PgPool, project: &ProjectId) -> Vec<Value> {
         .filter(|(kind, _)| kind == "span")
         .map(|(_, payload)| payload)
         .collect()
+}
+
+/// Each row waiting in the project's outbox, oldest first: how many tries
+/// it has been counted, and whether it is held for a wait or a lease now.
+async fn tries_of(pool: &PgPool, project: &ProjectId) -> Vec<(i32, bool)> {
+    sqlx::query_as(
+        "SELECT attempts, lease_until IS NOT NULL AND lease_until > now()
+           FROM telemetry.outbox WHERE project_id = $1 ORDER BY id",
+    )
+    .bind(project)
+    .fetch_all(pool)
+    .await
+    .expect("read a project's outbox tries")
 }
 
 /// What the organization's chain records of its monitors, in order: the
@@ -959,6 +972,156 @@ async fn a_run_ended_twice_is_one_row_of_spans(pool: PgPool) {
         Settled::default()
     );
     assert_eq!(spans().await, 2, "a copy in one batch wrote a second row");
+}
+
+/// A store that cannot be reached is the store's fault: the run's row is
+/// handed back for the next tick with its try returned, tick after tick,
+/// and never counted stuck. Nothing listens where this suite's ClickHouse
+/// would be.
+#[sqlx::test]
+async fn a_store_outage_hands_a_run_back_with_its_try(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.ping_ok(&format!("/{key}/nightly-report")).await;
+
+    // The first tick hands the notice over; every tick hands the run back.
+    // Thirteen is one past the cap, had the tries counted.
+    for tick in 1..=13 {
+        let settled = outbox::tick_once(&p.state).await.expect("a tick");
+        assert_eq!(settled.held, 1, "tick {tick}: {settled:?}");
+        assert_eq!(
+            settled.landed,
+            u32::from(tick == 1),
+            "tick {tick}: {settled:?}"
+        );
+        assert_eq!(
+            tries_of(&pool, &p.project).await,
+            [(0, false)],
+            "tick {tick}: the row waits with its try, unleased"
+        );
+    }
+    let (pending, stuck, oldest) = outbox::depth(&p.state).await.expect("the depth");
+    assert_eq!((pending, stuck), (1, 0));
+    assert!(oldest.is_some(), "the row to land is the oldest");
+}
+
+/// A row no version of this code wrote is the row's fault: held longer each
+/// time, counted, and after its twelfth try left — nothing takes it, the
+/// depth counts it stuck — until an operator's `release outbox` gives it its
+/// tries back, which it spends again.
+#[sqlx::test]
+async fn a_row_that_does_not_parse_waits_out_its_tries_until_released(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO telemetry.outbox (id, project_id, organization_id, kind, payload)
+         VALUES ($1, $2, $3, 'span', '{}')",
+    )
+    .bind(id)
+    .bind(&p.project)
+    .bind(&p.organization)
+    .execute(&pool)
+    .await
+    .expect("a row no version of this code wrote");
+
+    for attempt in 1..=12 {
+        assert_eq!(
+            outbox::tick_once(&p.state).await.expect("a tick"),
+            Settled { landed: 0, held: 1 },
+            "try {attempt}"
+        );
+        assert_eq!(
+            tries_of(&pool, &p.project).await,
+            [(attempt, true)],
+            "try {attempt}: held for its wait"
+        );
+        // Its wait over.
+        sqlx::query(
+            "UPDATE telemetry.outbox SET lease_until = now() - interval '1 second' WHERE id = $1",
+        )
+        .bind(id)
+        .execute(&pool)
+        .await
+        .expect("the wait over");
+    }
+    // Past its tries: nothing takes it, and the depth counts it stuck.
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled::default()
+    );
+    assert_eq!(
+        outbox::depth(&p.state).await.expect("the depth"),
+        (0, 1, None)
+    );
+
+    // Released: tried again, held again, and not touched by another release.
+    assert_eq!(outbox::release(&p.state).await.expect("the release"), 1);
+    assert_eq!(outbox::depth(&p.state).await.expect("the depth").0, 1);
+    assert_eq!(tries_of(&pool, &p.project).await, [(0, false)]);
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled { landed: 0, held: 1 }
+    );
+    assert_eq!(tries_of(&pool, &p.project).await, [(1, true)]);
+    assert_eq!(
+        outbox::release(&p.state).await.expect("the release"),
+        0,
+        "a row within its tries is not touched"
+    );
+}
+
+/// Notifications unable to write a notice is an outage of ours: the row is
+/// handed back with its try. A notice it refuses is the row's fault: held
+/// and counted. Both beside a run's row the unreachable store hands back.
+#[sqlx::test]
+async fn a_refused_notice_counts_a_try_and_one_notifications_could_not_write_does_not(
+    pool: PgPool,
+) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.notices.answer(Answer::Down);
+    p.ping_ok(&format!("/{key}/nightly-report")).await;
+
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled { landed: 0, held: 2 }
+    );
+    assert_eq!(
+        tries_of(&pool, &p.project).await,
+        [(0, false), (0, false)],
+        "notifications down and ClickHouse unreachable: both handed back"
+    );
+
+    p.notices.answer(Answer::Refused);
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled { landed: 0, held: 2 }
+    );
+    assert_eq!(
+        tries_of(&pool, &p.project).await,
+        [(1, true), (0, false)],
+        "a refused notice is held and counted; the run's row handed back again"
+    );
+
+    // Taken once its wait is over, the run's row still waiting on the store.
+    p.notices.answer(Answer::Taken);
+    sqlx::query(
+        "UPDATE telemetry.outbox SET lease_until = now() - interval '1 second'
+          WHERE project_id = $1 AND kind = 'notice'",
+    )
+    .bind(&p.project)
+    .execute(&pool)
+    .await
+    .expect("the wait over");
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled { landed: 1, held: 1 }
+    );
+    assert_eq!(p.notices.notices().len(), 1);
+    assert_eq!(tries_of(&pool, &p.project).await, [(0, false)]);
 }
 
 #[sqlx::test]

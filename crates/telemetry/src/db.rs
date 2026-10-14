@@ -1105,9 +1105,48 @@ pub async fn hold_outbox(
     Ok(())
 }
 
+/// Rows the store was at fault for, handed back untouched: the try returned
+/// and the lease dropped, so the next tick takes them again. The delivery
+/// loop's posture for a KEK it cannot reach, and the reason an outage of
+/// ours cannot spend a row's tries.
+pub async fn unlease_outbox(
+    tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
+    ids: &[Uuid],
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE telemetry.outbox
+            SET attempts = GREATEST(attempts - 1, 0),
+                lease_until = NULL
+          WHERE id = ANY($1)",
+    )
+    .bind(ids)
+    .execute(tx.conn())
+    .await?;
+    Ok(())
+}
+
+/// Every row past `max_attempts` given its tries back, for the loop to take
+/// again: an operator's, once what refused the rows is mended. Answers how
+/// many were released.
+pub async fn release_outbox(
+    tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
+    max_attempts: i32,
+) -> sqlx::Result<u64> {
+    Ok(sqlx::query(
+        "UPDATE telemetry.outbox
+            SET attempts = 0,
+                lease_until = NULL
+          WHERE attempts >= $1",
+    )
+    .bind(max_attempts)
+    .execute(tx.conn())
+    .await?
+    .rows_affected())
+}
+
 /// What the outbox holds: the rows still to land, those past `max_attempts`,
-/// which stay for an operator to see, and how old the oldest to land is, in
-/// seconds.
+/// which stay until an operator releases them, and how old the oldest to
+/// land is, in seconds.
 pub async fn outbox_depth(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     max_attempts: i32,

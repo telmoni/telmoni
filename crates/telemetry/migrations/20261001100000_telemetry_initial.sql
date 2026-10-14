@@ -362,9 +362,11 @@ GRANT UPDATE (organization_id) ON telemetry.open_runs TO telemetry_maintenance;
 -- once, since the loop reads which of a batch's runs `spans` holds already
 -- before it inserts and drops those rows: the loop every replica runs
 -- (`outbox.rs`) leases rows across tenants, `FOR UPDATE SKIP LOCKED`, lands
--- each and deletes it; a row that fails waits out its lease and is tried
--- again, up to a cap, past which it stays for an operator to see. Filed
--- under the project and its organization both, as a monitor is.
+-- each and deletes it; a row ClickHouse or the seam refused, or that does
+-- not parse, waits and is tried again up to a cap, past which it stays until
+-- `telmoni release outbox`; a row a store outage left is handed back with
+-- its try, so an outage strands nothing. Filed under the project and its
+-- organization both, as a monitor is.
 CREATE TABLE telemetry.outbox (
     id              UUID        PRIMARY KEY,
     project_id      TEXT        NOT NULL,
