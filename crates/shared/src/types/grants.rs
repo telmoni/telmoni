@@ -48,6 +48,38 @@ impl Grants {
     }
 }
 
+/// How many people an organization may hold, as the deployment that sells
+/// plans answers it ([`crate::seam::Entitlements::member_ceiling`]): its
+/// members and everyone it has invited, counted together, since an
+/// invitation is a seat promised. Held to where a person is promised one and
+/// where they take it; never where one already seated is concerned, so a
+/// roster past it keeps everybody.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemberCeiling {
+    /// How many the organization may hold, those invited among them.
+    pub limit: u32,
+    /// The one thing that lifts it, the 402's `entitlement`.
+    pub entitlement: String,
+    /// The sentence a person reads, which names nobody: the inviter and
+    /// the invited are answered with it alike.
+    pub detail: String,
+}
+
+impl MemberCeiling {
+    /// Whether one more person may be promised a seat, or take one, with
+    /// `held` already held. Refused, as a 402, at the ceiling.
+    pub fn admit(&self, held: u64) -> Result<(), TelmoniError> {
+        if held < u64::from(self.limit) {
+            return Ok(());
+        }
+        Err(PlanError::LimitReached {
+            entitlement: self.entitlement.clone(),
+            detail: self.detail.clone(),
+        }
+        .into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,6 +110,34 @@ mod tests {
                 .get("entitlement")
                 .and_then(serde_json::Value::as_str),
             Some("pro")
+        );
+    }
+
+    #[test]
+    fn a_ceiling_admits_one_more_until_it_is_held_and_refuses_in_the_deployments_words() {
+        let ceiling = MemberCeiling {
+            limit: 2,
+            entitlement: "pro".into(),
+            detail: "The plan holds two.".into(),
+        };
+        assert!(ceiling.admit(0).is_ok());
+        assert!(ceiling.admit(1).is_ok());
+        let pd = ceiling
+            .admit(2)
+            .expect_err("a seat past the ceiling")
+            .to_problem_details();
+        assert_eq!(pd.type_uri, "/errors/plan/limit-reached");
+        assert_eq!(pd.status, 402);
+        assert_eq!(pd.detail.as_deref(), Some("The plan holds two."));
+        assert_eq!(
+            pd.extensions
+                .get("entitlement")
+                .and_then(serde_json::Value::as_str),
+            Some("pro")
+        );
+        assert!(
+            ceiling.admit(u64::MAX).is_err(),
+            "a roster past the ceiling promised a seat"
         );
     }
 }

@@ -16,8 +16,8 @@ use uuid::Uuid;
 
 use crate::acting::{Acting, ActingKey};
 use crate::{
-    AuditAction, FlagSet, Grants, NotificationKind, OrganizationId, OrganizationStatus, ProjectId,
-    TelmoniError, UserId,
+    AuditAction, FlagSet, Grants, MemberCeiling, NotificationKind, OrganizationId,
+    OrganizationStatus, ProjectId, TelmoniError, UserId,
 };
 
 /// Who may read a document the agent indexes, beyond the tenant its keys
@@ -485,6 +485,19 @@ pub trait OwnershipHook: Send + Sync {
 pub trait Entitlements: Send + Sync {
     /// The organization's grants now.
     async fn grants(&self, organization_id: &OrganizationId) -> Result<Grants, TelmoniError>;
+
+    /// How many people the organization may hold, those it has invited
+    /// among them; `None` is as many as it invites. Asked apart from
+    /// [`Entitlements::grants`], which every span asks and so must be
+    /// answered from memory: a roster changes rarely, and this answer may
+    /// read the deployment's own rows.
+    async fn member_ceiling(
+        &self,
+        organization_id: &OrganizationId,
+    ) -> Result<Option<MemberCeiling>, TelmoniError> {
+        let _ = organization_id;
+        Ok(None)
+    }
 }
 
 /// A binary that sells nothing: every organization holds everything.
@@ -514,6 +527,25 @@ pub async fn admit_new(
             tracing::warn!(organization_id = %organization_id, error = %e,
                 "entitlements could not be read; let in");
             Ok(())
+        }
+    }
+}
+
+/// What the roster's doors ask before a seat is promised or taken: the
+/// organization's member ceiling, which the door then holds its count to
+/// ([`MemberCeiling::admit`]) once that count is read under its own lock.
+/// An answer that cannot be had is no ceiling, logged, as [`admit_new`]
+/// lets in what it cannot decide.
+pub async fn member_ceiling(
+    entitlements: &dyn Entitlements,
+    organization_id: &OrganizationId,
+) -> Option<MemberCeiling> {
+    match entitlements.member_ceiling(organization_id).await {
+        Ok(ceiling) => ceiling,
+        Err(e) => {
+            tracing::warn!(organization_id = %organization_id, error = %e,
+                "the member ceiling could not be read; none is held");
+            None
         }
     }
 }

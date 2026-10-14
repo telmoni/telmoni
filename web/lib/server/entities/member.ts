@@ -7,6 +7,7 @@ import { logger } from "@/lib/logger";
 import { Role, asRole } from "@/lib/types/enums";
 
 import { identityContext, projectHeaders } from "./identity-context";
+import { type RosterCeiling, RosterCeilingSchema } from "./organization-member";
 
 const MemberSchema = z.object({
   id: z.string(),
@@ -27,7 +28,7 @@ export type Member = Omit<z.infer<typeof MemberSchema>, "role"> & {
 };
 
 export type MemberAccess =
-  | { kind: "ok"; members: Member[] }
+  | { kind: "ok"; members: Member[]; ceiling: RosterCeiling | null }
   | { kind: "forbidden" }
   | { kind: "unavailable" };
 
@@ -42,7 +43,11 @@ export const fetchMembers = cache(async (projectId: string): Promise<MemberAcces
     if (res.status === 403) return { kind: "forbidden" };
     if (!res.ok) return { kind: "unavailable" };
     const parsed = z
-      .object({ members: z.array(MemberSchema) })
+      .object({
+        members: z.array(MemberSchema),
+        // The owning organization's, which a seat here counts against.
+        ceiling: RosterCeilingSchema.nullable().optional(),
+      })
       .safeParse(await res.json());
     if (!parsed.success) {
       logger.warn(
@@ -61,6 +66,7 @@ export const fetchMembers = cache(async (projectId: string): Promise<MemberAcces
           is_owner: m.is_owner ?? (role === Role.Owner || m.role === "owner"),
         };
       }),
+      ceiling: parsed.data.ceiling ?? null,
     };
   } catch (err) {
     logger.warn(

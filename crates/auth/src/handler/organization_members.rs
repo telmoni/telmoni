@@ -24,8 +24,9 @@ use crate::{
     AppState,
     db::{AuthLane, identities, locks, members, organization_members, organizations},
     handler::{
-        ActingOrganization, acting_organization, organization_of, organization_role_or_forbidden,
-        parse_user_id,
+        ActingOrganization, acting_organization,
+        invite::{admit_invitation, ceiling_of, roster_ceiling},
+        organization_of, organization_role_or_forbidden, parse_user_id,
     },
     model::{AuditKind, InviteScope},
 };
@@ -79,8 +80,10 @@ pub async fn list_organization_members(
 
     let rows = organization_members::list_for_organization(&mut tx, &organization).await?;
     tx.commit().await?;
+    // Read once the roster's connection is back, never beside it.
+    let ceiling = roster_ceiling(&state, &organization).await?;
 
-    Ok(Json(json!({ "members": rows })))
+    Ok(Json(json!({ "members": rows, "ceiling": ceiling })))
 }
 
 /// `PUT /internal/organization/members/{member_id}/role` — update a member's role.
@@ -316,10 +319,10 @@ pub async fn create_organization_invite(
         }
         .into());
     }
-    // A dormant organization takes no new members.
-    if let Some(entitlements) = state.siblings.entitlements.as_deref() {
-        telmoni_shared::seam::admit_new(entitlements, &organization).await?;
-    }
+    // A dormant organization takes no new members, and one at its ceiling
+    // promises no further seat.
+    let ceiling = ceiling_of(&state, &organization).await?;
+    admit_invitation(&state, &organization, ceiling, &email).await?;
 
     // The invitation's mail calls the organization by its name.
     let Some(name) = organizations::get(&mut tx, &organization)

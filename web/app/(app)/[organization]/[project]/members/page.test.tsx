@@ -167,6 +167,30 @@ describe("MembersPage", () => {
       expect(screen.queryByRole("button", { name: /^transfer project/i })).toBeNull();
     });
 
+    // A seat here counts against the owning organization's ceiling: at it,
+    // the button goes and the deployment's sentence stands where it was, to
+    // whoever could have invited; a member, who could not, reads nothing.
+    it("hides the invitation at the organization's ceiling, and says why", async () => {
+      mockProject = projectAs(Role.Owner);
+      mockMembers = {
+        ...(mockMembers as object),
+        ceiling: { limit: 1, held: 1, detail: "Hobby holds one member." },
+      };
+      render(await MembersPage({ params: PARAMS }));
+      expect(screen.queryByTestId("header-action")).toBeNull();
+      expect(screen.getByTestId("member-ceiling")).toHaveTextContent("Hobby holds one member.");
+    });
+
+    it("says nothing of the ceiling to a member, who could not invite anyway", async () => {
+      mockProject = projectAs(Role.Member);
+      mockMembers = {
+        ...(mockMembers as object),
+        ceiling: { limit: 1, held: 1, detail: "Hobby holds one member." },
+      };
+      render(await MembersPage({ params: PARAMS }));
+      expect(screen.queryByTestId("member-ceiling")).toBeNull();
+    });
+
     it("hides invite action and manage controls when caller is member", async () => {
       mockProject = projectAs(Role.Member);
       render(

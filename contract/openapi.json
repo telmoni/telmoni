@@ -46,7 +46,7 @@
   "paths": {
     "/v1/members": {
       "get": {
-        "description": "Everyone on the project the key was minted on, the owner first, with the role each holds. The same body the console's project roster shows, so a key reads no more than the project admin who minted it could; the organization's roster is the console's alone.",
+        "description": "Everyone on the project the key was minted on, the owner first, with the role each holds. The same list the console's project roster shows, so a key reads no more than the project admin who minted it could; the organization's roster is the console's alone.",
         "responses": {
           "200": {
             "description": "The members: the owner, then the project's seats."

@@ -12,7 +12,7 @@
     reason = "test scaffolding: asserts and fixture setup"
 )]
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use axum::Router;
@@ -27,7 +27,9 @@ use telmoni_auth::test_provider::{ScriptedProvider, as_person};
 use telmoni_auth::{AppState, Config, Siblings, router};
 use telmoni_shared::seam::{Entitlements, OwnershipChange, OwnershipHook};
 use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, seed_identity, service_pool};
-use telmoni_shared::{Dormant, Grants, OrganizationId, PlanError, TelmoniError, UserId};
+use telmoni_shared::{
+    Dormant, Grants, MemberCeiling, OrganizationId, PlanError, TelmoniError, UserId,
+};
 
 const SERVICE_SECRET: &str = "test-service-secret";
 const OWNER: &str = "user_hook_owner";
@@ -109,10 +111,26 @@ impl OwnershipHook for RecordingOwnership {
     }
 }
 
-/// Entitlements under which the organizations in `dormant` take nothing new.
+/// Entitlements under which the organizations in `dormant` take nothing new,
+/// and each in `ceilings` holds at most so many people.
 #[derive(Default)]
 struct DormantEntitlements {
     dormant: Mutex<HashSet<String>>,
+    ceilings: Mutex<HashMap<String, u32>>,
+}
+
+impl DormantEntitlements {
+    fn hold(&self, organization: &str, limit: u32) {
+        self.ceilings
+            .lock()
+            .unwrap()
+            .insert(organization.to_owned(), limit);
+    }
+}
+
+/// The sentence the double refuses a seat with.
+fn holds(limit: u32) -> String {
+    format!("Hobby holds {limit}.")
 }
 
 #[async_trait::async_trait]
@@ -132,6 +150,22 @@ impl Entitlements for DormantEntitlements {
             });
         }
         Ok(Grants::unlimited())
+    }
+
+    async fn member_ceiling(
+        &self,
+        organization_id: &OrganizationId,
+    ) -> Result<Option<MemberCeiling>, TelmoniError> {
+        Ok(self
+            .ceilings
+            .lock()
+            .unwrap()
+            .get(organization_id.as_str())
+            .map(|&limit| MemberCeiling {
+                limit,
+                entitlement: "pro".into(),
+                detail: holds(limit),
+            }))
     }
 }
 
@@ -565,4 +599,322 @@ async fn a_dormant_organization_sends_no_invitation(pool: PgPool) {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["ceiling"], Value::Null, "a ceiling nobody set: {body}");
+}
+
+/// How many people the organization holds, read straight from the roster.
+async fn seated(pool: &PgPool, organization: &str) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM auth.organization_members WHERE organization_id = $1")
+        .bind(organization)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// How many invitations, to the organization or to its projects, are live.
+async fn live_invitations(pool: &PgPool) -> i64 {
+    sqlx::query_scalar(
+        "SELECT (SELECT count(*) FROM auth.organization_invites
+                  WHERE accepted_at IS NULL AND revoked_at IS NULL)
+              + (SELECT count(*) FROM auth.member_invites
+                  WHERE accepted_at IS NULL AND revoked_at IS NULL)",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+impl Deployment {
+    /// A project of the owner's, in `organization`.
+    async fn project(&self, pool: &PgPool, organization: &str, name: &str) -> String {
+        let (status, body) = self
+            .call(
+                pool,
+                "POST",
+                "/internal/projects",
+                OWNER,
+                Some(organization),
+                Some(json!({ "name": name })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        body["id"].as_str().unwrap().to_owned()
+    }
+
+    /// An invitation to the organization, as the owner; what auth answered.
+    async fn invite(&self, pool: &PgPool, organization: &str, email: &str) -> (StatusCode, Value) {
+        self.call(
+            pool,
+            "POST",
+            "/internal/organization/invites",
+            OWNER,
+            Some(organization),
+            Some(json!({ "email": email, "role": "member" })),
+        )
+        .await
+    }
+
+    /// An invitation to a project, as the owner; what auth answered.
+    async fn invite_to(
+        &self,
+        pool: &PgPool,
+        organization: &str,
+        project: &str,
+        email: &str,
+    ) -> (StatusCode, Value) {
+        self.call(
+            pool,
+            "POST",
+            &format!("/internal/projects/{project}/invites"),
+            OWNER,
+            Some(organization),
+            Some(json!({ "email": email, "role": "member" })),
+        )
+        .await
+    }
+
+    /// `user` accepts the invitation `invite` from the console's bell.
+    async fn accept(&self, pool: &PgPool, user: &str, invite: &str) -> (StatusCode, Value) {
+        self.call(
+            pool,
+            "POST",
+            &format!("/internal/me/invites/{invite}/accept"),
+            user,
+            None,
+            None,
+        )
+        .await
+    }
+
+    /// What the roster page reads as the organization's ceiling.
+    async fn ceiling_read(&self, pool: &PgPool, organization: &str, uri: &str) -> Value {
+        let (status, body) = self
+            .call(pool, "GET", uri, OWNER, Some(organization), None)
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body["ceiling"].clone()
+    }
+}
+
+/// The 402 a seat past the ceiling is refused with, in the deployment's words.
+fn assert_past_the_ceiling(status: StatusCode, body: &Value, limit: u32) {
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
+    assert_eq!(body["type"], "/errors/plan/limit-reached");
+    assert_eq!(body["entitlement"], "pro");
+    assert_eq!(body["detail"], holds(limit));
+}
+
+/// One member on Hobby, as the hosted service holds it: at its ceiling an
+/// organization promises no seat on either lane and writes no invitation,
+/// and both roster pages are told the ceiling and what stands against it —
+/// whoever could invite is; a member of the project, who reads its roster
+/// and nothing of the organization's, is not.
+#[sqlx::test]
+async fn an_organization_at_its_ceiling_promises_no_seat_and_its_rosters_say_so(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let deployment = Deployment::default();
+    let organization = deployment.sign_in(&pool, OWNER).await;
+    deployment.sign_in(&pool, STRANGER).await;
+    let project = deployment.project(&pool, &organization, "Payments").await;
+    // Seated while there was room: the roster's one member besides the owner.
+    let (status, body) = deployment
+        .invite_to(
+            &pool,
+            &organization,
+            &project,
+            &format!("{STRANGER}@example.test"),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let seat = body["id"].as_str().unwrap().to_owned();
+    let (status, body) = deployment.accept(&pool, STRANGER, &seat).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    deployment.entitlements.hold(&organization, 1);
+
+    let (status, body) = deployment
+        .invite(&pool, &organization, "someone@example.test")
+        .await;
+    assert_past_the_ceiling(status, &body, 1);
+    let (status, body) = deployment
+        .invite_to(&pool, &organization, &project, "someone@example.test")
+        .await;
+    assert_past_the_ceiling(status, &body, 1);
+    assert_eq!(
+        live_invitations(&pool).await,
+        0,
+        "a refused invitation was written"
+    );
+
+    let expected = json!({ "limit": 1, "held": 2, "detail": holds(1) });
+    assert_eq!(
+        deployment
+            .ceiling_read(&pool, &organization, "/internal/organization/members")
+            .await,
+        expected
+    );
+    let roster = format!("/internal/projects/{project}/members");
+    assert_eq!(
+        deployment.ceiling_read(&pool, &organization, &roster).await,
+        expected
+    );
+    let (status, body) = deployment
+        .call(&pool, "GET", &roster, STRANGER, Some(&organization), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["ceiling"],
+        Value::Null,
+        "a member of the project was told what the organization holds: {body}"
+    );
+}
+
+/// Everyone invited counts against the ceiling, each address once — asked
+/// again, or to a second project, it is promised no further seat — and a
+/// withdrawn invitation gives its place back.
+#[sqlx::test]
+async fn everyone_invited_counts_once_against_the_ceiling(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let deployment = Deployment::default();
+    let organization = deployment.sign_in(&pool, OWNER).await;
+    let project = deployment.project(&pool, &organization, "Payments").await;
+    deployment.entitlements.hold(&organization, 3);
+
+    let (status, body) = deployment
+        .invite(&pool, &organization, "a@example.test")
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (status, body) = deployment
+        .invite_to(&pool, &organization, &project, "b@example.test")
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let b = body["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        deployment
+            .ceiling_read(&pool, &organization, "/internal/organization/members")
+            .await["held"],
+        3,
+        "the owner and two invited"
+    );
+
+    let (status, body) = deployment
+        .invite(&pool, &organization, "c@example.test")
+        .await;
+    assert_past_the_ceiling(status, &body, 3);
+    // The same address again replaces its invitation and promises no further
+    // seat, to the organization as to one of its projects.
+    let (status, body) = deployment
+        .invite(&pool, &organization, "a@example.test")
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (status, body) = deployment
+        .invite_to(&pool, &organization, &project, "a@example.test")
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    let (status, body) = deployment
+        .call(
+            &pool,
+            "DELETE",
+            &format!("/internal/projects/{project}/invites/{b}"),
+            OWNER,
+            Some(&organization),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = deployment
+        .invite(&pool, &organization, "c@example.test")
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "the withdrawn place: {body}");
+}
+
+/// A seat keeps the promise to the ceiling the organization holds when it
+/// is taken: an invitation sent while there was room seats nobody once there
+/// is none, by the bell or by the link, and stays live; a member joining a
+/// second project takes no seat.
+#[sqlx::test]
+async fn a_seat_is_held_to_the_ceiling_when_it_is_taken(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let deployment = Deployment::default();
+    let organization = deployment.sign_in(&pool, OWNER).await;
+    deployment.sign_in(&pool, ADMIN).await;
+    deployment.sign_in(&pool, STRANGER).await;
+    let (status, body) = deployment
+        .invite(&pool, &organization, &format!("{ADMIN}@example.test"))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let admins = body["id"].as_str().unwrap().to_owned();
+    let (status, body) = deployment
+        .invite(&pool, &organization, &format!("{STRANGER}@example.test"))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let strangers = body["id"].as_str().unwrap().to_owned();
+    let link = body["link"].as_str().unwrap().to_owned();
+    let token = link.rsplit('/').next().unwrap().to_owned();
+
+    deployment.entitlements.hold(&organization, 2);
+    let (status, body) = deployment.accept(&pool, ADMIN, &admins).await;
+    assert_eq!(status, StatusCode::OK, "the last place: {body}");
+    let (status, body) = deployment.accept(&pool, STRANGER, &strangers).await;
+    assert_past_the_ceiling(status, &body, 2);
+    let (status, body) = deployment
+        .call(
+            &pool,
+            "POST",
+            "/internal/invites/accept",
+            STRANGER,
+            None,
+            Some(json!({ "token": token })),
+        )
+        .await;
+    assert_past_the_ceiling(status, &body, 2);
+    assert_eq!(seated(&pool, &organization).await, 2);
+    assert_eq!(
+        live_invitations(&pool).await,
+        1,
+        "a refused seat spent or lost its invitation"
+    );
+
+    // Somebody already on the roster is promised, and takes, a second
+    // project's seat with the organization full.
+    let project = deployment.project(&pool, &organization, "Payments").await;
+    let (status, body) = deployment
+        .invite_to(
+            &pool,
+            &organization,
+            &project,
+            &format!("{ADMIN}@example.test"),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let seat = body["id"].as_str().unwrap().to_owned();
+    let (status, body) = deployment.accept(&pool, ADMIN, &seat).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(seated(&pool, &organization).await, 2);
+}
+
+/// A dormant organization seats nobody either: an invitation sent while it
+/// took things in is refused at the accept, in the deployment's words.
+#[sqlx::test]
+async fn a_dormant_organization_seats_nobody(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let deployment = Deployment::default();
+    let organization = deployment.sign_in(&pool, OWNER).await;
+    deployment.sign_in(&pool, ADMIN).await;
+    let (status, body) = deployment
+        .invite(&pool, &organization, &format!("{ADMIN}@example.test"))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let invite = body["id"].as_str().unwrap().to_owned();
+    deployment
+        .entitlements
+        .dormant
+        .lock()
+        .unwrap()
+        .insert(organization.clone());
+
+    let (status, body) = deployment.accept(&pool, ADMIN, &invite).await;
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
+    assert_eq!(body["detail"], "This organization is dormant.");
+    assert_eq!(seated(&pool, &organization).await, 1);
 }

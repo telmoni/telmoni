@@ -4,6 +4,7 @@ import { AccessDenied } from "@/components/access-denied";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { MemberCeilingNotice, atCeiling } from "@/components/member-ceiling";
 import { ownerContact } from "@/lib/identity";
 import { Role } from "@/lib/types/enums";
 import {
@@ -46,15 +47,20 @@ export default async function MembersPage({
 
   const isOwner = project.role === Role.Owner;
   const canManage = isOwner || project.role === Role.Admin;
+  // A seat here counts against the owning organization's ceiling: at it, an
+  // invitation would be refused, so the button goes and the deployment's
+  // sentence stands in its place.
+  const full = atCeiling(listing.ceiling);
 
   return (
     <>
       <PageHeader
         title="Members"
-        action={canManage ? <AddMember projectId={project.id} /> : undefined}
+        action={canManage && !full ? <AddMember projectId={project.id} /> : undefined}
       />
 
       <div className="grid gap-6">
+        {canManage && <MemberCeilingNotice ceiling={listing.ceiling} />}
         <section className="grid gap-3 lg:grid-cols-3">
           <Card className="gap-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2">

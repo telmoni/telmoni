@@ -27,8 +27,8 @@ use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::{
-    AuditAction, AuthError, AuthzError, OrganizationId, OrganizationRole, OrganizationStatus,
-    ProjectId, Role, TelmoniError, TelmoniResourceKind, UserId,
+    AuditAction, AuthError, AuthzError, MemberCeiling, OrganizationId, OrganizationRole,
+    OrganizationStatus, ProjectId, Role, TelmoniError, TelmoniResourceKind, UserId,
 };
 
 use crate::{
@@ -75,6 +75,102 @@ fn hash_invite_token(raw: &str) -> String {
     telmoni_shared::digest::sha256_hex(raw.as_bytes())
 }
 
+/// What the deployment says before a seat is promised or taken: a dormant
+/// organization's refusal now, and the ceiling its roster is held to once
+/// the count is read ([`admit_invitation`], [`admit_seat`]). Nothing in a
+/// binary that sells no plans. ⚠ Asked before the organization's lock is
+/// taken, never under it: the deployment answers on its own pool, and the
+/// roster's lanes queue behind that lock.
+pub(crate) async fn ceiling_of(
+    state: &AppState,
+    organization: &OrganizationId,
+) -> Result<Option<MemberCeiling>, TelmoniError> {
+    let Some(entitlements) = state.siblings.entitlements.as_deref() else {
+        return Ok(None);
+    };
+    telmoni_shared::seam::admit_new(entitlements, organization).await?;
+    Ok(telmoni_shared::seam::member_ceiling(entitlements, organization).await)
+}
+
+/// A count as SQL answers it, as the ceiling takes it: never below zero.
+fn count(n: i64) -> u64 {
+    u64::try_from(n).unwrap_or_default()
+}
+
+/// Hold a promised seat to the ceiling: the roster and everyone invited,
+/// read in the lane, the one binding that sees every project's
+/// invitations. An invitation to somebody already among them — on the
+/// roster, or invited and asked again — promises nobody a further seat and
+/// is never refused by it.
+pub(crate) async fn admit_invitation(
+    state: &AppState,
+    organization: &OrganizationId,
+    ceiling: Option<MemberCeiling>,
+    email: &str,
+) -> Result<(), TelmoniError> {
+    let Some(ceiling) = ceiling else {
+        return Ok(());
+    };
+    let mut lane = maintenance_scope(&state.db, AuthLane).await?;
+    let held = organization_members::held(&mut lane, organization, Some(email)).await?;
+    lane.commit().await?;
+    if held.names_email {
+        return Ok(());
+    }
+    ceiling.admit(count(held.people))
+}
+
+/// Hold a seat being taken to the ceiling, under the organization's lock:
+/// the roster alone counts here, since the seat is the promise kept, and an
+/// invitation sent while the organization held more than it holds now seats
+/// nobody past it. Only for somebody not on the roster yet: a member joining
+/// a second project takes no seat.
+async fn admit_seat(
+    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+    organization: &OrganizationId,
+    ceiling: Option<MemberCeiling>,
+) -> Result<(), TelmoniError> {
+    let Some(ceiling) = ceiling else {
+        return Ok(());
+    };
+    let seated = organization_members::seated(tx, organization).await?;
+    ceiling.admit(count(seated))
+}
+
+/// The ceiling as a roster page reads it: `null` where none is held.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct RosterCeiling {
+    /// How many the organization may hold, those invited among them.
+    pub limit: u32,
+    /// How many it holds against that: its members and everyone invited.
+    pub held: u64,
+    /// The sentence an invitation past it is refused with.
+    pub detail: String,
+}
+
+/// The organization's ceiling and what stands against it, for the roster
+/// pages, which hide the invitation they know would be refused.
+pub(crate) async fn roster_ceiling(
+    state: &AppState,
+    organization: &OrganizationId,
+) -> Result<Option<RosterCeiling>, TelmoniError> {
+    let Some(entitlements) = state.siblings.entitlements.as_deref() else {
+        return Ok(None);
+    };
+    let Some(ceiling) = telmoni_shared::seam::member_ceiling(entitlements, organization).await
+    else {
+        return Ok(None);
+    };
+    let mut lane = maintenance_scope(&state.db, AuthLane).await?;
+    let held = organization_members::held(&mut lane, organization, None).await?;
+    lane.commit().await?;
+    Ok(Some(RosterCeiling {
+        limit: ceiling.limit,
+        held: count(held.people),
+        detail: ceiling.detail,
+    }))
+}
+
 /// `POST /internal/projects/{project_id}/invites` — offer somebody a role.
 pub async fn create_invite(
     State(state): State<Arc<AppState>>,
@@ -90,10 +186,10 @@ pub async fn create_invite(
     let acting = acting_project(&state, &project_id, &actor).await?;
     authorize(acting.role, Verb::Create, Resource::Member)?;
     let organization = acting.organization.clone();
-    // A dormant organization takes no new members.
-    if let Some(entitlements) = state.siblings.entitlements.as_deref() {
-        telmoni_shared::seam::admit_new(entitlements, &organization).await?;
-    }
+    // A dormant organization takes no new members, and one at its ceiling
+    // promises no further seat.
+    let ceiling = ceiling_of(&state, &organization).await?;
+    admit_invitation(&state, &organization, ceiling, &email).await?;
 
     // ⚠ **Under the owning organization's scope.** Its flag overrides, its
     // roster and every address on it are the organization's rows; with only
@@ -368,23 +464,29 @@ async fn lock_active(
     Ok(())
 }
 
-/// Seat an accepted project invitation, **commit**, and announce it.
+/// Seat an accepted project invitation, **commit**, and announce it. The
+/// `ceiling` is the deployment's answer for the organization, asked by the
+/// caller before the organization's lock ([`ceiling_of`]).
 async fn seat_project_member(
     state: &AppState,
     mut tx: Scoped<'_, Maintenance<AuthLane>>,
     invite: AcceptedProjectInvite<'_>,
+    ceiling: Option<MemberCeiling>,
     actor: &UserId,
     accepter: &str,
 ) -> Result<(), TelmoniError> {
     let organization = invite.organization_id;
     lock_active(&mut tx, organization).await?;
-    if organization_members::role_on_organization(&mut tx, organization, actor).await?
-        == Some(OrganizationRole::Owner)
-    {
-        return Err(AuthError::BadRequest(
-            "you own this project — there is nothing to accept".into(),
-        )
-        .into());
+    match organization_members::role_on_organization(&mut tx, organization, actor).await? {
+        Some(OrganizationRole::Owner) => {
+            return Err(AuthError::BadRequest(
+                "you own this project — there is nothing to accept".into(),
+            )
+            .into());
+        }
+        // Already on the roster: a second project is no further seat.
+        Some(_) => {}
+        None => admit_seat(&mut tx, organization, ceiling).await?,
     }
 
     if !invites::mark_accepted(&mut tx, invite.id, actor).await? {
@@ -467,13 +569,23 @@ async fn seat_project_member(
 
 /// Seat an accepted organization invitation, and **commit**. A person already
 /// in the organization — at any role, the owner's included — is refused, and
-/// the invitation stays unaccepted.
+/// the invitation stays unaccepted; so is a seat past the organization's
+/// `ceiling`, the deployment's answer, asked by the caller before the
+/// organization's lock ([`ceiling_of`]).
 async fn seat_organization_member(
     mut tx: Scoped<'_, Maintenance<AuthLane>>,
     invite: AcceptedOrganizationInvite<'_>,
+    ceiling: Option<MemberCeiling>,
     actor: &UserId,
 ) -> Result<(), TelmoniError> {
     lock_active(&mut tx, invite.organization_id).await?;
+    if organization_members::role_on_organization(&mut tx, invite.organization_id, actor)
+        .await?
+        .is_some()
+    {
+        return Err(AuthError::Conflict("you are already in this organization".into()).into());
+    }
+    admit_seat(&mut tx, invite.organization_id, ceiling).await?;
     if !organization_members::add_member(&mut tx, invite.organization_id, actor, invite.role, actor)
         .await?
     {
@@ -584,6 +696,7 @@ pub async fn accept_invite(
     let token_hash = hash_invite_token(&req.token);
 
     if let Some(invite) = invites::find_live(&mut tx, &token_hash).await? {
+        let ceiling = ceiling_of(&state, &invite.organization_id).await?;
         let me = accepter(&mut tx, &actor).await?;
         if me.email != invite.email {
             return Err(not_yours());
@@ -597,6 +710,7 @@ pub async fn accept_invite(
                 organization_id: &invite.organization_id,
                 role: invite.role,
             },
+            ceiling,
             &actor,
             &crate::identity::display_for(me.display_name.as_deref(), &me.email),
         )
@@ -622,6 +736,7 @@ pub async fn accept_invite(
     if let Some(invite) =
         organization_members::find_live_organization_invite(&mut tx, &token_hash).await?
     {
+        let ceiling = ceiling_of(&state, &invite.organization_id).await?;
         let me = accepter(&mut tx, &actor).await?;
         if me.email != invite.email {
             return Err(not_yours());
@@ -633,6 +748,7 @@ pub async fn accept_invite(
                 organization_id: &invite.organization_id,
                 role: invite.role,
             },
+            ceiling,
             &actor,
         )
         .await?;
@@ -694,6 +810,7 @@ pub async fn accept_my_incoming_invite(
     if let Some(invite) =
         invites::find_incoming_member_invite(&mut tx, invite_id, &me.email).await?
     {
+        let ceiling = ceiling_of(&state, &invite.owner_organization_id).await?;
         seat_project_member(
             &state,
             tx,
@@ -703,6 +820,7 @@ pub async fn accept_my_incoming_invite(
                 organization_id: &invite.owner_organization_id,
                 role: invite.role,
             },
+            ceiling,
             &actor,
             &crate::identity::display_for(me.display_name.as_deref(), &me.email),
         )
@@ -730,6 +848,7 @@ pub async fn accept_my_incoming_invite(
     if let Some(invite) =
         invites::find_incoming_organization_invite(&mut tx, invite_id, &me.email).await?
     {
+        let ceiling = ceiling_of(&state, &invite.organization_id).await?;
         seat_organization_member(
             tx,
             AcceptedOrganizationInvite {
@@ -737,6 +856,7 @@ pub async fn accept_my_incoming_invite(
                 organization_id: &invite.organization_id,
                 role: invite.role,
             },
+            ceiling,
             &actor,
         )
         .await?;

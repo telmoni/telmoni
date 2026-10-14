@@ -85,7 +85,7 @@ pub const V1_LANES: &[V1Lane] = &[
             path: "/v1/members",
             summary: "Who is on the project",
             description: "Everyone on the project the key was minted on, the \
-                          owner first, with the role each holds. The same body \
+                          owner first, with the role each holds. The same list \
                           the console's project roster shows, so a key reads \
                           no more than the project admin who minted it could; \
                           the organization's roster is the console's alone.",

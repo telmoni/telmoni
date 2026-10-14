@@ -24,8 +24,19 @@ export type OrganizationMember = Omit<z.infer<typeof OrganizationMemberSchema>, 
   role: OrganizationRole | null;
 };
 
+// How many people the organization may hold, as the deployment that sells
+// plans answers it, and what stands against that — its members and everyone
+// invited — with the sentence an invitation past it is refused with; `null`
+// where none is held, as on a self-hosted installation.
+export const RosterCeilingSchema = z.object({
+  limit: z.number().int().min(0),
+  held: z.number().int().min(0),
+  detail: z.string(),
+});
+export type RosterCeiling = z.infer<typeof RosterCeilingSchema>;
+
 export type OrganizationMemberAccess =
-  | { kind: "ok"; members: OrganizationMember[] }
+  | { kind: "ok"; members: OrganizationMember[]; ceiling: RosterCeiling | null }
   | { kind: "forbidden" }
   | { kind: "unavailable" };
 
@@ -41,7 +52,10 @@ export const fetchOrganizationMembers = cache(
       if (res.status === 403) return { kind: "forbidden" };
       if (!res.ok) return { kind: "unavailable" };
       const parsed = z
-        .object({ members: z.array(OrganizationMemberSchema) })
+        .object({
+          members: z.array(OrganizationMemberSchema),
+          ceiling: RosterCeilingSchema.nullable().optional(),
+        })
         .safeParse(await res.json());
       if (!parsed.success) {
         logger.warn(
@@ -56,6 +70,7 @@ export const fetchOrganizationMembers = cache(
           ...m,
           role: asOrganizationRole(m.role),
         })),
+        ceiling: parsed.data.ceiling ?? null,
       };
     } catch (err) {
       logger.warn(

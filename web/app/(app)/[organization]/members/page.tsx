@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { MemberCeilingNotice, atCeiling } from "@/components/member-ceiling";
 import { ownerContact } from "@/lib/identity";
 import {
   activeOrganization,
@@ -80,17 +81,25 @@ export default async function OrganizationMembersPage() {
     );
   }
 
+  // At the plan's ceiling an invitation would be refused, so the button goes
+  // and the deployment's sentence stands in its place: a refusal here is a
+  // stale page, never a button that cannot work.
+  const full = atCeiling(listing.ceiling);
+
   return (
     <>
       <PageHeader
         title="Members"
         count={listing.members.length}
         action={
-          canManage ? <AddOrganizationMember organizationId={organizationId} /> : undefined
+          canManage && !full ? (
+            <AddOrganizationMember organizationId={organizationId} />
+          ) : undefined
         }
       />
 
       <div className="grid gap-6">
+        {canManage && <MemberCeilingNotice ceiling={listing.ceiling} />}
         <section className="grid gap-3 lg:grid-cols-3">
           <Card className="gap-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2">

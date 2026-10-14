@@ -80,9 +80,20 @@ pub async fn list_members(
     let mut acting = acting.enter_owner_scope().await?;
     let rows = members::list_for_project(&mut acting.tx, &project_id).await?;
     let acting = acting.leave_owner_scope().await?;
+    let organization = acting.organization.clone();
+    // The owning organization's ceiling, which a seat here counts against,
+    // to whoever could invite: what stands against it counts every project
+    // of the organization, which a member of this one has no roster of.
+    let may_invite = telmoni_shared::rbac::can(acting.role, Verb::Create, Resource::Member);
     acting.tx.commit().await?;
+    // Read once the roster's connection is back, never beside it.
+    let ceiling = if may_invite {
+        crate::handler::invite::roster_ceiling(&state, &organization).await?
+    } else {
+        None
+    };
 
-    Ok(Json(json!({ "members": rows })))
+    Ok(Json(json!({ "members": rows, "ceiling": ceiling })))
 }
 
 /// `PUT /internal/projects/{project_id}/members/{member_id}/role`.

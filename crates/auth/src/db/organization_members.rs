@@ -276,6 +276,70 @@ pub async fn has_others(
     .await
 }
 
+/// How many people the organization holds now: its roster, the owner among
+/// it. Read where a seat is taken, under the organization's lock, so two
+/// accepts cannot both find room for the last place.
+pub async fn seated(
+    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+    organization_id: &OrganizationId,
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar("SELECT count(*) FROM auth.organization_members WHERE organization_id = $1")
+        .bind(organization_id)
+        .fetch_one(tx.conn())
+        .await
+}
+
+/// What a roster holds against its ceiling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::FromRow)]
+pub struct Held {
+    /// How many people the organization holds once every live invitation is
+    /// taken: its roster, and each address invited — to it, or to one of
+    /// its projects — that is not on the roster, counted once however many
+    /// invitations name it.
+    pub people: i64,
+    /// Whether the address asked about is among them already, on the
+    /// roster or invited: an invitation to it promises no further seat.
+    pub names_email: bool,
+}
+
+/// What the organization holds against its ceiling, and whether `email` is
+/// already among it. In the lane: a project's invitations are the project's
+/// rows, which the organization's own binding sees none of.
+pub async fn held(
+    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+    organization_id: &OrganizationId,
+    email: Option<&str>,
+) -> sqlx::Result<Held> {
+    sqlx::query_as::<_, Held>(
+        "WITH roster AS (
+             SELECT i.email
+               FROM auth.organization_members m
+               JOIN auth.identities i ON i.user_id = m.user_id
+              WHERE m.organization_id = $1
+         ), invited AS (
+             SELECT email FROM auth.organization_invites
+              WHERE organization_id = $1
+                AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now()
+             UNION
+             SELECT mi.email
+               FROM auth.member_invites mi
+               JOIN auth.projects p ON p.external_id = mi.project_id
+              WHERE p.organization_id = $1
+                AND mi.accepted_at IS NULL AND mi.revoked_at IS NULL AND mi.expires_at > now()
+         )
+         SELECT (SELECT count(*) FROM auth.organization_members WHERE organization_id = $1)
+              + (SELECT count(*) FROM invited
+                  WHERE NOT EXISTS (SELECT 1 FROM roster WHERE roster.email = invited.email))
+                AS people,
+                EXISTS (SELECT 1 FROM roster WHERE email = $2)
+                OR EXISTS (SELECT 1 FROM invited WHERE email = $2) AS names_email",
+    )
+    .bind(organization_id)
+    .bind(email)
+    .fetch_one(tx.conn())
+    .await
+}
+
 /// The organizations this person owns, in id order — the order their locks
 /// are taken in.
 pub async fn owned_by(

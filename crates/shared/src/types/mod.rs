@@ -25,7 +25,7 @@ pub use api_key_scope::ApiKeyScope;
 pub use audit_action::AuditAction;
 pub use content_mode::ContentMode;
 pub use flag::{Flag, FlagSet};
-pub use grants::{Dormant, Grants};
+pub use grants::{Dormant, Grants, MemberCeiling};
 pub use notification_kind::NotificationKind;
 pub use organization_role::OrganizationRole;
 pub use organization_status::OrganizationStatus;

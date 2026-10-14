@@ -198,6 +198,29 @@ describe("OrganizationMembersPage", () => {
     expect(screen.getByTestId("header-action")).toBeInTheDocument();
   });
 
+  // At the plan's ceiling an invitation would be refused: the button goes,
+  // and the deployment's own sentence stands where it was. With room left,
+  // or no ceiling at all, nothing of it shows.
+  it("hides the invitation at the plan's ceiling, and says why", async () => {
+    mockOrganizationMembers = {
+      ...(mockOrganizationMembers as object),
+      ceiling: { limit: 1, held: 1, detail: "Hobby holds one member." },
+    };
+    render(await OrganizationMembersPage());
+    expect(screen.queryByTestId("header-action")).toBeNull();
+    expect(screen.getByTestId("member-ceiling")).toHaveTextContent("Hobby holds one member.");
+  });
+
+  it("keeps the invitation while the ceiling has room, and says nothing of it", async () => {
+    mockOrganizationMembers = {
+      ...(mockOrganizationMembers as object),
+      ceiling: { limit: 5, held: 4, detail: "Hobby holds five members." },
+    };
+    render(await OrganizationMembersPage());
+    expect(screen.getByTestId("header-action")).toBeInTheDocument();
+    expect(screen.queryByTestId("member-ceiling")).toBeNull();
+  });
+
   // ⚠ This named "non-owner" and supplied a context with no memberships at
   // all, so the caller had no organization role and the page is now refused
   // outright — the assertions would have passed over an access-denied screen
