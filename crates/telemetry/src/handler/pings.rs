@@ -389,16 +389,21 @@ async fn resolve_key(state: &AppState, key: &str) -> Result<ResolvedPingKey, Tel
     found.ok_or_else(unknown_key)
 }
 
-/// Whether `key` is shaped as a ping key is: the prefix and its characters,
-/// so nothing else costs a hash and a read.
-fn well_formed(key: &str) -> bool {
+/// Whether `key` is spelled as a ping key is minted — the prefix and its
+/// letters and digits — so nothing else costs a hash and a read. The door
+/// asks the same of the key's segment as it came, before the path is
+/// decoded, so an encoding of a key never passes as one.
+#[must_use]
+pub fn well_formed(key: &str) -> bool {
     key.strip_prefix(PING_KEY_PREFIX).is_some_and(|rest| {
         rest.len() == PING_KEY_RANDOM_LEN && rest.bytes().all(|b| b.is_ascii_alphanumeric())
     })
 }
 
-/// A key the table does not hold, or holds retired. ⚠ Never the key itself.
-fn unknown_key() -> TelmoniError {
+/// A key the table does not hold, or holds retired — and, at the door, one
+/// spelled otherwise than minted. ⚠ Never the key itself.
+#[must_use]
+pub fn unknown_key() -> TelmoniError {
     AuthError::NotFound("no ping key by that value".into()).into()
 }
 

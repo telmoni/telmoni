@@ -15,6 +15,7 @@ use tower::ServiceExt;
 use telmoni::{App, Module, Parts};
 use telmoni_auth::test_provider::test_issuer;
 use telmoni_shared::test_util::unreachable_pool;
+use telmoni_shared::types::mint_ping_key;
 
 const SECRET: &str = "test-service-secret";
 
@@ -400,5 +401,141 @@ async fn the_door_meters_the_cli_lanes_by_address() {
             .status(),
         StatusCode::NOT_FOUND,
         "another address is metered on its own"
+    );
+}
+
+/// The key with its last character percent-encoded: one key to the lane,
+/// which reads its path decoded, and no key to the door.
+fn percent_encoded_last(key: &str) -> String {
+    let last = key.bytes().next_back().expect("a key has a last byte");
+    let head = key
+        .strip_suffix(char::from(last))
+        .expect("the key ends in its last byte");
+    format!("{head}%{last:02X}")
+}
+
+/// The ping lane is on the binary's `/ping`, behind the door, which reads
+/// the key from the path as it came: a key spelled as minted passes to the
+/// lane, which asks the database for it (unreachable here); any other
+/// spelling in the key's place — the key with a character percent-encoded,
+/// a word — is refused at the door with the lane's own answer for a key it
+/// does not hold, so an encoding of a key is never let in on a bucket of
+/// its own; nothing in the key's place, or a doubled slash before it, is
+/// the lane's own 404.
+#[tokio::test]
+async fn the_ping_lane_is_served_at_ping_behind_the_door() {
+    let key = mint_ping_key();
+    let asked = send(get(&format!("/ping/{key}/nightly"))).await;
+    assert_eq!(
+        asked.status(),
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "a key as minted reaches the lane, which asks the database"
+    );
+    assert_eq!(problem(asked).await["type"], "/errors/internal/database");
+
+    let encoded = percent_encoded_last(&key);
+    let refused = send(get(&format!("/ping/{encoded}/nightly"))).await;
+    assert_eq!(refused.status(), StatusCode::NOT_FOUND);
+    let body = problem(refused).await;
+    assert_eq!(body["type"], "/errors/auth/not-found");
+    assert_eq!(body["detail"], "no ping key by that value");
+
+    let word = send(get("/ping/notakey/nightly")).await;
+    assert_eq!(word.status(), StatusCode::NOT_FOUND);
+    assert_eq!(problem(word).await["detail"], "no ping key by that value");
+
+    // The lane's own 404 for a path under it with no key where one goes,
+    // and axum's bare one for the lane's root with its trailing slash, which
+    // the nesting's catch-all does not take: nothing to count either way.
+    let doubled = format!("/ping//{key}/nightly");
+    for nothing in ["/ping", doubled.as_str()] {
+        let response = send(get(nothing)).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{nothing}");
+        assert_eq!(
+            problem(response).await["detail"],
+            "no such lane under /ping",
+            "{nothing}"
+        );
+    }
+    assert_eq!(send(get("/ping/")).await.status(), StatusCode::NOT_FOUND);
+}
+
+/// The door meters the ping lane by the key, whatever addresses spend it,
+/// and the key is one bucket however it is sent: with its minute spent, the
+/// same key with a character percent-encoded is refused as no key rather
+/// than let in on a bucket of its own, while another key has a minute of
+/// its own. A method the lane does not take is answered behind the door
+/// with no database, so the count is the door's alone.
+#[tokio::test]
+async fn the_door_meters_the_ping_lane_by_key_from_any_address() {
+    let app = app();
+    let router = app.router();
+    let key = mint_ping_key();
+    let put = |path: String, address: &str| {
+        router.clone().oneshot(
+            Request::put(path)
+                .header("x-forwarded-for", format!("{address}, 35.191.0.1"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+    };
+    let mut addresses = [
+        "203.0.113.9",
+        "203.0.113.10",
+        "198.51.100.7",
+        "198.51.100.8",
+    ]
+    .into_iter()
+    .cycle();
+    for n in 0..600 {
+        let address = addresses.next().expect("the addresses cycle");
+        assert_eq!(
+            put(format!("/ping/{key}/nightly"), address)
+                .await
+                .expect("router responds")
+                .status(),
+            StatusCode::METHOD_NOT_ALLOWED,
+            "request {n} is within the key's minute"
+        );
+    }
+    // The limit leaks ten a second, so a slow machine earns one more for
+    // every tenth of a second the burst took; the loop ends at the first
+    // refusal either way, and a limit that never refuses runs it out.
+    let mut refused = None;
+    for _ in 0..600 {
+        let address = addresses.next().expect("the addresses cycle");
+        let response = put(format!("/ping/{key}/nightly"), address)
+            .await
+            .expect("router responds");
+        if response.status() == StatusCode::TOO_MANY_REQUESTS {
+            refused = Some(response);
+            break;
+        }
+    }
+    let refused = refused.expect("the key's minute was spent");
+    assert!(header(&refused, "retry-after").is_some());
+    assert_eq!(
+        problem(refused).await["type"],
+        "/errors/tenant/rate-limited"
+    );
+
+    let encoded = percent_encoded_last(&key);
+    let spelled_otherwise = put(format!("/ping/{encoded}/nightly"), "203.0.113.11")
+        .await
+        .expect("router responds");
+    assert_eq!(
+        spelled_otherwise.status(),
+        StatusCode::NOT_FOUND,
+        "an encoding of the key is no bucket of its own"
+    );
+
+    let other = mint_ping_key();
+    assert_eq!(
+        put(format!("/ping/{other}/nightly"), "203.0.113.9")
+            .await
+            .expect("router responds")
+            .status(),
+        StatusCode::METHOD_NOT_ALLOWED,
+        "another key is metered on its own"
     );
 }

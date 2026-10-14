@@ -21,6 +21,7 @@ use axum::{
 };
 
 use telmoni_shared::TelmoniError;
+use telmoni_telemetry::handler::pings;
 use telmoni_telemetry::rate_limit::RateLimit;
 
 /// How many a minute one credential may make: an API key on `/v1`, a bearer
@@ -99,7 +100,8 @@ impl Door {
     }
 
     /// The `/ping` lane behind the door's limits: by source, and by the key
-    /// in the path, before the lane reads it.
+    /// in the path, before the lane reads it — a key spelled otherwise than
+    /// minted refused here, as no key.
     pub fn ping(self: &Arc<Self>, lanes: Router) -> Router {
         lanes.layer(middleware::from_fn_with_state(
             (self.clone(), Lane::Ping),
@@ -142,7 +144,10 @@ async fn admit(
     let source = client_address(&request, door.trusted_proxy_hops);
     let credential = match lane {
         Lane::V1 | Lane::Cli => bearer_token(&request).map(RateLimit::digest),
-        Lane::Ping => ping_key_of(request.uri().path()).map(RateLimit::digest),
+        Lane::Ping => match ping_key_of(request.uri().path()) {
+            Ok(key) => key.map(RateLimit::digest),
+            Err(refused) => return refused.into_response(),
+        },
     };
     match door.admit(lane, &source, credential.as_deref()).await {
         Ok(()) => next.run(request).await,
@@ -150,17 +155,33 @@ async fn admit(
     }
 }
 
-/// ⚠ **A ping's key, as the lane reads it: the first segment after
-/// `/ping/`.** A router nested there may see its path with that prefix
-/// stripped, so the segment is read from either shape. A path with nothing
-/// there presents no credential, and the lane's `404` is what it gets.
-/// Keyed by its digest, as a bearer is, so Redis holds no key.
-fn ping_key_of(path: &str) -> Option<&str> {
-    let rest = path
-        .strip_prefix("/ping/")
-        .or_else(|| path.strip_prefix('/'))?;
-    let key = rest.split('/').next()?;
-    (!key.is_empty()).then_some(key)
+/// ⚠ **A ping's key as it was sent, spelled as minted, or the lane's
+/// refusal.** The lane reads its key from the path as axum hands the
+/// segments over, percent-decoded, so `telmoniping_%41…` and
+/// `telmoniping_A…` are one key to it; to a bucket keyed by the segment as
+/// it came they would be two, and every character of the key, encoded or
+/// not, a fresh one. So the door takes a key spelled as minted — the prefix
+/// and its letters and digits, by the lane's own test — and refuses any
+/// other spelling in the key's place as the lane refuses a key it does not
+/// hold, before anything is counted, since the answer costs nothing;
+/// nothing is decoded, as an encoding of a key is not the key. The key's
+/// place is the first segment of the path as the door sees it, the lane's
+/// prefix stripped by the nesting; nothing there presents no credential,
+/// and the lane's `404` is what it gets. Keyed by its digest, as a bearer
+/// is, so Redis holds no key.
+fn ping_key_of(path: &str) -> Result<Option<&str>, TelmoniError> {
+    let Some(key) = path
+        .strip_prefix('/')
+        .and_then(|rest| rest.split('/').next())
+        .filter(|key| !key.is_empty())
+    else {
+        return Ok(None);
+    };
+    if pings::well_formed(key) {
+        Ok(Some(key))
+    } else {
+        Err(pings::unknown_key())
+    }
 }
 
 /// ⚠ **The token, as the gates read it, and never the header's spelling.**
@@ -246,6 +267,7 @@ fn bucket_of(address: &str) -> String {
 mod tests {
     use super::*;
     use axum::body::Body;
+    use axum::http::StatusCode;
 
     fn request(forwarded: &[&str], peer: Option<&str>) -> Request {
         let mut builder = Request::builder().uri("/v1/organization");
@@ -364,24 +386,98 @@ mod tests {
         }
     }
 
-    /// A ping's credential is the key in its path, whether the path still
-    /// carries the lane's prefix or the nesting stripped it.
+    /// The key with its last character percent-encoded, and with the first
+    /// of its prefix: one key to the lane either way, and none to the door.
+    fn spelled_otherwise(key: &str) -> [String; 2] {
+        let last = key.bytes().next_back().expect("a key has a last byte");
+        let head = key
+            .strip_suffix(char::from(last))
+            .expect("the key ends in its last byte");
+        let tail = key.strip_prefix('t').expect("a key starts with its prefix");
+        [format!("{head}%{last:02X}"), format!("%74{tail}")]
+    }
+
+    /// A ping's credential is the key in its path as the door sees it, the
+    /// lane's prefix stripped, spelled as minted; nothing in the key's
+    /// place, or a doubled slash before it, is no credential; and anything
+    /// else there — the key with a character percent-encoded, in its prefix
+    /// or after it, a word, the lane's own name, a key a character short or
+    /// long, one with a byte past ASCII or a character beside it — is
+    /// refused as the lane refuses a key it does not hold.
     #[test]
-    fn a_pings_credential_is_the_key_in_its_path() {
-        for (path, key) in [
-            ("/ping/telmoniping_k3y/nightly", Some("telmoniping_k3y")),
-            (
-                "/ping/telmoniping_k3y/nightly/start",
-                Some("telmoniping_k3y"),
-            ),
-            ("/telmoniping_k3y/nightly", Some("telmoniping_k3y")),
-            ("/telmoniping_k3y", Some("telmoniping_k3y")),
-            ("/ping/", None),
-            ("/ping", Some("ping")),
-            ("/", None),
-            ("", None),
+    fn a_pings_credential_is_the_key_in_its_path_spelled_as_minted() {
+        let key = telmoni_shared::types::mint_ping_key();
+        for path in [
+            format!("/{key}/nightly"),
+            format!("/{key}/nightly/start"),
+            format!("/{key}/"),
+            format!("/{key}"),
         ] {
-            assert_eq!(ping_key_of(path), key, "{path:?}");
+            assert_eq!(
+                ping_key_of(&path).ok(),
+                Some(Some(key.as_str())),
+                "{path:?}"
+            );
+        }
+        let doubled = format!("//{key}/nightly");
+        for path in ["/", "", "//", doubled.as_str()] {
+            assert_eq!(ping_key_of(path).ok(), Some(None), "{path:?}");
+        }
+        let short = key
+            .strip_suffix(|_: char| true)
+            .expect("a key has a last character");
+        let shorter = short
+            .strip_suffix(|_: char| true)
+            .expect("a key has a last character");
+        let mut not_keys = spelled_otherwise(&key).to_vec();
+        not_keys.extend([
+            "notakey".to_owned(),
+            "ping".to_owned(),
+            "telmoniping_".to_owned(),
+            short.to_owned(),
+            format!("{key}x"),
+            format!("{shorter}é"),
+            format!("{key};x"),
+            format!("{key}%20"),
+        ]);
+        for not_a_key in not_keys {
+            let path = format!("/{not_a_key}/nightly");
+            let refused = ping_key_of(&path).expect_err(&path);
+            assert_eq!(
+                refused.into_response().status(),
+                StatusCode::NOT_FOUND,
+                "{path:?}"
+            );
+        }
+    }
+
+    /// What the lane reads: axum hands a path's segments over
+    /// percent-decoded, so the key with a character encoded, in its prefix
+    /// or after it, is the minted key to the lane — which is why the door
+    /// takes a key as minted or not at all.
+    #[tokio::test]
+    async fn the_lane_reads_its_key_decoded() {
+        use axum::{Router, extract::Path, routing::get};
+        use tower::ServiceExt as _;
+
+        let lane = Router::new().route(
+            "/{key}/{slug}",
+            get(|Path((key, _)): Path<(String, String)>| async move { key }),
+        );
+        let key = telmoni_shared::types::mint_ping_key();
+        for spelling in spelled_otherwise(&key) {
+            let request = Request::get(format!("/{spelling}/nightly"))
+                .body(Body::empty())
+                .expect("a request");
+            let response = lane
+                .clone()
+                .oneshot(request)
+                .await
+                .expect("the lane answers");
+            let read = axum::body::to_bytes(response.into_body(), 1024)
+                .await
+                .expect("a body");
+            assert_eq!(read, key.as_bytes(), "{spelling:?}");
         }
     }
 }
