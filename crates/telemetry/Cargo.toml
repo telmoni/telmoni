@@ -20,6 +20,9 @@ async-trait = { workspace = true }
 # The console's lanes under `/internal/telemetry`.
 axum        = { workspace = true }
 chrono      = { workspace = true }
+# A monitor's schedule: its zone by name, and its cron line's next due time.
+chrono-tz   = { workspace = true }
+croner      = { workspace = true }
 clickhouse  = { workspace = true }
 # Ingest: an export's gzip, its OTLP messages, and the `Status` a refusal is.
 flate2              = { workspace = true }

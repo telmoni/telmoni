@@ -36,6 +36,11 @@ const VALIDATED: &[(&str, &str, &str)] = &[
         "refused by `create_pool_for_service` unless a simple identifier",
     ),
     (
+        "crates/telemetry/src/db.rs",
+        "table",
+        "the purges' and a move's loop over `ORGANIZATION_TABLES`, a const list of the module's own tables",
+    ),
+    (
         "crates/shared/src/test_util/migrations.rs",
         "schema",
         "a test helper's own schema argument, never a request value",

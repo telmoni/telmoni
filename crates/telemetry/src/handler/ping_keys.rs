@@ -1,0 +1,336 @@
+//! A project's ping keys, under [`Resource::Token`] as its API keys are: a
+//! credential a machine holds, shown once and kept hashed. `GET
+//! /internal/telemetry/ping-keys`, which lists them; `POST`, which mints one
+//! — two may be live at once, so a rotation moves the crontab lines over one
+//! at a time; and `DELETE /ping-keys/{id}`, which retires one now. The
+//! rotation retires the older of two a week after its last ping
+//! ([`crate::rotation`]), through [`retire_stale_keys`]. Each minting and
+//! retiring is recorded on the chain as [`TelmoniResourceKind::PingKey`],
+//! since a key is what lets a line fake a ping.
+
+use std::sync::Arc;
+
+use axum::extract::{Path, State};
+use axum::http::{HeaderMap, StatusCode};
+use chrono::{DateTime, Utc};
+use serde::Serialize;
+use serde_json::json;
+use uuid::Uuid;
+
+use telmoni_shared::acting::Acting;
+use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
+use telmoni_shared::db::tenant_session::{
+    ProjectAndOrganization, Scoped, maintenance_scope, project_scope,
+};
+use telmoni_shared::digest::sha256_hex;
+use telmoni_shared::extract::{Json, correlation_id};
+use telmoni_shared::rbac::{Resource, Verb};
+use telmoni_shared::seam;
+use telmoni_shared::types::{PING_KEY_PREFIX, mint_ping_key};
+use telmoni_shared::{AuditAction, AuthError, ProjectId, TelmoniError, TelmoniResourceKind};
+
+use crate::AppState;
+use crate::db::{self, PingKeyRow, ResolvedPingKey, TelemetryLane};
+use crate::handler::chain;
+use crate::rotation::REPLACED_AFTER_S;
+
+/// How many of a project's keys may be live at once: the one its lines
+/// carry, and the one they are moving to.
+pub const LIVE_MAX: i64 = 2;
+/// How much of a key the list shows: its prefix and the first characters
+/// after it, enough to tell two keys apart and nothing a guesser gains by.
+const SHOWN: usize = PING_KEY_PREFIX.len() + 8;
+/// How many stale keys one tick of the rotation retires.
+const RETIRE_BATCH: i64 = 100;
+
+/// One ping key, as the lanes answer it: never the key.
+#[derive(Debug, Serialize)]
+pub struct PingKey {
+    pub id: Uuid,
+    pub prefix: String,
+    pub created_at: DateTime<Utc>,
+    pub last_ping_at: Option<DateTime<Utc>>,
+    pub retired_at: Option<DateTime<Utc>>,
+}
+
+impl From<PingKeyRow> for PingKey {
+    fn from(row: PingKeyRow) -> Self {
+        Self {
+            id: row.id,
+            prefix: row.prefix,
+            created_at: row.created_at,
+            last_ping_at: row.last_ping_at,
+            retired_at: row.retired_at,
+        }
+    }
+}
+
+/// What the list answers: the live keys first, each set newest first.
+#[derive(Debug, Serialize)]
+pub struct PingKeyList {
+    pub keys: Vec<PingKey>,
+}
+
+/// A key as it is minted: the key itself, shown this once, and its row.
+#[derive(Debug, Serialize)]
+pub struct MintedPingKey {
+    pub key: String,
+    #[serde(flatten)]
+    pub ping_key: PingKey,
+}
+
+/// A key the project does not have.
+fn not_found() -> TelmoniError {
+    AuthError::NotFound("no ping key by that id in this project".into()).into()
+}
+
+/// A refused change let go of, its chain lock with it.
+fn rolled_back(result: sqlx::Result<()>, project_id: &ProjectId) {
+    if let Err(e) = result {
+        tracing::warn!(
+            project_id = %project_id,
+            error = %e,
+            "telemetry: a refused change to a ping key could not be rolled back; its \
+             connection drops it"
+        );
+    }
+}
+
+/// A transaction bound to the project and its organization both, as every
+/// write to a key needs.
+async fn scoped<'a>(
+    state: &'a AppState,
+    acting: &Acting,
+    project_id: &ProjectId,
+) -> Result<Scoped<'a, ProjectAndOrganization>, TelmoniError> {
+    Ok(project_scope(&state.db, project_id)
+        .await?
+        .bind_organization(&acting.organization_id)
+        .await?)
+}
+
+/// `GET /internal/telemetry/ping-keys` — the project's keys, as its API keys
+/// are listed: what each shows of itself, when it was made, its last ping
+/// and when it was retired.
+pub async fn list_ping_keys(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<PingKeyList>, TelmoniError> {
+    let acting = state.auth.resolve(&headers).await?;
+    let project_id = &acting
+        .require_project(Verb::Read, Resource::Token)?
+        .project_id;
+    let mut tx = project_scope(&state.db, project_id).await?;
+    let rows = db::ping_keys(&mut tx, project_id).await?;
+    tx.commit().await?;
+    Ok(Json(PingKeyList {
+        keys: rows.into_iter().map(PingKey::from).collect(),
+    }))
+}
+
+/// `POST /internal/telemetry/ping-keys` — a new key of the project, shown
+/// this once, made under the organization's chain lock: the second live key
+/// beside the first for a rotation, and never a third.
+pub async fn create_ping_key(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<(StatusCode, Json<MintedPingKey>), TelmoniError> {
+    let acting = state.auth.resolve(&headers).await?;
+    let project_id = acting
+        .require_project(Verb::Create, Resource::Token)?
+        .project_id
+        .clone();
+    seam::admit_new(state.entitlements.as_ref(), &acting.organization_id).await?;
+    let mut tx = scoped(&state, &acting, &project_id).await?;
+    let minted = match mint_key(&state, &acting, &project_id, &mut tx, &headers).await {
+        Ok(minted) => minted,
+        Err(refused) => {
+            rolled_back(tx.rollback().await, &project_id);
+            return Err(refused);
+        }
+    };
+    tx.commit().await?;
+    tracing::info!(project_id = %project_id, ping_key_id = %minted.ping_key.id, "telemetry: a ping key minted");
+    Ok((StatusCode::CREATED, Json(minted)))
+}
+
+/// The minting itself, inside the transaction [`create_ping_key`] opened:
+/// under the organization's chain lock, the role checked again on auth's
+/// second answer, the project's settings row made or re-filed, the live
+/// keys counted, and the key written as its hash and recorded.
+async fn mint_key(
+    state: &AppState,
+    acting: &Acting,
+    project_id: &ProjectId,
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    headers: &HeaderMap,
+) -> Result<MintedPingKey, TelmoniError> {
+    let organization_id = &acting.organization_id;
+    let now = chain::hold(&*state.auth, acting, project_id, tx).await?;
+    now.require_project(Verb::Create, Resource::Token)?;
+    db::ensure_settings(tx, project_id, organization_id).await?;
+    let live = db::live_ping_key_count(tx, project_id).await?;
+    if live >= LIVE_MAX {
+        return Err(AuthError::Conflict(format!(
+            "this project holds {LIVE_MAX} live ping keys already, the most it may: retire one \
+             first"
+        ))
+        .into());
+    }
+    let key = mint_ping_key();
+    let shown: String = key.chars().take(SHOWN).collect();
+    let row = db::insert_ping_key(
+        tx,
+        project_id,
+        organization_id,
+        Uuid::new_v4(),
+        &sha256_hex(key.as_bytes()),
+        &shown,
+    )
+    .await?;
+    emit_audit(
+        tx,
+        AuditEvent {
+            organization_id,
+            in_project: Some(project_id),
+            actor: Actor::User(acting.user_id.as_str()),
+            action: AuditAction::Created,
+            resource_kind: TelmoniResourceKind::PingKey,
+            resource_id: Some(&row.id.to_string()),
+            request_id: correlation_id(headers),
+            ip_address: None,
+            user_agent: None,
+            metadata: Some(json!({ "prefix": row.prefix })),
+        },
+    )
+    .await?;
+    Ok(MintedPingKey {
+        key,
+        ping_key: PingKey::from(row),
+    })
+}
+
+/// `DELETE /internal/telemetry/ping-keys/{id}` — the key retired now: every
+/// ping under it a 404 from here on. One retired already is left as it is.
+pub async fn delete_ping_key(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<StatusCode, TelmoniError> {
+    let acting = state.auth.resolve(&headers).await?;
+    let project_id = acting
+        .require_project(Verb::Delete, Resource::Token)?
+        .project_id
+        .clone();
+    let id = Uuid::parse_str(&id).map_err(|_| not_found())?;
+    let mut tx = scoped(&state, &acting, &project_id).await?;
+    let row = match retire_key(&state, &acting, &project_id, &mut tx, &headers, id).await {
+        Ok(row) => row,
+        Err(refused) => {
+            rolled_back(tx.rollback().await, &project_id);
+            return Err(refused);
+        }
+    };
+    tx.commit().await?;
+    tracing::info!(project_id = %project_id, ping_key_id = %row.id, "telemetry: a ping key retired");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// The retirement itself, inside the transaction [`delete_ping_key`]
+/// opened: under the organization's chain lock, a live key put out of use
+/// and recorded; one retired already is answered as it is, and nothing is
+/// recorded.
+async fn retire_key(
+    state: &AppState,
+    acting: &Acting,
+    project_id: &ProjectId,
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    headers: &HeaderMap,
+    id: Uuid,
+) -> Result<PingKeyRow, TelmoniError> {
+    let now = chain::hold(&*state.auth, acting, project_id, tx).await?;
+    now.require_project(Verb::Delete, Resource::Token)?;
+    let before = db::ping_key(tx, project_id, id)
+        .await?
+        .ok_or_else(not_found)?;
+    if before.retired_at.is_some() {
+        return Ok(before);
+    }
+    let row = db::retire_ping_key(tx, project_id, id)
+        .await?
+        .ok_or_else(not_found)?;
+    emit_audit(
+        tx,
+        AuditEvent {
+            organization_id: &acting.organization_id,
+            in_project: Some(project_id),
+            actor: Actor::User(acting.user_id.as_str()),
+            action: AuditAction::Deleted,
+            resource_kind: TelmoniResourceKind::PingKey,
+            resource_id: Some(&row.id.to_string()),
+            request_id: correlation_id(headers),
+            ip_address: None,
+            user_agent: None,
+            metadata: Some(json!({ "prefix": row.prefix })),
+        },
+    )
+    .await?;
+    Ok(row)
+}
+
+/// The rotation's tick: every live key a week past its last ping with a
+/// newer live key of its project standing, retired — each in its project's
+/// own scope, recorded on the chain as the module's own act. Answers how
+/// many were. Safe on every replica at once: a key two ticks find is retired
+/// by the first, and the second finds it retired and records nothing.
+pub async fn retire_stale_keys(state: &AppState) -> Result<u32, TelmoniError> {
+    let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
+    let stale = db::stale_ping_keys(&mut tx, REPLACED_AFTER_S, RETIRE_BATCH).await?;
+    tx.commit().await?;
+    let mut retired = 0;
+    for key in &stale {
+        if retire_stale_key(state, key).await? {
+            retired += 1;
+        }
+    }
+    Ok(retired)
+}
+
+/// One stale key retired, in a transaction of its own under the
+/// organization's chain lock; `false` where another replica retired it
+/// first.
+async fn retire_stale_key(state: &AppState, key: &ResolvedPingKey) -> Result<bool, TelmoniError> {
+    let (project_id, organization_id) = (&key.project_id, &key.organization_id);
+    let mut tx = project_scope(&state.db, project_id)
+        .await?
+        .bind_organization(organization_id)
+        .await?;
+    chain::lock(project_id, organization_id, &mut tx).await?;
+    let Some(row) = db::retire_ping_key(&mut tx, project_id, key.id).await? else {
+        tx.rollback().await?;
+        return Ok(false);
+    };
+    emit_audit(
+        &mut tx,
+        AuditEvent {
+            organization_id,
+            in_project: Some(project_id),
+            actor: Actor::Service("telemetry"),
+            action: AuditAction::Deleted,
+            resource_kind: TelmoniResourceKind::PingKey,
+            resource_id: Some(&row.id.to_string()),
+            request_id: None,
+            ip_address: None,
+            user_agent: None,
+            metadata: Some(json!({ "prefix": row.prefix, "rotation": true })),
+        },
+    )
+    .await?;
+    tx.commit().await?;
+    tracing::info!(
+        project_id = %project_id,
+        ping_key_id = %row.id,
+        "telemetry: a ping key retired by its rotation, a week past its last ping"
+    );
+    Ok(true)
+}

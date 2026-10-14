@@ -3,9 +3,10 @@
 //! Auth, notifications, telemetry and the agent are libraries. This crate
 //! links them, hands each the others through the seams in
 //! [`telmoni_shared::seam`], mounts their routers under one listener, and
-//! runs their background loops — the delivery loop, the retention sweeps,
-//! the agent's indexer, the deletion sweep and the nightly audit walk — as
-//! tasks of the same process. Each module still connects as its own database
+//! runs their background loops — the delivery loop, telemetry's outbox loop
+//! and its ping keys' rotation, the retention sweeps, the agent's indexer,
+//! the deletion sweep and the nightly audit walk — as tasks of the same
+//! process. Each module still connects as its own database
 //! role, so row-level security and the grants stand exactly as they did
 //! across services.
 //!
@@ -258,6 +259,7 @@ impl App {
             secrets.clone(),
             late_auth.clone(),
             entitlements.clone(),
+            notifier.clone(),
         )?);
         let agent = parts
             .agent
@@ -369,9 +371,10 @@ impl App {
                 self.secrets.clone(),
                 require_service_secret,
             ));
-        // The machine lanes, on the one `/v1` and the one `/cli`, behind the
-        // door: every module's `/v1` lanes nest here as they come, auth's
-        // today, each module gating its own with the key check.
+        // The machine lanes, on the one `/v1`, the one `/cli` and the one
+        // `/ping`, behind the door: every module's `/v1` lanes nest here as
+        // they come, auth's today, each module gating its own with the key
+        // check; the ping lane's gate is the key in its path.
         let core = Router::new()
             .merge(probes)
             .merge(log_level)
@@ -383,6 +386,11 @@ impl App {
             .nest(
                 "/cli",
                 self.door.cli(telmoni_auth::cli_router(self.auth.clone())),
+            )
+            .nest(
+                "/ping",
+                self.door
+                    .ping(telmoni_telemetry::ping_router(self.telemetry.clone())),
             )
             .merge(telmoni_notifications::router(self.notifications.clone()))
             .merge(telmoni_telemetry::router(self.telemetry.clone()))
@@ -424,6 +432,8 @@ impl App {
         let delivery = tokio::spawn(telmoni_notifications::delivery::run(
             self.notifications.clone(),
         ));
+        let outbox = tokio::spawn(telmoni_telemetry::outbox::run(self.telemetry.clone()));
+        tokio::spawn(telmoni_telemetry::rotation::run(self.telemetry.clone()));
         if env_parse("RUN_SWEEPS", true)? {
             sweeps::spawn(self.auth.clone());
         } else {
@@ -451,14 +461,19 @@ impl App {
                 .into_make_service_with_connect_info::<SocketAddr>(),
         )
         .with_graceful_shutdown(telmoni_shared::shutdown::shutdown_signal());
-        // ⚠ The delivery loop is raced against the server: a dead loop would
-        // leave a Ready pod with every delivery `pending`, so the process
-        // exits and the restart is the recovery.
+        // ⚠ The delivery and outbox loops are raced against the server: a
+        // dead loop would leave a Ready pod with every delivery `pending`, or
+        // every ping's row unwritten, so the process exits and the restart
+        // is the recovery.
         tokio::select! {
             served = serve => served?,
             ended = delivery => match ended {
                 Ok(()) => anyhow::bail!("the delivery loop exited; restarting the process"),
                 Err(e) => anyhow::bail!("the delivery loop died: {e}"),
+            },
+            ended = outbox => match ended {
+                Ok(()) => anyhow::bail!("the outbox loop exited; restarting the process"),
+                Err(e) => anyhow::bail!("the outbox loop died: {e}"),
             },
         }
         Ok(())

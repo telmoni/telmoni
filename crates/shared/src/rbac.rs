@@ -72,6 +72,11 @@ pub enum Resource {
     /// its owners and admins save them, as they change everything else the
     /// project's members share.
     View,
+    /// A project's monitors: what each of its agents is expected to do and
+    /// is held to. Every role on the project reads them; its owners and
+    /// admins make, change, pause and delete them, since a monitor is what
+    /// pages somebody, or stops paging them.
+    Monitor,
     // The product built on this platform adds its resources here WITH their
     // handlers, never before, or the matrix grants a capability no endpoint
     // exposes.
@@ -80,7 +85,7 @@ pub enum Resource {
 impl Resource {
     /// Every resource, in the matrix's order.
     #[must_use]
-    pub const fn all() -> [Self; 7] {
+    pub const fn all() -> [Self; 8] {
         [
             Self::Project,
             Self::Member,
@@ -89,6 +94,7 @@ impl Resource {
             Self::Audit,
             Self::Trace,
             Self::View,
+            Self::Monitor,
         ]
     }
 
@@ -103,6 +109,7 @@ impl Resource {
             Self::Audit => "audit",
             Self::Trace => "trace",
             Self::View => "view",
+            Self::Monitor => "monitor",
         }
     }
 }
@@ -182,7 +189,7 @@ mod tests {
     use super::*;
 
     const VERBS: [Verb; 4] = Verb::all();
-    const RESOURCES: [Resource; 7] = Resource::all();
+    const RESOURCES: [Resource; 8] = Resource::all();
 
     /// A new variant fails to compile here until `all()` lists it, and two
     /// variants never share a word.
@@ -201,7 +208,8 @@ mod tests {
                 | Resource::Connector
                 | Resource::Audit
                 | Resource::Trace
-                | Resource::View => {}
+                | Resource::View
+                | Resource::Monitor => {}
             }
         }
         let mut words: Vec<&str> = VERBS.iter().map(|v| v.as_str()).collect();

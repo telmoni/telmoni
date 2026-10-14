@@ -27,9 +27,10 @@ crates/
   auth/           sign-in, organizations and projects, members, invitations, API keys
   notifications/  the feed, the Slack and webhook connectors, delivery
   agent/          the console agent: search over the docs and a project's own data
-  telemetry/      ingest at /otlp/v1/traces, each project's settings, the spans and their hourly
-                  totals in ClickHouse, its ClickHouse file and nightly purge, ClickHouse's
-                  configuration and local users
+  telemetry/      ingest at /otlp/v1/traces and the ping lane at /ping, each project's settings,
+                  monitors, ping keys and open runs, the outbox, the spans and their hourly totals
+                  in ClickHouse, its ClickHouse file and nightly purge, ClickHouse's configuration
+                  and local users
   migrator/       the migration runner, grants, role hardening, the audit schema;
                   runs telemetry's ClickHouse file and purge
   shared/         errors, RBAC, tenancy, the seams between modules

@@ -23,6 +23,7 @@ const HINT = {
   member_left: "Someone left or was removed from this project.",
   connector_connected: "A destination was connected to this project.",
   connector_disconnected: "A destination stopped accepting notices.",
+  monitor_discovered: "A ping named a monitor this project did not have, so it was made and paused.",
 } as const satisfies Record<NotificationKind, string>;
 
 // The picker's own state. "Selected" with nothing chosen is a state the

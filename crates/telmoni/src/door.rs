@@ -1,12 +1,13 @@
 //! The machine door: what the binary puts in front of the lanes a machine
-//! reaches straight on the machine host — the public read API under `/v1`
-//! and the CLI's session lanes under `/cli` — because they come in from the
-//! internet rather than from the console. Each lane has a gate of its own,
-//! an API key, a bearer or a device code; the door adds what every lane
-//! shares: the caller's address, read past the proxies in front, and the
-//! limits held in Redis by source and by credential, so one caller cannot
-//! spend the others' room. Ingest at `/otlp/v1/traces` keeps its own limit,
-//! per project, inside its handler.
+//! reaches straight on the machine host — the public read API under `/v1`,
+//! the CLI's session lanes under `/cli` and the ping lane under `/ping` —
+//! because they come in from the internet rather than from the console. Each
+//! lane has a gate of its own, an API key, a bearer or a device code, or the
+//! ping key in a ping's path; the door adds what every lane shares: the
+//! caller's address, read past the proxies in front, and the limits held in
+//! Redis by source and by credential, so one caller cannot spend the others'
+//! room. Ingest at `/otlp/v1/traces` keeps its own limit, per project,
+//! inside its handler.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -30,6 +31,10 @@ const V1_PER_SOURCE: u32 = 1_200;
 /// How many a minute one address may make on `/cli`: a sign-in's polls, a
 /// refresh now and then, and little else.
 const CLI_PER_SOURCE: u32 = 120;
+/// How many a minute one address may make on `/ping`: a host's crontab
+/// lines, each pinging its start and its end. The plan's own numbers, per
+/// organization and per key, come with the limiter (roadmap 2.11).
+const PING_PER_SOURCE: u32 = 1_200;
 
 /// The door, as one replica holds it: the limits, and where they are kept.
 pub struct Door {
@@ -41,6 +46,8 @@ pub struct Door {
     v1_key: RateLimit,
     cli_source: RateLimit,
     cli_bearer: RateLimit,
+    ping_source: RateLimit,
+    ping_key: RateLimit,
 }
 
 /// Which lanes a request came in on, since each has limits of its own.
@@ -48,6 +55,7 @@ pub struct Door {
 enum Lane {
     V1,
     Cli,
+    Ping,
 }
 
 impl Door {
@@ -62,6 +70,8 @@ impl Door {
             v1_key: RateLimit::new("telmoni:door:v1:key", PER_CREDENTIAL),
             cli_source: RateLimit::new("telmoni:door:cli:source", CLI_PER_SOURCE),
             cli_bearer: RateLimit::new("telmoni:door:cli:bearer", PER_CREDENTIAL),
+            ping_source: RateLimit::new("telmoni:door:ping:source", PING_PER_SOURCE),
+            ping_key: RateLimit::new("telmoni:door:ping:key", PER_CREDENTIAL),
         })
     }
 
@@ -88,6 +98,15 @@ impl Door {
         ))
     }
 
+    /// The `/ping` lane behind the door's limits: by source, and by the key
+    /// in the path, before the lane reads it.
+    pub fn ping(self: &Arc<Self>, lanes: Router) -> Router {
+        lanes.layer(middleware::from_fn_with_state(
+            (self.clone(), Lane::Ping),
+            admit,
+        ))
+    }
+
     /// The source's limit, then the credential's where one is presented: a
     /// flood from one address is refused before its credentials are read,
     /// and a credential spent from many addresses is refused all the same.
@@ -100,6 +119,7 @@ impl Door {
         let (by_source, by_credential) = match lane {
             Lane::V1 => (&self.v1_source, &self.v1_key),
             Lane::Cli => (&self.cli_source, &self.cli_bearer),
+            Lane::Ping => (&self.ping_source, &self.ping_key),
         };
         by_source.admit(&self.telemetry.redis, source).await?;
         if let Some(credential) = credential {
@@ -120,11 +140,27 @@ async fn admit(
     next: Next,
 ) -> Response {
     let source = client_address(&request, door.trusted_proxy_hops);
-    let credential = bearer_token(&request).map(RateLimit::digest);
+    let credential = match lane {
+        Lane::V1 | Lane::Cli => bearer_token(&request).map(RateLimit::digest),
+        Lane::Ping => ping_key_of(request.uri().path()).map(RateLimit::digest),
+    };
     match door.admit(lane, &source, credential.as_deref()).await {
         Ok(()) => next.run(request).await,
         Err(refused) => refused.into_response(),
     }
+}
+
+/// ⚠ **A ping's key, as the lane reads it: the first segment after
+/// `/ping/`.** A router nested there may see its path with that prefix
+/// stripped, so the segment is read from either shape. A path with nothing
+/// there presents no credential, and the lane's `404` is what it gets.
+/// Keyed by its digest, as a bearer is, so Redis holds no key.
+fn ping_key_of(path: &str) -> Option<&str> {
+    let rest = path
+        .strip_prefix("/ping/")
+        .or_else(|| path.strip_prefix('/'))?;
+    let key = rest.split('/').next()?;
+    (!key.is_empty()).then_some(key)
 }
 
 /// ⚠ **The token, as the gates read it, and never the header's spelling.**
@@ -325,6 +361,27 @@ mod tests {
                 None,
                 "{not_a_bearer:?}"
             );
+        }
+    }
+
+    /// A ping's credential is the key in its path, whether the path still
+    /// carries the lane's prefix or the nesting stripped it.
+    #[test]
+    fn a_pings_credential_is_the_key_in_its_path() {
+        for (path, key) in [
+            ("/ping/telmoniping_k3y/nightly", Some("telmoniping_k3y")),
+            (
+                "/ping/telmoniping_k3y/nightly/start",
+                Some("telmoniping_k3y"),
+            ),
+            ("/telmoniping_k3y/nightly", Some("telmoniping_k3y")),
+            ("/telmoniping_k3y", Some("telmoniping_k3y")),
+            ("/ping/", None),
+            ("/ping", Some("ping")),
+            ("/", None),
+            ("", None),
+        ] {
+            assert_eq!(ping_key_of(path), key, "{path:?}");
         }
     }
 }

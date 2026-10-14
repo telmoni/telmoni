@@ -27,12 +27,21 @@ pub enum TelmoniResourceKind {
     /// the vendor and channel or the endpoint's host — never the grant, the URL
     /// or the secret, because the chain is append-only.
     Connector,
+    /// A project's monitor: what one of its agents is expected to do and held
+    /// to. Made, changed, paused, resumed and deleted by a person, or made by
+    /// its first ping or run.
+    Monitor,
+    /// A project's ping key, `telmoniping_…` — minted, and retired by a
+    /// person or by its rotation. Under `Resource::Token`, as an API key is,
+    /// since each is a credential a machine holds; a kind of its own, so the
+    /// log says which credential it was.
+    PingKey,
 }
 
 impl TelmoniResourceKind {
     /// Every kind, in declaration order.
     #[must_use]
-    pub const fn all() -> [Self; 6] {
+    pub const fn all() -> [Self; 8] {
         [
             Self::Organization,
             Self::Project,
@@ -40,6 +49,8 @@ impl TelmoniResourceKind {
             Self::Token,
             Self::Session,
             Self::Connector,
+            Self::Monitor,
+            Self::PingKey,
         ]
     }
 }
@@ -53,6 +64,8 @@ impl fmt::Display for TelmoniResourceKind {
             Self::Session => write!(f, "session"),
             Self::Member => write!(f, "member"),
             Self::Connector => write!(f, "connector"),
+            Self::Monitor => write!(f, "monitor"),
+            Self::PingKey => write!(f, "ping_key"),
         }
     }
 }
@@ -67,9 +80,11 @@ impl FromStr for TelmoniResourceKind {
             "token" => Ok(Self::Token),
             "session" => Ok(Self::Session),
             "connector" => Ok(Self::Connector),
+            "monitor" => Ok(Self::Monitor),
+            "ping_key" => Ok(Self::PingKey),
             _ => Err(ParseEnumError::new(
                 s,
-                "organization, project, member, token, session, connector",
+                "organization, project, member, token, session, connector, monitor, ping_key",
             )),
         }
     }
@@ -93,11 +108,13 @@ mod tests {
                 TelmoniResourceKind::Token => "token",
                 TelmoniResourceKind::Session => "session",
                 TelmoniResourceKind::Connector => "connector",
+                TelmoniResourceKind::Monitor => "monitor",
+                TelmoniResourceKind::PingKey => "ping_key",
             }
         }
         assert_eq!(
             ALL.len(),
-            6,
+            8,
             "a variant reached the enum without reaching ALL"
         );
         for kind in ALL {

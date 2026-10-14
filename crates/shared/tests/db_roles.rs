@@ -511,6 +511,41 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             "telemetry.trace_views",
             &["SELECT", "DELETE"],
         ),
+        // The purges delete a project's or an organization's monitors; the
+        // project's own scope makes, changes and deletes them. (A transfer
+        // rewrites `organization_id` alone: a column grant, not this.)
+        (
+            "telemetry_maintenance",
+            "telemetry.monitors",
+            &["SELECT", "DELETE"],
+        ),
+        // The ping lane resolves a key outside any tenant, as auth resolves
+        // an API key; the purges delete them. A key is minted, touched by
+        // its pings and retired in the project's own scope. (A transfer
+        // rewrites `organization_id` alone: a column grant, not this.)
+        (
+            "telemetry_maintenance",
+            "telemetry.ping_keys",
+            &["SELECT", "DELETE"],
+        ),
+        // The purges delete a project's open runs with it; the ticker reads
+        // them across tenants to see one gone quiet (2.12). A run is opened,
+        // heard and ended in the project's own scope. (A transfer rewrites
+        // `organization_id` alone: a column grant, not this.)
+        (
+            "telemetry_maintenance",
+            "telemetry.open_runs",
+            &["SELECT", "DELETE"],
+        ),
+        // The outbox loop leases rows across tenants and deletes each once
+        // it has landed; a lease is two columns, granted as columns. A row is
+        // written in the project's own scope. (A transfer rewrites
+        // `organization_id` alone: a column grant, not this.)
+        (
+            "telemetry_maintenance",
+            "telemetry.outbox",
+            &["SELECT", "DELETE"],
+        ),
     ];
     for (lane, table, allowed) in NARROWED {
         for verb in ["SELECT", "INSERT", "UPDATE", "DELETE"] {

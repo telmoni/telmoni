@@ -15,7 +15,7 @@ use telmoni_shared::acting::Acting;
 use telmoni_shared::audit::lock_chain;
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped};
 use telmoni_shared::seam::Auth;
-use telmoni_shared::{AuthError, ProjectId, TelmoniError};
+use telmoni_shared::{AuthError, OrganizationId, ProjectId, TelmoniError};
 
 /// The longest a change waits for the organization's chain lock: the
 /// role's own `lock_timeout` on a tier, set on the transaction too, so that a
@@ -44,6 +44,35 @@ pub(crate) async fn hold(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
 ) -> Result<Acting, TelmoniError> {
     let organization_id = &acting.organization_id;
+    lock(project_id, organization_id, tx).await?;
+    let Ok(now) = tokio::time::timeout(READ_AGAIN_BUDGET, auth.resolve_again(acting)).await else {
+        tracing::warn!(
+            project_id = %project_id,
+            organization_id = %organization_id,
+            "telemetry: auth did not answer a change to a project again in time"
+        );
+        return Err(AuthError::IdentityUnavailable.into());
+    };
+    let now = now?;
+    if now.organization_id != *organization_id {
+        return Err(AuthError::Conflict(
+            "the project has moved to another organization; reload and try again".into(),
+        )
+        .into());
+    }
+    Ok(now)
+}
+
+/// The organization's chain lock alone, taken in `tx` and let go with it,
+/// for a write nobody is acting as a person for: a monitor its first ping
+/// makes, a key its rotation retires. Refused where the lock is not had in
+/// time, so a ping waits on no transfer for longer than any other writer
+/// would.
+pub(crate) async fn lock(
+    project_id: &ProjectId,
+    organization_id: &OrganizationId,
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+) -> Result<(), TelmoniError> {
     sqlx::query("SELECT set_config('lock_timeout', $1, true)")
         .bind(format!("{}ms", CHAIN_LOCK_WAIT.as_millis()))
         .execute(tx.conn())
@@ -66,20 +95,5 @@ pub(crate) async fn hold(
         )
         .into());
     }
-    let Ok(now) = tokio::time::timeout(READ_AGAIN_BUDGET, auth.resolve_again(acting)).await else {
-        tracing::warn!(
-            project_id = %project_id,
-            organization_id = %organization_id,
-            "telemetry: auth did not answer a change to a project again in time"
-        );
-        return Err(AuthError::IdentityUnavailable.into());
-    };
-    let now = now?;
-    if now.organization_id != *organization_id {
-        return Err(AuthError::Conflict(
-            "the project has moved to another organization; reload and try again".into(),
-        )
-        .into());
-    }
-    Ok(now)
+    Ok(())
 }

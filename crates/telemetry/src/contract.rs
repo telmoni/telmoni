@@ -37,6 +37,22 @@ pub const CLAIM_PENDING_SECS: u64 = 60;
 /// retry follows a lost answer within minutes.
 pub const CLAIM_ANSWER_SECS: u64 = 60 * 60;
 
+// ── The ping lane ────────────────────────────────────────────────────────────
+
+/// The most of a ping's body that is read. A body is content — what 4.1
+/// keeps on an `on` project, and what is dropped until then, the answer
+/// saying so — and is never read past this, so a crontab's `curl` with a log
+/// attached costs a bounded read; the ping counts whatever its body.
+pub const PING_BODY_MAX_BYTES: usize = 100 * 1024;
+/// A run's progress as its `/checkpoint`s reported it, on its finished span:
+/// its steps, and its spend in US dollars, under names of ours, since no
+/// convention names what a crontab reports.
+pub const RUN_STEPS: &str = "telmoni.run.steps";
+pub const RUN_COST_USD: &str = "telmoni.run.cost_usd";
+/// A `/fail` ping's exit code, under the conventions' own name for a
+/// process's.
+pub const EXIT_CODE: &str = "process.exit.code";
+
 // ── Caps, each named after its field ─────────────────────────────────────────
 
 /// A span's `name`, an agent's and a tool's among them.

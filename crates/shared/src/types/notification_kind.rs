@@ -26,18 +26,24 @@ pub enum NotificationKind {
     /// or the target refuses posts. The feed carries the news because the
     /// channel that would have carried it is the one that stopped.
     ConnectorDisconnected,
+    /// A monitor made by its first ping or run, before its owner set it up
+    /// — or not made, because the plan's limit is reached. Telemetry raises
+    /// it on the project's feed, once a monitor, with the slug and which key
+    /// sent it in the metadata.
+    MonitorDiscovered,
 }
 
 impl NotificationKind {
     /// Every kind, in wire order.
     #[must_use]
-    pub const fn all() -> [Self; 5] {
+    pub const fn all() -> [Self; 6] {
         [
             Self::OrganizationAlert,
             Self::MemberAdded,
             Self::MemberLeft,
             Self::ConnectorConnected,
             Self::ConnectorDisconnected,
+            Self::MonitorDiscovered,
         ]
     }
 }
@@ -50,6 +56,7 @@ impl fmt::Display for NotificationKind {
             Self::MemberLeft => write!(f, "member_left"),
             Self::ConnectorConnected => write!(f, "connector_connected"),
             Self::ConnectorDisconnected => write!(f, "connector_disconnected"),
+            Self::MonitorDiscovered => write!(f, "monitor_discovered"),
         }
     }
 }
@@ -63,9 +70,11 @@ impl FromStr for NotificationKind {
             "member_left" => Ok(Self::MemberLeft),
             "connector_connected" => Ok(Self::ConnectorConnected),
             "connector_disconnected" => Ok(Self::ConnectorDisconnected),
+            "monitor_discovered" => Ok(Self::MonitorDiscovered),
             _ => Err(ParseEnumError::new(
                 s,
-                "organization_alert, member_added, member_left, connector_connected, connector_disconnected",
+                "organization_alert, member_added, member_left, connector_connected, \
+                 connector_disconnected, monitor_discovered",
             )),
         }
     }
@@ -76,7 +85,7 @@ mod tests {
     use super::*;
 
     /// The vocabulary, read from the enum rather than restated here.
-    const ALL: [NotificationKind; 5] = NotificationKind::all();
+    const ALL: [NotificationKind; 6] = NotificationKind::all();
 
     /// `all()` is a hand-written array, so nothing but a `match` forces it to
     /// stay complete: a new variant fails to compile here until it is listed.
@@ -88,7 +97,8 @@ mod tests {
                 | NotificationKind::MemberAdded
                 | NotificationKind::MemberLeft
                 | NotificationKind::ConnectorConnected
-                | NotificationKind::ConnectorDisconnected => {}
+                | NotificationKind::ConnectorDisconnected
+                | NotificationKind::MonitorDiscovered => {}
             }
         }
         let mut seen: Vec<String> = ALL.iter().map(ToString::to_string).collect();

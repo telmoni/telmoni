@@ -41,6 +41,10 @@ const MATRIX: &[Cell] = &[
     cell(Role::Owner, Verb::Create, Resource::View, true),
     cell(Role::Owner, Verb::Update, Resource::View, true),
     cell(Role::Owner, Verb::Delete, Resource::View, true),
+    cell(Role::Owner, Verb::Read, Resource::Monitor, true),
+    cell(Role::Owner, Verb::Create, Resource::Monitor, true),
+    cell(Role::Owner, Verb::Update, Resource::Monitor, true),
+    cell(Role::Owner, Verb::Delete, Resource::Monitor, true),
     cell(Role::Admin, Verb::Read, Resource::Project, true),
     cell(Role::Admin, Verb::Create, Resource::Project, true),
     cell(Role::Admin, Verb::Update, Resource::Project, true),
@@ -63,6 +67,10 @@ const MATRIX: &[Cell] = &[
     cell(Role::Admin, Verb::Create, Resource::View, true),
     cell(Role::Admin, Verb::Update, Resource::View, true),
     cell(Role::Admin, Verb::Delete, Resource::View, true),
+    cell(Role::Admin, Verb::Read, Resource::Monitor, true),
+    cell(Role::Admin, Verb::Create, Resource::Monitor, true),
+    cell(Role::Admin, Verb::Update, Resource::Monitor, true),
+    cell(Role::Admin, Verb::Delete, Resource::Monitor, true),
     cell(Role::Member, Verb::Read, Resource::Project, true),
     cell(Role::Member, Verb::Create, Resource::Project, false),
     cell(Role::Member, Verb::Update, Resource::Project, false),
@@ -85,6 +93,10 @@ const MATRIX: &[Cell] = &[
     cell(Role::Member, Verb::Create, Resource::View, false),
     cell(Role::Member, Verb::Update, Resource::View, false),
     cell(Role::Member, Verb::Delete, Resource::View, false),
+    cell(Role::Member, Verb::Read, Resource::Monitor, true),
+    cell(Role::Member, Verb::Create, Resource::Monitor, false),
+    cell(Role::Member, Verb::Update, Resource::Monitor, false),
+    cell(Role::Member, Verb::Delete, Resource::Monitor, false),
 ];
 
 const fn cell(role: Role, verb: Verb, resource: Resource, allowed: bool) -> Cell {
@@ -246,6 +258,11 @@ fn an_admin_can_manage_everything_except_delete_project() {
     assert_allows(Role::Admin, Verb::Create, Resource::View);
     assert_allows(Role::Admin, Verb::Update, Resource::View);
     assert_allows(Role::Admin, Verb::Delete, Resource::View);
+
+    assert_allows(Role::Admin, Verb::Read, Resource::Monitor);
+    assert_allows(Role::Admin, Verb::Create, Resource::Monitor);
+    assert_allows(Role::Admin, Verb::Update, Resource::Monitor);
+    assert_allows(Role::Admin, Verb::Delete, Resource::Monitor);
 }
 
 /// Owner and Admin read the audit log, the Member does not, and no role writes it.
@@ -326,9 +343,10 @@ const fn resource_ordinal(r: Resource) -> usize {
         Resource::Audit => 4,
         Resource::Trace => 5,
         Resource::View => 6,
+        Resource::Monitor => 7,
     }
 }
-const RESOURCE_COUNT: usize = 7;
+const RESOURCE_COUNT: usize = 8;
 
 /// Assert one array covers `N` slots exactly once.
 fn assert_covers<T: Copy + std::fmt::Debug>(

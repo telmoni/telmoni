@@ -8,6 +8,7 @@ const LABELS = {
   organization_alert: "Organization alert",
   connector_connected: "Channel connected",
   connector_disconnected: "Channel disconnected",
+  monitor_discovered: "Monitor discovered",
 } as const satisfies Record<NotificationKind, string>;
 
 export const NOTIFICATION_KINDS: readonly NotificationKind[] = Object.values(NotificationKind);

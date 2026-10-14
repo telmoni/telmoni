@@ -131,3 +131,273 @@ CREATE POLICY maintenance_access ON telemetry.trace_views
 -- The purges delete a deleted project's views, and those of an organization's
 -- projects. A transfer moves nothing: a view names no organization.
 GRANT SELECT, DELETE ON telemetry.trace_views TO telemetry_maintenance;
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 3. MONITORS
+-- ══════════════════════════════════════════════════════════════════════════════
+-- An agent's contract, one monitor an agent: when its runs are expected — a
+-- five-field cron line in the monitor's own zone, or an interval, or neither
+-- for one that only holds its runs to their bounds — how long past the due
+-- time a run may start, how long one is expected to take, and the bounds every
+-- run is held to, the tighter of these and the run's own. Filed under the
+-- project and its organization both: the organization's plan counts its
+-- monitors across its projects, and its purge finds them by it. The slug is
+-- what every crontab line and ping carries, fixed once saved; the agent is
+-- the `telmoni.agent` its runs carry, the slug unless set otherwise.
+CREATE TABLE telemetry.monitors (
+    id                  UUID        PRIMARY KEY,
+    project_id          TEXT        NOT NULL,
+    organization_id     TEXT        NOT NULL,
+    slug                TEXT        NOT NULL,
+    name                TEXT        NOT NULL,
+    agent               TEXT        NOT NULL,
+    schedule            TEXT,
+    interval_s          INTEGER,
+    timezone            TEXT        NOT NULL DEFAULT 'UTC',
+    -- Meaningless without a schedule or an interval, so held to one.
+    grace_s             INTEGER,
+    expected_duration_s INTEGER,
+    stall_after_s       INTEGER,
+    max_steps           INTEGER,
+    max_cost_usd        DOUBLE PRECISION,
+    -- `MonitorState`'s word; `new` is a monitor a first ping or run made.
+    state               TEXT        NOT NULL DEFAULT 'healthy',
+    state_changed_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- When the next run is expected, in UTC; none for a monitor with no
+    -- schedule, and none while it is paused.
+    next_due_at         TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT monitors_slug_check CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND char_length(slug) <= 48),
+    CONSTRAINT monitors_name_check CHECK (char_length(name) BETWEEN 1 AND 60),
+    CONSTRAINT monitors_agent_check CHECK (char_length(agent) BETWEEN 1 AND 128),
+    CONSTRAINT monitors_timezone_check CHECK (char_length(timezone) BETWEEN 1 AND 64),
+    CONSTRAINT monitors_one_timing_check CHECK (schedule IS NULL OR interval_s IS NULL),
+    CONSTRAINT monitors_grace_with_timing_check CHECK ((grace_s IS NULL) = (schedule IS NULL AND interval_s IS NULL)),
+    CONSTRAINT monitors_interval_check CHECK (interval_s IS NULL OR interval_s >= 60),
+    CONSTRAINT monitors_grace_check CHECK (grace_s IS NULL OR grace_s >= 0),
+    CONSTRAINT monitors_expected_duration_check CHECK (expected_duration_s IS NULL OR expected_duration_s > 0),
+    CONSTRAINT monitors_stall_check CHECK (stall_after_s IS NULL OR stall_after_s > 0),
+    CONSTRAINT monitors_steps_check CHECK (max_steps IS NULL OR max_steps > 0),
+    CONSTRAINT monitors_cost_check CHECK (max_cost_usd IS NULL OR max_cost_usd > 0),
+    CONSTRAINT monitors_state_check CHECK (state IN ('failed', 'stalled', 'over_bound', 'late', 'running', 'new', 'paused', 'healthy'))
+);
+
+-- One slug and one agent per monitor in a project: the slug is what a ping
+-- names, the agent what a run names, and each must find one monitor.
+CREATE UNIQUE INDEX monitors_project_slug_idx ON telemetry.monitors (project_id, slug);
+CREATE UNIQUE INDEX monitors_project_agent_idx ON telemetry.monitors (project_id, agent);
+CREATE INDEX monitors_organization_idx ON telemetry.monitors (organization_id);
+-- The ticker's scan: the scheduled monitors by when their next run is due.
+CREATE INDEX monitors_due_idx ON telemetry.monitors (next_due_at) WHERE next_due_at IS NOT NULL;
+
+ALTER TABLE telemetry.monitors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.monitors FORCE ROW LEVEL SECURITY;
+
+-- A write names the organization too, as a settings row's does, so a
+-- project's scope alone cannot file a monitor under another organization.
+CREATE POLICY tenant_isolation ON telemetry.monitors
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true)
+                AND organization_id = current_setting('app.organization_id', true));
+
+-- An organization reads its projects' monitors — the count its plan holds
+-- it to — and writes none: each is changed on its own project.
+CREATE POLICY organization_read ON telemetry.monitors
+    FOR SELECT
+    USING (organization_id = current_setting('app.organization_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.monitors
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- The purges delete an organization's or a deleted project's monitors.
+GRANT SELECT, DELETE ON telemetry.monitors TO telemetry_maintenance;
+-- A transfer moves them to the organization that now holds their project.
+GRANT UPDATE (organization_id) ON telemetry.monitors TO telemetry_maintenance;
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 4. PING KEYS
+-- ══════════════════════════════════════════════════════════════════════════════
+-- A project's ping keys: what every crontab line carries, in the URL of each
+-- ping, minted for pings alone — `telmoniping_` and 32 base62 characters,
+-- shown once and kept as its SHA-256, as an API key is — so a line's leak can
+-- fake a ping and make a paused monitor, and nothing more. Two may be live at
+-- once, so a rotation moves the crontab lines over one at a time: the older is
+-- retired by a person, or a week after its last ping once a newer one stands
+-- (`rotation.rs`). A key the table does not hold, or holds retired, is a 404.
+-- Filed under the project and its organization both, as a monitor is.
+CREATE TABLE telemetry.ping_keys (
+    id              UUID        PRIMARY KEY,
+    project_id      TEXT        NOT NULL,
+    organization_id TEXT        NOT NULL,
+    -- The SHA-256 of the key, in hex; the key itself is kept nowhere.
+    key_hash        TEXT        NOT NULL,
+    -- What the list shows of it: the prefix and the first characters after
+    -- it, enough to tell two keys apart and nothing a guesser gains by.
+    prefix          TEXT        NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- Touched by its pings, at most once a minute.
+    last_ping_at    TIMESTAMPTZ,
+    retired_at      TIMESTAMPTZ,
+    CONSTRAINT ping_keys_key_hash_check CHECK (key_hash ~ '^[0-9a-f]{64}$'),
+    CONSTRAINT ping_keys_prefix_check CHECK (char_length(prefix) BETWEEN 1 AND 32)
+);
+
+-- The ping lane finds a key by its hash, and by nothing else.
+CREATE UNIQUE INDEX ping_keys_hash_idx ON telemetry.ping_keys (key_hash);
+-- The project's live keys: the count a minting is held to, and the
+-- rotation's search for an older key a newer one has replaced.
+CREATE INDEX ping_keys_project_live_idx ON telemetry.ping_keys (project_id, created_at) WHERE retired_at IS NULL;
+CREATE INDEX ping_keys_organization_idx ON telemetry.ping_keys (organization_id);
+
+ALTER TABLE telemetry.ping_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.ping_keys FORCE ROW LEVEL SECURITY;
+
+-- A write names the organization too, as a monitor's does.
+CREATE POLICY tenant_isolation ON telemetry.ping_keys
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true)
+                AND organization_id = current_setting('app.organization_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.ping_keys
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- The lane resolves a key outside any tenant, as auth resolves an API key;
+-- the rotation finds the keys a week past their last ping; and the purges
+-- delete an organization's or a deleted project's keys. A key is minted,
+-- touched by its pings and retired in the project's own scope.
+GRANT SELECT, DELETE ON telemetry.ping_keys TO telemetry_maintenance;
+-- A transfer moves them to the organization that now holds their project.
+GRANT UPDATE (organization_id) ON telemetry.ping_keys TO telemetry_maintenance;
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 5. OPEN RUNS
+-- ══════════════════════════════════════════════════════════════════════════════
+-- A row per run still going: opened by a `/start` or a `/checkpoint` ping —
+-- and, once ingest opens runs, by a run's `telmoni.run.start` — heard by every
+-- ping after it, and gone when the run ends, its finished span handed to the
+-- outbox below. What it holds is what the ticker reads to see a run gone
+-- quiet or past a bound: when it started, when it was last heard, its steps
+-- and spend so far, and the bounds it is held to — its monitor's, for a run
+-- reported by pings, which declare none. A run goes with its monitor. Filed
+-- under the project and its organization both, as a monitor is.
+CREATE TABLE telemetry.open_runs (
+    -- The run's id: the `rid` a ping names, or one minted for it, and the
+    -- `run_id` of its span once it ends.
+    id              UUID        PRIMARY KEY,
+    project_id      TEXT        NOT NULL,
+    organization_id TEXT        NOT NULL,
+    monitor_id      UUID        NOT NULL REFERENCES telemetry.monitors (id) ON DELETE CASCADE,
+    -- The monitor's agent, which the span names.
+    agent           TEXT        NOT NULL,
+    -- `ping` for a run reported by pings, `ingest` for one an SDK sends.
+    source          TEXT        NOT NULL,
+    -- The key its pings came under, for a run reported by pings.
+    ping_key_id     UUID,
+    started_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_heard_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    steps           INTEGER     NOT NULL DEFAULT 0,
+    input_tokens    BIGINT      NOT NULL DEFAULT 0,
+    output_tokens   BIGINT      NOT NULL DEFAULT 0,
+    cost_usd        DOUBLE PRECISION NOT NULL DEFAULT 0,
+    stall_after_s   INTEGER,
+    max_steps       INTEGER,
+    max_cost_usd    DOUBLE PRECISION,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT open_runs_agent_check CHECK (char_length(agent) BETWEEN 1 AND 128),
+    CONSTRAINT open_runs_source_check CHECK (source IN ('ping', 'ingest')),
+    CONSTRAINT open_runs_steps_check CHECK (steps >= 0),
+    CONSTRAINT open_runs_tokens_check CHECK (input_tokens >= 0 AND output_tokens >= 0),
+    CONSTRAINT open_runs_cost_check CHECK (cost_usd >= 0),
+    CONSTRAINT open_runs_stall_check CHECK (stall_after_s IS NULL OR stall_after_s > 0),
+    CONSTRAINT open_runs_max_steps_check CHECK (max_steps IS NULL OR max_steps > 0),
+    CONSTRAINT open_runs_max_cost_check CHECK (max_cost_usd IS NULL OR max_cost_usd > 0)
+);
+
+-- A ping that names no run means its monitor's newest open one.
+CREATE INDEX open_runs_monitor_idx ON telemetry.open_runs (monitor_id, started_at DESC);
+CREATE INDEX open_runs_project_idx ON telemetry.open_runs (project_id);
+-- The ticker's scan for silence: the runs held to a stall timeout, by when
+-- they were last heard.
+CREATE INDEX open_runs_heard_idx ON telemetry.open_runs (last_heard_at) WHERE stall_after_s IS NOT NULL;
+
+ALTER TABLE telemetry.open_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.open_runs FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON telemetry.open_runs
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true)
+                AND organization_id = current_setting('app.organization_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.open_runs
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- The ticker reads every open run across tenants; the purges delete an
+-- organization's or a deleted project's. A run is opened, heard and ended
+-- in the project's own scope.
+GRANT SELECT, DELETE ON telemetry.open_runs TO telemetry_maintenance;
+-- A transfer moves them to the organization that now holds their project.
+GRANT UPDATE (organization_id) ON telemetry.open_runs TO telemetry_maintenance;
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 6. OUTBOX
+-- ══════════════════════════════════════════════════════════════════════════════
+-- What telemetry hands on once a transaction has committed, and must not
+-- lose: a ping's finished run, which becomes a row of ClickHouse's `spans`
+-- (`kind` = 'span'), and a notice for the project's feed, handed to
+-- notifications through the seam (`kind` = 'notice'). A row is written in the
+-- transaction that ends the run or makes the monitor, so a monitor is never
+-- late because ClickHouse was down and nothing is told twice: the loop every
+-- replica runs (`outbox.rs`) leases rows across tenants, `FOR UPDATE SKIP
+-- LOCKED`, lands each and deletes it; a row that fails waits out its lease
+-- and is tried again, up to a cap, past which it stays for an operator to
+-- see. Filed under the project and its organization both, as a monitor is.
+CREATE TABLE telemetry.outbox (
+    id              UUID        PRIMARY KEY,
+    project_id      TEXT        NOT NULL,
+    organization_id TEXT        NOT NULL,
+    kind            TEXT        NOT NULL,
+    -- The finished run as `outbox::FinishedRun` spells it, or the notice as
+    -- `outbox::QueuedNotice` does.
+    payload         JSONB       NOT NULL,
+    attempts        INTEGER     NOT NULL DEFAULT 0,
+    lease_until     TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT outbox_kind_check CHECK (kind IN ('span', 'notice')),
+    CONSTRAINT outbox_payload_check CHECK (jsonb_typeof(payload) = 'object'),
+    CONSTRAINT outbox_attempts_check CHECK (attempts >= 0)
+);
+
+-- The purges find a project's rows; the loop takes rows in physical order.
+CREATE INDEX outbox_project_idx ON telemetry.outbox (project_id);
+
+ALTER TABLE telemetry.outbox ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.outbox FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON telemetry.outbox
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true)
+                AND organization_id = current_setting('app.organization_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.outbox
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- The loop leases rows across tenants and deletes each once it has landed,
+-- as the purges delete a project's; a lease is two columns, granted as
+-- columns. A row is written in the project's own scope.
+GRANT SELECT, DELETE ON telemetry.outbox TO telemetry_maintenance;
+GRANT UPDATE (attempts, lease_until) ON telemetry.outbox TO telemetry_maintenance;
+-- A transfer moves them to the organization that now holds their project.
+GRANT UPDATE (organization_id) ON telemetry.outbox TO telemetry_maintenance;

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use telmoni_shared::envelope::{Kek, Vault, on_deployed_tier};
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
-use telmoni_shared::seam::{Auth, Entitlements};
+use telmoni_shared::seam::{Auth, Entitlements, Notifications};
 
 use crate::contract::EXPORTS_PER_MINUTE;
 use crate::rate_limit::RateLimit;
@@ -34,6 +34,7 @@ pub fn state(
     service_secrets: ServiceSecrets,
     auth: Arc<dyn Auth>,
     entitlements: Arc<dyn Entitlements>,
+    notifications: Arc<dyn Notifications>,
 ) -> anyhow::Result<AppState> {
     let store = Store::connect(config.clickhouse_url.expose())
         .context("TELEMETRY_CLICKHOUSE_URL is not a ClickHouse URL")?;
@@ -64,6 +65,7 @@ pub fn state(
         service_secrets,
         auth,
         entitlements,
+        notifications,
         http,
         vault: Vault::new(),
         kek,

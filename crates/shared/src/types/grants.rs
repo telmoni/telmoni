@@ -80,9 +80,57 @@ impl MemberCeiling {
     }
 }
 
+/// How many monitors an organization may hold across its projects, as the
+/// deployment that sells plans answers it
+/// ([`crate::seam::Entitlements::monitor_ceiling`]). Held where one is made,
+/// by a person or by a first ping or run; never where one already made is
+/// concerned, so a project past it keeps every monitor it has.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MonitorCeiling {
+    /// How many the organization may hold.
+    pub limit: u32,
+    /// The one thing that lifts it, the 402's `entitlement`.
+    pub entitlement: String,
+    /// The sentence a person reads, which names nobody.
+    pub detail: String,
+}
+
+impl MonitorCeiling {
+    /// Whether one more monitor may be made, with `held` already held.
+    /// Refused, as a 402, at the ceiling.
+    pub fn admit(&self, held: u64) -> Result<(), TelmoniError> {
+        if held < u64::from(self.limit) {
+            return Ok(());
+        }
+        Err(PlanError::LimitReached {
+            entitlement: self.entitlement.clone(),
+            detail: self.detail.clone(),
+        }
+        .into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_monitor_ceiling_admits_one_more_until_it_is_held() {
+        let ceiling = MonitorCeiling {
+            limit: 5,
+            entitlement: "pro".into(),
+            detail: "The plan holds five.".into(),
+        };
+        assert!(ceiling.admit(4).is_ok());
+        let pd = ceiling
+            .admit(5)
+            .expect_err("a monitor past the ceiling")
+            .to_problem_details();
+        assert_eq!(pd.type_uri, "/errors/plan/limit-reached");
+        assert_eq!(pd.status, 402);
+        assert_eq!(pd.detail.as_deref(), Some("The plan holds five."));
+        assert!(ceiling.admit(u64::MAX).is_err());
+    }
 
     #[test]
     fn a_binary_that_sells_nothing_admits_everything() {

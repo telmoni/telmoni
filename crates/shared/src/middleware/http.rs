@@ -43,9 +43,23 @@ fn make_span(request: &Request<Body>) -> tracing::Span {
     tracing::info_span!(
         "request",
         method = %request.method(),
-        path = %request.uri().path(),
+        path = %loggable_path(request.uri().path()),
         request_id = %request_id,
     )
+}
+
+/// The path as the span prints it: a ping's key rides in its URL,
+/// `/ping/{ping_key}/{slug}`, so that segment is cut out of every log line,
+/// and a log holds no credential. Every other path is printed as it came.
+fn loggable_path(path: &str) -> std::borrow::Cow<'_, str> {
+    let Some(rest) = path.strip_prefix("/ping/") else {
+        return path.into();
+    };
+    match rest.split_once('/') {
+        Some((_, tail)) => format!("/ping/…/{tail}").into(),
+        None if rest.is_empty() => path.into(),
+        None => "/ping/…".into(),
+    }
 }
 
 #[cfg(test)]
@@ -91,5 +105,29 @@ mod tests {
             res.headers().get(REQUEST_ID_HEADER).unwrap(),
             "req-from-the-bff"
         );
+    }
+
+    /// ⚠ A ping's key never reaches a log line: the span prints the path with
+    /// that segment cut out, and every other path as it came.
+    #[test]
+    fn a_pings_key_is_cut_out_of_the_logged_path() {
+        for (path, logged) in [
+            (
+                "/ping/telmoniping_k3yk3yk3yk3yk3yk3yk3yk3yk3yk3yk3y/nightly/start",
+                "/ping/…/nightly/start",
+            ),
+            ("/ping/telmoniping_k3y/nightly", "/ping/…/nightly"),
+            ("/ping/telmoniping_k3y/", "/ping/…/"),
+            ("/ping/telmoniping_k3y", "/ping/…"),
+            ("/ping/", "/ping/"),
+            ("/ping", "/ping"),
+            (
+                "/pings/telmoniping_k3y/nightly",
+                "/pings/telmoniping_k3y/nightly",
+            ),
+            ("/v1/organization", "/v1/organization"),
+        ] {
+            assert_eq!(loggable_path(path), logged, "{path}");
+        }
     }
 }

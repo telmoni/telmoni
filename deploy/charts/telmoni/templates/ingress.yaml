@@ -109,8 +109,8 @@ spec:
     name: web
 ---
 # The machine lanes — ingest at /otlp/v1/traces, the public read API under
-# /v1, the CLI's session lanes under /cli, and Slack's signed events at
-# /webhooks/slack — on `server-api`: on a host of their own where
+# /v1, the CLI's session lanes under /cli, the ping lane under /ping, and
+# Slack's signed events at /webhooks/slack — on `server-api`: on a host of their own where
 # `ingress.apiHost` names one, else under their paths on the console's host,
 # whose slugs are reserved so no organization shadows them. Only the lanes'
 # paths, on either host: every other lane of the server is the console's to
@@ -145,6 +145,9 @@ spec:
         - path:
             type: PathPrefix
             value: /cli
+        - path:
+            type: PathPrefix
+            value: /ping
         - path:
             type: Exact
             value: /webhooks/slack

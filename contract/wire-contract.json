@@ -17,12 +17,23 @@
       "members",
       "signup"
     ],
+    "MonitorState": [
+      "failed",
+      "stalled",
+      "over_bound",
+      "late",
+      "running",
+      "new",
+      "paused",
+      "healthy"
+    ],
     "NotificationKind": [
       "organization_alert",
       "member_added",
       "member_left",
       "connector_connected",
-      "connector_disconnected"
+      "connector_disconnected",
+      "monitor_discovered"
     ],
     "OrganizationStatus": [
       "active",

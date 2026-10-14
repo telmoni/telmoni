@@ -20,11 +20,14 @@ use uuid::Uuid;
 use telmoni_shared::acting::{Acting, ActingKey, ActingProject};
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::rbac::project_role;
-use telmoni_shared::seam::{Auth, Entitlements, NoLimits, ProjectHome};
+use telmoni_shared::seam::{
+    Auth, Emitted, Entitlements, NoLimits, Notice, Notifications, ProjectHome,
+};
 use telmoni_shared::test_util::{ServiceRole, chain_lock_held, service_pool};
 use telmoni_shared::{
-    ApiKeyScope, AuthError, AuthzError, FlagSet, Grants, OrganizationId, OrganizationRole,
-    OrganizationStatus, Paused, ProjectId, Role, SpanKind, SpanStatus, TelmoniError, UserId,
+    ApiKeyScope, AuthError, AuthzError, FlagSet, Grants, NotificationKind, OrganizationId,
+    OrganizationRole, OrganizationStatus, Paused, ProjectId, Role, SpanKind, SpanStatus,
+    TelmoniError, UserId,
 };
 use telmoni_telemetry::store::{self, SpanRow, Store};
 use telmoni_telemetry::{AppState, Config};
@@ -329,13 +332,7 @@ pub(crate) fn state_with_entitlements(
 ) -> Arc<AppState> {
     // Nothing listens on either: the replica stands in for Redis, as it does
     // on a laptop with none, and a lane that reaches for ClickHouse fails.
-    state_at(
-        pool,
-        auth,
-        "http://telemetry:telemetry@127.0.0.1:1",
-        "redis://127.0.0.1:1",
-        entitlements,
-    )
+    state_with_notices(pool, auth, entitlements, NoticeLog::new())
 }
 
 /// Entitlements under which one organization is paused, as a deployment that
@@ -357,16 +354,134 @@ impl Entitlements for PausedOrganization {
     }
 }
 
+/// One notice as the module handed it through the seam.
+#[derive(Debug, Clone)]
+pub(crate) struct LoggedNotice {
+    pub(crate) feed_id: Uuid,
+    pub(crate) organization_id: OrganizationId,
+    pub(crate) project_id: Option<ProjectId>,
+    pub(crate) kind: NotificationKind,
+    pub(crate) title: String,
+    pub(crate) body: String,
+    pub(crate) metadata: serde_json::Value,
+    pub(crate) dedup_key: Option<String>,
+}
+
+/// Notifications as this module holds it: every notice handed through the
+/// seam, kept for a suite to read, and a replayed dedup key answered with
+/// its first row and kept once, as the module answers one.
+#[derive(Default)]
+pub(crate) struct NoticeLog {
+    notices: Mutex<Vec<LoggedNotice>>,
+}
+
+impl NoticeLog {
+    pub(crate) fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    /// Every notice handed over, in order.
+    pub(crate) fn notices(&self) -> Vec<LoggedNotice> {
+        self.notices
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
+#[async_trait]
+impl Notifications for NoticeLog {
+    async fn emit(
+        &self,
+        organization_id: &OrganizationId,
+        project_id: Option<&ProjectId>,
+        notice: Notice<'_>,
+    ) -> Result<Emitted, TelmoniError> {
+        let mut notices = self
+            .notices
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(key) = notice.dedup_key
+            && let Some(first) = notices
+                .iter()
+                .find(|logged| logged.dedup_key.as_deref() == Some(key))
+        {
+            return Ok(Emitted {
+                feed_id: first.feed_id,
+                deduplicated: true,
+            });
+        }
+        let feed_id = Uuid::new_v4();
+        notices.push(LoggedNotice {
+            feed_id,
+            organization_id: organization_id.clone(),
+            project_id: project_id.cloned(),
+            kind: notice.kind,
+            title: notice.title.to_owned(),
+            body: notice.body.to_owned(),
+            metadata: notice.metadata,
+            dedup_key: notice.dedup_key.map(str::to_owned),
+        });
+        Ok(Emitted {
+            feed_id,
+            deduplicated: false,
+        })
+    }
+
+    async fn purge_organization(
+        &self,
+        _organization_id: &OrganizationId,
+    ) -> Result<u64, TelmoniError> {
+        Ok(0)
+    }
+
+    async fn purge_project(&self, _project_id: &ProjectId) -> Result<u64, TelmoniError> {
+        Ok(0)
+    }
+
+    async fn redact_person(&self, _user_id: &UserId) -> Result<u64, TelmoniError> {
+        Ok(0)
+    }
+}
+
+/// [`state_with_entitlements`], with `notices` keeping every notice the
+/// module hands through the seam.
+pub(crate) fn state_with_notices(
+    pool: &PgPool,
+    auth: Arc<dyn Auth>,
+    entitlements: Arc<dyn Entitlements>,
+    notices: Arc<NoticeLog>,
+) -> Arc<AppState> {
+    state_at(
+        pool,
+        auth,
+        "http://telemetry:telemetry@127.0.0.1:1",
+        "redis://127.0.0.1:1",
+        entitlements,
+        notices,
+    )
+}
+
 /// The module over `pool`, with the stores a suite can reach: ClickHouse as
 /// `TELEMETRY_CLICKHOUSE_URL` names it, which the caller has checked with
 /// [`clickhouse_or_skip`], and Redis as `REDIS_URL` names it, or the compose
 /// file's; neither dialled until a lane needs it.
 pub(crate) fn state_with_stores(pool: &PgPool, auth: Arc<dyn Auth>) -> Arc<AppState> {
+    state_with_stores_and_notices(pool, auth, NoticeLog::new())
+}
+
+/// [`state_with_stores`], with `notices` keeping every notice the module
+/// hands through the seam.
+pub(crate) fn state_with_stores_and_notices(
+    pool: &PgPool,
+    auth: Arc<dyn Auth>,
+    notices: Arc<NoticeLog>,
+) -> Arc<AppState> {
     let clickhouse = std::env::var("TELEMETRY_CLICKHOUSE_URL").expect(
         "state_with_stores: TELEMETRY_CLICKHOUSE_URL is set, checked by clickhouse_or_skip",
     );
     let redis = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_owned());
-    state_at(pool, auth, &clickhouse, &redis, Arc::new(NoLimits))
+    state_at(pool, auth, &clickhouse, &redis, Arc::new(NoLimits), notices)
 }
 
 fn state_at(
@@ -375,6 +490,7 @@ fn state_at(
     clickhouse_url: &str,
     redis_url: &str,
     entitlements: Arc<dyn Entitlements>,
+    notifications: Arc<dyn Notifications>,
 ) -> Arc<AppState> {
     let config = Config {
         database_url: "".into(),
@@ -393,6 +509,7 @@ fn state_at(
             ServiceSecrets::new(SECRET, None::<String>),
             auth,
             entitlements,
+            notifications,
         )
         .expect("the module's state over a laptop's key"),
     )

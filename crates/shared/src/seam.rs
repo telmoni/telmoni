@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::acting::{Acting, ActingKey};
 use crate::{
-    AuditAction, FlagSet, Grants, MemberCeiling, NotificationKind, OrganizationId,
+    AuditAction, FlagSet, Grants, MemberCeiling, MonitorCeiling, NotificationKind, OrganizationId,
     OrganizationStatus, ProjectId, TelmoniError, UserId,
 };
 
@@ -563,6 +563,17 @@ pub trait Entitlements: Send + Sync {
         let _ = organization_id;
         Ok(None)
     }
+
+    /// How many monitors the organization may hold across its projects;
+    /// `None` is as many as it makes. Asked where one is made, apart from
+    /// [`Entitlements::grants`], as [`Entitlements::member_ceiling`] is.
+    async fn monitor_ceiling(
+        &self,
+        organization_id: &OrganizationId,
+    ) -> Result<Option<MonitorCeiling>, TelmoniError> {
+        let _ = organization_id;
+        Ok(None)
+    }
 }
 
 /// A binary that sells nothing: every organization holds everything.
@@ -610,6 +621,25 @@ pub async fn member_ceiling(
         Err(e) => {
             tracing::warn!(organization_id = %organization_id, error = %e,
                 "the member ceiling could not be read; none is held");
+            None
+        }
+    }
+}
+
+/// What the lane that makes a monitor asks before one is made: the
+/// organization's monitor ceiling, which the lane holds its count to
+/// ([`MonitorCeiling::admit`]) under the organization's chain lock. An
+/// answer that cannot be had is no ceiling, logged, as [`admit_new`] lets in
+/// what it cannot decide.
+pub async fn monitor_ceiling(
+    entitlements: &dyn Entitlements,
+    organization_id: &OrganizationId,
+) -> Option<MonitorCeiling> {
+    match entitlements.monitor_ceiling(organization_id).await {
+        Ok(ceiling) => ceiling,
+        Err(e) => {
+            tracing::warn!(organization_id = %organization_id, error = %e,
+                "the monitor ceiling could not be read; none is held");
             None
         }
     }

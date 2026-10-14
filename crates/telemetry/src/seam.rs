@@ -2,12 +2,13 @@
 //! [`telmoni_shared::seam::Telemetry`], on a handle to the module's state.
 //! Auth runs its purges and a project's move through this.
 //!
-//! A purge takes a project's spans and totals with its settings and saved
-//! views: the rows marked deleted in ClickHouse first, so a settings row
-//! stands for as long as its project's spans do and a purge cut short finds
-//! them again, then the views and the row removed. An organization's
-//! projects are the ones its settings rows name, since neither a span nor a
-//! view names an organization.
+//! A purge takes a project's spans and totals with its settings, saved
+//! views, monitors, ping keys, open runs and outbox rows: the rows marked
+//! deleted in ClickHouse first, so a settings row stands for as long as its
+//! project's spans do and a purge cut short finds them again, then the rest
+//! and the row removed. An organization's projects are the ones its
+//! settings rows name, since neither a span nor a view names an
+//! organization; its monitors, keys, runs and outbox rows name it.
 
 use std::sync::Arc;
 
@@ -66,7 +67,7 @@ impl Telemetry for TelemetrySeam {
             organization_id = %organization_id,
             projects = projects.len(),
             purged,
-            "telemetry purge: the organization's projects' rows marked deleted and their settings and views removed"
+            "telemetry purge: the organization's projects' rows marked deleted and their settings, views, monitors, keys and runs removed"
         );
         Ok(purged)
     }
@@ -79,7 +80,7 @@ impl Telemetry for TelemetrySeam {
         tracing::info!(
             project_id = %project_id,
             purged,
-            "telemetry purge: the project's rows marked deleted and its settings and views removed"
+            "telemetry purge: the project's rows marked deleted and its settings, views, monitors, keys and runs removed"
         );
         Ok(purged)
     }
@@ -96,7 +97,7 @@ impl Telemetry for TelemetrySeam {
             project_id = %project_id,
             organization_id = %organization_id,
             moved,
-            "telemetry: the project's settings moved with it"
+            "telemetry: the project's settings, monitors, keys and runs moved with it"
         );
         Ok(())
     }
