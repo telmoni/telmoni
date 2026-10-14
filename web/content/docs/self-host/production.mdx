@@ -267,6 +267,15 @@ telmoni terminate org_019a0b8c3f2e7d41
 
 `terminate` closes the organization without its owner's confirmation code, as `service:operator` in its audit log. There is no way back: the next deletion sweep past the wait erases it, as it erases one its owner deleted.
 
+### Rows ClickHouse refused
+
+A finished run's row of `spans`, and the notice a monitor raises for the feed, wait in telemetry's outbox until they land, so a ClickHouse outage makes no monitor late: the rows wait it out, however long it lasts, and land when it is back. A row ClickHouse refuses, or that the feed will not take, is tried twelve times over half an hour and then left: the server log names it at `error` as it crosses, and the `telemetry outbox depth` line counts it as `stuck` once a minute. Once what refused it is mended:
+
+```bash
+# Give every row past its tries another go
+telmoni release outbox
+```
+
 ---
 
 ## What the server refuses at boot
