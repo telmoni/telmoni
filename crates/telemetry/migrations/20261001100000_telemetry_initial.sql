@@ -296,7 +296,7 @@ GRANT UPDATE (organization_id) ON telemetry.ping_keys TO telemetry_maintenance;
 CREATE TABLE telemetry.open_runs (
     -- The run's id: the `rid` a ping names, or one minted for it, and the
     -- `run_id` of its span once it ends.
-    id              UUID        PRIMARY KEY,
+    id              UUID        NOT NULL,
     project_id      TEXT        NOT NULL,
     organization_id TEXT        NOT NULL,
     monitor_id      UUID        NOT NULL REFERENCES telemetry.monitors (id) ON DELETE CASCADE,
@@ -322,6 +322,13 @@ CREATE TABLE telemetry.open_runs (
     max_steps       INTEGER,
     max_cost_usd    DOUBLE PRECISION,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- A run's id is its own within its project, as `spans` keys the span
+    -- by project: a `rid` a script derives from its own name — `uuidgen
+    -- --sha1` on the job's name and the day, the stable UUID the manual
+    -- gives — is open in two projects at once, neither told of the other.
+    -- The lane names this key, `open_runs_pkey`, for the `/start` that runs
+    -- into it under another of the project's monitors.
+    PRIMARY KEY (project_id, id),
     CONSTRAINT open_runs_agent_check CHECK (char_length(agent) BETWEEN 1 AND 128),
     CONSTRAINT open_runs_source_check CHECK (source IN ('ping', 'ingest')),
     CONSTRAINT open_runs_steps_check CHECK (steps >= 0),
@@ -334,7 +341,6 @@ CREATE TABLE telemetry.open_runs (
 
 -- A ping that names no run means its monitor's newest open one.
 CREATE INDEX open_runs_monitor_idx ON telemetry.open_runs (monitor_id, started_at DESC);
-CREATE INDEX open_runs_project_idx ON telemetry.open_runs (project_id);
 -- The ticker's scan for silence: the runs held to a stall timeout, by when
 -- they were last heard — every run under a monitor its first ping made has
 -- one, the lane's default, and one under a saved monitor its owner's or

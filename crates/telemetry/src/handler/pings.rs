@@ -63,7 +63,9 @@ const DEFAULT_TIMEZONE: &str = "UTC";
 /// monitor of another slug may carry.
 const SLUG_TAKEN: &str = "monitors_project_slug_idx";
 const AGENT_TAKEN: &str = "monitors_project_agent_idx";
-/// The primary key a run opened under a `rid` already open runs into.
+/// The primary key a run opened under a `rid` the project has open already
+/// runs into: the key is the project's and the id's, so the run it finds is
+/// one of the project's own, under another of its monitors.
 const RUN_TAKEN: &str = "open_runs_pkey";
 /// The most monitors one project holds that its pings made and nobody has
 /// set up — `new` — before a ping that would make one more is refused: room

@@ -723,6 +723,78 @@ async fn a_run_that_never_said_it_ended_is_ended_by_the_ping_after_it(pool: PgPo
     assert_eq!(ceilings_of(&pool, &p.project).await, [24 * 60 * 60]);
 }
 
+/// A `rid` is a run's own name within its project: a script that derives
+/// one from its own name — `uuidgen --sha1` on the job's name and the day,
+/// the stable UUID the manual gives — opens its run beside another tenant's
+/// of the same id, each heard and ended alone and neither told of the other.
+/// Within a project the id is one monitor's run: a `/start` naming it under
+/// another monitor is refused.
+#[sqlx::test]
+async fn a_rid_is_a_runs_own_name_within_its_project(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let a = project(&pool);
+    let b = project(&pool);
+    a.make(hourly()).await;
+    b.make(hourly()).await;
+    let a_key = a.mint().await;
+    let b_key = b.mint().await;
+    let shared = rid();
+
+    // Two tenants open a run by the same id, each in its own project.
+    a.ping_ok(&format!("/{a_key}/hourly-sync/start?rid={shared}"))
+        .await;
+    b.ping_ok(&format!("/{b_key}/hourly-sync/start?rid={shared}"))
+        .await;
+    for p in [&a, &b] {
+        let runs = open_runs(&pool, &p.project).await;
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].0.to_string(), shared);
+    }
+
+    // Heard in the project its ping came under alone.
+    b.ping_ok(&format!(
+        "/{b_key}/hourly-sync/checkpoint?rid={shared}&steps=2"
+    ))
+    .await;
+    assert_eq!(open_runs(&pool, &a.project).await[0].1, 0);
+    assert_eq!(open_runs(&pool, &b.project).await[0].1, 2);
+
+    // Ended in its own project alone, as the run it was there.
+    a.ping_ok(&format!("/{a_key}/hourly-sync?rid={shared}"))
+        .await;
+    assert!(open_runs(&pool, &a.project).await.is_empty());
+    assert_eq!(open_runs(&pool, &b.project).await.len(), 1);
+    let finished = finished_runs(&pool, &a.project).await;
+    assert_eq!(finished.len(), 1);
+    assert_eq!(finished[0]["run_id"].as_str(), Some(shared.as_str()));
+    assert_eq!(finished[0]["status"], "ok");
+    assert!(finished_runs(&pool, &b.project).await.is_empty());
+    assert_eq!(a.monitor("hourly-sync").await["state"], "healthy");
+    assert_eq!(b.monitor("hourly-sync").await["state"], "running");
+
+    // Within the project the id is the monitor's run: under another
+    // monitor it is refused, and the run stands as it was.
+    let (status, body) = b
+        .ping(&format!("/{b_key}/nightly-report/start?rid={shared}"))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(body.contains("under another monitor"), "{body}");
+    let runs = open_runs(&pool, &b.project).await;
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].1, 2);
+    b.ping_ok(&format!(
+        "/{b_key}/hourly-sync/fail?rid={shared}&exit_code=1"
+    ))
+    .await;
+    assert!(open_runs(&pool, &b.project).await.is_empty());
+    let finished = finished_runs(&pool, &b.project).await;
+    assert_eq!(finished.len(), 1);
+    assert_eq!(finished[0]["status"], "error");
+    assert_eq!(finished[0]["steps"], 2);
+    assert_eq!(finished[0]["exit_code"], 1);
+    assert_eq!(b.monitor("hourly-sync").await["state"], "failed");
+}
+
 #[sqlx::test]
 async fn a_pings_body_is_dropped_its_query_held_to_numbers_and_the_lane_to_its_shape(pool: PgPool) {
     apply_audit_migrations(&pool).await;

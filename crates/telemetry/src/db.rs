@@ -921,8 +921,10 @@ pub async fn newest_open_run<B: HasProject>(
     .await
 }
 
-/// A run opened, under `id`. One open already under that id, in any
-/// project, is the primary key's refusal, `open_runs_pkey`.
+/// A run opened, under `id`, which is its own within the project: one open
+/// already under that id in the project is the primary key's refusal,
+/// `open_runs_pkey`, and one in another project is nothing to this one,
+/// since the key is the project's and the id's.
 pub async fn insert_open_run(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
