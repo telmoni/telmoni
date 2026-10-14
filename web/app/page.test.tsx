@@ -34,7 +34,8 @@ describe("the splash page", () => {
       "href",
       DOCS_URL,
     );
-    expect(screen.getByText(/has not launched/)).toBeInTheDocument();
+    expect(screen.getByText(/SDKs in four languages/)).toBeInTheDocument();
+    expect(screen.queryByText(/not launched/i)).toBeNull();
   });
 
   it("sends a member to the console instead", async () => {
@@ -96,7 +97,7 @@ describe("the splash page", () => {
 
     for (const question of [
       "What is Telmoni?",
-      "Has it launched?",
+      "What runs today?",
       "What does it store?",
       "Can I self-host it?",
       "How do I get started?",

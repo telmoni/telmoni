@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 const docs = (path: string) => `${DOCS_URL}${path}`;
 
 // The line above the claim: what this is, and where it stands.
-const CAPTIONS = ["Open source · Apache-2.0", "Not launched · Built in the open"];
+const CAPTIONS = ["Open source · Apache-2.0", "Built in the open"];
 
 // The sentence the page makes, the phrase it leans on, and the paragraph
 // under it: the product as it is being built, in the words its roadmap uses
@@ -28,7 +28,7 @@ const PITCH =
 
 // True today; it moves as the roadmap does, and says what is not built yet.
 const STATUS =
-  "Telmoni has not launched. What runs today is the foundation — organizations and roles, API keys, the audit log, notifications and the console agent — and the first of the telemetry on it: SDKs in four languages that record an agent's runs, ingest that keeps them as metadata, and a console that reads them as traces, sessions and users. Monitors and alerts are next, built in the open.";
+  "What runs today is the foundation — organizations and roles, API keys, the audit log, notifications and the console agent — and the first of the telemetry on it: SDKs in four languages that record an agent's runs, ingest that keeps them as metadata, and a console that reads them as traces, sessions and users. Monitors and alerts are next, built in the open.";
 
 // What the product is for, one cell per goal, in the order they are built:
 // a small motion that says it, a line, then three points.
@@ -183,9 +183,9 @@ const FAQ = [
       "A privacy-first telemetry and monitoring platform for AI agents: every run and the steps inside it, every model and tool call with its tokens, latency and cost, the bounds each agent keeps, and the alert when one breaks them. It is open source, Apache-2.0, and runs as one binary you can self-host.",
   },
   {
-    question: "Has it launched?",
+    question: "What runs today?",
     answer:
-      "Not yet. What runs today is the foundation — organizations and roles, API keys, the audit log, notifications, the console agent and the CLI — and the first of the telemetry: the SDKs record an agent's runs, ingest keeps them as metadata, and the console reads them as traces, sessions and users. Monitors and alerts are not built yet.",
+      "The foundation — organizations and roles, API keys, the audit log, notifications, the console agent and the CLI — and the first of the telemetry: the SDKs record an agent's runs, ingest keeps them as metadata, and the console reads them as traces, sessions and users. Monitors and alerts are next.",
   },
   {
     question: "What does it store?",
