@@ -45,9 +45,11 @@ use telmoni_shared::audit::lock_chain;
 use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
-use telmoni_shared::seam::{Entitlements, NoLimits};
+use telmoni_shared::seam::{Entitlements, NoLimits, Notice, Notifications};
 use telmoni_shared::test_util::apply_audit_migrations;
-use telmoni_shared::{NotificationKind, OrganizationId, OrganizationRole, ProjectId};
+use telmoni_shared::{
+    NotificationKind, OrganizationId, OrganizationRole, OrganizationStatus, ProjectId,
+};
 use telmoni_telemetry::db::{self, TelemetryLane};
 use telmoni_telemetry::handler::pings::NEW_MONITORS_MAX;
 use telmoni_telemetry::outbox::{self, Settled};
@@ -90,6 +92,23 @@ fn project_under(
     let notices = NoticeLog::new();
     let state = common::state_with_notices(pool, auth, entitlements, notices.clone());
     Project::over(state, notices, organization, project)
+}
+
+/// A project as `project` makes one, with auth kept to say what a test needs
+/// said of where the project is and how its organization stands.
+fn project_and_auth(pool: &PgPool) -> (Project, Arc<AuthStub>) {
+    let (organization, project) = (OrganizationId::new(), ProjectId::new());
+    let auth = AuthStub::probing(pool);
+    auth.seat(
+        OWNER,
+        &organization,
+        &project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let notices = NoticeLog::new();
+    let state = common::state_with_notices(pool, auth.clone(), Arc::new(NoLimits), notices.clone());
+    (Project::over(state, notices, organization, project), auth)
 }
 
 impl Project {
@@ -2333,6 +2352,311 @@ async fn a_refused_notice_counts_a_try_and_one_notifications_could_not_write_doe
     );
     assert_eq!(p.notices.notices().len(), 1);
     assert_eq!(tries_of(&pool, &p.project).await, [(0, false)]);
+}
+
+/// The kinds of the rows waiting in the project's outbox, oldest first.
+async fn kinds_waiting(pool: &PgPool, project: &ProjectId) -> Vec<String> {
+    outbox_of(pool, project)
+        .await
+        .into_iter()
+        .map(|(kind, _)| kind)
+        .collect()
+}
+
+/// A notice goes nowhere once its organization's deletion is marked: the
+/// deletion's purges take that organization's feeds, and a notice written
+/// after them would outlive them, the monitor's slug and the key's prefix in
+/// its body. The row is dropped as landed; the run's row beside it waits on
+/// the store as before. Nor once the organization is gone, between auth
+/// saying where the project is and saying how the organization stands.
+#[sqlx::test]
+async fn a_notice_for_an_organization_being_deleted_is_dropped(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let (p, auth) = project_and_auth(&pool);
+    let key = p.mint().await;
+    p.ping_ok(&format!("/{key}/nightly-report")).await;
+
+    auth.stand(&p.organization, Some(OrganizationStatus::PendingDeletion));
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled { landed: 1, held: 1 },
+        "the notice dropped as landed, the run's row handed back"
+    );
+    assert!(
+        p.notices.notices().is_empty(),
+        "a notice was written to a feed the deletion purges"
+    );
+    assert_eq!(kinds_waiting(&pool, &p.project).await, ["span"]);
+
+    p.ping_ok(&format!("/{key}/weekly-digest")).await;
+    auth.stand(&p.organization, None);
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled { landed: 1, held: 2 }
+    );
+    assert!(
+        p.notices.notices().is_empty(),
+        "a notice was written for an organization that is gone"
+    );
+    assert_eq!(kinds_waiting(&pool, &p.project).await, ["span", "span"]);
+}
+
+/// A notice goes nowhere once auth has no such project — deleted, or its
+/// organization's deletion done — and the project is purged from
+/// notifications once more, which takes whatever an earlier try wrote after
+/// the deletion's own purge and was cut off before it could ask again.
+#[sqlx::test]
+async fn a_notice_for_a_project_that_is_gone_is_dropped(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let (p, auth) = project_and_auth(&pool);
+    let key = p.mint().await;
+    p.ping_ok(&format!("/{key}/nightly-report")).await;
+
+    // The earlier try: written, then cut off with its row still leased.
+    let waiting = outbox_of(&pool, &p.project).await;
+    let (_, queued) = waiting
+        .iter()
+        .find(|(kind, _)| kind == "notice")
+        .expect("the notice's row");
+    p.notices
+        .emit(
+            &p.organization,
+            Some(&p.project),
+            Notice {
+                kind: NotificationKind::MonitorDiscovered,
+                subject_user_id: None,
+                title: queued["title"].as_str().expect("a title"),
+                body: queued["body"].as_str().expect("a body"),
+                metadata: queued["metadata"].clone(),
+                dedup_key: queued["dedup_key"].as_str(),
+            },
+        )
+        .await
+        .expect("the earlier try's write");
+
+    auth.forget(&p.project);
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled { landed: 1, held: 1 },
+        "the notice dropped as landed, the run's row handed back"
+    );
+    assert!(
+        p.notices.notices().is_empty(),
+        "a notice outlived a project that is gone"
+    );
+    assert_eq!(p.notices.purged(), std::slice::from_ref(&p.project));
+    assert_eq!(kinds_waiting(&pool, &p.project).await, ["span"]);
+}
+
+/// A notice follows its project: a row leased before a transfer committed
+/// names the organization the project left, and the notice is filed where
+/// auth holds the project now, as that organization stands — the one it
+/// left being deleted changes nothing — and nothing is purged.
+#[sqlx::test]
+async fn a_notice_follows_its_project_to_the_organization_holding_it_now(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let (p, auth) = project_and_auth(&pool);
+    let key = p.mint().await;
+    p.ping_ok(&format!("/{key}/nightly-report")).await;
+
+    let other = OrganizationId::new();
+    auth.move_to(&p.project, &other)
+        .stand(&p.organization, Some(OrganizationStatus::PendingDeletion));
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled { landed: 1, held: 1 }
+    );
+    let notices = p.notices.notices();
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    assert_eq!(notices[0].organization_id, other);
+    assert_eq!(notices[0].project_id.as_ref(), Some(&p.project));
+    assert!(
+        p.notices.purged().is_empty(),
+        "a project that moved was purged"
+    );
+}
+
+/// A transfer committing between the ask and the write leaves the notice
+/// under the organization the project left, the residue `land_notice`
+/// names, and purges nothing: the project is still there, and a purge would
+/// take what its new organization holds of it.
+#[sqlx::test]
+async fn a_notice_whose_project_moves_as_it_is_written_purges_nothing(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let (p, auth) = project_and_auth(&pool);
+    let key = p.mint().await;
+    p.ping_ok(&format!("/{key}/nightly-report")).await;
+
+    auth.move_after(&p.project, &OrganizationId::new(), 1);
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled { landed: 1, held: 1 }
+    );
+    let notices = p.notices.notices();
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    assert_eq!(notices[0].organization_id, p.organization);
+    assert!(
+        p.notices.purged().is_empty(),
+        "a project that moved was purged"
+    );
+}
+
+/// Auth unable to say where a notice's project is, or how its organization
+/// stands, is an outage of ours: the row is handed back with its try and
+/// nothing written, the batch's other notices handed back unasked rather
+/// than each waiting on auth in turn, and every notice lands once auth
+/// answers.
+#[sqlx::test]
+async fn a_notice_auth_cannot_place_waits_with_its_try(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let (p, auth) = project_and_auth(&pool);
+    let key = p.mint().await;
+    p.ping_ok(&format!("/{key}/nightly-report")).await;
+    p.ping_ok(&format!("/{key}/weekly-digest")).await;
+
+    auth.failing_homes(true);
+    let asked = auth.homes_asked();
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled { landed: 0, held: 4 }
+    );
+    assert_eq!(
+        auth.homes_asked() - asked,
+        1,
+        "auth asked again for the second notice"
+    );
+    assert_eq!(
+        tries_of(&pool, &p.project).await,
+        [(0, false); 4],
+        "where the project is unanswered: every row handed back"
+    );
+
+    auth.failing_homes(false).failing_standing(true);
+    let asked = auth.homes_asked();
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled { landed: 0, held: 4 }
+    );
+    assert_eq!(
+        auth.homes_asked() - asked,
+        1,
+        "auth asked again for the second notice"
+    );
+    assert_eq!(
+        tries_of(&pool, &p.project).await,
+        [(0, false); 4],
+        "the organization's standing unanswered: every row handed back"
+    );
+    assert!(p.notices.notices().is_empty());
+
+    auth.failing_standing(false);
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled { landed: 2, held: 2 }
+    );
+    assert_eq!(p.notices.notices().len(), 2);
+    assert_eq!(kinds_waiting(&pool, &p.project).await, ["span", "span"]);
+}
+
+/// A project deleted as its notice is written — the deletion committing
+/// after the loop asked where the project is, and notifications' purge of
+/// it run before the notice lands — would leave the notice behind both:
+/// asked again once the notice is written, auth has no such project, and the
+/// loop purges it from notifications once more, which takes the notice.
+#[sqlx::test]
+async fn a_notice_written_as_its_project_is_deleted_goes_with_it(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let (p, auth) = project_and_auth(&pool);
+    let key = p.mint().await;
+    p.ping_ok(&format!("/{key}/nightly-report")).await;
+
+    auth.forget_after(&p.project, 1);
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled { landed: 1, held: 1 }
+    );
+    assert!(
+        p.notices.notices().is_empty(),
+        "the notice outlived its project"
+    );
+    assert_eq!(p.notices.purged(), std::slice::from_ref(&p.project));
+}
+
+/// Auth lost on the ask after the write says nothing of a deletion: nothing
+/// is purged, since a purge takes the project's connectors and feed with it,
+/// and the row is handed back with its try; the next tick writes the notice
+/// again, which its dedup key keeps one notice, and asks again.
+#[sqlx::test]
+async fn a_notice_auth_cannot_place_once_written_is_tried_again(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let (p, auth) = project_and_auth(&pool);
+    let key = p.mint().await;
+    p.ping_ok(&format!("/{key}/nightly-report")).await;
+
+    auth.failing_homes_after(1);
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled { landed: 0, held: 2 }
+    );
+    assert_eq!(tries_of(&pool, &p.project).await, [(0, false), (0, false)]);
+    assert_eq!(p.notices.notices().len(), 1, "the notice was written");
+    assert!(
+        p.notices.purged().is_empty(),
+        "a project auth could not place was purged"
+    );
+
+    auth.failing_homes(false);
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled { landed: 1, held: 1 }
+    );
+    assert_eq!(
+        p.notices.notices().len(),
+        1,
+        "written again, still one notice"
+    );
+    assert!(p.notices.purged().is_empty());
+}
+
+/// A purge that fails, or does not end within auth's budget for it, hands
+/// the row back, its notice written, and the next tick, finding the project
+/// gone, purges again and drops the row.
+#[sqlx::test]
+async fn a_purge_that_fails_or_does_not_end_in_time_hands_the_notice_back(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let (p, auth) = project_and_auth(&pool);
+    let key = p.mint().await;
+    p.ping_ok(&format!("/{key}/nightly-report")).await;
+
+    auth.forget_after(&p.project, 1);
+    p.notices.failing_purges(true);
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled { landed: 0, held: 2 }
+    );
+    assert_eq!(tries_of(&pool, &p.project).await, [(0, false), (0, false)]);
+    assert_eq!(p.notices.notices().len(), 1, "the notice was written");
+
+    p.notices.failing_purges(false);
+    p.notices.stalling_purges(true);
+    let settled = tokio::time::timeout(Duration::from_secs(15), outbox::tick_once(&p.state))
+        .await
+        .expect("a stalled purge held the tick past its budget")
+        .expect("a tick");
+    assert_eq!(settled, Settled { landed: 0, held: 2 });
+    assert_eq!(tries_of(&pool, &p.project).await, [(0, false), (0, false)]);
+    assert_eq!(p.notices.notices().len(), 1, "the notice was purged");
+
+    p.notices.stalling_purges(false);
+    assert_eq!(
+        outbox::tick_once(&p.state).await.expect("a tick"),
+        Settled { landed: 1, held: 1 }
+    );
+    assert!(
+        p.notices.notices().is_empty(),
+        "the notice outlived its project"
+    );
+    assert_eq!(p.notices.purged(), std::slice::from_ref(&p.project));
 }
 
 #[sqlx::test]

@@ -6,7 +6,7 @@
 #![allow(dead_code, reason = "each suite uses the part of the harness it needs")]
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -59,6 +59,22 @@ pub(crate) struct AuthStub {
     chain_held: Mutex<Vec<bool>>,
     /// The API keys auth would resolve, by the bearer that presents them.
     keys: Mutex<HashMap<String, ActingKey>>,
+    /// What auth answers of an organization that is not active: one whose
+    /// deletion is marked, or one gone.
+    standings: Mutex<HashMap<OrganizationId, Option<OrganizationStatus>>>,
+    /// A project auth says where it is this many more times before it is
+    /// deleted (`None`) or moves to the organization named.
+    change_after: Mutex<Option<(ProjectId, usize, Option<OrganizationId>)>>,
+    /// How many times auth was asked where projects are.
+    homes_asked: AtomicUsize,
+    /// Whether asking where a project is fails, as it does while auth cannot
+    /// be reached.
+    homes_fail: AtomicBool,
+    /// How many more asks of where a project is are answered before every
+    /// one fails.
+    homes_fail_after: Mutex<Option<usize>>,
+    /// Whether asking an organization's standing fails.
+    standing_fail: AtomicBool,
 }
 
 impl AuthStub {
@@ -154,6 +170,102 @@ impl AuthStub {
             .again
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(answer);
+        self
+    }
+
+    /// Answer `status` as `organization`'s standing from now on:
+    /// `PendingDeletion` once its deletion is marked, `None` once it is gone.
+    pub(crate) fn stand(
+        &self,
+        organization: &OrganizationId,
+        status: Option<OrganizationStatus>,
+    ) -> &Self {
+        self.standings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(organization.clone(), status);
+        self
+    }
+
+    /// Every seat on `project` gone, as auth holds a project once it is
+    /// deleted: asked where it is, auth leaves it out.
+    pub(crate) fn forget(&self, project: &ProjectId) -> &Self {
+        self.seats
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|(_, seated), _| *seated != project.to_string());
+        self
+    }
+
+    /// Every seat on `project` moved to `organization`, as auth holds a
+    /// project once a transfer of it commits.
+    pub(crate) fn move_to(&self, project: &ProjectId, organization: &OrganizationId) -> &Self {
+        for ((_, seated), (held_by, _, _)) in self
+            .seats
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter_mut()
+        {
+            if *seated == project.to_string() {
+                *held_by = organization.clone();
+            }
+        }
+        self
+    }
+
+    /// Say where `project` is `asks` more times, then forget it: its deletion
+    /// committing between one ask and the next.
+    pub(crate) fn forget_after(&self, project: &ProjectId, asks: usize) -> &Self {
+        *self
+            .change_after
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some((project.clone(), asks, None));
+        self
+    }
+
+    /// Say where `project` is `asks` more times, then move it to
+    /// `organization`: a transfer of it committing between one ask and the
+    /// next.
+    pub(crate) fn move_after(
+        &self,
+        project: &ProjectId,
+        organization: &OrganizationId,
+        asks: usize,
+    ) -> &Self {
+        *self
+            .change_after
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some((project.clone(), asks, Some(organization.clone())));
+        self
+    }
+
+    /// How many times auth was asked where projects are.
+    pub(crate) fn homes_asked(&self) -> usize {
+        self.homes_asked.load(Ordering::SeqCst)
+    }
+
+    /// Fail every ask of where a project is from now on, or stop failing.
+    pub(crate) fn failing_homes(&self, failing: bool) -> &Self {
+        self.homes_fail.store(failing, Ordering::SeqCst);
+        self
+    }
+
+    /// Answer where projects are `asks` more times, then fail every ask: auth
+    /// lost between one ask and the next.
+    pub(crate) fn failing_homes_after(&self, asks: usize) -> &Self {
+        *self
+            .homes_fail_after
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(asks);
+        self
+    }
+
+    /// Fail every ask of an organization's standing from now on, or stop
+    /// failing.
+    pub(crate) fn failing_standing(&self, failing: bool) -> &Self {
+        self.standing_fail.store(failing, Ordering::SeqCst);
         self
     }
 
@@ -288,6 +400,50 @@ impl Auth for AuthStub {
         &self,
         projects: &[ProjectId],
     ) -> Result<Vec<ProjectHome>, TelmoniError> {
+        self.homes_asked.fetch_add(1, Ordering::SeqCst);
+        {
+            let mut fail_after = self
+                .homes_fail_after
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            match fail_after.as_mut() {
+                Some(0) => {
+                    *fail_after = None;
+                    self.homes_fail.store(true, Ordering::SeqCst);
+                }
+                Some(asks) => *asks -= 1,
+                None => {}
+            }
+        }
+        if self.homes_fail.load(Ordering::SeqCst) {
+            return Err(TelmoniError::Internal("auth cannot be reached".into()));
+        }
+        let changed = {
+            let mut change_after = self
+                .change_after
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            match change_after.as_mut() {
+                Some((project, asks, _)) if projects.contains(project) => {
+                    if *asks == 0 {
+                        change_after.take()
+                    } else {
+                        *asks -= 1;
+                        None
+                    }
+                }
+                _ => None,
+            }
+        };
+        match changed {
+            Some((project, _, None)) => {
+                self.forget(&project);
+            }
+            Some((project, _, Some(organization))) => {
+                self.move_to(&project, &organization);
+            }
+            None => {}
+        }
         let seats = self
             .seats
             .lock()
@@ -310,9 +466,18 @@ impl Auth for AuthStub {
 
     async fn organization_standing(
         &self,
-        _organization_id: &OrganizationId,
+        organization_id: &OrganizationId,
     ) -> Result<Option<OrganizationStatus>, TelmoniError> {
-        Ok(Some(OrganizationStatus::Active))
+        if self.standing_fail.load(Ordering::SeqCst) {
+            return Err(TelmoniError::Internal("auth cannot be reached".into()));
+        }
+        Ok(self
+            .standings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(organization_id)
+            .copied()
+            .unwrap_or(Some(OrganizationStatus::Active)))
     }
 }
 
@@ -487,12 +652,19 @@ pub(crate) enum Answer {
 }
 
 /// Notifications as this module holds it: every notice handed through the
-/// seam, kept for a suite to read, and a replayed dedup key answered with
-/// its first row and kept once, as the module answers one.
+/// seam, kept for a suite to read, and a dedup key replayed on the same
+/// organization's feed of the same project answered with its first row and
+/// kept once, as the module answers one.
 #[derive(Default)]
 pub(crate) struct NoticeLog {
     notices: Mutex<Vec<LoggedNotice>>,
     answer: Mutex<Answer>,
+    /// Every project purged through the seam, in order.
+    purged: Mutex<Vec<ProjectId>>,
+    /// Whether a purge never ends, as one stuck at a connector's vendor.
+    purges_stall: AtomicBool,
+    /// Whether a purge fails, as one notifications cannot write does.
+    purges_fail: AtomicBool,
 }
 
 impl NoticeLog {
@@ -508,12 +680,30 @@ impl NoticeLog {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = answer;
     }
 
-    /// Every notice handed over, in order.
+    /// Every notice handed over, in order, but those a purge took.
     pub(crate) fn notices(&self) -> Vec<LoggedNotice> {
         self.notices
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
+    }
+
+    /// Every project purged through the seam, in order.
+    pub(crate) fn purged(&self) -> Vec<ProjectId> {
+        self.purged
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Have every purge from now on never end, or end again.
+    pub(crate) fn stalling_purges(&self, stalling: bool) {
+        self.purges_stall.store(stalling, Ordering::SeqCst);
+    }
+
+    /// Have every purge from now on fail, or succeed again.
+    pub(crate) fn failing_purges(&self, failing: bool) {
+        self.purges_fail.store(failing, Ordering::SeqCst);
     }
 }
 
@@ -541,9 +731,11 @@ impl Notifications for NoticeLog {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(key) = notice.dedup_key
-            && let Some(first) = notices
-                .iter()
-                .find(|logged| logged.dedup_key.as_deref() == Some(key))
+            && let Some(first) = notices.iter().find(|logged| {
+                logged.dedup_key.as_deref() == Some(key)
+                    && logged.organization_id == *organization_id
+                    && logged.project_id.as_ref() == project_id
+            })
         {
             return Ok(Emitted {
                 feed_id: first.feed_id,
@@ -574,8 +766,27 @@ impl Notifications for NoticeLog {
         Ok(0)
     }
 
-    async fn purge_project(&self, _project_id: &ProjectId) -> Result<u64, TelmoniError> {
-        Ok(0)
+    /// As notifications purges a project: its notices go from the feed.
+    async fn purge_project(&self, project_id: &ProjectId) -> Result<u64, TelmoniError> {
+        if self.purges_stall.load(Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
+        if self.purges_fail.load(Ordering::SeqCst) {
+            return Err(TelmoniError::Internal("the fake cannot purge".into()));
+        }
+        let mut notices = self
+            .notices
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let before = notices.len();
+        notices.retain(|logged| logged.project_id.as_ref() != Some(project_id));
+        let gone = before - notices.len();
+        drop(notices);
+        self.purged
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(project_id.clone());
+        Ok(u64::try_from(gone).unwrap_or(u64::MAX))
     }
 
     async fn redact_person(&self, _user_id: &UserId) -> Result<u64, TelmoniError> {

@@ -1,18 +1,22 @@
-//! The outbox: what telemetry hands on once a transaction has committed,
-//! and must not lose. A ping's finished run becomes a row of ClickHouse's
+//! The outbox: what telemetry hands on once a transaction has committed, and
+//! must not lose. A ping's finished run becomes a row of ClickHouse's
 //! `spans`, and a notice for a project's feed is handed to notifications
 //! through the seam; each is written as a row here in the transaction that
 //! ends the run or makes the monitor, so a monitor is never late because
 //! ClickHouse was down. A notice is never told twice: the seam answers a
-//! replayed dedup key with its first row and queues nothing. A run is
-//! written once but for a sliver: `spans` is a plain `MergeTree`, read
-//! without `FINAL`, which keeps every copy it is given, so before each insert
-//! the loop reads which of the batch's runs the table holds already and
-//! drops those rows as landed — a batch leased again after a loop died
-//! between its insert and its delete, a retried end ping that filed a second
-//! run under the same `rid`, two end pings for one run — and writes no run
-//! twice within one batch. What is left is two replicas landing one run
-//! inside one insert's time, which no read can see.
+//! replayed dedup key with its first row and queues nothing. It goes to the
+//! organization auth holds its project in when the loop asks, and to none
+//! once that organization's deletion is marked or the project is gone, since
+//! a notice written after a deletion's purges would outlive them; a project
+//! found gone, before the write or after it, is purged from notifications
+//! once more. A run is written once but for a sliver: `spans` is a plain
+//! `MergeTree`, read without `FINAL`, which keeps every copy it is given, so
+//! before each insert the loop reads which of the batch's runs the table
+//! holds already and drops those rows as landed — a batch leased again after
+//! a loop died between its insert and its delete, a retried end ping that
+//! filed a second run under the same `rid`, two end pings for one run — and
+//! writes no run twice within one batch. What is left is two replicas landing
+//! one run inside one insert's time, which no read can see.
 //!
 //! The loop is one every replica runs, on the delivery loop's pattern: each
 //! tick leases rows across every tenant, `FOR UPDATE SKIP LOCKED` under a
@@ -45,7 +49,8 @@ use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, mainten
 use telmoni_shared::digest::hex_lower;
 use telmoni_shared::seam::Notice;
 use telmoni_shared::{
-    NotificationKind, OrganizationId, ProjectId, SpanKind, SpanStatus, TelmoniError,
+    NotificationKind, OrganizationId, OrganizationStatus, ProjectId, SpanKind, SpanStatus,
+    TelmoniError,
 };
 
 use crate::contract::{EXIT_CODE, RUN_COST_USD, RUN_STEPS};
@@ -77,6 +82,10 @@ const RETRY_FLOOR_SECS: i64 = 5;
 const RETRY_CEILING_SECS: i64 = 300;
 /// How often the depth line is written: the delivery loop's minute.
 const DEPTH_EVERY_TICKS: u64 = 60 / POLL_SECS;
+/// How long notifications may take to purge a project a notice was for:
+/// auth's own budget for the same call, since a purge tears the project's
+/// connections down at their vendors while the loop holds its lease.
+const PURGE_BUDGET: Duration = Duration::from_secs(5);
 
 /// The `kind` of a row carrying a finished run.
 pub const KIND_SPAN: &str = "span";
@@ -238,7 +247,8 @@ pub async fn enqueue_notice(
 /// What one tick, or one batch, came to.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Settled {
-    /// Rows that landed, or carried a run landed already, and are gone.
+    /// Rows that landed, carried a run landed already, or carried a notice
+    /// with no feed left to land on, and are gone.
     pub landed: u32,
     /// Rows that did not: held for their next try, or handed back for the
     /// next tick with their try returned, where the store was at fault.
@@ -409,8 +419,15 @@ async fn drain_batch(state: &Arc<AppState>) -> Result<Settled, TelmoniError> {
     let (runs, notices): (Vec<OutboxRow>, Vec<OutboxRow>) =
         leased.into_iter().partition(|row| row.kind == KIND_SPAN);
     land_runs(state, runs, &mut landed, &mut held).await;
-    for row in notices {
-        land_notice(state, row, &mut landed, &mut held).await;
+    let mut notices = notices.into_iter();
+    while let Some(row) = notices.next() {
+        if land_notice(state, row, &mut landed, &mut held)
+            .await
+            .is_break()
+        {
+            held.extend(notices.map(|row| NoticeRow::of(row).held(Fault::Store)));
+            break;
+        }
     }
 
     let settled = Settled {
@@ -728,14 +745,87 @@ async fn held_runs(
         .collect())
 }
 
-/// One notice handed through the seam, under its dedup key.
+/// A notice's row as the loop settles it, its payload aside.
+struct NoticeRow {
+    id: Uuid,
+    /// How many times it has been leased, this time counted.
+    attempts: i32,
+    project_id: ProjectId,
+}
+
+impl NoticeRow {
+    /// The row unread, as one handed back unasked is.
+    fn of(row: OutboxRow) -> Self {
+        Self {
+            id: row.id,
+            attempts: row.attempts,
+            project_id: row.project_id,
+        }
+    }
+
+    /// The row, not landed, with whose fault that was.
+    fn held(self, fault: Fault) -> Held {
+        Held {
+            id: self.id,
+            attempts: self.attempts,
+            kind: KIND_NOTICE,
+            project_id: self.project_id,
+            fault,
+        }
+    }
+}
+
+/// Where a notice of a project's lands, as auth answers.
+enum Landing {
+    /// The feed of the organization holding the project now.
+    Feed(OrganizationId),
+    /// Nowhere, since the organization's deletion is marked: its purges are
+    /// still to come, and take whatever lands before them.
+    OrganizationClosing,
+    /// Nowhere, since auth has no such project: its deletion's purges have
+    /// run, or are running.
+    ProjectGone,
+}
+
+/// One notice handed through the seam, under its dedup key, to the feed of
+/// the organization auth holds its project in when the loop asks: a
+/// transfer that committed before then takes the notice with the project.
+/// Where that organization's deletion is marked, the row is dropped as
+/// landed, since the deletion's purges take its feeds, and a notice written
+/// after them would outlive them, slug and key prefix and all. Asking before
+/// the write is enough there: the purges wait out the deletion's quarter of
+/// an hour, and the write follows its ask within seconds, each call held to
+/// its pool's acquire and its role's statement timeout. Not for a project,
+/// whose feed is purged the moment it is deleted, so a project auth no
+/// longer has — before the write, or asked again after it — is purged from
+/// notifications once more ([`settle_gone`]), which takes whatever this try
+/// wrote, or an earlier one cut off before it could ask again. An ask auth
+/// cannot answer hands the row back and answers [`ControlFlow::Break`], for
+/// the batch's other notices to be handed back unasked.
+///
+/// ⚠ A transfer committing between the ask and the write files the notice
+/// under the organization the project left, after the transfer's own purge
+/// of the project: it stays there, unread, until that organization's purge
+/// or the feed's retention.
 async fn land_notice(
     state: &AppState,
     row: OutboxRow,
     landed: &mut Vec<Uuid>,
     held: &mut Vec<Held>,
-) {
-    let notice = match serde_json::from_value::<QueuedNotice>(row.payload) {
+) -> ControlFlow<()> {
+    let OutboxRow {
+        id,
+        attempts,
+        project_id,
+        payload,
+        ..
+    } = row;
+    let row = NoticeRow {
+        id,
+        attempts,
+        project_id,
+    };
+    let notice = match serde_json::from_value::<QueuedNotice>(payload) {
         Ok(notice) => notice,
         Err(error) => {
             tracing::error!(
@@ -744,20 +834,42 @@ async fn land_notice(
                 error = %error,
                 "telemetry outbox: a notice does not parse; the row is held"
             );
-            held.push(Held {
-                id: row.id,
-                attempts: row.attempts,
-                kind: KIND_NOTICE,
-                project_id: row.project_id,
-                fault: Fault::Row,
-            });
-            return;
+            held.push(row.held(Fault::Row));
+            return ControlFlow::Continue(());
+        }
+    };
+    let organization_id = match landing(state, &row.project_id).await {
+        Ok(Landing::Feed(organization_id)) => organization_id,
+        Ok(Landing::OrganizationClosing) => {
+            tracing::debug!(
+                outbox_id = %row.id,
+                project_id = %row.project_id,
+                "telemetry outbox: a notice's organization is being deleted; the row is dropped"
+            );
+            landed.push(row.id);
+            return ControlFlow::Continue(());
+        }
+        Ok(Landing::ProjectGone) => {
+            settle_gone(state, row, landed, held).await;
+            return ControlFlow::Continue(());
+        }
+        Err(error) => {
+            // Auth that cannot answer is an outage of ours, as notifications
+            // that cannot write is.
+            tracing::warn!(
+                outbox_id = %row.id,
+                project_id = %row.project_id,
+                error = %error,
+                "telemetry outbox: auth could not say where a notice's project is; the batch's notices wait with their tries"
+            );
+            held.push(row.held(Fault::Store));
+            return ControlFlow::Break(());
         }
     };
     let handed = state
         .notifications
         .emit(
-            &row.organization_id,
+            &organization_id,
             Some(&row.project_id),
             Notice {
                 kind: notice.kind,
@@ -770,7 +882,26 @@ async fn land_notice(
         )
         .await;
     match handed {
-        Ok(_) => landed.push(row.id),
+        Ok(_) => match still_there(state, &row.project_id).await {
+            Ok(true) => {
+                landed.push(row.id);
+                ControlFlow::Continue(())
+            }
+            Ok(false) => {
+                settle_gone(state, row, landed, held).await;
+                ControlFlow::Continue(())
+            }
+            Err(error) => {
+                tracing::warn!(
+                    outbox_id = %row.id,
+                    project_id = %row.project_id,
+                    error = %error,
+                    "telemetry outbox: auth could not say whether a notice's project outlived its write; the batch's notices wait with their tries"
+                );
+                held.push(row.held(Fault::Store));
+                ControlFlow::Break(())
+            }
+        },
         Err(error) => {
             // A notice the seam refuses — a bound, a shape — is this code's
             // to mend, and retrying will not land it; notifications that
@@ -794,13 +925,94 @@ async fn land_notice(
                     "telemetry outbox: notifications refused a notice; the row is held"
                 ),
             }
-            held.push(Held {
-                id: row.id,
-                attempts: row.attempts,
-                kind: KIND_NOTICE,
-                project_id: row.project_id,
-                fault,
-            });
+            held.push(row.held(fault));
+            ControlFlow::Continue(())
+        }
+    }
+}
+
+/// Where a notice of `project_id`'s lands, as auth answers: the organization
+/// it holds the project in now, unless that organization's deletion is
+/// marked. An error answers nothing, never "nowhere".
+async fn landing(state: &AppState, project_id: &ProjectId) -> Result<Landing, TelmoniError> {
+    let homes = state
+        .auth
+        .project_homes(std::slice::from_ref(project_id))
+        .await?;
+    let Some(home) = homes
+        .into_iter()
+        .find(|home| home.project_id == *project_id)
+    else {
+        return Ok(Landing::ProjectGone);
+    };
+    let standing = state
+        .auth
+        .organization_standing(&home.organization_id)
+        .await?;
+    Ok(if standing == Some(OrganizationStatus::Active) {
+        Landing::Feed(home.organization_id)
+    } else {
+        Landing::OrganizationClosing
+    })
+}
+
+/// Whether auth still has the project, asked once its notice is written: a
+/// deletion committed after [`landing`] asked, its purge of the project run
+/// before the write, would leave the notice behind both. A project that
+/// moved meanwhile is still there; its purge would take what its new
+/// organization holds of it.
+async fn still_there(state: &AppState, project_id: &ProjectId) -> Result<bool, TelmoniError> {
+    Ok(state
+        .auth
+        .project_homes(std::slice::from_ref(project_id))
+        .await?
+        .iter()
+        .any(|home| home.project_id == *project_id))
+}
+
+/// A notice's project auth no longer has: purged from notifications once
+/// more, within auth's budget for the same call, and the row dropped as
+/// landed. The purge is the deletion's own, so it is idempotent, and it
+/// takes whatever a try wrote after the deletion's purge ran; a purge that
+/// fails, or does not end in time, hands the row back, for the next tick to
+/// find the project gone and purge again.
+async fn settle_gone(
+    state: &AppState,
+    row: NoticeRow,
+    landed: &mut Vec<Uuid>,
+    held: &mut Vec<Held>,
+) {
+    match tokio::time::timeout(
+        PURGE_BUDGET,
+        state.notifications.purge_project(&row.project_id),
+    )
+    .await
+    {
+        Ok(Ok(_)) => {
+            tracing::debug!(
+                outbox_id = %row.id,
+                project_id = %row.project_id,
+                "telemetry outbox: a notice's project is gone; its feed is purged again and the row dropped"
+            );
+            landed.push(row.id);
+        }
+        Ok(Err(error)) => {
+            tracing::warn!(
+                outbox_id = %row.id,
+                project_id = %row.project_id,
+                error = %error,
+                "telemetry outbox: notifications did not purge a notice's project, which is gone; the row waits with its try"
+            );
+            held.push(row.held(Fault::Store));
+        }
+        Err(_) => {
+            tracing::warn!(
+                outbox_id = %row.id,
+                project_id = %row.project_id,
+                budget_secs = PURGE_BUDGET.as_secs(),
+                "telemetry outbox: notifications did not purge a notice's project, which is gone, in time; the row waits with its try"
+            );
+            held.push(row.held(Fault::Store));
         }
     }
 }
