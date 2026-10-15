@@ -175,6 +175,7 @@ change applies from the next notice. The body's `kind` is one of:
 | `connector_connected` | A destination was connected to the project. |
 | `connector_disconnected` | A destination stopped accepting notices. |
 | `monitor_discovered` | A ping under one of the project's ping keys named a monitor the project did not have; the monitor was made, paused as new until someone sets it up. |
+| `ping_key_retired` | The rotation retired one of the project's ping keys, unused for over a week — since its last ping, or its minting where it never pinged — while a newer key stood; a line still using it is refused. |
 | `organization_alert` | A notice for the organization's Owner and Admins, posted to the organization rather than a project; the open core raises none. One goes to every connection in the organization that takes the kind. |
 
 Slack channels always receive every kind.

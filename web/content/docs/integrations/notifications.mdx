@@ -5,9 +5,10 @@ description: "What Telmoni records in activity feeds, where notices are displaye
 
 A notification is an event record describing an action or status update within
 an organization or one of its projects: a member joining, a connector state
-change, or a monitor a ping made. Telmoni writes each notice to its feed, and
-queues one delivery for each connection that takes it, in one database
-transaction, and makes no send before that transaction commits.
+change, a monitor a ping made, or a ping key the rotation retired. Telmoni
+writes each notice to its feed, and queues one delivery for each connection
+that takes it, in one database transaction, and makes no send before that
+transaction commits.
 
 ## Notice types
 
@@ -18,6 +19,7 @@ transaction, and makes no send before that transaction commits.
 | `connector_connected` | A Slack or webhook connector finishes setup |
 | `connector_disconnected` | A connection stops: Slack refuses posts to it for good (see [connection states](/docs/integrations/slack#connection-states)), a webhook answers `410` or fails ten sends in a row, or Slack reports the Telmoni app removed from a workspace or its tokens revoked |
 | `monitor_discovered` | A ping under one of the project's ping keys names a monitor the project does not have: the monitor is made, paused as new, and watches for nothing until you set it up |
+| `ping_key_retired` | The rotation retires one of the project's ping keys: a newer key stands, and this one has not pinged in over a week, or was minted over a week ago and never used, so a line still using it is refused from then on |
 | `organization_alert` | A notice for the organization's Owner and Admins, posted to the organization rather than a project; the open core raises none |
 
 ## Where you read them
