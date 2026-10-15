@@ -223,6 +223,40 @@ impl Project {
         assert_eq!((status, body.as_str()), (StatusCode::OK, "OK"), "{path}");
         assert!(media_type.starts_with("text/plain"), "{path}: {media_type}");
     }
+
+    /// A `GET` ping sent while its run is ended beside it: the project's one
+    /// open run deleted, as an end ping deletes its row, by a session of
+    /// `pool`'s that commits once the ping has read the run open and waits
+    /// on its row to write it.
+    async fn ping_as_its_run_ends(&self, pool: &PgPool, path: &str) -> (StatusCode, String) {
+        let mut end = pool.begin().await.expect("the end's transaction");
+        let end_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *end)
+            .await
+            .expect("the end's session");
+        let ended = sqlx::query("DELETE FROM telemetry.open_runs WHERE project_id = $1")
+            .bind(&self.project)
+            .execute(&mut *end)
+            .await
+            .expect("end the open run")
+            .rows_affected();
+        assert_eq!(ended, 1, "one run open, to end beside the ping");
+        let (answer, ()) = tokio::join!(self.ping(path), async {
+            common::eventually("the ping waits on its run's row", move || async move {
+                sqlx::query_scalar::<_, bool>(
+                    "SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+                                     WHERE $1 = ANY (pg_blocking_pids(pid)))",
+                )
+                .bind(end_pid)
+                .fetch_one(pool)
+                .await
+                .expect("ask who waits on the end")
+            })
+            .await;
+            end.commit().await.expect("the end commits");
+        });
+        answer
+    }
 }
 
 /// A monitor as the console makes one: hourly, a minute of grace, held to a
@@ -710,6 +744,99 @@ async fn a_run_that_never_said_it_ended_is_ended_by_the_ping_after_it(pool: PgPo
     // A monitor a ping made expects nothing: its runs' ceiling is a day.
     p.ping_ok(&format!("/{key}/found-by-ping/start")).await;
     assert_eq!(ceilings_of(&pool, &p.project).await, [24 * 60 * 60]);
+}
+
+/// A ping that read its run open and finds it ended beside it when it
+/// writes — the end committed while the ping waited on the run's row —
+/// changes nothing: a `/checkpoint`, naming its run or meaning the newest,
+/// and a `/start` sent again are answered `OK`, open no run, hand nothing
+/// over and leave the monitor as it stood, where a ping that took its run
+/// for heard would set it running. The write is held to the monitor the
+/// run was read under, so a namesake another monitor opened under the id
+/// in that gap is not taken for it.
+#[sqlx::test]
+async fn a_ping_whose_run_ends_beside_it_changes_nothing(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.make(hourly()).await;
+
+    let (named, retried) = (rid(), rid());
+    for (start, racing) in [
+        (
+            format!("/{key}/hourly-sync/start?rid={named}"),
+            format!("/{key}/hourly-sync/checkpoint?rid={named}&steps=2"),
+        ),
+        (
+            format!("/{key}/hourly-sync/start"),
+            format!("/{key}/hourly-sync/checkpoint?steps=2"),
+        ),
+        (
+            format!("/{key}/hourly-sync/start?rid={retried}"),
+            format!("/{key}/hourly-sync/start?rid={retried}"),
+        ),
+    ] {
+        p.ping_ok(&start).await;
+        // Another run's end fails the monitor, so a ping that took its run
+        // for heard would set it running again.
+        p.ping_ok(&format!("/{key}/hourly-sync/fail?rid={}", rid()))
+            .await;
+        assert_eq!(p.monitor("hourly-sync").await["state"], "failed");
+        let (status, body) = p.ping_as_its_run_ends(&pool, &racing).await;
+        assert_eq!((status, body.as_str()), (StatusCode::OK, "OK"), "{racing}");
+        assert!(
+            open_runs(&pool, &p.project).await.is_empty(),
+            "{racing}: the run was opened again"
+        );
+        assert_eq!(
+            p.monitor("hourly-sync").await["state"],
+            "failed",
+            "{racing}"
+        );
+    }
+    assert_eq!(
+        finished_runs(&pool, &p.project).await.len(),
+        3,
+        "the `/fail`s' runs alone: nothing a ping found ended beside it was handed over"
+    );
+
+    // The gap between the read and the write cannot be held open from
+    // outside, so the namesake is put to the write itself.
+    let namesake = rid();
+    p.ping_ok(&format!("/{key}/other-sync/start?rid={namesake}"))
+        .await;
+    let id_of = |monitor: Value| {
+        Uuid::parse_str(monitor["id"].as_str().expect("an id")).expect("a monitor's id")
+    };
+    let hourly = id_of(p.monitor("hourly-sync").await);
+    let other = id_of(p.monitor("other-sync").await);
+    let namesake = Uuid::parse_str(&namesake).expect("a run's id");
+    let mut tx = telmoni_shared::db::tenant_session::project_scope(&pool, &p.project)
+        .await
+        .expect("a scope");
+    let heard = db::hear_open_run(
+        &mut tx,
+        &p.project,
+        namesake,
+        hourly,
+        Utc::now(),
+        None,
+        None,
+    )
+    .await
+    .expect("a write");
+    assert!(
+        heard.is_none(),
+        "another monitor's run was heard as this one's"
+    );
+    let heard = db::hear_open_run(&mut tx, &p.project, namesake, other, Utc::now(), None, None)
+        .await
+        .expect("a write");
+    assert!(
+        heard.is_some(),
+        "the run under its own monitor was not heard"
+    );
+    tx.rollback().await.expect("rolled back");
 }
 
 /// A `rid` is a run's own name within its project: a script that derives

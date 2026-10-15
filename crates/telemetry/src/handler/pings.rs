@@ -651,12 +651,14 @@ enum RunEvent {
 
 /// The run recorded: opened, heard, or ended and handed to the outbox as a
 /// finished span, once — an end that finds the run ended beside it hands
-/// over nothing. A run that never said it ended — a job that crashed after
-/// its `/start`, a `/checkpoint` that came after its run's end — is ended
-/// `error` by the next ping that finds it ([`abandon`]): a `/start` naming
-/// no run ends what its monitor still has open, and an end ping naming none
-/// ends the newest with its verdict and the rest the same way; a ping
-/// naming a run leaves the others be, since runs that overlap name
+/// over nothing, and a checkpoint or a `/start` sent again that finds it
+/// ended since it was read changes nothing, the end having decided the run
+/// and the monitor. A run that never said it ended — a job that crashed
+/// after its `/start`, a `/checkpoint` that came after its run's end — is
+/// ended `error` by the next ping that finds it ([`abandon`]): a `/start`
+/// naming no run ends what its monitor still has open, and an end ping
+/// naming none ends the newest with its verdict and the rest the same way;
+/// a ping naming a run leaves the others be, since runs that overlap name
 /// themselves. Answers the run's id and what happened to it.
 async fn record(
     key: &ResolvedPingKey,
@@ -677,10 +679,18 @@ async fn record(
     match report {
         Report::Start => match (open, progress.rid) {
             // A `/start` sent again for the run it named — a retried curl —
-            // is heard, not a second run.
+            // is heard, not a second run; one whose run ended beside it
+            // since it was read changes nothing.
             (Some(run), Some(_)) => {
-                db::hear_open_run(tx, project_id, run.id, now, None, None).await?;
-                Ok((run.id, RunEvent::Heard))
+                let heard =
+                    db::hear_open_run(tx, project_id, run.id, run.monitor_id, now, None, None)
+                        .await?;
+                let event = if heard.is_some() {
+                    RunEvent::Heard
+                } else {
+                    RunEvent::Gone
+                };
+                Ok((run.id, event))
             }
             (_, rid) => {
                 // The monitor's next run: whatever it still has open never
@@ -696,18 +706,24 @@ async fn record(
         },
         Report::Checkpoint => {
             let run = match open {
-                Some(run) => db::hear_open_run(
+                Some(run) => match db::hear_open_run(
                     tx,
                     project_id,
                     run.id,
+                    run.monitor_id,
                     now,
                     progress.steps,
                     progress.cost_usd,
                 )
                 .await?
-                .ok_or_else(|| {
-                    TelmoniError::Internal("ping: an open run went while it was heard".into())
-                })?,
+                {
+                    Some(run) => run,
+                    // Ended beside this ping since it was read: the end
+                    // decided the run and the monitor. A checkpoint that
+                    // finds no run opens one, since its `/start` was lost;
+                    // this one saw the run open, so nothing was lost.
+                    None => return Ok((run.id, RunEvent::Gone)),
+                },
                 // Its `/start` was lost on the way: the checkpoint opens the
                 // run it reports on.
                 None => {
