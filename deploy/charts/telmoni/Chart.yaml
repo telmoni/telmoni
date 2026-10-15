@@ -4,4 +4,4 @@ description: Telmoni, open source — the server (auth, notifications, telemetry
 type: application
 version: 0.1.0
 appVersion: "0.0.0"
-icon: "https://telmoni.com/icon.png"
+icon: "https://telmoni.com/icon.svg"
