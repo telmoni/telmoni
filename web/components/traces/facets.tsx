@@ -178,7 +178,14 @@ function FacetSection({
 }) {
   const label = FILTER_LABEL[filter];
   const typed = TYPED_FILTERS.includes(filter);
-  const [open, setOpen] = useState(ticked.length > 0 || !typed);
+  // Open only where there is activity: a value ticked, or values among the
+  // window's runs to pick from, but never an id's fifty alone. Open and
+  // empty, a section only says so, and pushes the ones that hold something
+  // down the panel. Read from the data until the reader opens or shuts it
+  // themselves, since the page stays mounted as runs land and the window
+  // moves, and a section shut while it was empty would stay shut.
+  const [chosen, setChosen] = useState<boolean | null>(null);
+  const open = chosen ?? (ticked.length > 0 || (!typed && facet.values.length > 0));
   const [mode, setMode] = useState<"select" | "text">("select");
   // A ticked value the window's runs no longer carry stays on the list, at
   // nought, so it can be unticked where it was ticked.
@@ -191,7 +198,7 @@ function FacetSection({
   const text = (value: string) => (filter === "status" ? STATUS_LABEL[value as SpanStatus] : value);
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="border-b border-border py-1">
+    <Collapsible open={open} onOpenChange={setChosen} className="border-b border-border py-1">
       <div className="flex items-center gap-1">
         <CollapsibleTrigger asChild>
           <Button variant="ghost" size="sm" className="flex-1 justify-start px-1.5">
