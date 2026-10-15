@@ -3,9 +3,28 @@
 [![CI](https://github.com/telmoni/telmoni/actions/workflows/ci.yml/badge.svg)](https://github.com/telmoni/telmoni/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-A foundation for organizations and their projects: members and roles, API keys, notifications, a hash-chained audit log, a console agent, telemetry's ingest and stores for agents' spans, and the SDKs that send them. One Rust binary runs all of it behind a Next.js console.
+Privacy-first telemetry and monitoring for AI agents in production.
 
-Telmoni has not launched yet. The four SDKs are this repository's, under `sdk/`. The customer documentation is [`telmoni/docs`](https://github.com/telmoni/docs), which the console builds in and serves at [telmoni.com/docs](https://telmoni.com/docs); the CLI is [`telmoni/telmoni-cli`](https://github.com/telmoni/telmoni-cli).
+> Know when your agents stall, loop or overspend, without sending us a single prompt.
+
+Every run and the steps inside it, every model and tool call with its tokens, latency and cost, the bounds each agent keeps, and the alert when one breaks them. Prompts and completions stay out unless an organization owner explicitly turns them on for a project.
+
+One Rust binary runs the platform behind a Next.js console, backed by PostgreSQL, ClickHouse and Redis. Open source under Apache-2.0.
+
+## What Telmoni does
+
+- **Telemetry for agents** · Ingest over OpenTelemetry's protocol (`/otlp/v1/traces`) or a crontab `curl` to the ping lane (`/ping/{ping_key}/{slug}`). Records runs, steps, model and tool calls, token usage, latency, cost and failures from any framework, correlated by run, session and end user.
+- **Monitoring** · Contracts for autonomous agents: crontab schedules, stall timeouts, step caps and cost caps. Tracks state (`healthy`, `late`, `stalled`, `failed`, `paused`) and routes alerts to an in-app feed, Slack and signed webhooks.
+- **Privacy first** · Metadata by default: timings, statuses, counts, names and costs. Prompts and completions are dropped at the door unless an organization owner turns content mode on for a project. User IDs are hashed, reads are audited, and deletions are receipted.
+- **For developers and agents** · SDKs for Python, TypeScript, Go and Rust. A Next.js console with real-time traces, histograms and session views. An in-app console agent that answers questions with citations. The `telmoni` CLI and agent skills for Claude Code, Cursor and Codex.
+- **Self-hostable & extensible** · Deployable via Docker Compose or Kubernetes (Helm). Built on a modular Rust foundation: assemble your own identity provider, mail transport, purge hooks or custom modules.
+
+## Ecosystem
+
+- **Core platform & SDKs** (this repository): the Rust binary, Next.js console and idiomatic SDKs under `sdk/` (Python, TypeScript, Go, Rust).
+- **Documentation**: [`telmoni/docs`](https://github.com/telmoni/docs), built into the console and served at [telmoni.com/docs](https://telmoni.com/docs).
+- **CLI**: [`telmoni/telmoni-cli`](https://github.com/telmoni/telmoni-cli), terminal access to projects, runs and monitors.
+- **Agent skills**: [`telmoni/skills`](https://github.com/telmoni/skills), teaching Claude Code, Cursor, Codex and any agent reading `SKILL.md` to drive the platform.
 
 ## Getting started
 
