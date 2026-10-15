@@ -25,6 +25,8 @@ application_default_credentials.json
 
 # ── AI / tooling state ────────────────────────────────────────────────────────
 .claude/
+.agents/
+.gemini/
 .aider*
 .cursor/
 
