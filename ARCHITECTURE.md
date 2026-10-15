@@ -349,6 +349,8 @@ Most of it runs inside `serve`, in every replica, and all of it is safe for repl
 | Auth's retention | `serve`, daily | One idempotent transaction |
 | Audit exports | `serve`, on a timer, and built after a request | Row leases, each write fenced on its attempt |
 | Delivery loop | `serve`, every replica | Row leases, `SKIP LOCKED` |
+| Telemetry's outbox | `serve`, every replica | Row leases, `SKIP LOCKED` |
+| Ping keys' rotation | `serve`, every replica, a minute | A key retired once and recorded once, under its organization's chain lock |
 | Notifications' and the agent's retention | `serve`, hourly | Advisory locks, chunk by chunk |
 | Agent indexer | `serve`, when the agent is on | Cursor leases |
 | Migrations | `telmoni migrate`, a Helm hook Job | One Job |
@@ -356,7 +358,7 @@ Most of it runs inside `serve`, in every replica, and all of it is safe for repl
 
 - **Work a request starts** is awaited where losing it would matter — the deletion tail, the agent's erase — or left for a lease or a sweep to finish. Two are bare tasks a rollout can lose: the password-reset mail, so that its timing reveals nothing, and the retries that settle telemetry's settings after a transfer that could not settle them itself (*Known gaps*).
 - **No loop is told to stop.** Leases lapse, locks die with their connections, and committed chunks stay committed, so a loop cut short loses nothing.
-- **The delivery loop is raced against the HTTP server**: if it ends, the process exits, and the restart is the recovery.
+- **The delivery loop, telemetry's outbox and the ping keys' rotation are raced against the HTTP server**: if one ends, the process exits, and the restart is the recovery.
 
 ## Deployment
 

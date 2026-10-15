@@ -4,7 +4,16 @@
 //! own, a tick a minute on every replica, each tick safe beside the others'
 //! since a key is retired once and recorded once
 //! ([`crate::handler::ping_keys::retire_stale_keys`]). A tick that fails is
-//! logged, and the next one runs.
+//! logged, and the next one runs; so is a tick that panics, each tick being
+//! a task of its own, so that a key whose retirement panics ends that tick
+//! alone — never the loop, which a restart would not mend, since the next
+//! loop meets the same key, and never the server.
+//!
+//! ⚠ The loop's handle is raced against the server in the binary's `serve`,
+//! as the outbox's is, for a loop that ends all the same: a dead loop would
+//! retire no key on its replica for as long as the pod ran, and no sweep or
+//! command retires one in its place, so the process exits and the restart
+//! is the recovery.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -31,14 +40,22 @@ pub async fn run(state: Arc<AppState>) {
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         ticker.tick().await;
-        match ping_keys::retire_stale_keys(&state).await {
-            Ok(0) => {}
-            Ok(retired) => {
+        let tick = tokio::spawn({
+            let state = state.clone();
+            async move { ping_keys::retire_stale_keys(&state).await }
+        });
+        match tick.await {
+            Ok(Ok(0)) => {}
+            Ok(Ok(retired)) => {
                 tracing::info!(retired, "telemetry: ping keys retired by their rotation");
             }
-            Err(e) => tracing::warn!(
+            Ok(Err(e)) => tracing::warn!(
                 error = %e,
                 "telemetry: the ping keys' rotation tick failed; the next one retries"
+            ),
+            Err(e) => tracing::error!(
+                error = %e,
+                "telemetry: the ping keys' rotation tick died; the next one retries"
             ),
         }
     }

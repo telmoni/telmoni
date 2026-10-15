@@ -438,7 +438,7 @@ impl App {
             self.notifications.clone(),
         ));
         let outbox = tokio::spawn(telmoni_telemetry::outbox::run(self.telemetry.clone()));
-        tokio::spawn(telmoni_telemetry::rotation::run(self.telemetry.clone()));
+        let rotation = tokio::spawn(telmoni_telemetry::rotation::run(self.telemetry.clone()));
         if env_parse("RUN_SWEEPS", true)? {
             sweeps::spawn(self.auth.clone());
         } else {
@@ -466,9 +466,11 @@ impl App {
                 .into_make_service_with_connect_info::<SocketAddr>(),
         )
         .with_graceful_shutdown(telmoni_shared::shutdown::shutdown_signal());
-        // ⚠ The delivery and outbox loops are raced against the server: a
-        // dead loop would leave a Ready pod with every delivery `pending`, or
-        // every ping's row unwritten, so the process exits and the restart
+        // ⚠ The delivery and outbox loops and the ping keys' rotation are
+        // raced against the server: a dead loop would leave a Ready pod with
+        // every delivery `pending`, every ping's row unwritten, or no key
+        // retired by it however long past its week, with no sweep or command
+        // to retire one in its place, so the process exits and the restart
         // is the recovery.
         tokio::select! {
             served = serve => served?,
@@ -479,6 +481,10 @@ impl App {
             ended = outbox => match ended {
                 Ok(()) => anyhow::bail!("the outbox loop exited; restarting the process"),
                 Err(e) => anyhow::bail!("the outbox loop died: {e}"),
+            },
+            ended = rotation => match ended {
+                Ok(()) => anyhow::bail!("the ping keys' rotation exited; restarting the process"),
+                Err(e) => anyhow::bail!("the ping keys' rotation died: {e}"),
             },
         }
         Ok(())
