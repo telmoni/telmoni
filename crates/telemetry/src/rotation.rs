@@ -2,7 +2,7 @@
 //! its crontab lines over one at a time, and the older is retired a week
 //! after its last ping once the newer stands — by a loop of this module's
 //! own, a tick a minute on every replica, each tick safe beside the others'
-//! since a key is retired once and recorded once
+//! since a key is retired, recorded and told to its project once
 //! ([`crate::handler::ping_keys::retire_stale_keys`]). A tick that fails is
 //! logged, and the next one runs; so is a tick that panics, each tick being
 //! a task of its own, so that a key whose retirement panics ends that tick

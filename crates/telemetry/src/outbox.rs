@@ -2,21 +2,21 @@
 //! must not lose. A ping's finished run becomes a row of ClickHouse's
 //! `spans`, and a notice for a project's feed is handed to notifications
 //! through the seam; each is written as a row here in the transaction that
-//! ends the run or makes the monitor, so a monitor is never late because
-//! ClickHouse was down. A notice is never told twice: the seam answers a
-//! replayed dedup key with its first row and queues nothing. It goes to the
-//! organization auth holds its project in when the loop asks, and to none
-//! once that organization's deletion is marked or the project is gone, since
-//! a notice written after a deletion's purges would outlive them; a project
-//! found gone, before the write or after it, is purged from notifications
-//! once more. A run is written once but for a sliver: `spans` is a plain
-//! `MergeTree`, read without `FINAL`, which keeps every copy it is given, so
-//! before each insert the loop reads which of the batch's runs the table
-//! holds already and drops those rows as landed — a batch leased again after
-//! a loop died between its insert and its delete, a retried end ping that
-//! filed a second run under the same `rid`, two end pings for one run — and
-//! writes no run twice within one batch. What is left is two replicas landing
-//! one run inside one insert's time, which no read can see.
+//! ends the run, makes the monitor or retires the key, so a monitor is never
+//! late because ClickHouse was down. A notice is never told twice: the seam
+//! answers a replayed dedup key with its first row and queues nothing. It
+//! goes to the organization auth holds its project in when the loop asks, and
+//! to none once that organization's deletion is marked or the project is
+//! gone, since a notice written after a deletion's purges would outlive them;
+//! a project found gone, before the write or after it, is purged from
+//! notifications once more. A run is written once but for a sliver: `spans`
+//! is a plain `MergeTree`, read without `FINAL`, which keeps every copy it is
+//! given, so before each insert the loop reads which of the batch's runs the
+//! table holds already and drops those rows as landed — a batch leased again
+//! after a loop died between its insert and its delete, a retried end ping
+//! that filed a second run under the same `rid`, two end pings for one run —
+//! and writes no run twice within one batch. What is left is two replicas
+//! landing one run inside one insert's time, which no read can see.
 //!
 //! The loop is one every replica runs, on the delivery loop's pattern: each
 //! tick leases rows across every tenant, `FOR UPDATE SKIP LOCKED` under a

@@ -3,8 +3,10 @@
 //! recorded on the chain under the organization's lock; two may be live at
 //! once and never three; a key of another shape, one the table does not
 //! hold and one retired open nothing on the ping lane; the rotation retires
-//! the older of two a week after its last ping once a newer one stands, and
-//! records it as the module's own act; and a ping touches its key.
+//! the older of two a week after its last ping once a newer one stands,
+//! records it as the module's own act and tells the project, once and in the
+//! same transaction, while nobody is told of a key a person retires; and a
+//! ping touches its key.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
 mod common;
@@ -21,6 +23,7 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use common::{AuthStub, SECRET};
+use telmoni_shared::audit::lock_chain;
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::test_util::apply_audit_migrations;
 use telmoni_shared::types::{PING_KEY_PREFIX, PING_KEY_RANDOM_LEN};
@@ -163,6 +166,19 @@ async fn monitors_of(pool: &PgPool, project: &ProjectId) -> i64 {
         .expect("count a project's monitors")
 }
 
+/// The notices waiting in the project's outbox, oldest first.
+async fn notices_waiting(pool: &PgPool, project: &ProjectId) -> Vec<Value> {
+    sqlx::query_scalar(
+        "SELECT payload FROM telemetry.outbox
+          WHERE project_id = $1 AND kind = 'notice'
+          ORDER BY id",
+    )
+    .bind(project)
+    .fetch_all(pool)
+    .await
+    .expect("read the project's notices")
+}
+
 /// The first `n` characters of `s`.
 fn head(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
@@ -280,6 +296,10 @@ async fn owners_and_admins_mint_and_retire_keys_and_members_read_them(pool: PgPo
             ("created".to_owned(), OWNER.to_owned()),
         ]
     );
+    assert!(
+        notices_waiting(&pool, &p.project).await.is_empty(),
+        "a person who retires a key knows it: nobody is told"
+    );
 }
 
 #[sqlx::test]
@@ -378,10 +398,32 @@ async fn the_rotation_retires_the_older_key_a_week_after_its_last_ping(pool: PgP
     assert!(keys[0]["retired_at"].is_null());
     assert_eq!(keys[1]["id"], old["id"]);
     assert!(keys[1]["retired_at"].is_string(), "{}", keys[1]);
+    // Told once, in the transaction that retired it, with what finds the
+    // line still carrying the key.
+    let told = notices_waiting(&pool, &p.project).await;
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert_eq!(told[0]["kind"], "ping_key_retired");
+    assert_eq!(
+        told[0]["dedup_key"],
+        format!("telemetry:ping-key:{old_id}:retired")
+    );
+    assert_eq!(told[0]["metadata"]["ping_key_id"], old["id"]);
+    assert_eq!(told[0]["metadata"]["ping_key_prefix"], old["prefix"]);
+    let body = told[0]["body"].as_str().expect("a body");
+    assert!(
+        body.contains(old["prefix"].as_str().expect("a prefix")),
+        "{body}"
+    );
+    assert!(body.contains("had not pinged in over a week"), "{body}");
     assert_eq!(
         retire_stale_keys(&p.state).await.expect("a tick"),
         0,
         "the next tick finds nothing"
+    );
+    assert_eq!(
+        notices_waiting(&pool, &p.project).await.len(),
+        1,
+        "a tick that retires nothing tells nothing"
     );
     let (status, _) = p
         .ping(&format!(
@@ -410,6 +452,16 @@ async fn the_rotation_retires_the_older_key_a_week_after_its_last_ping(pool: PgP
             .count(),
         2
     );
+    let told = notices_waiting(&pool, &p.project).await;
+    assert_eq!(told.len(), 2, "{told:?}");
+    assert_eq!(told[1]["metadata"]["ping_key_id"], new["id"]);
+    assert!(
+        told[1]["body"]
+            .as_str()
+            .is_some_and(|body| body.contains("was minted over a week ago and never pinged")),
+        "{}",
+        told[1]
+    );
 
     let chain = recorded(&pool, &p.organization).await;
     assert_eq!(
@@ -423,4 +475,95 @@ async fn the_rotation_retires_the_older_key_a_week_after_its_last_ping(pool: PgP
         ],
         "each retirement by the rotation is the module's own act on the chain"
     );
+}
+
+/// A key the rotation would retire, a week past its last ping with a newer
+/// one standing.
+async fn stale(p: &Project, pool: &PgPool) -> Value {
+    let (_, old) = p.mint(OWNER).await;
+    p.mint(ADMIN).await;
+    let id = old.get("id").and_then(Value::as_str).expect("an id");
+    aged(pool, id, 9, Some(8)).await;
+    old
+}
+
+/// The notice is written in the transaction that retires the key and records
+/// it: one that cannot be written leaves the key live and the chain as it
+/// was, for the next tick to retire, record and tell together.
+#[sqlx::test]
+async fn a_retirement_whose_notice_cannot_be_written_is_no_retirement(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    stale(&p, &pool).await;
+
+    sqlx::query("REVOKE INSERT ON telemetry.outbox FROM telemetry")
+        .execute(&pool)
+        .await
+        .expect("the outbox closed to the module");
+    assert!(
+        retire_stale_keys(&p.state).await.is_err(),
+        "a key was retired without its notice"
+    );
+    assert!(
+        p.list(OWNER)
+            .await
+            .iter()
+            .all(|key| key["retired_at"].is_null())
+    );
+    assert_eq!(recorded(&pool, &p.organization).await.len(), 2);
+    assert!(notices_waiting(&pool, &p.project).await.is_empty());
+
+    sqlx::query("GRANT INSERT ON telemetry.outbox TO telemetry")
+        .execute(&pool)
+        .await
+        .expect("the outbox open again");
+    assert_eq!(retire_stale_keys(&p.state).await.expect("a tick"), 1);
+    assert_eq!(recorded(&pool, &p.organization).await.len(), 3);
+    assert_eq!(notices_waiting(&pool, &p.project).await.len(), 1);
+}
+
+/// Two replicas whose ticks find one key retire it, record it and tell of it
+/// once: the second, let in under the organization's chain lock once the
+/// first has committed, finds it retired and does nothing.
+#[sqlx::test]
+async fn a_key_two_ticks_find_is_retired_recorded_and_told_once(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    stale(&p, &pool).await;
+
+    let mut holder = pool.begin().await.expect("a transaction to hold the lock");
+    lock_chain(&mut holder, &p.organization)
+        .await
+        .expect("the chain lock");
+    let (first, second, ()) = tokio::join!(
+        retire_stale_keys(&p.state),
+        retire_stale_keys(&p.state),
+        async {
+            common::eventually("both ticks wait on the chain lock", || async {
+                advisory_waits(&pool).await == 2
+            })
+            .await;
+            holder.rollback().await.expect("let the lock go");
+        },
+    );
+    assert_eq!(first.expect("a tick") + second.expect("a tick"), 1);
+    let retired_by_the_rotation = recorded(&pool, &p.organization)
+        .await
+        .into_iter()
+        .filter(|(_, by)| by == "service:telemetry")
+        .count();
+    assert_eq!(retired_by_the_rotation, 1);
+    assert_eq!(notices_waiting(&pool, &p.project).await.len(), 1);
+}
+
+/// How many sessions wait on an advisory lock in this database.
+async fn advisory_waits(pool: &PgPool) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM pg_locks
+          WHERE locktype = 'advisory' AND NOT granted
+            AND database = (SELECT oid FROM pg_database WHERE datname = current_database())",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("count the waits on an advisory lock")
 }

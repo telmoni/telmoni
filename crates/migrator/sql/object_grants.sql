@@ -116,10 +116,11 @@ BEGIN
     END IF;
     -- A ping key is retired, never deleted: its row is the record of what
     -- the key was and when it last pinged, and the lane's purge takes it
-    -- with its project. An outbox row is added in its ping's own transaction
-    -- and by nothing else a request does; the lane leases, lands and removes
-    -- it, and a request that rewrote or removed one could unsay a finished
-    -- run or a notice before it is handed on.
+    -- with its project. An outbox row is added in the transaction of what it
+    -- tells of — a ping's, or the rotation's retiring a key — and by nothing
+    -- else; the lane leases, lands and removes it, and a request that
+    -- rewrote or removed one could unsay a finished run or a notice before
+    -- it is handed on.
     IF to_regclass('telemetry.ping_keys') IS NOT NULL THEN
         EXECUTE 'REVOKE DELETE ON telemetry.ping_keys FROM telemetry';
     END IF;

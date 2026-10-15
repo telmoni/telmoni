@@ -33,7 +33,8 @@
       "member_left",
       "connector_connected",
       "connector_disconnected",
-      "monitor_discovered"
+      "monitor_discovered",
+      "ping_key_retired"
     ],
     "OrganizationStatus": [
       "active",

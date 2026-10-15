@@ -33,6 +33,7 @@ use crate::AppState;
 use crate::db::{self, PingKeyRow, ResolvedPingKey, TelemetryLane};
 use crate::handler::chain;
 use crate::rotation::REPLACED_AFTER_S;
+use crate::{notify, outbox};
 
 /// How many of a project's keys may be live at once: the one its lines
 /// carry, and the one they are moving to.
@@ -280,9 +281,10 @@ async fn retire_key(
 
 /// The rotation's tick: every live key a week past its last ping with a
 /// newer live key of its project standing, retired — each in its project's
-/// own scope, recorded on the chain as the module's own act. Answers how
-/// many were. Safe on every replica at once: a key two ticks find is retired
-/// by the first, and the second finds it retired and records nothing.
+/// own scope, recorded on the chain as the module's own act and told to the
+/// project. Answers how many were. Safe on every replica at once: a key two
+/// ticks find is retired by the first, and the second finds it retired and
+/// records and tells nothing.
 pub async fn retire_stale_keys(state: &AppState) -> Result<u32, TelmoniError> {
     let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
     let stale = db::stale_ping_keys(&mut tx, REPLACED_AFTER_S, RETIRE_BATCH).await?;
@@ -297,8 +299,10 @@ pub async fn retire_stale_keys(state: &AppState) -> Result<u32, TelmoniError> {
 }
 
 /// One stale key retired, in a transaction of its own under the
-/// organization's chain lock; `false` where another replica retired it
-/// first.
+/// organization's chain lock, which records it and puts the project's
+/// notice in the outbox; `false` where another replica retired it first.
+/// Told, since a line not moved over to the newer key is refused from now
+/// on, and its owner would otherwise learn of it from cron's mail.
 async fn retire_stale_key(state: &AppState, key: &ResolvedPingKey) -> Result<bool, TelmoniError> {
     let (project_id, organization_id) = (&key.project_id, &key.organization_id);
     let mut tx = project_scope(&state.db, project_id)
@@ -324,6 +328,13 @@ async fn retire_stale_key(state: &AppState, key: &ResolvedPingKey) -> Result<boo
             user_agent: None,
             metadata: Some(json!({ "prefix": row.prefix, "rotation": true })),
         },
+    )
+    .await?;
+    outbox::enqueue_notice(
+        &mut tx,
+        project_id,
+        organization_id,
+        &notify::ping_key_retired(&row),
     )
     .await?;
     tx.commit().await?;
