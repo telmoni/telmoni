@@ -403,6 +403,39 @@ fn fault(fault: Fault) -> TelmoniError {
     TelmoniError::BadRequest(fault.detail().to_owned())
 }
 
+/// When `monitor` is next due after `after`, under the timing its row keeps:
+/// `None` for one that expects no run, and for one whose timing cannot be
+/// read now. Every timing is read and searched as it is saved, so only a
+/// change of ours makes one unreadable — a `croner` that reads a line more
+/// strictly, a zone the database no longer names — and that is the
+/// operator's to mend, never a ping or a resume to be refused for. So it is
+/// logged and the monitor is due at no time until a read succeeds again: at
+/// its next run's end or resume once a release can read the timing, or at a
+/// save, which reads the timing as sent and names what it cannot read. No
+/// time, rather than one already passed, which would call it late however
+/// its runs came.
+pub(crate) fn due_after(
+    project_id: &ProjectId,
+    monitor: &MonitorRow,
+    after: DateTime<Utc>,
+) -> Option<DateTime<Utc>> {
+    Schedule::read(
+        monitor.schedule.as_deref(),
+        monitor.interval_s,
+        &monitor.timezone,
+    )
+    .and_then(|schedule| schedule.next_due(after))
+    .unwrap_or_else(|fault| {
+        tracing::error!(
+            project_id = %project_id,
+            monitor_id = %monitor.id,
+            fault = ?fault,
+            "telemetry: a saved monitor's timing cannot be read; it is due at no time"
+        );
+        None
+    })
+}
+
 /// A monitor the project does not have.
 fn not_found() -> TelmoniError {
     AuthError::NotFound("no monitor by that slug in this project".into()).into()
@@ -633,7 +666,9 @@ async fn held(
 /// `PUT /internal/telemetry/monitors/{slug}` — one of the project's
 /// monitors, saved over: everything but its slug. A monitor its first ping
 /// or run made, `new`, is set up by this and starts; a paused one stays
-/// paused. Its next due time stands unless its timing changed.
+/// paused. Its next due time stands while its timing does, but for one a
+/// timing that could not be read left it without; a timing that never comes
+/// is refused whenever it is sent, as at a make.
 pub async fn update_monitor(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -684,12 +719,19 @@ async fn change_monitor(
 ) -> Result<MonitorRow, TelmoniError> {
     let before = held(state, acting, project_id, tx, Verb::Update, slug).await?;
     let starts = before.state == MonitorState::New;
+    // Searched whenever it is sent, changed or not and paused or not, so a
+    // line that never comes is refused as a make refuses it, and no timing is
+    // saved that a ping or a resume could not read.
+    let found = monitor.timing.read.next_due(Utc::now()).map_err(fault)?;
     let next_due_at = if before.state == MonitorState::Paused {
         None
     } else if monitor.times_as(&before) && !starts {
-        before.next_due_at
+        // The timing stands, so its due time does — but where it has none,
+        // which a timing that could not be read leaves (`due_after`), the one
+        // just found.
+        before.next_due_at.or(found)
     } else {
-        monitor.timing.read.next_due(Utc::now()).map_err(fault)?
+        found
     };
     let state_after = starts.then_some(MonitorState::Healthy);
     let changed = monitor.changes_to(&before);
@@ -830,7 +872,8 @@ pub async fn resume_monitor(
 
 /// The resumption itself, inside the transaction [`resume_monitor`] opened:
 /// under the organization's chain lock, a paused monitor put back in
-/// `healthy`, its next run due from now under its own timing, and recorded.
+/// `healthy`, its next run due from now under its own timing — at no time
+/// where that timing cannot be read now ([`due_after`]) — and recorded.
 async fn restart_monitor(
     state: &AppState,
     acting: &Acting,
@@ -851,14 +894,7 @@ async fn restart_monitor(
         }
         _ => return Ok(before),
     }
-    let next_due_at = Schedule::read(
-        before.schedule.as_deref(),
-        before.interval_s,
-        &before.timezone,
-    )
-    .map_err(fault)?
-    .next_due(Utc::now())
-    .map_err(fault)?;
+    let next_due_at = due_after(project_id, &before, Utc::now());
     let row = db::set_monitor_state(tx, project_id, slug, MonitorState::Healthy, next_due_at)
         .await?
         .ok_or_else(not_found)?;

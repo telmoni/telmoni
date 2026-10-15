@@ -48,10 +48,9 @@ use crate::db::{
     self, MonitorRow, MonitorWrite, OpenRunRow, OpenRunWrite, ResolvedPingKey, TelemetryLane,
 };
 use crate::handler::chain;
-use crate::handler::monitors::{MAX_COST_USD_MAX, MAX_STEPS_MAX, RESERVED};
+use crate::handler::monitors::{MAX_COST_USD_MAX, MAX_STEPS_MAX, RESERVED, due_after};
 use crate::notify;
 use crate::outbox::{self, FinishedRun};
-use crate::schedule::Schedule;
 
 /// The methods the lane takes, for a `405`.
 const ALLOW: &str = "GET, HEAD, POST";
@@ -902,7 +901,9 @@ fn over_bound(run: &OpenRunRow) -> bool {
 /// The monitor after its run was heard: its state from what the run did —
 /// unless its state is its owner's to set, which one its first ping made,
 /// `new`, and one paused keep, their runs still kept — and its next due
-/// time found again once a run ended, so a run that came is not late.
+/// time found again once a run ended, so a run that came is not late; none
+/// where the timing it saved cannot be read now, logged, as a ping and the
+/// run it ends are never refused for that ([`due_after`]).
 async fn settle(
     project_id: &ProjectId,
     monitor: &MonitorRow,
@@ -912,18 +913,7 @@ async fn settle(
 ) -> Result<(), TelmoniError> {
     let state = state_after(monitor.state, event);
     let next_due_at = match (state, event) {
-        (Some(_), RunEvent::EndedOk | RunEvent::EndedError) => Schedule::read(
-            monitor.schedule.as_deref(),
-            monitor.interval_s,
-            &monitor.timezone,
-        )
-        .and_then(|schedule| schedule.next_due(now))
-        .map_err(|fault| {
-            TelmoniError::Internal(format!(
-                "ping: a saved monitor's timing cannot be read: {}",
-                fault.detail()
-            ))
-        })?,
+        (Some(_), RunEvent::EndedOk | RunEvent::EndedError) => due_after(project_id, monitor, now),
         _ => monitor.next_due_at,
     };
     if state.is_none_or(|state| state == monitor.state) && next_due_at == monitor.next_due_at {

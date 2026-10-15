@@ -5,9 +5,12 @@
 //! step cap, and ended by a bare ping or a `/fail`, when it waits in the
 //! outbox as a finished span and the monitor's state and next due time
 //! follow, or as `error` by the next ping that finds it never said it ended;
-//! the run a ping names by `rid`; every run's ceiling, and the stall timeout
-//! a discovered monitor is given; a body is dropped and said so, the
-//! query held to numbers, the methods and paths to the lane's; past the
+//! a ping whose run ends beside it changing nothing; the run a ping names
+//! by `rid`; every run's ceiling, and the stall timeout a discovered
+//! monitor is given; a monitor whose saved timing cannot be read refusing
+//! none of its pings; a body is dropped and said so, the query held to
+//! numbers, the methods and paths to the lane's, and no answer one a cache
+//! may keep; past the
 //! plan's limit, or past the monitors nobody has set up that a project may
 //! hold, nothing is made and the ping is refused with the bound's words; a
 //! paused organization takes no ping; a finished run reaches ClickHouse
@@ -909,6 +912,108 @@ async fn a_rid_is_a_runs_own_name_within_its_project(pool: PgPool) {
     assert_eq!(finished[0]["steps"], 2);
     assert_eq!(finished[0]["exit_code"], 1);
     assert_eq!(b.monitor("hourly-sync").await["state"], "failed");
+}
+
+/// A monitor whose timing was read as it was saved and cannot be read now —
+/// as only a change of ours leaves one: a zone the database no longer
+/// names, a line a stricter `croner` refuses, one whose search no longer
+/// ends — refuses none of its pings. Each run is ended and handed to the
+/// outbox, the monitor's state follows it, and it is due at no time rather
+/// than at one already passed; saved again, the timing is read as it is
+/// sent, and the monitor is due again once it can be.
+#[sqlx::test]
+async fn a_monitor_whose_saved_timing_cannot_be_read_refuses_no_ping(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.make(hourly()).await;
+    for (schedule, interval_s, timezone, end, state) in [
+        (None, Some(3600), "Mars/Olympus", "", "healthy"),
+        (
+            Some("every day at nine"),
+            None,
+            "UTC",
+            "/fail?exit_code=2",
+            "failed",
+        ),
+        (Some("0 0 30 2 *"), None, "UTC", "", "healthy"),
+    ] {
+        let unreadable = format!("{schedule:?} {interval_s:?} {timezone}");
+        // Written straight into the row, due an hour on, as a change of ours
+        // would leave it.
+        let written = sqlx::query(
+            "UPDATE telemetry.monitors
+                SET schedule = $2, interval_s = $3, timezone = $4,
+                    next_due_at = now() + interval '1 hour'
+              WHERE project_id = $1 AND slug = 'hourly-sync'",
+        )
+        .bind(&p.project)
+        .bind(schedule)
+        .bind(interval_s)
+        .bind(timezone)
+        .execute(&pool)
+        .await
+        .expect("write the monitor's timing")
+        .rows_affected();
+        assert_eq!(written, 1, "{unreadable}");
+        p.ping_ok(&format!("/{key}/hourly-sync/start")).await;
+        p.ping_ok(&format!("/{key}/hourly-sync{end}")).await;
+        assert!(
+            open_runs(&pool, &p.project).await.is_empty(),
+            "{unreadable}: the run's end was rolled back"
+        );
+        let monitor = p.monitor("hourly-sync").await;
+        assert_eq!(monitor["state"], state, "{unreadable}");
+        assert!(
+            monitor["next_due_at"].is_null(),
+            "{unreadable}: due at a time its timing could not give: {monitor}"
+        );
+    }
+    let finished = finished_runs(&pool, &p.project).await;
+    assert_eq!(
+        finished
+            .iter()
+            .map(|run| run["status"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        ["ok", "error", "ok"]
+    );
+    assert_eq!(finished[1]["exit_code"], 2);
+
+    // Saved again, the timing is read and searched as it is sent, the line
+    // that never comes refused though the row holds it, and the same timing
+    // a readable one gives the monitor its due time back.
+    let one = format!("{MONITORS}/hourly-sync");
+    let (status, problem) = p
+        .send(p.request(
+            "PUT",
+            &one,
+            Some(json!({ "name": "Hourly sync", "schedule": "0 0 30 2 *", "grace_s": 60 })),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert!(
+        problem["detail"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("never comes"),
+        "{problem}"
+    );
+    let mended = sqlx::query(
+        "UPDATE telemetry.monitors SET schedule = NULL, interval_s = 3600
+          WHERE project_id = $1 AND slug = 'hourly-sync'",
+    )
+    .bind(&p.project)
+    .execute(&pool)
+    .await
+    .expect("a readable timing, as a fix of ours would leave it")
+    .rows_affected();
+    assert_eq!(mended, 1, "the same timing the save sends, so it stands");
+    let (status, saved) = p.send(p.request("PUT", &one, Some(hourly()))).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert!(
+        saved["next_due_at"].is_string(),
+        "due again under the same timing: {saved}"
+    );
 }
 
 #[sqlx::test]

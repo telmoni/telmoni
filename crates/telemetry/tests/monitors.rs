@@ -4,9 +4,11 @@
 //! monitor is made under the organization's chain lock and held to its
 //! plan's ceiling across the organization's projects; one slug and one agent
 //! each find one monitor; a field the lane cannot take is a 400 that names
-//! it and echoes none of it; what a schedule means is answered without
-//! saving; a project reads its own monitors and no other's; and the purges
-//! take a project's monitors with it, as a move takes them along.
+//! it and echoes none of it; a paused monitor is resumed whatever its saved
+//! timing, and saves none that never comes; what a schedule means is
+//! answered without saving; a project reads its own monitors and no other's;
+//! and the purges take a project's monitors with it, as a move takes them
+//! along.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
 mod common;
@@ -527,6 +529,80 @@ async fn a_monitor_the_lane_cannot_take_is_a_400_that_echoes_none_of_it(pool: Pg
         assert!(!detail.contains("script"), "{body} was echoed: {detail}");
     }
     assert_eq!(monitors_of(&pool, &p.project).await, 0);
+}
+
+/// A paused monitor is resumed whatever its saved timing: one that cannot be
+/// read now — as only a change of ours leaves one — resumes due at no time,
+/// recorded as any resume is, rather than refused with a 400 for a request
+/// that sent no timing. And a timing saved over a paused monitor is searched
+/// as one made is, so a line that never comes is refused as it is sent.
+#[sqlx::test]
+async fn a_paused_monitor_is_resumed_whatever_its_saved_timing(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let (status, made) = p
+        .send(p.request("POST", LANE, OWNER, Some(nightly())))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    let one = format!("{LANE}/nightly-report");
+    let (status, paused) = p
+        .send(p.request("POST", &format!("{one}/pause"), OWNER, None))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{paused}");
+
+    // Paused, a line that never comes is refused as it is sent, and one that
+    // comes is saved, the monitor still paused and due at no time.
+    let mut never = nightly();
+    never["schedule"] = json!("0 0 30 2 *");
+    let (status, problem) = p.send(p.request("PUT", &one, OWNER, Some(never))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert!(
+        problem["detail"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("never comes"),
+        "{problem}"
+    );
+    let mut later = nightly();
+    later["schedule"] = json!("0 3 * * *");
+    let (status, saved) = p.send(p.request("PUT", &one, OWNER, Some(later))).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["state"], "paused");
+    assert_eq!(saved["next_due_at"], Value::Null);
+
+    // A zone the database no longer names, written straight into the row as
+    // a change of ours would leave it: the resume goes through, due at no
+    // time.
+    let written = sqlx::query(
+        "UPDATE telemetry.monitors SET timezone = 'Mars/Olympus'
+          WHERE project_id = $1 AND slug = 'nightly-report'",
+    )
+    .bind(&p.project)
+    .execute(&pool)
+    .await
+    .expect("write the monitor's zone")
+    .rows_affected();
+    assert_eq!(written, 1);
+    let (status, resumed) = p
+        .send(p.request("POST", &format!("{one}/resume"), OWNER, None))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{resumed}");
+    assert_eq!(resumed["state"], "healthy");
+    assert_eq!(
+        resumed["next_due_at"],
+        Value::Null,
+        "due at a time its timing could not give"
+    );
+    assert_eq!(
+        recorded(&pool, &p.organization).await,
+        ["created", "updated", "updated", "updated"],
+        "made, paused, saved over and resumed"
+    );
+
+    // Saved again in a zone the database names, it is due again.
+    let (status, saved) = p.send(p.request("PUT", &one, OWNER, Some(nightly()))).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert!(saved["next_due_at"].is_string(), "{saved}");
 }
 
 /// What a schedule means is answered as it is typed, to every role, and
