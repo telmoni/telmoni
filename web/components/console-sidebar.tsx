@@ -23,11 +23,15 @@ function NavRow({
   item,
   showLabel,
   step = false,
+  short,
   className,
 }: {
   item: ConsoleNavItem;
   showLabel: boolean;
   step?: boolean;
+  /** The row's words where its title runs longer than the rail is wide: the
+   *  title stays its name, read out and shown under the pointer. */
+  short?: string;
   className?: string;
 }) {
   // The drawer closes on `onNavigate`, not a click: a ⌘-click to a new tab
@@ -84,13 +88,15 @@ function NavRow({
   );
   const label = (
     <span className="flex flex-1 items-center min-w-0 overflow-hidden pr-1">
-      <span className="whitespace-nowrap truncate">{item.title}</span>
+      <span className="whitespace-nowrap truncate">{short ?? item.title}</span>
     </span>
   );
   return (
     <Link
       href={item.url}
       onNavigate={closeOnMobile}
+      aria-label={short ? item.title : undefined}
+      title={short ? item.title : undefined}
       aria-current={item.isActive ? "page" : undefined}
       {...(step ? { ["data-rail-step"]: "" } : {})}
       className={rowClass}
@@ -142,10 +148,12 @@ export function ConsoleSidebar({
   const steppedIn = groups[0]?.title === "Account";
   const { live, fallback } = useLiveResources();
   const returnUrl = resolveReturnUrl(trail, live, fallback);
-  const returnLabel =
-    consolePlace(returnUrl)?.kind === "organization"
-      ? "Back to organization"
-      : "Back to project";
+  const backToOrganization = consolePlace(returnUrl)?.kind === "organization";
+  const returnLabel = backToOrganization ? "Back to organization" : "Back to project";
+  // On the rail open, the arrow says "back" and the row names the place: at
+  // the rail's width (`--spacing-sidebar`) "Back to organization" would be
+  // cut short.
+  const returnShort = backToOrganization ? "Organization" : "Project";
 
   // ⚠ **A page that is not found has no rail of its own.** The rail is spelled
   // from the path, and a path that names nothing spells a rail of links to
@@ -180,7 +188,7 @@ export function ConsoleSidebar({
           ? "-translate-x-full max-md:invisible md:cursor-expand"
           : "translate-x-0 shadow-drawer md:shadow-none",
         "md:static md:shrink-0 md:translate-x-0 md:border-r md:border-sidebar-border",
-        collapsed ? "md:w-15" : "md:w-64",
+        collapsed ? "md:w-15" : "md:w-sidebar",
         // `translate`, the property Tailwind's `-translate-x-full` sets, not
         // `transform`; `visibility` beside it holds the drawer visible until
         // the slide ends.
@@ -255,6 +263,7 @@ export function ConsoleSidebar({
               ))}
               <NavRow
                 item={{ title: returnLabel, url: returnUrl, icon: ArrowLeft, isActive: false }}
+                short={returnShort}
                 showLabel={expanded}
                 step
                 className={cn(

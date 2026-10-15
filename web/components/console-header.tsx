@@ -64,7 +64,7 @@ export function ConsoleHeader({
             ? // 12px in, as the closed rail's squares are: the 36px control
               // then centres its mark 30px from the edge, on the rail's icons.
               "group/brand md:w-15 md:cursor-expand md:justify-start md:px-3"
-            : "md:w-64 md:justify-between",
+            : "md:w-sidebar md:justify-between",
         )}
         onClick={(e) => {
           if (collapsed && !(e.target as HTMLElement).closest("a[href], button")) toggle();
