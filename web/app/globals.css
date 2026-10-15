@@ -70,6 +70,14 @@
   --highlight: oklch(0.95 0.19 105);
   --highlight-foreground: oklch(0.22 0.02 100);
 
+  /* The mark in colour, as the brand pack's masters give it: the chip is
+     always the high-contrast element against its surface, so it inverts
+     with the theme, and the ember light and cyan line take darker shades on
+     the light chip to keep their contrast. Hex, as the pack spells them. */
+  --mark-chip: #1f2937;
+  --mark-light: #f97316;
+  --mark-line: #22d3ee;
+
   --sidebar: var(--background);
   --sidebar-foreground: oklch(0.27 0.01 250);
   --sidebar-primary: oklch(0.13 0.01 250);
@@ -117,6 +125,10 @@
   --highlight: oklch(0.9 0.18 105);
   --highlight-foreground: oklch(0.2 0.02 100);
 
+  --mark-chip: #e6e8ea;
+  --mark-light: #c2410c;
+  --mark-line: #0e7490;
+
   --sidebar: var(--background);
   --sidebar-foreground: oklch(0.96 0.005 250);
   --sidebar-primary: oklch(0.92 0 0);
@@ -162,6 +174,13 @@
   --brand-positive: oklch(0.52 0.15 150);
   --brand-negative: oklch(0.55 0.21 27);
 
+  /* Restated with the surface: the home page puts `dark` on this element
+     itself, where these rules, coming later, decide its paper, and a mark
+     left with `.dark`'s light chip vanished into light paper. */
+  --mark-chip: #1f2937;
+  --mark-light: #f97316;
+  --mark-line: #22d3ee;
+
   background-color: var(--background);
   color: var(--foreground);
 }
@@ -198,6 +217,10 @@
 
   --brand-positive: oklch(0.68 0.14 150);
   --brand-negative: oklch(0.65 0.2 27);
+
+  --mark-chip: #e6e8ea;
+  --mark-light: #c2410c;
+  --mark-line: #0e7490;
 
   background-color: var(--background);
   color: var(--foreground);
@@ -549,6 +572,9 @@ html.a11y-no-letter-keys [data-letter-key] {
   --color-ring: var(--ring);
   --color-brand-positive: var(--brand-positive);
   --color-brand-negative: var(--brand-negative);
+  --color-mark-chip: var(--mark-chip);
+  --color-mark-light: var(--mark-light);
+  --color-mark-line: var(--mark-line);
   --color-highlight: var(--highlight);
   --color-highlight-foreground: var(--highlight-foreground);
   --color-console-field: var(--console-field);

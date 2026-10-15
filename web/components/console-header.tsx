@@ -104,7 +104,7 @@ export function ConsoleHeader({
           }}
           aria-label={PRODUCT_NAME}
           className={cn(
-            "hidden min-w-0 items-center gap-2 pl-1.5 text-[17px] leading-none font-bold tracking-tight hover:text-muted-foreground md:flex",
+            "hidden min-w-0 items-center gap-2 pl-1.5 text-[17px] leading-none font-bold tracking-tight hover:opacity-70 md:flex",
             collapsed && "md:hidden",
           )}
         >

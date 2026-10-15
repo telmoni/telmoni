@@ -45,7 +45,7 @@ export function SiteHeader({ signedIn }: { signedIn: boolean }) {
         <div className="flex items-center px-3.5">
           <Link
             href="/"
-            className="flex min-w-0 items-center gap-2 pl-1.5 text-[17px] leading-none font-bold tracking-tight hover:text-muted-foreground"
+            className="flex min-w-0 items-center gap-2 pl-1.5 text-[17px] leading-none font-bold tracking-tight hover:opacity-70"
           >
             <TelmoniMark className="size-5 shrink-0" />
             <span className="truncate">{PRODUCT_NAME}</span>
