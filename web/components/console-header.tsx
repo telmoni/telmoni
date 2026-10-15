@@ -113,7 +113,7 @@ export function ConsoleHeader({
             aria-expanded={false}
             aria-controls="console-sidebar"
             title="Open sidebar"
-            className="group hidden size-9 shrink-0 cursor-expand items-center justify-center rounded-md hover:bg-sidebar-accent/50 md:flex"
+            className="group hidden size-9 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-sidebar-accent/50 md:flex"
           >
             <TelmoniMark className="size-5 group-hover/brand:hidden group-focus-visible:hidden" />
             <PanelLeft className="hidden size-4 text-muted-foreground group-hover/brand:block group-focus-visible:block" />
