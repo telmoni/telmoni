@@ -298,6 +298,18 @@ async fn a_key_of_another_shape_or_retired_opens_nothing(pool: PgPool) {
         "a ping touches its key: {}",
         keys[0]
     );
+    // A ping the lane refuses after its key is resolved touches it too, as a
+    // request an API key opens and a lane then refuses touches the key: its
+    // line carries the key, and the rotation counts its week from the key's
+    // last ping.
+    let id = minted["id"].as_str().expect("an id");
+    aged(&pool, id, 0, None).await;
+    let (status, _) = p.ping(&format!("/{key}/Nightly")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        p.list(OWNER).await[0]["last_ping_at"].is_string(),
+        "a refused ping left its key untouched"
+    );
 
     // ⚠ A key the table does not hold is a 404, never a 401, and the answer
     // never echoes it.

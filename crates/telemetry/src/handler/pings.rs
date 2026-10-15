@@ -391,7 +391,12 @@ async fn handle(
 /// The key a ping presents, resolved outside any tenant as auth resolves an
 /// API key: the live key with that hash, or a 404 — never a 401, so a
 /// scanner learns nothing from the difference. A key of another shape is a
-/// 404 without a read.
+/// 404 without a read. The key's last ping is moved here, in the statement
+/// that resolves it, as auth's `validate` touches an API key: so a ping's
+/// own transaction takes no lock on its key's row, which the rotation, a
+/// person's retirement, a transfer's move and a purge each take beside the
+/// rows a ping writes, each in an order of its own; and a ping refused after
+/// this still counts as one that came under the key, since a line carries it.
 async fn resolve_key(state: &AppState, key: &str) -> Result<ResolvedPingKey, TelmoniError> {
     if !well_formed(key) {
         return Err(unknown_key());
@@ -401,6 +406,39 @@ async fn resolve_key(state: &AppState, key: &str) -> Result<ResolvedPingKey, Tel
     let found = db::resolve_ping_key(&mut tx, &hash).await?;
     tx.commit().await?;
     found.ok_or_else(unknown_key)
+}
+
+/// The key a ping came under, read again in the ping's own transaction, and
+/// the ping refused before it writes where the key no longer stands as it
+/// was resolved: retired since, or gone with a purged project, a 404 as for
+/// any key the table does not hold or holds retired; moved with its project
+/// to another organization, a 409, for the next ping to resolve afresh. The
+/// organization it was resolved under is the one every row the ping writes
+/// is filed under, and the row policy holds an update of a row a transfer
+/// moved to the organization it names now, never a row the ping inserts or
+/// deletes. ⚠ What commits after this read, while the ping writes, is not
+/// seen here: a transfer's move — an update of a row it moved refused, a
+/// delete of one let by, a row the ping inserts filed under the organization
+/// read here — or a purge, which the rows the ping inserts outlive.
+async fn still_held(
+    key: &ResolvedPingKey,
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+) -> Result<(), TelmoniError> {
+    match db::live_ping_key_organization(tx, &key.project_id, key.id).await? {
+        Some(organization_id) if organization_id == key.organization_id => Ok(()),
+        Some(_) => {
+            tracing::debug!(
+                project_id = %key.project_id,
+                ping_key_id = %key.id,
+                "ping: refused, its project moved to another organization since its key was resolved"
+            );
+            Err(AuthError::Conflict(
+                "the project has moved to another organization; ping again".into(),
+            )
+            .into())
+        }
+        None => Err(unknown_key()),
+    }
 }
 
 /// Whether `key` is spelled as a ping key is minted — the prefix and its
@@ -474,9 +512,10 @@ fn rolled_back(result: sqlx::Result<()>, project_id: &ProjectId) {
     }
 }
 
-/// The ping itself, inside the transaction [`handle`] opened: the key
-/// touched, the monitor found or made, the run recorded and the monitor
-/// settled.
+/// The ping itself, inside the transaction [`handle`] opened: its key held
+/// to where it was resolved, the monitor found or made, the run recorded and
+/// the monitor settled. Its key was touched where it was resolved
+/// ([`resolve_key`]), so nothing here waits on the key's row.
 #[expect(
     clippy::too_many_arguments,
     reason = "a ping is these eight things; a struct built once for one call would say the same in more lines"
@@ -492,7 +531,7 @@ async fn ping(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
 ) -> Result<Heard, TelmoniError> {
     let project_id = &key.project_id;
-    db::touch_ping_key(tx, project_id, key.id).await?;
+    still_held(key, tx).await?;
     let monitor = match db::monitor(tx, project_id, slug).await? {
         Some(monitor) => monitor,
         None => discover_monitor(state, headers, key, slug, tx).await?,
@@ -527,6 +566,12 @@ async fn discover_monitor(
     let (project_id, organization_id) = (&key.project_id, &key.organization_id);
     let ceiling = chain::ceiling(state.entitlements.as_ref(), organization_id).await;
     chain::lock(project_id, organization_id, tx).await?;
+    // A transfer's accept holds the lock across its move, and a retirement
+    // across its own, so a ping that waited out either finds its key moved
+    // or retired by now, and is refused before it makes a monitor under a key
+    // that opens nothing, or files one, or the project's settings row, under
+    // the organization that gave the project up.
+    still_held(key, tx).await?;
     // Another ping may have made it while this one waited for the lock.
     if let Some(monitor) = db::monitor(tx, project_id, slug).await? {
         return Ok(monitor);

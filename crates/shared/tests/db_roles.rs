@@ -520,9 +520,10 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             &["SELECT", "DELETE"],
         ),
         // The ping lane resolves a key outside any tenant, as auth resolves
-        // an API key; the purges delete them. A key is minted, touched by
-        // its pings and retired in the project's own scope. (A transfer
-        // rewrites `organization_id` alone: a column grant, not this.)
+        // an API key; the purges delete them. A key is minted and retired in
+        // the project's own scope. (A transfer rewrites `organization_id`,
+        // and a ping's resolution `last_ping_at`, alone: column grants, not
+        // this.)
         (
             "telemetry_maintenance",
             "telemetry.ping_keys",

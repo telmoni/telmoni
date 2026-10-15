@@ -249,9 +249,12 @@ CREATE TABLE telemetry.ping_keys (
 
 -- The ping lane finds a key by its hash, and by nothing else.
 CREATE UNIQUE INDEX ping_keys_hash_idx ON telemetry.ping_keys (key_hash);
--- The project's live keys: the count a minting is held to, and the
--- rotation's search for an older key a newer one has replaced.
-CREATE INDEX ping_keys_project_live_idx ON telemetry.ping_keys (project_id, created_at) WHERE retired_at IS NULL;
+-- A project's keys, the retired ones with the live: the list, which shows
+-- both, the count a minting is held to, the rotation's search for a newer
+-- key standing, and the project's purge and move. Retired keys are kept
+-- while their project stands, so an index of the live ones alone left the
+-- list and the purge a walk of every tenant's keys.
+CREATE INDEX ping_keys_project_idx ON telemetry.ping_keys (project_id, created_at);
 CREATE INDEX ping_keys_organization_idx ON telemetry.ping_keys (organization_id);
 
 ALTER TABLE telemetry.ping_keys ENABLE ROW LEVEL SECURITY;
@@ -270,11 +273,16 @@ CREATE POLICY maintenance_access ON telemetry.ping_keys
 
 -- The lane resolves a key outside any tenant, as auth resolves an API key;
 -- the rotation finds the keys a week past their last ping; and the purges
--- delete an organization's or a deleted project's keys. A key is minted,
--- touched by its pings and retired in the project's own scope.
+-- delete an organization's or a deleted project's keys. A key is minted and
+-- retired in the project's own scope.
 GRANT SELECT, DELETE ON telemetry.ping_keys TO telemetry_maintenance;
 -- A transfer moves them to the organization that now holds their project.
 GRANT UPDATE (organization_id) ON telemetry.ping_keys TO telemetry_maintenance;
+-- A ping touches its key in the statement that resolves it, as auth touches
+-- an API key, so the ping's own transaction takes no lock on the key's row,
+-- which the rotation, a retirement, a transfer's move and a purge each take
+-- beside the rows a ping writes, in orders of their own.
+GRANT UPDATE (last_ping_at) ON telemetry.ping_keys TO telemetry_maintenance;
 
 
 -- ══════════════════════════════════════════════════════════════════════════════

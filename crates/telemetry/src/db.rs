@@ -767,24 +767,22 @@ pub async fn retire_ping_key(
     .await
 }
 
-/// A ping came under one of the project's keys: its `last_ping_at` moved,
-/// at most once a minute, so a busy key is not a write per ping.
-pub async fn touch_ping_key<B: HasProject>(
+/// The organization one of the project's live keys is filed under now;
+/// `None` where the project holds no live key by that id — retired since,
+/// or gone with the project.
+pub async fn live_ping_key_organization<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
     id: Uuid,
-) -> sqlx::Result<()> {
-    sqlx::query(
-        "UPDATE telemetry.ping_keys
-            SET last_ping_at = now()
-          WHERE project_id = $1 AND id = $2
-            AND (last_ping_at IS NULL OR last_ping_at < now() - interval '1 minute')",
+) -> sqlx::Result<Option<OrganizationId>> {
+    sqlx::query_scalar(
+        "SELECT organization_id FROM telemetry.ping_keys
+          WHERE project_id = $1 AND id = $2 AND retired_at IS NULL",
     )
     .bind(project_id)
     .bind(id)
-    .execute(tx.conn())
-    .await?;
-    Ok(())
+    .fetch_optional(tx.conn())
+    .await
 }
 
 /// What the lane learns of a key a ping presents, resolved outside any
@@ -799,15 +797,24 @@ pub struct ResolvedPingKey {
 }
 
 /// The live key with `key_hash`, or `None`: a key the table does not hold,
-/// or holds retired, opens nothing.
+/// or holds retired, opens nothing. A ping came under the key it answers:
+/// its `last_ping_at` is moved in the same statement, at most once a minute,
+/// so a busy key is not a write per ping and the lookup one round trip.
 pub async fn resolve_ping_key(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     key_hash: &str,
 ) -> sqlx::Result<Option<ResolvedPingKey>> {
     sqlx::query_as(
-        "SELECT id, project_id, organization_id, prefix
-           FROM telemetry.ping_keys
-          WHERE key_hash = $1 AND retired_at IS NULL",
+        "WITH live AS (
+            SELECT id, project_id, organization_id, prefix
+              FROM telemetry.ping_keys
+             WHERE key_hash = $1 AND retired_at IS NULL
+         ), touched AS (
+            UPDATE telemetry.ping_keys SET last_ping_at = now()
+             WHERE id = (SELECT id FROM live)
+               AND (last_ping_at IS NULL OR last_ping_at < now() - interval '1 minute')
+         )
+         SELECT id, project_id, organization_id, prefix FROM live",
     )
     .bind(key_hash)
     .fetch_optional(tx.conn())
