@@ -10,6 +10,7 @@ import { TraceFacetsPanel } from "@/components/traces/facets";
 import { TraceFilterBar } from "@/components/traces/filter-bar";
 import { NewTraces } from "@/components/traces/new-traces";
 import { TracePagination } from "@/components/traces/pagination";
+import { TracePeek } from "@/components/traces/peek";
 import { TraceTable } from "@/components/traces/table";
 import { TraceHeaderControls, TraceToolbar } from "@/components/traces/toolbar";
 import { UtcOffsetCookie } from "@/components/traces/utc-offset";
@@ -222,6 +223,15 @@ export default async function TracesPage({
           </div>
         </div>
       </div>
+      {/* The trace a row opened, over the list rather than in its place: its
+          spans are read as it opens, and its ↑ and ↓ buttons, and `j` and
+          `k`, step through this page's rows. */}
+      <TracePeek
+        organization={organization}
+        slug={slug}
+        projectId={project.id}
+        runs={list.traces.map((t) => t.run_id)}
+      />
     </TooltipProvider>
   );
 }

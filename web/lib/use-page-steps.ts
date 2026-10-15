@@ -1,0 +1,55 @@
+"use client";
+
+import { useSyncExternalStore } from "react";
+
+// What a page lets `j` and `k` step through — the trace list's peek, through
+// the runs of the page — offered while it is open and taken back as it goes.
+// The console's one key handler reads it (`components/keyboard-shortcuts.tsx`),
+// so the keys pass the pending `g` first and keep the rules every bare key
+// keeps; module state, as the trace list's preferences are, since a tab
+// shows one page at a time.
+
+/** One page's steps: what they are called, and each way's move, which does
+ *  nothing at its end of the page. */
+export interface PageSteps {
+  /** What one step moves to, as the shortcuts sheet names it: "trace". */
+  noun: string;
+  next: () => void;
+  previous: () => void;
+}
+
+let current: PageSteps | null = null;
+let listeners: Array<() => void> = [];
+
+function emit() {
+  for (const l of listeners) l();
+}
+
+function subscribe(onChange: () => void) {
+  listeners = [...listeners, onChange];
+  return () => {
+    listeners = listeners.filter((l) => l !== onChange);
+  };
+}
+
+/** Offers `steps` to the keys; the function it returns takes them back,
+ *  unless another offer has replaced them since. */
+export function offerPageSteps(steps: PageSteps): () => void {
+  current = steps;
+  emit();
+  return () => {
+    if (current !== steps) return;
+    current = null;
+    emit();
+  };
+}
+
+/** The steps on offer, as a key press reads them. */
+export function pageSteps(): PageSteps | null {
+  return current;
+}
+
+/** The steps on offer, for what draws them: the shortcuts sheet. */
+export function usePageSteps(): PageSteps | null {
+  return useSyncExternalStore(subscribe, pageSteps, () => null);
+}

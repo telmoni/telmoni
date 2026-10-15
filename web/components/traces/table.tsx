@@ -9,6 +9,7 @@ import { LinkPending } from "@/components/link-pending";
 import { LocalTime } from "@/components/local-time";
 import { SortHeading } from "@/components/sort-heading";
 import { TraceStatusBadge } from "@/components/trace-status-badge";
+import { usePeekedRun } from "@/components/traces/peek";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -17,6 +18,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { openPeek } from "@/lib/peek";
 import type { Trace, TraceQuery } from "@/lib/server/entities/traces";
 import {
   TRACE_COLUMNS,
@@ -46,11 +48,14 @@ type Props = {
 
 // The page's rows, a run each: its id, which opens its trace, and the
 // columns the person shows (`lib/trace-prefs.ts`), each heading that sorts a
-// link that sorts by it. Rows are chosen, as Langfuse's are, to download
+// link that sorts by it. A click on a row opens its trace in the peek beside
+// the list (`peek.tsx`), as Langfuse's rows do, and the row stays marked
+// while it is open. Rows are chosen, as Langfuse's are, to download
 // those alone; the choice is the page's, so a page of new rows starts with
 // none chosen (the page keys this on its rows).
 export function TraceTable({ organization, slug, query, ui, traces }: Props) {
   const prefs = useTracePrefs();
+  const peeked = usePeekedRun();
   const [chosen, setChosen] = useState<ReadonlySet<string>>(() => new Set());
   const columns = TRACE_COLUMNS.filter((c) => prefs.columns.includes(c.key));
   const { sort, dir } = currentSort(query);
@@ -132,7 +137,23 @@ export function TraceTable({ organization, slug, query, ui, traces }: Props) {
         </THead>
         <tbody>
           {traces.map((trace) => (
-            <tr key={trace.run_id} data-state={chosen.has(trace.run_id) ? "selected" : undefined}>
+            <tr
+              key={trace.run_id}
+              data-state={chosen.has(trace.run_id) ? "selected" : undefined}
+              aria-current={peeked === trace.run_id ? "true" : undefined}
+              // Anywhere on the row but a control or a link of its own, which
+              // keep their own way, and but a drag that chose some text to
+              // copy: the keyboard's way is the id's link.
+              onClick={(event) => {
+                if ((event.target as HTMLElement).closest("a, button, input, label")) return;
+                if (window.getSelection()?.toString()) return;
+                openPeek(trace.run_id);
+              }}
+              className={cn(
+                "cursor-pointer",
+                peeked === trace.run_id ? "bg-muted" : "hover:bg-muted/50",
+              )}
+            >
               <Td className={cn("pr-0", tight)}>
                 <Checkbox
                   checked={chosen.has(trace.run_id)}
@@ -143,6 +164,17 @@ export function TraceTable({ organization, slug, query, ui, traces }: Props) {
               <Td className={cn("whitespace-nowrap", tight)}>
                 <Link
                   href={traceHref(organization, slug, trace.run_id)}
+                  data-peek-run={trace.run_id}
+                  // A plain click opens the trace in the peek; one that asks
+                  // for a new tab or window, or a copy of the link, gets the
+                  // trace's own page, as the link says.
+                  onClick={(event) => {
+                    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+                      return;
+                    }
+                    event.preventDefault();
+                    openPeek(trace.run_id);
+                  }}
                   className="font-mono text-xs underline-offset-4 hover:underline"
                 >
                   {shortId(trace.run_id)}

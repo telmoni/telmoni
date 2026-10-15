@@ -20,12 +20,15 @@ import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { usePagePrimaryAction } from "@/components/page-action";
 import { useActiveOrganization, useFlags } from "@/lib/store";
 import { letterKeysOn, useLetterKeys } from "@/lib/use-accessibility";
+import { pageSteps, usePageSteps } from "@/lib/use-page-steps";
 import { useIsMac } from "@/lib/use-platform";
 import {
   AGENT_MODIFIER_KEY,
   goSequences,
   MODAL_SELECTOR,
+  NEXT_KEY,
   PAGE_ACTION_KEY,
+  PREVIOUS_KEY,
   pressedKey,
   resolveSequence,
   SEQUENCE_TIMEOUT_MS,
@@ -42,6 +45,7 @@ export function KeyboardShortcuts() {
   const organization = useActiveOrganization()?.slug ?? null;
   const flags = useFlags();
   const pageAction = usePagePrimaryAction();
+  const steps = usePageSteps();
   const isMac = useIsMac();
 
   const { shortcutsOpen: sheetOpen, setShortcutsOpen: setSheetOpen, openSearch } = useConsoleUi();
@@ -122,6 +126,12 @@ export function KeyboardShortcuts() {
         action.run();
         return;
       }
+      const step = pageSteps();
+      if (step && (k === NEXT_KEY || k === PREVIOUS_KEY)) {
+        e.preventDefault();
+        (k === NEXT_KEY ? step.next : step.previous)();
+        return;
+      }
       // The sheet is the `?` the keyboard types and Search the `/`, whatever
       // Shift took to type them: on a German, Nordic, Spanish, Italian or
       // French keyboard `/` is itself a shifted key, and reading Shift as the
@@ -155,6 +165,12 @@ export function KeyboardShortcuts() {
   const extras = [
     ...(pageAction && letterKeys
       ? [{ label: pageAction.label, chords: [[PAGE_ACTION_KEY.toUpperCase()]] }]
+      : []),
+    ...(steps && letterKeys
+      ? [
+          { label: `Next ${steps.noun}`, chords: [[NEXT_KEY.toUpperCase()]] },
+          { label: `Previous ${steps.noun}`, chords: [[PREVIOUS_KEY.toUpperCase()]] },
+        ]
       : []),
     { label: "Search", chords: letterKeys ? [[modifier, "K"], [SEARCH_KEY]] : [[modifier, "K"]] },
     { label: "Ask the agent", chords: [[modifier, AGENT_MODIFIER_KEY.toUpperCase()]] },

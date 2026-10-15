@@ -16,6 +16,7 @@ import { movedPath, projectAt } from "@/lib/console-nav";
 import { RealtimeEventDataSchema } from "@/lib/events/types";
 import { LIVE_HOLD_MS, liveRefresher } from "@/lib/live-refresh";
 import { projectPath } from "@/lib/slug";
+import { PEEK_PARAM, PEEKED_RUN_LANDED } from "@/lib/traces";
 import { listIsEmpty, tracesArrived } from "@/lib/use-new-traces";
 
 const RETRY_MS = 30_000;
@@ -91,6 +92,14 @@ export function RealtimeListener({ liveHoldMs = LIVE_HOLD_MS }: { liveHoldMs?: n
     const live = liveRefresher(() => {
       if (document.visibilityState === "visible") router.refresh();
       else dirty = true;
+    }, liveHoldMs);
+    // The trace the list's peek holds open is read again when its own run
+    // lands, as a trace's page is drawn for its own run: held as a page is,
+    // and only while in view.
+    let peekDirty = false;
+    const peekLive = liveRefresher(() => {
+      if (document.visibilityState === "visible") window.dispatchEvent(new Event(PEEKED_RUN_LANDED));
+      else peekDirty = true;
     }, liveHoldMs);
 
     function settled(inviteId: string | undefined) {
@@ -219,6 +228,10 @@ export function RealtimeListener({ liveHoldMs = LIVE_HOLD_MS }: { liveHoldMs?: n
         const page = SPAN_PAGES.exec(pathnameRef.current);
         if (!page) return;
         const [, section, one] = page;
+        if (section === "traces" && !one) {
+          const peeked = new URLSearchParams(window.location.search).get(PEEK_PARAM);
+          if (peeked && (data.more || data.runs.includes(peeked))) peekLive.nudge();
+        }
         if (section === "traces" && !one && !listIsEmpty(data.projectId)) {
           tracesArrived(data.projectId, data.runs, data.more);
           return;
@@ -251,6 +264,10 @@ export function RealtimeListener({ liveHoldMs = LIVE_HOLD_MS }: { liveHoldMs?: n
           dirty = false;
           live.flush();
         }
+        if (peekDirty) {
+          peekDirty = false;
+          peekLive.flush();
+        }
       }
     };
 
@@ -260,6 +277,7 @@ export function RealtimeListener({ liveHoldMs = LIVE_HOLD_MS }: { liveHoldMs?: n
     return () => {
       active = false;
       live.dispose();
+      peekLive.dispose();
       if (retryTimer) clearTimeout(retryTimer);
       document.removeEventListener("visibilitychange", handleVisibilityOrOnline);
       window.removeEventListener("online", handleVisibilityOrOnline);

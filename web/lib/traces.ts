@@ -128,6 +128,14 @@ export function traceHref(organization: string, project: string, runId: string):
   return projectPath(organization, project, `/traces/${encodeURIComponent(runId)}`);
 }
 
+/** The list's key for the run its peek holds open (`components/traces/peek.tsx`):
+ *  the browser's, never the server's, so the list is not read again for it. */
+export const PEEK_PARAM = "peek";
+
+/** Sent on the window when the run the peek holds open has landed again, its
+ *  nudges held as a page's are (`components/realtime-listener.tsx`). */
+export const PEEKED_RUN_LANDED = "telmoni:peeked-run-landed";
+
 /** The query with `value` ticked under `filter`, or unticked where it was,
  *  from the first page again: what clicking a value does. */
 export function toggled(query: TraceQuery, filter: FilterKey, value: string): TraceQuery {
@@ -567,47 +575,6 @@ export function shortId(id: string): string {
 /** The milliseconds between two of the server's times. */
 export function spanMillis(span: Pick<TraceSpan, "started_at" | "ended_at">): number {
   return Math.max(0, new Date(span.ended_at).getTime() - new Date(span.started_at).getTime());
-}
-
-/** A step of a trace with the calls made inside it, in the order they
- *  started: the shape the trace page lists first. */
-export type StepGroup = {
-  /** The step, or `null` for the calls made straight under the run. */
-  step: TraceSpan | null;
-  calls: TraceSpan[];
-};
-
-/** A trace's spans as steps and their calls. A call nests under the nearest
- *  step above it, whatever lies between; one under no step is the run's own;
- *  a span of no kind the list counts — an exporter's HTTP call — is left to
- *  the timeline. */
-export function groupSteps(spans: TraceSpan[]): { run: TraceSpan | null; groups: StepGroup[] } {
-  const byId = new Map(spans.map((s) => [s.span_id, s]));
-  const run = spans.find((s) => s.kind === SpanKind.Run) ?? null;
-  const steps = spans.filter((s) => s.kind === SpanKind.Step);
-  const groups = new Map<string | null, StepGroup>();
-  groups.set(null, { step: null, calls: [] });
-  for (const step of steps) groups.set(step.span_id, { step, calls: [] });
-
-  const nearestStep = (span: TraceSpan): string | null => {
-    let parent = byId.get(span.parent_span_id);
-    const seen = new Set<string>();
-    while (parent && !seen.has(parent.span_id)) {
-      if (parent.kind === SpanKind.Step) return parent.span_id;
-      seen.add(parent.span_id);
-      parent = byId.get(parent.parent_span_id);
-    }
-    return null;
-  };
-  for (const span of spans) {
-    if (span.kind !== SpanKind.ModelCall && span.kind !== SpanKind.ToolCall) continue;
-    groups.get(nearestStep(span))?.calls.push(span);
-  }
-  const ordered = [...groups.values()].filter((g) => g.step !== null || g.calls.length > 0);
-  const startOf = (g: StepGroup) =>
-    new Date((g.step ?? g.calls[0]!).started_at).getTime();
-  ordered.sort((a, b) => startOf(a) - startOf(b));
-  return { run, groups: ordered };
 }
 
 /** Where a span sits on the trace's timeline, as shares of its whole: what

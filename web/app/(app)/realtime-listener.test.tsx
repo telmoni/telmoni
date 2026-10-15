@@ -3,6 +3,7 @@ import { render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RealtimeListener } from "@/components/realtime-listener";
+import { PEEKED_RUN_LANDED } from "@/lib/traces";
 import { listDrawn, newTraces } from "@/lib/use-new-traces";
 
 const mockReplace = vi.fn();
@@ -451,6 +452,34 @@ describe("RealtimeListener - spans:ingested", () => {
       vi.advanceTimersByTime(100);
       expect(mockRefresh).toHaveBeenCalledTimes(2);
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The list's peek is read again when its own run lands, held as a page is,
+  // while the list itself still counts rather than draws.
+  it("tells the list's peek when its own run lands, and the list counts it", () => {
+    vi.useFakeTimers();
+    const landed = vi.fn();
+    window.addEventListener(PEEKED_RUN_LANDED, landed);
+    try {
+      listDrawn("project_1", { rows: ["r1"], empty: false, first: true });
+      window.history.replaceState(null, "", "/acme/web/traces?peek=run_7");
+      mockPathname = "/acme/web/traces";
+      render(<RealtimeListener liveHoldMs={100} />);
+      nudge("project_1", ["run_1"]);
+      expect(landed).not.toHaveBeenCalled();
+      nudge("project_1", ["run_7"]);
+      expect(landed).toHaveBeenCalledTimes(1);
+      nudge("project_1", ["run_1"], true);
+      expect(landed, "held, as a page is").toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(100);
+      expect(landed).toHaveBeenCalledTimes(2);
+      expect(mockRefresh).not.toHaveBeenCalled();
+      expect(newTraces("project_1").count).toBe(2);
+    } finally {
+      window.removeEventListener(PEEKED_RUN_LANDED, landed);
+      window.history.replaceState(null, "", "/");
       vi.useRealTimers();
     }
   });

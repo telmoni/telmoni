@@ -11,7 +11,6 @@ import {
   currentSort,
   downloadHref,
   formatDuration,
-  groupSteps,
   nextSort,
   pageCount,
   parseTraceQuery,
@@ -287,7 +286,7 @@ describe("numbers into words", () => {
   });
 });
 
-describe("a trace as steps and their calls", () => {
+describe("a trace's spans on one line of time", () => {
   const run = span({ span_id: "01", kind: "run", name: "nightly-report" });
   const step = span({
     span_id: "02",
@@ -302,43 +301,6 @@ describe("a trace as steps and their calls", () => {
     parent_span_id: "02",
     name: "chat gpt-x",
     started_at: "2026-10-11T03:00:00.020Z",
-  });
-  // A call under an exporter's own span under the step still belongs to the step.
-  const http = span({
-    span_id: "04",
-    kind: "span",
-    parent_span_id: "02",
-    name: "POST /v1/messages",
-    started_at: "2026-10-11T03:00:00.030Z",
-  });
-  const nested = span({
-    span_id: "05",
-    kind: "tool_call",
-    parent_span_id: "04",
-    name: "search_docs",
-    started_at: "2026-10-11T03:00:00.040Z",
-  });
-  const direct = span({
-    span_id: "06",
-    kind: "tool_call",
-    parent_span_id: "01",
-    name: "fetch_page",
-    started_at: "2026-10-11T03:00:00.005Z",
-  });
-
-  it("nests each call under the nearest step above it, the run's own first when first", () => {
-    const { run: found, groups } = groupSteps([run, step, call, http, nested, direct]);
-    expect(found?.span_id).toBe("01");
-    expect(groups.map((g) => [g.step?.name ?? null, g.calls.map((c) => c.name)])).toEqual([
-      [null, ["fetch_page"]],
-      ["plan the reply", ["chat gpt-x", "search_docs"]],
-    ]);
-  });
-
-  it("lists a step with no calls, and leaves out an empty run group", () => {
-    const { groups } = groupSteps([run, step]);
-    expect(groups).toEqual([{ step, calls: [] }]);
-    expect(groupSteps([]).run).toBeNull();
   });
 
   it("places every span on the timeline as a share of the whole, by depth", () => {

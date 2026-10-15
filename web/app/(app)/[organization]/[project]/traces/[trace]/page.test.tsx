@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/page-header", () => ({
   PageHeader: ({ title, backHref }: { title: string; backHref?: string }) => (
@@ -122,61 +122,141 @@ beforeEach(() => {
 });
 
 describe("TracePage", () => {
-  it("names the run, sums it, and lists its steps with their calls", async () => {
+  // Four days after the run, inside the week the user's and the session's
+  // pages open on, so their links need no window of their own.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-15T12:00:00.000Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  const chosen = () => screen.getByRole("region", { name: "The span chosen" });
+
+  it("names the run, sums it on one line, and opens on the run's own span", async () => {
     render(await TracePage({ params: PARAMS }));
     expect(fetchTrace).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", RUN);
     const header = screen.getByTestId("page-header");
     expect(header).toHaveTextContent("nightly-report");
     expect(header).toHaveAttribute("data-back", "/acme/web/traces");
 
-    expect(screen.getByText("2 s")).toBeInTheDocument();
-    // The run's tokens, and the one call's: the same number twice.
-    expect(screen.getAllByText("1,500")).toHaveLength(2);
-    expect(screen.getByText("(1,200 in, 300 out)")).toBeInTheDocument();
-    expect(screen.getByText("40 steps at most")).toBeInTheDocument();
-    expect(screen.getByText("team=search")).toBeInTheDocument();
-    expect(screen.getByText(RUN)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "9f86d081884c7d659a2feaa0c55ad015" })).toHaveAttribute(
-      "href",
-      "/acme/web/traces?user=9f86d081884c7d659a2feaa0c55ad015",
-    );
-    // The session leads to its own page, the user to their traces.
-    expect(screen.getByRole("link", { name: "conv-1" })).toHaveAttribute(
+    // The line under the name: how long, the model calls' tokens, and the
+    // session and the user it carried, each leading to its page.
+    expect(screen.getAllByText("2 s").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText("1,500 tokens").some((el) => el.getAttribute("title") === "1,200 in, 300 out"),
+    ).toBe(true);
+    expect(screen.getByRole("link", { name: "session" })).toHaveAttribute(
       "href",
       "/acme/web/sessions/conv-1",
     );
-
-    // The steps view: the step, then its two calls under it.
-    expect(screen.getByText("plan the reply")).toBeInTheDocument();
-    expect(screen.getByText("chat claude-sonnet-5-5")).toBeInTheDocument();
-    expect(screen.getByText("claude-sonnet-5-5")).toBeInTheDocument();
-    expect(screen.getByText("Error: TimeoutError")).toBeInTheDocument();
-    expect(screen.getByText("1.5 s")).toBeInTheDocument();
-    expect(screen.getByText("200 ms")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Timeline" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "user 9f86d081" })).toHaveAttribute(
       "href",
-      `/acme/web/traces/${RUN}?view=timeline`,
+      "/acme/web/traces?user=9f86d081884c7d659a2feaa0c55ad015",
     );
+
+    // The spans as they ran: the run, its step, and the step's two calls.
+    const tree = screen.getByRole("tree", { name: "Spans" });
+    const rows = within(tree).getAllByRole("treeitem");
+    expect(rows.map((row) => row.getAttribute("aria-level"))).toEqual(["1", "2", "3", "3"]);
+    expect(rows[0]).toHaveAttribute("aria-selected", "true");
+    expect(within(tree).getByText("TimeoutError")).toBeInTheDocument();
+
+    // The run's own span, read with the whole trace's sums.
+    const run = chosen();
+    expect(within(run).getByRole("heading", { name: "nightly-report" })).toBeInTheDocument();
+    expect(within(run).getByText("40 steps at most")).toBeInTheDocument();
+    expect(within(run).getByText(/1 step, 2 calls/)).toBeInTheDocument();
+    expect(within(run).getByText("(1,200 in, 300 out)")).toBeInTheDocument();
+    expect(within(run).getAllByText("team=search").length).toBeGreaterThan(0);
+    expect(within(run).getByText(RUN)).toBeInTheDocument();
   });
 
-  it("draws the timeline one view away, every span a bar", async () => {
-    render(
-      await TracePage({ params: PARAMS, searchParams: Promise.resolve({ view: "timeline" }) }),
-    );
-    expect(screen.getByRole("heading", { name: "Timeline" })).toBeInTheDocument();
-    expect(screen.getAllByRole("listitem")).toHaveLength(4);
-    expect(screen.getByRole("link", { name: "Steps" })).toHaveAttribute(
+  it("reads the span chosen in the tree: its model and tokens, and how it failed", async () => {
+    render(await TracePage({ params: PARAMS }));
+    const tree = screen.getByRole("tree", { name: "Spans" });
+
+    fireEvent.click(within(tree).getByText("search_docs"));
+    expect(within(chosen()).getByRole("heading", { name: "search_docs" })).toBeInTheDocument();
+    expect(within(chosen()).getAllByText("Error: TimeoutError").length).toBeGreaterThan(0);
+    expect(within(chosen()).getAllByText("200 ms").length).toBeGreaterThan(0);
+
+    fireEvent.click(within(tree).getByText("chat claude-sonnet-5-5"));
+    expect(within(chosen()).getAllByRole("link", { name: "claude-sonnet-5-5" })[0]).toHaveAttribute(
       "href",
-      `/acme/web/traces/${RUN}`,
+      "/acme/web/traces?model=claude-sonnet-5-5",
     );
+    expect(within(chosen()).getByText("1,200")).toBeInTheDocument();
+    expect(within(chosen()).getByText("anthropic")).toBeInTheDocument();
+  });
+
+  it("walks the tree from the keyboard, the focus with the span chosen, and shuts a branch and opens it again", async () => {
+    // The frame the row waits for, to take the focus, comes at once.
+    vi.stubGlobal("requestAnimationFrame", (step: FrameRequestCallback) => {
+      step(0);
+      return 0;
+    });
+    render(await TracePage({ params: PARAMS }));
+    const tree = screen.getByRole("tree", { name: "Spans" });
+    const row = (name: string) =>
+      within(tree)
+        .getAllByRole("treeitem")
+        .find((item) => item.textContent?.includes(name))!;
+
+    fireEvent.keyDown(row("nightly-report"), { key: "ArrowDown" });
+    expect(within(chosen()).getByRole("heading", { name: "plan the reply" })).toBeInTheDocument();
+    expect(document.activeElement).toBe(row("plan the reply"));
+    fireEvent.keyDown(row("plan the reply"), { key: "ArrowLeft" });
+    expect(within(tree).getAllByRole("treeitem")).toHaveLength(2);
+    fireEvent.keyDown(row("plan the reply"), { key: "ArrowRight" });
+    expect(within(tree).getAllByRole("treeitem")).toHaveLength(4);
+    fireEvent.keyDown(row("plan the reply"), { key: "End" });
+    expect(within(chosen()).getByRole("heading", { name: "search_docs" })).toBeInTheDocument();
+    expect(document.activeElement).toBe(row("search_docs"));
+    // The two calls are a set of two under their step, said outright.
+    expect(row("search_docs")).toHaveAttribute("aria-posinset", "2");
+    expect(row("search_docs")).toHaveAttribute("aria-setsize", "2");
+  });
+
+  it("chooses the branch it shuts when the span chosen was inside it", async () => {
+    render(await TracePage({ params: PARAMS }));
+    const tree = screen.getByRole("tree", { name: "Spans" });
+    fireEvent.click(within(tree).getByText("search_docs"));
+    const step = within(tree)
+      .getAllByRole("treeitem")
+      .find((item) => item.textContent?.includes("plan the reply"))!;
+    fireEvent.click(step.querySelector(".lucide-chevron-right")!.parentElement!);
+    expect(within(tree).getAllByRole("treeitem")).toHaveLength(2);
+    expect(within(chosen()).getByRole("heading", { name: "plan the reply" })).toBeInTheDocument();
+    expect(step).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("finds spans by a search, and draws the timeline a toggle away, every span a bar", async () => {
+    render(await TracePage({ params: PARAMS }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search spans" }), {
+      target: { value: "search_docs" },
+    });
+    const tree = screen.getByRole("tree", { name: "Spans" });
+    // The match with the spans above it.
+    expect(within(tree).getAllByRole("treeitem")).toHaveLength(3);
+    // Escape empties the search before it would shut anything.
+    const field = screen.getByRole("searchbox", { name: "Search spans" });
+    expect(fireEvent.keyDown(field, { key: "Escape" })).toBe(false);
+    expect(field).toHaveValue("");
+    expect(within(tree).getAllByRole("treeitem")).toHaveLength(4);
+
+    fireEvent.click(screen.getByRole("radio", { name: "Timeline" }));
+    expect(tree.querySelectorAll('[role="treeitem"] span[style*="width"]')).toHaveLength(4);
   });
 
   it("calls a run whose own span has not arrived running", async () => {
     mockTrace = { kind: "ok", trace: { run_id: RUN, spans: SPANS.slice(2, 3), truncated: true } };
     render(await TracePage({ params: PARAMS }));
     expect(screen.getByText("Running")).toBeInTheDocument();
-    expect(screen.getByText("Under the run")).toBeInTheDocument();
-    expect(screen.getByText(/more spans than the page shows/)).toBeInTheDocument();
+    expect(within(screen.getByRole("tree")).getByText("chat claude-sonnet-5-5")).toBeInTheDocument();
+    expect(screen.getByText(/more spans than the server sends at once/)).toBeInTheDocument();
   });
 
   it("says when there is no such trace here, and leads back to the list", async () => {

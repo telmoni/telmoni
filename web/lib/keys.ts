@@ -44,6 +44,13 @@ export const SEQUENCE_TIMEOUT_MS = 1000;
 
 export const PAGE_ACTION_KEY = "c";
 
+/** Step to the next and the previous of what a page steps through
+ *  (`lib/use-page-steps.ts`): the trace list's peek through the page's runs,
+ *  as a mail reader's j and k do. `k` is also the API keys row's `g k`, and
+ *  the pending-`g` branch takes it first, as it does `c`. */
+export const NEXT_KEY = "j";
+export const PREVIOUS_KEY = "k";
+
 /** `g` then this reaches the organization's overview from anywhere, Account
  *  included: the one sequence that is not a row of the rail you stand in. */
 export const ORGANIZATION_KEY = "O";

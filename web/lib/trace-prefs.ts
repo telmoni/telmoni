@@ -1,10 +1,12 @@
+import { PEEK_WIDTH_MIN } from "@/lib/peek";
 import { DEFAULT_COLUMNS, TRACE_COLUMNS } from "@/lib/traces";
 import type { TraceColumn } from "@/lib/types/enums";
 
 // What a person chose of the trace list's look, kept in their own browser as
 // Langfuse keeps a table's columns: which columns show, how tightly the rows
-// sit, how often the page reads itself again, and whether the filters stand
-// beside it. None of it is the list's state — a link a colleague opens shows
+// sit, how often the page reads itself again, whether the filters stand
+// beside it, and how wide a trace opened from it stands, full size or
+// dragged. None of it is the list's state — a link a colleague opens shows
 // their own columns — so none of it is in the URL; a saved view carries its
 // columns with it, and applying one sets them here.
 
@@ -22,6 +24,12 @@ export type TracePrefs = {
   refresh: RefreshSeconds;
   /** Whether the filters' sidebar shows. */
   filters: boolean;
+  /** Whether a trace opened from the list fills the content area, rather
+   *  than standing beside the list (`components/traces/peek.tsx`). */
+  peekFull: boolean;
+  /** How wide, in pixels, the person dragged that panel beside the list;
+   *  `null` for its own width. */
+  peekWidth: number | null;
 };
 
 export const DEFAULT_PREFS: TracePrefs = {
@@ -29,7 +37,21 @@ export const DEFAULT_PREFS: TracePrefs = {
   density: "comfortable",
   refresh: 0,
   filters: true,
+  peekFull: false,
+  peekWidth: null,
 };
+
+/** A dragged width this build keeps: whole pixels, no narrower than a drag
+ *  leaves the panel. One wider than the area the panel stands in is held to
+ *  the area as it is drawn. */
+function keptWidth(value: unknown): number | null {
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= PEEK_WIDTH_MIN &&
+    value <= 10_000
+    ? value
+    : null;
+}
 
 /** Where the browser keeps them. */
 export const TRACE_PREFS_KEY = "telmoni-traces";
@@ -65,6 +87,8 @@ export function readPrefs(stored: string | null): TracePrefs {
       ? (kept.refresh as RefreshSeconds)
       : DEFAULT_PREFS.refresh,
     filters: typeof kept.filters === "boolean" ? kept.filters : DEFAULT_PREFS.filters,
+    peekFull: typeof kept.peekFull === "boolean" ? kept.peekFull : DEFAULT_PREFS.peekFull,
+    peekWidth: keptWidth(kept.peekWidth),
   };
 }
 
