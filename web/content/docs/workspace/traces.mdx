@@ -1,13 +1,14 @@
 ---
 title: "Traces"
-description: "A project's Traces page: every run of its agents as a row, newest first, narrowed by any of its values, sorted, paged, drawn over the window, saved as views and downloaded, and each run's own page with its steps, calls and timeline — all of it metadata."
+description: "A project's Traces page: every run of its agents as a row, newest first, narrowed by any of its values, sorted, paged, drawn over the window, saved as views and downloaded, and each run opened beside the list or on a page of its own, its spans as a tree beside the one you choose — all of it metadata."
 ---
 
 A **trace** is one run's record: the run's own span and every span recorded
-inside it, found by the run's id. A project's **Traces** page lists them, and
-each has a page of its own. Everything on both is metadata — timings, statuses,
-counts, model and tool names — and nothing on either is a prompt, a completion
-or a tool payload, in any [content mode](/docs/api/ingest#what-is-dropped-at-the-door).
+inside it, found by the run's id. A project's **Traces** page lists them; each
+opens beside the list, and has a page of its own. Everything on both is
+metadata — timings, statuses, counts, model and tool names — and nothing on
+either is a prompt, a completion or a tool payload, in any
+[content mode](/docs/api/ingest#what-is-dropped-at-the-door).
 
 ## The list
 
@@ -16,7 +17,7 @@ row each, fifty to a page:
 
 | Column | What it is |
 |---|---|
-| Trace | The first eight characters of the run's id; opens the trace |
+| Trace | The first eight characters of the run's id; opens the trace beside the list, as a click anywhere else on the row does |
 | Started | When the run's first span started, in your time zone |
 | Agent | The run's agent (`telmoni.agent`) |
 | User | The end user the run was for (`user.id`), as stored: hashed under the project's own key |
@@ -104,23 +105,46 @@ metadata, with each user's id as stored — and never a message.
 
 ## A trace
 
-A trace's page names its run and sums it: status, when it started, how long it
-ran, its user — a link to the runs that share it — and its session, a link
-to [its page](/docs/workspace/sessions#a-session), how many steps and calls it
-made, its tokens, the bounds it declared, its sample rate, its tags, and its
-run id in full.
+A click on a row of the list, anywhere but on one of its links, opens the
+run's trace in a panel over the list's right side, under the page's header and
+beside the sidebar, without leaving the list. The row stays marked while its
+trace is open. The panel's ↑ and ↓ open the previous and the next row's
+trace, as `k` and `j` do. Drag the panel's left edge to make it wider or
+narrower, and double-click the edge to put it back; **Full size** fills the
+page's area with the panel and **Exit full size** puts it back. Your browser
+keeps both for the next trace you open. The arrow beside them opens the
+trace's own page. **Close**,
+`Esc` from inside the panel, or your browser's **Back** shuts it, and the
+page's link holds the open trace, so a link you share opens the list with it.
+A `⌘`-click or `Ctrl`-click on the run's id opens the trace's page in a new
+tab instead. The trace's own page shows the same, with the page's room.
 
-**Steps** lists each step the agent recorded, in the order they ran, with the
-model and tool calls made inside it: the model and its provider, the call's
-tokens, its latency, and how it ended, with the error's type where it failed.
-Calls made straight under the run, with no step around them, are listed
-together under the run's own heading, where the first of them started.
+Its first line sums the run: its status, when it started, how long it ran, its
+model calls' tokens — hover for the split — its session, a link to
+[its page](/docs/workspace/sessions#a-session), its user, a link to the runs
+that share it, and its tags.
 
-**Timeline**, one view away, draws every span of the run — the steps, the
-calls, and any other span an exporter recorded inside it — as a bar on one
-line of time, nested as it was recorded, with its duration beside it. The
-page holds a run's first 5,000 spans; a run with more says so under them.
+Below it, the run's spans stand as the tree they ran in, each under the span
+it names as its parent: its kind, its name, how long it ran, a model call's
+tokens, and, for a span that failed, the error's type in red. **Search spans**
+finds spans by name, kind, model, provider or error type, each with the spans
+above it.
+**Timeline** draws each span as a bar on one line of time, from the run's
+first start to its last end. The arrow keys walk the tree: up and down a span,
+right to open a span's branch or step into it, left to shut it or step out of
+it. A run of more than 400 spans opens with its branches shut but the run's
+own.
 
-A run whose own span has not arrived yet is shown as running. A trace that
-is not in the project — a run that has passed its retention, or one of another
-project's — says so, and leads back to the list.
+Beside the tree stands the span you choose, the run's own first: its kind, its
+status and the error's type, its model and provider, the tool it called — the
+model and the tool each a link to the list narrowed to them — its tokens,
+input, output and cached, when it started and ended to the millisecond, how
+long it ran, when it was received, and its ids. The run's own span adds the
+run's steps, calls and tokens, its user, session and tags, the bounds it
+declared and its sample rate. **Attributes** lists what else was kept with the
+span under its own name, and **Raw** shows either as it was stored. The
+trace holds a run's first 5,000 spans; a run with more says so under them.
+
+A run whose own span has not arrived yet is shown as running, and its trace
+is read again as more of its spans land. A trace that is not in the project —
+a run that has passed its retention, or one of another project's — says so.
