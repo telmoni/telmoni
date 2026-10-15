@@ -6,7 +6,7 @@ import { PaperShell } from "@/components/paper-shell";
 import { SplashHero } from "@/components/splash-hero";
 import { Button } from "@/components/ui/button";
 import { getServerSession } from "@/lib/server/session";
-import { DOCS_URL, REPO_URL, SECURITY_POLICY_URL, SKILLS_URL } from "@/lib/site";
+import { DOCS_URL, SECURITY_POLICY_URL, SKILLS_URL } from "@/lib/site";
 import { cn } from "@/lib/utils";
 
 // No `metadata` here on purpose. `layout.tsx` templates a page title as
@@ -67,11 +67,12 @@ const GOALS = [
 
 type Pointer = { label: string; href: string };
 
-// The open platform, four cells of links into the documentation or the
-// source.
-const OPEN: { title: string; blurb: string; links: Pointer[] }[] = [
+// The open platform, three cells of links into the documentation, each with
+// its own motion in the corner as the goals above have.
+const OPEN: { title: string; glyph: GlyphKind; blurb: string; links: Pointer[] }[] = [
   {
     title: "Self-host",
+    glyph: "hosts",
     blurb: "The whole platform on your own infrastructure. You bring the identity provider, the mail transport and the model.",
     links: [
       { label: "Docker Compose", href: docs("/self-host/docker-compose") },
@@ -81,26 +82,8 @@ const OPEN: { title: string; blurb: string; links: Pointer[] }[] = [
     ],
   },
   {
-    title: "Apache-2.0",
-    blurb: "Every feature, with no limits and nothing held back: one Rust binary behind a Next.js console.",
-    links: [
-      ...(REPO_URL ? [{ label: "Read the source", href: REPO_URL }] : []),
-      { label: "Fork, modify, contribute", href: docs("/contributing/introduction") },
-      { label: "How it is built", href: docs("/contributing/developing") },
-    ],
-  },
-  {
-    title: "Documented",
-    blurb: "The docs describe what is implemented today, as it is, and every error the API answers has a page.",
-    links: [
-      { label: "The docs", href: DOCS_URL },
-      { label: "API reference", href: docs("/api/reference") },
-      { label: "Errors", href: docs("/errors") },
-      { label: "The SDKs", href: docs("/api/sdks") },
-    ],
-  },
-  {
     title: "Security as mechanism",
+    glyph: "lock",
     blurb: "Isolation the database enforces, an audit record in the same transaction as the change, and deletion that ends.",
     links: [
       { label: "Tenant isolation", href: `${SECURITY_POLICY_URL}#tenant-isolation` },
@@ -253,7 +236,83 @@ function markerOver(words: readonly number[], kept: number) {
 // schedule's pulse, and a document's words going under a marker line by line
 // while the field kept on each line stays. Decorative, and still under
 // reduced motion.
-function Glyph({ kind }: { kind: "spans" | "pulse" | "redact" }) {
+type GlyphKind = "spans" | "pulse" | "redact" | "hosts" | "lock";
+
+function Glyph({ kind }: { kind: GlyphKind }) {
+  // Self-host: three machines of your own, their lights coming on in turn.
+  if (kind === "hosts") {
+    return (
+      <span aria-hidden="true" className="flex w-16 flex-col items-start gap-0.5">
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="flex h-2 w-11 items-center gap-1 rounded-sm border border-foreground/40 px-1"
+          >
+            <span className="h-px flex-1 bg-foreground/30" />
+            <span
+              className="glyph-blink size-1 [border-radius:9999px] bg-foreground/80"
+              style={{ animationDelay: `${i * 400}ms` }}
+            />
+          </span>
+        ))}
+      </span>
+    );
+  }
+  // Security as mechanism: a lock whose shackle pops open, pivots, returns, and snaps shut.
+  if (kind === "lock") {
+    return (
+      <span aria-hidden="true" className="flex w-16">
+        {/* Pulled left by the body's inset, so the lock's edge, not its box's,
+            lines up with the title under it. */}
+        <svg
+          className="-ml-1 size-7 overflow-visible"
+          viewBox="0 0 28 28"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          {/* Shackle: heel (left) remains seated in the body; toe (right) unlatches and clears the socket */}
+          <path
+            className="glyph-shackle text-foreground/60"
+            d="M 8.5 16 V 7 A 5.5 5.5 0 0 1 19.5 7 V 13"
+            stroke="currentColor"
+            strokeWidth="2.25"
+            strokeLinecap="round"
+          />
+          {/* Body, laid on a card-coloured one of its own shape: its ink is
+              translucent, and the shackle's seated legs showed through it. */}
+          <rect
+            x="4"
+            y="11.5"
+            width="20"
+            height="14"
+            rx="2"
+            className="text-card"
+            fill="currentColor"
+          />
+          <rect
+            x="4"
+            y="11.5"
+            width="20"
+            height="14"
+            rx="2"
+            className="text-foreground/70"
+            fill="currentColor"
+          />
+          {/* Keyhole */}
+          <circle cx="14" cy="17" r="1.25" className="text-card" fill="currentColor" />
+          <rect
+            x="13.2"
+            y="17"
+            width="1.6"
+            height="3"
+            rx="0.5"
+            className="text-card"
+            fill="currentColor"
+          />
+        </svg>
+      </span>
+    );
+  }
   if (kind === "spans") {
     return (
       <span aria-hidden="true" className="flex w-16 flex-col gap-1">
@@ -273,8 +332,8 @@ function Glyph({ kind }: { kind: "spans" | "pulse" | "redact" }) {
         {[0, 1, 2].map((i) => (
           <span key={i} className="relative flex size-2">
             <span
-              className="absolute inline-flex size-full animate-ping [border-radius:9999px] bg-foreground/40 motion-reduce:animate-none"
-              style={{ animationDelay: `${i * 500}ms` }}
+              className="glyph-ping absolute inline-flex size-full [border-radius:9999px] bg-foreground/40"
+              style={{ animationDelay: `${i * 400}ms` }}
             />
             <span className="relative inline-flex size-2 [border-radius:9999px] bg-foreground/70" />
           </span>
@@ -309,8 +368,7 @@ function Glyph({ kind }: { kind: "spans" | "pulse" | "redact" }) {
   );
 }
 
-// The small mono line a product site sets above a heading or in a cell's
-// corner: a number, a tag.
+// The small mono line a product site sets above a heading.
 function Label({ className, children }: { className?: string; children: React.ReactNode }) {
   return (
     <p
@@ -326,26 +384,26 @@ function Label({ className, children }: { className?: string; children: React.Re
 
 function Tag({ children }: { children: React.ReactNode }) {
   return (
-    <span className="rounded-sm border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">
+    <span className="w-fit rounded-sm border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">
       {children}
     </span>
   );
 }
 
-// A section opens with its number, its heading with one phrase marked, and
+// A section opens with its label, its heading with one phrase marked, and
 // a line under it.
 function SectionHead({
-  number,
+  label,
   title,
   blurb,
 }: {
-  number: string;
+  label: string;
   title: React.ReactNode;
   blurb?: string;
 }) {
   return (
     <div className="rise-in flex flex-col gap-3">
-      <Label>{number}</Label>
+      <Label>{label}</Label>
       <h2 className="text-[28px] font-semibold leading-[1.15] tracking-tight text-foreground sm:text-[32px]">
         {title}
       </h2>
@@ -375,18 +433,6 @@ function Cells({ className, children }: { className?: string; children: React.Re
   );
 }
 
-function Cell({ className, children }: { className?: string; children: React.ReactNode }) {
-  return (
-    <div
-      className={cn(
-        "-mt-px -ml-px flex flex-col gap-3 border-t border-l border-border bg-card p-5",
-        className,
-      )}
-    >
-      {children}
-    </div>
-  );
-}
 
 function Chip({ href, children }: { href: string; children: React.ReactNode }) {
   return (
@@ -458,7 +504,7 @@ export default async function SplashPage() {
 
         <section className="flex flex-col gap-6">
           <SectionHead
-            number="01 · What it is for"
+            label="What it is for"
             title={
               <>
                 Telemetry, monitoring, <Mark>privacy</Mark>.
@@ -466,34 +512,40 @@ export default async function SplashPage() {
             }
             blurb="Built in this order on the foundation below, for agents in production: a service, a nightly batch, a coding session, a graph."
           />
-          {/* The cells share their rows — number, title, lead, list — so the
+          {/* The cells share their rows — motion, title, lead, list — so the
               rule above each list is one line across the row, where the
               longest lead ends, rather than three at three heights. */}
-          <Cells className="sm:grid-cols-3">
-            {GOALS.map((goal, i) => (
-              <Cell key={goal.title} className="row-span-4 grid grid-rows-subgrid">
-                <div className="flex items-start justify-between gap-4">
-                  <Label>0{i + 1}</Label>
+          <Cells className="bg-card">
+            <div className="grid grid-cols-1 gap-6 p-5 sm:grid-cols-3 sm:gap-0 sm:grid-rows-[auto_auto_auto_1fr]">
+              {GOALS.map((goal, i) => (
+                <div
+                  key={goal.title}
+                  className={cn(
+                    "row-span-4 grid grid-rows-subgrid gap-3",
+                    i > 0 && "border-t border-border pt-6 sm:border-t-0 sm:border-l sm:border-border sm:pt-0 sm:pl-6",
+                    i < GOALS.length - 1 && "sm:pr-6",
+                  )}
+                >
                   <Glyph kind={goal.glyph} />
+                  <h3 className="text-[15px] font-medium text-foreground">{goal.title}</h3>
+                  <p className="text-sm leading-[1.5] text-muted-foreground">{goal.lead}</p>
+                  <ul className="flex flex-col gap-2 border-t border-border pt-3 text-sm leading-[1.4] text-muted-foreground">
+                    {goal.points.map((point) => (
+                      <li key={point} className="flex gap-2">
+                        <span aria-hidden="true" className="mt-[0.55em] size-1 shrink-0 rounded-full bg-muted-foreground" />
+                        {point}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <h3 className="text-[15px] font-medium text-foreground">{goal.title}</h3>
-                <p className="text-sm leading-[1.5] text-muted-foreground">{goal.lead}</p>
-                <ul className="mt-1 flex flex-col gap-2 border-t border-border pt-3 text-sm leading-[1.4] text-muted-foreground">
-                  {goal.points.map((point) => (
-                    <li key={point} className="flex gap-2">
-                      <span aria-hidden="true" className="mt-[0.55em] size-1 shrink-0 rounded-full bg-muted-foreground" />
-                      {point}
-                    </li>
-                  ))}
-                </ul>
-              </Cell>
-            ))}
+              ))}
+            </div>
           </Cells>
         </section>
 
         <section className="flex flex-col gap-6">
           <SectionHead
-            number="02 · Open source"
+            label="Open source"
             title={
               <>
                 <Mark>Open platform.</Mark> Open source.
@@ -501,26 +553,36 @@ export default async function SplashPage() {
             }
             blurb="The whole platform is Apache-2.0: the server, the console and the docs it serves, the CLI and the SDKs, and the agent skills. Nothing is held back."
           />
-          <Cells className="sm:grid-cols-2">
-            {OPEN.map((box) => (
-              <Cell key={box.title}>
-                <h3 className="text-[15px] font-medium text-foreground">{box.title}</h3>
-                <p className="text-sm leading-[1.5] text-muted-foreground">{box.blurb}</p>
-                <ul className="mt-auto flex flex-wrap gap-2 pt-1">
-                  {box.links.map((link) => (
-                    <li key={link.href}>
-                      <Chip href={link.href}>{link.label}</Chip>
-                    </li>
-                  ))}
-                </ul>
-              </Cell>
-            ))}
+          <Cells className="bg-card">
+            <div className="grid grid-cols-1 gap-6 p-5 sm:grid-cols-2 sm:grid-rows-[auto_auto_auto_1fr] sm:gap-0">
+              {OPEN.map((box, i) => (
+                <div
+                  key={box.title}
+                  className={cn(
+                    "row-span-4 grid grid-rows-subgrid gap-3",
+                    i > 0 && "border-t border-border pt-6 sm:border-t-0 sm:border-l sm:border-border sm:pt-0 sm:pl-6",
+                    i < OPEN.length - 1 && "sm:pr-6",
+                  )}
+                >
+                  <Glyph kind={box.glyph} />
+                  <h3 className="text-[15px] font-medium text-foreground">{box.title}</h3>
+                  <p className="text-sm leading-[1.5] text-muted-foreground">{box.blurb}</p>
+                  <ul className="flex flex-wrap content-start gap-2 border-t border-border pt-3">
+                    {box.links.map((link) => (
+                      <li key={link.href}>
+                        <Chip href={link.href}>{link.label}</Chip>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
           </Cells>
         </section>
 
         <section className="flex flex-col gap-6">
           <SectionHead
-            number="03 · Developers and agents"
+            label="Developers and agents"
             title={
               <>
                 Work from the console or a terminal, or <Mark>send an agent</Mark>.
@@ -528,16 +590,10 @@ export default async function SplashPage() {
             }
             blurb="Work in the console or from a terminal. The console agent answers about your project with citations; the skill, the CLI and the API connect coding agents to Telmoni."
           />
-          <Cells className="sm:grid-cols-3">
-            {/* The agent's cell spans the row and splits in two at the wide
-                breakpoint, the three things it finds beside the text, so
-                nothing is left blank under it. */}
-            <Cell className="gap-4 sm:col-span-3 lg:grid lg:grid-cols-[1.2fr_1fr] lg:gap-8">
+          <Cells className="bg-card">
+            <div className="flex flex-col gap-4 p-5 lg:grid lg:grid-cols-[1.2fr_1fr] lg:gap-8">
               <div className="flex flex-col gap-4">
-                <div className="flex items-center justify-between">
-                  <Label>00</Label>
-                  <Tag>{AGENT.tag}</Tag>
-                </div>
+                <Tag>{AGENT.tag}</Tag>
                 <h3 className="text-[17px] font-medium text-foreground">{AGENT.title}</h3>
                 <p className="max-w-[58ch] text-[15px] leading-[1.5] text-muted-foreground">
                   {AGENT.body}
@@ -558,26 +614,33 @@ export default async function SplashPage() {
                   </div>
                 ))}
               </dl>
-            </Cell>
-            {DOORS.map((door, i) => (
-              <Cell key={door.title}>
-                <div className="flex items-center justify-between">
-                  <Label>0{i + 1}</Label>
+            </div>
+            <div className="mx-5 border-t border-border" />
+            <div className="grid grid-cols-1 gap-6 p-5 sm:grid-cols-3 sm:gap-0">
+              {DOORS.map((door, i) => (
+                <div
+                  key={door.title}
+                  className={cn(
+                    "flex flex-col gap-3",
+                    i > 0 && "border-t border-border pt-6 sm:border-t-0 sm:border-l sm:pt-0 sm:pl-6",
+                    i < DOORS.length - 1 && "sm:pr-6",
+                  )}
+                >
                   <Tag>{door.tag}</Tag>
+                  <h3 className="text-[15px] font-medium text-foreground">{door.title}</h3>
+                  <p className="text-sm leading-[1.45] text-muted-foreground">{door.body}</p>
+                  <div className="mt-auto pt-1">
+                    <Arrow href={door.link.href}>{door.link.label}</Arrow>
+                  </div>
                 </div>
-                <h3 className="text-[15px] font-medium text-foreground">{door.title}</h3>
-                <p className="text-sm leading-[1.45] text-muted-foreground">{door.body}</p>
-                <div className="mt-auto pt-1">
-                  <Arrow href={door.link.href}>{door.link.label}</Arrow>
-                </div>
-              </Cell>
-            ))}
+              ))}
+            </div>
           </Cells>
         </section>
 
         <section className="flex flex-col gap-6">
           <SectionHead
-            number="04 · Why"
+            label="Why"
             title={
               <>
                 <Mark>Why</Mark> Telmoni?
@@ -600,7 +663,7 @@ export default async function SplashPage() {
 
         <section className="flex flex-col gap-6">
           <SectionHead
-            number="05 · Get started"
+            label="Get started"
             title={
               <>
                 Start in <Mark>a minute</Mark>.
@@ -608,35 +671,37 @@ export default async function SplashPage() {
             }
             blurb="Sign up, create a project in the organization your first sign-in makes, make an API key and install the CLI. Or hand it to a coding agent."
           />
-          <Cells className="lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-            <Cell className="gap-4">
-              <h3 className="text-[15px] font-medium text-foreground">By hand</h3>
-              <p className="text-sm leading-[1.5] text-muted-foreground">
-                {"The console walks you through the organization and the project; the docs have the CLI's installer and the API's reference."}
-              </p>
-              <div className="mt-auto pt-1">
-                <WayIn signedIn={signedIn} align="start" />
+          <Cells className="bg-card">
+            <div className="flex flex-col gap-6 p-5 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:gap-8">
+              <div className="flex flex-col gap-4">
+                <h3 className="text-[15px] font-medium text-foreground">By hand</h3>
+                <p className="text-sm leading-[1.5] text-muted-foreground">
+                  {"The console walks you through the organization and the project; the docs have the CLI's installer and the API's reference."}
+                </p>
+                <div className="mt-auto pt-1">
+                  <WayIn signedIn={signedIn} align="start" />
+                </div>
               </div>
-            </Cell>
-            <Cell className="gap-4">
-              <h3 className="text-[15px] font-medium text-foreground">With a coding agent</h3>
-              <p className="text-sm leading-[1.5] text-muted-foreground">
-                The agent skill teaches Claude Code, Codex, Cursor and any agent that reads SKILL.md
-                to drive the CLI, call the API and build a webhook receiver.
-              </p>
-              <pre className="overflow-x-auto rounded-md border border-border bg-muted/40 p-3 text-xs leading-[1.6] text-foreground">
-                <code>{"/plugin marketplace add telmoni/skills\n/plugin install telmoni@telmoni"}</code>
-              </pre>
-              <p className="text-xs leading-[1.5] text-muted-foreground">
-                From any other agent, <code>npx skills add telmoni/skills</code>. Then ask it to set
-                this project up with Telmoni: the CLI, an API key and a webhook receiver.
-              </p>
-            </Cell>
+              <div className="flex flex-col gap-4 border-t border-border pt-6 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-8">
+                <h3 className="text-[15px] font-medium text-foreground">With a coding agent</h3>
+                <p className="text-sm leading-[1.5] text-muted-foreground">
+                  The agent skill teaches Claude Code, Codex, Cursor and any agent that reads SKILL.md
+                  to drive the CLI, call the API and build a webhook receiver.
+                </p>
+                <pre className="overflow-x-auto rounded-md border border-border bg-muted/40 p-3 text-xs leading-[1.6] text-foreground">
+                  <code>{"/plugin marketplace add telmoni/skills\n/plugin install telmoni@telmoni"}</code>
+                </pre>
+                <p className="text-xs leading-[1.5] text-muted-foreground">
+                  From any other agent, <code>npx skills add telmoni/skills</code>. Then ask it to set
+                  this project up with Telmoni: the CLI, an API key and a webhook receiver.
+                </p>
+              </div>
+            </div>
           </Cells>
         </section>
 
         <section className="flex flex-col gap-6">
-          <SectionHead number="06 · Questions" title="Questions and answers" />
+          <SectionHead label="Questions" title="Questions and answers" />
           <div className="border-t border-border">
             {FAQ.map((entry) => (
               <details key={entry.question} className="group border-b border-border">
