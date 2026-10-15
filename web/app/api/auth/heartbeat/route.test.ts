@@ -127,10 +127,13 @@ describe("POST /api/auth/heartbeat", () => {
     });
 
     mockRefreshSessionTokens.mockResolvedValue({
-      userId: "usr_1",
-      sessionRowId: "sess_live",
-      expiresAt: newExpiresAt,
-      refreshToken: "rt_new",
+      kind: "renewed",
+      session: {
+        userId: "usr_1",
+        sessionRowId: "sess_live",
+        expiresAt: newExpiresAt,
+        refreshToken: "rt_new",
+      },
     });
 
     const res = await beat();
@@ -149,11 +152,30 @@ describe("POST /api/auth/heartbeat", () => {
       expiresAt: Date.now() + 30_000,
       refreshToken: "rt_old",
     });
-    mockRefreshSessionTokens.mockResolvedValue(null);
+    mockRefreshSessionTokens.mockResolvedValue({ kind: "refused" });
 
     const res = await beat();
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ ok: false, error: "refresh_failed" });
     expect(res.cookies.get("telmoni_session")?.value).toBe("");
+  });
+
+  // Auth down says nothing of the session: the cookie stands untouched, and
+  // the page's heartbeat, which retries anything but a 401, asks again —
+  // within auth's grace, as auth may have spent the token all the same.
+  it("keeps the session and asks again soon when auth does not answer the refresh", async () => {
+    mockGetSession.mockResolvedValue({
+      userId: "usr_1",
+      sessionRowId: "sess_live",
+      expiresAt: Date.now() + 30_000,
+      refreshToken: "rt_old",
+    });
+    mockRefreshSessionTokens.mockResolvedValue({ kind: "unreachable" });
+
+    const res = await beat();
+    expect(res.status).toBe(503);
+    expect(res.headers.get("retry-after")).toBe("5");
+    expect(await res.json()).toEqual({ ok: false, error: "unavailable" });
+    expect(res.cookies.get("telmoni_session")).toBeUndefined();
   });
 });

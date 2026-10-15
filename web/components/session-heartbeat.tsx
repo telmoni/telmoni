@@ -6,17 +6,27 @@ import { afterRefusedHeartbeat } from "@/lib/auth/heartbeat";
 
 const RETRY_MS = 30_000;
 
-const REQUEST_TIMEOUT_MS = 10_000;
+/** After a renewal nobody answered — a 503, auth silent, or the ping cut off
+ *  — which auth may have made all the same: asked again well inside the
+ *  thirty seconds auth lets a spent refresh token come back in, past which
+ *  the ask reads as a stolen copy and ends the session. That long, never
+ *  later: not held to the schedule's mark before expiry. */
+const UNANSWERED_RETRY_MS = 5_000;
+
+/** How many quick asks the grace holds. Past it a spent token is lost
+ *  whatever is asked, and an auth that stays down is asked at the usual
+ *  pace rather than every few seconds from every open tab. */
+const UNANSWERED_RETRIES = 4;
+
+/** Past the route's own ten seconds on auth, so its 503 comes back rather
+ *  than this cutoff. */
+const REQUEST_TIMEOUT_MS = 15_000;
 
 interface SessionHeartbeatProps {
   expiresAt: number;
-  needsReseal?: boolean;
 }
 
-export function SessionHeartbeat({
-  expiresAt: initialExpiresAt,
-  needsReseal,
-}: SessionHeartbeatProps) {
+export function SessionHeartbeat({ expiresAt: initialExpiresAt }: SessionHeartbeatProps) {
   const expiresAtRef = useRef(initialExpiresAt);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -35,6 +45,7 @@ export function SessionHeartbeat({
     // A closure-local flag still does the only job it had — no two
     // overlapping pings from one run — and teardown discards it.
     let inFlight = false;
+    let unansweredInRow = 0;
 
     async function pingHeartbeat() {
       if (inFlight || unmounted) return;
@@ -47,6 +58,7 @@ export function SessionHeartbeat({
       // suite runs on fake timers, which drive setTimeout but not the latter.
       const abort = new AbortController();
       const cutoff = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
+      let unanswered = false;
       try {
         const res = await fetch("/api/auth/heartbeat", {
           method: "POST",
@@ -70,16 +82,33 @@ export function SessionHeartbeat({
           } | null;
           if (data?.expiresAt) {
             expiresAtRef.current = data.expiresAt;
+            unansweredInRow = 0;
             scheduleNext();
             return;
           }
         }
+        unanswered = res.status === 503;
       } catch {
+        // Cut off, or never sent: auth may have spent the token all the same.
+        unanswered = true;
       } finally {
         clearTimeout(cutoff);
         inFlight = false;
       }
-      if (!unmounted) scheduleNext(RETRY_MS);
+      if (unmounted) return;
+      if (unanswered && unansweredInRow < UNANSWERED_RETRIES) {
+        unansweredInRow += 1;
+        askAgainSoon();
+      } else {
+        scheduleNext(RETRY_MS);
+      }
+    }
+
+    function askAgainSoon() {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        void pingHeartbeat();
+      }, UNANSWERED_RETRY_MS);
     }
 
     function scheduleNext(minDelayMs = 5_000) {
@@ -99,13 +128,8 @@ export function SessionHeartbeat({
       }, delay);
     }
 
-    // If Next.js rendered a Server Component where cookies are read-only,
-    // getSession() flags needsReseal=true so this client heartbeat immediately
-    // asks /api/auth/heartbeat (a Route Handler) to persist the updated cookie.
     const requiresImmediatePing =
-      needsReseal ||
-      (expiresAtRef.current > 0 &&
-        Date.now() + 90_000 >= expiresAtRef.current);
+      expiresAtRef.current > 0 && Date.now() + 90_000 >= expiresAtRef.current;
 
     if (requiresImmediatePing) {
       void pingHeartbeat();
@@ -133,7 +157,7 @@ export function SessionHeartbeat({
       document.removeEventListener("visibilitychange", onVisibilityOrFocus);
       window.removeEventListener("focus", onVisibilityOrFocus);
     };
-  }, [initialExpiresAt, needsReseal]);
+  }, [initialExpiresAt]);
 
   return null;
 }

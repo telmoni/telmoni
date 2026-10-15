@@ -25,7 +25,6 @@ export interface SessionData {
   expiresAt: number;
   idToken: string | null;
   authMethod: string | null;
-  needsReseal?: boolean;
 }
 
 export const SESSION_COOKIE = "telmoni_session";
@@ -36,32 +35,30 @@ export const PKCE_COOKIE = "telmoni_pkce";
 // to the service, and the query string is the vendor's to fill, not ours.
 export const CONNECT_COOKIE = "telmoni_connect";
 
-const REFRESH_THRESHOLD_MS = 60_000;
-
-// How long the sealed cookie lives. Exported because the two Route Handlers
-// that reseal onto a NextResponse cannot use `writeSessionCookie` below — it
-// writes through `cookies()`, which a response-scoped cookie jar is not — and
-// both spelled the literal out instead. Two spellings of one TTL is one that
-// gets changed alone.
+// How long the sealed cookie lives. Exported because what reseals onto a
+// NextResponse (the sign-in's callback, the heartbeat and the proxy's
+// renewal) cannot use `writeSessionCookie` below, which writes
+// through `cookies()`, as a response-scoped cookie jar does not, and each
+// spelled the literal out instead. Two spellings of one TTL is one that gets
+// changed alone.
 export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 
 const pw = () => env.AUTH_SECRET;
 
+/// The session the request carries, as the proxy left it: renewed there
+/// before anything renders, once its bearer is about to lapse
+/// (`lib/proxy/session.ts`).
+///
+/// ⚠ **Never renews it.** A page cannot write the cookie, so a refresh made
+/// here was lost with the render, and auth takes a refresh token presented
+/// again past its thirty seconds' grace as a copy somebody kept, and ends the
+/// whole session: the home page, opened twice on a lapsed bearer, signed its
+/// reader out. Only what writes the cookie it renews spends the refresh
+/// token — the proxy, and the heartbeat's Route Handler.
 export async function getSession(): Promise<SessionData | null> {
   const jar = await cookies();
-  const value = jar.get(SESSION_COOKIE)?.value;
-  if (!value) return null;
-
-  let data: SessionData;
-  try {
-    const unsealed = await unsealData<Partial<SessionData>>(value, {
-      password: pw(),
-    });
-    if (!unsealed?.userId) return null;
-    data = normalize(unsealed);
-  } catch {
-    return null;
-  }
+  const data = await unsealSession(jar.get(SESSION_COOKIE)?.value);
+  if (!data) return null;
 
   if (await isSessionBlacklisted(sessionEndKey(data))) {
     try {
@@ -70,31 +67,21 @@ export async function getSession(): Promise<SessionData | null> {
     }
     return null;
   }
+  return data;
+}
 
-  if (Date.now() + REFRESH_THRESHOLD_MS < data.expiresAt) {
-    return data;
-  }
-
-  const refreshed = await refreshSessionTokens(data);
-  if (!refreshed) {
-    try {
-      jar.delete(SESSION_COOKIE);
-    } catch {
-    }
+/// The session a sealed cookie holds; `null` for one that does not unseal or
+/// names nobody.
+export async function unsealSession(value: string | undefined): Promise<SessionData | null> {
+  if (!value) return null;
+  try {
+    const unsealed = await unsealData<Partial<SessionData>>(value, {
+      password: pw(),
+    });
+    return unsealed?.userId ? normalize(unsealed) : null;
+  } catch {
     return null;
   }
-
-  try {
-    const sealed = await sealSession(refreshed);
-    jar.set({
-      name: SESSION_COOKIE,
-      value: sealed,
-      ...cookieOpts(SESSION_TTL_SECONDS),
-    });
-  } catch {
-    refreshed.needsReseal = true;
-  }
-  return refreshed;
 }
 
 /// Whether the session cookie names a row the console has already ended — an
@@ -190,14 +177,14 @@ export async function sealSession(data: SessionData): Promise<string> {
 //
 // Only callable where cookies are writable — a Server Action or a Route
 // Handler. A Server Component holds a ReadonlyRequestCookies and this throws,
-// which is why `getSession` above wraps the same two lines in its own try/catch
-// and sets `needsReseal` instead.
+// which is why a lapsing session is renewed in the proxy rather than by the
+// page that finds it.
 //
 // ⚠ Exists so the cookie's NAME, FLAGS and TTL have one spelling for everything
-// that writes through the request's cookie jar. The two Route Handlers that
-// reseal onto a NextResponse still set the three by hand — a response-scoped
-// jar is a different object — but they now spend the exported
-// SESSION_TTL_SECONDS rather than re-typing the literal.
+// that writes through the request's cookie jar. What reseals onto a
+// NextResponse still sets the three by hand — a response-scoped jar is a
+// different object — but spends the exported SESSION_TTL_SECONDS and
+// `cookieOpts` rather than re-typing them.
 export async function writeSessionCookie(data: SessionData): Promise<void> {
   const jar = await cookies();
   jar.set({
@@ -278,21 +265,30 @@ function normalize(partial: Partial<SessionData>): SessionData {
   };
 }
 
+/// A session renewed, the renewal refused, or auth not answering it
+/// (`refreshTokens`): the session stands then, and is asked about again.
+export type Renewal =
+  | { kind: "renewed"; session: SessionData }
+  | { kind: "refused" }
+  | { kind: "unreachable" };
+
 // The refresh carries the session row's id so auth marks it seen as it rotates
-// the tokens; the console makes no call of its own for that. `null` ends the
-// session at every caller, a revoked row included — auth refuses the grant.
-export async function refreshSessionTokens(
-  data: SessionData,
-): Promise<SessionData | null> {
-  if (!data.refreshToken) return null;
-  const result = await refreshTokens(data.refreshToken, data.sessionRowId);
-  if (!result) return null;
+// the tokens; the console makes no call of its own for that. A revoked row is
+// a refused grant, and so is a session with no refresh token to spend.
+export async function refreshSessionTokens(data: SessionData): Promise<Renewal> {
+  if (!data.refreshToken) return { kind: "refused" };
+  const answer = await refreshTokens(data.refreshToken, data.sessionRowId);
+  if (answer.kind !== "granted") return answer;
+  const { tokens } = answer;
   return {
-    ...data,
-    accessToken: result.accessToken,
-    refreshToken: result.refreshToken ?? data.refreshToken,
-    sessionId: result.sessionId,
-    expiresAt: Date.now() + result.expiresIn * 1000,
-    idToken: data.idToken,
+    kind: "renewed",
+    session: {
+      ...data,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken ?? data.refreshToken,
+      sessionId: tokens.sessionId,
+      expiresAt: Date.now() + tokens.expiresIn * 1000,
+      idToken: data.idToken,
+    },
   };
 }

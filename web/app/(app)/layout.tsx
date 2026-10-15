@@ -84,7 +84,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           sessions={sessions}
           currentSessionId={session.sessionRowId}
           expiresAt={session.expiresAt}
-          needsReseal={session.needsReseal}
         />
       </StoreProvider>
     );
@@ -95,10 +94,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="group/console theme-console flex h-svh flex-col">
-      <SessionHeartbeat
-        expiresAt={session.expiresAt}
-        needsReseal={session.needsReseal}
-      />
+      <SessionHeartbeat expiresAt={session.expiresAt} />
       <ConsoleTrailRecorder />
       <StoreProvider {...seed}>
         <OrganizationSync rendered={(ctx && activeOrganization(ctx)?.slug) ?? null} />

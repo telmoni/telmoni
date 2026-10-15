@@ -168,14 +168,24 @@ export async function getLogoutUrl(
   }
 }
 
+/// What auth answered a refresh: the next pair, its refusal, or nothing to go
+/// on.
+export type RefreshAnswer =
+  | { kind: "granted"; tokens: AuthnResult }
+  | { kind: "refused" }
+  | { kind: "unreachable" };
+
 // `session_row_id` names the `auth.sessions` row this sign-in was recorded
 // under, so auth marks it seen as it rotates the tokens — there is no separate
-// touch. A refused grant, a revoked row included, is a 401 and answers `null`,
-// which ends the session.
+// touch. A refusal — the token spent, lapsed or revoked, the row with it — is
+// a 4xx, and asking again would be refused again: the session is over. No
+// answer — a timeout, a 429, a 5xx — says nothing about the session, so it is
+// told apart, and the caller keeps the session and asks again later rather
+// than signing somebody out because auth blinked.
 export async function refreshTokens(
   refreshToken: string,
   sessionRowId: string | null,
-): Promise<AuthnResult | null> {
+): Promise<RefreshAnswer> {
   try {
     const res = await fetchWithTimeout(
       `${env.SERVER_URL}/internal/auth/refresh`,
@@ -185,18 +195,32 @@ export async function refreshTokens(
         body: JSON.stringify({ refresh_token: refreshToken, session_row_id: sessionRowId }),
       },
     );
-    if (!res.ok) return null;
-    const parsed = AuthnResultSchema.safeParse(await res.json());
-    return parsed.success ? parsed.data : null;
+    if (res.ok) {
+      let body: unknown;
+      try {
+        body = await res.json();
+      } catch {
+        // Cut off or garbled on its way: auth rotated, and takes the spent
+        // token back for its thirty seconds, so asked again inside them it
+        // answers. The parser's message is not logged: it quotes the body,
+        // and the body holds the tokens.
+        logger.warn("auth: token refresh answer unread");
+        return { kind: "unreachable" };
+      }
+      const parsed = AuthnResultSchema.safeParse(body);
+      // A grant read whole but of another shape reads no better asked again.
+      return parsed.success ? { kind: "granted", tokens: parsed.data } : { kind: "refused" };
+    }
+    if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
+      return { kind: "refused" };
+    }
+    logger.warn({ status: res.status }, "auth: token refresh unanswered");
+    return { kind: "unreachable" };
   } catch (err) {
-    // `null` here ends the session: `getSession` deletes the cookie when a
-    // refresh fails. An outage at auth during the refresh window therefore
-    // signs people out, and without this line it did so with nothing in the
-    // logs to say why.
     logger.warn(
       { error: err instanceof Error ? err.message : String(err) },
       "auth: token refresh failed",
     );
-    return null;
+    return { kind: "unreachable" };
   }
 }

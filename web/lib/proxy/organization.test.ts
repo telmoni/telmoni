@@ -61,9 +61,14 @@ async function run(request: NextRequest): Promise<NextResponse> {
   return res;
 }
 
-/** A signed-in request for `path`. */
+/** A signed-in request for `path`, its session sealed as a sign-in seals one:
+ *  the proxy ends a session whose bearer has lapsed with no refresh token to
+ *  renew it, so a bare id would be signed out before the path was read. */
 async function visit(path: string, init: { cookie?: string; headers?: Record<string, string> } = {}) {
-  const session = await sealData({ userId: "user_1" }, { password: SECRET });
+  const session = await sealData(
+    { userId: "user_1", refreshToken: "rt_1", expiresAt: Date.now() + 60 * 60 * 1000 },
+    { password: SECRET },
+  );
   const cookies = [`telmoni_session=${session}`, ...(init.cookie ? [init.cookie] : [])];
   return run(
     new NextRequest(`http://localhost:3000${path}`, {

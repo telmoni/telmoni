@@ -1,28 +1,34 @@
-import { unsealData } from 'iron-session';
-import { type NextProxy, type NextRequest, NextResponse } from 'next/server';
+import { type NextProxy, NextResponse } from 'next/server';
 
-import { logger } from '@/lib/logger';
+import { SESSION_COOKIE, SESSION_TTL_SECONDS, cookieOpts } from '@/lib/auth/session';
 import { ORGANIZATION_HEADER, PATH_HEADER, namedOrganization } from '@/lib/proxy/organization';
 import { isPublic } from '@/lib/proxy/public-paths';
+import { type SettledSession, settleSession } from '@/lib/proxy/session';
 
-async function isLoggedIn(request: NextRequest): Promise<boolean> {
-  const value = request.cookies.get('telmoni_session')?.value;
-  if (!value) return false;
-  const password = process.env.AUTH_SECRET;
-  if (!password) {
-    // Through pino, not `console`: Next 16 runs the proxy on the Node.js
-    // runtime only (a `runtime` segment config here is a build error), so
-    // the same subscriber the rest of the server uses is available. A
-    // total-outage condition should not arrive at DEFAULT severity.
-    logger.error('proxy: AUTH_SECRET is unset — no session can be verified');
-    return false;
+// The two routes that write the session cookie themselves — the callback a
+// new session, the sign-out a cleared one — so a renewal here would only
+// spend a token on a session they replace. (The test door writes one too,
+// over anything set here, and answers only where tests may sign in.) Every
+// other `/auth` page reads the session as any page does: the device
+// approval spends its bearer.
+function writesItsOwnSession(pathname: string): boolean {
+  return pathname === '/auth/callback' || pathname === '/auth/logout';
+}
+
+// The browser's copy of what settling the session did to its cookie, on
+// every answer the proxy gives: a redirect to sign in and a refusal too, so
+// an ended session's cookie goes wherever the request was headed.
+function carry(settled: SettledSession | null, response: NextResponse): NextResponse {
+  if (settled?.kind === 'renewed') {
+    response.cookies.set({
+      name: SESSION_COOKIE,
+      value: settled.sealed,
+      ...cookieOpts(SESSION_TTL_SECONDS),
+    });
+  } else if (settled?.kind === 'ended') {
+    response.cookies.delete(SESSION_COOKIE);
   }
-  try {
-    const data = await unsealData<{ userId?: string }>(value, { password });
-    return !!data?.userId;
-  } catch {
-    return false;
-  }
+  return response;
 }
 
 // The identity provider's origins, for `form-action`: signing out from the
@@ -104,17 +110,27 @@ export const proxy: NextProxy = async (request) => {
     if (target) return NextResponse.redirect(target, 308);
   }
 
-  const loggedIn     = await isLoggedIn(request);
+  // The session is renewed here, once its bearer is about to lapse, and
+  // nowhere a page renders (`lib/proxy/session.ts`): the renewed cookie is
+  // written into the request, so every page, action and handler below reads
+  // it, and onto the answer, so the browser keeps it.
+  const settled = writesItsOwnSession(pathname)
+    ? null
+    : await settleSession(request.cookies.get(SESSION_COOKIE)?.value);
+  if (settled?.kind === 'renewed') request.cookies.set(SESSION_COOKIE, settled.sealed);
+  if (settled?.kind === 'ended') request.cookies.delete(SESSION_COOKIE);
+
+  const loggedIn     = settled?.kind === 'kept' || settled?.kind === 'renewed';
   const isProtected  = !isPublic(pathname);
 
   if (isProtected && !loggedIn) {
     if (pathname.startsWith('/api/')) {
-      return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
+      return carry(settled, NextResponse.json({ error: 'unauthenticated' }, { status: 401 }));
     }
     const entry = '/auth/login';
     const url = new URL(entry, request.url);
     url.searchParams.set('returnTo', pathname + request.nextUrl.search);
-    return NextResponse.redirect(url);
+    return carry(settled, NextResponse.redirect(url));
   }
 
   const nonce = btoa(crypto.randomUUID());
@@ -134,7 +150,7 @@ export const proxy: NextProxy = async (request) => {
 
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set('content-security-policy', csp);
-  return response;
+  return carry(settled, response);
 };
 
 // The dots are escaped: the pattern is a regex, and an unescaped one is any

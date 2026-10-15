@@ -60,8 +60,8 @@ export async function POST(request: NextRequest) {
   if (isNearExpiry) {
     // The refresh names the session row, so a revocation from another device
     // surfaces here as a refused grant rather than through a call of its own.
-    const refreshed = await refreshSessionTokens(currentSession);
-    if (!refreshed) {
+    const renewal = await refreshSessionTokens(currentSession);
+    if (renewal.kind === "refused") {
       const response = NextResponse.json(
         { ok: false, error: "refresh_failed" },
         { status: 401 },
@@ -69,7 +69,17 @@ export async function POST(request: NextRequest) {
       response.cookies.delete(SESSION_COOKIE);
       return response;
     }
-    currentSession = refreshed;
+    // Auth did not answer, which says nothing of the session: it stands,
+    // and the page's heartbeat asks again — within auth's grace, as auth may
+    // have spent the token before its answer was lost — rather than sending
+    // anyone to sign in while auth is down.
+    if (renewal.kind === "unreachable") {
+      return NextResponse.json(
+        { ok: false, error: "unavailable" },
+        { status: 503, headers: { "Retry-After": "5" } },
+      );
+    }
+    currentSession = renewal.session;
   }
 
   const sealed = await sealSession(currentSession);

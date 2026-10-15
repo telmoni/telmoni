@@ -103,9 +103,11 @@ describe("refreshTokens", () => {
   // tokens; the console makes no call of its own for that any more.
   it("posts the grant and the session row, and answers the rotated tokens", async () => {
     fetchWithTimeout.mockResolvedValue(rotated());
-    const result = await refreshTokens("rt_old", "sess_1");
-    expect(result?.accessToken).toBe("at_new");
-    expect(result?.sessionId).toBe("ses_1");
+    const answer = await refreshTokens("rt_old", "sess_1");
+    expect(answer).toMatchObject({
+      kind: "granted",
+      tokens: { accessToken: "at_new", sessionId: "ses_1" },
+    });
     expect(sent().url).toBe("http://auth.test/internal/auth/refresh");
     expect(sent().body).toEqual({ refresh_token: "rt_old", session_row_id: "sess_1" });
     expect(sent().headers["x-service-secret"]).toBe("s3cret");
@@ -118,15 +120,36 @@ describe("refreshTokens", () => {
   });
 
   // A 401 is the grant refused — a row revoked from another device among the
-  // reasons — and `null` is what ends the session at every caller.
-  it("answers null when auth refuses the grant", async () => {
+  // reasons — and a refusal is what ends the session at every caller.
+  it("answers a refusal when auth refuses the grant", async () => {
     fetchWithTimeout.mockResolvedValue(new Response("{}", { status: 401 }));
-    await expect(refreshTokens("rt_old", "sess_1")).resolves.toBeNull();
+    await expect(refreshTokens("rt_old", "sess_1")).resolves.toEqual({ kind: "refused" });
+  });
+
+  // No answer says nothing of the session, so the caller keeps it and asks
+  // again, rather than signing somebody out because auth blinked.
+  it("answers that auth was unreachable for a 5xx, a 429 and a request that failed", async () => {
+    fetchWithTimeout.mockResolvedValueOnce(new Response("{}", { status: 503 }));
+    await expect(refreshTokens("rt_old", null)).resolves.toEqual({ kind: "unreachable" });
+
+    fetchWithTimeout.mockResolvedValueOnce(new Response("{}", { status: 429 }));
+    await expect(refreshTokens("rt_old", null)).resolves.toEqual({ kind: "unreachable" });
+
+    fetchWithTimeout.mockRejectedValueOnce(new Error("connect ECONNREFUSED"));
+    await expect(refreshTokens("rt_old", null)).resolves.toEqual({ kind: "unreachable" });
+  });
+
+  // Auth rotated and its answer came cut off: it takes the spent token back
+  // for thirty seconds, so the next ask inside them is answered — never a
+  // sign-out for a body lost on its way.
+  it("answers that auth was unreachable for a grant whose body did not arrive whole", async () => {
+    fetchWithTimeout.mockResolvedValueOnce(new Response('{"accessToken":"at_', { status: 200 }));
+    await expect(refreshTokens("rt_old", null)).resolves.toEqual({ kind: "unreachable" });
   });
 
   // The bearer is opaque, so the session id rides the answer or nothing
   // could name the session at sign-out.
-  it("answers null for a grant that names no session", async () => {
+  it("answers a refusal for a grant that names no session", async () => {
     fetchWithTimeout.mockResolvedValue(
       ok({
         userId: "user_1",
@@ -139,7 +162,7 @@ describe("refreshTokens", () => {
         expiresIn: 3600,
       }),
     );
-    await expect(refreshTokens("rt_old", "sess_1")).resolves.toBeNull();
+    await expect(refreshTokens("rt_old", "sess_1")).resolves.toEqual({ kind: "refused" });
   });
 });
 

@@ -23,7 +23,6 @@ export function AccountOnly({
   sessions = null,
   currentSessionId = null,
   expiresAt,
-  needsReseal,
 }: {
   email: string;
   authMethod?: string | null;
@@ -34,11 +33,10 @@ export function AccountOnly({
   sessions?: ActiveSession[] | null;
   currentSessionId?: string | null;
   expiresAt: number;
-  needsReseal?: boolean;
 }) {
   return (
     <PaperShell signedIn>
-      <SessionHeartbeat expiresAt={expiresAt} needsReseal={needsReseal} />
+      <SessionHeartbeat expiresAt={expiresAt} />
       <main className="mx-auto grid w-full max-w-xl gap-6 px-3.5 py-10">
         <Card data-testid="account-only">
           <h1 className="text-lg font-semibold">You&apos;re not in an organization</h1>

@@ -122,7 +122,7 @@ flowchart LR
 ```mermaid
 flowchart TB
   subgraph Web["web: the Next.js console"]
-    Proxy["proxy.ts: sign-in gate, CSP"]
+    Proxy["proxy.ts: sign-in gate, session renewal, CSP"]
     Pages["Server Components and Server Actions"]
     Relays["Route Handlers: reads, agent turns, live events"]
   end
@@ -168,7 +168,7 @@ sequenceDiagram
   participant S as Server
   participant P as Postgres
   B->>C: a page, with the sealed session cookie
-  C->>C: proxy.ts: the cookie unseals, a CSP nonce, the organization the path names
+  C->>C: proxy.ts: the cookie unseals, renewed near its bearer's end, a CSP nonce, the organization the path names
   C->>S: /me, then the lane: bearer, service secret, organization, project, request id
   S->>S: the service secret, then the bearer looked up by its hash
   S->>P: a transaction scoped to the tenant, the role read inside it
@@ -200,7 +200,7 @@ Every way in:
 **Who is asking** is auth's answer, `Acting`, on every request: the person, the organization, both roles, the session.
 - **One issuer.** The password form, an OIDC provider and the CLI's device grant all end in the same opaque session — a short-lived bearer and a refresh token rotated on every use — stored as hashes. An external provider only answers "who is this".
 - **Ending a session holds on the next request**, since every request looks its bearer up.
-- **The console's side** is a sealed cookie holding the session's tokens, refreshed near expiry.
+- **The console's side** is a sealed cookie holding the session's tokens, renewed near expiry only where the cookie can be written: by an open tab's heartbeat through its own Route Handler, and otherwise by the proxy before anything renders (`web/lib/proxy/session.ts`), on every path but the sign-in's callback and the sign-out, which write the cookie themselves; the proxy writes the renewed cookie both into the request the page renders with and onto the answer the browser keeps. Never by a page, which cannot write it: auth takes a refresh token presented again past its thirty seconds' grace as a copy somebody kept, and ends the session. The requests a page sends together share one renewal in each process, auth's grace covering the few a second replica sends; a refusal clears the cookie; and an auth that does not answer leaves the session to be asked about again within that grace, since auth may have spent the token before its answer was lost.
 - **API keys** are minted on a project, hashed, shown once, with an expiry and a rotation grace.
 - **Abuse limits** are where the cost is: lockouts and a decoy hash in auth, capped codes and links, and per-person and per-address windows at the console's edge.
 
