@@ -78,11 +78,17 @@ function DialogContent({
 // One surface, title to actions, with no rule between them and the body, laid
 // out as a console page is (asked 2026-10-08): the console's edge padding,
 // 14px (`p-3.5`, as `<main>` keeps), all round, and the close button inside it
-// like any other control — its box 14px from the top and the right, as a page
-// action's is — with the title on the same row, centred on it as a page title
-// is on its actions. The title's 7px centres its 22px line on the button's
-// 36px and keeps a wrapped title's first line there, so a long name never
-// pulls the button off the padding.
+// like any other control — its box 14px from the top, the right and what
+// comes under it, as a page action's is — with the title on the same row,
+// centred on it as a page title is on its actions. The title's 7px centres its
+// 22px line on the button's 36px and keeps a wrapped title's first line there,
+// so a long name never pulls the button off the padding.
+//
+// ⚠ **The 14px under the header and over the footer are theirs, not the
+// body's** (asked 2026-10-15). The body scrolls when the window is short, and
+// padding of its own scrolled away with its content, which then ran flush
+// under the close button and into the buttons. Held by the two that stand
+// still, the gaps hold whatever the body does; the body keeps its sides alone.
 function DialogHeader({
   className,
   children,
@@ -92,7 +98,7 @@ function DialogHeader({
     <div
       data-slot="dialog-header"
       className={cn(
-        "flex shrink-0 items-start gap-3 px-3.5 pt-3.5",
+        "flex shrink-0 items-start gap-3 p-3.5",
         className,
       )}
       {...props}
@@ -113,7 +119,7 @@ function DialogBody({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-body"
-      className={cn("grid min-h-0 content-start gap-4 overflow-y-auto p-3.5", className)}
+      className={cn("grid min-h-0 content-start gap-4 overflow-y-auto px-3.5", className)}
       {...props}
     />
   );
@@ -124,7 +130,7 @@ function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="dialog-footer"
       className={cn(
-        "flex shrink-0 items-center justify-end gap-3 px-3.5 pb-3.5",
+        "flex shrink-0 items-center justify-end gap-3 p-3.5",
         className,
       )}
       {...props}

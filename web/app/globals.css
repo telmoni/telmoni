@@ -406,8 +406,9 @@
    text's own colour, past WCAG 2.4.13's 3:1 on either theme, where the browser
    marks focus visible: from the keyboard, and in a text field however it was
    reached, never on a click on a button or a link. In the rail, a menu or a
-   list, and a row of joined segments, each of which clips what overflows, it
-   is drawn inside the element. */
+   list, a row of joined segments, and a modal's body, which scrolls between
+   its header and footer with no padding of its own above or below, each of
+   which clips what overflows, it is drawn inside the element. */
 html.a11y-focus-rings *:focus-visible {
   outline: 2px solid var(--color-foreground);
   outline-offset: 2px;
@@ -416,7 +417,7 @@ html.a11y-focus-rings *:focus-visible {
      3px over its duration. */
   transition-property: color, background-color, border-color, opacity, box-shadow;
 }
-html.a11y-focus-rings :is(#console-sidebar, [role="menu"], [role="listbox"], [data-segmented]) *:focus-visible {
+html.a11y-focus-rings :is(#console-sidebar, [role="menu"], [role="listbox"], [data-segmented], [data-slot="dialog-body"], [data-slot="alert-dialog-body"]) *:focus-visible {
   outline-offset: -2px;
 }
 

@@ -242,7 +242,7 @@ export function ConsoleSearch() {
 
         {/* The palette's header is its input row: the field and the close
             button on one row, inside the same 14px every modal keeps. */}
-        <DialogHeader className="items-center gap-2.5 pb-3.5">
+        <DialogHeader className="items-center gap-2.5">
           <Search aria-hidden className="size-4 shrink-0 text-muted-foreground" />
           <input
             ref={inputRef}
@@ -269,8 +269,9 @@ export function ConsoleSearch() {
 
         {/* The chassis's body, unpadded at the sides: a result row's
             highlight runs edge to edge, and each row keeps the 14px inset
-            inside itself, the field's, as every modal's edge is. */}
-        <DialogBody id={PANEL_ID} className="block p-0 py-1.5">
+            inside itself, the field's, as every modal's edge is. Above and
+            below, the header's and the legend's 14px, as in every modal. */}
+        <DialogBody id={PANEL_ID} className="block p-0">
           {projectId && loading && (
             <p className="px-3.5 py-3 text-sm text-muted-foreground">
               Looking through this project&rsquo;s resources…

@@ -80,7 +80,8 @@ function AlertDialogContent({
 // action's is — with the title on the same row, centred on it as a page title
 // is on its actions. The title's 7px centres its 22px line on the button's
 // 36px and keeps a wrapped title's first line there, so a long name never
-// pulls the button off the padding.
+// pulls the button off the padding. The 14px under the header and over the
+// footer are theirs, not the scrolling body's, as in `dialog.tsx`.
 function AlertDialogHeader({
   className,
   children,
@@ -90,7 +91,7 @@ function AlertDialogHeader({
     <div
       data-slot="alert-dialog-header"
       className={cn(
-        "flex shrink-0 items-start gap-3 px-3.5 pt-3.5",
+        "flex shrink-0 items-start gap-3 p-3.5",
         className,
       )}
       {...props}
@@ -114,7 +115,7 @@ function AlertDialogBody({
   return (
     <div
       data-slot="alert-dialog-body"
-      className={cn("grid min-h-0 content-start gap-4 overflow-y-auto p-3.5", className)}
+      className={cn("grid min-h-0 content-start gap-4 overflow-y-auto px-3.5", className)}
       {...props}
     />
   );
@@ -128,7 +129,7 @@ function AlertDialogFooter({
     <div
       data-slot="alert-dialog-footer"
       className={cn(
-        "flex shrink-0 items-center justify-end gap-3 px-3.5 pb-3.5",
+        "flex shrink-0 items-center justify-end gap-3 p-3.5",
         className,
       )}
       {...props}
