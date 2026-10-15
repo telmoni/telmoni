@@ -119,9 +119,14 @@ export default async function TracesPage({
             Install an{" "}
             <Link href="/docs/api/sdks" className="underline underline-offset-4">
               SDK
-            </Link>
-            , wrap one function as a run, and its trace lists here within a minute of ending.
-            Runs from the last {days} {days === 1 ? "day" : "days"} are shown.
+            </Link>{" "}
+            and wrap one function as a run, or add the{" "}
+            <Link href="/docs/api/coding-agents" className="underline underline-offset-4">
+              coding-agent plugin
+            </Link>{" "}
+            for Claude Code, Codex, OpenCode or Cursor, and each run&rsquo;s trace lists here
+            within a minute of ending. Runs from the last {days} {days === 1 ? "day" : "days"} are
+            shown.
           </>
         }
       />

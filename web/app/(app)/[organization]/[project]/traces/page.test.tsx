@@ -343,6 +343,10 @@ describe("TracesPage", () => {
     render(await TracesPage({ params: PARAMS }));
     expect(screen.getByText("Nothing to show yet.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "SDK" })).toHaveAttribute("href", "/docs/api/sdks");
+    expect(screen.getByRole("link", { name: "coding-agent plugin" })).toHaveAttribute(
+      "href",
+      "/docs/api/coding-agents",
+    );
     expect(screen.queryByTestId("histogram")).toBeNull();
 
     render(
