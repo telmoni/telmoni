@@ -163,7 +163,9 @@ function MetricChart({
   const grid = <CartesianGrid vertical={false} />;
   const yAxis = (
     <YAxis
-      width={metric === "duration" ? 56 : 40}
+      // Measured from the labels drawn, not guessed per metric: a fixed
+      // forty pixels cut the first digit off a tokens axis past 9,999.
+      width="auto"
       tickLine={false}
       axisLine={false}
       allowDecimals={false}
