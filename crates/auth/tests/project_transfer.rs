@@ -2,8 +2,8 @@
 //! admin takes it into an organization they own, and the project changes
 //! organization in one transaction. Every guard around that move — who may
 //! offer, to whom, where it may land, what ends an offer, what comes with the
-//! project and what stays behind — who is mailed each change, and its race
-//! with a removal.
+//! project and what stays behind — who is mailed each change, and its races
+//! with a removal and with the pings writing into the project.
 #![allow(
     clippy::indexing_slicing,
     reason = "a panicking helper is a failing test"
@@ -29,9 +29,12 @@ use telmoni_auth::test_provider::{
     as_person,
 };
 use telmoni_auth::{AppState, Config, Siblings, router};
+use telmoni_shared::db::project_move;
 use telmoni_shared::mail::{Mail, MailError, MailSender, NoopSender};
-use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, seed_identity, service_pool};
-use telmoni_shared::{OrganizationId, UserId};
+use telmoni_shared::test_util::{
+    ServiceRole, apply_audit_migrations, chain_lock_held, seed_identity, service_pool,
+};
+use telmoni_shared::{OrganizationId, ProjectId, UserId};
 
 const SERVICE_SECRET: &str = "test-service-secret";
 const OWNER: &str = "user_handover_owner";
@@ -1719,6 +1722,219 @@ async fn the_accept_holds_the_source_chain_while_the_settings_move(pool: PgPool)
         telemetry.chain_held_at_moves(),
         [true],
         "the accept moved the settings without holding the chain lock the content switch waits on"
+    );
+}
+
+/// ⚠ **Every move of the settings holds the project alone**: a refused
+/// accept's, the settling of it, an accepted one's and an owner's move, each
+/// under the project's move lock. Telemetry's pings hold their project in
+/// place while they write, so none writes beside a move — which would miss a
+/// ping's rows not yet committed, or move a row the ping then updates, a 500
+/// — and one that waited it out files its rows where the project went.
+#[sqlx::test]
+async fn every_move_of_the_settings_holds_the_project_alone(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let telemetry = Arc::new(RecordingTelemetry::new(SiblingCalls::default()));
+    telemetry.probing_move_lock(
+        pool.clone(),
+        ProjectId::try_new(h.project.as_str()).expect("the project's id"),
+    );
+    let with_telemetry = || {
+        build(
+            pool.clone(),
+            Arc::new(NoopSender),
+            None,
+            Some(telemetry.clone()),
+        )
+    };
+    assert_eq!(
+        offer(&pool, &h, OWNER, &h.source, ADMIN).await.0,
+        StatusCode::OK
+    );
+    let accept_path = format!("/internal/projects/{}/transfer/accept", h.project);
+
+    telemetry.failing_moves(1);
+    let (status, body) = send(
+        with_telemetry(),
+        &pool,
+        "POST",
+        &accept_path,
+        ADMIN,
+        Some(&h.admins),
+        None,
+        None,
+    )
+    .await;
+    assert!(status.is_server_error(), "{status} {body}");
+    let (status, body) = send(
+        with_telemetry(),
+        &pool,
+        "POST",
+        &accept_path,
+        ADMIN,
+        Some(&h.admins),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let second = found(&pool, ADMIN, "Second").await;
+    let (status, body) = send(
+        with_telemetry(),
+        &pool,
+        "POST",
+        &format!("/internal/projects/{}/move", h.project),
+        ADMIN,
+        Some(&h.admins),
+        None,
+        Some(json!({ "organizationId": second })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        telemetry.move_lock_held_at_moves(),
+        [true, true, true, true],
+        "a move of the settings made with the project not held alone: the refused accept's, \
+         its settling, the accepted one's, the owner's"
+    );
+}
+
+/// ⚠ **A transfer waits for the pings in flight before it takes a chain
+/// lock.** A ping holds its project in place from the start of its
+/// transaction and may wait for its organization's chain lock meanwhile, so
+/// an accept that took a chain lock and then waited on that ping would wait
+/// in a circle, which Postgres breaks by aborting one side.
+#[sqlx::test]
+async fn a_transfer_waits_for_the_pings_in_flight_before_it_takes_a_chain_lock(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    assert_eq!(
+        offer(&pool, &h, OWNER, &h.source, ADMIN).await.0,
+        StatusCode::OK
+    );
+    let mut ping = pool.begin().await.expect("a ping's transaction");
+    assert!(
+        project_move::try_hold_in_place(
+            &mut ping,
+            &ProjectId::try_new(h.project.as_str()).expect("the project's id"),
+        )
+        .await
+        .expect("try the project")
+    );
+
+    let accept = tokio::spawn({
+        let (pool, admins) = (pool.clone(), h.admins.clone());
+        let path = format!("/internal/projects/{}/transfer/accept", h.project);
+        async move { call(&pool, "POST", &path, ADMIN, Some(&admins), None).await }
+    });
+    until_a_request_waits_on_a_lock(&pool).await;
+    for organization in [&h.source, &h.admins] {
+        let organization =
+            OrganizationId::try_new(organization.as_str()).expect("an organization's id");
+        assert!(
+            !chain_lock_held(&pool, &organization).await,
+            "the accept took a chain lock before it waited for the ping"
+        );
+    }
+    ping.commit().await.expect("the ping commits");
+    let (status, body) = accept.await.expect("the accept answers");
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(organization_of_project(&pool, &h.project).await, h.admins);
+}
+
+/// A transfer a check refuses never waits on a ping: the project's move lock
+/// is taken once every check under the organizations' locks has passed, so
+/// a refusal is answered while a ping holds the project, and the
+/// organizations' lanes are not held behind the ping meanwhile — an accept's
+/// offer spent, an owner's move out of an organization being deleted.
+#[sqlx::test]
+async fn a_transfer_a_check_refuses_never_waits_on_a_ping(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    assert_eq!(
+        offer(&pool, &h, OWNER, &h.source, ADMIN).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(cancel(&pool, &h, OWNER, &h.source).await.0, StatusCode::OK);
+    let second = found(&pool, OWNER, "Second").await;
+    let mut ping = pool.begin().await.expect("a ping's transaction");
+    assert!(
+        project_move::try_hold_in_place(
+            &mut ping,
+            &ProjectId::try_new(h.project.as_str()).expect("the project's id"),
+        )
+        .await
+        .expect("try the project")
+    );
+
+    let (status, body) = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        accept(&pool, &h, ADMIN, &h.admins, None),
+    )
+    .await
+    .expect("the refused accept waited on the ping");
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    set_pending(&pool, &h.source, true).await;
+    let (status, body) = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        move_into(&pool, &h, OWNER, &h.source, &second),
+    )
+    .await
+    .expect("the refused move waited on the ping");
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    ping.rollback().await.expect("the ping ends");
+    assert_eq!(organization_of_project(&pool, &h.project).await, h.source);
+}
+
+/// A transfer kept waiting by a ping past the role's `lock_timeout` — a ping
+/// holding its project across a slow answer — is a 409 to try again, not a
+/// 500, and moves nothing; the next try, the ping gone, goes through.
+#[sqlx::test]
+async fn a_transfer_kept_waiting_by_a_ping_is_a_conflict(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    assert_eq!(
+        offer(&pool, &h, OWNER, &h.source, ADMIN).await.0,
+        StatusCode::OK
+    );
+    // A tier sets `lock_timeout` on the role, which the suite's `SET ROLE`
+    // does not take up: the database's own reaches every new connection.
+    let database: String = sqlx::query_scalar("SELECT current_database()")
+        .fetch_one(&pool)
+        .await
+        .expect("the suite's database");
+    sqlx::query(&format!(
+        "ALTER DATABASE \"{database}\" SET lock_timeout = '1s'"
+    ))
+    .execute(&pool)
+    .await
+    .expect("a lock_timeout for every new connection");
+    let mut ping = pool.begin().await.expect("a ping's transaction");
+    assert!(
+        project_move::try_hold_in_place(
+            &mut ping,
+            &ProjectId::try_new(h.project.as_str()).expect("the project's id"),
+        )
+        .await
+        .expect("try the project")
+    );
+
+    let (status, body) = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        accept(&pool, &h, ADMIN, &h.admins, None),
+    )
+    .await
+    .expect("the accept waited past its lock_timeout");
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        body["detail"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("the project is busy")),
+        "{body}"
+    );
+    assert_eq!(organization_of_project(&pool, &h.project).await, h.source);
+    ping.rollback().await.expect("the ping ends");
+    assert_eq!(
+        accept(&pool, &h, ADMIN, &h.admins, None).await.0,
+        StatusCode::OK
     );
 }
 

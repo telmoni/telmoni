@@ -354,6 +354,56 @@ impl Entitlements for PausedOrganization {
     }
 }
 
+/// Entitlements under which every organization takes in anything, recording
+/// at each ask of `organization`'s standing how many advisory locks the
+/// suite's database held then: a ping asks the standing of the organization
+/// its project moved to with nothing held, so no move waits on the answer.
+pub(crate) struct StandingAsked {
+    pool: PgPool,
+    organization: OrganizationId,
+    held: Mutex<Vec<i64>>,
+}
+
+impl StandingAsked {
+    pub(crate) fn of(pool: &PgPool, organization: &OrganizationId) -> Arc<Self> {
+        Arc::new(Self {
+            pool: pool.clone(),
+            organization: organization.clone(),
+            held: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// How many advisory locks were held at each ask, in order.
+    pub(crate) fn held(&self) -> Vec<i64> {
+        self.held
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
+#[async_trait]
+impl Entitlements for StandingAsked {
+    async fn grants(&self, organization_id: &OrganizationId) -> Result<Grants, TelmoniError> {
+        if *organization_id == self.organization {
+            let held: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM pg_locks
+                  WHERE locktype = 'advisory' AND granted
+                    AND database = (SELECT oid FROM pg_database
+                                     WHERE datname = current_database())",
+            )
+            .fetch_one(&self.pool)
+            .await
+            .expect("count the advisory locks held");
+            self.held
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(held);
+        }
+        Ok(Grants::unlimited())
+    }
+}
+
 /// Entitlements under which every organization holds `limit` monitors,
 /// answered after `after`, with whether the organization's chain lock was
 /// held at each ask recorded in order, probed from `pool` as auth's stub

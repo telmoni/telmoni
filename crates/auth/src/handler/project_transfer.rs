@@ -47,6 +47,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
+use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::{
     Maintenance, ProjectAndOrganization, Scoped, maintenance_scope,
 };
@@ -682,6 +683,33 @@ async fn lock_transfer_organizations(
     Ok(())
 }
 
+/// Postgres's `lock_not_available`: a `lock_timeout` ran out.
+const LOCK_NOT_AVAILABLE: &str = "55P03";
+
+/// The project's move lock, alone, for a move of its rows. A wait the role's
+/// `lock_timeout` ends — a ping holding the project across a slow answer —
+/// is a 409 to try again, not the 500 a database that failed would be.
+async fn lock_project_for_move(
+    conn: &mut sqlx::PgConnection,
+    project_id: &ProjectId,
+) -> Result<(), TelmoniError> {
+    let Err(e) = project_move::lock_for_move(conn, project_id).await else {
+        return Ok(());
+    };
+    let timed_out = e
+        .as_database_error()
+        .and_then(|db| db.code())
+        .is_some_and(|code| code == LOCK_NOT_AVAILABLE);
+    if !timed_out {
+        return Err(e.into());
+    }
+    tracing::warn!(
+        project_id = %project_id,
+        "a move of a project gave up waiting for the pings writing into it"
+    );
+    Err(AuthError::Conflict("the project is busy — try again in a moment".into()).into())
+}
+
 /// `POST /internal/projects/{project_id}/transfer/accept` — the admin holding
 /// a live offer takes the project into an organization they own. The
 /// previous owner keeps a seat on it, as an admin, and is mailed.
@@ -698,6 +726,14 @@ async fn lock_transfer_organizations(
 /// could land after their account deletion read what they own, and leave a
 /// project in an organization whose owner can never sign in to hand it on.
 /// Under the lock, somebody on their way out is refused.
+///
+/// ⚠ **The project's move lock, alone, once every check has passed and
+/// before any chain lock**, held to the commit
+/// ([`telmoni_shared::db::project_move`]): an accept a check refuses never
+/// waits on a ping, the accept waits for the pings writing into the project
+/// — as long as the role's `lock_timeout` lets it, then a 409 — and a ping
+/// kept out meanwhile files its rows under the organization it then finds
+/// the project in.
 ///
 /// ⚠ **Telemetry's move, then notifications' purge, then the commit, and a
 /// step that fails moves nothing.** Telemetry's move of the project's
@@ -850,6 +886,10 @@ pub async fn accept(
         }
     }
 
+    // The project's move lock once every check has passed, so an accept a
+    // check refuses never waits on a ping, and before the audit rows take a
+    // chain lock, which a ping holding the project may be waiting for.
+    lock_project_for_move(&mut tx, &project_id).await?;
     emit_project_transfer_audits(
         &mut tx,
         TransferAudits {
@@ -929,7 +969,8 @@ pub struct MoveRequest {
 /// one deleted.
 ///
 /// ⚠ **The caller's own lock first, then both organizations' by id**, as the
-/// accept takes them, and every role and status read again under them.
+/// accept takes them, and every role and status read again under them; then
+/// the project's move lock, as the accept takes it.
 pub async fn move_project(
     State(state): State<Arc<AppState>>,
     Path(project_id): Path<String>,
@@ -1037,6 +1078,9 @@ pub async fn move_project(
         }
     }
 
+    // Where the accept takes it, for the accept's reasons: no refused move
+    // waits on a ping, and no chain lock is held while one does.
+    lock_project_for_move(&mut tx, &project_id).await?;
     emit_project_move_audits(
         &mut tx,
         MoveAudits {
@@ -1206,9 +1250,12 @@ async fn move_purge_and_commit(
 /// a step after it failed, one over its budget may still land, and a commit
 /// may land with its answer lost. So the settling reads where auth holds the
 /// project, under both organizations' locks, as an accept takes them, and
-/// moves the settings there — right whichever happened, a retry's accept in
-/// between included; a project moved on since, beyond both, is the later
-/// accept's to settle. The
+/// moves the settings there under the project's move lock — right whichever
+/// happened, a retry's accept in between included; a project moved on since,
+/// beyond both, is the later accept's to settle. A ping let in between the
+/// two moves filed its rows under the organization the first one named: its
+/// telemetry rows go back with the rest, while what it recorded on that
+/// organization's chain, and a notice delivered there, stay. The
 /// request settles them itself before it answers, so a rollout that waits for
 /// it waits for that too; a settling that fails, or a request dropped before
 /// it could, leaves the guard armed, and its drop tries again in a task of
@@ -1314,6 +1361,9 @@ impl Settle {
         if standing.organization_id != self.source && standing.organization_id != self.destination {
             return Ok(());
         }
+        // So that no ping writes beside the move, which would miss its rows
+        // or have its updates refused.
+        lock_project_for_move(&mut tx, &self.project_id).await?;
         crate::handler::deletion::move_project_telemetry(
             &self.state,
             &self.project_id,

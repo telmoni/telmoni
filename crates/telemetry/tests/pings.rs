@@ -6,9 +6,13 @@
 //! outbox as a finished span and the monitor's state and next due time
 //! follow, or as `error` by the next ping that finds it never said it ended;
 //! a ping whose run ends beside it changing nothing; a ping waiting on no
-//! other writer in a circle, and refused where a transfer moved its key
-//! after it was resolved; the run a ping names
-//! by `rid`; every run's ceiling, and the stall timeout a discovered
+//! other writer in a circle; the project held in place while a ping writes,
+//! so a move waits for the pings in flight, keeping new ones out meanwhile,
+//! and takes their rows, and a ping a move keeps out holds no connection
+//! while it waits, files its rows where the project went once let in, its
+//! new organization's standing asked with nothing held, or gives up as on
+//! the chain lock; the run a ping names by `rid`; every run's ceiling, and
+//! the stall timeout a discovered
 //! monitor is given; a monitor whose saved timing cannot be read refusing
 //! none of its pings; a body is dropped and said so, the query held to
 //! numbers, the methods and paths to the lane's, and no answer one a cache
@@ -23,6 +27,7 @@
 mod common;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use axum::Router;
@@ -35,8 +40,9 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use common::{Answer, AuthStub, Ceiling, NoticeLog, PausedOrganization, SECRET};
+use common::{Answer, AuthStub, Ceiling, NoticeLog, PausedOrganization, SECRET, StandingAsked};
 use telmoni_shared::audit::lock_chain;
+use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::seam::{Entitlements, NoLimits};
@@ -272,7 +278,7 @@ impl Project {
         &self,
         pool: &PgPool,
         path: &str,
-        order: &[Lock<'_>],
+        order: &[Lock],
     ) -> (StatusCode, String) {
         let (first, rest) = order.split_first().expect("a lock to hold first");
         let mut writer = pool.begin().await.expect("the writer's transaction");
@@ -301,11 +307,121 @@ impl Project {
         answer
     }
 
+    /// A `GET` ping sent while the project moves to `to`: a writer, a session
+    /// of `pool`'s, takes `held` before the ping is sent; once the ping waits
+    /// on it, a move as auth and telemetry make one — the project's move lock
+    /// alone, then the organization's chain lock, as an accept takes them,
+    /// then every row the project has handed to `to` — is started on a
+    /// transaction opened before the ping, held to waiting on the ping alone,
+    /// and then the writer commits. The ping's answer, once the move is done
+    /// too.
+    async fn ping_as_the_project_moves(
+        &self,
+        pool: &PgPool,
+        path: &str,
+        held: Lock,
+        to: &OrganizationId,
+    ) -> (StatusCode, String) {
+        let mut writer = pool.begin().await.expect("the writer's transaction");
+        let writer_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *writer)
+            .await
+            .expect("the writer's session");
+        self.take(&mut writer, held).await;
+        let mut mover = maintenance_scope(&self.state.db, TelemetryLane)
+            .await
+            .expect("the lane");
+        let (answer, ()) = tokio::join!(self.ping(path), async {
+            let ping_pid = waiting_on(pool, writer_pid, "the ping waits on the writer").await;
+            let ((), ()) = tokio::join!(
+                async {
+                    project_move::lock_for_move(mover.conn(), &self.project)
+                        .await
+                        .expect("the move lock");
+                    lock_chain(mover.conn(), &self.organization)
+                        .await
+                        .expect("the chain lock");
+                    db::move_project(&mut mover, &self.project, to)
+                        .await
+                        .expect("moved");
+                    mover.commit().await.expect("the move commits");
+                },
+                async {
+                    let mover_pid = waiting_on(pool, ping_pid, "the move waits on the ping").await;
+                    let blocking: Vec<i32> = sqlx::query_scalar("SELECT pg_blocking_pids($1)")
+                        .bind(mover_pid)
+                        .fetch_one(pool)
+                        .await
+                        .expect("ask what the move waits on");
+                    assert_eq!(blocking, [ping_pid], "the move waits on the ping alone");
+                    writer.commit().await.expect("the writer commits");
+                },
+            );
+        });
+        answer
+    }
+
+    /// A `GET` ping whose key is resolved before the project moves to `to`
+    /// and whose transaction comes after: a move as auth and telemetry make
+    /// one — the project's move lock alone, then the organization's chain
+    /// lock, as an accept takes them, then every row the project has handed
+    /// to `to` — holds the project from before the ping is sent until the
+    /// ping has resolved its key, touching it, and has been kept out a while;
+    /// the ping answered only once the move commits.
+    async fn ping_resolved_before_a_move(
+        &self,
+        pool: &PgPool,
+        path: &str,
+        to: &OrganizationId,
+    ) -> (StatusCode, String) {
+        untouched(pool, &self.project).await;
+        let mut mover = maintenance_scope(&self.state.db, TelemetryLane)
+            .await
+            .expect("the lane");
+        project_move::lock_for_move(mover.conn(), &self.project)
+            .await
+            .expect("the move lock");
+        lock_chain(mover.conn(), &self.organization)
+            .await
+            .expect("the chain lock");
+        let project = &self.project;
+        let committing = AtomicBool::new(false);
+        let kept_out = async {
+            let answer = self.ping(path).await;
+            assert!(
+                committing.load(Ordering::SeqCst),
+                "the ping was let in before the move committed"
+            );
+            answer
+        };
+        let (answer, ()) = tokio::join!(kept_out, async {
+            common::eventually("the ping resolves its key", move || async move {
+                sqlx::query_scalar::<_, bool>(
+                    "SELECT last_ping_at IS NOT NULL FROM telemetry.ping_keys
+                      WHERE project_id = $1 AND retired_at IS NULL",
+                )
+                .bind(project)
+                .fetch_one(pool)
+                .await
+                .expect("read the live key")
+            })
+            .await;
+            // Long enough for the ping to have tried the project and let go:
+            // the move is to commit while the ping is kept out.
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            db::move_project(&mut mover, project, to)
+                .await
+                .expect("moved");
+            committing.store(true, Ordering::SeqCst);
+            mover.commit().await.expect("the move commits");
+        });
+        answer
+    }
+
     /// One of the writer's locks: the organization's chain lock, or every row
     /// the project has in a table — rewritten to the organization each names
-    /// already, moved to another as a transfer moves them, or deleted as a
-    /// purge deletes them.
-    async fn take(&self, writer: &mut sqlx::PgConnection, lock: Lock<'_>) {
+    /// already, or deleted as a purge deletes them.
+    async fn take(&self, writer: &mut sqlx::PgConnection, lock: Lock) {
         let (table, taken) = match lock {
             Lock::Chain => {
                 lock_chain(writer, &self.organization)
@@ -320,16 +436,6 @@ impl Project {
                       WHERE project_id = $1"
                 ))
                 .bind(&self.project)
-                .execute(writer)
-                .await,
-            ),
-            Lock::Moved(table, to) => (
-                table,
-                sqlx::query(&format!(
-                    "UPDATE telemetry.{table} SET organization_id = $2 WHERE project_id = $1"
-                ))
-                .bind(&self.project)
-                .bind(to)
                 .execute(writer)
                 .await,
             ),
@@ -359,13 +465,12 @@ impl Project {
 }
 
 /// A lock a writer beside a ping takes: the organization's chain lock; the
-/// project's rows in one table, rewritten in place, moved to another
-/// organization, or purged; or its live keys, retired.
+/// project's rows in one table, rewritten in place or purged; or its live
+/// keys, retired.
 #[derive(Debug, Clone, Copy)]
-enum Lock<'a> {
+enum Lock {
     Chain,
     Rows(&'static str),
-    Moved(&'static str, &'a OrganizationId),
     Purged(&'static str),
     Retired,
 }
@@ -473,6 +578,42 @@ async fn filed_under(pool: &PgPool, table: &str, project: &ProjectId) -> Vec<Str
     .fetch_all(pool)
     .await
     .expect("read where the project's rows are filed")
+}
+
+/// The one session found waiting on `pid`'s locks, polled for as `what`.
+async fn waiting_on(pool: &PgPool, pid: i32, what: &str) -> i32 {
+    common::eventually(what, move || async move {
+        sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+                             WHERE $1 = ANY (pg_blocking_pids(pid)))",
+        )
+        .bind(pid)
+        .fetch_one(pool)
+        .await
+        .expect("ask who waits")
+    })
+    .await;
+    let waiting: Vec<i32> = sqlx::query_scalar(
+        "SELECT pid FROM pg_stat_activity WHERE $1 = ANY (pg_blocking_pids(pid))",
+    )
+    .bind(pid)
+    .fetch_all(pool)
+    .await
+    .expect("the sessions waiting");
+    assert_eq!(waiting.len(), 1, "{what}: {waiting:?} wait");
+    waiting.first().copied().expect("the session waiting")
+}
+
+/// Whether every row the project has in `table` is filed under
+/// `organization`, and it has one at least.
+async fn all_filed_under(
+    pool: &PgPool,
+    table: &str,
+    project: &ProjectId,
+    organization: &OrganizationId,
+) -> bool {
+    let filed = filed_under(pool, table, project).await;
+    !filed.is_empty() && filed.iter().all(|o| o == organization.as_str())
 }
 
 /// The project's live key as if no ping had come under it in the last
@@ -982,10 +1123,12 @@ async fn a_ping_whose_run_ends_beside_it_changes_nothing(pool: PgPool) {
 /// ping in a circle over it. Each writer here is one of the project's: a
 /// retirement under the chain lock, a settling's move with the settings row,
 /// a transfer's move with the runs and the monitors, a purge with the
-/// monitors. Wherever in its own transaction a ping touched its key — first,
-/// once its monitor is found, once its run is written, once its monitor is —
-/// one of them would wait on it in a circle until Postgres ended the ping,
-/// which waited first: a 500.
+/// monitors. The moves here take their rows without the project's move lock,
+/// which would keep the ping out of their way altogether, so that the ping
+/// meets them row by row. Wherever in its own transaction a ping touched its
+/// key — first, once its monitor is found, once its run is written, once its
+/// monitor is — one of them would wait on it in a circle until Postgres
+/// ended the ping, which waited first: a 500.
 #[sqlx::test]
 async fn a_ping_waits_on_no_writer_in_a_circle(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -1104,74 +1247,307 @@ async fn a_ping_waits_on_no_writer_in_a_circle(pool: PgPool) {
     assert!(open_runs(&pool, &p.project).await.is_empty());
 }
 
-/// A ping is refused, not filed under the organization that gave its project
-/// up, where a transfer moved its key after the key was resolved: the key is
-/// read again in the ping's own transaction before it writes, and again once
-/// a first ping has the chain lock, which a transfer's accept holds across
-/// its move. Filed under the organization the key named, a run or a monitor
-/// would be one the old organization's purge takes and the new one's never
-/// finds, and a first ping would file the project's settings row back under
-/// the old one. The next ping resolves the key afresh.
+/// A ping a move kept out files its rows where the project went: the move
+/// holds the project's move lock alone, taken before any chain lock as a
+/// transfer takes it, and the ping reads its key's organization only once it
+/// holds the project in place. So a ping resolved before the move and let in
+/// after it is neither refused nor filed under the organization that gave
+/// the project up, whose purge would take its rows and the new one's never
+/// find them — and it is held to the new organization's standing, asked with
+/// nothing held, so no move of the project waits on the answer.
 #[sqlx::test]
-async fn a_ping_whose_key_moved_since_it_was_resolved_is_refused(pool: PgPool) {
+async fn a_ping_a_move_kept_out_is_filed_where_the_project_went(pool: PgPool) {
     apply_audit_migrations(&pool).await;
     let elsewhere = OrganizationId::new();
 
-    // Moved once the key was resolved, before the ping's transaction began:
-    // a `/start` to a monitor its first ping made, which no run's ping writes
-    // to, would file its run and nothing else.
+    // A `/start` to a monitor its first ping made opens its run there.
     let p = project(&pool);
     let key = p.mint().await;
     p.ping_ok(&format!("/{key}/nightly-report")).await;
-    untouched(&pool, &p.project).await;
     let (status, body) = p
-        .ping_as_locks_are_taken(
-            &pool,
-            &format!("/{key}/nightly-report/start"),
-            &[
-                Lock::Moved("ping_keys", &elsewhere),
-                Lock::Moved("monitors", &elsewhere),
-                Lock::Moved("project_settings", &elsewhere),
-            ],
-        )
+        .ping_resolved_before_a_move(&pool, &format!("/{key}/nightly-report/start"), &elsewhere)
         .await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
-    assert!(body.contains("moved to another organization"), "{body}");
-    assert!(
-        open_runs(&pool, &p.project).await.is_empty(),
-        "a run filed under the organization that gave the project up"
+    assert_eq!((status, body.as_str()), (StatusCode::OK, "OK"));
+    assert_eq!(
+        filed_under(&pool, "open_runs", &p.project).await,
+        [elsewhere.to_string()],
+        "the run filed under the organization that gave the project up"
     );
+    assert_eq!(monitors_of(&pool, &p.project).await, 1);
 
-    // Moved while a first ping waited for the chain lock the accept held.
+    // A first ping makes its monitor there, records it on that organization's
+    // chain, and tells its owner there.
     let q = project(&pool);
     let key = q.mint().await;
     let (status, body) = q
-        .ping_as_locks_are_taken(
+        .ping_resolved_before_a_move(&pool, &format!("/{key}/nightly-report"), &elsewhere)
+        .await;
+    assert_eq!((status, body.as_str()), (StatusCode::OK, "OK"));
+    for table in ["monitors", "outbox", "project_settings"] {
+        assert!(
+            all_filed_under(&pool, table, &q.project, &elsewhere).await,
+            "{table}: {:?}",
+            filed_under(&pool, table, &q.project).await
+        );
+    }
+    assert_eq!(recorded(&pool, &elsewhere).await.len(), 1);
+    assert!(recorded(&pool, &q.organization).await.is_empty());
+
+    // Moved into a paused organization: a 402, and nothing written.
+    let paused = OrganizationId::new();
+    let r = project_under(
+        &pool,
+        OrganizationId::new(),
+        Arc::new(PausedOrganization(paused.clone())),
+    );
+    let key = r.mint().await;
+    let (status, body) = r
+        .ping_resolved_before_a_move(&pool, &format!("/{key}/nightly-report"), &paused)
+        .await;
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
+    assert_eq!(monitors_of(&pool, &r.project).await, 0);
+    assert!(outbox_of(&pool, &r.project).await.is_empty());
+
+    // The new organization's standing asked once, with nothing held.
+    let next = OrganizationId::new();
+    let standing = StandingAsked::of(&pool, &next);
+    let s = project_under(&pool, OrganizationId::new(), standing.clone());
+    let key = s.mint().await;
+    let (status, body) = s
+        .ping_resolved_before_a_move(&pool, &format!("/{key}/nightly-report"), &next)
+        .await;
+    assert_eq!((status, body.as_str()), (StatusCode::OK, "OK"));
+    assert_eq!(
+        standing.held(),
+        [0],
+        "the standing asked with an advisory lock held"
+    );
+    assert!(all_filed_under(&pool, "monitors", &s.project, &next).await);
+}
+
+/// A move waits for the pings in flight and takes their rows with the rest:
+/// a ping holds its project in place from the start of its transaction to
+/// its commit, so the move is held until the ping has written — never let
+/// past a run the ping had not committed, which would stay filed under the
+/// organization that gave the project up, nor commit a row the ping is about
+/// to update, which the row policy would refuse the ping, a 500. A first
+/// ping waiting for its organization's chain lock holds the move back the
+/// same way, in no circle: a move takes the project's lock before any chain
+/// lock.
+#[sqlx::test]
+async fn a_move_waits_for_the_pings_in_flight_and_takes_their_rows(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let elsewhere = OrganizationId::new();
+
+    // A `/start` writes its run, then waits on its monitor's row to settle it.
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.make(hourly()).await;
+    let (status, body) = p
+        .ping_as_the_project_moves(
             &pool,
-            &format!("/{key}/nightly-report"),
-            &[
-                Lock::Chain,
-                Lock::Moved("ping_keys", &elsewhere),
-                Lock::Moved("project_settings", &elsewhere),
-            ],
+            &format!("/{key}/hourly-sync/start"),
+            Lock::Rows("monitors"),
+            &elsewhere,
         )
         .await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
-    // The lock's own wait ends in a 409 too; this one is the key's.
-    assert!(body.contains("moved to another organization"), "{body}");
-    assert_eq!(monitors_of(&pool, &q.project).await, 0);
-    assert_eq!(
-        filed_under(&pool, "project_settings", &q.project).await,
-        [elsewhere.to_string()],
-        "the settings row filed back under the organization that gave the project up"
-    );
+    assert_eq!((status, body.as_str()), (StatusCode::OK, "OK"));
+    for table in ["open_runs", "monitors", "ping_keys", "project_settings"] {
+        assert!(
+            all_filed_under(&pool, table, &p.project, &elsewhere).await,
+            "{table}: {:?}",
+            filed_under(&pool, table, &p.project).await
+        );
+    }
 
-    // The next ping resolves the key where it stands now.
-    q.ping_ok(&format!("/{key}/nightly-report")).await;
-    assert_eq!(
-        filed_under(&pool, "monitors", &q.project).await,
-        [elsewhere.to_string()]
+    // A first ping waits for its organization's chain lock.
+    let q = project(&pool);
+    let key = q.mint().await;
+    let (status, body) = q
+        .ping_as_the_project_moves(
+            &pool,
+            &format!("/{key}/nightly-report"),
+            Lock::Chain,
+            &elsewhere,
+        )
+        .await;
+    assert_eq!((status, body.as_str()), (StatusCode::OK, "OK"));
+    for table in ["monitors", "outbox", "ping_keys", "project_settings"] {
+        assert!(
+            all_filed_under(&pool, table, &q.project, &elsewhere).await,
+            "{table}: {:?}",
+            filed_under(&pool, table, &q.project).await
+        );
+    }
+}
+
+/// A ping waits out a move no longer than it waits for the chain lock: past
+/// the two seconds, a 409 that says to try again, and nothing written. Pings
+/// holding the same project in place never keep each other out.
+#[sqlx::test]
+async fn a_ping_waits_on_a_move_no_longer_than_on_the_chain_lock(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    // Held in place by another ping until this one is answered, so a ping it
+    // kept out could end only in the 409 below.
+    let mut beside = pool.begin().await.expect("another ping's transaction");
+    assert!(
+        project_move::try_hold_in_place(&mut beside, &p.project)
+            .await
+            .expect("try the project")
     );
+    p.ping_ok(&format!("/{key}/hourly-sync")).await;
+    beside.rollback().await.expect("the other ping ends");
+
+    let mut moving = pool.begin().await.expect("a transaction to hold the lock");
+    project_move::lock_for_move(&mut moving, &p.project)
+        .await
+        .expect("the move lock");
+    let sent = std::time::Instant::now();
+    let (status, body) = tokio::time::timeout(
+        Duration::from_secs(10),
+        p.ping(&format!("/{key}/nightly-report")),
+    )
+    .await
+    .expect("the ping gave up on the move");
+    // The two seconds are counted once the key is resolved, after `sent`;
+    // the ceiling leaves room for a slow machine and none for a longer wait.
+    let waited = sent.elapsed();
+    assert!(
+        (Duration::from_secs(2)..Duration::from_secs(4)).contains(&waited),
+        "{waited:?}"
+    );
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        body.contains("the project is moving to another organization"),
+        "{body}"
+    );
+    assert_eq!(monitors_of(&pool, &p.project).await, 1);
+    moving.rollback().await.expect("let the lock go");
+    p.ping_ok(&format!("/{key}/nightly-report")).await;
+    assert_eq!(monitors_of(&pool, &p.project).await, 2);
+}
+
+/// Pings a move keeps out hold no connection while they wait: of more of
+/// them than the module's pool holds, sent while a move holds the project,
+/// none ever waits on the lock, a wait that would hold its connection, and
+/// the move's own work — telemetry's half of a transfer, on the same pool,
+/// while auth holds the lock — gets the connection it needs. None is let in
+/// before the move lets go, and each is answered once it does, filed where
+/// the project went.
+#[sqlx::test]
+async fn pings_a_move_keeps_out_hold_no_connection(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let elsewhere = OrganizationId::new();
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.make(hourly()).await;
+    let mut moving = pool.begin().await.expect("a transaction to hold the lock");
+    project_move::lock_for_move(&mut moving, &p.project)
+        .await
+        .expect("the move lock");
+    let mut kept_out = tokio::task::JoinSet::new();
+    for _ in 0..8 {
+        let (lane, path) = (p.pings.clone(), format!("/{key}/hourly-sync"));
+        kept_out.spawn(async move {
+            lane.oneshot(Request::get(path).body(Body::empty()).expect("a request"))
+                .await
+                .expect("the lane answers")
+                .status()
+        });
+    }
+    // Looked at while the pings are kept out, over and over, and let go well
+    // inside their two seconds.
+    for _ in 0..8 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let waiting: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_locks
+              WHERE locktype = 'advisory' AND NOT granted
+                AND database = (SELECT oid FROM pg_database
+                                 WHERE datname = current_database())",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("count the waits on an advisory lock");
+        assert_eq!(waiting, 0, "a ping kept out waits on the lock");
+    }
+    let moved = tokio::time::timeout(Duration::from_secs(1), async {
+        let mut tx = maintenance_scope(&p.state.db, TelemetryLane).await?;
+        db::move_project(&mut tx, &p.project, &elsewhere).await?;
+        tx.commit().await
+    })
+    .await;
+    assert!(
+        moved.is_ok_and(|done| done.is_ok()),
+        "the move's own work was kept from the pool"
+    );
+    assert!(
+        finished_runs(&pool, &p.project).await.is_empty(),
+        "a ping let in while the move held the project"
+    );
+    moving.rollback().await.expect("let the lock go");
+    while let Some(answered) = kept_out.join_next().await {
+        assert_eq!(answered.expect("a ping"), StatusCode::OK);
+    }
+    assert_eq!(finished_runs(&pool, &p.project).await.len(), 8);
+    assert!(all_filed_under(&pool, "outbox", &p.project, &elsewhere).await);
+}
+
+/// A move waiting on the pings in flight keeps new ones out until it is done,
+/// rather than let them in ahead of it, which a steady stream of pings could
+/// do until the move gave up: a ping sent while a move waits on another is
+/// let in only once the move commits, and files its run where the project
+/// went.
+#[sqlx::test]
+async fn a_move_waiting_on_the_pings_in_flight_keeps_new_ones_out(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let elsewhere = OrganizationId::new();
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.make(hourly()).await;
+    let mut in_flight = pool.begin().await.expect("a ping's transaction");
+    let in_flight_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *in_flight)
+        .await
+        .expect("the ping's session");
+    assert!(
+        project_move::try_hold_in_place(&mut in_flight, &p.project)
+            .await
+            .expect("try the project")
+    );
+    let mut mover = maintenance_scope(&p.state.db, TelemetryLane)
+        .await
+        .expect("the lane");
+    let committing = AtomicBool::new(false);
+    let ((), (status, body)) = tokio::join!(
+        async {
+            project_move::lock_for_move(mover.conn(), &p.project)
+                .await
+                .expect("the move lock");
+            db::move_project(&mut mover, &p.project, &elsewhere)
+                .await
+                .expect("moved");
+            committing.store(true, Ordering::SeqCst);
+            mover.commit().await.expect("the move commits");
+        },
+        async {
+            waiting_on(&pool, in_flight_pid, "the move waits on the ping in flight").await;
+            let path = format!("/{key}/hourly-sync");
+            let (answer, ()) = tokio::join!(p.ping(&path), async {
+                // Long enough for the new ping to have been kept out.
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                in_flight.rollback().await.expect("the ping in flight ends");
+            });
+            assert!(
+                committing.load(Ordering::SeqCst),
+                "the new ping was let in ahead of the waiting move"
+            );
+            answer
+        },
+    );
+    assert_eq!((status, body.as_str()), (StatusCode::OK, "OK"));
+    assert!(all_filed_under(&pool, "outbox", &p.project, &elsewhere).await);
 }
 
 /// A `rid` is a run's own name within its project: a script that derives

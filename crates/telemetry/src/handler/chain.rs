@@ -107,9 +107,10 @@ pub(crate) async fn lock(
 /// of its own, through a pool a burst can spend, and a read that waited on
 /// that under the lock would hold every other writer in the organization to
 /// the lock's two seconds and a 409 for as long as it waited; before the
-/// lock, and bounded, it costs this change alone a second at most. An answer
-/// not had in time is no ceiling, logged, as the seam answers one it cannot
-/// read.
+/// lock, and bounded, it costs this change a second at most — and a move of
+/// the project that second, where the change is a ping, which holds its
+/// project in place meanwhile. An answer not had in time is no ceiling,
+/// logged, as the seam answers one it cannot read.
 pub(crate) async fn ceiling(
     entitlements: &dyn Entitlements,
     organization_id: &OrganizationId,

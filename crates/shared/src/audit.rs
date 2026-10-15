@@ -103,7 +103,8 @@ async fn newest_link(
 /// audited change in the organization — a transfer, an ownership hand-over, a
 /// deletion — holds it from its audit row to its commit. A writer takes it
 /// before reading what its change depends on, so that what it read cannot
-/// move under it before it commits.
+/// move under it before it commits. A writer that takes a project's move lock
+/// as well takes that one first ([`crate::db::project_move`]).
 pub async fn lock_chain(
     conn: &mut PgConnection,
     organization_id: &OrganizationId,

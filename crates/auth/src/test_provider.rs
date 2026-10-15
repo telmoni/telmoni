@@ -324,6 +324,11 @@ pub struct RecordingTelemetry {
     chain_probe: Mutex<Option<(PgPool, OrganizationId)>>,
     /// For each move since probing began, whether that lock was held.
     chain_held: Mutex<Vec<bool>>,
+    /// A pool to ask from, and the project whose move lock to ask about at
+    /// each move.
+    move_probe: Mutex<Option<(PgPool, ProjectId)>>,
+    /// For each move since probing began, whether that lock was held alone.
+    move_held: Mutex<Vec<bool>>,
 }
 
 impl RecordingTelemetry {
@@ -338,6 +343,8 @@ impl RecordingTelemetry {
             move_delays: Mutex::new(VecDeque::new()),
             chain_probe: Mutex::new(None),
             chain_held: Mutex::new(Vec::new()),
+            move_probe: Mutex::new(None),
+            move_held: Mutex::new(Vec::new()),
         }
     }
 
@@ -357,6 +364,26 @@ impl RecordingTelemetry {
     #[must_use]
     pub fn chain_held_at_moves(&self) -> Vec<bool> {
         self.chain_held
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// At each move from now on, ask from a session of `pool`'s whether
+    /// `project`'s move lock is held alone: the lock a ping holds its project
+    /// in place with, which a move must hold so that no ping writes beside it.
+    pub fn probing_move_lock(&self, pool: PgPool, project: ProjectId) -> &Self {
+        *self
+            .move_probe
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((pool, project));
+        self
+    }
+
+    /// Whether the probed move lock was held alone at each move, in order.
+    #[must_use]
+    pub fn move_lock_held_at_moves(&self) -> Vec<bool> {
+        self.move_held
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
@@ -432,6 +459,18 @@ impl Telemetry for RecordingTelemetry {
         if let Some((pool, organization)) = probe {
             let held = telmoni_shared::test_util::chain_lock_held(&pool, &organization).await;
             self.chain_held
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(held);
+        }
+        let probe = self
+            .move_probe
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some((pool, project)) = probe {
+            let held = telmoni_shared::test_util::move_lock_held(&pool, &project).await;
+            self.move_held
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push(held);

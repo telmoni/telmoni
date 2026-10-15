@@ -2,6 +2,7 @@
 
 pub mod audit_hash;
 pub mod audit_verify;
+pub mod project_move;
 pub mod retention;
 pub mod tenant_session;
 

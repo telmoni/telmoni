@@ -618,7 +618,12 @@ pub async fn hashing_settings<B: HasProject>(
 /// `organization_id`, the organization auth says holds the project now — so
 /// the purges find every project with spans, and a row a transfer's failed
 /// settling left under another organization is re-filed. Its mode and its
-/// key are left as they are.
+/// key are left as they are. ⚠ The caller owes it an organization no move
+/// has passed since it was read — auth's answer under the chain lock a
+/// transfer holds across its move, or a ping's key read with the project
+/// held in place: one read before a transfer committed files the row back
+/// under the organization that gave the project up, as an export's can,
+/// which `hashing::storage_for_project` reads under neither.
 pub async fn ensure_settings(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,

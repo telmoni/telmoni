@@ -457,6 +457,14 @@ pub trait Telemetry: Send + Sync {
     /// A project handed to another organization: its settings — its content
     /// mode among them — go with it, so the new organization's purge, and
     /// never the old one's, is what removes them.
+    ///
+    /// ⚠ **The caller holds the project's move lock alone** across the call
+    /// and to its own commit ([`crate::db::project_move::lock_for_move`]): a
+    /// ping holds its project in place while it writes, so the move waits
+    /// for the pings in flight, and a ping kept out files its rows under the
+    /// organization it finds the project in once it is let in. A move given
+    /// up on over its budget may still commit after the caller lets go; its
+    /// settling takes the lock again.
     async fn move_project(
         &self,
         project_id: &ProjectId,
