@@ -2354,6 +2354,44 @@ async fn a_refused_notice_counts_a_try_and_one_notifications_could_not_write_doe
     assert_eq!(tries_of(&pool, &p.project).await, [(0, false)]);
 }
 
+/// The row a ping's discovery writes on the chain records the request's id
+/// only well formed: on the lane alone, as a suite mounts it, a caller's free
+/// text is no id at all; behind the binary's layers the lane sees no id of a
+/// caller's (`crates/telmoni/tests/health.rs`).
+#[sqlx::test]
+async fn a_discovery_records_no_free_text_for_its_request(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    for (slug, sent) in [
+        ("nightly-report", "it's free text, of any length"),
+        ("weekly-digest", "req-1"),
+    ] {
+        let answered = p
+            .pings
+            .clone()
+            .oneshot(
+                Request::get(format!("/{key}/{slug}"))
+                    .header("x-request-id", sent)
+                    .body(Body::empty())
+                    .expect("a request"),
+            )
+            .await
+            .expect("the lane answers");
+        assert_eq!(answered.status(), StatusCode::OK, "{slug}");
+    }
+    let recorded: Vec<Option<String>> = sqlx::query_scalar(
+        "SELECT request_id FROM audit.events
+          WHERE organization_id = $1 AND resource_kind = 'monitor'
+          ORDER BY seq",
+    )
+    .bind(&p.organization)
+    .fetch_all(&pool)
+    .await
+    .expect("read the chain");
+    assert_eq!(recorded, [None, Some("req-1".to_owned())]);
+}
+
 /// The kinds of the rows waiting in the project's outbox, oldest first.
 async fn kinds_waiting(pool: &PgPool, project: &ProjectId) -> Vec<String> {
     outbox_of(pool, project)

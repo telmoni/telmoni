@@ -392,7 +392,6 @@ async fn handle(
         run_id = %heard.run_id,
         report = ?report,
         body_dropped,
-        request_id = ?correlation_id(headers),
         "ping: heard"
     );
     Ok(Heard {

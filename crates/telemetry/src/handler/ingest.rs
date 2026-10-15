@@ -24,7 +24,6 @@ use serde_json::json;
 
 use telmoni_shared::acting::ActingKey;
 use telmoni_shared::db::tenant_session::project_scope;
-use telmoni_shared::extract::correlation_id;
 use telmoni_shared::{ContentMode, TelemetryError, TelmoniError};
 
 use crate::contract::{BATCH_MAX_BYTES, BATCH_SPANS_MAX};
@@ -110,14 +109,13 @@ async fn handle(
         Claim::Answered(stored) => {
             tracing::debug!(
                 project_id = %key.project_id,
-                request_id = ?correlation_id(headers),
                 "ingest: an export sent again, answered as it was"
             );
             return Ok(answer(encoding, &stored.content_mode, stored.body));
         }
     };
 
-    match write(state, key, headers, encoding, &bytes).await {
+    match write(state, key, encoding, &bytes).await {
         Ok((content_mode, body)) => {
             guard
                 .answer(
@@ -143,7 +141,6 @@ async fn handle(
 async fn write(
     state: &Arc<AppState>,
     key: &ActingKey,
-    headers: &HeaderMap,
     encoding: Encoding,
     bytes: &[u8],
 ) -> Result<(ContentMode, Vec<u8>), TelmoniError> {
@@ -178,7 +175,6 @@ async fn write(
         spans = batch.rows.len(),
         refused = batch.report.refused.len(),
         dropped = batch.report.dropped.len(),
-        request_id = ?correlation_id(headers),
         "ingest: export kept"
     );
     // The organization's open consoles are told, so a page reading this

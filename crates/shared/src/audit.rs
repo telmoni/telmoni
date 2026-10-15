@@ -57,7 +57,8 @@ pub struct AuditEvent<'a> {
     pub resource_kind: TelmoniResourceKind,
     /// UUID or slug of the resource. None when the action names no single row.
     pub resource_id: Option<&'a str>,
-    /// W3C traceparent — cross-stitches the audit row with the service logs.
+    /// The request's id, as its span prints it on every log line, so the row
+    /// and the request's logs find each other: `correlation_id`'s answer.
     pub request_id: Option<&'a str>,
     /// Client IP as a string literal (e.g. `"192.0.2.1"` / `"2001:db8::1"`).
     /// Bound as `$8::inet`, so an unparseable value fails the transaction —

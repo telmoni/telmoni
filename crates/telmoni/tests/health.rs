@@ -14,6 +14,7 @@ use tower::ServiceExt;
 
 use telmoni::{App, Module, Parts};
 use telmoni_auth::test_provider::test_issuer;
+use telmoni_shared::middleware::http::is_request_id;
 use telmoni_shared::test_util::unreachable_pool;
 use telmoni_shared::types::mint_ping_key;
 
@@ -570,4 +571,41 @@ async fn the_door_meters_the_ping_lane_by_key_from_any_address() {
         StatusCode::METHOD_NOT_ALLOWED,
         "another key is metered on its own"
     );
+}
+
+/// ⚠ A request is named by this process alone: an id sent to the ping lane,
+/// free text or well formed, gives way to one minted here, the id the
+/// response echoes; and one sent with the service secret beside it does too,
+/// so no answer on a public lane tells a guessed secret from a wrong one.
+#[tokio::test]
+async fn a_request_is_named_by_this_process_alone() {
+    let key = mint_ping_key();
+    for sent in ["it's free text, of any length", "req-from-the-caller"] {
+        let pinged = send(
+            Request::get(format!("/ping/{key}/nightly"))
+                .header("x-request-id", sent)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let named = header(&pinged, "x-request-id").expect("an id echoed");
+        assert_ne!(named, sent, "the caller named its request");
+        assert!(is_request_id(named), "{named}");
+    }
+
+    for secret in [SECRET, "a-guess"] {
+        let probed = send(
+            Request::get(format!("/ping/{key}/nightly"))
+                .header("x-service-secret", secret)
+                .header("x-request-id", "req-probe")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_ne!(
+            header(&probed, "x-request-id"),
+            Some("req-probe"),
+            "the answer told whether {secret} is the secret"
+        );
+    }
 }

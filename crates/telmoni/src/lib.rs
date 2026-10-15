@@ -408,6 +408,9 @@ impl App {
             .fallback(not_found)
             .layer(telmoni_shared::middleware::http::trace_layer())
             .layer(telmoni_shared::middleware::http::request_id_layers())
+            .layer(middleware::from_fn(
+                telmoni_shared::middleware::http::fresh_request_id,
+            ))
     }
 
     /// Run the process until it is told to stop: refuse what a deployed tier

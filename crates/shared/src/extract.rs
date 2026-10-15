@@ -13,6 +13,7 @@ use axum::{
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::error::TelmoniError;
+use crate::middleware::http::{REQUEST_ID_HEADER, is_request_id};
 
 /// Like [`axum::Json`], but a deserialize rejection becomes a
 /// [`TelmoniError::BadRequest`] naming the failure.
@@ -82,14 +83,16 @@ impl RejectionText for QueryRejection {
     }
 }
 
-/// Extract correlation ID (`traceparent` or fallback to `x-request-id`).
+/// The request's id, for an audit row: its `x-request-id`, only well formed
+/// ([`is_request_id`]), since a caller's free text must never reach the
+/// chain. Behind
+/// [`fresh_request_id`](crate::middleware::http::fresh_request_id) it is the
+/// id minted for the request, the one its span prints on every log line.
 pub fn correlation_id(headers: &HeaderMap) -> Option<&str> {
     headers
-        .get("traceparent")
-        .or_else(|| headers.get("x-request-id"))
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
+        .get(REQUEST_ID_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| is_request_id(value))
 }
 
 #[cfg(test)]
@@ -129,5 +132,46 @@ mod tests {
             .await
             .expect("a well-formed body parses");
         assert_eq!(dto.a, 7);
+    }
+
+    fn headers(sent: &[(&str, &str)]) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        for (name, value) in sent {
+            headers.append(
+                axum::http::HeaderName::from_bytes(name.as_bytes()).expect("a header name"),
+                value.parse().expect("a header value"),
+            );
+        }
+        headers
+    }
+
+    /// An audit row keeps the request's id well formed or none: the
+    /// `x-request-id` its span prints, a trace context never, and never a
+    /// caller's free text.
+    #[test]
+    fn a_correlation_id_is_kept_only_well_formed() {
+        let traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        for (sent, kept) in [
+            (vec![(REQUEST_ID_HEADER, "req-1")], Some("req-1")),
+            (
+                vec![("traceparent", traceparent), (REQUEST_ID_HEADER, "req-1")],
+                Some("req-1"),
+            ),
+            (vec![("traceparent", traceparent)], None),
+            (
+                vec![(REQUEST_ID_HEADER, "it's free text, of any length")],
+                None,
+            ),
+            (vec![(REQUEST_ID_HEADER, "ada@example.com")], None),
+            (vec![(REQUEST_ID_HEADER, "")], None),
+            (vec![], None),
+        ] {
+            assert_eq!(correlation_id(&headers(&sent)), kept, "{sent:?}");
+        }
+        let long = "a".repeat(129);
+        assert_eq!(
+            correlation_id(&headers(&[(REQUEST_ID_HEADER, &long)])),
+            None
+        );
     }
 }
