@@ -87,20 +87,26 @@ TELMONI_API_KEY=telmoni_… claude --plugin-dir ./claude-observability-plugin
 ```
 
 Once published, it installs from its own marketplace, added sparse so that
-nothing but its manifest is fetched, and its key is set with Claude Code's own
-configuration, which keeps it with Claude Code's credentials:
+nothing but its manifest is fetched:
 
 ```sh
 claude plugin marketplace add telmoni/claude-observability-plugin --sparse .claude-plugin
 claude plugin install telmoni-observability@telmoni-plugins
-claude plugin configure telmoni-observability@telmoni-plugins
 ```
 
-The key and the endpoint are the plugin's own configuration, or
-`TELMONI_API_KEY` and `TELMONI_ENDPOINT`; the endpoint defaults to
-`https://api.telmoni.com`. The hook runs when a turn stops, when an API error
-ends one, and when the session ends. Its log is `~/.claude/telmoni/hook.log`
-(under `CLAUDE_CONFIG_DIR` where you set one). Inside Cursor, which runs Claude
+In a Claude Code session, set the key with
+`/plugin configure telmoni-observability@telmoni-plugins`. From your shell,
+`claude plugin configure telmoni-observability@telmoni-plugins --values-stdin`
+takes the configuration as JSON (`{"TELMONI_API_KEY": "telmoni_…"}`); without
+`--values-stdin` it only lists the options. Claude Code keeps the key with its
+own credentials: in the Keychain on macOS, and in its credentials file
+elsewhere. Left blank, the endpoint is `https://api.telmoni.com`; a self-hosted
+Telmoni gives its own machine host. `TELMONI_API_KEY` and `TELMONI_ENDPOINT` in
+the environment serve when the plugin's own settings are unset.
+
+The hook runs when a turn stops, when an API error ends one, and when the
+session ends. Its log is `~/.claude/telmoni/hook.log` (under
+`CLAUDE_CONFIG_DIR` where you set one). Inside Cursor, which runs Claude
 Code's hooks too, the plugin does nothing: Cursor's own plugin records those
 conversations.
 
@@ -137,15 +143,34 @@ as one that ran.
 ## OpenCode
 
 You need OpenCode 1.18.29 or later, or OpenCode 2, whose plugin systems differ;
-the one package serves both. Once published, name it under one key, never
-both — OpenCode 2 reads OpenCode 1's list too, and would load it twice:
+the one package serves both. Once published, add it to your `opencode.json`
+under `plugin` on OpenCode 1:
 
 ```json
 { "plugin": ["telmoni-opencode-observability-plugin"] }
 ```
 
-on OpenCode 1, or `"plugins"` on OpenCode 2, in your `opencode.json`. Until it
-is published, its repository's `AGENTS.md` says how to run it from a checkout.
+or have OpenCode add it to the global configuration:
+
+```sh
+opencode plugin telmoni-opencode-observability-plugin -g
+```
+
+On OpenCode 2, the list is `plugins`:
+
+```json
+{ "plugins": ["telmoni-opencode-observability-plugin"] }
+```
+
+or:
+
+```sh
+opencode plugin add telmoni-opencode-observability-plugin
+```
+
+One key is enough: OpenCode 2 reads an OpenCode 1 `plugin` list too, and sets
+the plugin up once even where it is named under both. Until it is published, its
+repository's `AGENTS.md` says how to run it from a checkout.
 
 The key goes in `telmoni.json` beside your OpenCode configuration
 (`~/.config/opencode/telmoni.json`), as `{ "apiKey": "telmoni_…" }`; the plugin
