@@ -168,7 +168,8 @@ impl Project {
 
     /// A ping as a crontab sends one: no header but those given, the key in
     /// the path, on the lane as the binary nests it. The answer's status,
-    /// its media type and its body.
+    /// its media type and its body — every answer, whatever it says, held
+    /// to saying that no cache may keep it.
     async fn send_ping(
         &self,
         method: &str,
@@ -186,6 +187,11 @@ impl Project {
             .oneshot(builder.body(body).expect("a request"))
             .await
             .expect("the lane answers");
+        assert_eq!(
+            cache_control(&response),
+            Some("no-store"),
+            "{method} {path}: an answer a cache may keep"
+        );
         let status = response.status();
         let media_type = response
             .headers()
@@ -316,6 +322,14 @@ async fn recorded(pool: &PgPool, organization: &OrganizationId) -> Vec<(String, 
 /// A run id a ping names.
 fn rid() -> String {
     Uuid::new_v4().to_string()
+}
+
+/// What an answer tells a cache on the way, where it says anything.
+fn cache_control(response: &axum::response::Response) -> Option<&str> {
+    response
+        .headers()
+        .get("cache-control")
+        .and_then(|v| v.to_str().ok())
 }
 
 /// A clock as a lane or a payload wrote it.
@@ -881,6 +895,65 @@ async fn a_pings_body_is_dropped_its_query_held_to_numbers_and_the_lane_to_its_s
         );
         assert!(!body.contains(&key), "{missing} echoed the key: {body}");
     }
+}
+
+/// No answer the lane gives is one a cache may keep: a `GET` records a run,
+/// and a bare ping's URL is the same each run, so a cache on the way that
+/// kept a `200` would answer the next run's ping in the lane's place. Each
+/// kind of answer says so — an `OK` to `GET`, `HEAD` or `POST`, a refusal,
+/// axum's own for a path that does not decode, a key the lane does not
+/// hold, a path or a method it does not serve — and each `OK` was a ping the
+/// lane heard, `HEAD`'s as `GET`'s.
+#[sqlx::test]
+async fn no_answer_of_the_lane_is_one_a_cache_may_keep(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    let path = format!("/{key}/nightly-report");
+    let unknown = format!("/{}/nightly-report", telmoni_shared::types::mint_ping_key());
+    for (method, sent, status) in [
+        ("GET", path.clone(), StatusCode::OK),
+        ("HEAD", path.clone(), StatusCode::OK),
+        ("POST", format!("{path}/start"), StatusCode::OK),
+        ("GET", format!("{path}/fail?exit_code=1"), StatusCode::OK),
+        (
+            "GET",
+            format!("{path}/checkpoint?steps=four"),
+            StatusCode::BAD_REQUEST,
+        ),
+        ("GET", format!("/{key}/%FF"), StatusCode::BAD_REQUEST),
+        ("GET", unknown, StatusCode::NOT_FOUND),
+        ("GET", format!("{path}/stop"), StatusCode::NOT_FOUND),
+        ("PUT", path.clone(), StatusCode::METHOD_NOT_ALLOWED),
+    ] {
+        let response = p
+            .pings
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(&sent)
+                    .body(Body::empty())
+                    .expect("a request"),
+            )
+            .await
+            .expect("the lane answers");
+        assert_eq!(response.status(), status, "{method} {sent}");
+        assert_eq!(
+            cache_control(&response),
+            Some("no-store"),
+            "{method} {sent}"
+        );
+    }
+    let finished = finished_runs(&pool, &p.project).await;
+    assert_eq!(
+        finished
+            .iter()
+            .map(|run| run["status"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        ["ok", "ok", "error"],
+        "a ping of no duration to GET and to HEAD, and the run POST opened"
+    );
 }
 
 /// Past the plan's limit a ping to a slug no monitor has is refused with the

@@ -434,7 +434,8 @@ fn percent_encoded_last(key: &str) -> String {
 /// does not hold, so an encoding of a key is never let in on a bucket of
 /// its own; nothing in the key's place, or a doubled slash before it, is
 /// the lane's own 404, and the lane's root with its trailing slash the
-/// server's.
+/// server's. The lane's answers and the door's refusals alike reach the
+/// caller saying no cache may keep them.
 #[tokio::test]
 async fn the_ping_lane_is_served_at_ping_behind_the_door() {
     let key = mint_ping_key();
@@ -444,17 +445,27 @@ async fn the_ping_lane_is_served_at_ping_behind_the_door() {
         StatusCode::INTERNAL_SERVER_ERROR,
         "a key as minted reaches the lane, which asks the database"
     );
+    assert_eq!(
+        header(&asked, "cache-control"),
+        Some("no-store"),
+        "the lane's answer, through the door"
+    );
     assert_eq!(problem(asked).await["type"], "/errors/internal/database");
 
+    // The door's refusal is the lane's answer for a key it does not hold,
+    // none a cache may keep either: one that took `%41` for `A` would keep
+    // it as the answer for the key itself.
     let encoded = percent_encoded_last(&key);
     let refused = send(get(&format!("/ping/{encoded}/nightly"))).await;
     assert_eq!(refused.status(), StatusCode::NOT_FOUND);
+    assert_eq!(header(&refused, "cache-control"), Some("no-store"));
     let body = problem(refused).await;
     assert_eq!(body["type"], "/errors/auth/not-found");
     assert_eq!(body["detail"], "no ping key by that value");
 
     let word = send(get("/ping/notakey/nightly")).await;
     assert_eq!(word.status(), StatusCode::NOT_FOUND);
+    assert_eq!(header(&word, "cache-control"), Some("no-store"));
     assert_eq!(problem(word).await["detail"], "no ping key by that value");
 
     // The lane's own 404 for a path under it with no key where one goes,
@@ -464,6 +475,11 @@ async fn the_ping_lane_is_served_at_ping_behind_the_door() {
     for nothing in ["/ping", doubled.as_str()] {
         let response = send(get(nothing)).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{nothing}");
+        assert_eq!(
+            header(&response, "cache-control"),
+            Some("no-store"),
+            "{nothing}: the lane's fallback, through the door"
+        );
         assert_eq!(
             problem(response).await["detail"],
             "no such lane under /ping",
@@ -529,6 +545,7 @@ async fn the_door_meters_the_ping_lane_by_key_from_any_address() {
     }
     let refused = refused.expect("the key's minute was spent");
     assert!(header(&refused, "retry-after").is_some());
+    assert_eq!(header(&refused, "cache-control"), Some("no-store"));
     assert_eq!(
         problem(refused).await["type"],
         "/errors/tenant/rate-limited"

@@ -216,7 +216,8 @@ pub fn router(state: Arc<AppState>) -> Router {
 /// door: `/{ping_key}/{slug}` and its `/start`, `/checkpoint` and `/fail`,
 /// `GET` or `POST`, the key in the path its one gate
 /// ([`handler::pings`]). A path no lane serves, or a method none takes, is
-/// answered as the other machine lanes answer one.
+/// answered as the other machine lanes answer one; and no answer, those
+/// included, is one a cache may keep ([`handler::pings::never_stored`]).
 pub fn ping_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route(
@@ -237,5 +238,6 @@ pub fn ping_router(state: Arc<AppState>) -> Router {
         )
         .method_not_allowed_fallback(handler::pings::method_not_allowed)
         .fallback(handler::pings::not_found)
+        .layer(middleware::map_response(handler::pings::never_stored))
         .with_state(state)
 }

@@ -101,12 +101,18 @@ impl Door {
 
     /// The `/ping` lane behind the door's limits: by source, and by the key
     /// in the path, before the lane reads it — a key spelled otherwise than
-    /// minted refused here, as no key.
+    /// minted refused here, as no key. The door's refusals there are none a
+    /// cache may keep, as none of the lane's answers is
+    /// ([`pings::never_stored`]): a cache that takes a percent-encoded letter
+    /// for the letter, as RFC 9110 §4.2.3 lets one, would keep the refusal of
+    /// a key with one letter encoded as the answer for the key itself.
     pub fn ping(self: &Arc<Self>, lanes: Router) -> Router {
-        lanes.layer(middleware::from_fn_with_state(
-            (self.clone(), Lane::Ping),
-            admit,
-        ))
+        lanes
+            .layer(middleware::from_fn_with_state(
+                (self.clone(), Lane::Ping),
+                admit,
+            ))
+            .layer(middleware::map_response(pings::never_stored))
     }
 
     /// The source's limit, then the credential's where one is presented: a

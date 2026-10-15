@@ -13,7 +13,8 @@
 //! cap, never parsed whatever its media type, and kept nowhere until 4.1
 //! keeps one, the answer saying so; a run's progress rides in the query
 //! alone, numbers alone. Nothing here is audited but the monitor a first
-//! ping makes: a ping is traffic, and its run is the lane's own record.
+//! ping makes: a ping is traffic, and its run is the lane's own record. And
+//! since a `GET` here records a run, no answer is one a cache may keep.
 
 use std::sync::Arc;
 
@@ -290,6 +291,20 @@ pub async fn not_found() -> Response {
 /// A method no lane takes: `405` with `Allow`, as a problem document.
 pub async fn method_not_allowed() -> Response {
     problem::method_not_allowed(ALLOW)
+}
+
+/// Every answer the lane gives, said never to be stored. A `GET` here
+/// records a run, and the request a crontab sends — to the same URL each
+/// run, for a bare ping — carries no `Authorization`, which would keep a
+/// shared cache from answering it with a stored response (RFC 9111 §3.5).
+/// So a cache between the crontab and the lane may store a `200` that names
+/// no freshness of its own (§3) and serve it as fresh by heuristic (§4.2.2),
+/// answering the next run's ping itself: a run that never arrives.
+pub async fn never_stored(mut response: Response) -> Response {
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 /// What a ping is answered: `200` with `OK` — or `OK; body dropped` — in
