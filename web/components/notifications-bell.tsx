@@ -105,9 +105,9 @@ export function NotificationsBell() {
         sideOffset={12.5}
         data-testid="notifications-menu"
       >
-        {/* `h-12` + the panel's `p-1` + the separator's `mt-1` = 56 to the
-            rule, the height every overlay's first row lands on. */}
-        <DropdownMenuLabel className="flex h-12 items-center justify-between gap-2">
+        {/* The head is the account menu's: one 36px line in the label's small
+            muted type, then the rule, so the header's menus open alike. */}
+        <DropdownMenuLabel className="flex h-9 items-center justify-between gap-2 px-2 py-0 text-xs font-normal text-muted-foreground">
           <span>Notifications</span>
           {count > 0 && (
             <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
@@ -150,20 +150,14 @@ export function NotificationsBell() {
           </div>
         )}
 
-        {/* ⚠ **The footer is the account menu's footer, not one more row.**
-            Same classes as the account menu's sign-out row, and the
-            negative margins cancel the panel's `p-1` so the fill reaches three
-            edges: a row highlighted as an inset pill here would be the one
-            menu in the console whose last entry is shaped differently from
-            every other menu's. Its `border-t` IS the rule, which is why there
-            is no separator above it. */}
-        <DropdownMenuItem
-          asChild
-          className="-mx-1 mt-1 -mb-1 h-14 cursor-pointer gap-3 rounded-none border-t px-3"
-        >
+        {/* The foot is every header menu's foot (`nav-user.tsx`,
+            `resource-selector.tsx`): a rule, then one 36px row, its icon
+            first. The rows above drop their last rule for it. */}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild className="h-9 cursor-pointer gap-2 px-2">
           <Link href={NOTIFICATIONS_HREF} data-testid="notifications-menu-all">
-            <span className="flex-1">Go to notifications</span>
-            <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+            <Bell className="size-4 shrink-0 text-muted-foreground" />
+            Go to notifications
           </Link>
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -232,7 +226,7 @@ function ExportBuildingRow({ entry, organization }: { entry: AuditExport; organi
 // so before the button that does it; the bell only points there.
 // `h-auto` undoes the menu item's fixed `h-9`: these rows hold two lines, and
 // a row clipped to one line's height overflowed the list into a scrollbar.
-// The last row drops its rule, which would double the footer's `border-t`.
+// The last row drops its rule, which would double the one above the foot.
 function OfferRow({ offer }: { offer: OrganizationEntry }) {
   return (
     <DropdownMenuItem asChild className="h-auto rounded-none border-b border-border px-3 py-3 last:border-b-0">
