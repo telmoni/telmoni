@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useRef, type ReactNode } from "react";
-import { InfoIcon } from "lucide-react";
+import { ArrowLeft, InfoIcon } from "lucide-react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
-import { usePageHeaderSet } from "./page-header-context";
 import { recordVisit } from "@/lib/search-recent";
 
 export function PageHeader({
@@ -27,19 +27,17 @@ export function PageHeader({
    *  sentence. */
   info?: string;
   action?: ReactNode;
+  /** Where the page's way back leads, drawn above its title as `← backLabel`:
+   *  a page of one trace or one session, back to its list. Both or none. */
   backHref?: string;
   backLabel?: string;
 }) {
-  const set = usePageHeaderSet();
   const pathname = usePathname();
   useEffect(() => {
-    const my = { backHref, backLabel };
-    set(my);
     // Not the tab's title, which is each page's `metadata` alone: written here
     // as well, it was one more change after Next's own.
     if (title) recordVisit({ href: pathname, label: title });
-    return () => set((cur) => (cur === my ? null : cur));
-  }, [title, backHref, backLabel, set, pathname]);
+  }, [title, pathname]);
 
   // A page that came after its loading state finds the focus where the
   // console shell parked it, on the main region, as no heading stood there
@@ -55,7 +53,7 @@ export function PageHeader({
   if (!title && !action) return null;
   // As tall as a page action, 36px, so a page with one and a page without
   // start their content at the same height and nothing jumps between them.
-  return (
+  const row = (
     <div className="flex min-h-9 w-full min-w-0 items-center gap-3">
       {title && (
         <div className="flex min-w-0 items-center gap-2">
@@ -90,6 +88,21 @@ export function PageHeader({
         </div>
       )}
       {action && <div className="ml-auto shrink-0">{action}</div>}
+    </div>
+  );
+  if (!backHref || !backLabel) return row;
+  // In the page, over its title, rather than in the console's header: the way
+  // back belongs to the page it leaves, and the header is the console's own.
+  return (
+    <div className="grid w-full min-w-0 gap-2">
+      <Link
+        href={backHref}
+        className="flex w-fit items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="size-4" />
+        {backLabel}
+      </Link>
+      {row}
     </div>
   );
 }

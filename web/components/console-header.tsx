@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Menu, PanelLeft } from "lucide-react";
+import { Menu, PanelLeft } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -9,7 +9,6 @@ import { ResourceSelector } from "./resource-selector";
 import { NavUser } from "./nav-user";
 import { NotificationsBell } from "./notifications-bell";
 import { SearchButton } from "./search-button";
-import { usePageHeaderValue } from "./page-header-context";
 import { useSidebar } from "./sidebar-context";
 import { TelmoniMark } from "./telmoni-mark";
 import { PRODUCT_NAME } from "@/lib/site";
@@ -44,7 +43,6 @@ export function ConsoleHeader({
   /// this one says there what a new organization starts on.
   createOrganizationNotice?: React.ReactNode;
 }) {
-  const header = usePageHeaderValue();
   const { collapsed, toggle } = useSidebar();
   const organization = useActiveOrganization();
   const pathname = usePathname();
@@ -54,10 +52,6 @@ export function ConsoleHeader({
   // straight, without the redirect's round trip.
   const home = organization ? organizationPath(organization.slug) : "/account/notifications";
 
-  const back =
-    header?.backHref && header.backLabel
-      ? { href: header.backHref, label: header.backLabel }
-      : null;
   return (
     <header
       data-slot="console-header"
@@ -142,15 +136,6 @@ export function ConsoleHeader({
           page's title does, 14px from the rail's rule — the rail's own inset
           (`console-shell.tsx`). */}
       <div className="flex min-w-0 flex-1 items-center gap-3.5 pl-1.5 pr-3.5">
-        {back && (
-          <Link
-            href={back.href}
-            className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="size-4" />
-            {back.label}
-          </Link>
-        )}
         <ResourceSelector
           host={host}
           organizationBadge={organizationBadge}

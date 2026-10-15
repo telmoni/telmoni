@@ -18,7 +18,6 @@ import { ExtensionOrganizationBadge } from "@/components/extension/organization-
 import { InviteToastNotifier } from "@/components/invite-toast-notifier";
 import { OrganizationSync } from "@/components/organization-sync";
 import { RealtimeListener } from "@/components/realtime-listener";
-import { PageHeaderProvider } from "@/components/page-header-context";
 import {
   activeOrganization,
   fetchActiveSessions,
@@ -101,7 +100,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <RealtimeListener liveHoldMs={liveHoldMs} />
         <InviteToastNotifier />
         <ConsoleUiProvider>
-          <PageHeaderProvider>
           <PagePrimaryActionProvider>
             <SidebarProvider initialCollapsed={initialCollapsed}>
               <SkipLink />
@@ -137,7 +135,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               </div>
             </SidebarProvider>
           </PagePrimaryActionProvider>
-        </PageHeaderProvider>
         </ConsoleUiProvider>
       </StoreProvider>
     </div>
