@@ -114,8 +114,15 @@ const LANE_WRITTEN: &[&str] = &["notifications.delivery_attempts", "agent.erasur
 /// The tables the runtime role writes but never deletes from: its
 /// maintenance lane purges them with their project or organization. A
 /// project's settings row removed by a request would set its content mode
-/// back with no audit row.
-const LANE_DELETED: &[&str] = &["telemetry.project_settings"];
+/// back with no audit row; a ping key is retired, never deleted, its row
+/// the record of what the key was.
+const LANE_DELETED: &[&str] = &["telemetry.project_settings", "telemetry.ping_keys"];
+
+/// The tables the runtime role only adds to: its maintenance lane drains
+/// them, leasing each row, landing it and removing it. A request that
+/// rewrote or removed an outbox row could unsay a finished run or a notice
+/// before it is handed on.
+const LANE_DRAINED: &[&str] = &["telemetry.outbox"];
 
 /// The runtime roles that write audit rows, each auditing its own writes on
 /// the organization's chain: every module's but the agent's, which changes
@@ -126,6 +133,7 @@ const AUDIT_WRITERS: &[&str] = &["auth", "notifications", "telemetry"];
 async fn object_grants_give_each_role_its_own_schema_and_no_siblings() {
     let Some(pool) = harness().await else { return };
     let mut checks = 0usize;
+    let mut seen: Vec<String> = Vec::new();
 
     for &(role, own) in SERVICE_ROLES {
         assert!(
@@ -137,6 +145,7 @@ async fn object_grants_give_each_role_its_own_schema_and_no_siblings() {
 
         let children = partition_children(&pool, own).await;
         for table in tables_in(&pool, own).await {
+            seen.push(table.clone());
             if children.contains(&table) {
                 for verb in DML {
                     assert!(
@@ -183,6 +192,16 @@ async fn object_grants_give_each_role_its_own_schema_and_no_siblings() {
                 );
                 checks += 1;
             }
+            if LANE_DRAINED.contains(&table.as_str()) {
+                for verb in ["UPDATE", "DELETE"] {
+                    assert!(
+                        !has_table_privilege(&pool, role, &table, verb).await,
+                        "role `{role}` can {verb} `{table}` — the lane drains it and a \
+                         request only adds to it; object_grants.sql revokes the rest"
+                    );
+                    checks += 1;
+                }
+            }
         }
 
         for &other in CROSS_SCHEMAS {
@@ -207,6 +226,16 @@ async fn object_grants_give_each_role_its_own_schema_and_no_siblings() {
         }
     }
 
+    // A table these lists name that no schema holds would drop its checks in
+    // silence: renamed, its rows here stopped asserting anything.
+    for listed in LANE_WRITTEN.iter().chain(LANE_DELETED).chain(LANE_DRAINED) {
+        assert!(
+            seen.iter().any(|table| table == listed),
+            "`{listed}` is named here and no schema holds it — its checks stopped running"
+        );
+        checks += 1;
+    }
+
     assert_ran(checks);
 }
 
@@ -224,6 +253,7 @@ async fn every_runtime_role_can_rewrite_a_mutable_table_of_its_own() {
             !children.contains(t)
                 && !APPEND_ONLY.contains(&t.as_str())
                 && !LANE_WRITTEN.contains(&t.as_str())
+                && !LANE_DRAINED.contains(&t.as_str())
         }) else {
             panic!(
                 "schema `{own}` has no mutable table to probe — the UPDATE assertion \

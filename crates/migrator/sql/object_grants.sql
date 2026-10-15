@@ -114,6 +114,18 @@ BEGIN
     IF to_regclass('telemetry.project_settings') IS NOT NULL THEN
         EXECUTE 'REVOKE DELETE ON telemetry.project_settings FROM telemetry';
     END IF;
+    -- A ping key is retired, never deleted: its row is the record of what
+    -- the key was and when it last pinged, and the lane's purge takes it
+    -- with its project. An outbox row is added in its ping's own transaction
+    -- and by nothing else a request does; the lane leases, lands and removes
+    -- it, and a request that rewrote or removed one could unsay a finished
+    -- run or a notice before it is handed on.
+    IF to_regclass('telemetry.ping_keys') IS NOT NULL THEN
+        EXECUTE 'REVOKE DELETE ON telemetry.ping_keys FROM telemetry';
+    END IF;
+    IF to_regclass('telemetry.outbox') IS NOT NULL THEN
+        EXECUTE 'REVOKE UPDATE, DELETE ON telemetry.outbox FROM telemetry';
+    END IF;
 EXCEPTION
     WHEN invalid_schema_name THEN
         RAISE NOTICE 'telemetry schema not yet created — telemetry own-schema grants land on next re-apply';
