@@ -1,6 +1,7 @@
 //! A project's ping keys through the module's own router: owners and admins
 //! mint and retire them and members read them, each minting and retiring
-//! recorded on the chain under the organization's lock; two may be live at
+//! recorded on the chain under the organization's lock, and one that cannot
+//! have the lock in time refused with nothing changed; two may be live at
 //! once and never three; a key of another shape, one the table does not
 //! hold and one retired open nothing on the ping lane; the rotation retires
 //! the older of two a week after its last ping once a newer one stands,
@@ -806,6 +807,52 @@ async fn a_tick_that_loses_its_database_ends_there(pool: PgPool) {
         !logs.text().contains("could not retire a key"),
         "a key was tried as though the database had answered"
     );
+}
+
+/// A minting or a retirement that cannot have the organization's chain lock
+/// within its wait — a transfer's accept holding it past two seconds, say —
+/// is answered for the person to try again, mints, retires and records
+/// nothing, and never asks auth again without the lock; once the lock is
+/// free, both go through.
+#[sqlx::test]
+async fn a_key_change_that_waits_too_long_on_the_chain_changes_nothing(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let (_, minted) = p.mint(OWNER).await;
+    let retire = format!("{LANE}/{}", minted["id"].as_str().expect("an id"));
+
+    let mut holder = pool.begin().await.expect("a transaction to hold the lock");
+    lock_chain(&mut holder, &p.organization)
+        .await
+        .expect("the chain lock");
+    let (status, body) = tokio::time::timeout(Duration::from_secs(10), p.mint(OWNER))
+        .await
+        .expect("the minting waited on the lock past its own wait");
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["type"], "/errors/auth/conflict");
+    let (status, body) = tokio::time::timeout(
+        Duration::from_secs(10),
+        p.send(p.request("DELETE", &retire, OWNER)),
+    )
+    .await
+    .expect("the retirement waited on the lock past its own wait");
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    holder.rollback().await.expect("let the lock go");
+    assert_eq!(
+        p.auth.chain_held(),
+        [true],
+        "auth was asked again for the first minting alone"
+    );
+    let keys = p.list(OWNER).await;
+    assert_eq!(keys.len(), 1);
+    assert!(keys[0]["retired_at"].is_null());
+    assert_eq!(recorded(&pool, &p.organization).await.len(), 1);
+
+    let (status, _) = p.mint(OWNER).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (status, _) = p.send(p.request("DELETE", &retire, OWNER)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(recorded(&pool, &p.organization).await.len(), 3);
 }
 
 /// Two replicas whose ticks find one key retire it, record it and tell of it

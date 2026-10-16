@@ -1,6 +1,7 @@
 //! The ping lane as a crontab reaches it: a ping to a slug no monitor has
-//! makes the monitor, paused as `new`, recorded on the chain as made by the
-//! key, and the owner told once through the outbox; a run is opened by its
+//! makes the monitor, paused as `new` until its owner saves it, which no
+//! resume does, recorded on the chain as made by the key, and the owner told
+//! once through the outbox; a run is opened by its
 //! `/start`, heard by its `/checkpoint`s, which hold it to its monitor's
 //! step cap, and ended by a bare ping or a `/fail`, when it waits in the
 //! outbox as a finished span and the monitor's state and next due time
@@ -574,6 +575,18 @@ async fn tries_of(pool: &PgPool, project: &ProjectId) -> Vec<(i32, bool)> {
     .expect("read a project's outbox tries")
 }
 
+/// How many seconds an outbox row is held for yet.
+async fn held_for(pool: &PgPool, id: Uuid) -> i64 {
+    sqlx::query_scalar(
+        "SELECT CAST(extract(epoch FROM lease_until - now()) AS BIGINT)
+           FROM telemetry.outbox WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .expect("read how long a row is held")
+}
+
 /// What the organization's chain records of its monitors, in order: the
 /// action, who did it, and the row's metadata.
 async fn recorded(pool: &PgPool, organization: &OrganizationId) -> Vec<(String, String, Value)> {
@@ -784,6 +797,106 @@ async fn a_ping_to_a_slug_no_monitor_has_makes_it_and_tells_the_owner_once(pool:
         assert!(!body.contains(refused), "{refused} was echoed: {body}");
     }
     assert_eq!(monitors_of(&pool, &p.project).await, 1);
+}
+
+/// A monitor its first ping made starts once its owner saves its settings,
+/// and not before: a resume is refused with how to start it, changing and
+/// recording nothing; a save starts it `healthy`, due under the timing it
+/// sets and held to the bounds it sets in place of the hour's stall timeout
+/// it was given, the start recorded on the chain beside what changed — and
+/// recorded where nothing else did — after which its pings move it as any
+/// monitor's do.
+#[sqlx::test]
+async fn a_monitor_a_ping_made_starts_once_its_owner_saves_it(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.ping_ok(&format!("/{key}/nightly-report")).await;
+    p.ping_ok(&format!("/{key}/weekly-digest")).await;
+    let made = p.monitor("nightly-report").await;
+    assert_eq!(made["state"], "new");
+
+    let (status, body) = p
+        .send(p.request("POST", &format!("{MONITORS}/nightly-report/resume"), None))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        body["detail"]
+            .as_str()
+            .is_some_and(|d| d.contains("save its settings to start it")),
+        "{body}"
+    );
+    assert_eq!(p.monitor("nightly-report").await, made);
+    assert_eq!(
+        recorded(&pool, &p.organization).await.len(),
+        2,
+        "the two discoveries alone"
+    );
+
+    let (status, saved) = p
+        .send(p.request(
+            "PUT",
+            &format!("{MONITORS}/nightly-report"),
+            Some(json!({
+                "name": "Nightly report",
+                "schedule": "0 2 * * *",
+                "timezone": "Europe/London",
+                "grace_s": 600,
+                "bounds": { "stall_after_s": 120 },
+            })),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["id"], made["id"]);
+    assert_eq!(saved["state"], "healthy");
+    assert!(
+        saved["next_due_at"].is_string(),
+        "due under the timing saved"
+    );
+    assert_eq!(saved["bounds"]["stall_after_s"], 120);
+    let chain = recorded(&pool, &p.organization).await;
+    assert_eq!(chain.len(), 3, "{chain:?}");
+    assert_eq!(
+        (chain[2].0.as_str(), chain[2].1.as_str()),
+        ("updated", OWNER)
+    );
+    assert_eq!(
+        chain[2].2["state"],
+        json!({ "from": "new", "to": "healthy" })
+    );
+    assert_eq!(
+        chain[2].2["changed"],
+        json!(["name", "schedule", "timezone", "grace_s", "stall_after_s"])
+    );
+
+    // Saved as its ping made it, it starts all the same, and the start is
+    // recorded though nothing else changed.
+    let (status, saved) = p
+        .send(p.request(
+            "PUT",
+            &format!("{MONITORS}/weekly-digest"),
+            Some(json!({
+                "name": "weekly-digest",
+                "bounds": { "stall_after_s": 3600 },
+            })),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["state"], "healthy");
+    assert!(saved["next_due_at"].is_null(), "no timing, so never due");
+    let chain = recorded(&pool, &p.organization).await;
+    assert_eq!(chain.len(), 4, "{chain:?}");
+    assert_eq!(
+        chain[3].2["state"],
+        json!({ "from": "new", "to": "healthy" })
+    );
+    assert_eq!(chain[3].2["changed"], json!([]));
+
+    // Started, its pings move it as any monitor's do.
+    p.ping_ok(&format!("/{key}/nightly-report/fail")).await;
+    assert_eq!(p.monitor("nightly-report").await["state"], "failed");
+    p.ping_ok(&format!("/{key}/nightly-report")).await;
+    assert_eq!(p.monitor("nightly-report").await["state"], "healthy");
 }
 
 #[sqlx::test]
@@ -2237,9 +2350,10 @@ async fn a_store_outage_hands_a_run_back_with_its_try(pool: PgPool) {
 }
 
 /// A row no version of this code wrote is the row's fault: held longer each
-/// time, counted, and after its twelfth try left — nothing takes it, the
-/// depth counts it stuck — until an operator's `release outbox` gives it its
-/// tries back, which it spends again.
+/// time — five seconds, doubled each try, five minutes at most — and taken
+/// by no tick within its wait, counted, and after its twelfth try left —
+/// nothing takes it, the depth counts it stuck — until an operator's
+/// `release outbox` gives it its tries back, which it spends again.
 #[sqlx::test]
 async fn a_row_that_does_not_parse_waits_out_its_tries_until_released(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -2256,7 +2370,8 @@ async fn a_row_that_does_not_parse_waits_out_its_tries_until_released(pool: PgPo
     .await
     .expect("a row no version of this code wrote");
 
-    for attempt in 1..=12 {
+    let waits = [5, 10, 20, 40, 80, 160, 300, 300, 300, 300, 300, 300];
+    for (attempt, wait) in (1..=12).zip(waits) {
         assert_eq!(
             outbox::tick_once(&p.state).await.expect("a tick"),
             Settled { landed: 0, held: 1 },
@@ -2267,6 +2382,17 @@ async fn a_row_that_does_not_parse_waits_out_its_tries_until_released(pool: PgPo
             [(attempt, true)],
             "try {attempt}: held for its wait"
         );
+        let held = held_for(&pool, id).await;
+        assert!(
+            (wait - 2..=wait).contains(&held),
+            "try {attempt}: held for {held}s, not {wait}s"
+        );
+        assert_eq!(
+            outbox::tick_once(&p.state).await.expect("a tick"),
+            Settled::default(),
+            "try {attempt}: taken within its wait"
+        );
+        assert_eq!(tries_of(&pool, &p.project).await, [(attempt, true)]);
         // Its wait over.
         sqlx::query(
             "UPDATE telemetry.outbox SET lease_until = now() - interval '1 second' WHERE id = $1",

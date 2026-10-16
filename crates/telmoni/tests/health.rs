@@ -15,8 +15,8 @@ use tower::ServiceExt;
 use telmoni::{App, Module, Parts};
 use telmoni_auth::test_provider::test_issuer;
 use telmoni_shared::middleware::http::is_request_id;
-use telmoni_shared::test_util::unreachable_pool;
-use telmoni_shared::types::mint_ping_key;
+use telmoni_shared::test_util::{captured_logs, unreachable_pool};
+use telmoni_shared::types::{PING_KEY_PREFIX, mint_ping_key};
 
 const SECRET: &str = "test-service-secret";
 
@@ -608,4 +608,68 @@ async fn a_request_is_named_by_this_process_alone() {
             "the answer told whether {secret} is the secret"
         );
     }
+}
+
+/// ⚠ No log line carries a ping's key, at any level, whoever writes it: the
+/// span the binary opens for every request, before the door and the lanes,
+/// prints the path with the key cut out — on the lane's own failure, which
+/// it logs at error inside the span, on the lane's fallback, on the door's
+/// refusal of the key spelled otherwise, and on the server's 404 for a lane
+/// misspelt, the likeliest leak, as a shell's join leaves one.
+#[tokio::test]
+async fn no_log_line_carries_a_pings_key() {
+    let (_logging, logs) = captured_logs();
+    let key = mint_ping_key();
+    let encoded = percent_encoded_last(&key);
+    for (path, answered, printed) in [
+        (
+            format!("/ping/{key}/nightly"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "/ping/…/nightly",
+        ),
+        (
+            format!("/ping//{key}/nightly"),
+            StatusCode::NOT_FOUND,
+            "/ping//…/nightly",
+        ),
+        (
+            format!("/ping/{encoded}/nightly"),
+            StatusCode::NOT_FOUND,
+            "/ping/…/nightly",
+        ),
+        (
+            format!("/PING/{key}/nightly"),
+            StatusCode::NOT_FOUND,
+            "/PING/…/nightly",
+        ),
+        (
+            format!("/pings/{key}/nightly"),
+            StatusCode::NOT_FOUND,
+            "/pings/…/nightly",
+        ),
+    ] {
+        let before = logs.text().len();
+        assert_eq!(send(get(&path)).await.status(), answered, "{path}");
+        let own = logs.text().split_off(before);
+        assert!(
+            own.contains(&format!(r#""path":"{printed}""#)),
+            "{path} was not logged as {printed}: {own}"
+        );
+    }
+    let lines = logs.text();
+    let refused = lines
+        .lines()
+        .find(|line| line.contains("ping: refused on our side"))
+        .expect("the lane's own line at error");
+    assert!(
+        refused.contains(r#""path":"/ping/…/nightly""#),
+        "the lane's line was written outside the request's span: {refused}"
+    );
+    // The key less its last character, so its encoded spelling counts too.
+    let secret: String = key
+        .chars()
+        .skip(PING_KEY_PREFIX.len())
+        .take(key.len() - PING_KEY_PREFIX.len() - 1)
+        .collect();
+    assert!(!lines.contains(&secret), "a ping's key reached a log line");
 }
