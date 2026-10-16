@@ -36,7 +36,7 @@ lists. An end user's id is stored only as a keyed hash
 | Organizations, projects, members and roles | While they exist | Deleted with the organization, or the project |
 | Invitations | Until accepted, declined or withdrawn, or 7 days; an unaccepted one's record 30 days past expiry or withdrawal, an accepted one's until its acceptor's account is erased or its project or organization is deleted | The retention sweep deletes an unaccepted one's record |
 | API keys | While live; a revoked or expired key's record 7 days | The retention sweep deletes the record |
-| Connectors: Slack grants, webhook endpoints and their signing secrets | While connected | Revoked at the vendor and erased when disconnected, or with the project or the organization |
+| Connectors: Slack grants, webhook endpoints and their signing secrets | While connected; a Slack bot token until Slack has taken its app back, a day at most | Erased when disconnected, or with the project or the organization, the Slack app uninstalled from a workspace no other connection uses |
 | Activity feed notices | 90 days | The notifications sweep deletes them |
 | Connector deliveries: what was sent where, and the answer | 30 days | The same sweep |
 | The audit log | Without a time limit, through the organization's deletion | Never deleted: its monthly partitions are kept, and only an export's file is a copy |

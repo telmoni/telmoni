@@ -26,16 +26,17 @@ after typing the project's name
   open go with them, its ping keys first, so the ping lane is closed to the
   project before anything else. Its connectors, their delivery history and
   its activity feed are purged in the same request, just before its
-  telemetry, and the console agent removes what it holds about the project
-  within the hour.
+  telemetry — the Slack app uninstalled right after from every workspace no
+  other connection uses — and the console agent removes what it holds about
+  the project within the hour.
 - **What stays:** the project's events in the organization's audit log.
 - **If a step fails:** its telemetry's purge — cut short by a store that
   did not answer, or by a ping still being answered that held the project
   past the purge's two seconds — is tried again every ten minutes until it
   lands, telemetry finding the project through the settings row the failure
   left, its ping keys gone already; its connectors' purge — cut short by a
-  database that did not answer, or by a vendor slow to take a grant back —
-  is tried again every hour until it lands.
+  database that did not answer — is tried again every hour until it lands,
+  and an uninstall Slack did not answer is asked again every hour for a day.
 
 ## Deleting an organization
 
@@ -78,9 +79,11 @@ no organization that has other members
 - **An API key:** **Revoke** ends it at once, and its record is deleted seven
   days later. **Rotate** keeps the old key working for a day while you deploy
   the new one ([API keys](/docs/api/api-keys)).
-- **A connector:** disconnecting it revokes the grant at the vendor and
-  erases the grant or signing secret, and its deliveries and their attempts
-  go with it ([Notifications](/docs/integrations/notifications)).
+- **A connector:** disconnecting it erases the grant or signing secret, and
+  its deliveries and their attempts go with it; a Slack app no other
+  connection uses is uninstalled from the workspace, its bot token kept,
+  sealed, until Slack has answered, a day at most
+  ([Notifications](/docs/integrations/notifications)).
 - **A session:** end any session but the current one from **Active
   sessions**; the device signs out within minutes
   ([Privacy](/docs/account/privacy#active-sessions)).

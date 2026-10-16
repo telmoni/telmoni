@@ -101,4 +101,5 @@ connected to that Slack workspace. The event is recorded in the organization's
 To remove a connection, select **Disconnect** on the connector's row on the
 **Connectors** page. Telmoni deletes the connection with its queue and delivery
 log, records the action in the project's audit log, and uninstalls the Slack
-app from the workspace once no other connection on the platform uses it.
+app from the workspace once no other connection on the platform uses it,
+asking again every hour for a day where Slack does not answer.
