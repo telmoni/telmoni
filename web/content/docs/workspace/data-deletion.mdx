@@ -28,11 +28,12 @@ after typing the project's name
   telemetry, and the console agent removes what it holds about the project
   within the hour.
 - **What stays:** the project's events in the organization's audit log.
-- **If a step fails** — a store that did not answer, or a ping still being
-  answered that held the project past the purge's two seconds — the
-  organization's own deletion finishes it: telemetry finds the project
-  again through the settings row the failure left, and its ping keys are
-  gone already.
+- **If a step fails:** its telemetry's purge — cut short by a store that
+  did not answer, or by a ping still being answered that held the project
+  past the purge's two seconds — is tried again every ten minutes until it
+  lands, telemetry finding the project through the settings row the failure
+  left, its ping keys gone already; what its connectors' purge misses goes
+  when the organization itself is deleted.
 
 ## Deleting an organization
 
