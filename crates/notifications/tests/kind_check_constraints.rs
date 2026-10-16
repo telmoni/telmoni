@@ -247,3 +247,18 @@ fn the_handshake_check_admits_exactly_the_providers_with_a_grant() {
         "oauth_states_provider_check must admit exactly the providers with a grant"
     );
 }
+
+/// An uninstall is filed only for a provider installed once per workspace.
+#[test]
+fn the_uninstall_check_admits_exactly_the_providers_installed_per_workspace() {
+    let installed = spelled(
+        Provider::all()
+            .into_iter()
+            .filter(|provider| provider.installed_per_workspace()),
+    );
+    assert_eq!(
+        admitted(&initial_migration(), "uninstalls_provider_check"),
+        installed,
+        "uninstalls_provider_check must admit exactly the providers installed per workspace"
+    );
+}

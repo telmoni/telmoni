@@ -20,9 +20,8 @@ use telmoni_shared::{AuthError, OrganizationId, ProjectId, TelmoniError, UserId}
 use uuid::Uuid;
 
 use crate::AppState;
-use crate::connector::Provider;
 use crate::db::{self, NotificationsLane};
-use crate::delivery;
+use crate::{delivery, uninstall};
 
 /// Most feed rows a read returns (newest first; a dropdown, not an export).
 const FEED_LIMIT: i64 = 50;
@@ -277,67 +276,44 @@ pub async fn mark_read(
     Ok(Json(json!({ "marked": marked })))
 }
 
-/// Everything this module holds for the organization, before its row goes:
-/// its connectors torn down upstream first, then every row. Answers how many
-/// feed rows went. What auth's finalize calls, in process.
+/// Everything held for the organization, before its row goes, and an uninstall
+/// filed for each workspace its connectors reached. What auth's finalize calls.
 pub async fn purge_organization(
-    state: &AppState,
+    state: &Arc<AppState>,
     organization_id: &OrganizationId,
 ) -> Result<u64, TelmoniError> {
     let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
-    let held = db::sealed_connections_for_organization(&mut tx, organization_id).await?;
-    tx.commit().await?;
-    let mut slack_workspaces = std::collections::HashSet::new();
-    for connection in &held {
-        if connection.provider == Provider::Slack
-            && !slack_workspaces.insert(connection.external_workspace_id.clone())
-        {
-            continue;
-        }
-        connectors::tear_down_for_purge(state, connection, organization_id).await;
-    }
-
-    let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
     let purged = db::purge_organization(&mut tx, organization_id).await?;
+    let filed = uninstall::file(&mut tx, &purged.connections).await?;
     tx.commit().await?;
+    uninstall::settle_soon(state, filed);
     tracing::info!(
         organization_id = %organization_id,
-        purged,
+        purged = purged.rows,
         "notifications purge: the organization's feeds removed"
     );
-    Ok(purged)
+    Ok(purged.rows)
 }
 
-/// Everything this module holds for one project: its connectors, torn down
-/// upstream first, their deliveries, its feed and any handshake in flight.
-/// Auth calls it before a project is handed to another organization, since
-/// the connectors are the old organization's grants and would post the new
-/// owner's events into the old owner's channels, and after a project is
-/// deleted, and again by the retention sweep if that call failed. Safe to
-/// repeat: a second teardown is refused by the vendor and logged.
-pub async fn purge_project(state: &AppState, project_id: &ProjectId) -> Result<u64, TelmoniError> {
+/// Everything held for one project, and an uninstall filed for each workspace
+/// its connectors reached: before a transfer, as the old owner's grants must not
+/// post the new owner's events, after a delete, and again by the sweep.
+pub async fn purge_project(
+    state: &Arc<AppState>,
+    project_id: &ProjectId,
+) -> Result<u64, TelmoniError> {
     let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
-    let held = db::sealed_connections_for_project(&mut tx, project_id).await?;
-    tx.commit().await?;
-    let mut slack_workspaces = std::collections::HashSet::new();
-    for connection in &held {
-        if connection.provider == Provider::Slack
-            && !slack_workspaces.insert(connection.external_workspace_id.clone())
-        {
-            continue;
-        }
-        connectors::tear_down_for_project_purge(state, connection, project_id).await;
-    }
-
-    let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
+    db::wait_no_longer(&mut tx).await?;
     let purged = db::purge_project(&mut tx, project_id).await?;
+    let filed = uninstall::file(&mut tx, &purged.connections).await?;
     tx.commit().await?;
+    uninstall::settle_soon(state, filed);
     tracing::info!(
         project_id = %project_id,
-        purged,
+        purged = purged.rows,
         "notifications purge: the project's rows removed"
     );
-    Ok(purged)
+    Ok(purged.rows)
 }
 
 /// A person's account erasure: every notice that named them, on every feed

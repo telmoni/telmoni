@@ -28,7 +28,8 @@ use telmoni_shared::net_guard::{Egress, HostRejection, host_is_dialable};
 use telmoni_shared::{Redacted, TelmoniError};
 
 use super::{
-    Connector, DeliveryError, Event, Provider, Terminal, parse_retry_after, refused, short_body,
+    Connector, DeliveryError, Event, Provider, TearDownError, Terminal, parse_retry_after, refused,
+    short_body,
 };
 
 type HmacSha256 = Hmac<Sha256>;
@@ -236,9 +237,8 @@ impl Connector for WebhookConnector {
     async fn tear_down(
         &self,
         _http: &Egress,
-        _target: &Redacted,
         _token: Option<&Redacted>,
-    ) -> Result<(), TelmoniError> {
+    ) -> Result<(), TearDownError> {
         Ok(())
     }
 }

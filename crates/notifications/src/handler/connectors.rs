@@ -30,9 +30,8 @@ use crate::connector::{
     ConnectionStatus, Connector, DeliveryError, Event, Grant, Provider, Terminal, webhook,
 };
 use crate::db::{self, NotificationsLane};
-use crate::delivery;
 use crate::handler::{ProjectIdentity, authorize};
-use crate::notify;
+use crate::{delivery, notify, uninstall};
 
 /// How long a handshake may take between the authorize and the callback.
 const STATE_TTL_SECS: i64 = 600;
@@ -278,6 +277,10 @@ pub async fn callback(
         .await?
         .bind_organization(&identity.organization_id)
         .await?;
+    // Held to the commit: an uninstall's count of the workspace waits for this row.
+    if provider.installed_per_workspace() {
+        db::lock_workspace(&mut tx, provider, &installed.workspace_id).await?;
+    }
     let now_existing = db::existing_connection_id(
         &mut tx,
         &identity.project_id,
@@ -681,12 +684,10 @@ pub async fn delete_connector(
     let request_id = correlation_id(&headers);
 
     let mut tx = project_scope(&state.db, &identity.project_id).await?;
-    let sealed = db::sealed_connection(&mut tx, &identity.project_id, id)
+    let sealed = db::delete_connection(&mut tx, &identity.project_id, id)
         .await?
         .ok_or_else(|| AuthError::NotFound(format!("connection not found: {id}")))?;
-    db::delete_connection(&mut tx, &identity.project_id, id)
-        .await?
-        .ok_or_else(|| AuthError::NotFound(format!("connection not found: {id}")))?;
+    let filed = uninstall::file(&mut tx, std::slice::from_ref(&sealed)).await?;
     emit_audit(
         &mut tx,
         AuditEvent {
@@ -710,166 +711,8 @@ pub async fn delete_connector(
     tx.commit().await?;
     tracing::info!(connection_id = %id, project_id = %identity.project_id, provider = %sealed.provider, "connector disconnected");
 
-    tear_down(&state, &sealed).await;
+    uninstall::settle_soon(&state, filed);
     Ok(StatusCode::NO_CONTENT)
-}
-
-/// The upstream half of a disconnect, best effort, after the row is gone.
-async fn tear_down(state: &AppState, sealed: &db::SealedConnection) {
-    let provider = sealed.provider;
-    let others = match provider {
-        Provider::Webhook => return,
-        Provider::Slack => {
-            remaining_in_workspace(state, provider, &sealed.external_workspace_id, None).await
-        }
-    };
-    tear_down_if_last(state, sealed, provider, others).await;
-}
-
-/// The organization purge's teardown, where "last" means no connection
-/// OUTSIDE the organization being erased.
-pub(crate) async fn tear_down_for_purge(
-    state: &AppState,
-    sealed: &db::SealedConnection,
-    organization_id: &telmoni_shared::OrganizationId,
-) {
-    let provider = sealed.provider;
-    let others = match provider {
-        Provider::Webhook => return,
-        Provider::Slack => {
-            remaining_in_workspace(
-                state,
-                provider,
-                &sealed.external_workspace_id,
-                Some(organization_id),
-            )
-            .await
-        }
-    };
-    tear_down_if_last(state, sealed, provider, others).await;
-}
-
-/// The project purge's teardown, where "last" means no connection OUTSIDE the
-/// project being purged: another project's, in this organization or any
-/// other, keeps the app installed.
-pub(crate) async fn tear_down_for_project_purge(
-    state: &AppState,
-    sealed: &db::SealedConnection,
-    project_id: &telmoni_shared::ProjectId,
-) {
-    let provider = sealed.provider;
-    let others = match provider {
-        Provider::Webhook => return,
-        Provider::Slack => {
-            remaining_in_workspace_outside_project(
-                state,
-                provider,
-                &sealed.external_workspace_id,
-                project_id,
-            )
-            .await
-        }
-    };
-    tear_down_if_last(state, sealed, provider, others).await;
-}
-
-/// Slack's `apps.uninstall` kills every connection in the workspace, so it is
-/// sent only when no other connection would die with it.
-async fn tear_down_if_last(
-    state: &AppState,
-    sealed: &db::SealedConnection,
-    provider: Provider,
-    others: Result<i64, TelmoniError>,
-) {
-    match others {
-        Ok(0) => {}
-        Ok(_) => {
-            tracing::info!(connection_id = %sealed.id, "other connections share this workspace; the app stays installed");
-            return;
-        }
-        Err(e) => {
-            tracing::warn!(connection_id = %sealed.id, error = %e, "could not count the workspace's other connections; leaving the app installed");
-            return;
-        }
-    }
-    let (Some(connector), Some(kek)) = (state.connectors.get(provider), state.kek.as_ref()) else {
-        tracing::warn!(connection_id = %sealed.id, "no connector or key to tear the grant down with");
-        return;
-    };
-    let dek = match kek
-        .unwrap_dek(
-            &state.http,
-            &sealed.wrapped_dek,
-            sealed.id.as_bytes(),
-            sealed.key_version,
-        )
-        .await
-    {
-        Ok(dek) => dek,
-        Err(e) => {
-            tracing::warn!(connection_id = %sealed.id, error = %e, "the grant's key could not be opened for teardown");
-            return;
-        }
-    };
-    let opened = state
-        .vault
-        .open(&dek, &sealed.target(), sealed.id.as_bytes())
-        .and_then(|url| {
-            let token = sealed
-                .token()
-                .map(|t| state.vault.open(&dek, &t, sealed.id.as_bytes()))
-                .transpose()?;
-            Ok((url, token))
-        });
-    let (url, token): (Redacted, Option<Redacted>) = match opened {
-        Ok(pair) => pair,
-        Err(e) => {
-            tracing::warn!(connection_id = %sealed.id, error = %e, "the grant could not be opened for teardown");
-            return;
-        }
-    };
-    if let Err(e) = connector
-        .tear_down(&state.egress, &url, token.as_ref())
-        .await
-    {
-        tracing::warn!(connection_id = %sealed.id, provider = %provider, error = %e,
-            "upstream teardown failed; the row is gone and the vendor will refuse the next post");
-    }
-}
-
-/// How many connections still point at a workspace, across every tenant or
-/// every tenant but one.
-async fn remaining_in_workspace(
-    state: &AppState,
-    provider: Provider,
-    workspace: &str,
-    outside: Option<&telmoni_shared::OrganizationId>,
-) -> Result<i64, TelmoniError> {
-    let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
-    let n = match outside {
-        Some(organization) => {
-            db::count_workspace_connections_outside(&mut tx, provider, workspace, organization)
-                .await?
-        }
-        None => db::count_workspace_connections(&mut tx, provider, workspace).await?,
-    };
-    tx.commit().await?;
-    Ok(n)
-}
-
-/// How many connections still point at a workspace from any project but one.
-async fn remaining_in_workspace_outside_project(
-    state: &AppState,
-    provider: Provider,
-    workspace: &str,
-    project_id: &telmoni_shared::ProjectId,
-) -> Result<i64, TelmoniError> {
-    let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
-    let n =
-        db::count_workspace_connections_outside_project(&mut tx, provider, workspace, project_id)
-            .await?;
-    tx.commit().await?;
-    Ok(n)
 }
 
 /// `POST /internal/connectors/{id}/test` — send one message now and report

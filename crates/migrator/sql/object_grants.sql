@@ -60,6 +60,12 @@ BEGIN
     IF to_regclass('notifications.delivery_attempts') IS NOT NULL THEN
         EXECUTE 'REVOKE INSERT, UPDATE, DELETE ON notifications.delivery_attempts FROM notifications';
     END IF;
+    -- An uninstall is filed in the transaction of the disconnect it follows,
+    -- and by nothing else; the lane settles and removes it, and a request
+    -- that rewrote or removed one could leave an app installed.
+    IF to_regclass('notifications.uninstalls') IS NOT NULL THEN
+        EXECUTE 'REVOKE UPDATE, DELETE ON notifications.uninstalls FROM notifications';
+    END IF;
 EXCEPTION
     WHEN invalid_schema_name THEN
         RAISE NOTICE 'notifications schema not yet created — notifications own-schema grants land on next re-apply';

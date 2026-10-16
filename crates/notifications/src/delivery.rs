@@ -609,7 +609,8 @@ fn breaker_limit(state: &AppState, connection: &SealedConnection) -> Option<i32>
         .consecutive_failure_limit()
 }
 
-/// Write the whole batch's bookkeeping, then retire whatever it condemned.
+/// Write the whole batch's bookkeeping, again where a deadlock ended it, then
+/// retire whatever it condemned.
 async fn record(state: &Arc<AppState>, outcomes: Vec<Outcome>) -> Result<(), TelmoniError> {
     let mut delivered: Vec<Uuid> = Vec::new();
     let mut touched: Vec<Uuid> = Vec::new();
@@ -687,15 +688,25 @@ async fn record(state: &Arc<AppState>, outcomes: Vec<Outcome>) -> Result<(), Tel
 
     let tallies: Vec<(Uuid, i32)> = breaker.iter().map(|(&id, &(n, ..))| (id, n)).collect();
 
-    let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
-    db::mark_delivered(&mut tx, &delivered).await?;
-    db::touch_connections(&mut tx, &touched).await?;
-    db::fail_deliveries(&mut tx, &failures).await?;
-    for (why, ids) in &held {
-        db::unlease_deliveries(&mut tx, ids, why).await?;
-    }
-    let counts = db::record_consecutive_failures(&mut tx, &tallies).await?;
-    tx.commit().await?;
+    let batch = Bookkeeping {
+        delivered: &delivered,
+        touched: &touched,
+        failures: &failures,
+        held: &held,
+        tallies: &tallies,
+    };
+    let mut tries = 1;
+    let counts = loop {
+        match batch.write(state).await {
+            Err(e) if deadlocked(&e) && tries < BOOKKEEPING_TRIES => {
+                tries += 1;
+                tracing::info!(
+                    "a delivery batch's bookkeeping was ended to break a deadlock; writing it again"
+                );
+            }
+            written => break written?,
+        }
+    };
 
     // The log in its own transaction, after the queue's: it is a record of
     // what happened, and nothing in it may undo what happened. A failed write
@@ -722,6 +733,44 @@ async fn record(state: &Arc<AppState>, outcomes: Vec<Outcome>) -> Result<(), Tel
         retire(state, connection_id, class, &reason).await?;
     }
     Ok(())
+}
+
+/// How many times a batch's bookkeeping is written before a deadlock is the
+/// tick's error.
+const BOOKKEEPING_TRIES: u32 = 3;
+
+/// Postgres's `deadlock_detected`.
+const DEADLOCK_DETECTED: &str = "40P01";
+
+fn deadlocked(error: &sqlx::Error) -> bool {
+    matches!(error, sqlx::Error::Database(e) if e.code().as_deref() == Some(DEADLOCK_DETECTED))
+}
+
+/// A batch's bookkeeping: the connections first, then their deliveries, the
+/// order a purge's cascade, a retirement and a workspace's revocation take.
+struct Bookkeeping<'a> {
+    delivered: &'a [Uuid],
+    touched: &'a [Uuid],
+    failures: &'a [FailedAttempt],
+    held: &'a HashMap<String, Vec<Uuid>>,
+    tallies: &'a [(Uuid, i32)],
+}
+
+impl Bookkeeping<'_> {
+    /// One transaction, so one a deadlock ends wrote nothing and is written
+    /// whole again.
+    async fn write(&self, state: &AppState) -> sqlx::Result<Vec<(Uuid, i32)>> {
+        let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
+        db::touch_connections(&mut tx, self.touched).await?;
+        let counts = db::record_consecutive_failures(&mut tx, self.tallies).await?;
+        db::mark_delivered(&mut tx, self.delivered).await?;
+        db::fail_deliveries(&mut tx, self.failures).await?;
+        for (why, ids) in self.held {
+            db::unlease_deliveries(&mut tx, ids, why).await?;
+        }
+        tx.commit().await?;
+        Ok(counts)
+    }
 }
 
 async fn log_attempts(state: &AppState, attempts: &[NewAttempt]) -> Result<(), TelmoniError> {

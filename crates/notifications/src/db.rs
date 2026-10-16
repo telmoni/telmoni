@@ -368,26 +368,38 @@ pub async fn try_retention_lock(
     .await
 }
 
-/// Hard-delete every notifications row for one ORGANIZATION — this service's
-/// step of the deletion cascade. One lane for every table: when this was two,
-/// only one was ever called and the other's rows outlived the erasure.
+/// What a purge removed: how many rows, and its connections as the delete
+/// found them, for the uninstalls it files.
+pub struct Purged {
+    pub rows: u64,
+    pub connections: Vec<SealedConnection>,
+}
+
+/// Hard-delete the organization's rows, every table in one lane, but the
+/// uninstalls it files: two lanes once left one table's rows behind.
 pub async fn purge_organization(
     tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
     organization_id: &OrganizationId,
-) -> sqlx::Result<u64> {
-    let mut purged = 0u64;
+) -> sqlx::Result<Purged> {
+    let connections = sqlx::query_as::<_, SealedConnection>(&format!(
+        "DELETE FROM notifications.connections WHERE organization_id = $1
+         RETURNING {SEALED_COLUMNS}"
+    ))
+    .bind(organization_id)
+    .fetch_all(tx.conn())
+    .await?;
+    let mut rows = u64::try_from(connections.len()).unwrap_or(u64::MAX);
     for sql in [
-        "DELETE FROM notifications.connections WHERE organization_id = $1",
         "DELETE FROM notifications.oauth_states WHERE organization_id = $1",
         "DELETE FROM notifications.feed WHERE organization_id = $1",
     ] {
-        purged += sqlx::query(sql)
+        rows += sqlx::query(sql)
             .bind(organization_id)
             .execute(tx.conn())
             .await?
             .rows_affected();
     }
-    Ok(purged)
+    Ok(Purged { rows, connections })
 }
 
 /// A page of the projects this module's rows name, in id order after
@@ -433,32 +445,60 @@ pub async fn projects_after(
 /// `lock_timeout`, and a stuck purge would hold up the sweep that retries it.
 const PURGE_LOCK_WAIT: &str = "2000ms";
 
-/// Hard-delete every notifications row for one PROJECT: what a project
-/// handed to another organization leaves behind, and what a deleted one
-/// does. The same three tables as the organization's purge; deliveries and
-/// their attempts cascade from the connections. A row held past
-/// `PURGE_LOCK_WAIT` fails the purge, for its caller to try again.
-pub async fn purge_project(
+/// Caps every later lock wait in a purge's transaction at `PURGE_LOCK_WAIT`;
+/// one past it fails the purge, for its caller to try again.
+pub async fn wait_no_longer(
     tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
-    project_id: &ProjectId,
-) -> sqlx::Result<u64> {
+) -> sqlx::Result<()> {
     sqlx::query("SELECT set_config('lock_timeout', $1, true)")
         .bind(PURGE_LOCK_WAIT)
         .execute(tx.conn())
         .await?;
-    let mut purged = 0u64;
+    Ok(())
+}
+
+/// Holds one vendor workspace's lock to the end of the transaction, so that an
+/// uninstall's count of the workspace and an install's write go one at a time.
+pub async fn lock_workspace<B: Binding>(
+    tx: &mut Scoped<'_, B>,
+    provider: Provider,
+    external_workspace_id: &str,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "SELECT pg_advisory_xact_lock(
+             hashtextextended('notifications:workspace:' || $1 || ':' || $2, 0))",
+    )
+    .bind(provider)
+    .bind(external_workspace_id)
+    .execute(tx.conn())
+    .await?;
+    Ok(())
+}
+
+/// Hard-delete one PROJECT's rows but its uninstalls, as a transfer or a delete
+/// leaves them; deliveries and their attempts go by the cascade.
+pub async fn purge_project(
+    tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
+    project_id: &ProjectId,
+) -> sqlx::Result<Purged> {
+    let connections = sqlx::query_as::<_, SealedConnection>(&format!(
+        "DELETE FROM notifications.connections WHERE project_id = $1 RETURNING {SEALED_COLUMNS}"
+    ))
+    .bind(project_id)
+    .fetch_all(tx.conn())
+    .await?;
+    let mut rows = u64::try_from(connections.len()).unwrap_or(u64::MAX);
     for sql in [
-        "DELETE FROM notifications.connections WHERE project_id = $1",
         "DELETE FROM notifications.oauth_states WHERE project_id = $1",
         "DELETE FROM notifications.feed WHERE project_id = $1",
     ] {
-        purged += sqlx::query(sql)
+        rows += sqlx::query(sql)
             .bind(project_id)
             .execute(tx.conn())
             .await?
             .rows_affected();
     }
-    Ok(purged)
+    Ok(Purged { rows, connections })
 }
 
 /// A connection as served to the BFF — **never the target or the token.**
@@ -522,6 +562,7 @@ pub struct SealedConnection {
     pub prior_token_ciphertext: Option<Vec<u8>>,
     pub prior_token_nonce: Option<Vec<u8>>,
     pub prior_token_expires_at: Option<DateTime<Utc>>,
+    pub shard_key: Uuid,
 }
 
 impl std::fmt::Debug for SealedConnection {
@@ -586,7 +627,7 @@ const SEALED_COLUMNS: &str = "id, project_id, organization_id, provider, status,
      external_workspace_id, external_workspace_name, channel_name, \
      target_ciphertext, target_nonce, key_version, wrapped_dek, \
      token_ciphertext, token_nonce, \
-     prior_token_ciphertext, prior_token_nonce, prior_token_expires_at";
+     prior_token_ciphertext, prior_token_nonce, prior_token_expires_at, shard_key";
 
 /// One connection by id, sealed, in the project named: the predicate is what
 /// keeps tenants apart where everything connects as one database user and
@@ -614,38 +655,6 @@ pub async fn sealed_connections(
         "SELECT {SEALED_COLUMNS} FROM notifications.connections WHERE id = ANY($1)"
     ))
     .bind(ids)
-    .fetch_all(tx.conn())
-    .await
-}
-
-/// Every connection an organization holds, sealed, so the purge can tear each
-/// down upstream before the rows go.
-pub async fn sealed_connections_for_organization(
-    tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
-    organization_id: &OrganizationId,
-) -> sqlx::Result<Vec<SealedConnection>> {
-    sqlx::query_as::<_, SealedConnection>(&format!(
-        "SELECT {SEALED_COLUMNS} FROM notifications.connections
-          WHERE organization_id = $1
-          ORDER BY id"
-    ))
-    .bind(organization_id)
-    .fetch_all(tx.conn())
-    .await
-}
-
-/// Every connection a project holds, sealed, so the project purge can tear
-/// each down upstream before the rows go.
-pub async fn sealed_connections_for_project(
-    tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
-    project_id: &ProjectId,
-) -> sqlx::Result<Vec<SealedConnection>> {
-    sqlx::query_as::<_, SealedConnection>(&format!(
-        "SELECT {SEALED_COLUMNS} FROM notifications.connections
-          WHERE project_id = $1
-          ORDER BY id"
-    ))
-    .bind(project_id)
     .fetch_all(tx.conn())
     .await
 }
@@ -791,22 +800,25 @@ pub async fn reconnect_connection(
     .await
 }
 
-/// Remove one connection; its queue cascades. `None` when there is no such row.
+/// Remove one connection, answering it as the delete found it; its queue
+/// cascades. `None` when there is no such row.
 pub async fn delete_connection(
     tx: &mut Scoped<'_, Project>,
     project_id: &ProjectId,
     id: Uuid,
-) -> sqlx::Result<Option<Uuid>> {
-    sqlx::query_scalar::<_, Uuid>(
-        "DELETE FROM notifications.connections WHERE project_id = $1 AND id = $2 RETURNING id",
-    )
+) -> sqlx::Result<Option<SealedConnection>> {
+    sqlx::query_as::<_, SealedConnection>(&format!(
+        "DELETE FROM notifications.connections WHERE project_id = $1 AND id = $2
+         RETURNING {SEALED_COLUMNS}"
+    ))
     .bind(project_id)
     .bind(id)
     .fetch_optional(tx.conn())
     .await
 }
 
-/// How many connections, platform-wide, still point at one vendor workspace.
+/// How many connections, platform-wide, still use the app in one vendor
+/// workspace: every one but a revoked one, whose token is dead.
 pub async fn count_workspace_connections(
     tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
     provider: Provider,
@@ -814,49 +826,154 @@ pub async fn count_workspace_connections(
 ) -> sqlx::Result<i64> {
     sqlx::query_scalar::<_, i64>(
         "SELECT count(*) FROM notifications.connections
-          WHERE provider = $1 AND external_workspace_id = $2",
+          WHERE provider = $1 AND external_workspace_id = $2 AND status <> $3",
     )
     .bind(provider)
     .bind(external_workspace_id)
+    .bind(ConnectionStatus::Revoked)
     .fetch_one(tx.conn())
     .await
 }
 
-/// Like [`count_workspace_connections`], but outside one organization: does
-/// anybody else still use this workspace?
-pub async fn count_workspace_connections_outside(
-    tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
-    provider: Provider,
-    external_workspace_id: &str,
-    organization_id: &OrganizationId,
-) -> sqlx::Result<i64> {
-    sqlx::query_scalar::<_, i64>(
-        "SELECT count(*) FROM notifications.connections
-          WHERE provider = $1 AND external_workspace_id = $2 AND organization_id <> $3",
+/// An uninstall filed for a workspace, with the sealed token it is sent with.
+/// `Debug` prints the token's length and nothing else.
+#[derive(FromRow)]
+pub struct Uninstall {
+    /// The deleted connection's id: the token's associated data.
+    pub id: Uuid,
+    pub provider: Provider,
+    pub external_workspace_id: String,
+    pub key_version: i16,
+    pub wrapped_dek: Vec<u8>,
+    pub token_ciphertext: Vec<u8>,
+    pub token_nonce: Vec<u8>,
+    pub attempts: i32,
+}
+
+impl std::fmt::Debug for Uninstall {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Uninstall")
+            .field("id", &self.id)
+            .field("provider", &self.provider)
+            .field("external_workspace_id", &self.external_workspace_id)
+            .field("token", &self.token_ciphertext.len())
+            .field("attempts", &self.attempts)
+            .finish()
+    }
+}
+
+impl Uninstall {
+    /// The sealed bot token the vendor's uninstall is asked with.
+    #[must_use]
+    pub fn token(&self) -> Sealed {
+        Sealed {
+            ciphertext: self.token_ciphertext.clone(),
+            nonce: self.token_nonce.clone(),
+        }
+    }
+}
+
+const UNINSTALL_COLUMNS: &str = "id, provider, external_workspace_id, key_version, wrapped_dek, \
+     token_ciphertext, token_nonce, attempts";
+
+/// Files the uninstall a deleted connection's workspace may need, in the
+/// transaction that deletes it. `None` for a connection holding no token.
+pub async fn file_uninstall<B: Binding>(
+    tx: &mut Scoped<'_, B>,
+    connection: &SealedConnection,
+) -> sqlx::Result<Option<Uninstall>> {
+    let Some(token) = connection.token() else {
+        return Ok(None);
+    };
+    sqlx::query(
+        "INSERT INTO notifications.uninstalls
+             (id, project_id, organization_id, provider, external_workspace_id, key_version,
+              wrapped_dek, token_ciphertext, token_nonce, shard_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
     )
-    .bind(provider)
-    .bind(external_workspace_id)
-    .bind(organization_id)
-    .fetch_one(tx.conn())
+    .bind(connection.id)
+    .bind(&connection.project_id)
+    .bind(&connection.organization_id)
+    .bind(connection.provider)
+    .bind(&connection.external_workspace_id)
+    .bind(connection.key_version)
+    .bind(&connection.wrapped_dek)
+    .bind(&token.ciphertext)
+    .bind(&token.nonce)
+    .bind(connection.shard_key)
+    .execute(tx.conn())
+    .await?;
+    Ok(Some(Uninstall {
+        id: connection.id,
+        provider: connection.provider,
+        external_workspace_id: connection.external_workspace_id.clone(),
+        key_version: connection.key_version,
+        wrapped_dek: connection.wrapped_dek.clone(),
+        token_ciphertext: token.ciphertext,
+        token_nonce: token.nonce,
+        attempts: 0,
+    }))
+}
+
+/// Removes a settled uninstall.
+pub async fn forget_uninstall(
+    tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
+    id: Uuid,
+) -> sqlx::Result<()> {
+    sqlx::query("DELETE FROM notifications.uninstalls WHERE id = $1")
+        .bind(id)
+        .execute(tx.conn())
+        .await?;
+    Ok(())
+}
+
+/// Counts a try nothing answered, answering how many there have been; `None`
+/// once another settle removed the row.
+pub async fn uninstall_tried(
+    tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
+    id: Uuid,
+) -> sqlx::Result<Option<i32>> {
+    sqlx::query_scalar(
+        "UPDATE notifications.uninstalls SET attempts = attempts + 1 WHERE id = $1
+         RETURNING attempts",
+    )
+    .bind(id)
+    .fetch_optional(tx.conn())
     .await
 }
 
-/// Like [`count_workspace_connections`], but outside one project: does any
-/// other project, in this organization or another, still use this workspace?
-pub async fn count_workspace_connections_outside_project(
+/// The uninstalls filed more than `filed_secs` ago, oldest first, for the
+/// sweep to settle what the settle after each delete left.
+pub async fn uninstalls_due(
     tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
-    provider: Provider,
-    external_workspace_id: &str,
-    project_id: &ProjectId,
-) -> sqlx::Result<i64> {
-    sqlx::query_scalar::<_, i64>(
-        "SELECT count(*) FROM notifications.connections
-          WHERE provider = $1 AND external_workspace_id = $2 AND project_id <> $3",
-    )
-    .bind(provider)
-    .bind(external_workspace_id)
-    .bind(project_id)
-    .fetch_one(tx.conn())
+    filed_secs: i64,
+    limit: i64,
+) -> sqlx::Result<Vec<Uninstall>> {
+    sqlx::query_as::<_, Uninstall>(&format!(
+        "SELECT {UNINSTALL_COLUMNS} FROM notifications.uninstalls
+          WHERE created_at < now() - make_interval(secs => $1::bigint)
+          ORDER BY created_at, id
+          LIMIT $2"
+    ))
+    .bind(filed_secs)
+    .bind(limit)
+    .fetch_all(tx.conn())
+    .await
+}
+
+/// Removes the uninstalls filed more than `filed_secs` ago, answering them:
+/// given up on, however many replicas tried them meanwhile.
+pub async fn give_up_uninstalls(
+    tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
+    filed_secs: i64,
+) -> sqlx::Result<Vec<Uninstall>> {
+    sqlx::query_as::<_, Uninstall>(&format!(
+        "DELETE FROM notifications.uninstalls
+          WHERE created_at < now() - make_interval(secs => $1::bigint)
+      RETURNING {UNINSTALL_COLUMNS}"
+    ))
+    .bind(filed_secs)
+    .fetch_all(tx.conn())
     .await
 }
 

@@ -26,7 +26,8 @@ use common::{AuthStub, Flags, SECRET};
 use telmoni_notifications::connector::{Connectors, Provider, slack, webhook};
 use telmoni_notifications::db::NotificationsLane;
 use telmoni_notifications::retention::{self, Purged};
-use telmoni_notifications::{AppState, db, delivery, router};
+use telmoni_notifications::uninstall::{self, Swept};
+use telmoni_notifications::{AppState, db, delivery, handler, router};
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::envelope::{KEK_VERSION, Kek, KmsKek, LocalKek, Vault};
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
@@ -1835,6 +1836,7 @@ async fn a_slack_disconnect_uninstalls_only_when_it_was_the_last(pool: PgPool) {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    uninstalls_settled(&pool).await;
     let uninstalls = |reqs: Vec<wiremock::Request>| {
         reqs.into_iter()
             .filter(|r| r.url.path() == "/api/apps.uninstall")
@@ -1858,6 +1860,7 @@ async fn a_slack_disconnect_uninstalls_only_when_it_was_the_last(pool: PgPool) {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    uninstalls_settled(&pool).await;
     assert_eq!(uninstalls(mocks.received_requests().await.unwrap()), 1);
     let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM notifications.connections")
         .fetch_one(&pool)
@@ -2129,26 +2132,13 @@ async fn the_purge_tears_down_the_grants_and_removes_every_row(pool: PgPool) {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
-    let uninstalls: Vec<String> = mocks
-        .received_requests()
-        .await
-        .unwrap()
-        .into_iter()
-        .filter(|r| r.url.path() == "/api/apps.uninstall")
-        .map(|r| {
-            r.headers
-                .get("authorization")
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .to_owned()
-        })
-        .collect();
-    assert_eq!(uninstalls, ["Bearer xoxb-mine"]);
+    uninstalls_settled(&pool).await;
+    assert_eq!(uninstalled_with(&mocks).await, ["Bearer xoxb-mine"]);
     for (table, expect) in [
         ("connections", 1i64),
         ("deliveries", 0),
         ("oauth_states", 0),
+        ("uninstalls", 0),
     ] {
         let left: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM notifications.{table}"))
             .fetch_one(&pool)
@@ -2346,19 +2336,8 @@ async fn a_deleted_projects_purge_cut_short_is_finished_by_the_sweep(pool: PgPoo
         );
     }
     assert_eq!(rows_of_project(&pool, ORGANIZATION).await, [1, 1, 0, 1]);
-    let uninstalls: Vec<String> = posts_to(&mocks, "/api/apps.uninstall")
-        .await
-        .into_iter()
-        .map(|r| {
-            r.headers
-                .get("authorization")
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .to_owned()
-        })
-        .collect();
-    assert_eq!(uninstalls, ["Bearer xoxb-gone"]);
+    uninstalls_settled(&pool).await;
+    assert_eq!(uninstalled_with(&mocks).await, ["Bearer xoxb-gone"]);
     assert_eq!(connection_status(&pool, kept).await.0, "active");
     assert_eq!(
         retention::purge_gone_projects(&st).await.unwrap(),
@@ -2525,6 +2504,855 @@ async fn a_sweep_that_loses_its_database_ends_there(pool: PgPool) {
             .contains("a deleted project's purge failed again"),
         "a project was tried as though the database had answered"
     );
+}
+
+/// How many of this database's sessions wait on a lock now.
+async fn lock_waiters(pool: &PgPool) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM pg_stat_activity
+          WHERE datname = current_database() AND wait_event_type = 'Lock'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// Polls `holds` until it answers true, failing after ten seconds.
+async fn eventually<F, Fut>(what: &str, mut holds: F)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !holds().await {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{what}: still not so after ten seconds"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// `apps.uninstall` answering `ok`, `delay` late.
+async fn mount_uninstall(mocks: &MockServer, delay: Duration) {
+    Mock::given(method("POST"))
+        .and(path("/api/apps.uninstall"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"ok": true}))
+                .set_delay(delay),
+        )
+        .mount(mocks)
+        .await;
+}
+
+/// The bot tokens `apps.uninstall` was sent with, in the order sent.
+async fn uninstalled_with(mocks: &MockServer) -> Vec<String> {
+    posts_to(mocks, "/api/apps.uninstall")
+        .await
+        .into_iter()
+        .map(|r| {
+            r.headers
+                .get("authorization")
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect()
+}
+
+/// A transaction of the owner's holding `table`'s row `id`, so whatever
+/// deletes it waits there.
+async fn holding(
+    pool: &PgPool,
+    table: &str,
+    id: Uuid,
+) -> sqlx::Transaction<'static, sqlx::Postgres> {
+    let mut holder = pool.begin().await.unwrap();
+    sqlx::query(&format!(
+        "SELECT 1 FROM notifications.{table} WHERE id = $1 FOR UPDATE"
+    ))
+    .bind(id)
+    .execute(&mut *holder)
+    .await
+    .unwrap();
+    holder
+}
+
+/// One project's purge, as auth calls it, on a task of its own.
+fn purging(
+    st: &Arc<AppState>,
+    organization: &'static str,
+) -> tokio::task::JoinHandle<Result<u64, TelmoniError>> {
+    let st = st.clone();
+    tokio::spawn(async move { handler::purge_project(&st, &pid(organization)).await })
+}
+
+/// Waits until every uninstall filed so far was tried once: sent, refused or
+/// not needed and removed, or left with its try counted.
+async fn uninstalls_settled(pool: &PgPool) {
+    eventually("every filed uninstall settles", || async {
+        let untried: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM notifications.uninstalls WHERE attempts = 0")
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        untried == 0
+    })
+    .await;
+}
+
+/// The uninstalls still filed, by connection, with their tries.
+async fn filed_uninstalls(pool: &PgPool) -> Vec<(Uuid, i32)> {
+    sqlx::query_as("SELECT id, attempts FROM notifications.uninstalls ORDER BY id")
+        .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
+/// Two purges sharing a Slack workspace, deciding one beside the other, uninstall the app once.
+#[sqlx::test]
+async fn two_purges_of_one_workspace_leave_the_app_uninstalled(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let first = seed_connection(
+        &pool,
+        GONE,
+        Provider::Slack,
+        "T0SHARED",
+        "C0FIRST",
+        &slack_hook_url(&mocks, "first"),
+        Some("xoxb-shared"),
+    )
+    .await;
+    seed_connection(
+        &pool,
+        GONE_TOO,
+        Provider::Slack,
+        "T0SHARED",
+        "C0SECOND",
+        &slack_hook_url(&mocks, "second"),
+        Some("xoxb-shared"),
+    )
+    .await;
+    mount_uninstall(&mocks, Duration::ZERO).await;
+    let st = state(pool.clone(), &mocks, None);
+
+    let holder = holding(&pool, "connections", first).await;
+    let first_purge = purging(&st, GONE);
+    eventually("the first purge waits at its delete", || async {
+        lock_waiters(&pool).await == 1
+    })
+    .await;
+    let second_purge = purging(&st, GONE_TOO);
+    eventually("the second purge is done or waits", || async {
+        second_purge.is_finished() || lock_waiters(&pool).await == 2
+    })
+    .await;
+    uninstalls_settled(&pool).await;
+    holder.rollback().await.unwrap();
+    first_purge.await.unwrap().unwrap();
+    second_purge.await.unwrap().unwrap();
+    uninstalls_settled(&pool).await;
+
+    for organization in [GONE, GONE_TOO] {
+        assert_eq!(
+            rows_of_project(&pool, organization).await,
+            [0, 0, 0, 0],
+            "{organization}"
+        );
+    }
+    assert_eq!(uninstalled_with(&mocks).await, ["Bearer xoxb-shared"]);
+    assert!(filed_uninstalls(&pool).await.is_empty());
+}
+
+/// An organization's purge and a project's, sharing a workspace, uninstall the app once.
+#[sqlx::test]
+async fn an_organizations_purge_and_a_projects_leave_the_app_uninstalled(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let first = seed_connection(
+        &pool,
+        GONE,
+        Provider::Slack,
+        "T0SHARED",
+        "C0FIRST",
+        &slack_hook_url(&mocks, "first"),
+        Some("xoxb-shared"),
+    )
+    .await;
+    seed_connection(
+        &pool,
+        GONE_TOO,
+        Provider::Slack,
+        "T0SHARED",
+        "C0SECOND",
+        &slack_hook_url(&mocks, "second"),
+        Some("xoxb-shared"),
+    )
+    .await;
+    mount_uninstall(&mocks, Duration::ZERO).await;
+    let st = state(pool.clone(), &mocks, None);
+
+    let holder = holding(&pool, "connections", first).await;
+    let organization_purge = tokio::spawn({
+        let st = st.clone();
+        async move { handler::purge_organization(&st, &oid(GONE)).await }
+    });
+    eventually("the organization's purge waits at its delete", || async {
+        lock_waiters(&pool).await == 1
+    })
+    .await;
+    let project_purge = purging(&st, GONE_TOO);
+    eventually("the project's purge is done or waits", || async {
+        project_purge.is_finished() || lock_waiters(&pool).await == 2
+    })
+    .await;
+    uninstalls_settled(&pool).await;
+    holder.rollback().await.unwrap();
+    organization_purge.await.unwrap().unwrap();
+    project_purge.await.unwrap().unwrap();
+    uninstalls_settled(&pool).await;
+
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM notifications.connections")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+    assert_eq!(uninstalled_with(&mocks).await, ["Bearer xoxb-shared"]);
+}
+
+/// A disconnect deciding beside a purge of the same workspace leaves the app uninstalled once.
+#[sqlx::test]
+async fn a_disconnect_and_a_purge_of_one_workspace_leave_the_app_uninstalled(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let mine = seed_connection(
+        &pool,
+        ORGANIZATION,
+        Provider::Slack,
+        SLACK_WORKSPACE,
+        "C0MINE",
+        &slack_hook_url(&mocks, "mine"),
+        Some("xoxb-shared"),
+    )
+    .await;
+    let gone = seed_connection(
+        &pool,
+        GONE,
+        Provider::Slack,
+        SLACK_WORKSPACE,
+        "C0GONE",
+        &slack_hook_url(&mocks, "gone"),
+        Some("xoxb-shared"),
+    )
+    .await;
+    mount_uninstall(&mocks, Duration::ZERO).await;
+    let st = state(pool.clone(), &mocks, None);
+
+    let holder = holding(&pool, "connections", gone).await;
+    let purge = purging(&st, GONE);
+    eventually("the purge waits at its delete", || async {
+        lock_waiters(&pool).await == 1
+    })
+    .await;
+    let disconnect = tokio::spawn(app(&st).oneshot(owner(
+        "DELETE",
+        &format!("/internal/connectors/{mine}"),
+        None,
+    )));
+    eventually("the disconnect is done or waits", || async {
+        disconnect.is_finished() || lock_waiters(&pool).await == 2
+    })
+    .await;
+    uninstalls_settled(&pool).await;
+    holder.rollback().await.unwrap();
+    purge.await.unwrap().unwrap();
+    assert_eq!(
+        disconnect.await.unwrap().unwrap().status(),
+        StatusCode::NO_CONTENT
+    );
+    uninstalls_settled(&pool).await;
+
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM notifications.connections")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+    assert_eq!(uninstalled_with(&mocks).await, ["Bearer xoxb-shared"]);
+}
+
+/// A purge's uninstall waits for an install holding its workspace, counts it, and keeps the app.
+#[sqlx::test]
+async fn an_install_landing_as_a_purge_decides_keeps_the_app_installed(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    seed_connection(
+        &pool,
+        GONE,
+        Provider::Slack,
+        SLACK_WORKSPACE,
+        "C0GONE",
+        &slack_hook_url(&mocks, "gone"),
+        Some("xoxb-gone"),
+    )
+    .await;
+    let hook = slack_hook_url(&mocks, "newhook");
+    Mock::given(method("POST"))
+        .and(path("/api/oauth.v2.access"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(slack_access_ok(&hook)))
+        .mount(&mocks)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/services/T0001/B0HOOK/newhook"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .mount(&mocks)
+        .await;
+    mount_uninstall(&mocks, Duration::ZERO).await;
+    let st = state(pool.clone(), &mocks, None);
+    let resp = app(&st)
+        .oneshot(owner("POST", "/internal/connectors/slack/authorize", None))
+        .await
+        .unwrap();
+    let raw_state = json_body(resp).await["state"].as_str().unwrap().to_owned();
+
+    // The audit chain held, so the install waits with its row written.
+    let mut chain = pool.begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(ORGANIZATION)
+        .execute(&mut *chain)
+        .await
+        .unwrap();
+    let install = tokio::spawn(app(&st).oneshot(owner(
+        "POST",
+        "/internal/connectors/slack/callback",
+        Some(&format!(r#"{{"code":"c0de","state":"{raw_state}"}}"#)),
+    )));
+    eventually("the install waits on the audit chain", || async {
+        lock_waiters(&pool).await == 1
+    })
+    .await;
+    purging(&st, GONE).await.unwrap().unwrap();
+    eventually("the uninstall waits on the install, or settled", || async {
+        lock_waiters(&pool).await == 2 || filed_uninstalls(&pool).await.is_empty()
+    })
+    .await;
+    chain.rollback().await.unwrap();
+    assert_eq!(
+        install.await.unwrap().unwrap().status(),
+        StatusCode::CREATED
+    );
+    uninstalls_settled(&pool).await;
+
+    assert!(
+        uninstalled_with(&mocks).await.is_empty(),
+        "the app was uninstalled under the connection just made"
+    );
+    assert_eq!(rows_of_project(&pool, GONE).await, [0, 0, 0, 0]);
+    let made: Vec<String> =
+        sqlx::query_scalar("SELECT status FROM notifications.connections WHERE project_id = $1")
+            .bind(project_of(ORGANIZATION))
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(made, ["active"]);
+}
+
+/// Connections made as a project's purge waits at its delete are the sweep's to tear down.
+#[sqlx::test]
+async fn connections_made_as_their_project_is_purged_are_left_for_the_sweep(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let gone = seed_connection(
+        &pool,
+        GONE,
+        Provider::Slack,
+        "T0GONE",
+        "C0GONE",
+        &slack_hook_url(&mocks, "gone"),
+        Some("xoxb-gone"),
+    )
+    .await;
+    let standing = seed_connection(
+        &pool,
+        ORGANIZATION,
+        Provider::Slack,
+        "T0SHARED",
+        "C0STANDING",
+        &slack_hook_url(&mocks, "standing"),
+        Some("xoxb-shared"),
+    )
+    .await;
+    mount_uninstall(&mocks, Duration::ZERO).await;
+    let auth = people();
+    auth.hold(&pid(ORGANIZATION), &oid(ORGANIZATION));
+    let st = state_asking(pool.clone(), &mocks, auth);
+
+    let holder = holding(&pool, "connections", gone).await;
+    let purge = purging(&st, GONE);
+    eventually("the purge waits at its delete", || async {
+        lock_waiters(&pool).await == 1
+    })
+    .await;
+    for (workspace, token) in [("T0LATE", "xoxb-late"), ("T0SHARED", "xoxb-shared")] {
+        seed_connection(
+            &pool,
+            GONE,
+            Provider::Slack,
+            workspace,
+            "C0LATE",
+            &slack_hook_url(&mocks, "late"),
+            Some(token),
+        )
+        .await;
+    }
+    holder.rollback().await.unwrap();
+    purge.await.unwrap().unwrap();
+    uninstalls_settled(&pool).await;
+    assert_eq!(rows_of_project(&pool, GONE).await, [2, 0, 0, 0]);
+    assert_eq!(uninstalled_with(&mocks).await, ["Bearer xoxb-gone"]);
+
+    assert_eq!(
+        retention::purge_gone_projects(&st).await.unwrap(),
+        Purged { purged: 1, left: 0 }
+    );
+    uninstalls_settled(&pool).await;
+    assert_eq!(rows_of_project(&pool, GONE).await, [0, 0, 0, 0]);
+    assert_eq!(
+        uninstalled_with(&mocks).await,
+        ["Bearer xoxb-gone", "Bearer xoxb-late"]
+    );
+    assert_eq!(connection_status(&pool, standing).await.0, "active");
+}
+
+/// A purge answers before the vendor does, and its uninstall is sent after it.
+#[sqlx::test]
+async fn a_purge_answers_before_the_vendor_and_its_uninstall_follows(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let gone = seed_connection(
+        &pool,
+        GONE,
+        Provider::Slack,
+        "T0GONE",
+        "C0GONE",
+        &slack_hook_url(&mocks, "gone"),
+        Some("xoxb-gone"),
+    )
+    .await;
+    seed_delivery(&pool, GONE, gone).await;
+    seed_notice(&pool, GONE).await;
+    mount_uninstall(&mocks, Duration::from_secs(3)).await;
+    let st = state(pool.clone(), &mocks, None);
+
+    handler::purge_project(&st, &pid(GONE)).await.unwrap();
+    assert_eq!(rows_of_project(&pool, GONE).await, [0, 0, 0, 0]);
+    assert_eq!(
+        filed_uninstalls(&pool).await,
+        [(gone, 0)],
+        "the purge waited for the vendor"
+    );
+
+    uninstalls_settled(&pool).await;
+    assert_eq!(uninstalled_with(&mocks).await, ["Bearer xoxb-gone"]);
+    assert!(filed_uninstalls(&pool).await.is_empty());
+}
+
+/// The sweep retries what a delete's settle could not send, and gives one up after a day.
+#[sqlx::test]
+async fn the_sweep_retries_an_unanswered_uninstall_and_gives_it_up_after_a_day(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let mut seeded = Vec::new();
+    for (workspace, token) in [
+        ("T0AGAIN", "xoxb-again"),
+        ("T0REFUSED", "xoxb-refused"),
+        ("T0LAST", "xoxb-last"),
+        ("T0LATER", "xoxb-later"),
+    ] {
+        seeded.push(
+            seed_connection(
+                &pool,
+                GONE,
+                Provider::Slack,
+                workspace,
+                "C0GONE",
+                &slack_hook_url(&mocks, token),
+                Some(token),
+            )
+            .await,
+        );
+    }
+    let (again, last, later) = (seeded[0], seeded[2], seeded[3]);
+    let answer = || Mock::given(method("POST")).and(path("/api/apps.uninstall"));
+    answer()
+        .and(header_is("authorization", "Bearer xoxb-again"))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .mount(&mocks)
+        .await;
+    answer()
+        .and(header_is("authorization", "Bearer xoxb-again"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+        .mount(&mocks)
+        .await;
+    answer()
+        .and(header_is("authorization", "Bearer xoxb-refused"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"ok": false, "error": "invalid_auth"})),
+        )
+        .mount(&mocks)
+        .await;
+    answer()
+        .and(header_is("authorization", "Bearer xoxb-last"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&mocks)
+        .await;
+    answer()
+        .and(header_is("authorization", "Bearer xoxb-later"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"ok": false, "error": "bad_client_secret"})),
+        )
+        .mount(&mocks)
+        .await;
+    let st = state(pool.clone(), &mocks, None);
+
+    handler::purge_project(&st, &pid(GONE)).await.unwrap();
+    uninstalls_settled(&pool).await;
+    assert_eq!(
+        filed_uninstalls(&pool).await,
+        [(again, 1), (last, 1), (later, 1)]
+    );
+    assert_eq!(
+        uninstall::sweep(&st).await.unwrap(),
+        Swept::default(),
+        "the sweep takes nothing a minute old"
+    );
+
+    sqlx::query(
+        "UPDATE notifications.uninstalls
+            SET created_at = now() - CASE WHEN id = $1 THEN interval '2 days'
+                                          ELSE interval '2 minutes' END",
+    )
+    .bind(last)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (_logging, logs) = captured_logs();
+    assert_eq!(
+        uninstall::sweep(&st).await.unwrap(),
+        Swept {
+            settled: 1,
+            again: 1,
+            given_up: 1
+        }
+    );
+    assert_eq!(filed_uninstalls(&pool).await, [(later, 2)]);
+    assert!(logs.text().contains("given up"), "{}", logs.text());
+    let sent = uninstalled_with(&mocks).await;
+    for (token, times) in [("again", 2), ("refused", 1), ("last", 1), ("later", 2)] {
+        let bearer = format!("Bearer xoxb-{token}");
+        assert_eq!(
+            sent.iter().filter(|b| **b == bearer).count(),
+            times,
+            "{token}: {sent:?}"
+        );
+    }
+}
+
+/// An uninstall waits out the key service, its try counted and nothing sent.
+#[sqlx::test]
+async fn an_uninstall_waits_out_the_key_service(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let gone = seed_connection(
+        &pool,
+        GONE,
+        Provider::Slack,
+        "T0GONE",
+        "C0GONE",
+        &slack_hook_url(&mocks, "gone"),
+        Some("xoxb-gone"),
+    )
+    .await;
+    mount_metadata_token(&mocks).await;
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/{KMS_KEY}:decrypt")))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&mocks)
+        .await;
+    mount_uninstall(&mocks, Duration::ZERO).await;
+    let st = state_with_kek(
+        pool.clone(),
+        &mocks,
+        None,
+        both_connectors(&mocks),
+        kms_kek(&mocks),
+    );
+
+    handler::purge_project(&st, &pid(GONE)).await.unwrap();
+    uninstalls_settled(&pool).await;
+    assert_eq!(filed_uninstalls(&pool).await, [(gone, 1)]);
+    assert!(uninstalled_with(&mocks).await.is_empty());
+}
+
+/// An app installed again after Slack revoked its workspace is uninstalled with the live token.
+#[sqlx::test]
+async fn a_revoked_connection_neither_keeps_the_app_nor_lends_its_token(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let revoked = |id: Uuid| {
+        sqlx::query(
+            "UPDATE notifications.connections
+                SET status = 'revoked', revoked_at = now(), last_error = 'slack: app_uninstalled'
+              WHERE id = $1",
+        )
+        .bind(id)
+    };
+    // The workspace's first install, uninstalled in Slack, beside a project
+    // that connected it again.
+    let dead = seed_connection(
+        &pool,
+        ORGANIZATION,
+        Provider::Slack,
+        SLACK_WORKSPACE,
+        "C0DEAD",
+        &slack_hook_url(&mocks, "dead"),
+        Some("xoxb-dead"),
+    )
+    .await;
+    revoked(dead).execute(&pool).await.unwrap();
+    let live = seed_connection(
+        &pool,
+        OTHER_ORGANIZATION,
+        Provider::Slack,
+        SLACK_WORKSPACE,
+        "C0LIVE",
+        &slack_hook_url(&mocks, "live"),
+        Some("xoxb-live"),
+    )
+    .await;
+    // The same within one organization: the dead row first by id.
+    let gone_dead = seed_connection(
+        &pool,
+        GONE,
+        Provider::Slack,
+        "T0BOTH",
+        "C0DEAD",
+        &slack_hook_url(&mocks, "gone-dead"),
+        Some("xoxb-gone-dead"),
+    )
+    .await;
+    revoked(gone_dead).execute(&pool).await.unwrap();
+    seed_connection(
+        &pool,
+        GONE,
+        Provider::Slack,
+        "T0BOTH",
+        "C0LIVE",
+        &slack_hook_url(&mocks, "gone-live"),
+        Some("xoxb-gone-live"),
+    )
+    .await;
+    for token in ["xoxb-dead", "xoxb-gone-dead"] {
+        Mock::given(method("POST"))
+            .and(path("/api/apps.uninstall"))
+            .and(header_is(
+                "authorization",
+                format!("Bearer {token}").as_str(),
+            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"ok": false, "error": "token_revoked"})),
+            )
+            .mount(&mocks)
+            .await;
+    }
+    mount_uninstall(&mocks, Duration::ZERO).await;
+    let st = state(pool.clone(), &mocks, None);
+
+    let resp = app(&st)
+        .oneshot(req_as(
+            "DELETE",
+            &format!("/internal/connectors/{live}"),
+            OTHER_ORGANIZATION,
+            OTHER_OWNER,
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    uninstalls_settled(&pool).await;
+    handler::purge_organization(&st, &oid(GONE)).await.unwrap();
+    uninstalls_settled(&pool).await;
+    handler::purge_project(&st, &pid(ORGANIZATION))
+        .await
+        .unwrap();
+    uninstalls_settled(&pool).await;
+
+    assert_eq!(
+        uninstalled_with(&mocks).await,
+        ["Bearer xoxb-live", "Bearer xoxb-gone-live"]
+    );
+    assert!(filed_uninstalls(&pool).await.is_empty());
+}
+
+/// A purge deleting a connection beside a batch holding one of its deliveries: both finish.
+#[sqlx::test]
+async fn a_batch_written_down_beside_a_purge_finishes_with_it(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    for hook in ["/hooks/gone", "/hooks/kept"] {
+        Mock::given(method("POST"))
+            .and(path(hook))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mocks)
+            .await;
+    }
+    let gone = seed_webhook(
+        &pool,
+        GONE,
+        &format!("{}/hooks/gone", mocks.uri()),
+        "whsec_gone",
+    )
+    .await;
+    let kept = seed_webhook(
+        &pool,
+        ORGANIZATION,
+        &format!("{}/hooks/kept", mocks.uri()),
+        "whsec_kept",
+    )
+    .await;
+    // Held, so the purge's cascade waits there with the connection deleted.
+    let first = seed_delivery(&pool, GONE, gone).await;
+    seed_delivery(&pool, GONE, gone).await;
+    let other = seed_delivery(&pool, ORGANIZATION, kept).await;
+    let st = state(pool.clone(), &mocks, None);
+
+    let holder = holding(&pool, "deliveries", first).await;
+    let purge = purging(&st, GONE);
+    eventually("the purge waits at its connection's deliveries", || async {
+        lock_waiters(&pool).await == 1
+    })
+    .await;
+    let tick = tokio::spawn({
+        let st = st.clone();
+        async move { delivery::tick_once(&st).await }
+    });
+    eventually("the batch waits on the purge's connection", || async {
+        lock_waiters(&pool).await == 2
+    })
+    .await;
+    holder.rollback().await.unwrap();
+
+    assert_eq!(tick.await.unwrap().unwrap(), 2);
+    purge.await.unwrap().unwrap();
+    assert_eq!(delivery_status(&pool, other).await.0, "delivered");
+    assert_eq!(rows_of_project(&pool, GONE).await, [0, 0, 0, 0]);
+}
+
+/// A purge finishes while a batch holding its deliveries waits: the batch takes connections first.
+#[sqlx::test]
+async fn a_purge_never_waits_on_a_batch_holding_its_deliveries(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    for hook in ["/hooks/kept", "/hooks/gone"] {
+        Mock::given(method("POST"))
+            .and(path(hook))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mocks)
+            .await;
+    }
+    // Made first, so the bookkeeping reaches it before the purged project's.
+    let kept = seed_webhook(
+        &pool,
+        ORGANIZATION,
+        &format!("{}/hooks/kept", mocks.uri()),
+        "whsec_kept",
+    )
+    .await;
+    let gone = seed_webhook(
+        &pool,
+        GONE,
+        &format!("{}/hooks/gone", mocks.uri()),
+        "whsec_gone",
+    )
+    .await;
+    let other = seed_delivery(&pool, ORGANIZATION, kept).await;
+    seed_delivery(&pool, GONE, gone).await;
+    let st = state(pool.clone(), &mocks, None);
+
+    // Held, so the bookkeeping stops at the batch's first connection.
+    let holder = holding(&pool, "connections", kept).await;
+    let tick = tokio::spawn({
+        let st = st.clone();
+        async move { delivery::tick_once(&st).await }
+    });
+    eventually("the bookkeeping waits on the held connection", || async {
+        lock_waiters(&pool).await == 1
+    })
+    .await;
+    let purge = purging(&st, GONE);
+    eventually("the purge finishes while the batch waits", || async {
+        purge.is_finished()
+    })
+    .await;
+    purge.await.unwrap().unwrap();
+    holder.rollback().await.unwrap();
+    assert_eq!(tick.await.unwrap().unwrap(), 2);
+    assert_eq!(delivery_status(&pool, other).await.0, "delivered");
+    assert_eq!(rows_of_project(&pool, GONE).await, [0, 0, 0, 0]);
+}
+
+/// A batch whose bookkeeping Postgres ends to break a deadlock is written down again.
+#[sqlx::test]
+async fn a_batch_a_deadlock_ends_is_written_down_again(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/hooks/kept"))
+        .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_millis(300)))
+        .mount(&mocks)
+        .await;
+    let kept = seed_webhook(
+        &pool,
+        ORGANIZATION,
+        &format!("{}/hooks/kept", mocks.uri()),
+        "whsec_kept",
+    )
+    .await;
+    let first = seed_delivery(&pool, ORGANIZATION, kept).await;
+    let second = seed_delivery(&pool, ORGANIZATION, kept).await;
+    let st = state(pool.clone(), &mocks, None);
+
+    let tick = tokio::spawn({
+        let st = st.clone();
+        async move { delivery::tick_once(&st).await }
+    });
+    eventually("the batch is being sent", || async {
+        posts_to(&mocks, "/hooks/kept").await.len() == 2
+    })
+    .await;
+    // A rival closing a circle with the bookkeeping, which waited first and is ended.
+    let mut rival = holding(&pool, "deliveries", second).await;
+    eventually("the bookkeeping waits on the rival", || async {
+        lock_waiters(&pool).await == 1
+    })
+    .await;
+    sqlx::query("SELECT 1 FROM notifications.connections WHERE id = $1 FOR UPDATE")
+        .bind(kept)
+        .execute(&mut *rival)
+        .await
+        .unwrap();
+    rival.rollback().await.unwrap();
+
+    assert_eq!(tick.await.unwrap().unwrap(), 2);
+    for id in [first, second] {
+        assert_eq!(delivery_status(&pool, id).await.0, "delivered", "{id}");
+    }
 }
 
 /// A webhook connects by URL: checked, secret answered ONCE, row sealed, and

@@ -33,6 +33,7 @@ pub mod handler;
 pub mod notify;
 pub mod retention;
 pub mod seam;
+pub mod uninstall;
 
 pub use config::Config;
 

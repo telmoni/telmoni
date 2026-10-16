@@ -312,3 +312,45 @@ CREATE POLICY maintenance_access ON notifications.oauth_states
     WITH CHECK (current_user = 'notifications_maintenance');
 
 GRANT SELECT, DELETE ON notifications.oauth_states TO notifications_maintenance;
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 5. UNINSTALLS
+-- ══════════════════════════════════════════════════════════════════════════════
+-- A vendor app to uninstall from a workspace a deleted connection reached,
+-- once no connection there uses it: filed with its sealed token in the
+-- transaction that deletes the connection, settled after the commit, and by
+-- the retention sweep where that did not finish. `id` is the connection's, the
+-- token's associated data.
+CREATE TABLE notifications.uninstalls (
+    id                    UUID        PRIMARY KEY,
+    project_id            TEXT        NOT NULL,
+    organization_id       TEXT        NOT NULL,
+    provider              TEXT        NOT NULL,
+    external_workspace_id TEXT        NOT NULL,
+    key_version           SMALLINT    NOT NULL,
+    wrapped_dek           BYTEA       NOT NULL,
+    token_ciphertext      BYTEA       NOT NULL,
+    token_nonce           BYTEA       NOT NULL,
+    attempts              INTEGER     NOT NULL DEFAULT 0,
+    shard_key             UUID        NOT NULL DEFAULT gen_random_uuid(),
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uninstalls_provider_check CHECK (provider IN ('slack'))
+);
+
+ALTER TABLE notifications.uninstalls ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications.uninstalls FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON notifications.uninstalls
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true));
+
+CREATE POLICY maintenance_access ON notifications.uninstalls
+    TO notifications_maintenance
+    USING      (current_user = 'notifications_maintenance')
+    WITH CHECK (current_user = 'notifications_maintenance');
+
+-- A disconnect files its row in the project's scope; the purges file theirs in
+-- the lane, which settles each, counting a failed try, and removes it.
+GRANT SELECT, INSERT, DELETE ON notifications.uninstalls TO notifications_maintenance;
+GRANT UPDATE (attempts) ON notifications.uninstalls TO notifications_maintenance;

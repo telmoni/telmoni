@@ -53,6 +53,16 @@ impl Provider {
             Self::Webhook => "Webhook",
         }
     }
+
+    /// Whether the vendor's app is installed once per workspace, so that the
+    /// last connection into one going means uninstalling it there.
+    #[must_use]
+    pub const fn installed_per_workspace(self) -> bool {
+        match self {
+            Self::Slack => true,
+            Self::Webhook => false,
+        }
+    }
 }
 
 impl std::fmt::Display for Provider {
@@ -314,14 +324,27 @@ pub trait Connector: Send + Sync {
         event: &Event<'_>,
     ) -> Result<u16, DeliveryError>;
 
-    /// Undo the install upstream. Best effort everywhere: the row is the
-    /// customer's decision and the vendor's answer must never roll it back.
-    async fn tear_down(
-        &self,
-        http: &Egress,
-        target: &Redacted,
-        token: Option<&Redacted>,
-    ) -> Result<(), TelmoniError>;
+    /// Undo the install upstream. The row is the customer's decision, and the
+    /// vendor's answer never rolls it back.
+    async fn tear_down(&self, http: &Egress, token: Option<&Redacted>)
+    -> Result<(), TearDownError>;
+}
+
+/// Why an uninstall did not go through.
+#[derive(Debug)]
+pub enum TearDownError {
+    /// Nothing answered, or not yet, here or at the vendor: worth another try.
+    Unanswered(String),
+    /// The token can never do it: another try would end the same.
+    Refused(String),
+}
+
+impl std::fmt::Display for TearDownError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unanswered(why) | Self::Refused(why) => f.write_str(why),
+        }
+    }
 }
 
 /// The OAuth handshake, Slack's; the signed webhook has none.

@@ -361,7 +361,7 @@ async fn an_organization_purge_clears_every_table_and_spares_every_other_organiz
         .await
         .unwrap();
     tx.commit().await.unwrap();
-    assert_eq!(purged, 1, "the organization's one feed row");
+    assert_eq!(purged.rows, 1, "the organization's one feed row");
 
     let gone: i64 =
         sqlx::query_scalar("SELECT count(*) FROM notifications.feed WHERE project_id = $1")

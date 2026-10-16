@@ -119,10 +119,10 @@ const LANE_WRITTEN: &[&str] = &["notifications.delivery_attempts", "agent.erasur
 const LANE_DELETED: &[&str] = &["telemetry.project_settings", "telemetry.ping_keys"];
 
 /// The tables the runtime role only adds to: its maintenance lane drains
-/// them, leasing each row, landing it and removing it. A request that
+/// them, landing or settling each row and removing it. A request that
 /// rewrote or removed an outbox row could unsay a finished run or a notice
-/// before it is handed on.
-const LANE_DRAINED: &[&str] = &["telemetry.outbox"];
+/// before it is handed on, or an uninstall before it is sent.
+const LANE_DRAINED: &[&str] = &["telemetry.outbox", "notifications.uninstalls"];
 
 /// The runtime roles that write audit rows, each auditing its own writes on
 /// the organization's chain: every module's but the agent's, which changes
@@ -499,6 +499,13 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             "notifications_maintenance",
             "notifications.delivery_attempts",
             &["INSERT"],
+        ),
+        // A purge files an uninstall; the lane settles and removes it. (A
+        // failed try is counted in `attempts` alone: a column grant.)
+        (
+            "notifications_maintenance",
+            "notifications.uninstalls",
+            &["SELECT", "INSERT", "DELETE"],
         ),
         // The indexer writes every tenant's passages; retention and the
         // purges delete them.

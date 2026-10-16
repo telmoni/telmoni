@@ -15,8 +15,8 @@ use telmoni_shared::net_guard::Egress;
 use telmoni_shared::{AuthError, Redacted, TelmoniError};
 
 use super::{
-    Connector, DeliveryError, Event, Grant, Installed, Provider, Terminal, parse_retry_after,
-    refused, short_body, truncate, undialable,
+    Connector, DeliveryError, Event, Grant, Installed, Provider, TearDownError, Terminal,
+    parse_retry_after, refused, short_body, truncate, undialable,
 };
 
 /// Slack's header block limit.
@@ -53,6 +53,19 @@ const BAD_TARGET: &[&str] = &[
 
 /// The body we sent, refused. A renderer bug, and the loop says so.
 const OUR_BUG: &[&str] = &["invalid_payload", "no_text", "too_many_attachments"];
+
+/// What `apps.uninstall` answers when the token can never do it; any other
+/// failure, ours included, is tried again.
+const UNINSTALL_FINAL: &[&str] = &[
+    "invalid_auth",
+    "not_authed",
+    "account_inactive",
+    "token_revoked",
+    "token_expired",
+    "no_permission",
+    "missing_scope",
+    "client_id_token_mismatch",
+];
 
 /// Classify one non-2xx answer from `hooks.slack.com`.
 #[must_use]
@@ -229,7 +242,7 @@ struct IncomingWebhook {
     url: Redacted,
 }
 
-/// A Web API answer that says only `ok`, which is how `apps.uninstall`
+/// A Web API answer that says only `ok`, as `apps.uninstall`'s does.
 #[derive(Debug, Deserialize)]
 struct OkResponse {
     ok: bool,
@@ -338,17 +351,18 @@ impl Connector for SlackConnector {
     async fn tear_down(
         &self,
         http: &Egress,
-        _url: &Redacted,
         token: Option<&Redacted>,
-    ) -> Result<(), TelmoniError> {
+    ) -> Result<(), TearDownError> {
         let Some(token) = token else {
-            return Err(TelmoniError::Internal(
+            return Err(TearDownError::Refused(
                 "slack teardown has no bot token to uninstall with".into(),
             ));
         };
         let resp = http
             .post(&format!("{}/api/apps.uninstall", self.api_base))
-            .map_err(|why| undialable("slack apps.uninstall", why))?
+            .map_err(|why| {
+                TearDownError::Unanswered(undialable("slack apps.uninstall", why).to_string())
+            })?
             .bearer_auth(token.expose())
             .form(&[
                 ("client_id", self.client_id.as_str()),
@@ -356,24 +370,33 @@ impl Connector for SlackConnector {
             ])
             .send()
             .await
-            .map_err(|e| TelmoniError::internal("slack apps.uninstall unreachable", e))?;
-        if !resp.status().is_success() {
-            return Err(TelmoniError::Internal(format!(
-                "slack apps.uninstall returned {}",
-                resp.status()
+            .map_err(|e| {
+                TearDownError::Unanswered(format!(
+                    "slack apps.uninstall unreachable: {}",
+                    e.without_url()
+                ))
+            })?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(TearDownError::Unanswered(format!(
+                "slack apps.uninstall returned {status}"
             )));
         }
-        let body: OkResponse = resp
-            .json()
-            .await
-            .map_err(|e| TelmoniError::internal("slack apps.uninstall body unreadable", e))?;
+        let body: OkResponse = resp.json().await.map_err(|e| {
+            TearDownError::Unanswered(format!(
+                "slack apps.uninstall body unreadable: {}",
+                e.without_url()
+            ))
+        })?;
         if body.ok {
-            Ok(())
+            return Ok(());
+        }
+        let word = body.error.unwrap_or_else(|| "unknown_error".into());
+        let why = format!("slack apps.uninstall refused: {word}");
+        if UNINSTALL_FINAL.contains(&word.as_str()) {
+            Err(TearDownError::Refused(why))
         } else {
-            Err(TelmoniError::Internal(format!(
-                "slack apps.uninstall refused: {}",
-                body.error.unwrap_or_else(|| "unknown_error".into())
-            )))
+            Err(TearDownError::Unanswered(why))
         }
     }
 }

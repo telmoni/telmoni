@@ -1,10 +1,8 @@
-//! The retention sweep: the feed, finished deliveries, and expired handshake
-//! states, and first any deleted project's purge its delete could not finish,
-//! since auth purges a project once and a failure leaves its sealed grants
-//! behind. A loop inside the server, as every sweep is, since the
-//! notifications role alone holds a grant on this schema. Detached, unlike
-//! delivery: a stalled sweep keeps rows too long, a stalled delivery loop
-//! loses customer events.
+//! The retention sweep: a deleted project's purge its delete could not finish,
+//! since auth purges once; the feed, finished deliveries and expired
+//! handshakes; then the uninstalls deletes filed and could not settle.
+//! Detached, unlike delivery: a stalled sweep keeps rows too long, a stalled
+//! delivery loop loses customer events.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -14,6 +12,7 @@ use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::{ProjectId, TelmoniError};
 
 use crate::db::NotificationsLane;
+use crate::uninstall::{self, Swept};
 use crate::{AppState, db, handler};
 
 pub use telmoni_shared::db::retention::{DELIVERY_RETENTION_DAYS, FEED_RETENTION_DAYS};
@@ -65,8 +64,8 @@ pub async fn run(state: Arc<AppState>) {
     }
 }
 
-/// One sweep: deleted projects first, then the windows, which run whatever
-/// the first pass did.
+/// One sweep: deleted projects, the windows, then the uninstalls, which a
+/// hanging vendor holds up; each runs whatever the one before it did.
 pub async fn tick(state: &Arc<AppState>) {
     match purge_gone_projects(state).await {
         Ok(Purged { purged: 0, left: 0 }) => {}
@@ -87,12 +86,34 @@ pub async fn tick(state: &Arc<AppState>) {
         Ok(n) => tracing::info!(removed = n, "notifications retention sweep"),
         Err(e) => tracing::warn!(error = %e, "retention sweep failed; will retry"),
     }
+    match uninstall::sweep(state).await {
+        Ok(Swept {
+            settled: 0,
+            again: 0,
+            given_up: 0,
+        }) => {}
+        Ok(Swept {
+            settled,
+            again,
+            given_up,
+        }) => tracing::info!(
+            settled,
+            again,
+            given_up,
+            "notifications: the retention sweep settled the uninstalls their deletes could not"
+        ),
+        Err(e) => tracing::warn!(
+            error = %e,
+            "notifications: the retention sweep's pass over uninstalls failed; the next sweep \
+             retries"
+        ),
+    }
 }
 
 /// Purges again each project the rows name that auth no longer has, a page
 /// at a time. Ends early when auth cannot answer or Postgres does not; any
 /// other failed purge is logged and left for the next sweep.
-pub async fn purge_gone_projects(state: &AppState) -> Result<Purged, TelmoniError> {
+pub async fn purge_gone_projects(state: &Arc<AppState>) -> Result<Purged, TelmoniError> {
     let mut swept = Purged::default();
     let mut after = String::new();
     loop {
