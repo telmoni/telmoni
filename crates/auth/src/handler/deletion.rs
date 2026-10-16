@@ -205,8 +205,9 @@ pub(crate) async fn purge_project_connectors(
 
 /// Telemetry's teardown for one project after it is deleted: its spans and
 /// totals marked deleted, then its settings. No telemetry module is nothing
-/// to purge. A purge that fails here is caught up by the organization's,
-/// which finds the project through the settings row the failure left.
+/// to purge. A purge that fails here is tried again by telemetry's own
+/// sweep, every ten minutes until it lands, which finds the project through
+/// the settings row the failure left once this delete has committed.
 pub(crate) async fn purge_project_telemetry(
     state: &AppState,
     project_id: &ProjectId,

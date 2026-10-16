@@ -328,7 +328,7 @@ pub async fn retire_each(
                 busy.insert(organization_id);
                 rotated.left += 1;
             }
-            Err(e) if unanswered(&e) => return Err(e),
+            Err(e) if db::unanswered(&e) => return Err(e),
             Err(e) => {
                 tracing::warn!(
                     project_id = %key.project_id,
@@ -342,23 +342,6 @@ pub async fn retire_each(
         }
     }
     Ok(rotated)
-}
-
-/// Whether a key's retirement failed for want of the database — no
-/// connection to be had, or the one it had lost — rather than for anything
-/// about the key.
-fn unanswered(error: &TelmoniError) -> bool {
-    matches!(
-        error,
-        TelmoniError::Database(
-            sqlx::Error::PoolTimedOut
-                | sqlx::Error::PoolClosed
-                | sqlx::Error::WorkerCrashed
-                | sqlx::Error::Io(_)
-                | sqlx::Error::Tls(_)
-                | sqlx::Error::Protocol(_)
-        )
-    )
 }
 
 /// One stale key retired, in a transaction of its own: its project held in

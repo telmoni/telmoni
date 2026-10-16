@@ -64,8 +64,9 @@ const ALLOW: &str = "GET, HEAD, POST";
 const SOURCE: &str = "ping";
 /// The longest a ping waits out a move of its project to another
 /// organization, or its purge, before it is refused: as long as it waits for
-/// its organization's chain lock.
-const MOVE_WAIT: Duration = Duration::from_secs(2);
+/// its organization's chain lock. Read from the module's state
+/// ([`AppState::move_wait`]), which every binary sets to this.
+pub(crate) const MOVE_WAIT: Duration = Duration::from_secs(2);
 /// How long a ping a move keeps out lets go before it first tries again,
 /// doubled at each try after up to [`MOVE_RETRY_MAX`]: a move is over in
 /// milliseconds as a rule, and the pings a long one keeps out take turns on
@@ -425,14 +426,14 @@ async fn resolve_key(state: &AppState, key: &str) -> Result<ResolvedPingKey, Tel
 /// project up, whose purge would take the rows and the new one's never find
 /// them. A ping a move keeps out lets go of its connection and tries again a
 /// moment later ([`MOVE_RETRY`]), so the pings waiting out a move hold no
-/// connection while they wait, and is refused once [`MOVE_WAIT`] has passed,
-/// as on the chain lock. A purge holds the project alone as a move does
-/// ([`db::purge_project`]), so a ping in flight is waited for, two seconds
-/// at most, and its rows purged with the rest; one kept out, let in once the
-/// purge commits, finds its key gone — and a project's own purge deletes
-/// the keys before anything else ([`db::close_ping_lane`]). A
-/// key retired since, or gone with a purged project, is a 404, as for any
-/// key the table does not hold or holds retired. ⚠ A move given up on over
+/// connection while they wait, and is refused once [`AppState::move_wait`]
+/// has passed, as on the chain lock. A purge holds the project alone as a
+/// move does ([`db::purge_project`]), so a ping in flight is waited for, two
+/// seconds at most, and its rows purged with the rest; one kept out, let in
+/// once the purge commits, finds its key gone — and a project's own purge
+/// deletes the keys before anything else ([`db::close_ping_lane`]). A key
+/// retired since, or gone with a purged project, is a 404, as for any key
+/// the table does not hold or holds retired. ⚠ A move given up on over
 /// its budget, which may commit once its caller has let the project go,
 /// holds it no longer: beside it, a ping may be refused an update of a row
 /// it moved, or file a row under the organization its key named, the one
@@ -441,7 +442,7 @@ async fn held_in_place(
     state: &AppState,
     mut key: ResolvedPingKey,
 ) -> Result<(ResolvedPingKey, Scoped<'_, ProjectAndOrganization>), TelmoniError> {
-    let deadline = tokio::time::Instant::now() + MOVE_WAIT;
+    let deadline = tokio::time::Instant::now() + state.move_wait;
     let mut retry = MOVE_RETRY;
     loop {
         let mut tx = project_scope(&state.db, &key.project_id).await?;

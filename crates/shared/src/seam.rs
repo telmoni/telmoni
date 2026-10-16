@@ -459,7 +459,10 @@ pub trait Telemetry: Send + Sync {
     ) -> Result<u64, TelmoniError>;
 
     /// Everything held for one project, after it is deleted. ⚠ Called with
-    /// nothing held, as [`Telemetry::purge_organization`] is.
+    /// nothing held, as [`Telemetry::purge_organization`] is. One that fails
+    /// is left for the module's own sweep, which tries it again once the
+    /// project's delete has committed and until it lands: the caller logs
+    /// the failure and need not retry it.
     async fn purge_project(&self, project_id: &ProjectId) -> Result<u64, TelmoniError>;
 
     /// A project handed to another organization: its settings — its content

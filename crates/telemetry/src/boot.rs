@@ -10,6 +10,7 @@ use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::seam::{Auth, Entitlements, Notifications};
 
 use crate::contract::EXPORTS_PER_MINUTE;
+use crate::handler::pings::MOVE_WAIT;
 use crate::rate_limit::RateLimit;
 use crate::replica::Redis;
 use crate::{AppState, Config, hashing, store::Store};
@@ -72,5 +73,6 @@ pub fn state(
         hashing_keys: hashing::Cache::default(),
         redis,
         rate_limit: RateLimit::new("telemetry:ingest:limit", EXPORTS_PER_MINUTE),
+        move_wait: MOVE_WAIT,
     })
 }

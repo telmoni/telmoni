@@ -7,7 +7,8 @@
 //! the outbox as a finished span and the monitor's state and next due time
 //! follow, or as `error` by the next ping that finds it never said it ended;
 //! a ping whose run ends beside it changing nothing, and one whose monitor
-//! is paused or saved beside it settling the monitor as it stands; a ping
+//! is paused or saved beside it settling the monitor as it stands, as a
+//! pause or a save after its settling writes over what it settled; a ping
 //! waiting on no other writer in a circle, a monitor's delete and a purge
 //! included, each holding the monitor before its runs, a ping that waited
 //! out its monitor's delete making the monitor anew, and a purge holding its
@@ -29,7 +30,8 @@
 //! outbox, and lands nowhere for an organization being deleted or a project
 //! gone, whose spans are marked deleted again before the insert or after
 //! it; and the purges and a move take the keys, runs and outbox rows with
-//! the project.
+//! the project, a project's purge cut short finished by the sweep once auth
+//! no longer has the project.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
 mod common;
@@ -51,18 +53,20 @@ use uuid::Uuid;
 use common::{Answer, AuthStub, Ceiling, NoticeLog, PausedOrganization, SECRET, StandingAsked};
 use telmoni_shared::audit::lock_chain;
 use telmoni_shared::db::project_move;
-use telmoni_shared::db::tenant_session::maintenance_scope;
+use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::seam::{Entitlements, NoLimits, Notice, Notifications, Telemetry};
 use telmoni_shared::test_util::apply_audit_migrations;
 use telmoni_shared::{
-    NotificationKind, OrganizationId, OrganizationRole, OrganizationStatus, ProjectId,
+    MonitorState, NotificationKind, OrganizationId, OrganizationRole, OrganizationStatus,
+    ProjectId, SpanKind, TelmoniError,
 };
-use telmoni_telemetry::db::{self, TelemetryLane};
+use telmoni_telemetry::db::{self, MonitorRow, TelemetryLane};
 use telmoni_telemetry::handler::pings::NEW_MONITORS_MAX;
 use telmoni_telemetry::outbox::{self, FinishedRun, Settled};
 use telmoni_telemetry::seam::TelemetrySeam;
 use telmoni_telemetry::store::SpanRow;
+use telmoni_telemetry::sweep::{self, Swept};
 use telmoni_telemetry::{AppState, ping_router, router};
 
 const MONITORS: &str = "/internal/telemetry/monitors";
@@ -119,6 +123,23 @@ fn project_and_auth(pool: &PgPool) -> (Project, Arc<AuthStub>) {
     let notices = NoticeLog::new();
     let state = common::state_with_notices(pool, auth.clone(), Arc::new(NoLimits), notices.clone());
     (Project::over(state, notices, organization, project), auth)
+}
+
+/// A project as `project` makes one, its pings waiting out a move of it for
+/// `move_wait` before they give up.
+fn project_waiting_out_moves(pool: &PgPool, move_wait: Duration) -> Project {
+    let (organization, project) = (OrganizationId::new(), ProjectId::new());
+    let auth = AuthStub::probing(pool);
+    auth.seat(
+        OWNER,
+        &organization,
+        &project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let notices = NoticeLog::new();
+    let state = common::state_waiting_out_moves(pool, auth, notices.clone(), move_wait);
+    Project::over(state, notices, organization, project)
 }
 
 impl Project {
@@ -575,6 +596,59 @@ impl Project {
             });
             paused.expect("the pause was answered").0
         })
+    }
+
+    /// A change to `slug` sent from the console as a ping settles the
+    /// monitor: a transaction of the module's own, bound as a ping's is,
+    /// holds the monitor as a ping's settling holds it until the change waits
+    /// on it, then settles it as a run's end does — healthy, due at `due` —
+    /// with the ping's own statement, and commits. The change's status and
+    /// body, and the monitor as the settling left it.
+    async fn change_as_a_ping_settles(
+        &self,
+        pool: &PgPool,
+        slug: &str,
+        change: Request<Body>,
+        due: DateTime<Utc>,
+    ) -> ((StatusCode, Value), MonitorRow) {
+        let id = self
+            .monitor(slug)
+            .await
+            .get("id")
+            .and_then(Value::as_str)
+            .and_then(|id| Uuid::parse_str(id).ok())
+            .expect("a monitor's id");
+        let mut ping = project_scope(&self.state.db, &self.project)
+            .await
+            .expect("the ping's scope")
+            .bind_organization(&self.organization)
+            .await
+            .expect("bound to its organization");
+        let ping_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(ping.conn())
+            .await
+            .expect("the ping's session");
+        db::monitor_to_settle(&mut ping, &self.project, id)
+            .await
+            .expect("hold the monitor to settle it")
+            .expect("the monitor");
+        let changed = tokio::time::timeout(Duration::from_secs(10), self.send(change));
+        let (changed, settled) = tokio::join!(changed, async {
+            waiting_on(pool, ping_pid, "the change waits on the ping's settling").await;
+            let settled = db::settle_monitor_run(
+                &mut ping,
+                &self.project,
+                id,
+                MonitorState::Healthy,
+                Some(due),
+            )
+            .await
+            .expect("settled as a ping settles it")
+            .expect("the monitor");
+            ping.commit().await.expect("the settling commits");
+            settled
+        });
+        (changed.expect("the change waited on the settling"), settled)
     }
 
     /// A `GET` ping sent while a purge is under way: the project's, or its
@@ -2366,6 +2440,111 @@ async fn a_ping_settles_its_monitor_as_it_stands_not_as_it_read_it(pool: PgPool)
     assert_eq!(open_runs(&pool, &p.project).await.len(), 2);
 }
 
+/// A change the console saves over a monitor is written over the monitor as
+/// it stands when the change writes it, not as the change read it: a ping
+/// takes no chain lock, and one whose run ends between the read and the
+/// write settles the monitor — healthy, due an interval on — and what it
+/// settled stands. A save that keeps the timing keeps the due time the ping
+/// moved to, not the one it read, which had passed as a rule and which the
+/// ticker would call late, while one that moves the timing is due under the
+/// timing it saved; a pause records the state the ping left, the one it
+/// paused; and none puts the monitor's clocks back past the ping's, though
+/// each began before the ping settled.
+#[sqlx::test]
+async fn a_change_the_console_saves_is_written_over_the_monitor_as_a_ping_left_it(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.make(hourly()).await;
+    let monitor = format!("{MONITORS}/hourly-sync");
+    let saved = |interval_s: i32, name: &str| {
+        let mut saved = hourly();
+        saved["interval_s"] = json!(interval_s);
+        saved["name"] = json!(name);
+        p.request("PUT", &monitor, Some(saved))
+    };
+    // A run come at its due time, five minutes gone, and not yet ended.
+    let started = || async {
+        p.ping_ok(&format!("/{key}/hourly-sync/start")).await;
+        sqlx::query(
+            "UPDATE telemetry.monitors SET next_due_at = now() - interval '5 minutes'
+              WHERE project_id = $1",
+        )
+        .bind(&p.project)
+        .execute(&pool)
+        .await
+        .expect("the monitor due five minutes ago");
+    };
+
+    // A rename as the run's end settles the monitor: due when the ping said.
+    started().await;
+    let due = Utc::now() + chrono::Duration::hours(1);
+    let ((status, renamed), settled) = p
+        .change_as_a_ping_settles(
+            &pool,
+            "hourly-sync",
+            saved(3_600, "Hourly sync, renamed"),
+            due,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{renamed}");
+    assert_eq!(renamed["name"], "Hourly sync, renamed");
+    assert_eq!(renamed["state"], "healthy", "{renamed}");
+    assert_eq!(
+        Some(at(&renamed["next_due_at"])),
+        settled.next_due_at,
+        "{renamed}"
+    );
+    assert!(
+        at(&renamed["updated_at"]) >= settled.updated_at,
+        "{renamed}"
+    );
+    assert_eq!(p.monitor("hourly-sync").await, renamed);
+
+    // A save that moves it to daily as the next run's end settles it: due a
+    // day on, under the timing saved.
+    started().await;
+    let ((status, daily), settled) = p
+        .change_as_a_ping_settles(
+            &pool,
+            "hourly-sync",
+            saved(86_400, "Hourly sync, renamed"),
+            Utc::now() + chrono::Duration::hours(1),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{daily}");
+    assert_eq!(daily["state"], "healthy", "{daily}");
+    let due_in = at(&daily["next_due_at"]) - Utc::now();
+    assert!(due_in > chrono::Duration::hours(23), "{daily}");
+    assert!(at(&daily["updated_at"]) >= settled.updated_at, "{daily}");
+
+    // A pause as the next run's end settles it: paused from healthy, its
+    // clocks no older than the ping's.
+    started().await;
+    let pause = p.request("POST", &format!("{monitor}/pause"), None);
+    let ((status, paused), settled) = p
+        .change_as_a_ping_settles(&pool, "hourly-sync", pause, due)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{paused}");
+    assert_eq!(paused["state"], "paused", "{paused}");
+    assert_eq!(paused["next_due_at"], Value::Null, "{paused}");
+    assert!(
+        at(&paused["state_changed_at"]) >= settled.state_changed_at,
+        "{paused}"
+    );
+    assert!(at(&paused["updated_at"]) >= settled.updated_at, "{paused}");
+    let (action, _, metadata) = recorded(&pool, &p.organization)
+        .await
+        .pop()
+        .expect("the pause's record");
+    assert_eq!(action, "updated");
+    assert_eq!(
+        metadata["state"],
+        json!({ "from": "healthy", "to": "paused" }),
+        "{metadata}"
+    );
+}
+
 /// A ping a move kept out files its rows where the project went: the move
 /// holds the project's move lock alone, taken before any chain lock as a
 /// transfer takes it, and the ping reads its key's organization only once it
@@ -2578,12 +2757,16 @@ async fn a_ping_waits_on_a_move_no_longer_than_on_the_chain_lock(pool: PgPool) {
 /// the move's own work — telemetry's half of a transfer, on the same pool,
 /// while auth holds the lock — gets the connection it needs. None is let in
 /// before the move lets go, and each is answered once it does, filed where
-/// the project went.
+/// the project went. The pings wait out the move for a minute here rather
+/// than two seconds, so that none gives up while a busy machine stretches
+/// the test's hold, which a load of ten made twelve seconds; a ping that
+/// held its connection would hold it as long, three times what the move's
+/// work is given, and longer than the pool waits to hand one out.
 #[sqlx::test]
 async fn pings_a_move_keeps_out_hold_no_connection(pool: PgPool) {
     apply_audit_migrations(&pool).await;
     let elsewhere = OrganizationId::new();
-    let p = project(&pool);
+    let p = project_waiting_out_moves(&pool, Duration::from_secs(60));
     let key = p.mint().await;
     p.make(hourly()).await;
     let mut moving = pool.begin().await.expect("a transaction to hold the lock");
@@ -2600,8 +2783,7 @@ async fn pings_a_move_keeps_out_hold_no_connection(pool: PgPool) {
                 .status()
         });
     }
-    // Looked at while the pings are kept out, over and over, and let go well
-    // inside their two seconds.
+    // Looked at while the pings are kept out, over and over.
     for _ in 0..8 {
         tokio::time::sleep(Duration::from_millis(50)).await;
         let waiting: i64 = sqlx::query_scalar(
@@ -2615,7 +2797,7 @@ async fn pings_a_move_keeps_out_hold_no_connection(pool: PgPool) {
         .expect("count the waits on an advisory lock");
         assert_eq!(waiting, 0, "a ping kept out waits on the lock");
     }
-    let moved = tokio::time::timeout(Duration::from_secs(1), async {
+    let moved = tokio::time::timeout(Duration::from_secs(20), async {
         let mut tx = maintenance_scope(&p.state.db, TelemetryLane).await?;
         db::move_project(&mut tx, &p.project, &elsewhere).await?;
         tx.commit().await
@@ -4600,8 +4782,9 @@ async fn a_purge_waits_two_seconds_at_most_for_a_project_held_in_place(pool: PgP
 /// not answer, as this suite's does not, or by a ping holding the project
 /// past the purge's two seconds — leaves no key opening the lane, where the
 /// deleted project's pings went on being answered, and its first pings
-/// making monitors, until its organization's purge. The rest of its rows
-/// stand for that purge, which finds them through the settings row.
+/// making monitors, until the purge was finished. The rest of its rows stand
+/// for the sweep that finishes it, which finds them through the settings
+/// row.
 #[sqlx::test]
 async fn a_projects_purge_closes_its_ping_lane_before_anything_can_fail(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -4627,7 +4810,250 @@ async fn a_projects_purge_closes_its_ping_lane_before_anything_can_fail(pool: Pg
     assert_eq!(
         left_of(&pool, &p.project).await,
         ["monitors", "outbox", "project_settings"],
-        "the rest stands for the organization's purge, and no first ping made more"
+        "the rest stands for the sweep, and no first ping made more"
+    );
+}
+
+/// A project's purge cut short is finished by the sweep once auth no longer
+/// has the project: a pass finds it by the settings row the failure left and
+/// purges it again — its spans and totals marked deleted, its settings,
+/// monitors and runs gone — while a project auth still has keeps
+/// everything, though its settings row names another organization than the
+/// one auth says holds it, as a move whose settling is still to come leaves
+/// one. A pass auth cannot answer ends with every row as it was, and so does
+/// one ClickHouse does not answer, for the next to finish; and a pass after
+/// the one that did finds nothing to do.
+#[sqlx::test]
+async fn a_projects_purge_cut_short_is_finished_by_the_sweep(pool: PgPool) {
+    let Some(clickhouse) =
+        common::clickhouse_or_skip("a_projects_purge_cut_short_is_finished_by_the_sweep").await
+    else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let auth = AuthStub::probing(&pool);
+    let notices = NoticeLog::new();
+    let live = common::state_with_stores_and_notices(&pool, auth.clone(), notices.clone());
+    // The same module over a ClickHouse that does not answer.
+    let away = common::state_with_notices(&pool, auth.clone(), Arc::new(NoLimits), notices.clone());
+    let organization = OrganizationId::new();
+    let gone = project_over(&live, &auth, &notices, &organization);
+    let kept = project_over(&live, &auth, &notices, &organization);
+    for p in [&gone, &kept] {
+        let key = p.mint().await;
+        p.make(hourly()).await;
+        p.ping_ok(&format!("/{key}/hourly-sync/start")).await;
+        clickhouse
+            .store
+            .insert_spans(&[common::span(&p.project, SpanKind::Run, "hourly-sync", 100)])
+            .await
+            .expect("a span of the project's");
+    }
+    sqlx::query("UPDATE telemetry.project_settings SET organization_id = $2 WHERE project_id = $1")
+        .bind(&kept.project)
+        .bind(OrganizationId::new())
+        .execute(&pool)
+        .await
+        .expect("the kept project's row filed under another organization");
+
+    // Deleted, and its purge cut short by a ClickHouse that does not answer:
+    // its ping keys gone, the rest left.
+    auth.forget(&gone.project);
+    TelemetrySeam(away.clone())
+        .purge_project(&gone.project)
+        .await
+        .expect_err("a purge over a store that does not answer");
+    let left = left_of(&pool, &gone.project).await;
+    assert_eq!(left, ["monitors", "open_runs", "project_settings"]);
+
+    // A pass auth cannot answer, and one ClickHouse does not: nothing goes.
+    auth.failing_homes(true);
+    sweep::sweep(&live)
+        .await
+        .expect_err("a pass auth cannot answer");
+    auth.failing_homes(false);
+    let refused = sweep::sweep(&away)
+        .await
+        .expect_err("a pass over a store that does not answer");
+    assert_eq!(
+        refused.to_problem_details().type_uri,
+        "/errors/telemetry/store-unavailable"
+    );
+    assert_eq!(left_of(&pool, &gone.project).await, left);
+    assert_eq!(
+        common::rows_of(&clickhouse.store, &gone.project).await,
+        (1, 1)
+    );
+
+    // A pass that can: the purge finished, and nothing of the other's gone.
+    assert_eq!(
+        sweep::sweep(&live).await.expect("a pass"),
+        Swept { purged: 1, left: 0 }
+    );
+    assert!(left_of(&pool, &gone.project).await.is_empty());
+    common::eventually("the deleted project's spans are marked deleted", || async {
+        common::rows_of(&clickhouse.store, &gone.project).await == (0, 0)
+    })
+    .await;
+    assert_eq!(
+        left_of(&pool, &kept.project).await,
+        ["monitors", "open_runs", "ping_keys", "project_settings"]
+    );
+    assert_eq!(
+        common::rows_of(&clickhouse.store, &kept.project).await,
+        (1, 1)
+    );
+    assert_eq!(
+        sweep::sweep(&live).await.expect("a pass"),
+        Swept::default(),
+        "nothing is left to finish"
+    );
+}
+
+/// A purge the sweep cannot finish now — a ping holding the project past the
+/// purge's two seconds — is left for the next pass, and the pass goes on to
+/// the rest: another project auth no longer has, read after it, is purged
+/// beside it, and the next pass, the project let go, finishes the first.
+#[sqlx::test]
+async fn a_purge_the_sweep_cannot_finish_now_waits_for_the_next_pass(pool: PgPool) {
+    let Some(_clickhouse) =
+        common::clickhouse_or_skip("a_purge_the_sweep_cannot_finish_now_waits_for_the_next_pass")
+            .await
+    else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let auth = AuthStub::probing(&pool);
+    let notices = NoticeLog::new();
+    let state = common::state_with_stores_and_notices(&pool, auth.clone(), notices.clone());
+    let organization = OrganizationId::new();
+    for _ in 0..2 {
+        let p = project_over(&state, &auth, &notices, &organization);
+        p.make(hourly()).await;
+        auth.forget(&p.project);
+    }
+    let read: Vec<ProjectId> =
+        sqlx::query_scalar("SELECT project_id FROM telemetry.project_settings ORDER BY project_id")
+            .fetch_all(&pool)
+            .await
+            .expect("the rows in the order a pass reads them");
+    assert_eq!(read.len(), 2, "{read:?}");
+    let held = read.first().expect("the row read first");
+    let other = read.last().expect("the row read after it");
+    let mut in_place = pool.begin().await.expect("a ping's transaction");
+    assert!(
+        project_move::try_hold_in_place(&mut in_place, held)
+            .await
+            .expect("hold the project in place")
+    );
+    assert_eq!(
+        sweep::sweep(&state).await.expect("a pass"),
+        Swept { purged: 1, left: 1 }
+    );
+    assert!(left_of(&pool, other).await.is_empty());
+    assert_eq!(left_of(&pool, held).await, ["monitors", "project_settings"]);
+    in_place.rollback().await.expect("the ping ends");
+    assert_eq!(
+        sweep::sweep(&state).await.expect("a pass"),
+        Swept { purged: 1, left: 0 }
+    );
+    assert!(left_of(&pool, held).await.is_empty());
+}
+
+/// The sweep reads every settings row, a page at a time and in order: the
+/// projects auth no longer has, one read first and one on the second page,
+/// are found and purged, every project auth still has keeps its row, and
+/// auth is asked once a page.
+#[sqlx::test]
+async fn the_sweep_reads_every_page_of_settings_rows(pool: PgPool) {
+    let Some(_clickhouse) =
+        common::clickhouse_or_skip("the_sweep_reads_every_page_of_settings_rows").await
+    else {
+        return;
+    };
+    let auth = AuthStub::probing(&pool);
+    let state = common::state_with_stores(&pool, auth.clone());
+    let organization = OrganizationId::new();
+    let projects: Vec<ProjectId> = (0..501).map(|_| ProjectId::new()).collect();
+    for project in &projects {
+        auth.seat(OWNER, &organization, project, OrganizationRole::Owner, None);
+    }
+    sqlx::query(
+        "INSERT INTO telemetry.project_settings (project_id, organization_id)
+         SELECT unnest($1::text[]), $2",
+    )
+    .bind(&projects)
+    .bind(&organization)
+    .execute(&pool)
+    .await
+    .expect("a settings row for each project");
+    let ends: Vec<ProjectId> = sqlx::query_scalar(
+        "(SELECT project_id FROM telemetry.project_settings ORDER BY project_id LIMIT 1)
+         UNION ALL
+         (SELECT project_id FROM telemetry.project_settings ORDER BY project_id DESC LIMIT 1)",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("the rows read first and last");
+    for project in &ends {
+        auth.forget(project);
+    }
+    let asked = auth.homes_asked();
+    assert_eq!(
+        sweep::sweep(&state).await.expect("a pass"),
+        Swept { purged: 2, left: 0 }
+    );
+    assert_eq!(
+        auth.homes_asked() - asked,
+        2,
+        "a page of 500, then one of 1"
+    );
+    for project in &ends {
+        assert!(left_of(&pool, project).await.is_empty());
+    }
+    let standing: i64 = sqlx::query_scalar("SELECT count(*) FROM telemetry.project_settings")
+        .fetch_one(&pool)
+        .await
+        .expect("count the settings rows");
+    assert_eq!(standing, 499);
+}
+
+/// A database that stops answering mid-pass ends the pass where it stopped,
+/// as a failed read of a page does, rather than costing every project after
+/// it the same wait and a line of its own.
+#[sqlx::test]
+async fn a_pass_that_loses_its_database_ends_there(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let auth = AuthStub::probing(&pool);
+    let notices = NoticeLog::new();
+    let state =
+        common::state_with_notices(&pool, auth.clone(), Arc::new(NoLimits), notices.clone());
+    let organization = OrganizationId::new();
+    for _ in 0..2 {
+        let p = project_over(&state, &auth, &notices, &organization);
+        p.make(hourly()).await;
+        auth.forget(&p.project);
+    }
+    // The page read, auth's answer still to come when the pool closes.
+    auth.delaying_homes(Duration::from_millis(500));
+    let asked = auth.homes_asked();
+    let (_logging, logs) = telmoni_shared::test_util::captured_logs();
+    let (ended, ()) = tokio::join!(sweep::sweep(&state), async {
+        common::eventually("the pass asks auth", || async {
+            auth.homes_asked() > asked
+        })
+        .await;
+        state.db.close().await;
+    });
+    assert!(
+        matches!(ended, Err(TelmoniError::Database(sqlx::Error::PoolClosed))),
+        "{ended:?}"
+    );
+    assert!(
+        !logs
+            .text()
+            .contains("a deleted project's purge failed again"),
+        "a project was tried as though the database had answered"
     );
 }
 

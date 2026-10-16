@@ -24,7 +24,9 @@
 //! the project's ping key in the URL and nothing else; what a ping ends
 //! reaches ClickHouse, and what it discovers reaches the project's feed,
 //! through the [`outbox`], which a loop every replica runs drains, and the
-//! keys' [`rotation`] retires a replaced key a week after its last ping.
+//! keys' [`rotation`] retires a replaced key a week after its last ping; a
+//! third loop, the [`sweep`], finishes a deleted project's purge that auth's
+//! call could not.
 //!
 //! ⚠ **Its readiness reads Postgres alone.** The server is one process for
 //! every module: a ClickHouse outage must leave sign-in, and every console
@@ -64,6 +66,7 @@ pub mod schema;
 pub mod seam;
 pub mod sessions;
 pub mod store;
+pub mod sweep;
 pub mod traces;
 pub mod users;
 
@@ -104,6 +107,12 @@ pub struct AppState {
     pub redis: replica::Redis,
     /// Ingest's rate limit, per project.
     pub rate_limit: rate_limit::RateLimit,
+    /// The longest a ping waits out a move of its project, or its purge,
+    /// before it is refused: two seconds on every binary
+    /// (`handler::pings::MOVE_WAIT`).
+    /// Held here rather than read from the constant so a suite can hold a
+    /// move for longer than a busy machine lets two seconds last.
+    pub move_wait: std::time::Duration,
 }
 
 impl AppState {

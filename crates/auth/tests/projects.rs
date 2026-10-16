@@ -549,7 +549,7 @@ async fn deleting_a_project_takes_its_keys_and_its_seats(pool: PgPool) {
 
 /// A deleted project's connectors and telemetry settings are purged after
 /// the delete commits, and a purge that fails leaves the delete standing:
-/// what it missed goes with its organization's purge.
+/// what telemetry's missed, its own sweep purges again.
 #[sqlx::test]
 async fn deleting_a_project_purges_its_connectors_and_its_telemetry(pool: PgPool) {
     use telmoni_auth::test_provider::{

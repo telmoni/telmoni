@@ -916,14 +916,37 @@ pub(crate) fn state_with_notices(
     entitlements: Arc<dyn Entitlements>,
     notices: Arc<NoticeLog>,
 ) -> Arc<AppState> {
-    state_at(
+    Arc::new(module_at(
         pool,
         auth,
         "http://telemetry:telemetry@127.0.0.1:1",
         "redis://127.0.0.1:1",
         entitlements,
         notices,
-    )
+    ))
+}
+
+/// [`state_with_notices`], with a ping waiting out a move of its project for
+/// `move_wait` before it gives up, where the module waits two seconds: for a
+/// test that holds a move for longer than a busy machine lets two seconds
+/// last, and would otherwise see the pings it keeps out give up meanwhile.
+pub(crate) fn state_waiting_out_moves(
+    pool: &PgPool,
+    auth: Arc<dyn Auth>,
+    notices: Arc<NoticeLog>,
+    move_wait: Duration,
+) -> Arc<AppState> {
+    Arc::new(AppState {
+        move_wait,
+        ..module_at(
+            pool,
+            auth,
+            "http://telemetry:telemetry@127.0.0.1:1",
+            "redis://127.0.0.1:1",
+            Arc::new(NoLimits),
+            notices,
+        )
+    })
 }
 
 /// The module over `pool`, with the stores a suite can reach: ClickHouse as
@@ -945,17 +968,26 @@ pub(crate) fn state_with_stores_and_notices(
         "state_with_stores: TELEMETRY_CLICKHOUSE_URL is set, checked by clickhouse_or_skip",
     );
     let redis = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_owned());
-    state_at(pool, auth, &clickhouse, &redis, Arc::new(NoLimits), notices)
+    Arc::new(module_at(
+        pool,
+        auth,
+        &clickhouse,
+        &redis,
+        Arc::new(NoLimits),
+        notices,
+    ))
 }
 
-fn state_at(
+/// The module as the binary stands it up, unshared, so a suite can change a
+/// field of it first.
+fn module_at(
     pool: &PgPool,
     auth: Arc<dyn Auth>,
     clickhouse_url: &str,
     redis_url: &str,
     entitlements: Arc<dyn Entitlements>,
     notifications: Arc<dyn Notifications>,
-) -> Arc<AppState> {
+) -> AppState {
     let config = Config {
         database_url: "".into(),
         clickhouse_url: clickhouse_url.into(),
@@ -966,17 +998,15 @@ fn state_at(
         metadata_api_base: "http://127.0.0.1:1".into(),
         redis_url: redis_url.into(),
     };
-    Arc::new(
-        telmoni_telemetry::boot::state(
-            config,
-            service_pool(pool, ServiceRole::Telemetry),
-            ServiceSecrets::new(SECRET, None::<String>),
-            auth,
-            entitlements,
-            notifications,
-        )
-        .expect("the module's state over a laptop's key"),
+    telmoni_telemetry::boot::state(
+        config,
+        service_pool(pool, ServiceRole::Telemetry),
+        ServiceSecrets::new(SECRET, None::<String>),
+        auth,
+        entitlements,
+        notifications,
     )
+    .expect("the module's state over a laptop's key")
 }
 
 /// ClickHouse as both of the users a tier runs it with.

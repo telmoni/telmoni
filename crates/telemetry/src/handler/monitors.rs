@@ -638,7 +638,11 @@ async fn make_monitor(
 /// which the change holds to its commit, with the role checked again on
 /// auth's second answer, the one that stands: a transfer of the project
 /// committed between the two answers refuses the change rather than filing
-/// it under an organization that no longer holds the project.
+/// it under an organization that no longer holds the project. Read plainly:
+/// a ping takes no chain lock, so its settling — the run's state, and the
+/// next due time — may commit before the change writes, and a change reads
+/// what it moves again from the row it writes over, as a save its kept due
+/// time ([`db::update_monitor`]) and a pause the state it records.
 async fn held(
     state: &AppState,
     acting: &Acting,
@@ -714,15 +718,18 @@ async fn change_monitor(
     // line that never comes is refused as a make refuses it, and no timing is
     // saved that a ping or a resume could not read.
     let found = monitor.timing.read.next_due(Utc::now()).map_err(fault)?;
-    let next_due_at = if before.state == MonitorState::Paused {
-        None
+    // A ping settles neither a paused monitor nor a new one, nor moves a
+    // timing, so the read decides which of these stands; only the due time a
+    // timing that stands keeps is read again, from the row as it is written.
+    let (next_due_at, keep_due) = if before.state == MonitorState::Paused {
+        (None, false)
     } else if monitor.times_as(&before) && !starts {
         // The timing stands, so its due time does — but where it has none,
         // which a timing that could not be read leaves (`due_after`), the one
         // just found.
-        before.next_due_at.or(found)
+        (found, true)
     } else {
-        found
+        (found, false)
     };
     let state_after = starts.then_some(MonitorState::Healthy);
     let changed = monitor.changes_to(&before);
@@ -731,6 +738,7 @@ async fn change_monitor(
         project_id,
         slug,
         monitor.write(next_due_at),
+        keep_due,
         state_after,
     )
     .await
@@ -795,8 +803,9 @@ pub async fn pause_monitor(
 
 /// The pause itself, inside the transaction [`pause_monitor`] opened: under
 /// the organization's chain lock, a monitor not paused already put in
-/// `paused` with no next due time, and recorded; one paused already is
-/// answered as it is, and nothing is recorded.
+/// `paused` with no next due time, and recorded with the state it was in
+/// as the pause wrote over it, read again held as the write holds it; one
+/// paused already is answered as it is, and nothing is held or recorded.
 async fn halt_monitor(
     state: &AppState,
     acting: &Acting,
@@ -805,10 +814,17 @@ async fn halt_monitor(
     headers: &HeaderMap,
     slug: &str,
 ) -> Result<MonitorRow, TelmoniError> {
-    let before = held(state, acting, project_id, tx, Verb::Update, slug).await?;
-    if before.state == MonitorState::Paused {
-        return Ok(before);
+    let read = held(state, acting, project_id, tx, Verb::Update, slug).await?;
+    // Only a change under the chain lock pauses a monitor or resumes it, so
+    // the plain read says whether there is anything to write; the state the
+    // pause records it wrote over is read again, held as the write holds it,
+    // since a ping's settling may have moved it since.
+    if read.state == MonitorState::Paused {
+        return Ok(read);
     }
+    let before = db::monitor_to_change(tx, project_id, slug)
+        .await?
+        .ok_or_else(not_found)?;
     let row = db::set_monitor_state(tx, project_id, slug, MonitorState::Paused, None)
         .await?
         .ok_or_else(not_found)?;

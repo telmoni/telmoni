@@ -9,7 +9,7 @@ use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::{
     HasProject, Lane, Maintenance, MaintenanceLane, ProjectAndOrganization, Scoped,
 };
-use telmoni_shared::{ContentMode, MonitorState, OrganizationId, ProjectId};
+use telmoni_shared::{ContentMode, MonitorState, OrganizationId, ProjectId, TelmoniError};
 
 /// This module's cross-tenant lane: the one declaration, so a sibling's lane
 /// is unnameable here. See `tenant_session::Lane`.
@@ -17,6 +17,24 @@ use telmoni_shared::{ContentMode, MonitorState, OrganizationId, ProjectId};
 pub struct TelemetryLane;
 impl Lane for TelemetryLane {
     const SET_ROLE: &'static str = MaintenanceLane::Telemetry.set_role();
+}
+
+/// Whether a loop's work on one item failed for want of the database — no
+/// connection to be had, or the one it had lost — rather than for anything
+/// about the item: every item after it would wait the same out in turn, so
+/// the loop ends its pass instead (the rotation's, the purge sweep's).
+pub(crate) fn unanswered(error: &TelmoniError) -> bool {
+    matches!(
+        error,
+        TelmoniError::Database(
+            sqlx::Error::PoolTimedOut
+                | sqlx::Error::PoolClosed
+                | sqlx::Error::WorkerCrashed
+                | sqlx::Error::Io(_)
+                | sqlx::Error::Tls(_)
+                | sqlx::Error::Protocol(_)
+        )
+    )
 }
 
 /// A project's content mode: its own row's, or `off` where it has none.
@@ -86,6 +104,28 @@ pub async fn projects_of(
           ORDER BY project_id",
     )
     .bind(organization_id)
+    .fetch_all(tx.conn())
+    .await
+}
+
+/// Up to `limit` of the projects the settings rows name, in id order, after
+/// `after` — the empty string for the first page, which no id is — a page
+/// of what the sweep asks auth about ([`crate::sweep`]). A settings row
+/// stands while its project's spans do, so a purge cut short is found by its
+/// row.
+pub async fn settings_after(
+    tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
+    after: &str,
+    limit: i64,
+) -> sqlx::Result<Vec<ProjectId>> {
+    sqlx::query_scalar(
+        "SELECT project_id FROM telemetry.project_settings
+          WHERE project_id > $1
+          ORDER BY project_id
+          LIMIT $2",
+    )
+    .bind(after)
+    .bind(limit)
     .fetch_all(tx.conn())
     .await
 }
@@ -188,8 +228,9 @@ async fn wait_no_longer(tx: &mut Scoped<'_, Maintenance<TelemetryLane>>) -> sqlx
 /// A deleted project's ping keys, gone in a transaction of their own before
 /// the rest of its purge: so the ping lane is closed to the project whatever
 /// comes after, where the store's mark or the held purge, each of which can
-/// fail and leave the rest to the organization's purge, would leave its keys
-/// opening the lane — its pings answered, its first pings making monitors.
+/// fail and leave the rest to the sweep ([`crate::sweep`]), would leave its
+/// keys opening the lane meanwhile — its pings answered, its first pings
+/// making monitors.
 /// Safe outside the project's hold: a ping takes no lock on its key's row in
 /// its own transaction, touching it where it resolves it, and reads the key
 /// again once it holds the project, so one in flight finds it gone, a 404.
@@ -252,7 +293,8 @@ const MOVED_TABLES: [&str; 4] = [
 /// and a first ping can hold its project longer, the plan's ceiling read in
 /// a second at most and then the chain lock waited for two: a purge beside
 /// one that does fails, as one ClickHouse does not take fails, and is left
-/// to the organization's, its ping lane closed already ([`close_ping_lane`]).
+/// to the sweep's next pass ([`crate::sweep`]), its ping lane closed already
+/// ([`close_ping_lane`]).
 /// And it waits with a connection of this pool held: a ping or a retirement
 /// holding the lock needs no other to let go, writing in the one
 /// transaction it holds the lock in, and a move's caller, which needs one
@@ -470,6 +512,32 @@ pub async fn monitor<B: HasProject>(
     .await
 }
 
+/// One of the project's monitors, by its slug, as the console changes it
+/// where what it records is the state it changes: held as its write holds
+/// it, `FOR NO KEY UPDATE`, and read as it stands. A ping takes no chain
+/// lock, and a plain read may come before a ping's settling the change then
+/// writes over; held, it comes after, and no ping settles the monitor again
+/// before the change commits, each then finding it as the change left it
+/// ([`monitor_to_settle`]). The lock is the one the write takes, a statement
+/// early, with nothing taken in between, and taken only where the write
+/// follows, so nobody waits on the change for it who would not have waited
+/// on the write. `None` where it has no monitor by that slug.
+pub async fn monitor_to_change<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    slug: &str,
+) -> sqlx::Result<Option<MonitorRow>> {
+    sqlx::query_as(&format!(
+        "SELECT {MONITOR_COLUMNS} FROM telemetry.monitors
+          WHERE project_id = $1 AND slug = $2
+            FOR NO KEY UPDATE"
+    ))
+    .bind(project_id)
+    .bind(slug)
+    .fetch_optional(tx.conn())
+    .await
+}
+
 /// One of the project's monitors, by its slug, as a ping reads it: its row
 /// shared with the ping until the ping's transaction ends, before the ping
 /// takes any of its runs. Every writer of a monitor and its runs takes the
@@ -572,22 +640,35 @@ pub async fn insert_monitor(
 /// One of the project's monitors, written over — its definition and, where
 /// `state` names one, its state — or `None` where it has no monitor by that
 /// slug. The slug itself never changes: every crontab line carries it.
+/// Where `keep_due` says so, the monitor stays due when its row says as this
+/// writes it, or at `monitor.next_due_at` where the row says no time; and
+/// otherwise it is due at `monitor.next_due_at`. The row is read as it
+/// stands once the write holds it, not as the save read it before: a ping
+/// takes no chain lock, and one that settled the monitor in between — its
+/// run ended, due an interval on — keeps the due time it moved to, where
+/// the one the save read had passed as a rule. Its clocks are never put
+/// back past a ping's, which are its statement's own, though this
+/// transaction began before the ping's settling it waited on.
 pub async fn update_monitor(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
     slug: &str,
     monitor: MonitorWrite<'_>,
+    keep_due: bool,
     state: Option<MonitorState>,
 ) -> sqlx::Result<Option<MonitorRow>> {
     sqlx::query_as(&format!(
         "UPDATE telemetry.monitors
             SET name = $3, agent = $4, schedule = $5, interval_s = $6, timezone = $7,
                 grace_s = $8, expected_duration_s = $9, stall_after_s = $10, max_steps = $11,
-                max_cost_usd = $12, next_due_at = $13,
+                max_cost_usd = $12,
+                next_due_at = CASE WHEN $15::boolean THEN COALESCE(next_due_at, $13)
+                                   ELSE $13 END,
                 state = COALESCE($14::text, state),
                 state_changed_at = CASE WHEN $14::text IS NULL OR $14::text = state
-                                        THEN state_changed_at ELSE now() END,
-                updated_at = now()
+                                        THEN state_changed_at
+                                        ELSE GREATEST(now(), state_changed_at) END,
+                updated_at = GREATEST(now(), updated_at)
           WHERE project_id = $1 AND slug = $2
          RETURNING {MONITOR_COLUMNS}"
     ))
@@ -605,13 +686,16 @@ pub async fn update_monitor(
     .bind(monitor.max_cost_usd)
     .bind(monitor.next_due_at)
     .bind(state)
+    .bind(keep_due)
     .fetch_optional(tx.conn())
     .await
 }
 
 /// One of the project's monitors put in `state`, with when its next run is
 /// due under it — none while it is paused — or `None` where it has no
-/// monitor by that slug.
+/// monitor by that slug. Its clocks are never put back past a ping's
+/// settling, nor another change's, that committed after this transaction
+/// began, as [`update_monitor`]'s are not.
 pub async fn set_monitor_state(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
@@ -621,7 +705,8 @@ pub async fn set_monitor_state(
 ) -> sqlx::Result<Option<MonitorRow>> {
     sqlx::query_as(&format!(
         "UPDATE telemetry.monitors
-            SET state = $3, state_changed_at = now(), next_due_at = $4, updated_at = now()
+            SET state = $3, state_changed_at = GREATEST(now(), state_changed_at),
+                next_due_at = $4, updated_at = GREATEST(now(), updated_at)
           WHERE project_id = $1 AND slug = $2
          RETURNING {MONITOR_COLUMNS}"
     ))

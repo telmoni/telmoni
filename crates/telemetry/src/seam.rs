@@ -6,10 +6,12 @@
 //! views, monitors, ping keys, open runs and outbox rows: a project's ping
 //! keys first, on their own, so its ping lane is closed whatever fails after
 //! ([`db::close_ping_lane`]); then the rows marked deleted in ClickHouse, so
-//! a settings row stands for as long as its project's spans do and a purge
-//! cut short finds them again; then the rest and the row removed, the
-//! project held alone meanwhile so that no ping writes beside it
-//! ([`db::purge_project`]). An organization's projects are the ones its
+//! a settings row stands for as long as its project's spans do, and what
+//! finishes a purge cut short — the sweep, once auth no longer has the
+//! project ([`crate::sweep`]), or the organization's purge — finds them
+//! again; then the rest and the row removed, the project held alone
+//! meanwhile so that no ping writes beside it ([`db::purge_project`]). An
+//! organization's projects are the ones its
 //! settings rows name, since neither a span nor a view names an
 //! organization; its monitors, keys, runs and outbox rows name it.
 
@@ -29,26 +31,47 @@ use crate::store;
 /// the `Arc<dyn Telemetry>` auth is handed.
 pub struct TelemetrySeam(pub Arc<AppState>);
 
-impl TelemetrySeam {
-    /// `project`'s spans and totals marked deleted in ClickHouse, or why not:
-    /// a store that did not answer is the retried kind, a shape of ours it
-    /// refused is not.
-    async fn mark_deleted(&self, project: &ProjectId) -> Result<(), TelmoniError> {
-        self.0.store.delete_project(project).await.map_err(|error| {
-            // ⚠ The error's text can carry ClickHouse's own message: its
-            // kind alone is logged.
-            let kind = store::error_kind(&error);
-            if kind == "ours" {
-                tracing::error!(project_id = %project, kind, "telemetry purge: ClickHouse refused the project's delete");
-                return TelmoniError::Internal("telemetry purge: ClickHouse refused the delete".into());
-            }
-            tracing::warn!(project_id = %project, kind, "telemetry purge: ClickHouse did not take the project's delete");
-            TelemetryError::StoreUnavailable(
-                "the span store did not answer; the purge is retried".into(),
-            )
+/// `project`'s spans and totals marked deleted in ClickHouse, or why not: a
+/// store that did not answer is the retried kind, a shape of ours it refused
+/// is not.
+async fn mark_deleted(state: &AppState, project: &ProjectId) -> Result<(), TelmoniError> {
+    state.store.delete_project(project).await.map_err(|error| {
+        // ⚠ The error's text can carry ClickHouse's own message: its kind
+        // alone is logged.
+        let kind = store::error_kind(&error);
+        if kind == "ours" {
+            tracing::error!(project_id = %project, kind, "telemetry purge: ClickHouse refused the project's delete");
+            return TelmoniError::Internal("telemetry purge: ClickHouse refused the delete".into());
+        }
+        tracing::warn!(project_id = %project, kind, "telemetry purge: ClickHouse did not take the project's delete");
+        TelemetryError::StoreUnavailable("the span store did not answer; the purge is retried".into())
             .into()
-        })
-    }
+    })
+}
+
+/// One project's purge, as auth calls it once the project's delete commits
+/// and as the sweep calls it again where that one was cut short
+/// ([`crate::sweep`]): its ping keys, then its spans and totals, then the
+/// rest and its settings row. Safe to repeat, and beside another of its
+/// own, which holds the project alone in turn; answers how many rows went
+/// from Postgres.
+pub(crate) async fn purge_project(
+    state: &AppState,
+    project_id: &ProjectId,
+) -> Result<u64, TelmoniError> {
+    let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
+    let closed = db::close_ping_lane(&mut tx, project_id).await?;
+    tx.commit().await?;
+    mark_deleted(state, project_id).await?;
+    let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
+    let purged = closed + db::purge_project(&mut tx, project_id).await?;
+    tx.commit().await?;
+    tracing::info!(
+        project_id = %project_id,
+        purged,
+        "telemetry purge: the project's rows marked deleted and its settings, views, monitors, keys and runs removed"
+    );
+    Ok(purged)
 }
 
 #[async_trait]
@@ -61,7 +84,7 @@ impl Telemetry for TelemetrySeam {
         let projects = db::projects_of(&mut tx, organization_id).await?;
         tx.commit().await?;
         for project in &projects {
-            self.mark_deleted(project).await?;
+            mark_deleted(&self.0, project).await?;
         }
         let mut tx = maintenance_scope(&self.0.db, TelemetryLane).await?;
         let purged = db::purge_organization(&mut tx, organization_id).await?;
@@ -76,19 +99,7 @@ impl Telemetry for TelemetrySeam {
     }
 
     async fn purge_project(&self, project_id: &ProjectId) -> Result<u64, TelmoniError> {
-        let mut tx = maintenance_scope(&self.0.db, TelemetryLane).await?;
-        let closed = db::close_ping_lane(&mut tx, project_id).await?;
-        tx.commit().await?;
-        self.mark_deleted(project_id).await?;
-        let mut tx = maintenance_scope(&self.0.db, TelemetryLane).await?;
-        let purged = closed + db::purge_project(&mut tx, project_id).await?;
-        tx.commit().await?;
-        tracing::info!(
-            project_id = %project_id,
-            purged,
-            "telemetry purge: the project's rows marked deleted and its settings, views, monitors, keys and runs removed"
-        );
-        Ok(purged)
+        purge_project(&self.0, project_id).await
     }
 
     async fn move_project(

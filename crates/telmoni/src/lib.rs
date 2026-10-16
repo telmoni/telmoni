@@ -442,6 +442,7 @@ impl App {
         ));
         let outbox = tokio::spawn(telmoni_telemetry::outbox::run(self.telemetry.clone()));
         let rotation = tokio::spawn(telmoni_telemetry::rotation::run(self.telemetry.clone()));
+        let purges = tokio::spawn(telmoni_telemetry::sweep::run(self.telemetry.clone()));
         if env_parse("RUN_SWEEPS", true)? {
             sweeps::spawn(self.auth.clone());
         } else {
@@ -469,12 +470,13 @@ impl App {
                 .into_make_service_with_connect_info::<SocketAddr>(),
         )
         .with_graceful_shutdown(telmoni_shared::shutdown::shutdown_signal());
-        // ⚠ The delivery and outbox loops and the ping keys' rotation are
-        // raced against the server: a dead loop would leave a Ready pod with
-        // every delivery `pending`, every ping's row unwritten, or no key
-        // retired by it however long past its week, with no sweep or command
-        // to retire one in its place, so the process exits and the restart
-        // is the recovery.
+        // ⚠ The delivery and outbox loops, the ping keys' rotation and
+        // telemetry's purge sweep are raced against the server: a dead loop
+        // would leave a Ready pod with every delivery `pending`, every ping's
+        // row unwritten, no key retired by it however long past its week, or
+        // no deleted project's purge finished that its delete could not,
+        // with no sweep or command to do it in its place, so the process
+        // exits and the restart is the recovery.
         tokio::select! {
             served = serve => served?,
             ended = delivery => match ended {
@@ -488,6 +490,10 @@ impl App {
             ended = rotation => match ended {
                 Ok(()) => anyhow::bail!("the ping keys' rotation exited; restarting the process"),
                 Err(e) => anyhow::bail!("the ping keys' rotation died: {e}"),
+            },
+            ended = purges => match ended {
+                Ok(()) => anyhow::bail!("telemetry's purge sweep exited; restarting the process"),
+                Err(e) => anyhow::bail!("telemetry's purge sweep died: {e}"),
             },
         }
         Ok(())
