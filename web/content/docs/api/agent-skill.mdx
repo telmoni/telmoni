@@ -5,13 +5,15 @@ description: "The telmoni skill: what it teaches a coding agent about Telmoni, a
 
 The agent skill, [`telmoni/skills`](https://github.com/telmoni/skills), teaches
 a coding agent to work with Telmoni on your behalf: to record your agents' runs
-with the [SDKs](/docs/api/sdks), drive the [CLI](/docs/api/cli), call the
+with the [SDKs](/docs/api/sdks), and its own sessions with its
+[plugin](/docs/api/coding-agents), drive the [CLI](/docs/api/cli), call the
 read-only [API](/docs/api/reference) with an [API key](/docs/api/api-keys),
 build and test a receiver for [signed webhooks](/docs/integrations/webhooks),
 and [self-host](/docs/self-host/overview) with Docker Compose or Kubernetes. It
 sends the agent to these pages for the details, and adds what the pages alone
 don't give it: which path fits which situation, the mistakes agents make, and
-the guardrails around keys and your infrastructure.
+the guardrails around keys and your infrastructure. The skill itself sends
+nothing: a session is recorded by the plugin, once you install it.
 
 Every install below fetches the repository's `release` branch, which holds only
 what an agent loads: the plugin manifests, the skill, `LICENSE` and `NOTICE`.
