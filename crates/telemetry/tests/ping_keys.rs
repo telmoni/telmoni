@@ -5,13 +5,16 @@
 //! hold and one retired open nothing on the ping lane; the rotation retires
 //! the older of two a week after its last ping once a newer one stands,
 //! records it as the module's own act and tells the project, once and in the
-//! same transaction, while nobody is told of a key a person retires; and a
-//! ping touches its key.
+//! same transaction, while nobody is told of a key a person retires; one
+//! organization whose lock is busy holds up its own keys alone, and a key
+//! whose project moves is retired where it went; and a ping touches its
+//! key.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
 mod common;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
@@ -24,11 +27,15 @@ use uuid::Uuid;
 
 use common::{AuthStub, SECRET};
 use telmoni_shared::audit::lock_chain;
+use telmoni_shared::db::project_move;
+use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
-use telmoni_shared::test_util::apply_audit_migrations;
+use telmoni_shared::test_util::{apply_audit_migrations, captured_logs};
 use telmoni_shared::types::{PING_KEY_PREFIX, PING_KEY_RANDOM_LEN};
-use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, Role};
-use telmoni_telemetry::handler::ping_keys::{LIVE_MAX, retire_stale_keys};
+use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, Role, TelmoniError};
+use telmoni_telemetry::db::{self, ResolvedPingKey, TelemetryLane};
+use telmoni_telemetry::handler::ping_keys::{LIVE_MAX, Rotated, retire_each, retire_stale_keys};
+use telmoni_telemetry::rotation::REPLACED_AFTER_S;
 use telmoni_telemetry::{AppState, ping_router, router};
 
 const LANE: &str = "/internal/telemetry/ping-keys";
@@ -48,7 +55,12 @@ struct Project {
 }
 
 fn project(pool: &PgPool) -> Project {
-    let (organization, project) = (OrganizationId::new(), ProjectId::new());
+    project_of(pool, OrganizationId::new())
+}
+
+/// A project of `organization`, the roster seating its three people on it.
+fn project_of(pool: &PgPool, organization: OrganizationId) -> Project {
+    let project = ProjectId::new();
     let auth = AuthStub::probing(pool);
     for (user, role, seat) in [
         (OWNER, OrganizationRole::Owner, None),
@@ -382,17 +394,23 @@ async fn the_rotation_retires_the_older_key_a_week_after_its_last_ping(pool: PgP
 
     assert_eq!(
         retire_stale_keys(&p.state).await.expect("a tick"),
-        0,
+        retiring(0),
         "both minted today: nothing to retire"
     );
 
     // The old key pinged this week: the lines are still moving over.
     aged(&pool, old_id, 9, Some(2)).await;
-    assert_eq!(retire_stale_keys(&p.state).await.expect("a tick"), 0);
+    assert_eq!(
+        retire_stale_keys(&p.state).await.expect("a tick"),
+        retiring(0)
+    );
 
     // A week past its last ping, with the newer standing: retired.
     aged(&pool, old_id, 9, Some(8)).await;
-    assert_eq!(retire_stale_keys(&p.state).await.expect("a tick"), 1);
+    assert_eq!(
+        retire_stale_keys(&p.state).await.expect("a tick"),
+        retiring(1)
+    );
     let keys = p.list(OWNER).await;
     assert_eq!(keys[0]["id"], new["id"]);
     assert!(keys[0]["retired_at"].is_null());
@@ -417,7 +435,7 @@ async fn the_rotation_retires_the_older_key_a_week_after_its_last_ping(pool: PgP
     assert!(body.contains("had not pinged in over a week"), "{body}");
     assert_eq!(
         retire_stale_keys(&p.state).await.expect("a tick"),
-        0,
+        retiring(0),
         "the next tick finds nothing"
     );
     assert_eq!(
@@ -436,13 +454,19 @@ async fn the_rotation_retires_the_older_key_a_week_after_its_last_ping(pool: PgP
     // The newest key is never retired by the rotation, however old, since
     // nothing stands after it.
     aged(&pool, new_id, 30, None).await;
-    assert_eq!(retire_stale_keys(&p.state).await.expect("a tick"), 0);
+    assert_eq!(
+        retire_stale_keys(&p.state).await.expect("a tick"),
+        retiring(0)
+    );
 
     // One never pinged is retired a week after its minting once a newer one
     // stands: an unused key is not kept for the lines that never carried it.
     let (status, third) = p.mint(OWNER).await;
     assert_eq!(status, StatusCode::CREATED, "{third}");
-    assert_eq!(retire_stale_keys(&p.state).await.expect("a tick"), 1);
+    assert_eq!(
+        retire_stale_keys(&p.state).await.expect("a tick"),
+        retiring(1)
+    );
     let keys = p.list(OWNER).await;
     assert_eq!(keys[0]["id"], third["id"]);
     assert!(keys[0]["retired_at"].is_null());
@@ -487,6 +511,64 @@ async fn stale(p: &Project, pool: &PgPool) -> Value {
     old
 }
 
+/// A tick that retired `retired` keys and left none for a later one.
+fn retiring(retired: u32) -> Rotated {
+    Rotated { retired, left: 0 }
+}
+
+/// How many of `organization`'s ping keys its chain records the rotation
+/// retiring.
+async fn retired_by_the_rotation(pool: &PgPool, organization: &OrganizationId) -> usize {
+    recorded(pool, organization)
+        .await
+        .into_iter()
+        .filter(|(action, by)| action == "deleted" && by == "service:telemetry")
+        .count()
+}
+
+/// Whether every one of the project's keys is live.
+async fn all_live(p: &Project) -> bool {
+    p.list(OWNER)
+        .await
+        .iter()
+        .all(|key| key["retired_at"].is_null())
+}
+
+/// The project's rows handed to `organization` and committed, as a
+/// transfer's move hands them, under the project's move lock.
+async fn moved(p: &Project, organization: &OrganizationId) {
+    let mut mover = maintenance_scope(&p.state.db, TelemetryLane)
+        .await
+        .expect("the lane");
+    project_move::lock_for_move(mover.conn(), &p.project)
+        .await
+        .expect("the move lock");
+    db::move_project(&mut mover, &p.project, organization)
+        .await
+        .expect("moved");
+    mover.commit().await.expect("the move commits");
+}
+
+/// The tick's stale key of `p`'s project, as `read` holds it.
+fn key_of(read: &[ResolvedPingKey], p: &Project) -> ResolvedPingKey {
+    read.iter()
+        .find(|key| key.project_id == p.project)
+        .cloned()
+        .expect("the project's stale key")
+}
+
+/// The stale keys as a tick reads them, before it retires any.
+async fn stale_keys(state: &AppState) -> Vec<ResolvedPingKey> {
+    let mut tx = maintenance_scope(&state.db, TelemetryLane)
+        .await
+        .expect("the lane");
+    let stale = db::stale_ping_keys(&mut tx, REPLACED_AFTER_S, 100)
+        .await
+        .expect("read the stale keys");
+    tx.commit().await.expect("the read commits");
+    stale
+}
+
 /// The notice is written in the transaction that retires the key and records
 /// it: one that cannot be written leaves the key live and the chain as it
 /// was, for the next tick to retire, record and tell together.
@@ -500,16 +582,15 @@ async fn a_retirement_whose_notice_cannot_be_written_is_no_retirement(pool: PgPo
         .execute(&pool)
         .await
         .expect("the outbox closed to the module");
-    assert!(
-        retire_stale_keys(&p.state).await.is_err(),
+    assert_eq!(
+        retire_stale_keys(&p.state).await.expect("a tick"),
+        Rotated {
+            retired: 0,
+            left: 1
+        },
         "a key was retired without its notice"
     );
-    assert!(
-        p.list(OWNER)
-            .await
-            .iter()
-            .all(|key| key["retired_at"].is_null())
-    );
+    assert!(all_live(&p).await);
     assert_eq!(recorded(&pool, &p.organization).await.len(), 2);
     assert!(notices_waiting(&pool, &p.project).await.is_empty());
 
@@ -517,9 +598,214 @@ async fn a_retirement_whose_notice_cannot_be_written_is_no_retirement(pool: PgPo
         .execute(&pool)
         .await
         .expect("the outbox open again");
-    assert_eq!(retire_stale_keys(&p.state).await.expect("a tick"), 1);
+    assert_eq!(
+        retire_stale_keys(&p.state).await.expect("a tick"),
+        retiring(1)
+    );
     assert_eq!(recorded(&pool, &p.organization).await.len(), 3);
     assert_eq!(notices_waiting(&pool, &p.project).await.len(), 1);
+}
+
+/// ⚠ One organization whose chain lock is busy — a transfer's accept holding
+/// it past the rotation's wait, say — holds up its own keys alone: the tick
+/// retires every other organization's, waits on the busy lock once however
+/// many of that organization's keys it found, and leaves them for a later
+/// tick, which retires them once the lock is free.
+#[sqlx::test]
+async fn an_organization_whose_chain_lock_is_busy_holds_up_its_own_keys_alone(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let busy = project(&pool);
+    let busy_too = project_of(&pool, busy.organization.clone());
+    let free = project(&pool);
+    for p in [&busy, &busy_too, &free] {
+        stale(p, &pool).await;
+    }
+
+    let mut holder = pool.begin().await.expect("a transaction to hold the lock");
+    lock_chain(&mut holder, &busy.organization)
+        .await
+        .expect("the chain lock");
+    let (_logging, logs) = captured_logs();
+    let rotated = tokio::time::timeout(Duration::from_secs(10), retire_stale_keys(&free.state))
+        .await
+        .expect("the tick waited on the busy lock past its own wait")
+        .expect("a tick");
+    holder.rollback().await.expect("let the lock go");
+    assert_eq!(
+        rotated,
+        Rotated {
+            retired: 1,
+            left: 2
+        }
+    );
+    assert_eq!(
+        logs.text().matches("passed over an organization").count(),
+        1,
+        "the busy lock was waited on once for each of its keys"
+    );
+    assert_eq!(retired_by_the_rotation(&pool, &free.organization).await, 1);
+    assert_eq!(notices_waiting(&pool, &free.project).await.len(), 1);
+    for p in [&busy, &busy_too] {
+        assert!(all_live(p).await, "a key retired under a lock it never had");
+        assert!(notices_waiting(&pool, &p.project).await.is_empty());
+    }
+    assert_eq!(retired_by_the_rotation(&pool, &busy.organization).await, 0);
+
+    assert_eq!(
+        retire_stale_keys(&free.state).await.expect("a tick"),
+        retiring(2)
+    );
+    assert_eq!(retired_by_the_rotation(&pool, &busy.organization).await, 2);
+}
+
+/// A key whose project moves to another organization is retired where the
+/// project went, never under the one the tick's read named: while a move
+/// holds the project the key is left for a later tick, at once and with
+/// nothing recorded or told, and a move committed since the read is seen
+/// once the key's project is held — its retirement recorded on the chain of
+/// the organization holding the project, and its notice filed there.
+#[sqlx::test]
+async fn a_stale_key_whose_project_moves_is_retired_where_it_went(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let old = stale(&p, &pool).await;
+    let read = stale_keys(&p.state).await;
+    assert_eq!(read.len(), 1);
+    assert_eq!(read[0].organization_id, p.organization);
+
+    let to = OrganizationId::new();
+    let mut mover = maintenance_scope(&p.state.db, TelemetryLane)
+        .await
+        .expect("the lane");
+    project_move::lock_for_move(mover.conn(), &p.project)
+        .await
+        .expect("the move lock");
+    let rotated = tokio::time::timeout(Duration::from_secs(10), retire_stale_keys(&p.state))
+        .await
+        .expect("the tick waited on the move")
+        .expect("a tick");
+    assert_eq!(
+        rotated,
+        Rotated {
+            retired: 0,
+            left: 1
+        }
+    );
+    db::move_project(&mut mover, &p.project, &to)
+        .await
+        .expect("moved");
+    mover.commit().await.expect("the move commits");
+    assert!(all_live(&p).await);
+    assert!(notices_waiting(&pool, &p.project).await.is_empty());
+
+    assert_eq!(
+        retire_each(&p.state, &read).await.expect("a tick"),
+        retiring(1)
+    );
+    let retired: bool = sqlx::query_scalar(
+        "SELECT retired_at IS NOT NULL FROM telemetry.ping_keys WHERE id = $1::uuid",
+    )
+    .bind(old["id"].as_str().expect("an id"))
+    .fetch_one(&pool)
+    .await
+    .expect("read the key");
+    assert!(retired);
+    assert_eq!(
+        recorded(&pool, &to).await,
+        vec![("deleted".to_owned(), "service:telemetry".to_owned())]
+    );
+    assert_eq!(
+        recorded(&pool, &p.organization).await.len(),
+        2,
+        "the two mintings alone"
+    );
+    let filed: Vec<String> = sqlx::query_scalar(
+        "SELECT organization_id FROM telemetry.outbox WHERE project_id = $1 AND kind = 'notice'",
+    )
+    .bind(&p.project)
+    .fetch_all(&pool)
+    .await
+    .expect("read where the notice is filed");
+    assert_eq!(filed, [to.to_string()]);
+}
+
+/// The tick passes over an organization whose chain lock it found busy by
+/// where each key stands when the tick reaches it, not where its read found
+/// it: a key whose project moved into that organization since is left
+/// without a second wait on the lock, and one whose project moved out of it
+/// is retired where it went.
+#[sqlx::test]
+async fn a_busy_organization_is_passed_over_by_where_its_keys_stand_now(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let busy = project(&pool);
+    let coming = project(&pool);
+    let leaving = project_of(&pool, busy.organization.clone());
+    for p in [&busy, &coming, &leaving] {
+        stale(p, &pool).await;
+    }
+    let read = stale_keys(&busy.state).await;
+    let keys = [
+        key_of(&read, &busy),
+        key_of(&read, &coming),
+        key_of(&read, &leaving),
+    ];
+    moved(&coming, &busy.organization).await;
+    let away = OrganizationId::new();
+    moved(&leaving, &away).await;
+
+    let mut holder = pool.begin().await.expect("a transaction to hold the lock");
+    lock_chain(&mut holder, &busy.organization)
+        .await
+        .expect("the chain lock");
+    let (_logging, logs) = captured_logs();
+    let rotated = tokio::time::timeout(Duration::from_secs(10), retire_each(&busy.state, &keys))
+        .await
+        .expect("the tick waited on the busy lock past its own wait")
+        .expect("a tick");
+    holder.rollback().await.expect("let the lock go");
+    assert_eq!(
+        rotated,
+        Rotated {
+            retired: 1,
+            left: 2
+        }
+    );
+    assert_eq!(
+        logs.text().matches("passed over an organization").count(),
+        1,
+        "the busy lock was waited on again for a key that came under it"
+    );
+    assert!(all_live(&busy).await);
+    assert!(all_live(&coming).await);
+    assert_eq!(
+        retired_by_the_rotation(&pool, &away).await,
+        1,
+        "the key that left was retired where it went"
+    );
+}
+
+/// A database that stops answering ends the tick where it stopped, as a
+/// failed read of the keys does, rather than costing every key after it the
+/// same wait and a line of its own.
+#[sqlx::test]
+async fn a_tick_that_loses_its_database_ends_there(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    stale(&p, &pool).await;
+    let read = stale_keys(&p.state).await;
+    let twice = [read[0].clone(), read[0].clone()];
+
+    p.state.db.close().await;
+    let (_logging, logs) = captured_logs();
+    let ended = retire_each(&p.state, &twice).await;
+    assert!(
+        matches!(ended, Err(TelmoniError::Database(sqlx::Error::PoolClosed))),
+        "{ended:?}"
+    );
+    assert!(
+        !logs.text().contains("could not retire a key"),
+        "a key was tried as though the database had answered"
+    );
 }
 
 /// Two replicas whose ticks find one key retire it, record it and tell of it
@@ -546,13 +832,14 @@ async fn a_key_two_ticks_find_is_retired_recorded_and_told_once(pool: PgPool) {
             holder.rollback().await.expect("let the lock go");
         },
     );
-    assert_eq!(first.expect("a tick") + second.expect("a tick"), 1);
-    let retired_by_the_rotation = recorded(&pool, &p.organization)
-        .await
-        .into_iter()
-        .filter(|(_, by)| by == "service:telemetry")
-        .count();
-    assert_eq!(retired_by_the_rotation, 1);
+    let (first, second) = (first.expect("a tick"), second.expect("a tick"));
+    assert_eq!(first.retired + second.retired, 1);
+    assert_eq!(
+        first.left + second.left,
+        0,
+        "the second found it retired, and left nothing for a later tick"
+    );
+    assert_eq!(retired_by_the_rotation(&pool, &p.organization).await, 1);
     assert_eq!(notices_waiting(&pool, &p.project).await.len(), 1);
 }
 

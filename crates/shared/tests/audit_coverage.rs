@@ -175,7 +175,7 @@ const MUTATIONS: &[Mutation] = &[
     },
     Mutation {
         file: "crates/telemetry/src/handler/ping_keys.rs",
-        fn_name: "retire_stale_key",
+        fn_name: "retire_in_place",
         action: "Deleted",
         resource_kind: "PingKey",
         actor_id: ActorPattern::Service("telemetry"),

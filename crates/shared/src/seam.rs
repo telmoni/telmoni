@@ -460,9 +460,11 @@ pub trait Telemetry: Send + Sync {
     ///
     /// ⚠ **The caller holds the project's move lock alone** across the call
     /// and to its own commit ([`crate::db::project_move::lock_for_move`]): a
-    /// ping holds its project in place while it writes, so the move waits
-    /// for the pings in flight, and a ping kept out files its rows under the
-    /// organization it finds the project in once it is let in. A move given
+    /// ping holds its project in place while it writes, and the rotation
+    /// while it retires one of the project's ping keys, so the move waits for
+    /// the writes in flight; a ping kept out files its rows under the
+    /// organization it finds the project in once it is let in, and a key kept
+    /// out is retired there by a later tick. A move given
     /// up on over its budget may still commit after the caller lets go; its
     /// settling takes the lock again.
     async fn move_project(

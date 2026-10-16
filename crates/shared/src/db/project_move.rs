@@ -6,14 +6,14 @@
 //! A move — a transfer's accept, an owner's move, the settling of either —
 //! takes it alone ([`lock_for_move`]) across telemetry's move and holds it to
 //! the caller's commit, waiting for the writes in flight as long as its
-//! `lock_timeout` lets it. A write — a ping — only tries for it, shared
-//! ([`try_hold_in_place`]), as the first lock of its transaction, and reads
-//! the organization once it holds it: a move that committed meanwhile is
-//! seen, and none commits beside the write. A move holding the lock, or
-//! waiting for it, turns a write away at once, to let go of its connection
-//! and try again, so writes kept out by a move hold no connection while they
-//! wait — they take turns on the pool with the move's own work — and never
-//! wait on each other.
+//! `lock_timeout` lets it. A write — a ping, a key its rotation retires —
+//! only tries for it, shared ([`try_hold_in_place`]), as the first lock of
+//! its transaction, and reads the organization once it holds it: a move
+//! that committed meanwhile is seen, and none commits beside the write. A
+//! move holding the lock, or waiting for it, turns a write away at once, to
+//! let go of its connection and try again, so writes kept out by a move hold
+//! no connection while they wait — they take turns on the pool with the
+//! move's own work — and never wait on each other.
 //!
 //! ⚠ **Before any chain lock.** A write holding its project in place may wait
 //! for its organization's chain lock ([`crate::audit::lock_chain`]), so a

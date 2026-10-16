@@ -8,6 +8,7 @@
 //! retiring is recorded on the chain as [`TelmoniResourceKind::PingKey`],
 //! since a key is what lets a line fake a ping.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
@@ -19,6 +20,7 @@ use uuid::Uuid;
 
 use telmoni_shared::acting::Acting;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
+use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::{
     ProjectAndOrganization, Scoped, maintenance_scope, project_scope,
 };
@@ -27,7 +29,9 @@ use telmoni_shared::extract::{Json, correlation_id};
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam;
 use telmoni_shared::types::{PING_KEY_PREFIX, mint_ping_key};
-use telmoni_shared::{AuditAction, AuthError, ProjectId, TelmoniError, TelmoniResourceKind};
+use telmoni_shared::{
+    AuditAction, AuthError, OrganizationId, ProjectId, TelmoniError, TelmoniResourceKind,
+};
 
 use crate::AppState;
 use crate::db::{self, PingKeyRow, ResolvedPingKey, TelemetryLane};
@@ -279,43 +283,182 @@ async fn retire_key(
     Ok(row)
 }
 
+/// What one tick of the rotation did: the keys it retired, and those it left
+/// for a later tick.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Rotated {
+    pub retired: u32,
+    pub left: u32,
+}
+
+/// What became of one stale key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Retirement {
+    /// Retired, recorded and told.
+    Retired,
+    /// Retired already — by another replica's tick, or a person — or gone
+    /// with its project: nothing to do.
+    Gone,
+    /// Its project is moving to another organization: left for a later
+    /// tick, which finds it where it went.
+    Moving,
+    /// Its organization's chain lock was not had in time: left for a later
+    /// tick, as every other key the tick then finds standing under that
+    /// organization is.
+    Busy(OrganizationId),
+    /// Its organization's chain lock was found busy earlier in the tick:
+    /// left for a later tick without waiting on that lock again.
+    PassedOver,
+}
+
 /// The rotation's tick: every live key a week past its last ping with a
-/// newer live key of its project standing, retired — each in its project's
-/// own scope, recorded on the chain as the module's own act and told to the
-/// project. Answers how many were. Safe on every replica at once: a key two
-/// ticks find is retired by the first, and the second finds it retired and
-/// records and tells nothing.
-pub async fn retire_stale_keys(state: &AppState) -> Result<u32, TelmoniError> {
+/// newer live key of its project standing, retired ([`retire_each`]). Safe
+/// on every replica at once: a key two ticks find is retired by the first,
+/// and the second finds it retired and records and tells nothing.
+pub async fn retire_stale_keys(state: &AppState) -> Result<Rotated, TelmoniError> {
     let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
     let stale = db::stale_ping_keys(&mut tx, REPLACED_AFTER_S, RETIRE_BATCH).await?;
     tx.commit().await?;
-    let mut retired = 0;
-    for key in &stale {
-        if retire_stale_key(state, key).await? {
-            retired += 1;
-        }
-    }
-    Ok(retired)
+    retire_each(state, &stale).await
 }
 
-/// One stale key retired, in a transaction of its own under the
-/// organization's chain lock, which records it and puts the project's
-/// notice in the outbox; `false` where another replica retired it first.
-/// Told, since a line not moved over to the newer key is refused from now
-/// on, and its owner would otherwise learn of it from cron's mail.
-async fn retire_stale_key(state: &AppState, key: &ResolvedPingKey) -> Result<bool, TelmoniError> {
-    let (project_id, organization_id) = (&key.project_id, &key.organization_id);
-    let mut tx = project_scope(&state.db, project_id)
-        .await?
-        .bind_organization(organization_id)
-        .await?;
-    chain::lock(project_id, organization_id, &mut tx).await?;
-    let Some(row) = db::retire_ping_key(&mut tx, project_id, key.id).await? else {
-        tx.rollback().await?;
-        return Ok(false);
+/// The tick's work on the stale keys it read, in turn: each retired in its
+/// project's own scope, recorded on the chain as the module's own act and
+/// told to the project. Each key on its own: one that cannot be retired now
+/// — its project moving, its organization's chain lock busy past its wait,
+/// its retirement refused — is logged and left for a later tick, and the
+/// tick goes on to the rest, so one organization holds up its own keys
+/// alone; and an organization whose lock was busy is passed over for the
+/// rest of the tick, so its keys cost the tick one wait, not one each. A
+/// database that stops answering ends the tick, as a failed read of the
+/// keys does, since every key after it would wait it out in turn.
+pub async fn retire_each(
+    state: &AppState,
+    stale: &[ResolvedPingKey],
+) -> Result<Rotated, TelmoniError> {
+    let mut rotated = Rotated::default();
+    let mut busy: HashSet<OrganizationId> = HashSet::new();
+    for key in stale {
+        match retire_stale_key(state, key, &busy).await {
+            Ok(Retirement::Retired) => rotated.retired += 1,
+            Ok(Retirement::Gone) => {}
+            Ok(Retirement::Moving | Retirement::PassedOver) => rotated.left += 1,
+            Ok(Retirement::Busy(organization_id)) => {
+                tracing::warn!(
+                    organization_id = %organization_id,
+                    "telemetry: the ping keys' rotation passed over an organization whose chain \
+                     lock was busy; its stale keys wait for the next tick"
+                );
+                busy.insert(organization_id);
+                rotated.left += 1;
+            }
+            Err(e) if unanswered(&e) => return Err(e),
+            Err(e) => {
+                tracing::warn!(
+                    project_id = %key.project_id,
+                    ping_key_id = %key.id,
+                    error = %e,
+                    "telemetry: the ping keys' rotation could not retire a key; the next tick \
+                     tries again"
+                );
+                rotated.left += 1;
+            }
+        }
+    }
+    Ok(rotated)
+}
+
+/// Whether a key's retirement failed for want of the database — no
+/// connection to be had, or the one it had lost — rather than for anything
+/// about the key.
+fn unanswered(error: &TelmoniError) -> bool {
+    matches!(
+        error,
+        TelmoniError::Database(
+            sqlx::Error::PoolTimedOut
+                | sqlx::Error::PoolClosed
+                | sqlx::Error::WorkerCrashed
+                | sqlx::Error::Io(_)
+                | sqlx::Error::Tls(_)
+                | sqlx::Error::Protocol(_)
+        )
+    )
+}
+
+/// One stale key retired, in a transaction of its own: its project held in
+/// place, so no move of it commits meanwhile, and the organization the key
+/// stands under read there — not the one the tick's read named, which a
+/// move committed since would have the retirement filed under and the row
+/// policy refuse — then, unless the tick found that organization's chain
+/// lock busy already (`passed_over`), under that lock, retired, recorded,
+/// and the project's notice put in the outbox. Told, since a line not moved
+/// over to the newer key is refused from now on, and its owner would
+/// otherwise learn of it from cron's mail.
+async fn retire_stale_key(
+    state: &AppState,
+    key: &ResolvedPingKey,
+    passed_over: &HashSet<OrganizationId>,
+) -> Result<Retirement, TelmoniError> {
+    let project_id = &key.project_id;
+    let mut tx = project_scope(&state.db, project_id).await?;
+    if !project_move::try_hold_in_place(tx.conn(), project_id).await? {
+        rolled_back(tx.rollback().await, project_id);
+        tracing::debug!(
+            project_id = %project_id,
+            ping_key_id = %key.id,
+            "telemetry: a stale ping key's project is moving to another organization; a later \
+             tick retires the key where it went"
+        );
+        return Ok(Retirement::Moving);
+    }
+    let Some(organization_id) = db::live_ping_key_organization(&mut tx, project_id, key.id).await?
+    else {
+        rolled_back(tx.rollback().await, project_id);
+        return Ok(Retirement::Gone);
+    };
+    if passed_over.contains(&organization_id) {
+        rolled_back(tx.rollback().await, project_id);
+        return Ok(Retirement::PassedOver);
+    }
+    let mut tx = tx.bind_organization(&organization_id).await?;
+    match retire_in_place(&mut tx, project_id, &organization_id, key.id).await {
+        Ok(Retirement::Retired) => {
+            tx.commit().await?;
+            tracing::info!(
+                project_id = %project_id,
+                ping_key_id = %key.id,
+                "telemetry: a ping key retired by its rotation, a week past its last ping"
+            );
+            Ok(Retirement::Retired)
+        }
+        Ok(left) => {
+            rolled_back(tx.rollback().await, project_id);
+            Ok(left)
+        }
+        Err(refused) => {
+            rolled_back(tx.rollback().await, project_id);
+            Err(refused)
+        }
+    }
+}
+
+/// The retirement itself, inside the transaction [`retire_stale_key`]
+/// opened, the project held in place and bound to the organization its key
+/// stands under now.
+async fn retire_in_place(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    organization_id: &OrganizationId,
+    id: Uuid,
+) -> Result<Retirement, TelmoniError> {
+    if !chain::lock_in_time(organization_id, tx).await? {
+        return Ok(Retirement::Busy(organization_id.clone()));
+    }
+    let Some(row) = db::retire_ping_key(tx, project_id, id).await? else {
+        return Ok(Retirement::Gone);
     };
     emit_audit(
-        &mut tx,
+        tx,
         AuditEvent {
             organization_id,
             in_project: Some(project_id),
@@ -331,17 +474,11 @@ async fn retire_stale_key(state: &AppState, key: &ResolvedPingKey) -> Result<boo
     )
     .await?;
     outbox::enqueue_notice(
-        &mut tx,
+        tx,
         project_id,
         organization_id,
         &notify::ping_key_retired(&row),
     )
     .await?;
-    tx.commit().await?;
-    tracing::info!(
-        project_id = %project_id,
-        ping_key_id = %row.id,
-        "telemetry: a ping key retired by its rotation, a week past its last ping"
-    );
-    Ok(true)
+    Ok(Retirement::Retired)
 }

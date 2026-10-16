@@ -68,37 +68,51 @@ pub(crate) async fn hold(
 
 /// The organization's chain lock alone, taken in `tx` and let go with it,
 /// for a write nobody is acting as a person for: a monitor its first ping
-/// makes, a key its rotation retires. Refused where the lock is not had in
-/// time, so a ping waits on no transfer for longer than any other writer
-/// would.
+/// makes. Refused where the lock is not had in time, so a ping waits on no
+/// transfer for longer than any other writer would.
 pub(crate) async fn lock(
     project_id: &ProjectId,
     organization_id: &OrganizationId,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
 ) -> Result<(), TelmoniError> {
+    if lock_in_time(organization_id, tx).await? {
+        return Ok(());
+    }
+    tracing::warn!(
+        project_id = %project_id,
+        organization_id = %organization_id,
+        "telemetry: a change to a project gave up on the organization's chain lock"
+    );
+    Err(AuthError::Conflict(
+        "another change to this project's organization is under way; try again".into(),
+    )
+    .into())
+}
+
+/// The organization's chain lock, taken in `tx` and let go with it, where it
+/// is had within [`CHAIN_LOCK_WAIT`]; `false` where it is not, `tx` then
+/// aborted for the caller to roll back. For a write a later attempt does as
+/// well as this one — a key its rotation retires, which the next tick finds
+/// again — where [`lock`] refuses the caller who is waiting on an answer.
+pub(crate) async fn lock_in_time(
+    organization_id: &OrganizationId,
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+) -> sqlx::Result<bool> {
     sqlx::query("SELECT set_config('lock_timeout', $1, true)")
         .bind(format!("{}ms", CHAIN_LOCK_WAIT.as_millis()))
         .execute(tx.conn())
         .await?;
-    if let Err(e) = lock_chain(tx.conn(), organization_id).await {
-        let timed_out = e
-            .as_database_error()
-            .and_then(|db| db.code())
-            .is_some_and(|code| code == LOCK_NOT_AVAILABLE);
-        if !timed_out {
-            return Err(e.into());
+    match lock_chain(tx.conn(), organization_id).await {
+        Ok(()) => Ok(true),
+        Err(e)
+            if e.as_database_error()
+                .and_then(|db| db.code())
+                .is_some_and(|code| code == LOCK_NOT_AVAILABLE) =>
+        {
+            Ok(false)
         }
-        tracing::warn!(
-            project_id = %project_id,
-            organization_id = %organization_id,
-            "telemetry: a change to a project gave up on the organization's chain lock"
-        );
-        return Err(AuthError::Conflict(
-            "another change to this project's organization is under way; try again".into(),
-        )
-        .into());
+        Err(e) => Err(e),
     }
-    Ok(())
 }
 
 /// The organization's monitor ceiling, for a change to read before it takes

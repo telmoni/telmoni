@@ -3,11 +3,14 @@
 //! after its last ping once the newer stands — by a loop of this module's
 //! own, a tick a minute on every replica, each tick safe beside the others'
 //! since a key is retired, recorded and told to its project once
-//! ([`crate::handler::ping_keys::retire_stale_keys`]). A tick that fails is
-//! logged, and the next one runs; so is a tick that panics, each tick being
-//! a task of its own, so that a key whose retirement panics ends that tick
-//! alone — never the loop, which a restart would not mend, since the next
-//! loop meets the same key, and never the server.
+//! ([`crate::handler::ping_keys::retire_stale_keys`]). A key that cannot be
+//! retired now is logged and left for a later tick, and the tick goes on to
+//! the rest. A tick that fails — its read of the stale keys, or a database
+//! that stops answering — is logged, and the next one runs; so is a tick
+//! that panics, each tick being a task of its own, so that a key whose
+//! retirement panics ends that tick alone — never the loop, which a restart
+//! would not mend, since the next loop meets the same key, and never the
+//! server.
 //!
 //! ⚠ The loop's handle is raced against the server in the binary's `serve`,
 //! as the outbox's is, for a loop that ends all the same: a dead loop would
@@ -45,9 +48,13 @@ pub async fn run(state: Arc<AppState>) {
             async move { ping_keys::retire_stale_keys(&state).await }
         });
         match tick.await {
-            Ok(Ok(0)) => {}
-            Ok(Ok(retired)) => {
-                tracing::info!(retired, "telemetry: ping keys retired by their rotation");
+            Ok(Ok(ping_keys::Rotated { retired: 0, .. })) => {}
+            Ok(Ok(ping_keys::Rotated { retired, left })) => {
+                tracing::info!(
+                    retired,
+                    left,
+                    "telemetry: ping keys retired by their rotation"
+                );
             }
             Ok(Err(e)) => tracing::warn!(
                 error = %e,

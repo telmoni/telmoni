@@ -687,8 +687,10 @@ async fn lock_transfer_organizations(
 const LOCK_NOT_AVAILABLE: &str = "55P03";
 
 /// The project's move lock, alone, for a move of its rows. A wait the role's
-/// `lock_timeout` ends — a ping holding the project across a slow answer —
-/// is a 409 to try again, not the 500 a database that failed would be.
+/// `lock_timeout` ends — a ping holding the project across a slow answer, or
+/// the rotation retiring one of its ping keys across a wait for its chain
+/// lock — is a 409 to try again, not the 500 a database that failed would
+/// be.
 async fn lock_project_for_move(
     conn: &mut sqlx::PgConnection,
     project_id: &ProjectId,
@@ -705,7 +707,7 @@ async fn lock_project_for_move(
     }
     tracing::warn!(
         project_id = %project_id,
-        "a move of a project gave up waiting for the pings writing into it"
+        "a move of a project gave up waiting for the writes holding it in place"
     );
     Err(AuthError::Conflict("the project is busy — try again in a moment".into()).into())
 }
@@ -1253,9 +1255,10 @@ async fn move_purge_and_commit(
 /// moves the settings there under the project's move lock — right whichever
 /// happened, a retry's accept in between included; a project moved on since,
 /// beyond both, is the later accept's to settle. A ping let in between the
-/// two moves filed its rows under the organization the first one named: its
-/// telemetry rows go back with the rest, while what it recorded on that
-/// organization's chain, and a notice delivered there, stay. The
+/// two moves, or a ping key the rotation retired then, filed its rows under
+/// the organization the first one named: its telemetry rows go back with
+/// the rest, while what it recorded on that organization's chain, and a
+/// notice delivered there, stay. The
 /// request settles them itself before it answers, so a rollout that waits for
 /// it waits for that too; a settling that fails, or a request dropped before
 /// it could, leaves the guard armed, and its drop tries again in a task of
