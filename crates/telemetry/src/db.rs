@@ -91,14 +91,14 @@ pub async fn projects_of(
 
 /// Every settings row of an organization's projects, their saved views,
 /// found through those rows before they go, since a view names no
-/// organization, and their monitors, ping keys, open runs and outbox rows,
-/// which name it.
+/// organization, and their monitors, each with its open runs, ping keys and
+/// outbox rows, which name it (`PURGED_TABLES`).
 pub async fn purge_organization(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     organization_id: &OrganizationId,
 ) -> sqlx::Result<u64> {
     let mut purged = 0;
-    for table in ORGANIZATION_TABLES {
+    for table in PURGED_TABLES {
         purged += sqlx::query(&format!("DELETE FROM {table} WHERE organization_id = $1"))
             .bind(organization_id)
             .execute(tx.conn())
@@ -122,26 +122,40 @@ pub async fn purge_organization(
     Ok(purged + views + settings)
 }
 
-/// The tables filed under a project's organization as well as the project,
-/// in the order a purge takes them: what hangs off a monitor before the
-/// monitor, since a run goes with its monitor by cascade and is counted
-/// here instead. The settings row, which the purges find a project by, and
-/// the views, which name no organization, are taken apart from these.
-const ORGANIZATION_TABLES: [&str; 4] = [
+/// The tables a purge deletes a project's rows from, filed under its
+/// organization as well as the project, in the order it deletes them: the
+/// monitors first, each locked and then its open runs deleted with it by
+/// the cascade, uncounted. Every writer of a monitor and its runs takes the
+/// monitor first — a ping holds its monitor from its read ([`hold_monitor`])
+/// — and a purge that took a run of a monitor it did not hold, one made
+/// beside it since it began, could wait on that monitor while a ping holding
+/// it waited on the run. The settings row, which the purges find a project
+/// by, and the views, which name no organization, are taken apart from
+/// these, last.
+const PURGED_TABLES: [&str; 3] = [
+    "telemetry.monitors",
+    "telemetry.outbox",
+    "telemetry.ping_keys",
+];
+
+/// The tables a move rewrites a project's rows in, filed under its
+/// organization as well as the project, the monitors' rows last: their
+/// share is held already ([`move_project`]).
+const MOVED_TABLES: [&str; 4] = [
     "telemetry.outbox",
     "telemetry.open_runs",
     "telemetry.ping_keys",
     "telemetry.monitors",
 ];
 
-/// One project's outbox rows, open runs, ping keys, monitors, saved views
-/// and settings row.
+/// One project's monitors, each with its open runs, ping keys, outbox rows,
+/// saved views and settings row (`PURGED_TABLES`).
 pub async fn purge_project(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     project_id: &ProjectId,
 ) -> sqlx::Result<u64> {
     let mut purged = 0;
-    for table in ORGANIZATION_TABLES {
+    for table in PURGED_TABLES {
         purged += sqlx::query(&format!("DELETE FROM {table} WHERE project_id = $1"))
             .bind(project_id)
             .execute(tx.conn())
@@ -348,6 +362,34 @@ pub async fn monitor<B: HasProject>(
     .await
 }
 
+/// One of the project's monitors, by its slug, as a ping reads it: its row
+/// shared with the ping until the ping's transaction ends, before the ping
+/// takes any of its runs. Every writer of a monitor and its runs takes the
+/// monitor first — a delete and a purge, the runs after it by the cascade
+/// (`PURGED_TABLES`), and a move, which holds its monitors as a ping does
+/// before it rewrites anything ([`move_project`]) — so a ping and such a
+/// writer each wait on the other holding nothing the other wants, never in
+/// a circle. `FOR KEY SHARE` is the share a run's foreign key takes
+/// anyway: it keeps out a delete and a change of the monitor's key — its id,
+/// or the agent its unique index holds — alone, so the pings of one monitor
+/// and the console's other changes go on beside it; and a ping that waited
+/// on a delete finds no monitor by that slug, as a ping after it would.
+pub async fn hold_monitor<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    slug: &str,
+) -> sqlx::Result<Option<MonitorRow>> {
+    sqlx::query_as(&format!(
+        "SELECT {MONITOR_COLUMNS} FROM telemetry.monitors
+          WHERE project_id = $1 AND slug = $2
+            FOR KEY SHARE"
+    ))
+    .bind(project_id)
+    .bind(slug)
+    .fetch_optional(tx.conn())
+    .await
+}
+
 /// How many monitors the organization holds across its projects: what its
 /// plan's ceiling is held to. Read in a scope that names the organization,
 /// which the `organization_read` policy admits.
@@ -508,16 +550,24 @@ pub async fn settle_monitor_run(
     .await
 }
 
-/// One of the project's monitors, removed. Answers whether there was one.
+/// One of the project's monitors, removed, its open runs with it by the
+/// cascade on `open_runs.monitor_id`: the monitor's row first and its runs
+/// after it, the order every writer of both takes them in. A ping holds its
+/// monitor from its read ([`hold_monitor`]), so a delete waits for the pings
+/// in flight holding nothing they want, and a ping after it waits for the
+/// delete holding none of its runs. A delete that took the runs first would
+/// hold one a ping wants while it waited on the monitor the ping holds, a
+/// circle Postgres breaks by failing one of them. Answers whether there was
+/// one.
 pub async fn delete_monitor<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
-    slug: &str,
+    id: Uuid,
 ) -> sqlx::Result<bool> {
     Ok(
-        sqlx::query("DELETE FROM telemetry.monitors WHERE project_id = $1 AND slug = $2")
+        sqlx::query("DELETE FROM telemetry.monitors WHERE project_id = $1 AND id = $2")
             .bind(project_id)
-            .bind(slug)
+            .bind(id)
             .execute(tx.conn())
             .await?
             .rows_affected()
@@ -526,14 +576,26 @@ pub async fn delete_monitor<B: HasProject>(
 }
 
 /// A project's settings row and its monitors, ping keys, open runs and
-/// outbox rows, handed to the organization that now holds the project.
-/// Answers whether there was a settings row.
+/// outbox rows, handed to the organization that now holds the project, its
+/// monitors held first as a ping holds its own ([`hold_monitor`]): a move
+/// takes a monitor before its runs as every writer of both does, so a
+/// delete or a purge beside it — a settling's move holds no chain lock —
+/// meets it at the monitors, before either has taken a run of theirs. The
+/// share keeps out only a delete, a purge and a change of a monitor's agent;
+/// the rows are rewritten after it, runs before monitors, an order a ping
+/// that holds a run and then writes its monitor never meets the other way,
+/// and a first ping, which writes the settings row before its monitor, is
+/// kept out by the move lock. Answers whether there was a settings row.
 pub async fn move_project(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     project_id: &ProjectId,
     organization_id: &OrganizationId,
 ) -> sqlx::Result<bool> {
-    for table in ORGANIZATION_TABLES {
+    sqlx::query("SELECT 1 FROM telemetry.monitors WHERE project_id = $1 FOR KEY SHARE")
+        .bind(project_id)
+        .execute(tx.conn())
+        .await?;
+    for table in MOVED_TABLES {
         sqlx::query(&format!(
             "UPDATE {table} SET organization_id = $2 WHERE project_id = $1"
         ))

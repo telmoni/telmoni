@@ -921,7 +921,8 @@ async fn restart_monitor(
 }
 
 /// `DELETE /internal/telemetry/monitors/{slug}` — one of the project's
-/// monitors, gone; its runs stay, as traces of its agent.
+/// monitors, gone; its finished runs stay, as traces of its agent, and a
+/// run still open goes with it.
 pub async fn delete_monitor(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -947,7 +948,8 @@ pub async fn delete_monitor(
 }
 
 /// The removal itself, inside the transaction [`delete_monitor`] opened:
-/// under the organization's chain lock, the row gone and recorded.
+/// under the organization's chain lock, the row gone, its open runs with it
+/// ([`db::delete_monitor`]), and recorded.
 async fn remove_monitor(
     state: &AppState,
     acting: &Acting,
@@ -957,7 +959,7 @@ async fn remove_monitor(
     slug: &str,
 ) -> Result<MonitorRow, TelmoniError> {
     let row = held(state, acting, project_id, tx, Verb::Delete, slug).await?;
-    if !db::delete_monitor(tx, project_id, slug).await? {
+    if !db::delete_monitor(tx, project_id, row.id).await? {
         return Err(not_found());
     }
     emit_audit(

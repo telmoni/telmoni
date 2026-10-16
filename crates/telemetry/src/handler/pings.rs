@@ -489,9 +489,11 @@ async fn held_in_place(
 }
 
 /// The key read again once a first ping holds its organization's chain lock,
-/// which a retirement holds across its own: a ping that waited one out finds
-/// its key retired, a 404, and makes no monitor under a key that opens
-/// nothing. Its organization is the one [`held_in_place`] read: a move that
+/// which a retirement holds across its own, and has read its monitor again
+/// under it, which a purge of the project may have held it on: a ping that
+/// waited either out finds its key retired or gone, a 404, and makes no
+/// monitor under a key that opens nothing — nor the purged project's rows
+/// anew. Its organization is the one [`held_in_place`] read: a move that
 /// takes the project's lock cannot have passed since.
 async fn still_live(
     key: &ResolvedPingKey,
@@ -577,9 +579,9 @@ fn rolled_back(result: sqlx::Result<()>, project_id: &ProjectId) {
 
 /// The ping itself, inside the transaction [`held_in_place`] opened and
 /// bound to where its key stands, the project held in place: the monitor
-/// found or made, the run recorded and the monitor settled. Its key was
-/// touched where it was resolved ([`resolve_key`]), so nothing here waits on
-/// the key's row.
+/// found and held before any of its runs ([`db::hold_monitor`]) or made,
+/// the run recorded and the monitor settled. Its key was touched where it
+/// was resolved ([`resolve_key`]), so nothing here waits on the key's row.
 #[expect(
     clippy::too_many_arguments,
     reason = "a ping is these eight things; a struct built once for one call would say the same in more lines"
@@ -595,7 +597,7 @@ async fn ping(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
 ) -> Result<Heard, TelmoniError> {
     let project_id = &key.project_id;
-    let monitor = match db::monitor(tx, project_id, slug).await? {
+    let monitor = match db::hold_monitor(tx, project_id, slug).await? {
         Some(monitor) => monitor,
         None => discover_monitor(state, headers, key, slug, tx).await?,
     };
@@ -629,9 +631,10 @@ async fn discover_monitor(
     let (project_id, organization_id) = (&key.project_id, &key.organization_id);
     let ceiling = chain::ceiling(state.entitlements.as_ref(), organization_id).await;
     chain::lock(project_id, organization_id, tx).await?;
-    still_live(key, tx).await?;
     // Another ping may have made it while this one waited for the lock.
-    if let Some(monitor) = db::monitor(tx, project_id, slug).await? {
+    let made = db::hold_monitor(tx, project_id, slug).await?;
+    still_live(key, tx).await?;
+    if let Some(monitor) = made {
         return Ok(monitor);
     }
     db::ensure_settings(tx, project_id, organization_id).await?;
