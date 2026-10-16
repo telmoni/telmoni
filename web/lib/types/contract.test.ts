@@ -58,8 +58,11 @@ describe("wire contract", () => {
     expect(Object.keys(CONSOLE).sort()).toEqual(Object.keys(contract.enums).sort());
   });
 
-  it.each(Object.keys(CONSOLE))("%s has exactly the server's values", (name) => {
-    expect(Object.values(CONSOLE[name]!).sort()).toEqual([...contract.enums[name]!].sort());
+  // In the server's order, not as sets: an order can mean something —
+  // `MonitorState` lists the worst first, the order the Monitors page sorts
+  // by — and a copy holding the right values shuffled would sort it wrong.
+  it.each(Object.keys(CONSOLE))("%s has exactly the server's values, in its order", (name) => {
+    expect(Object.values(CONSOLE[name]!)).toEqual(contract.enums[name]);
   });
 
   it("each switched-off feature says what the server says", () => {
