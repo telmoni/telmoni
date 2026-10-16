@@ -83,6 +83,74 @@ pub fn unreachable_pool() -> sqlx::PgPool {
         .expect("a syntactically valid url builds a lazy pool")
 }
 
+/// Every log line written on this thread while the guard lives, at every
+/// level, each with the fields of the spans it was written in, as JSON: for
+/// a suite pinning that something reaches no log line, whatever on this
+/// thread writes it. A `#[tokio::test]`'s runtime polls its tasks on the
+/// thread that set it; a task sent to another thread, and a `log` record,
+/// are not kept.
+///
+/// ⚠ Two subscribers that keep nothing are registered beside it for the
+/// life of the process (`BYSTANDERS`). With one alone registered,
+/// `tracing` asks whether a callsite is wanted of the thread that reaches it
+/// first — in a suite run in parallel, another test's, which wants nothing —
+/// and caches the answer, so a span this thread opens there later is never
+/// printed: the request span, which every test of a router opens, went
+/// missing from the lines four runs in ten. With more, it asks every
+/// subscriber registered, under a lock — from the moment the second is,
+/// which a callsite another thread reaches in that same instant may miss.
+#[must_use]
+pub fn captured_logs() -> (tracing::subscriber::DefaultGuard, CapturedLogs) {
+    BYSTANDERS.get_or_init(|| {
+        [
+            tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default()),
+            tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default()),
+        ]
+    });
+    let logs = CapturedLogs::default();
+    let sink = logs.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .json()
+        .with_max_level(tracing::Level::TRACE)
+        .with_writer(move || sink.clone())
+        .finish();
+    (tracing::subscriber::set_default(subscriber), logs)
+}
+
+/// What [`captured_logs`] registers beside each capture: two, so that one
+/// capture beside them is never the only subscriber registered.
+static BYSTANDERS: std::sync::OnceLock<[tracing::Dispatch; 2]> = std::sync::OnceLock::new();
+
+/// The lines [`captured_logs`] keeps.
+#[derive(Clone, Default)]
+pub struct CapturedLogs(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl CapturedLogs {
+    /// Every line kept so far.
+    #[must_use]
+    pub fn text(&self) -> String {
+        let kept = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        String::from_utf8_lossy(&kept).into_owned()
+    }
+}
+
+impl std::io::Write for CapturedLogs {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 /// Resolves the repository root from `CARGO_MANIFEST_DIR`.
 pub fn project_root() -> std::path::PathBuf {
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));

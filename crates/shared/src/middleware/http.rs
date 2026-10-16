@@ -278,37 +278,13 @@ mod tests {
         }
     }
 
-    /// Where the span's log lines go, kept for the test to read.
-    #[derive(Clone, Default)]
-    struct Written(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
-
-    impl std::io::Write for Written {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .extend_from_slice(bytes);
-            Ok(bytes.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
     /// ⚠ The span prints a request id only well formed, behind
     /// [`fresh_request_id`] or not: a router that mounts the span and the id
     /// layers alone keeps a caller's id, and still no log line prints its
     /// free text.
     #[tokio::test]
     async fn the_span_prints_no_free_text_for_a_request_id() {
-        let written = Written::default();
-        let sink = written.clone();
-        let subscriber = tracing_subscriber::fmt()
-            .json()
-            .with_writer(move || sink.clone())
-            .finish();
-        let _logging = tracing::subscriber::set_default(subscriber);
+        let (_logging, logs) = crate::test_util::captured_logs();
         let answered = Router::new()
             .route(
                 "/",
@@ -329,14 +305,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(answered.status(), axum::http::StatusCode::OK);
-        let lines = String::from_utf8(
-            written
-                .0
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .clone(),
-        )
-        .unwrap();
+        let lines = logs.text();
         assert!(lines.contains(r#""request_id":"-""#), "{lines}");
         assert!(!lines.contains("free text"), "{lines}");
     }
