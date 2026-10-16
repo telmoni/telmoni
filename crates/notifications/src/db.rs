@@ -390,15 +390,10 @@ pub async fn purge_organization(
     Ok(purged)
 }
 
-/// The projects this module's rows name after `after`, in id order, `limit`
-/// of them: the tables the project's purge deletes from, and only those,
-/// since a delivery and its attempts go with their connection. Each table
-/// gives its first `limit` past `after`, and the page is the first `limit`
-/// of the three. The feed, which can hold thousands of notices a project, is
-/// walked one project at a time down its index, a step from each project to
-/// the next, so a page costs its projects and never their notices; a
-/// project's connections are few and its handshakes fewer. For the
-/// retention sweep, to find a deleted project's purge cut short.
+/// A page of the projects this module's rows name, in id order after
+/// `after`, for the retention sweep to find a purge cut short. The feed is
+/// walked one project at a time down its index, so a page never reads a
+/// project's notices.
 pub async fn projects_after(
     tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
     after: &str,
@@ -434,10 +429,8 @@ pub async fn projects_after(
     .await
 }
 
-/// The longest a project's purge waits for a row another transaction holds:
-/// the role's own `lock_timeout` on a tier, set on the transaction too, since
-/// the Compose quickstart's superuser carries none, and a purge waiting there
-/// would hold up the retention sweep that tries it again.
+/// Set per transaction because the Compose superuser has no role-level
+/// `lock_timeout`, and a stuck purge would hold up the sweep that retries it.
 const PURGE_LOCK_WAIT: &str = "2000ms";
 
 /// Hard-delete every notifications row for one PROJECT: what a project

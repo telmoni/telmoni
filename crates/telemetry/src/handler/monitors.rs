@@ -452,12 +452,9 @@ fn monitor_slug(given: &str) -> Result<String, TelmoniError> {
     }
 }
 
-/// A write a monitor's unique index refused, said in the words of the lane
-/// that wrote it — `slug_taken` where a monitor of that slug is the
-/// project's already, `agent_taken` where one for that agent is — or, for any
-/// other failure, the database's. The words are the lane's own, fixed in its
-/// code: never the slug or the agent a request sent, which a refusal echoes
-/// none of.
+/// A write a monitor's unique index refused, in the lane's own words
+/// (`slug_taken`, `agent_taken`), never in what the request sent; any other
+/// failure is the database's.
 pub(crate) fn refused_as_taken(
     error: sqlx::Error,
     slug_taken: &'static str,
@@ -600,8 +597,7 @@ async fn make_monitor(
     db::ensure_settings(tx, project_id, organization_id).await?;
     if let Some(ceiling) = ceiling {
         let held = db::monitor_count(tx, organization_id).await?;
-        // A count below zero, which no table gives, is past every ceiling:
-        // the bound fails closed.
+        // A negative count, which no table gives, fails closed.
         ceiling.admit(u64::try_from(held).unwrap_or(u64::MAX))?;
     }
     let next_due_at = monitor.timing.read.next_due(Utc::now()).map_err(fault)?;
@@ -639,10 +635,8 @@ async fn make_monitor(
 /// auth's second answer, the one that stands: a transfer of the project
 /// committed between the two answers refuses the change rather than filing
 /// it under an organization that no longer holds the project. Read plainly:
-/// a ping takes no chain lock, so its settling — the run's state, and the
-/// next due time — may commit before the change writes, and a change reads
-/// what it moves again from the row it writes over, as a save its kept due
-/// time ([`db::update_monitor`]) and a pause the state it records.
+/// a ping takes no chain lock, so what a ping moves is read again from the
+/// row as the change writes it.
 async fn held(
     state: &AppState,
     acting: &Acting,
@@ -718,9 +712,8 @@ async fn change_monitor(
     // line that never comes is refused as a make refuses it, and no timing is
     // saved that a ping or a resume could not read.
     let found = monitor.timing.read.next_due(Utc::now()).map_err(fault)?;
-    // A ping settles neither a paused monitor nor a new one, nor moves a
-    // timing, so the read decides which of these stands; only the due time a
-    // timing that stands keeps is read again, from the row as it is written.
+    // No ping pauses a monitor or moves a timing, so the read decides these;
+    // only a kept due time is read again, as the row is written.
     let (next_due_at, keep_due) = if before.state == MonitorState::Paused {
         (None, false)
     } else if monitor.times_as(&before) && !starts {
@@ -803,9 +796,8 @@ pub async fn pause_monitor(
 
 /// The pause itself, inside the transaction [`pause_monitor`] opened: under
 /// the organization's chain lock, a monitor not paused already put in
-/// `paused` with no next due time, and recorded with the state it was in
-/// as the pause wrote over it, read again held as the write holds it; one
-/// paused already is answered as it is, and nothing is held or recorded.
+/// `paused` with no next due time, and recorded with the state it wrote
+/// over; one paused already is answered as it is, and nothing is recorded.
 async fn halt_monitor(
     state: &AppState,
     acting: &Acting,
@@ -815,10 +807,9 @@ async fn halt_monitor(
     slug: &str,
 ) -> Result<MonitorRow, TelmoniError> {
     let read = held(state, acting, project_id, tx, Verb::Update, slug).await?;
-    // Only a change under the chain lock pauses a monitor or resumes it, so
-    // the plain read says whether there is anything to write; the state the
-    // pause records it wrote over is read again, held as the write holds it,
-    // since a ping's settling may have moved it since.
+    // Only a change under the chain lock pauses or resumes, so the plain
+    // read says whether to write; the state recorded is read again, locked,
+    // since a ping may have moved it.
     if read.state == MonitorState::Paused {
         return Ok(read);
     }

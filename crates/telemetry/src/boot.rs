@@ -17,8 +17,7 @@ use crate::rate_limit::RateLimit;
 use crate::replica::Redis;
 use crate::{AppState, Config, hashing, store::Store};
 
-/// The longest one call to the key service may take, the metadata server's
-/// token included.
+/// The longest one call to the key service may take, its token included.
 const KEY_SERVICE_WAIT: Duration = Duration::from_secs(15);
 
 /// The module's pool, opened as its own database role.
@@ -58,9 +57,8 @@ pub fn state(
              and a deployed tier names a Cloud KMS key"
         );
     }
-    // Bounded, as notifications' client for the same hops is: an export that
-    // keys its project waits this long at most on the key service, and so
-    // ends inside an organization's deletion grace.
+    // Bounded, so an export that keys its project ends inside an
+    // organization's deletion grace.
     let http = reqwest::Client::builder()
         .timeout(KEY_SERVICE_WAIT)
         .redirect(reqwest::redirect::Policy::none())

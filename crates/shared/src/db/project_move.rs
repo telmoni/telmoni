@@ -1,44 +1,21 @@
-//! A project's move lock: what keeps a write that files rows under the
+//! A project's move lock: it keeps a write that files rows under the
 //! organization it read the project in from landing beside a move of the
-//! project to another organization — the move missing the rows the write had
-//! not committed, and the write refused an update of a row the move had.
+//! project to another organization, or beside its purge. A move or a purge
+//! takes it alone ([`lock_for_move`]) to its commit; a write — a ping, a key
+//! its rotation retires — only tries for it, shared ([`try_hold_in_place`]),
+//! and is turned away at once, holding no connection while it waits.
 //!
-//! A move — a transfer's accept, an owner's move, the settling of either —
-//! takes it alone ([`lock_for_move`]) across telemetry's move and holds it to
-//! the caller's commit, waiting for the writes in flight as long as its
-//! `lock_timeout` lets it. A write — a ping, a key its rotation retires —
-//! only tries for it, shared ([`try_hold_in_place`]), as the first lock of
-//! its transaction, and reads the organization once it holds it: a move
-//! that committed meanwhile is seen, and none commits beside the write. A
-//! move holding the lock, or waiting for it, turns a write away at once, to
-//! let go of its connection and try again, so writes kept out by a move hold
-//! no connection while they wait — they take turns on the pool with the
-//! move's own work — and never wait on each other. Telemetry's purges take
-//! it alone too, in their own transaction, for each project whose rows they
-//! delete, so no write runs beside a purge either: one in flight is waited
-//! for, as long as the purge's `lock_timeout` lets it, its rows going with
-//! the rest, and one kept out, let in once the purge commits, finds the
-//! project's key gone.
-//!
-//! ⚠ **Before any chain lock.** A write holding its project in place may wait
-//! for its organization's chain lock ([`crate::audit::lock_chain`]), so a
-//! move that took a chain lock first would wait on that write in a circle,
-//! which Postgres breaks by aborting one side.
-//!
-//! ⚠ **The caller's lock, not telemetry's.** A move given up on over its
-//! budget may still commit after the caller let the lock go, beside a write
-//! let in since, until the settling that follows takes the lock again.
-//!
-//! Advisory, so it names no row: no writer of the project's rows waits on it
-//! but these, whatever order they take their rows in.
+//! ⚠ Take it before any chain lock ([`crate::audit::lock_chain`]): a write
+//! holding its project may wait for that lock, and the other order
+//! deadlocks. A move given up on over its budget may still commit after its
+//! caller lets the lock go.
 
 use sqlx::PgConnection;
 
 use crate::types::ProjectId;
 
 /// Wait for `project_id`'s move lock alone, held to the end of the caller's
-/// transaction: for a move of the project's rows to another organization,
-/// or a purge of them.
+/// transaction: for a move or a purge of the project's rows.
 pub async fn lock_for_move(conn: &mut PgConnection, project_id: &ProjectId) -> sqlx::Result<()> {
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('move:' || $1, 0))")
         .bind(project_id)

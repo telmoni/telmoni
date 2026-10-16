@@ -470,13 +470,10 @@ impl App {
                 .into_make_service_with_connect_info::<SocketAddr>(),
         )
         .with_graceful_shutdown(telmoni_shared::shutdown::shutdown_signal());
-        // ⚠ The delivery and outbox loops, the ping keys' rotation and
-        // telemetry's purge sweep are raced against the server: a dead loop
-        // would leave a Ready pod with every delivery `pending`, every ping's
-        // row unwritten, no key retired by it however long past its week, or
-        // no deleted project's purge finished that its delete could not,
-        // with no sweep or command to do it in its place, so the process
-        // exits and the restart is the recovery.
+        // ⚠ These loops are raced against the server: a dead one would leave
+        // a Ready pod that quietly stops delivering, writing pings, retiring
+        // keys or finishing purges, so the process exits and the restart is
+        // the recovery.
         tokio::select! {
             served = serve => served?,
             ended = delivery => match ended {

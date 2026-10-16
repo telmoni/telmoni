@@ -269,17 +269,10 @@ async fn the_purges_and_the_move_reach_only_what_they_name(pool: PgPool) {
     }
 }
 
-/// A project's first export files its settings row, and seals its hashing
-/// key in it, under the organization that holds the project now — the one
-/// the project's row names, where it has one, or auth's answer, asked with
-/// the project held in place so that no transfer commits meanwhile — never
-/// the one the export's key was resolved under before a transfer committed.
-/// Filed under the organization the project left, the row would have that
-/// organization's purge mark the moved project's spans deleted, and the new
-/// one's never find them. Gone since its key was read, the project refuses
-/// the export as its key now would; kept out by a move under way, the
-/// export is answered as one an exporter tries again; and neither writes
-/// anything.
+/// A project's first export files its settings row under the organization
+/// that holds the project now — the row's own, or auth's answer — never the
+/// one its key was resolved under before a transfer. A project gone since
+/// refuses the export, and a move under way makes it one to retry.
 #[sqlx::test]
 async fn a_first_export_files_the_settings_row_where_the_project_is_now(pool: PgPool) {
     let (left, holds) = (OrganizationId::new(), OrganizationId::new());
@@ -354,9 +347,7 @@ async fn a_first_export_files_the_settings_row_where_the_project_is_now(pool: Pg
     mover.rollback().await.expect("the move lets go");
 }
 
-/// A project's first export that auth cannot place — auth failing, or
-/// slower than its second — is answered as auth unavailable, a 503 an
-/// exporter tries again, never as a fault of ours it would drop, and writes
+/// A first export auth cannot place is a 503 an exporter retries, writing
 /// nothing; once auth answers, the row is filed.
 #[sqlx::test]
 async fn a_first_export_auth_cannot_place_is_tried_again(pool: PgPool) {

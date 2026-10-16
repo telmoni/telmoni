@@ -75,13 +75,11 @@ pub(crate) struct AuthStub {
     homes_fail_after: Mutex<Option<usize>>,
     /// Whether asking an organization's standing fails.
     standing_fail: AtomicBool,
-    /// For each ask of an organization's standing, how many advisory locks
-    /// the database held, asked from `chain_probe`'s session: a lane asks
-    /// with nothing held.
+    /// The advisory locks held at each ask of an organization's standing, as
+    /// `chain_probe`'s session sees them.
     standing_held: Mutex<Vec<i64>>,
-    /// For each ask of where projects are, how many advisory locks the
-    /// database held, asked as `standing_held` is: a first export asks with
-    /// its project held in place, its own lock alone.
+    /// The advisory locks held at each ask of where projects are, seen as
+    /// `standing_held` is.
     homes_held: Mutex<Vec<i64>>,
     /// How long each answer of an organization's standing takes to come, as
     /// an auth whose pool is spent takes.
@@ -200,9 +198,7 @@ impl AuthStub {
         self
     }
 
-    /// Every seat on `project` gone, and every key minted on it, as auth
-    /// holds a project once it is deleted: asked where it is, auth leaves it
-    /// out.
+    /// Forgets `project`, its seats and keys, as auth does once it is deleted.
     pub(crate) fn forget(&self, project: &ProjectId) -> &Self {
         self.seats
             .lock()
@@ -215,8 +211,8 @@ impl AuthStub {
         self
     }
 
-    /// Every seat on `project` moved to `organization`, and every key minted
-    /// on it, as auth holds a project once a transfer of it commits.
+    /// Moves `project`, its seats and keys, to `organization`, as a
+    /// transfer's commit does.
     pub(crate) fn move_to(&self, project: &ProjectId, organization: &OrganizationId) -> &Self {
         for ((_, seated), (held_by, _, _)) in self
             .seats
@@ -926,10 +922,8 @@ pub(crate) fn state_with_notices(
     ))
 }
 
-/// [`state_with_notices`], with a ping waiting out a move of its project for
-/// `move_wait` before it gives up, where the module waits two seconds: for a
-/// test that holds a move for longer than a busy machine lets two seconds
-/// last, and would otherwise see the pings it keeps out give up meanwhile.
+/// [`state_with_notices`], with pings waiting out a move for `move_wait`
+/// rather than two seconds, for a test that holds a move longer.
 pub(crate) fn state_waiting_out_moves(
     pool: &PgPool,
     auth: Arc<dyn Auth>,

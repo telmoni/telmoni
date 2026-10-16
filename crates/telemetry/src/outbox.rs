@@ -3,41 +3,18 @@
 //! `spans`, and a notice for a project's feed is handed to notifications
 //! through the seam; each is written as a row here in the transaction that
 //! ends the run, makes the monitor or retires the key, so a monitor is never
-//! late because ClickHouse was down. A notice is never told twice: the seam
-//! answers a replayed dedup key with its first row and queues nothing. It
-//! goes to the organization auth holds its project in when the loop asks, and
-//! to none once that organization's deletion is marked or the project is
-//! gone, since a notice written after a deletion's purges would outlive them;
-//! a project found gone, before the write or after it, is purged from
-//! notifications once more. A run lands by the same rule: nowhere for an
-//! organization being deleted or a project gone, and a project found gone,
-//! before the insert or after it, has its spans marked deleted once more. A
-//! run is written once but for a sliver: `spans` is a plain `MergeTree`,
-//! read without `FINAL`, which keeps every copy it is given, so before each
-//! insert the loop reads which of the batch's runs the table holds already
-//! and drops those rows as landed — a batch leased again after a loop died
-//! between its insert and its delete, a retried end ping that filed a second
-//! run under the same `rid`, two end pings for one run — and writes no run
-//! twice within one batch. What is left is two replicas landing one run
-//! inside one insert's time, which no read can see.
+//! late because ClickHouse was down. Both land in the organization auth
+//! holds the project in, and nowhere once that organization is being deleted
+//! or the project is gone, since a row written after a deletion's purges
+//! would outlive them. The seam tells a notice once, by its dedup key, and
+//! before each insert the loop drops the runs `spans` holds already.
 //!
-//! The loop is one every replica runs, on the delivery loop's pattern: each
-//! tick leases rows across every tenant, `FOR UPDATE SKIP LOCKED` under a
-//! lease, lands each, deletes what landed and holds the rest. Whose fault a
-//! row's failure is decides what it costs (`Fault`): a store that could
-//! not be reached, would not answer, or said it cannot take rows now hands
-//! the row back for the next tick with its try returned, so an outage of
-//! ours strands nothing however long it lasts; a row the store refused, or
-//! whose payload does not parse, waits longer each time, up to a cap, past
-//! which it stays for an operator — named in the log as it crosses, counted
-//! in the depth line, and tried again by `telmoni release outbox` once what
-//! refused it is mended. A batch the store refused is written again one row
-//! at a time first, so one row stops one row.
-//!
-//! ⚠ The loop's handle is raced against the server in the binary's `serve`,
-//! as the delivery loop's is: a dead loop would leave a Ready pod with every
-//! ping's row unwritten, so the process exits and the restart is the
-//! recovery.
+//! Every replica runs the loop, on the delivery loop's pattern: each tick
+//! leases rows `FOR UPDATE SKIP LOCKED`, lands each, deletes what landed and
+//! holds the rest. A row the store could not take now is handed back with
+//! its try returned (`Fault::Store`), so an outage strands nothing; a row it
+//! refused waits longer each time, up to a cap, then stays for an operator's
+//! `telmoni release outbox`.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::ControlFlow;
@@ -70,11 +47,9 @@ const BATCH: i64 = 100;
 /// How many batches one tick drains before it waits for the next, while
 /// every batch lands whole.
 const DRAIN_ROUNDS: usize = 20;
-/// How long a leased row is held before another replica may take it:
-/// longer than the asks and the read before a batch's insert and the
-/// insert's own deadline, which come first in the batch, so no run is
-/// written by two replicas; and than a notice's write, which a notice past
-/// it is told once all the same, by its dedup key.
+/// How long a leased row is held before another replica may take it: longer
+/// than a batch's asks, read and insert, which come first, so no run is
+/// written by two replicas.
 const LEASE_SECS: i64 = 120;
 /// How many times a row the store refused, or that does not parse, is tried
 /// before it is left for an operator: with the waits below, half an hour of
@@ -328,10 +303,8 @@ struct Held {
 /// The outbox loop. A failed tick is logged and the next one runs.
 pub async fn run(state: Arc<AppState>) {
     let poll = Duration::from_secs(POLL_SECS);
-    // The first drain a poll after boot, as each after it: a lease spends a
-    // row's try and holds it for its lease, so a process that dies within
-    // its first poll — one crash-looping at boot — strands no row and spends
-    // no try of one.
+    // The first drain a poll after boot, so a process crash-looping at boot
+    // spends no row's try.
     let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + poll, poll);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut ticks = 0;
@@ -427,10 +400,9 @@ async fn drain_batch(state: &Arc<AppState>) -> Result<Settled, TelmoniError> {
     let mut held: Vec<Held> = Vec::new();
     let (runs, notices): (Vec<OutboxRow>, Vec<OutboxRow>) =
         leased.into_iter().partition(|row| row.kind == KIND_SPAN);
-    // The runs first, their insert ended well inside the lease: a run a
-    // replica leases again once it lapses is written twice where the first
-    // insert has not ended, and a notice landed past it is not, the seam
-    // answering its dedup key with its first row.
+    // The runs first, so their insert ends well inside the lease: a run
+    // leased again once it lapses is written twice, where a notice is told
+    // once by its dedup key.
     land_runs(state, runs, &mut landed, &mut held).await;
     let mut notices = notices.into_iter();
     while let Some(row) = notices.next() {
@@ -546,15 +518,11 @@ fn parse_runs(rows: Vec<OutboxRow>, held: &mut Vec<Held>) -> Vec<QueuedRun> {
     runs
 }
 
-/// The batch's finished runs, as rows of `spans` in one insert — but for the
-/// runs of a project auth no longer has or of an organization whose deletion
-/// is marked, which land nowhere ([`open_runs`]), and the runs the table
-/// holds already, dropped as landed rather than written twice
-/// ([`write_runs`]) — then, auth asked again whether each project outlived
-/// the write ([`settle_written`]), the organization's open consoles told of
-/// what landed, and each gone project's spans marked deleted once more
-/// ([`mark_gone`]): last, since a mark made twice by two replicas is no
-/// harm, where a run written twice is.
+/// The batch's finished runs, written to `spans` in one insert: runs whose
+/// organization is being deleted or whose project is gone land nowhere
+/// ([`open_runs`]), runs `spans` holds already are dropped ([`write_runs`]),
+/// and a project gone by the time the insert ends has its spans marked
+/// deleted again ([`settle_written`], [`mark_gone`]).
 async fn land_runs(
     state: &Arc<AppState>,
     rows: Vec<OutboxRow>,
@@ -571,12 +539,9 @@ async fn land_runs(
     mark_gone(state, gone, landed, held).await;
 }
 
-/// The open runs as rows of `spans` in one insert, but for the runs the
-/// table holds already, dropped as landed rather than written twice
-/// ([`held_runs`]): what was written, for auth to be asked of again. A read
-/// that fails hands every run back with its try, whatever the read's fault:
-/// the rows did nothing. An insert the store refuses is tried again one row
-/// at a time ([`land_one_by_one`]).
+/// The open runs as rows of `spans` in one insert, but for those it holds
+/// already ([`held_runs`]); answers what was written. A failed read hands
+/// every run back; an insert the store refuses is tried one row at a time.
 async fn write_runs(
     state: &AppState,
     runs: Vec<QueuedRun>,
@@ -659,19 +624,11 @@ async fn write_runs(
     wrote
 }
 
-/// The batch's runs that may land, and the runs of projects auth no longer
-/// has, gathered by project for [`mark_gone`], as auth answers where their
-/// projects are and how the organizations holding them stand. A run of an
-/// organization whose deletion is marked is dropped as landed: the
-/// deletion's purges, a quarter of an hour on, take that organization's
-/// spans, and a row landed after them would outlive them; asking before the
-/// write is enough there, since the insert follows within its deadline, well
-/// inside the quarter of an hour. A run of a project auth no longer has,
-/// whose spans its deletion marked deleted once it committed, lands nowhere,
-/// and its project's spans are marked deleted once more, which takes what an
-/// earlier try wrote and was cut off before it could ask again. Auth unable
-/// to answer is an outage of ours: every run is handed back with its try,
-/// and none is left to write or mark.
+/// Splits the batch by where auth says each project lands: runs to write,
+/// and runs of projects gone, gathered for [`mark_gone`]. A run of an
+/// organization being deleted is dropped, since a row written after the
+/// deletion's purges would outlive them. Auth unable to answer hands every
+/// run back with its try.
 async fn open_runs(
     state: &AppState,
     runs: Vec<QueuedRun>,
@@ -748,8 +705,7 @@ async fn landings(
     Ok(landings)
 }
 
-/// The runs' projects, each once, in the order the runs name them, since a
-/// read and an ask name each project once.
+/// The runs' projects, each once, in the order first met.
 fn projects_of(runs: &[QueuedRun]) -> Vec<ProjectId> {
     let mut projects: Vec<ProjectId> = Vec::new();
     for queued in runs {
@@ -760,9 +716,8 @@ fn projects_of(runs: &[QueuedRun]) -> Vec<ProjectId> {
     projects
 }
 
-/// `run` gathered with the other runs of its project, the projects in the
-/// order first met, so a gone project is marked once however many of its
-/// runs a batch holds.
+/// `run` gathered with its project's other runs, so a gone project is
+/// marked once.
 fn by_project(gathered: &mut Vec<(ProjectId, Vec<QueuedRun>)>, run: QueuedRun) {
     match gathered
         .iter_mut()
@@ -773,16 +728,9 @@ fn by_project(gathered: &mut Vec<(ProjectId, Vec<QueuedRun>)>, run: QueuedRun) {
     }
 }
 
-/// The runs of projects auth no longer has: each project's spans marked
-/// deleted once more — the deletion's own mark, so idempotent, and taking
-/// every row ClickHouse holds by the time it is recorded, though not the
-/// rows of an insert a try gave up on past its deadline that the server
-/// finishes after the mark — and its rows dropped as landed. A mark that
-/// fails hands its project's rows back with
-/// their tries, whatever its fault, for the next tick to find the project
-/// gone and mark it again, and ends the pass: every project after it is
-/// handed back unmarked, as a store gone away mid-pass hands back every row
-/// after the one it failed on.
+/// Marks each gone project's spans deleted again and drops its runs as
+/// landed. A mark that fails hands that project's runs, and every project's
+/// after it, back with their tries for the next tick.
 async fn mark_gone(
     state: &AppState,
     gone: Vec<(ProjectId, Vec<QueuedRun>)>,
@@ -829,17 +777,11 @@ async fn mark_gone(
     }
 }
 
-/// The runs this try wrote, settled once auth is asked again whether their
-/// projects outlived the write. Auth commits a project's deletion before
-/// telemetry marks its spans deleted, so a row that landed after the mark —
-/// the deletion committed after [`open_runs`] asked, and its purge run
-/// before the insert ended — is found here, its project gone, and gathered
-/// into `gone` to be marked again ([`mark_gone`]). What still has its
-/// project lands, and its organization's open consoles are told. Auth
-/// unable to answer hands every row back with its try, for the next tick to
-/// ask again, which drops a row whose run `spans` holds rather than write it
-/// twice, or finds its project gone and marks it; the consoles are told now,
-/// since the run is in `spans` and that drop tells nobody.
+/// Asks auth again whether the written runs' projects still exist: a
+/// project deleted while the insert ran has its runs gathered into `gone`
+/// to be marked again; the rest land and their consoles are told. Auth
+/// unable to answer hands every row back for the next tick, which drops
+/// what `spans` holds already; the consoles are told now all the same.
 async fn settle_written(
     state: &Arc<AppState>,
     wrote: Vec<QueuedRun>,
@@ -876,18 +818,16 @@ async fn settle_written(
     landed.extend(kept.iter().map(|run| run.id));
 }
 
-/// The open consoles of each run's organization told that its project's
-/// runs landed, so a page reading them draws itself again rather than
-/// polling ([`nudges`]).
+/// Tells each run's organization's open consoles that its project's runs
+/// landed.
 fn tell(state: &Arc<AppState>, runs: &[QueuedRun]) {
     for ((organization, project), runs) in nudges(runs) {
         live::tell(Arc::clone(state), &organization, &project, runs);
     }
 }
 
-/// The runs' ids gathered by the organization each is told under and its
-/// project: a nudge names one project, and a trace's page looks for its own
-/// run among the ids.
+/// The runs' ids by organization and project, since a nudge names one
+/// project.
 fn nudges(runs: &[QueuedRun]) -> BTreeMap<(String, String), Vec<Uuid>> {
     let mut nudges: BTreeMap<(String, String), Vec<Uuid>> = BTreeMap::new();
     for run in runs {
@@ -1030,9 +970,7 @@ impl NoticeRow {
 
 /// Where a notice or a run of a project's lands, as auth answers.
 enum Landing {
-    /// Where the organization holding the project now, whose deletion is not
-    /// marked, takes it: a notice in that organization's feed, a run in
-    /// `spans`.
+    /// The organization holding the project now, not being deleted.
     Open(OrganizationId),
     /// Nowhere, since the organization's deletion is marked: its purges are
     /// still to come, and take whatever lands before them.
@@ -1455,8 +1393,7 @@ mod tests {
         (queued, spans)
     }
 
-    /// A row written alone: written, to be told of once auth says its
-    /// project outlived the write; refused, held with its try counted and
+    /// A row written alone: written; refused, held with its try counted and
     /// the pass going on; the store gone away, handed back and the pass
     /// ended.
     #[test]

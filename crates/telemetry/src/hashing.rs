@@ -85,13 +85,10 @@ impl Cache {
 ///
 /// # Errors
 ///
-/// Postgres did not answer; the key service did not answer, or a move or a
-/// purge of the project held it as its first export went to key it, which
-/// an exporter retries; auth did not say, in time or at all, which
-/// organization holds a project with no settings row yet, which it retries
-/// too; the project is gone since its key was read, refused as its key now
-/// is; or the row's key will not open, which is an outage of ours, logged
-/// by project.
+/// Postgres or the key service did not answer, a move or a purge held the
+/// project, or auth could not say where a new project is: each one an
+/// exporter retries. The project is gone, refused as its key now is; or the
+/// row's key will not open, an outage of ours, logged by project.
 pub async fn storage_for(state: &AppState, key: &ActingKey) -> Result<UserIdStorage, TelmoniError> {
     storage_for_project(state, &key.project_id).await
 }
@@ -128,22 +125,14 @@ pub async fn storage_for_project(
     Ok(storage)
 }
 
-/// The project's hashing key made, and its settings row with it where it
-/// has none. The key is sealed first, holding nothing, since the key
-/// service is asked across the network; then, the project held in place as
-/// a ping holds it, so that no transfer of it commits meanwhile, the row is
-/// filed under the organization that holds the project now — the one the
-/// row names, where it has one, which a move takes with the project, or,
-/// where it has none, auth's answer, asked under the hold
-/// ([`chain::home`]) — and never under the organization the export's key
-/// was resolved to before, which a transfer committed since would have the
-/// row filed back under: that organization's purge, which finds its
-/// projects by their settings rows, would mark the moved project's spans
-/// deleted, and the new one's never find them. Kept out by a move or a
-/// purge holding the project, the export is refused as one an exporter
-/// tries again; for a project auth no longer has, as its key now is,
-/// deleted with it, rather than with a status the lane gives nothing else.
-/// The key is ours, or the one a racing export wrote first.
+/// Makes the project's hashing key, and its settings row where it has none.
+/// The key is sealed first, holding nothing, since the key service is
+/// across the network. Then, with the project held in place so that no
+/// transfer commits meanwhile, the row is filed under the organization that
+/// holds the project now — the row's own, or auth's answer — never the one
+/// the export's key was resolved to, which a transfer may have left: that
+/// organization's purge would mark the moved project's spans deleted. The
+/// key is ours, or the one a racing export wrote first.
 async fn key_project(
     state: &AppState,
     project_id: &ProjectId,

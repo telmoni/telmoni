@@ -360,9 +360,8 @@ pub trait Notifications: Send + Sync {
 
     /// Everything held for one project: before it is handed to another
     /// organization, and after it is deleted. Idempotent. One that fails
-    /// after a delete is left for the module's own retention sweep, which
-    /// tries it again every hour until it lands, once the delete has
-    /// committed: the caller logs the failure and need not retry it.
+    /// after a delete is retried by the module's hourly retention sweep, so
+    /// the caller only logs it.
     async fn purge_project(&self, project_id: &ProjectId) -> Result<u64, TelmoniError>;
 
     /// Every notice that named the person, rewritten to name a former
@@ -450,22 +449,17 @@ pub trait Agent: Send + Sync {
 pub trait Telemetry: Send + Sync {
     /// Everything held for an organization's projects, before its row goes.
     ///
-    /// ⚠ **Called with nothing held.** A purge holds each project it purges
-    /// alone, as a move does ([`crate::db::project_move::lock_for_move`]),
-    /// and waits for the pings in flight, which may be waiting on the
-    /// organization's chain lock: a caller holding that lock across the
-    /// call would have the purge wait on it in a circle Postgres cannot see,
-    /// through the caller.
+    /// ⚠ Call it holding no lock: the purge waits for pings in flight, which
+    /// may wait on the organization's chain lock, so a caller holding that
+    /// lock deadlocks where Postgres cannot see it.
     async fn purge_organization(
         &self,
         organization_id: &OrganizationId,
     ) -> Result<u64, TelmoniError>;
 
-    /// Everything held for one project, after it is deleted. ⚠ Called with
-    /// nothing held, as [`Telemetry::purge_organization`] is. One that fails
-    /// is left for the module's own sweep, which tries it again once the
-    /// project's delete has committed and until it lands: the caller logs
-    /// the failure and need not retry it.
+    /// Everything held for one project, after it is deleted. ⚠ Call it
+    /// holding no lock, as [`Telemetry::purge_organization`]. One that fails
+    /// is retried by the module's own sweep, so the caller only logs it.
     async fn purge_project(&self, project_id: &ProjectId) -> Result<u64, TelmoniError>;
 
     /// A project handed to another organization: its settings — its content

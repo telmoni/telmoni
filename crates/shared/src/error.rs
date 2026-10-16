@@ -160,10 +160,9 @@ impl TelmoniError {
         Self::Internal(format!("{service} {op} returned {status}"))
     }
 
-    /// Whether this is the database not answering — no connection to be had,
-    /// or the one held lost — rather than anything about the statement or its
-    /// rows. A loop that goes on past one item's failure ends its pass on
-    /// this one instead: every item after it would wait the same out in turn.
+    /// Whether the database did not answer at all, rather than refusing a
+    /// statement: a loop over many items stops on this, since every item
+    /// after would wait the same out.
     #[must_use]
     pub const fn is_database_unanswered(&self) -> bool {
         matches!(

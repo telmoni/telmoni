@@ -53,9 +53,8 @@ const MEMBER: &str = "user_member";
 
 const SLACK_WORKSPACE: &str = "T0001";
 
-/// Organizations whose projects auth no longer has, deleted with rows left
-/// behind, in the order the sweep reads their projects; and who installed
-/// what they left.
+/// Organizations whose projects were deleted with rows left behind, in the
+/// order the sweep reads them; and who installed what they left.
 const GONE: &str = "org_gone_1";
 const GONE_TOO: &str = "org_gone_2";
 const GONE_THIRD: &str = "org_gone_3";
@@ -2260,14 +2259,9 @@ async fn seed_notice(pool: &PgPool, organization: &str) {
     .unwrap();
 }
 
-/// A deleted project's purge cut short — a vendor slow to take its grant
-/// back spends auth's budget before the rows are reached — is finished by
-/// the retention sweep, which finds the project by any row it left: a
-/// connection and its delivery, a notice, a handshake in flight. Its grant
-/// is torn down upstream and its rows removed, as its delete would have
-/// done, beside a project auth still has, untouched; and a sweep auth cannot
-/// answer leaves every row as it is, never taking the silence for none of
-/// them standing.
+/// The retention sweep finishes a deleted project's purge cut short, found
+/// by any row it left, and leaves a project auth still has alone; a sweep
+/// auth cannot answer changes nothing.
 #[sqlx::test]
 async fn a_deleted_projects_purge_cut_short_is_finished_by_the_sweep(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -2373,11 +2367,8 @@ async fn a_deleted_projects_purge_cut_short_is_finished_by_the_sweep(pool: PgPoo
     );
 }
 
-/// A deleted project's purge the sweep cannot finish now — a row of it held
-/// past the purge's own two-second lock wait, which holds here though the
-/// suites' roles carry none — is left for the next sweep, and the pass goes
-/// on: the deleted project read after it is purged beside it, and the next
-/// sweep, the row let go, finishes the first.
+/// A purge the sweep cannot finish now, a row of it locked past its two
+/// seconds, is left for the next sweep, and the pass goes on to the rest.
 #[sqlx::test]
 async fn a_purge_the_sweep_cannot_finish_now_waits_for_the_next_sweep(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -2414,9 +2405,8 @@ async fn a_purge_the_sweep_cannot_finish_now_waits_for_the_next_sweep(pool: PgPo
     assert_eq!(rows_of_project(&pool, GONE).await, [0, 0, 0, 0]);
 }
 
-/// The sweep reads every page of the projects the rows name: of 501, each
-/// with two notices, a page of 500 and then one, each asked of auth, the
-/// first and the last gone.
+/// The sweep reads every page of the projects the rows name: 501 projects
+/// are a page of 500 and a page of one.
 #[sqlx::test]
 async fn the_sweep_reads_every_page_of_the_projects_the_rows_name(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -2455,9 +2445,8 @@ async fn the_sweep_reads_every_page_of_the_projects_the_rows_name(pool: PgPool) 
     assert_eq!(left.last().map(String::as_str), Some("project_page_0500"));
 }
 
-/// Each hourly sweep finishes the deleted projects' purges and then prunes
-/// what its windows close on; a pass auth cannot answer leaves the deleted
-/// project's rows and prunes all the same.
+/// Each sweep finishes deleted projects' purges, then prunes its windows,
+/// even when auth cannot answer the first part.
 #[sqlx::test]
 async fn a_sweep_finishes_deleted_projects_and_prunes_the_rest(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -2496,9 +2485,7 @@ async fn a_sweep_finishes_deleted_projects_and_prunes_the_rest(pool: PgPool) {
     assert_eq!(rows_of_project(&pool, GONE).await, [0, 0, 0, 0]);
 }
 
-/// A database that stops answering mid-sweep ends the pass where it
-/// stopped, as a failed read of a page does, rather than costing every
-/// deleted project after it the same wait and a line of its own.
+/// A database that stops answering ends the sweep's pass where it stopped.
 #[sqlx::test]
 async fn a_sweep_that_loses_its_database_ends_there(pool: PgPool) {
     apply_audit_migrations(&pool).await;

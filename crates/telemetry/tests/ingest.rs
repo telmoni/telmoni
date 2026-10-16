@@ -528,13 +528,9 @@ async fn an_export_sent_again_is_answered_as_it_was_and_written_once(pool: PgPoo
     assert_eq!(count, 1, "written once");
 }
 
-/// An export whose key was read before its project was deleted, landing
-/// after the purge marked the project's spans deleted — on a replica that
-/// holds the project's hashing key, and so reads nothing that would refuse
-/// it — is marked deleted with the rest: auth, asked once the rows are in,
-/// no longer has the project. So whether the purge has gone on to delete the
-/// settings row or not yet, which it does only once its mark is made. It is
-/// answered as any other, its key having held when it came.
+/// An export landing after its project's purge marked the project's spans is
+/// marked deleted with them, whether or not the purge has deleted the
+/// settings row yet.
 #[sqlx::test]
 async fn an_export_landing_after_its_projects_purge_is_marked_with_it(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
@@ -607,10 +603,8 @@ async fn an_export_landing_after_its_projects_purge_is_marked_with_it(pool: PgPo
     }
 }
 
-/// Auth unable to say, once an export's rows are in, whether their project
-/// outlived the write — failing, or slower than its second — keeps the rows
-/// as written, and is not waited out: its silence is never taken as the
-/// project gone, which would mark a live project's spans deleted.
+/// Auth unable to say whether an export's project still exists keeps the
+/// rows as written, and is not waited out: silence is never "gone".
 #[sqlx::test]
 async fn an_export_auth_cannot_settle_keeps_its_rows(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
@@ -658,10 +652,8 @@ async fn an_export_auth_cannot_settle_keeps_its_rows(pool: PgPool) {
     );
 }
 
-/// An exporter that stops waiting once its rows are in — its own timeout, a
-/// load balancer's, a pod ending — does not cut the write off between its
-/// insert and the settling after it: a project deleted as the rows landed
-/// has them marked deleted all the same.
+/// An exporter that hangs up once its rows are in does not cut the write off
+/// before its settling: a project deleted meanwhile has them marked deleted.
 #[sqlx::test]
 async fn an_export_nobody_waits_for_is_settled_all_the_same(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
@@ -711,10 +703,8 @@ async fn an_export_nobody_waits_for_is_settled_all_the_same(pool: PgPool) {
     .await;
 }
 
-/// A body that has not arrived within the wait is refused — here a fifth of
-/// a second, where every binary waits a minute — so no export runs on past
-/// an organization's deletion grace: answered `invalid-batch` before its
-/// project is keyed or anything is written.
+/// A body that has not arrived within the wait (a fifth of a second here, a
+/// minute on every binary) is refused `invalid-batch`, and nothing written.
 #[sqlx::test]
 async fn a_body_that_does_not_arrive_in_time_is_refused(pool: PgPool) {
     let (organization, project) = (OrganizationId::new(), ProjectId::new());

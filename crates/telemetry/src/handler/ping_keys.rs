@@ -271,12 +271,10 @@ pub struct Rotated {
 enum Retirement {
     /// Retired, recorded and told.
     Retired,
-    /// Nothing to do: retired already — by another replica's tick, or a
-    /// person — gone with its project, or stale no longer, a ping having
-    /// come under it since the tick read it, or its newer key gone.
+    /// Nothing to do: retired already, gone with its project, or no longer
+    /// stale.
     Nothing,
-    /// Its project is held alone, by a move to another organization or a
-    /// purge: left for a later tick, which finds it where it went, or gone.
+    /// Its project is held by a move or a purge: left for a later tick.
     KeptOut,
     /// Its organization's chain lock was not had in time: left for a later
     /// tick, as every other key the tick then finds standing under that
@@ -298,16 +296,11 @@ pub async fn retire_stale_keys(state: &AppState) -> Result<Rotated, TelmoniError
     retire_each(state, &stale).await
 }
 
-/// The tick's work on the stale keys it read, in turn: each retired in its
-/// project's own scope, recorded on the chain as the module's own act and
-/// told to the project. Each key on its own: one that cannot be retired now
-/// — its project moving or being purged, its organization's chain lock busy
-/// past its wait, its retirement refused — is logged and left for a later
-/// tick, and the tick goes on to the rest, so one organization holds up its
-/// own keys alone; and an organization whose lock was busy is passed over
-/// for the rest of the tick, so its keys cost the tick one wait, not one
-/// each. A database that stops answering ends the tick, as a failed read of
-/// the keys does, since every key after it would wait it out in turn.
+/// The tick's work on the stale keys it read, each retired, recorded and
+/// told on its own. A key that cannot be retired now is logged and left for
+/// a later tick; an organization whose chain lock was busy is passed over
+/// for the rest of the tick, so its keys cost one wait, not one each; and a
+/// database that stops answering ends the tick.
 pub async fn retire_each(
     state: &AppState,
     stale: &[ResolvedPingKey],
@@ -344,15 +337,10 @@ pub async fn retire_each(
     Ok(rotated)
 }
 
-/// One stale key retired, in a transaction of its own: its project held in
-/// place, so no move or purge of it commits meanwhile, and the organization
-/// the key stands under read there — not the one the tick's read named,
-/// which a move committed since would have the retirement filed under and
-/// the row policy refuse — then, unless the tick found that organization's
-/// chain lock busy already (`passed_over`), under that lock, retired,
-/// recorded, and the project's notice put in the outbox. Told, since a line
-/// not moved over to the newer key is refused from now on, and its owner
-/// would otherwise learn of it from cron's mail.
+/// One stale key retired in a transaction of its own, its project held in
+/// place and the key's organization read there, not taken from the tick's
+/// read, which a move since would make wrong. Its owner is told, since a
+/// line still on the old key is refused from now on.
 async fn retire_stale_key(
     state: &AppState,
     key: &ResolvedPingKey,
@@ -403,10 +391,8 @@ async fn retire_stale_key(
 
 /// The retirement itself, inside the transaction [`retire_stale_key`]
 /// opened, the project held in place and bound to the organization its key
-/// stands under now: under that organization's chain lock, the key retired
-/// where it is stale still ([`db::retire_stale_ping_key`]) — the tick read
-/// it stale before any lock, and a ping may have come under it since, or a
-/// person retired its newer key — and only then recorded and told.
+/// stands under now: under that organization's chain lock, retired if still
+/// stale ([`db::retire_stale_ping_key`]), and only then recorded and told.
 async fn retire_in_place(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,

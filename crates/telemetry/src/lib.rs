@@ -107,15 +107,11 @@ pub struct AppState {
     pub redis: replica::Redis,
     /// Ingest's rate limit, per project.
     pub rate_limit: rate_limit::RateLimit,
-    /// The longest a ping waits out a move of its project, or its purge,
-    /// before it is refused: two seconds on every binary
-    /// (`handler::pings::MOVE_WAIT`).
-    /// Held here rather than read from the constant so a suite can hold a
-    /// move for longer than a busy machine lets two seconds last.
+    /// How long a ping waits out a move or a purge of its project
+    /// (`handler::pings::MOVE_WAIT`); a field so a suite can wait longer.
     pub move_wait: std::time::Duration,
-    /// The longest an export's body may take to arrive before the export is
-    /// refused: a minute on every binary (`handler::ingest::BODY_WAIT`). Held
-    /// here so a suite can refuse a body sooner than a minute.
+    /// How long an export's body may take to arrive
+    /// (`handler::ingest::BODY_WAIT`); a field so a suite can wait less.
     pub body_wait: std::time::Duration,
 }
 

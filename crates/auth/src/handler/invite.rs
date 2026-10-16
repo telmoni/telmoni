@@ -92,9 +92,8 @@ pub(crate) async fn ceiling_of(
     Ok(telmoni_shared::seam::member_ceiling(entitlements, organization).await)
 }
 
-/// A count as SQL answers it, as the ceiling takes it: one below zero, which
-/// no table gives, is past every ceiling, so the bound fails closed, as the
-/// monitor ceiling's does.
+/// A count as SQL answers it; a negative one, which no table gives, fails
+/// closed.
 fn count(n: i64) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
 }

@@ -5,12 +5,12 @@
 //! body, no further than its cap; its digest claimed, so a retry with the
 //! same bytes is answered rather than written again; then the spans read by
 //! the contract, their content dropped, and the rows written once ClickHouse
-//! holds them; auth asked whether the project outlived the write, its spans
-//! marked deleted once more where it did not; and the organization's open
-//! consoles told of them ([`crate::ingest::live`]). Every answer is OTLP's,
-//! in the request's encoding: the response on `200`, and on a refusal a
-//! `Status` whose message opens with the problem type, since OTLP asks that
-//! shape where every other lane answers a problem document.
+//! holds them, marked deleted again if their project was deleted meanwhile;
+//! and the organization's open consoles told of them ([`crate::ingest::live`]).
+//! Every answer is OTLP's, in the request's encoding: the response on `200`,
+//! and on a refusal a `Status` whose message opens with the problem type,
+//! since OTLP asks that shape where every other lane answers a problem
+//! document.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -39,12 +39,9 @@ use crate::{AppState, db, hashing};
 /// learns it from its first export.
 pub const CONTENT_MODE_HEADER: HeaderName = HeaderName::from_static("telmoni-content-mode");
 
-/// The longest an export's body may take to arrive, read from
-/// [`AppState::body_wait`]: a minute, six times the ten seconds OTel's
-/// exporters wait for their answer, so none of theirs is refused; and with
-/// the rest of the export bounded, a minute keeps every export a key let in
-/// far inside the fifteen minutes an organization's deletion waits before
-/// its purge, which therefore comes after every row such an export writes.
+/// The longest an export's body may take to arrive: six times OTel's
+/// ten-second export timeout, and far inside the fifteen minutes an
+/// organization's deletion waits before its purge.
 pub(crate) const BODY_WAIT: Duration = Duration::from_secs(60);
 
 /// `POST /otlp/v1/traces`.
@@ -97,10 +94,7 @@ async fn handle(
     // 402, which an exporter drops rather than retries.
     telmoni_shared::seam::admit_new(state.entitlements.as_ref(), &key.organization_id).await?;
 
-    // One byte past the cap is read, so that past it is known; a body that
-    // fails to arrive gets no answer anyway. One that has not arrived within
-    // the wait is refused, so no export runs on past an organization's
-    // deletion grace (`AppState::body_wait`).
+    // One byte past the cap is read, so that past it is known.
     let Ok(read) = tokio::time::timeout(state.body_wait, to_bytes(body, BATCH_MAX_BYTES + 1)).await
     else {
         return Err(TelemetryError::InvalidBatch(format!(
@@ -135,10 +129,8 @@ async fn handle(
         }
     };
 
-    // A task of its own, the claim's answer kept within it, so that an
-    // exporter that stops waiting never cuts the write off between its
-    // insert and the settling after it: rows ClickHouse holds are settled,
-    // and the answer kept for a retry, whether or not anyone hears it.
+    // Its own task, so an exporter that hangs up cannot cancel the write
+    // between its insert and its settling.
     let written = tokio::spawn({
         let state = Arc::clone(state);
         let key = key.clone();
@@ -171,10 +163,8 @@ async fn handle(
 }
 
 /// The claimed body, written: the spans read by the contract, the rows put
-/// in ClickHouse, settled once auth says whether their project outlived the
-/// write ([`settle_written`]), and the console told of them; the answer's
-/// mode and body on success, a project deleted as the rows landed answered
-/// as any other, since its key held when the export came.
+/// in ClickHouse and settled ([`settle_written`]), and the console told of
+/// them; the answer's mode and body on success.
 async fn write(
     state: &Arc<AppState>,
     key: &ActingKey,
@@ -215,10 +205,8 @@ async fn write(
         "ingest: export kept"
     );
     // The organization's open consoles are told, so a page reading this
-    // project's spans draws itself again, or counts them for the reader — of
-    // a batch that kept something, whose project outlived the write: one
-    // refused whole stored nothing to read, and a project deleted has no
-    // page. The answer waits for the settling, not for the telling.
+    // project's spans draws itself again — unless nothing was kept or the
+    // project is gone. The answer waits for the settling, not the telling.
     if !batch.rows.is_empty() && settle_written(state, &key.project_id).await {
         live::tell(
             Arc::clone(state),
@@ -239,31 +227,15 @@ async fn write(
     Ok((content_mode, body))
 }
 
-/// How long an export waits, once its rows are in, for auth to say whether
-/// their project outlived the write: a second at most for the answer, as
-/// long as a lane waits for auth's second answer, and a project found gone
-/// the mark after it.
+/// How long an export waits for auth to say whether its project still exists.
 const SETTLE_BUDGET: Duration = Duration::from_secs(1);
 
-/// The export's rows, settled once auth is asked whether their project
-/// outlived the write: `false` where it did not. Auth commits a project's
-/// deletion before telemetry's purge of it marks its spans deleted, and the
-/// mark takes only what ClickHouse holds when it is recorded, so the rows of
-/// an export whose key was read before the deletion, and that landed after
-/// the mark, are found here — the project gone — and its spans marked
-/// deleted once more, which takes them, as the outbox marks a run's
-/// ([`crate::outbox`]). Asked of auth rather than read from the settings
-/// row, which the purge deletes only once its mark is made, so an export
-/// that landed between the two would find the row standing, and which a
-/// transfer's settling that failed can leave under an organization deleted
-/// since, though the project lives on. An organization's deletion marks its
-/// projects' spans before auth deletes them, but only once the organization
-/// has been closed to its keys for fifteen minutes, past any export they
-/// let in: its body is read within `AppState::body_wait`, and the rest of
-/// it is bounded. An answer not had within [`SETTLE_BUDGET`], or not had at
-/// all, keeps the rows as written, logged, as does a mark that fails: a
-/// project gone meanwhile keeps them, unreadable, until the retention line.
-/// It costs every export that wrote a second ask of auth, beside its key's.
+/// Whether the export's project still exists. An export racing its
+/// project's purge can land after the purge's mark, so a project that is
+/// gone has its spans marked deleted again. Auth is asked rather than the
+/// settings row, since auth commits the delete before the purge marks and
+/// the row goes only after. Without an answer in time the rows are kept,
+/// logged.
 async fn settle_written(state: &AppState, project_id: &ProjectId) -> bool {
     let homes = match tokio::time::timeout(
         SETTLE_BUDGET,
@@ -299,8 +271,7 @@ async fn settle_written(state: &AppState, project_id: &ProjectId) -> bool {
             "ingest: an export's project was deleted as it landed; its spans are marked deleted \
              again"
         ),
-        // ⚠ The error's text can carry ClickHouse's own message: its kind
-        // alone is logged.
+        // The error's text can carry ClickHouse's message: log its kind alone.
         Err(error) => tracing::warn!(
             project_id = %project_id,
             kind = crate::store::error_kind(&error),

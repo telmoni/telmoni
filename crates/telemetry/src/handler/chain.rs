@@ -1,19 +1,11 @@
 //! The organization's chain lock, as a lane takes it before it files a row
-//! under a project's organization — a monitor, a ping key, a saved view, a
-//! project's content mode, a monitor its first ping makes, a key its
-//! rotation retires — and the settings row the first of them makes; what a
-//! change reads from across a seam, bounded, so that nobody waits under the
-//! lock on an answer another deployment's database gives; and the
-//! transaction a lane's write runs in, bound to the project and its
-//! organization, and let go of, with whatever locks it holds, where it does
-//! not commit.
+//! under a project's organization; what a change reads from across a seam,
+//! bounded, so that nobody waits under the lock on an answer another
+//! deployment's database gives; and the transaction a lane's write runs in.
 //!
-//! ⚠ A transfer's accept holds the lock from its audit rows to its commit and
-//! moves the project's settings in between, as an ownership hand-over and a
-//! deletion hold it over theirs: under it, the answer auth gives again is the
-//! one that stands, and a write resolved before one of them committed is
-//! refused rather than filed under an organization that no longer holds the
-//! project.
+//! ⚠ A transfer, a hand-over or a deletion holds the lock across its change,
+//! so auth's answer under the lock is the one that stands, and a write
+//! resolved before the change committed is refused.
 
 use std::time::Duration;
 
@@ -43,10 +35,8 @@ const ANSWER_BUDGET: Duration = Duration::from_secs(1);
 /// Postgres's `lock_not_available`: a `lock_timeout` ran out.
 const LOCK_NOT_AVAILABLE: &str = "55P03";
 
-/// A transaction of `pool`'s bound to the project and to the organization
-/// `acting` acts in, as every write a lane files under both needs: each
-/// row's policy files a write under the two, and [`hold`] checks the
-/// organization this binds.
+/// A transaction bound to the project and to the organization `acting` acts
+/// in, as the row policies on a lane's writes need.
 pub(crate) async fn scoped<'a>(
     pool: &'a PgPool,
     acting: &Acting,
@@ -58,13 +48,9 @@ pub(crate) async fn scoped<'a>(
         .await?)
 }
 
-/// A transaction let go of without its commit — its write refused, its
-/// project kept from it, or nothing left for it to do — answered by
-/// `rollback`: nothing was written, and whichever locks it holds, the
-/// organization's chain lock or the project's move lock, go with it before
-/// the answer rather than whenever the pool next sees the connection, since
-/// a move, a purge or the organization's other writers may be waiting on
-/// them. `write` names the lane, for the log.
+/// The rollback of a transaction that will not commit, logged if it failed.
+/// Rolled back now, its chain or move lock goes before the answer rather
+/// than whenever the pool next sees the connection. `write` names the lane.
 pub(crate) fn rolled_back(rollback: sqlx::Result<()>, project_id: &ProjectId, write: &'static str) {
     if let Err(e) = rollback {
         tracing::warn!(
@@ -156,13 +142,9 @@ pub(crate) async fn lock_in_time(
     }
 }
 
-/// The organization holding `project_id` now, as auth answers it within the
-/// same second auth's second answer gets: `None` where auth holds no such
-/// project, deleted since. For a write that holds the project in place
-/// while it asks, which no transfer passes, so the answer stands to its
-/// commit. Not answered in time, or not answered at all, the write is
-/// refused as auth unavailable, which a machine tries again, never as the
-/// fault of ours auth's own error would be, which an exporter drops.
+/// The organization holding `project_id` now, or `None` where the project
+/// is gone. Without an answer within `ANSWER_BUDGET` the write is refused as
+/// auth unavailable, which a machine retries.
 pub(crate) async fn home(
     auth: &dyn Auth,
     project_id: &ProjectId,
@@ -196,12 +178,10 @@ pub(crate) async fn home(
         .map(|home| home.organization_id))
 }
 
-/// Whether `organization_id` takes writes now, as auth answers it within the
-/// same second auth's second answer gets: not once its deletion is marked,
-/// which closes it to every lane, nor once auth no longer has it. Asked with
-/// nothing held. An answer not had in time, or not had at all, is taken as
-/// open, logged, as an unread ceiling is taken as none: the organization's
-/// purge holds each of its projects, and takes what such a write left.
+/// Whether `organization_id` takes writes now: not once its deletion is
+/// marked, nor once it is gone. Without an answer within `ANSWER_BUDGET` it
+/// counts as open, logged, since the organization's purge takes whatever
+/// such a write left.
 pub(crate) async fn open(auth: &dyn Auth, organization_id: &OrganizationId) -> bool {
     match tokio::time::timeout(ANSWER_BUDGET, auth.organization_standing(organization_id)).await {
         Ok(Ok(standing)) => standing == Some(OrganizationStatus::Active),

@@ -1,25 +1,10 @@
 //! The retention sweep: the feed, finished deliveries, and expired handshake
-//! states; and, first, each deleted project's purge that its delete could
-//! not finish. A loop inside the server, as every sweep is, since the
+//! states, and first any deleted project's purge its delete could not finish,
+//! since auth purges a project once and a failure leaves its sealed grants
+//! behind. A loop inside the server, as every sweep is, since the
 //! notifications role alone holds a grant on this schema. Detached, unlike
-//! delivery: a stalled sweep keeps rows too long — a deleted project's
-//! grants among them, until a sweep finishes its purge — where a stalled
-//! delivery loop loses customer events; and each sweep is a task of its own,
-//! so none ends the loop.
-//!
-//! Auth calls a project's purge once, after the delete commits and within
-//! five seconds; one that fails — a database that does not answer, or a
-//! vendor slow to take a grant back, which spends the budget before the
-//! rows are reached — leaves the project's rows, its connectors' sealed
-//! grants and webhook secrets among them. So each sweep reads the projects
-//! the rows name a page at a time, asks auth where they are, and purges
-//! again each one auth no longer has ([`purge_gone_projects`]). A deleted
-//! project never comes back, so auth's word that one is gone is for good;
-//! and the purge is safe to repeat, beside another replica's sweep too.
-//!
-//! ⚠ An answer auth cannot give ends the pass with every row as it is,
-//! never "none of them exist"; so does a database that does not answer,
-//! which every purge after would wait on in turn.
+//! delivery: a stalled sweep keeps rows too long, a stalled delivery loop
+//! loses customer events.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -36,9 +21,8 @@ pub use telmoni_shared::db::retention::{DELIVERY_RETENTION_DAYS, FEED_RETENTION_
 /// Hourly: small against a ninety-day window.
 const SWEEP_EVERY: Duration = Duration::from_secs(3600);
 
-/// How long after boot the first sweep runs: a minute rather than the hour,
-/// so a server restarted more often than hourly, through a day of deploys,
-/// still sweeps, and still finishes a deleted project's purge.
+/// A minute, not an hour, so a server redeployed more often than hourly
+/// still sweeps.
 const START_DELAY: Duration = Duration::from_secs(60);
 
 /// Rows deleted per statement per table.
@@ -52,18 +36,16 @@ const SWEEP_MAX_ROUNDS: usize = 200;
 /// Projects read, and asked of auth, at once.
 const PROJECTS_PAGE: i64 = 500;
 
-/// What one pass over the projects the rows name did: those it purged, and
-/// those whose purge failed again, left for the next sweep.
+/// Projects one pass purged, and those whose purge failed again.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Purged {
     pub purged: u64,
     pub left: u64,
 }
 
-/// The sweep loop: the first after `START_DELAY`, then hourly, each sweep
-/// a task of its own, so one that panics ends that sweep alone; one that
-/// overruns delays the next rather than stacking. Errors are logged and the
-/// loop continues: a failed sweep is rows kept too long, not rows lost.
+/// The sweep loop: a minute after boot, then hourly, each sweep its own task
+/// so that a panic ends that sweep alone. Errors are logged and the loop
+/// continues: a failed sweep is rows kept too long, not rows lost.
 pub async fn run(state: Arc<AppState>) {
     let mut ticker =
         tokio::time::interval_at(tokio::time::Instant::now() + START_DELAY, SWEEP_EVERY);
@@ -83,9 +65,8 @@ pub async fn run(state: Arc<AppState>) {
     }
 }
 
-/// One sweep: the pass over the projects the rows name, then the windows,
-/// each logged, and a pass that fails never keeping the windows from
-/// running.
+/// One sweep: deleted projects first, then the windows, which run whatever
+/// the first pass did.
 pub async fn tick(state: &Arc<AppState>) {
     match purge_gone_projects(state).await {
         Ok(Purged { purged: 0, left: 0 }) => {}
@@ -108,20 +89,9 @@ pub async fn tick(state: &Arc<AppState>) {
     }
 }
 
-/// Every project this module's rows name, a page at a time in id order
-/// ([`db::projects_after`]), each page asked of auth, and each project auth
-/// no longer has purged again as its delete purges it
-/// ([`handler::purge_project`]): its connectors torn down upstream, then its
-/// rows. A project auth still has is left as it is, whichever organization
-/// its rows name: the pass finishes a deletion, never a hand-over.
-///
-/// # Errors
-///
-/// Postgres did not answer a page's read, or a purge
-/// ([`TelmoniError::is_database_unanswered`]); or auth could not say where a
-/// page's projects are. Each ends the pass, every row not purged yet as it
-/// was. A purge that fails otherwise is logged and left for the next sweep,
-/// and the pass goes on to the rest.
+/// Purges again each project the rows name that auth no longer has, a page
+/// at a time. Ends early when auth cannot answer or Postgres does not; any
+/// other failed purge is logged and left for the next sweep.
 pub async fn purge_gone_projects(state: &AppState) -> Result<Purged, TelmoniError> {
     let mut swept = Purged::default();
     let mut after = String::new();

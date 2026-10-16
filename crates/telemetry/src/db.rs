@@ -90,11 +90,9 @@ pub async fn projects_of(
     .await
 }
 
-/// Up to `limit` of the projects the settings rows name, in id order, after
-/// `after` — the empty string for the first page, which no id is — a page
-/// of what the sweep asks auth about ([`crate::sweep`]). A settings row
-/// stands while its project's spans do, so a purge cut short is found by its
-/// row.
+/// A page of the projects with a settings row, in id order after `after`
+/// (empty for the first page), for the purge sweep: the row stays until its
+/// project's purge finishes.
 pub async fn settings_after(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     after: &str,
@@ -115,13 +113,10 @@ pub async fn settings_after(
 /// Every settings row of an organization's projects, their saved views,
 /// found through those rows before they go, since a view names no
 /// organization, and their monitors, each with its open runs, ping keys and
-/// outbox rows, which name it (`PURGED_TABLES`): each project the rows name
-/// held alone first, as [`purge_project`] holds its one, in id order, so two
-/// purges of the organization take them in one order. ⚠ Each is held to the
-/// purge's commit, an entry each in Postgres's lock table, which holds
-/// `max_locks_per_transaction` entries for each connection the server
-/// allows, shared by all of them: an organization of thousands of projects
-/// needs it raised before its purge can finish.
+/// outbox rows, which name it (`PURGED_TABLES`), each project held alone
+/// first, in id order so that two purges agree. ⚠ Each hold is a lock-table
+/// entry until commit: an organization of thousands of projects needs
+/// `max_locks_per_transaction` raised.
 pub async fn purge_organization(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     organization_id: &OrganizationId,
@@ -153,12 +148,8 @@ pub async fn purge_organization(
     Ok(purged + views + settings)
 }
 
-/// Every project the organization's rows here name as they stand when read
-/// — its settings rows, monitors, ping keys and outbox rows — in id order:
-/// the projects its purge deletes rows of, and holds alone first. Every
-/// table the purge deletes from by the organization, so a project whose
-/// rows a writer filed under the organization apart from its settings row
-/// is held as well.
+/// Every project the organization's rows in `PURGED_TABLES` and the
+/// settings name, in id order: the projects its purge holds.
 async fn projects_named(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     organization_id: &OrganizationId,
@@ -175,17 +166,12 @@ async fn projects_named(
     .await
 }
 
-/// How long a purge waits to hold a project alone, and for every lock after
-/// it: what a tier's roles wait for any lock, set on the purge's transaction
-/// as well, so that where the roles carry none — the Compose quickstart
-/// connects as the superuser — a purge its caller has given up on is not
-/// left queued for the lock, turning the project's pings away for as long
-/// as one in flight holds it.
+/// How long a purge waits for any lock. Set on the transaction because the
+/// Compose superuser has no role-level `lock_timeout`, and a purge left
+/// queued for a project's lock turns its pings away meanwhile.
 const PURGE_LOCK_WAIT: &str = "2s";
 
-/// `project_ids` held alone, in the order given, as a move holds its
-/// project, the transaction waiting no longer than [`PURGE_LOCK_WAIT`] for
-/// any lock from here on.
+/// Holds each project alone, in the order given, as a move does.
 async fn hold_alone(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     project_ids: &[ProjectId],
@@ -197,8 +183,7 @@ async fn hold_alone(
     Ok(())
 }
 
-/// The purge's transaction held to [`PURGE_LOCK_WAIT`] for any lock it
-/// waits on from here on.
+/// Caps every later lock wait in the transaction at [`PURGE_LOCK_WAIT`].
 async fn wait_no_longer(tx: &mut Scoped<'_, Maintenance<TelemetryLane>>) -> sqlx::Result<()> {
     sqlx::query("SELECT set_config('lock_timeout', $1, true)")
         .bind(PURGE_LOCK_WAIT)
@@ -207,16 +192,10 @@ async fn wait_no_longer(tx: &mut Scoped<'_, Maintenance<TelemetryLane>>) -> sqlx
     Ok(())
 }
 
-/// A deleted project's ping keys, gone in a transaction of their own before
-/// the rest of its purge: so the ping lane is closed to the project whatever
-/// comes after, where the store's mark or the held purge, each of which can
-/// fail and leave the rest to the sweep ([`crate::sweep`]), would leave its
-/// keys opening the lane meanwhile — its pings answered, its first pings
-/// making monitors.
-/// Safe outside the project's hold: a ping takes no lock on its key's row in
-/// its own transaction, touching it where it resolves it, and reads the key
-/// again once it holds the project, so one in flight finds it gone, a 404.
-/// Answers how many went.
+/// Deletes a deleted project's ping keys in a transaction of their own,
+/// before the rest of its purge, so the ping lane is closed even if the rest
+/// fails and waits for the sweep. A ping in flight reads its key again once
+/// it holds the project, and finds it gone. Answers how many went.
 pub async fn close_ping_lane(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     project_id: &ProjectId,
@@ -233,16 +212,9 @@ pub async fn close_ping_lane(
 
 /// The tables a purge deletes a project's rows from, filed under its
 /// organization as well as the project, in the order it deletes them: the
-/// monitors first, each locked and then its open runs deleted with it by
-/// the cascade, uncounted, as every writer of a monitor and its runs takes
-/// the monitor first. The purge holds the project alone before any of them
-/// ([`purge_project`]), so no ping, rotation or move runs beside it, but a
-/// move its caller gave up on over its budget, whose last statement may
-/// still be running; the console's changes take no move lock, and a delete
-/// of a monitor among them, which takes the monitor and then its runs,
-/// meets the purge at the monitor, before either holds a run the other
-/// wants. The settings row,
-/// which the purges find a project by, and the views, which name no
+/// monitors first, their open runs going with them by the cascade, as every
+/// writer of a monitor and its runs takes the monitor first. The settings
+/// row, which the purges find a project by, and the views, which name no
 /// organization, are taken apart from these, last.
 const PURGED_TABLES: [&str; 3] = [
     "telemetry.monitors",
@@ -262,25 +234,11 @@ const MOVED_TABLES: [&str; 4] = [
 
 /// One project's monitors, each with its open runs, ping keys, outbox rows,
 /// saved views and settings row (`PURGED_TABLES`), the project held alone
-/// first, as a move holds it ([`project_move::lock_for_move`]): the purge
-/// waits for the pings and the rotation's retirements in flight, which hold
-/// it in place, and deletes their rows with the rest, and turns away those
-/// that come after until it commits, when each finds its key gone. So no
-/// ping's transaction writes into the project beside its purge, and a first
-/// ping never takes the settings row, which the purge deletes last, and then
-/// waits on a monitor or a run the purge has deleted, by the agent or the id
-/// its own would share: a circle Postgres breaks by failing one of them.
-/// ⚠ It waits two seconds at most (`PURGE_LOCK_WAIT`) — less what the
-/// store's mark took, where auth gives a project's whole purge two seconds —
-/// and a first ping can hold its project longer, the plan's ceiling read in
-/// a second at most and then the chain lock waited for two: a purge beside
-/// one that does fails, as one ClickHouse does not take fails, and is left
-/// to the sweep's next pass ([`crate::sweep`]), its ping lane closed already
-/// ([`close_ping_lane`]).
-/// And it waits with a connection of this pool held: a ping or a retirement
-/// holding the lock needs no other to let go, writing in the one
-/// transaction it holds the lock in, and a move's caller, which needs one
-/// for telemetry's half of the move, gives that half two seconds.
+/// first, as a move holds it, so no ping writes into it beside the purge:
+/// pings in flight finish first and their rows go with the rest, and later
+/// ones find their key gone. ⚠ It waits at most `PURGE_LOCK_WAIT` for those
+/// pings; a purge that times out is left to the sweep, its ping lane closed
+/// already ([`close_ping_lane`]).
 pub async fn purge_project(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     project_id: &ProjectId,
@@ -494,16 +452,10 @@ pub async fn monitor<B: HasProject>(
     .await
 }
 
-/// One of the project's monitors, by its slug, as the console changes it
-/// where what it records is the state it changes: held as its write holds
-/// it, `FOR NO KEY UPDATE`, and read as it stands. A ping takes no chain
-/// lock, and a plain read may come before a ping's settling the change then
-/// writes over; held, it comes after, and no ping settles the monitor again
-/// before the change commits, each then finding it as the change left it
-/// ([`monitor_to_settle`]). The lock is the one the write takes, a statement
-/// early, with nothing taken in between, and taken only where the write
-/// follows, so nobody waits on the change for it who would not have waited
-/// on the write. `None` where it has no monitor by that slug.
+/// One of the project's monitors, by its slug, locked as the console's
+/// change will write it (`FOR NO KEY UPDATE`), so a ping's settling that
+/// lands meanwhile is read rather than written over. `None` where it has no
+/// monitor by that slug.
 pub async fn monitor_to_change<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
@@ -520,22 +472,12 @@ pub async fn monitor_to_change<B: HasProject>(
     .await
 }
 
-/// One of the project's monitors, by its slug, as a ping reads it: its row
-/// shared with the ping until the ping's transaction ends, before the ping
+/// One of the project's monitors, by its slug, as a ping reads it: shared
+/// (`FOR KEY SHARE`) until the ping's transaction ends, before the ping
 /// takes any of its runs. Every writer of a monitor and its runs takes the
-/// monitor first — a delete and a purge, the runs after it by the cascade
-/// (`PURGED_TABLES`), and a move, which holds its monitors as a ping does
-/// before it rewrites anything ([`move_project`]) — so a ping and such a
-/// writer each wait on the other holding nothing the other wants, never in
-/// a circle; a purge and a move hold the project alone besides, so a ping
-/// meets neither, but for a move its caller gave up on over its budget
-/// (`held_in_place` in the ping lane). `FOR KEY SHARE` is the share a run's foreign
-/// key takes anyway: it keeps out a delete and a change of the monitor's
-/// key — its id, or the agent its unique index holds — alone, so the pings
-/// of one monitor and the console's other changes go on beside it, until a
-/// ping raises it to settle the monitor ([`monitor_to_settle`]); and a ping
-/// that waited on a delete finds no monitor by that slug, as a ping after it
-/// would.
+/// monitor first, so none waits on a ping in a circle; and the share keeps
+/// out only a delete or a change of the monitor's key, so the console's
+/// other changes go on beside it.
 pub async fn hold_monitor<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
@@ -621,16 +563,11 @@ pub async fn insert_monitor(
 
 /// One of the project's monitors, written over — its definition and, where
 /// `state` names one, its state — or `None` where it has no monitor by that
-/// slug. The slug itself never changes: every crontab line carries it.
-/// Where `keep_due` says so, the monitor stays due when its row says as this
-/// writes it, or at `monitor.next_due_at` where the row says no time; and
-/// otherwise it is due at `monitor.next_due_at`. The row is read as it
-/// stands once the write holds it, not as the save read it before: a ping
-/// takes no chain lock, and one that settled the monitor in between — its
-/// run ended, due an interval on — keeps the due time it moved to, where
-/// the one the save read had passed as a rule. Its clocks are never put
-/// back past a ping's, which are its statement's own, though this
-/// transaction began before the ping's settling it waited on.
+/// slug. The slug itself never changes: every crontab line carries it. With
+/// `keep_due`, it keeps the due time its row holds as this writes (or takes
+/// `monitor.next_due_at` where the row has none), so a ping that settled the
+/// monitor since the save read it keeps the time it moved to. Its clocks
+/// never go back past a ping's.
 pub async fn update_monitor(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
@@ -675,9 +612,7 @@ pub async fn update_monitor(
 
 /// One of the project's monitors put in `state`, with when its next run is
 /// due under it — none while it is paused — or `None` where it has no
-/// monitor by that slug. Its clocks are never put back past a ping's
-/// settling, nor another change's, that committed after this transaction
-/// began, as [`update_monitor`]'s are not.
+/// monitor by that slug. Its clocks never go back, as [`update_monitor`]'s.
 pub async fn set_monitor_state(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
@@ -700,17 +635,10 @@ pub async fn set_monitor_state(
     .await
 }
 
-/// One of the project's monitors, by its id, as a ping settles it once its
-/// run is heard: held as the settling's write holds it, `FOR NO KEY
-/// UPDATE`, and read as it stands. The ping read its monitor at its start
-/// ([`hold_monitor`]), and a pause, a resume or a save may have committed
-/// since, which a settling found from that read would write over; found
-/// from this row, it settles what stands, and no other change commits over
-/// it before the ping does. The lock is the one the write takes, raised from
-/// the share the ping holds already, at the same point in the ping, its
-/// last, and taken only where the monitor as the ping read it would be
-/// written: so no writer waits on the ping for it that would not have waited
-/// on the write. `None` where it has no monitor by that id.
+/// One of the project's monitors, by its id, locked as a ping's settling
+/// will write it (`FOR NO KEY UPDATE`), so the ping settles the monitor as
+/// it stands rather than as it read it at its start: a pause or a save may
+/// have committed since. `None` where it has no monitor by that id.
 pub async fn monitor_to_settle(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
@@ -730,11 +658,9 @@ pub async fn monitor_to_settle(
 /// One of the project's monitors, by its id, after a run of its was heard:
 /// put in `state`, its `state_changed_at` moved only where that differs
 /// from the state it was in, and its next due time set to `next_due_at`,
-/// both found from the row [`monitor_to_settle`] holds. Its clocks are this
-/// statement's, never the ping's `now()`: the ping's transaction began
-/// before any change it waited on, and a pause or a save committed since
-/// would otherwise be followed by a state that changed before it. `None`
-/// where it has no monitor by that id.
+/// both found from the row [`monitor_to_settle`] holds. Its clocks are the
+/// statement's, not the transaction's, which began before any change it
+/// waited on. `None` where it has no monitor by that id.
 pub async fn settle_monitor_run(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
@@ -786,18 +712,11 @@ pub async fn delete_monitor<B: HasProject>(
 }
 
 /// A project's settings row and its monitors, ping keys, open runs and
-/// outbox rows, handed to the organization that now holds the project, its
-/// monitors held first as a ping holds its own ([`hold_monitor`]): a move
-/// takes a monitor before its runs as every writer of both does, so a
-/// monitor's delete beside it — a settling's move holds no chain lock, and
-/// the console's delete no move lock — meets it at the monitors, before
-/// either has taken a run of theirs. The share keeps out only a delete, a
-/// purge and a change of a monitor's agent; the rows are rewritten after
-/// it, runs before monitors, an order a ping that holds a run and then
-/// writes its monitor never meets the other way; and a first ping, which
-/// writes the settings row before its monitor, is kept out by the move lock
-/// the move's caller holds, which a purge, deleting that row last, waits on.
-/// Answers whether there was a settings row.
+/// outbox rows, handed to the organization that now holds the project. Its
+/// monitors are held first, as a ping holds its own ([`hold_monitor`]), so
+/// a delete beside the move meets it at the monitors; runs are rewritten
+/// before monitors, the order a ping takes them in. Answers whether there
+/// was a settings row.
 pub async fn move_project(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     project_id: &ProjectId,
@@ -855,9 +774,8 @@ type HashingRow = (
 );
 
 /// The organization a project's settings row is filed under, or `None`
-/// where it has no row yet: read in the project's own scope, as a write
-/// that will file the row where it stands reads it, its project held in
-/// place so that no move passes meanwhile.
+/// where it has no row yet; read with the project held in place, so that no
+/// move passes meanwhile.
 pub async fn settings_organization<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
@@ -905,17 +823,12 @@ pub async fn hashing_settings<B: HasProject>(
 }
 
 /// A project's row, made where it has none and filed under
-/// `organization_id`, so the purges find every project with spans. Its mode
-/// and its key are left as they are. A row a transfer's failed settling left
-/// under another organization is re-filed by a caller that passes auth's
-/// answer, as the console's changes do; a first export passes the row's own
-/// organization where it has one, and re-files nothing. ⚠ The caller owes
-/// it an organization no move has passed since it was read — auth's answer
-/// under the chain lock a transfer holds across its move, a ping's key read
-/// with the project held in place, or, for an export's first, the row's own
-/// organization or auth's answer, read with the project held in place
-/// (`hashing::storage_for_project`): one read before a transfer committed
-/// files the row back under the organization that gave the project up.
+/// `organization_id`, so the purges find every project with spans; its mode
+/// and key are left as they are. ⚠ The organization must be one no move has
+/// passed since it was read — auth's answer under the transfer's chain
+/// lock, or one read with the project held in place: one read before a
+/// transfer committed files the row back under the organization that gave
+/// the project up.
 pub async fn ensure_settings(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
@@ -1046,8 +959,7 @@ pub async fn insert_ping_key(
 
 /// One of the project's live ping keys, retired now by a person; `None`
 /// where the project has no live key by that id, so a second retirement
-/// changes nothing and records nothing. The rotation retires a key only
-/// where it is stale still ([`retire_stale_ping_key`]).
+/// changes nothing and records nothing.
 pub async fn retire_ping_key(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
@@ -1119,11 +1031,9 @@ pub async fn resolve_ping_key(
     .await
 }
 
-/// What makes a live key, `k`, one the rotation retires: `$1` seconds past
-/// its last ping — or its minting, where no ping ever came — with a newer
-/// live key of its project standing, so the crontab lines have had their
-/// week to move over. Asked by the tick's read and again by the retirement
-/// itself ([`retire_stale_ping_key`]).
+/// A live key `k` the rotation retires: `$1` seconds past its last ping (or
+/// its minting) with a newer live key standing, so crontab lines have had
+/// their week to move over.
 const STALE_KEY: &str = "coalesce(k.last_ping_at, k.created_at) < now() - make_interval(secs => $1)
             AND EXISTS (SELECT 1 FROM telemetry.ping_keys n
                          WHERE n.project_id = k.project_id
@@ -1150,15 +1060,10 @@ pub async fn stale_ping_keys(
     .await
 }
 
-/// One of the project's live keys, retired by its rotation where it is
-/// stale still (`STALE_KEY`), asked again in the statement that retires it,
-/// not only by the tick's read before: so a ping that touched the key since
-/// keeps it, its touch committed, or waited on and its row's newest version
-/// asked again, as `READ COMMITTED` asks an `UPDATE`; and so does its newer
-/// key's retirement by a person, which takes the organization's chain lock
-/// the rotation holds here, and would otherwise leave the project no live
-/// key. The retirement and the notice that says why hold together. `None`
-/// where the key is retired, gone, or stale no longer.
+/// Retires one of the project's keys if it is still stale (`STALE_KEY`),
+/// asked again in the retiring statement itself: a ping that touched the
+/// key since the tick's read, or a person retiring its newer key, keeps it.
+/// `None` where the key is retired, gone, or no longer stale.
 pub async fn retire_stale_ping_key(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,

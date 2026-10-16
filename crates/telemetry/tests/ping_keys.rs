@@ -890,11 +890,8 @@ async fn a_key_two_ticks_find_is_retired_recorded_and_told_once(pool: PgPool) {
     assert_eq!(notices_waiting(&pool, &p.project).await.len(), 1);
 }
 
-/// A key is retired only where it is stale when the rotation retires it, not
-/// merely when the tick read it: a ping that came under it since keeps it,
-/// and so does its newer key's retirement by a person since, which would
-/// otherwise have left the project no live key — so a retirement, and the
-/// notice that says why, hold when they are made.
+/// A key is retired only if still stale when the rotation retires it: a ping
+/// since the tick's read, or its newer key's retirement by a person, keeps it.
 #[sqlx::test]
 async fn a_key_stale_when_read_but_not_when_retired_stands(pool: PgPool) {
     apply_audit_migrations(&pool).await;

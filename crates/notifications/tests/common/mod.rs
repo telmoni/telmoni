@@ -53,12 +53,10 @@ pub(crate) struct AuthStub {
     roster: Mutex<HashMap<(String, String), Seat>>,
     flags: Mutex<Option<Flags>>,
     asked: AtomicUsize,
-    /// The projects auth holds, and the organization holding each: asked
-    /// where projects are, it answers these and leaves out the rest, as it
-    /// leaves out a project deleted.
+    /// The projects auth holds, and the organization holding each; any
+    /// other is gone.
     projects: Mutex<HashMap<ProjectId, OrganizationId>>,
-    /// Whether asking where projects are fails, as it does while auth cannot
-    /// be reached.
+    /// Whether asking where projects are fails.
     homes_fail: AtomicBool,
     /// How many times auth was asked where projects are.
     homes_asked: AtomicUsize,

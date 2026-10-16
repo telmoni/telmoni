@@ -388,7 +388,7 @@ export function nextSort(
 }
 
 /** A ready-made query a toolbar button applies, as Langfuse's Quality, Slow
- *  and Cost do: cost waits for prices (roadmap 8.1). */
+ *  and Cost do: cost waits for prices (roadmap 7.1). */
 export type Preset = {
   id: "errors" | "slow" | "tokens";
   label: string;

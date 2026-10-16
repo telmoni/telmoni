@@ -1,37 +1,8 @@
-//! The ping lane as a crontab reaches it: a ping to a slug no monitor has
-//! makes the monitor, paused as `new` until its owner saves it, which no
-//! resume does, recorded on the chain as made by the key, and the owner told
-//! once through the outbox; a run is opened by its `/start`, heard by its
-//! `/checkpoint`s, which hold it to its monitor's step cap and never move
-//! its progress back, and ended by a bare ping or a `/fail`, when it waits in
-//! the outbox as a finished span and the monitor's state and next due time
-//! follow, or as `error` by the next ping that finds it never said it ended;
-//! a ping whose run ends beside it changing nothing, and one whose monitor
-//! is paused or saved beside it settling the monitor as it stands, as a
-//! pause or a save after its settling writes over what it settled; a ping
-//! waiting on no other writer in a circle, a monitor's delete and a purge
-//! included, each holding the monitor before its runs, a ping that waited
-//! out its monitor's delete making the monitor anew, and a purge holding its
-//! projects alone, so a first ping beside it is kept out; the project
-//! held in place while a ping writes, so a move waits for the pings in
-//! flight, keeping new ones out meanwhile, and takes their rows, and a ping
-//! a move keeps out holds no connection while it waits, files its rows
-//! where the project went once let in, its new organization's standing
-//! asked with nothing held, or gives up as on the chain lock; the run a
-//! ping names by `rid`, heard by a ping that races the one opening it; every
-//! run's ceiling, and the stall timeout a discovered monitor is given; a
-//! monitor whose saved timing cannot be read refusing none of its pings; a
-//! body is dropped and said so, the query held to numbers, the methods and
-//! paths to the lane's, and no answer one a cache may keep; past the plan's
-//! limit, or past the monitors nobody has set up that a project may hold,
-//! nothing is made and the ping is refused with the bound's words; a paused
-//! organization takes no ping, and one being deleted none at all, its keys
-//! answered as unknown; a finished run reaches ClickHouse through the
-//! outbox, and lands nowhere for an organization being deleted or a project
-//! gone, whose spans are marked deleted again before the insert or after
-//! it; and the purges and a move take the keys, runs and outbox rows with
-//! the project, a project's purge cut short finished by the sweep once auth
-//! no longer has the project.
+//! The ping lane as a crontab reaches it: monitors a first ping makes, runs
+//! from `/start` to their end, the monitor's state and due time after them,
+//! and the lane's limits and refusals; pings racing the console's changes,
+//! moves and purges; finished runs reaching ClickHouse through the outbox;
+//! and the purges, the move and the purge sweep.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
 mod common;
@@ -319,14 +290,10 @@ impl Project {
         answer
     }
 
-    /// Two `GET` pings, the second sent while the first is still being
-    /// answered: a session of `pool`'s holds the project's monitors' rows in
-    /// the one mode a run's insert passes — its key check shares a monitor's
-    /// row with it — and a monitor's settling waits on, so the first, its run
-    /// opened, waits there to settle its monitor; the second is sent once it
-    /// does, and the session lets go once the second waits on the first.
-    /// Both answers, in order. The first must change its monitor's state, or
-    /// it neither holds nor writes the monitor and waits on nothing.
+    /// Two `GET` pings, the second sent while the first waits to settle its
+    /// monitor, held up by a session locking the monitors' rows; both
+    /// answers, in order. The first must change its monitor's state, or it
+    /// waits on nothing.
     async fn pings_racing(
         &self,
         pool: &PgPool,
@@ -474,13 +441,9 @@ impl Project {
         (answer, deleted)
     }
 
-    /// A `GET` ping and changes to its monitor in the console, sent once the
-    /// ping has read its monitor and gone on to its runs: a session of
-    /// `pool`'s holds `table` — the open runs, or the outbox — so the ping
-    /// waits there, its monitor read and not yet settled; the changes are
-    /// sent once it does, each answered in turn, and the session lets go once
-    /// the last has committed. The ping's answer, and each change's status
-    /// and body.
+    /// A `GET` ping, and changes to its monitor sent while the ping, its
+    /// monitor read, waits on a session holding `table`; the ping's answer
+    /// and each change's status and body.
     async fn ping_as_its_monitor_changes(
         &self,
         pool: &PgPool,
@@ -512,12 +475,9 @@ impl Project {
         })
     }
 
-    /// A `GET` ping naming `run`, held up on a run of `monitor`'s being opened
-    /// under that id: a session of `pool`'s inserts it and holds it
-    /// uncommitted, so the ping, its monitor read, waits there to open its
-    /// own; `beside` runs once it does, and the session lets go, the run it
-    /// was opening never opened, once `beside` is done. The ping's answer and
-    /// what `beside` came to.
+    /// A `GET` ping naming `run`, held up by a session opening a run under
+    /// that id, which it rolls back once `beside` has run; the ping's answer
+    /// and what `beside` came to.
     async fn ping_as_its_run_is_opened<T>(
         &self,
         pool: &PgPool,
@@ -552,13 +512,9 @@ impl Project {
         })
     }
 
-    /// A `GET` ping and the console's pause of `slug`, the pause still being
-    /// written as the ping comes to settle the monitor: a session of
-    /// `pool`'s holds the outbox, so the ping, its monitor read, waits there
-    /// to file its run; the pause is sent once it does, and a second session
-    /// holds the chain's records, so the pause, its monitor written, waits
-    /// there to record itself; the first lets go, and the second once the
-    /// ping waits on the pause. The ping's answer and the pause's status.
+    /// A `GET` ping and the console's pause of `slug`, the pause written but
+    /// not committed when the ping comes to settle the monitor; the ping's
+    /// answer and the pause's status.
     async fn ping_as_a_pause_commits(
         &self,
         pool: &PgPool,
@@ -598,12 +554,9 @@ impl Project {
         })
     }
 
-    /// A change to `slug` sent from the console as a ping settles the
-    /// monitor: a transaction of the module's own, bound as a ping's is,
-    /// holds the monitor as a ping's settling holds it until the change waits
-    /// on it, then settles it as a run's end does — healthy, due at `due` —
-    /// with the ping's own statement, and commits. The change's status and
-    /// body, and the monitor as the settling left it.
+    /// A change to `slug` sent from the console while a ping's settling holds
+    /// the monitor, which then settles it healthy and due at `due`; the
+    /// change's status and body, and the monitor as the settling left it.
     async fn change_as_a_ping_settles(
         &self,
         pool: &PgPool,
@@ -651,17 +604,9 @@ impl Project {
         (changed.expect("the change waited on the settling"), settled)
     }
 
-    /// A `GET` ping sent while a purge is under way: the project's, or its
-    /// organization's where `whole_organization` says so. Two sessions of
-    /// `pool`'s hold the monitors and the outbox, so the purge waits first at
-    /// its first delete, where the project is tried as a ping holds it in
-    /// place, and, the first session let go, at its second, the project's
-    /// monitors deleted, where the project is tried again and the ping sent;
-    /// the second lets go once the ping waits on the purge, or has had a
-    /// moment to — a ping kept out never does, and the probes are what catch
-    /// a purge that does not hold the project. The ping's answer, what the
-    /// purge came to, and whether a ping could hold the project in place at
-    /// either point.
+    /// A `GET` ping sent while a purge, the project's or its organization's,
+    /// is stopped between its deletes; the ping's answer, what the purge came
+    /// to, and whether a ping could have held the project in place meanwhile.
     async fn ping_as_a_purge_runs(
         &self,
         pool: &PgPool,
@@ -1313,10 +1258,8 @@ async fn a_ping_to_a_slug_no_monitor_has_makes_it_and_tells_the_owner_once(pool:
     assert_eq!(monitors_of(&pool, &p.project).await, 1);
 }
 
-/// A first ping whose monitor's agent — its slug, as a ping makes one —
-/// another monitor of the project carries under a slug of its own makes
-/// nothing, and is refused with a 409 that tells the crontab to ping that
-/// slug, in the lane's own words rather than the console's.
+/// A first ping whose agent another monitor of the project carries makes
+/// nothing, and gets a 409 in the lane's own words, not the console's.
 #[sqlx::test]
 async fn a_first_ping_whose_agent_another_monitor_carries_is_told_its_slug(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -2202,24 +2145,9 @@ async fn a_ping_beside_its_monitors_delete_waits_and_makes_it_anew(pool: PgPool)
     );
 }
 
-/// A ping settles its monitor from the row as it stands, held as its write
-/// holds it, never from the monitor as it read it at its start: a pause or a
-/// save the console commits in between is what the ping settles, and stands.
-/// An end ping that comes as its monitor is paused files its run and leaves
-/// the monitor paused and due at no time, and a `/start` opens its run and
-/// leaves it the same; an end ping that comes to settle the monitor while a
-/// pause is still being written waits for the pause, and leaves it be; an
-/// end ping as the monitor's timing moves from hourly to daily makes it due
-/// a day on, and a `/start` as it moves back leaves it due when the save
-/// said; a rename in between changes nothing of what an end ping settles;
-/// a `/fail` as the monitor is paused and resumed fails it after the resume,
-/// its clocks later than the resume's, not the ping's start; and a `/start`
-/// as another ping's settling moves the due time keeps the due time it moved
-/// to, and one as another run's checkpoint takes the monitor past its bound
-/// leaves it there. A ping
-/// that wrote what it had read would undo each: the paused monitor watched
-/// again, healthy or running and due, its owner's pause still on the chain;
-/// the daily one due within the hour, which the ticker would call late.
+/// A ping settles its monitor as it stands once locked, not as it read it:
+/// a pause, a save, a rename or another ping's settling committed in between
+/// is kept, never undone.
 #[sqlx::test]
 async fn a_ping_settles_its_monitor_as_it_stands_not_as_it_read_it(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -2355,9 +2283,8 @@ async fn a_ping_settles_its_monitor_as_it_stands_not_as_it_read_it(pool: PgPool)
     );
     assert_eq!(finished_runs(&pool, &p.project).await.len(), 4);
 
-    // A run's `/fail`, as the monitor is paused and resumed: the monitor
-    // failed, its state changed, and the row written, after the resume, not
-    // when the ping began, before it.
+    // A `/fail` as the monitor is paused and resumed: failed, its clocks
+    // after the resume's.
     let run = rid();
     p.ping_ok(&format!("/{key}/hourly-sync/start?rid={run}"))
         .await;
@@ -2386,10 +2313,8 @@ async fn a_ping_settles_its_monitor_as_it_stands_not_as_it_read_it(pool: PgPool)
     );
     assert_eq!(finished_runs(&pool, &p.project).await.len(), 5);
 
-    // A `/start` as another ping files a run of no duration: the `/start`
-    // held up on a run being opened under the id it names while the other's
-    // settling commits, moving the due time on; the `/start` runs the
-    // monitor and keeps that due time, not the one it read.
+    // A `/start` as another ping's settling moves the due time on: it keeps
+    // the moved due time, not the one it read.
     p.ping_ok(&format!("/{key}/hourly-sync")).await;
     let id = Uuid::parse_str(
         p.monitor("hourly-sync").await["id"]
@@ -2416,9 +2341,8 @@ async fn a_ping_settles_its_monitor_as_it_stands_not_as_it_read_it(pool: PgPool)
     assert_eq!(settled["next_due_at"], due, "{settled}");
     assert_eq!(finished_runs(&pool, &p.project).await.len(), 7);
 
-    // A `/start` as another run's checkpoint takes it past its step cap: the
-    // monitor, found healthy when the `/start` read it, stays over its bound
-    // while that run goes on, as the checkpoint left it.
+    // A `/start` as another run's checkpoint takes the monitor past its step
+    // cap: it stays over its bound.
     for (status, body) in [p.send(pause()).await, p.send(resume()).await] {
         assert_eq!(status, StatusCode::OK, "{body}");
     }
@@ -2440,16 +2364,9 @@ async fn a_ping_settles_its_monitor_as_it_stands_not_as_it_read_it(pool: PgPool)
     assert_eq!(open_runs(&pool, &p.project).await.len(), 2);
 }
 
-/// A change the console saves over a monitor is written over the monitor as
-/// it stands when the change writes it, not as the change read it: a ping
-/// takes no chain lock, and one whose run ends between the read and the
-/// write settles the monitor — healthy, due an interval on — and what it
-/// settled stands. A save that keeps the timing keeps the due time the ping
-/// moved to, not the one it read, which had passed as a rule and which the
-/// ticker would call late, while one that moves the timing is due under the
-/// timing it saved; a pause records the state the ping left, the one it
-/// paused; and none puts the monitor's clocks back past the ping's, though
-/// each began before the ping settled.
+/// A console save or pause is written over the monitor as a ping settling
+/// meanwhile left it: a kept timing keeps the due time the ping moved to, a
+/// pause records the state the ping left, and no clock goes back.
 #[sqlx::test]
 async fn a_change_the_console_saves_is_written_over_the_monitor_as_a_ping_left_it(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -2545,14 +2462,8 @@ async fn a_change_the_console_saves_is_written_over_the_monitor_as_a_ping_left_i
     );
 }
 
-/// A ping a move kept out files its rows where the project went: the move
-/// holds the project's move lock alone, taken before any chain lock as a
-/// transfer takes it, and the ping reads its key's organization only once it
-/// holds the project in place. So a ping resolved before the move and let in
-/// after it is neither refused nor filed under the organization that gave
-/// the project up, whose purge would take its rows and the new one's never
-/// find them — and it is held to the new organization's standing, asked with
-/// nothing held, so no move of the project waits on the answer.
+/// A ping a move kept out files its rows where the project went, and is held
+/// to the new organization's standing, asked with nothing held.
 #[sqlx::test]
 async fn a_ping_a_move_kept_out_is_filed_where_the_project_went(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -2606,9 +2517,8 @@ async fn a_ping_a_move_kept_out_is_filed_where_the_project_went(pool: PgPool) {
     assert_eq!(monitors_of(&pool, &r.project).await, 0);
     assert!(outbox_of(&pool, &r.project).await.is_empty());
 
-    // Moved into an organization whose deletion is marked: refused as a key
-    // the lane does not know, its standing asked once the move has let the
-    // project go, and nothing written.
+    // Moved into an organization being deleted: refused as an unknown key,
+    // and nothing written.
     let closing = OrganizationId::new();
     let (t, auth) = project_and_auth(&pool);
     auth.stand(&closing, Some(OrganizationStatus::PendingDeletion));
@@ -2647,15 +2557,8 @@ async fn a_ping_a_move_kept_out_is_filed_where_the_project_went(pool: PgPool) {
     assert!(all_filed_under(&pool, "monitors", &s.project, &next).await);
 }
 
-/// A move waits for the pings in flight and takes their rows with the rest:
-/// a ping holds its project in place from the start of its transaction to
-/// its commit, so the move is held until the ping has written — never let
-/// past a run the ping had not committed, which would stay filed under the
-/// organization that gave the project up, nor commit a row the ping is about
-/// to update, which the row policy would refuse the ping, a 500. A first
-/// ping waiting for its organization's chain lock holds the move back the
-/// same way, in no circle: a move takes the project's lock before any chain
-/// lock.
+/// A move waits for the pings in flight and takes their rows with the rest,
+/// a first ping waiting on its chain lock included, in no circle.
 #[sqlx::test]
 async fn a_move_waits_for_the_pings_in_flight_and_takes_their_rows(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -2751,17 +2654,11 @@ async fn a_ping_waits_on_a_move_no_longer_than_on_the_chain_lock(pool: PgPool) {
     assert_eq!(monitors_of(&pool, &p.project).await, 2);
 }
 
-/// Pings a move keeps out hold no connection while they wait: of more of
-/// them than the module's pool holds, sent while a move holds the project,
-/// none ever waits on the lock, a wait that would hold its connection, and
-/// the move's own work — telemetry's half of a transfer, on the same pool,
-/// while auth holds the lock — gets the connection it needs. None is let in
-/// before the move lets go, and each is answered once it does, filed where
-/// the project went. The pings wait out the move for a minute here rather
-/// than two seconds, so that none gives up while a busy machine stretches
-/// the test's hold, which a load of ten made twelve seconds; a ping that
-/// held its connection would hold it as long, three times what the move's
-/// work is given, and longer than the pool waits to hand one out.
+/// Pings a move keeps out hold no connection while they wait: more of them
+/// than the pool holds leave the move's own work the connection it needs,
+/// and each is answered once the move lets go, filed where the project went.
+/// They wait a minute here, not two seconds, so a busy machine cannot make
+/// one give up.
 #[sqlx::test]
 async fn pings_a_move_keeps_out_hold_no_connection(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -3540,14 +3437,9 @@ async fn a_paused_organization_takes_no_ping(pool: PgPool) {
     assert_eq!(monitors_of(&pool, &p.project).await, 0);
 }
 
-/// A ping for an organization whose deletion is marked is refused as a key
-/// the lane does not know, whatever else it says: the mark closes the
-/// organization to every lane a quarter of an hour before its purges, so
-/// the pings a crontab sends meanwhile make no monitor, end no run and tell
-/// nobody, and leave nothing for a purge to miss. So too once auth has no
-/// such organization. The standing is asked with nothing held. Auth unable
-/// to say refuses nothing, as an unread ceiling holds none: the lane stays
-/// up through auth's outage, and a purge takes what such a ping writes.
+/// A ping for an organization being deleted, or gone, is refused as an
+/// unknown key and writes nothing; auth unable to say refuses nothing, so
+/// the lane stays up through auth's outage.
 #[sqlx::test]
 async fn a_ping_for_an_organization_being_deleted_is_refused_as_an_unknown_key(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -3971,13 +3863,8 @@ async fn kinds_waiting(pool: &PgPool, project: &ProjectId) -> Vec<String> {
         .collect()
 }
 
-/// A notice goes nowhere once its organization's deletion is marked: the
-/// deletion's purges take that organization's feeds, and a notice written
-/// after them would outlive them, the monitor's slug and the key's prefix in
-/// its body. The row is dropped as landed, as the run's row beside it is,
-/// whose span would outlive them the same way. Nor once the organization is
-/// gone, between auth saying where the project is and saying how the
-/// organization stands.
+/// A notice, and the run beside it, go nowhere once their organization is
+/// being deleted, or is gone, since they would outlive its purges.
 #[sqlx::test]
 async fn a_notice_for_an_organization_being_deleted_is_dropped(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -4298,13 +4185,8 @@ fn project_over(
     )
 }
 
-/// A run lands nowhere once its organization's deletion is marked: the
-/// deletion's purges, a quarter of an hour on, take the organization's
-/// spans, and a row landed after them would outlive them, so the row is
-/// dropped as landed. Nor once auth has no such project, whose spans its
-/// deletion marked deleted as it committed: the project's spans are marked
-/// deleted once more, which takes whatever an earlier try wrote and was cut
-/// off before it could ask again, and the row is dropped.
+/// A run lands nowhere once its organization is being deleted, or its
+/// project is gone, whose spans are then marked deleted again.
 #[sqlx::test]
 async fn a_run_whose_organization_is_closing_or_whose_project_is_gone_lands_nowhere(pool: PgPool) {
     let Some(clickhouse) = common::clickhouse_or_skip(
@@ -4369,11 +4251,8 @@ async fn a_run_whose_organization_is_closing_or_whose_project_is_gone_lands_nowh
     .await;
 }
 
-/// A project deleted as its run is written — the deletion committing after
-/// the loop asked where the project is, and its purge marking the project's
-/// spans deleted before the run's row lands — would leave the row behind
-/// the mark: asked again once the row is in, auth has no such project, and
-/// the loop marks the project's spans deleted once more, which takes it.
+/// A project deleted while its run is written has its spans marked deleted
+/// again once the row is in.
 #[sqlx::test]
 async fn a_run_written_as_its_project_is_deleted_goes_with_it(pool: PgPool) {
     let Some(clickhouse) =
@@ -4415,12 +4294,9 @@ async fn a_run_written_as_its_project_is_deleted_goes_with_it(pool: PgPool) {
     .await;
 }
 
-/// Auth unable to say where a run's project is, or how its organization
-/// stands, is an outage of ours: the row is handed back with its try and
-/// nothing written. Unable to say, once the row is in, whether the project
-/// outlived the write, it hands the row back too, for the next tick to ask
-/// again — which, finding the run in `spans`, drops the row rather than
-/// write the run twice.
+/// Auth unable to say where a run's project is hands the row back with its
+/// try; unable to say after the write, the next tick drops the row rather
+/// than write the run twice.
 #[sqlx::test]
 async fn a_run_auth_cannot_place_waits_with_its_try(pool: PgPool) {
     let Some(clickhouse) =
@@ -4488,11 +4364,8 @@ async fn a_run_auth_cannot_place_waits_with_its_try(pool: PgPool) {
     );
 }
 
-/// A run of a project that is gone, whose spans ClickHouse does not mark
-/// deleted once more, waits with its try for the next tick to mark them,
-/// since a row an earlier try wrote would stay otherwise. A mark that fails
-/// ends the pass, the batch's other gone projects handed back unmarked, as
-/// a store gone away mid-pass hands back every row after the one it failed.
+/// A gone project's run whose mark fails waits with its try for the next
+/// tick, and the batch's other gone projects are handed back unmarked.
 #[sqlx::test]
 async fn a_mark_clickhouse_does_not_take_hands_the_run_back(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -4618,13 +4491,8 @@ async fn the_purges_and_a_move_take_the_keys_runs_and_outbox_rows_with_the_proje
     assert!(open_runs(&pool, &q.project).await.is_empty());
 }
 
-/// A purge holds the project alone before it deletes anything, as a move
-/// does, and its monitors go first, each taking its runs by the cascade, as
-/// every writer of a monitor and its runs takes the monitor first: a ping in
-/// flight, which holds its project in place and its monitor from its read,
-/// is waited for before any row of the project's is taken, so the outbox
-/// row it writes goes with the rest, where a purge that took the outbox
-/// first left it behind. A project's purge and an organization's alike.
+/// A purge, a project's or an organization's, waits for a ping in flight
+/// before it deletes anything, so the ping's outbox row goes with the rest.
 #[sqlx::test]
 async fn a_purge_waits_for_the_pings_in_flight_before_it_takes_their_runs(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -4679,17 +4547,9 @@ async fn a_purge_waits_for_the_pings_in_flight_before_it_takes_their_runs(pool: 
     }
 }
 
-/// A purge holds each project it purges alone, as a move does, before it
-/// deletes any of the project's rows: so a first ping sent while one is under
-/// way is kept out until it commits, and then finds its key gone, a 404 —
-/// where it took the project's settings row and then waited on a row the
-/// purge had deleted, the monitor its own would share an agent with or, by
-/// the cascade, the run its own would share an id with, while the purge
-/// waited on the settings row: a circle Postgres breaks by failing one of
-/// them, a 500 for the crontab or a purge auth does not try again. The
-/// project is held from before the purge's first delete, so no ping is
-/// let in while the purge deletes its monitors either. A project's purge and
-/// an organization's alike.
+/// A first ping sent during a purge, a project's or an organization's, is
+/// kept out until the purge commits, then finds its key gone, a 404, rather
+/// than deadlocking with it.
 #[sqlx::test]
 async fn a_purge_keeps_out_the_first_pings_beside_it(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -4728,12 +4588,8 @@ async fn a_purge_keeps_out_the_first_pings_beside_it(pool: PgPool) {
     }
 }
 
-/// A purge waits for a project held in place no longer than a tier's roles
-/// wait for any lock, set on its own transaction: so where the roles carry
-/// none — the Compose quickstart connects as the superuser, as this suite
-/// does — a purge its caller has given up on never stays queued for the
-/// lock, turning the project's pings away for as long as the hold lasts.
-/// Past two seconds it fails, and the project's rows stand for the next.
+/// A purge waits at most two seconds for a project held in place, even where
+/// the role sets no `lock_timeout`, and then fails, the rows standing.
 #[sqlx::test]
 async fn a_purge_waits_two_seconds_at_most_for_a_project_held_in_place(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -4777,14 +4633,8 @@ async fn a_purge_waits_two_seconds_at_most_for_a_project_held_in_place(pool: PgP
     );
 }
 
-/// A project's purge closes its ping lane before anything that can fail: its
-/// keys go first, on their own, so a purge cut short — by a store that does
-/// not answer, as this suite's does not, or by a ping holding the project
-/// past the purge's two seconds — leaves no key opening the lane, where the
-/// deleted project's pings went on being answered, and its first pings
-/// making monitors, until the purge was finished. The rest of its rows stand
-/// for the sweep that finishes it, which finds them through the settings
-/// row.
+/// A project's purge deletes its ping keys first, on their own, so a purge
+/// cut short leaves no key answering pings; the rest waits for the sweep.
 #[sqlx::test]
 async fn a_projects_purge_closes_its_ping_lane_before_anything_can_fail(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -4814,15 +4664,9 @@ async fn a_projects_purge_closes_its_ping_lane_before_anything_can_fail(pool: Pg
     );
 }
 
-/// A project's purge cut short is finished by the sweep once auth no longer
-/// has the project: a pass finds it by the settings row the failure left and
-/// purges it again — its spans and totals marked deleted, its settings,
-/// monitors and runs gone — while a project auth still has keeps
-/// everything, though its settings row names another organization than the
-/// one auth says holds it, as a move whose settling is still to come leaves
-/// one. A pass auth cannot answer ends with every row as it was, and so does
-/// one ClickHouse does not answer, for the next to finish; and a pass after
-/// the one that did finds nothing to do.
+/// The sweep finishes a purge cut short once auth no longer has the project,
+/// and leaves a project auth still has alone, wherever its row is filed; a
+/// pass auth or ClickHouse cannot answer changes nothing.
 #[sqlx::test]
 async fn a_projects_purge_cut_short_is_finished_by_the_sweep(pool: PgPool) {
     let Some(clickhouse) =
@@ -4910,10 +4754,8 @@ async fn a_projects_purge_cut_short_is_finished_by_the_sweep(pool: PgPool) {
     );
 }
 
-/// A purge the sweep cannot finish now — a ping holding the project past the
-/// purge's two seconds — is left for the next pass, and the pass goes on to
-/// the rest: another project auth no longer has, read after it, is purged
-/// beside it, and the next pass, the project let go, finishes the first.
+/// A purge the sweep cannot finish now is left for the next pass, and the
+/// pass goes on to the rest.
 #[sqlx::test]
 async fn a_purge_the_sweep_cannot_finish_now_waits_for_the_next_pass(pool: PgPool) {
     let Some(_clickhouse) =
@@ -4960,10 +4802,8 @@ async fn a_purge_the_sweep_cannot_finish_now_waits_for_the_next_pass(pool: PgPoo
     assert!(left_of(&pool, held).await.is_empty());
 }
 
-/// The sweep reads every settings row, a page at a time and in order: the
-/// projects auth no longer has, one read first and one on the second page,
-/// are found and purged, every project auth still has keeps its row, and
-/// auth is asked once a page.
+/// The sweep reads every settings row, a page at a time, asking auth once a
+/// page.
 #[sqlx::test]
 async fn the_sweep_reads_every_page_of_settings_rows(pool: PgPool) {
     let Some(_clickhouse) =
@@ -5018,9 +4858,7 @@ async fn the_sweep_reads_every_page_of_settings_rows(pool: PgPool) {
     assert_eq!(standing, 499);
 }
 
-/// A database that stops answering mid-pass ends the pass where it stopped,
-/// as a failed read of a page does, rather than costing every project after
-/// it the same wait and a line of its own.
+/// A database that stops answering ends the sweep's pass where it stopped.
 #[sqlx::test]
 async fn a_pass_that_loses_its_database_ends_there(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -5057,12 +4895,9 @@ async fn a_pass_that_loses_its_database_ends_there(pool: PgPool) {
     );
 }
 
-/// An organization's purge holds every project its rows name before it
-/// deletes any of them, wherever the organization is named: a project whose
-/// settings row is filed under another organization — as an export racing
-/// the project's transfer leaves one — and whose monitors, ping keys or
-/// outbox rows alone name this one is held as one whose rows all do, and
-/// only the rows filed under the organization go with its purge.
+/// An organization's purge holds every project its rows name, one whose
+/// settings row is filed elsewhere included, and takes only the rows filed
+/// under the organization.
 #[sqlx::test]
 async fn an_organizations_purge_holds_every_project_its_rows_name(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -5145,17 +4980,9 @@ async fn a_run_open_and_one_filed(pool: &PgPool, p: &Project, key: &str) {
     assert_eq!(finished_runs(pool, &p.project).await.len(), 1);
 }
 
-/// A project's move holds its monitors before it rewrites anything, as
-/// every writer of a monitor and its runs takes the monitor first, so a
-/// monitor's delete or the project's purge beside it — a settling's move
-/// holds no chain lock, and the move here no move lock, which the purge
-/// would wait on first — waits for the move holding nothing the move wants:
-/// here the move is held up on the project's ping key, its monitors held and
-/// its outbox rows and runs rewritten already, and each, sent then, waits on
-/// it; once the key is let go the move commits and the other goes through.
-/// Without the share each took the monitor and then met the move's runs or
-/// outbox rows while the move waited on the monitor, a circle Postgres
-/// breaks by failing one of them.
+/// A move holds its monitors before it rewrites anything, so a monitor's
+/// delete or the project's purge beside it waits for the move, rather than
+/// deadlocking with it on the runs or the outbox.
 #[sqlx::test]
 async fn a_move_and_a_delete_or_a_purge_beside_it_wait_in_turn(pool: PgPool) {
     apply_audit_migrations(&pool).await;

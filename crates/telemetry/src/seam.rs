@@ -3,17 +3,13 @@
 //! Auth runs its purges and a project's move through this.
 //!
 //! A purge takes a project's spans and totals with its settings, saved
-//! views, monitors, ping keys, open runs and outbox rows: a project's ping
-//! keys first, on their own, so its ping lane is closed whatever fails after
-//! ([`db::close_ping_lane`]); then the rows marked deleted in ClickHouse, so
-//! a settings row stands for as long as its project's spans do, and what
-//! finishes a purge cut short — the sweep, once auth no longer has the
-//! project ([`crate::sweep`]), or the organization's purge — finds them
-//! again; then the rest and the row removed, the project held alone
-//! meanwhile so that no ping writes beside it ([`db::purge_project`]). An
-//! organization's projects are the ones its
-//! settings rows name, since neither a span nor a view names an
-//! organization; its monitors, keys, runs and outbox rows name it.
+//! views, monitors, ping keys, open runs and outbox rows: the ping keys
+//! first, so the ping lane is closed whatever fails after; then the rows
+//! marked deleted in ClickHouse, before the settings row goes, so a purge
+//! cut short leaves the row the sweep finds it by ([`crate::sweep`]); then
+//! the rest and the row removed. An organization's projects are the ones its settings rows name,
+//! since neither a span nor a view names an organization; its monitors,
+//! keys, runs and outbox rows name it.
 
 use std::sync::Arc;
 
@@ -49,12 +45,9 @@ async fn mark_deleted(state: &AppState, project: &ProjectId) -> Result<(), Telmo
     })
 }
 
-/// One project's purge, as auth calls it once the project's delete commits
-/// and as the sweep calls it again where that one was cut short
-/// ([`crate::sweep`]): its ping keys, then its spans and totals, then the
-/// rest and its settings row. Safe to repeat, and beside another of its
-/// own, which holds the project alone in turn; answers how many rows went
-/// from Postgres.
+/// One project's purge, as auth calls it after the delete and the sweep
+/// calls it again: its ping keys, then its spans and totals, then the rest.
+/// Safe to repeat; answers how many rows went from Postgres.
 pub(crate) async fn purge_project(
     state: &AppState,
     project_id: &ProjectId,

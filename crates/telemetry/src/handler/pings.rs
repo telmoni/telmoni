@@ -1,22 +1,15 @@
 //! The public ping lane: `/ping/{ping_key}/{slug}`, `GET` or `POST` with no
 //! header, so a crontab line needs only `curl`. A bare ping is success; its
-//! `/start`, `/checkpoint` and `/fail` are the rest of a run, each held on
-//! the run's open row until the run ends, when the run becomes a row of
-//! `spans` through the outbox ([`crate::outbox`]), as every finished span
-//! does. The key rides in the URL and is resolved outside any tenant, as
-//! auth resolves an API key; the request then runs in the project's scope,
-//! the project held in place while it writes, so a transfer or a purge waits
-//! for the ping and the ping for either, its rows filed where the project is.
-//! A slug no monitor has makes its monitor, paused as `new`, and the owner
-//! is told once; past the plan's limit, or past the monitors nobody has set
-//! up that one project may hold, nothing is made and the ping is refused
-//! with a problem document that says what lifts it, which `curl -f` turns
-//! into cron's mail. A ping's body is content: read no further than its
-//! cap, never parsed whatever its media type, and kept nowhere until 4.1
-//! keeps one, the answer saying so; a run's progress rides in the query
-//! alone, numbers alone. Nothing here is audited but the monitor a first
-//! ping makes: a ping is traffic, and its run is the lane's own record. And
-//! since a `GET` here records a run, no answer is one a cache may keep.
+//! `/start`, `/checkpoint` and `/fail` are the rest of a run, held on the
+//! run's open row until it ends and becomes a row of `spans` through the
+//! outbox ([`crate::outbox`]). The key rides in the URL; the request runs in
+//! the project's scope, the project held in place while it writes, so a
+//! transfer or a purge waits for the ping. A slug no monitor has makes its
+//! monitor, paused as `new`; past a limit the ping is refused with a problem
+//! document, which `curl -f` turns into cron's mail. A ping's body is
+//! content, never parsed or kept; progress rides in the query, numbers
+//! alone. Only the monitor a first ping makes is audited, and no answer may
+//! be cached, since a `GET` records a run.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -62,10 +55,8 @@ use crate::outbox::{self, FinishedRun};
 const ALLOW: &str = "GET, HEAD, POST";
 /// What an open run's `source` says of a run reported by pings.
 const SOURCE: &str = "ping";
-/// The longest a ping waits out a move of its project to another
-/// organization, or its purge, before it is refused: as long as it waits for
-/// its organization's chain lock. Read from the module's state
-/// ([`AppState::move_wait`]), which every binary sets to this.
+/// The longest a ping waits out a move or a purge of its project before it
+/// is refused: as long as it waits for its organization's chain lock.
 pub(crate) const MOVE_WAIT: Duration = Duration::from_secs(2);
 /// How long a ping a move keeps out lets go before it first tries again,
 /// doubled at each try after up to [`MOVE_RETRY_MAX`]: a move is over in
@@ -344,13 +335,10 @@ fn answer(outcome: Result<Heard, TelmoniError>) -> Response {
     }
 }
 
-/// The lane's order: the key and whether its organization is open, then the
-/// slug, then the query, then whether the organization is paused, then the
-/// body, and only then the project's scope, the project held in place and
-/// the organization its rows are filed under read there ([`held_in_place`]).
-/// A key the table does not hold, or holds retired, or whose organization
-/// auth says is closed ([`closed`]), is a 404 whatever else the request
-/// says, so a scanner learns nothing from the rest.
+/// The lane's order: the key and whether its organization is open, the slug,
+/// the query, whether the organization is paused, the body, and only then
+/// the project's scope ([`held_in_place`]). A key that opens nothing is a
+/// 404 whatever else the request says, so a scanner learns nothing.
 async fn handle(
     state: &Arc<AppState>,
     headers: &HeaderMap,
@@ -415,29 +403,13 @@ async fn resolve_key(state: &AppState, key: &str) -> Result<ResolvedPingKey, Tel
 }
 
 /// The ping's transaction, its project held in place and bound to the
-/// organization the ping's key stands under now, with the key as it stands.
-/// A move holds the project alone ([`project_move`]) across telemetry's half
-/// of it and to its commit, so none commits while the ping writes — a move
-/// would miss the rows the ping had not committed, and the row policy refuse
-/// the ping an update of a row the move had — and the key is read once the
-/// project is held, so a move that committed since the key was resolved is
-/// seen: the ping follows the project, its new organization's standing asked
-/// with nothing held, and files nothing under the organization that gave the
-/// project up, whose purge would take the rows and the new one's never find
-/// them. A ping a move keeps out lets go of its connection and tries again a
-/// moment later ([`MOVE_RETRY`]), so the pings waiting out a move hold no
-/// connection while they wait, and is refused once [`AppState::move_wait`]
-/// has passed, as on the chain lock. A purge holds the project alone as a
-/// move does ([`db::purge_project`]), so a ping in flight is waited for, two
-/// seconds at most, and its rows purged with the rest; one kept out, let in
-/// once the purge commits, finds its key gone — and a project's own purge
-/// deletes the keys before anything else ([`db::close_ping_lane`]). A key
-/// retired since, or gone with a purged project, is a 404, as for any key
-/// the table does not hold or holds retired. ⚠ A move given up on over
-/// its budget, which may commit once its caller has let the project go,
-/// holds it no longer: beside it, a ping may be refused an update of a row
-/// it moved, or file a row under the organization its key named, the one
-/// the settling that follows then moves every row to.
+/// organization its key stands under now. A move or a purge holds the
+/// project alone to its commit ([`project_move`]), so none passes while the
+/// ping writes; the key is read again once the project is held, so the ping
+/// follows a move that committed since, and finds a purged project's key
+/// gone, a 404. A ping kept out lets go of its connection and tries again
+/// ([`MOVE_RETRY`]) until [`AppState::move_wait`] has passed. ⚠ A move given
+/// up on over its budget may still commit after its caller let go.
 async fn held_in_place(
     state: &AppState,
     mut key: ResolvedPingKey,
@@ -489,12 +461,9 @@ async fn held_in_place(
     }
 }
 
-/// The key read again once a first ping holds its organization's chain lock,
-/// which a retirement holds across its own: a ping that waited one out finds
-/// its key retired, a 404, and makes no monitor under a key that opens
-/// nothing. Its organization is the one [`held_in_place`] read, and its key
-/// is not gone with a purge: a move or a purge, which take the project's
-/// lock, cannot have passed since.
+/// The key read again once a first ping holds its organization's chain
+/// lock, which a retirement holds across its own: a ping that waited one out
+/// finds its key retired, a 404, and makes no monitor under it.
 async fn still_live(
     key: &ResolvedPingKey,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
@@ -523,13 +492,9 @@ pub fn unknown_key() -> TelmoniError {
     AuthError::NotFound("no ping key by that value".into()).into()
 }
 
-/// A key whose organization's deletion is marked, or that auth no longer
-/// has: refused as a key the table does not hold, as ingest refuses an API
-/// key of such an organization's. The mark closes the organization to every
-/// lane a quarter of an hour before its purges, so a crontab's pings
-/// meanwhile make no monitor, end no run and tell nobody — but for one auth
-/// could not answer for in time, let in ([`chain::open`]), and one in flight
-/// as the mark committed, whose rows the purges take.
+/// A key whose organization is being deleted, or gone: refused as a key the
+/// table does not hold, as ingest refuses such an organization's API key, so
+/// a crontab's pings meanwhile make no monitor and tell nobody.
 fn closed(key: &ResolvedPingKey) -> TelmoniError {
     tracing::debug!(
         project_id = %key.project_id,
@@ -653,8 +618,7 @@ async fn discover_monitor(
     }
     if let Some(ceiling) = ceiling {
         let held = db::monitor_count(tx, organization_id).await?;
-        // A count below zero, which no table gives, is past every ceiling:
-        // the bound fails closed.
+        // A negative count, which no table gives, fails closed.
         if let Err(refused) = ceiling.admit(u64::try_from(held).unwrap_or(u64::MAX)) {
             tracing::debug!(
                 project_id = %project_id,
@@ -1040,16 +1004,10 @@ fn hearing(run: &OpenRunRow) -> RunEvent {
 /// `new`, and one paused keep, their runs still kept — and its next due
 /// time found again once a run ended, so a run that came is not late; none
 /// where the timing it saved cannot be read now, logged, as a ping and the
-/// run it ends are never refused for that ([`due_after`]). Found from the
-/// monitor as it stands once held as the write holds it
-/// ([`db::monitor_to_settle`]), never from the monitor as this ping read
-/// it: a pause, a resume or a save committed since is what the ping
-/// settles, and it stands, where a write found from the read would put a
-/// paused monitor back under watch, or a moved timing's due time back where
-/// the old timing had it. A ping with nothing to change of the monitor as it
-/// read it — one paused or `new`, or one whose state and due time the run
-/// leaves as they are — writes nothing and holds nothing more, as though it
-/// had come before the change.
+/// run it ends are never refused for that ([`due_after`]). Worked out again
+/// from the monitor as it stands once locked ([`db::monitor_to_settle`]),
+/// so a pause or a save committed since the ping read it is kept; a ping
+/// with nothing to change writes and locks nothing.
 async fn settle(
     project_id: &ProjectId,
     monitor: &MonitorRow,
@@ -1063,8 +1021,8 @@ async fn settle(
     let Some(held) = db::monitor_to_settle(tx, project_id, monitor.id).await? else {
         return Ok(());
     };
-    // Found again only where the row moved since the read: a timing that
-    // cannot be read is logged once a ping, not once each finding.
+    // Worked out again only where the row moved, so a bad timing is logged
+    // once.
     let settling = if same_settling(monitor, &held) {
         Some(found)
     } else {

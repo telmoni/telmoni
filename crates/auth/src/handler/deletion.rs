@@ -166,28 +166,21 @@ pub(crate) async fn purge_organization_siblings(
 /// cannot be allowed the console's whole ten seconds.
 const PROJECT_PURGE_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// The longest telemetry's project purge or move may take. A purge is its
-/// ping keys deleted, a delete recorded on each of two ClickHouse tables,
-/// answered once recorded rather than once run, and the project's rows in
-/// Postgres once the pings in flight let go of it, which it waits two
-/// seconds at most for, less what the rest took; a move rewrites the
-/// project's rows once its monitors are held. The transfer's accept calls
-/// the move before notifications' purge, while its own transaction holds
-/// both organizations' locks, and the two together stay under the console's
-/// ten seconds.
+/// The longest telemetry's project purge or move may take: a purge records
+/// a delete on two ClickHouse tables and waits at most two seconds for the
+/// pings in flight; a move rewrites the project's rows. The transfer's
+/// accept calls the move before notifications' purge, while its own
+/// transaction holds both organizations' locks, and the two together stay
+/// under the console's ten seconds.
 const TELEMETRY_PROJECT_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Notifications' teardown for one project — its connectors, their
 /// deliveries, its feed and any handshake in flight — before it is handed
 /// to another organization, whose events must never post into the old
-/// one's channels, and after one is deleted. No notifications module is
-/// nothing to purge; a refusal or a purge over budget is an `Err`, which the
-/// transfer treats as a refusal to move, and which a delete logs: a purge
-/// that fails after a delete is tried again by notifications' own retention
-/// sweep, every hour until it lands, which finds the project through the
-/// rows the failure left once the delete has committed. The agent needs no
-/// call: it finds what it holds of a project under an organization that no
-/// longer has it, and removes it, itself.
+/// one's channels, and after one is deleted. A refusal or a purge over
+/// budget is an `Err`: the transfer refuses to move, and a delete logs it
+/// for notifications' hourly sweep to retry. The agent needs no call: it
+/// removes what it holds of a project that left, itself.
 pub(crate) async fn purge_project_connectors(
     state: &AppState,
     project_id: &ProjectId,
@@ -208,9 +201,8 @@ pub(crate) async fn purge_project_connectors(
 
 /// Telemetry's teardown for one project after it is deleted: its spans and
 /// totals marked deleted, then its settings. No telemetry module is nothing
-/// to purge. A purge that fails here is tried again by telemetry's own
-/// sweep, every ten minutes until it lands, which finds the project through
-/// the settings row the failure left once this delete has committed.
+/// to purge. A purge that fails here is retried by telemetry's own sweep
+/// every ten minutes.
 pub(crate) async fn purge_project_telemetry(
     state: &AppState,
     project_id: &ProjectId,
