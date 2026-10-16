@@ -6,10 +6,12 @@
 //! its progress back, and ended by a bare ping or a `/fail`, when it waits in
 //! the outbox as a finished span and the monitor's state and next due time
 //! follow, or as `error` by the next ping that finds it never said it ended;
-//! a ping whose run ends beside it changing nothing; a ping waiting on no
-//! other writer in a circle, a monitor's delete and a purge included, each
-//! holding the monitor before its runs, and a ping that waited out its
-//! monitor's delete making the monitor anew; the project
+//! a ping whose run ends beside it changing nothing, and one whose monitor
+//! is paused or saved beside it settling the monitor as it stands; a ping
+//! waiting on no other writer in a circle, a monitor's delete and a purge
+//! included, each holding the monitor before its runs, a ping that waited
+//! out its monitor's delete making the monitor anew, and a purge holding its
+//! projects alone, so a first ping beside it is kept out; the project
 //! held in place while a ping writes, so a move waits for the pings in
 //! flight, keeping new ones out meanwhile, and takes their rows, and a ping
 //! a move keeps out holds no connection while it waits, files its rows
@@ -48,7 +50,7 @@ use telmoni_shared::audit::lock_chain;
 use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
-use telmoni_shared::seam::{Entitlements, NoLimits, Notice, Notifications};
+use telmoni_shared::seam::{Entitlements, NoLimits, Notice, Notifications, Telemetry};
 use telmoni_shared::test_util::apply_audit_migrations;
 use telmoni_shared::{
     NotificationKind, OrganizationId, OrganizationRole, OrganizationStatus, ProjectId,
@@ -56,6 +58,7 @@ use telmoni_shared::{
 use telmoni_telemetry::db::{self, TelemetryLane};
 use telmoni_telemetry::handler::pings::NEW_MONITORS_MAX;
 use telmoni_telemetry::outbox::{self, Settled};
+use telmoni_telemetry::seam::TelemetrySeam;
 use telmoni_telemetry::{AppState, ping_router, router};
 
 const MONITORS: &str = "/internal/telemetry/monitors";
@@ -294,11 +297,11 @@ impl Project {
     /// Two `GET` pings, the second sent while the first is still being
     /// answered: a session of `pool`'s holds the project's monitors' rows in
     /// the one mode a run's insert passes — its key check shares a monitor's
-    /// row with it — and a monitor's write waits on, so the first, its run
-    /// opened, waits there to write its monitor; the second is sent once it
+    /// row with it — and a monitor's settling waits on, so the first, its run
+    /// opened, waits there to settle its monitor; the second is sent once it
     /// does, and the session lets go once the second waits on the first.
     /// Both answers, in order. The first must change its monitor's state, or
-    /// it writes the monitor nothing and waits on nothing.
+    /// it neither holds nor writes the monitor and waits on nothing.
     async fn pings_racing(
         &self,
         pool: &PgPool,
@@ -444,6 +447,190 @@ impl Project {
             answer
         });
         (answer, deleted)
+    }
+
+    /// A `GET` ping and changes to its monitor in the console, sent once the
+    /// ping has read its monitor and gone on to its runs: a session of
+    /// `pool`'s holds `table` — the open runs, or the outbox — so the ping
+    /// waits there, its monitor read and not yet settled; the changes are
+    /// sent once it does, each answered in turn, and the session lets go once
+    /// the last has committed. The ping's answer, and each change's status
+    /// and body.
+    async fn ping_as_its_monitor_changes(
+        &self,
+        pool: &PgPool,
+        path: &str,
+        table: &str,
+        changes: Vec<Request<Body>>,
+    ) -> ((StatusCode, String), Vec<(StatusCode, Value)>) {
+        let mut holder = pool.begin().await.expect("the holder's transaction");
+        let holder_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *holder)
+            .await
+            .expect("the holder's session");
+        sqlx::query(&format!("LOCK TABLE telemetry.{table} IN SHARE MODE"))
+            .execute(&mut *holder)
+            .await
+            .expect("hold the table");
+        tokio::join!(self.ping(path), async {
+            waiting_on(pool, holder_pid, "the ping waits to write its run").await;
+            let mut changed = Vec::new();
+            for change in changes {
+                changed.push(
+                    tokio::time::timeout(Duration::from_secs(10), self.send(change))
+                        .await
+                        .expect("a change waited on the ping"),
+                );
+            }
+            holder.commit().await.expect("the holder lets go");
+            changed
+        })
+    }
+
+    /// A `GET` ping naming `run`, held up on a run of `monitor`'s being opened
+    /// under that id: a session of `pool`'s inserts it and holds it
+    /// uncommitted, so the ping, its monitor read, waits there to open its
+    /// own; `beside` runs once it does, and the session lets go, the run it
+    /// was opening never opened, once `beside` is done. The ping's answer and
+    /// what `beside` came to.
+    async fn ping_as_its_run_is_opened<T>(
+        &self,
+        pool: &PgPool,
+        path: &str,
+        run: &str,
+        monitor: Uuid,
+        beside: impl Future<Output = T>,
+    ) -> ((StatusCode, String), T) {
+        let mut opener = pool.begin().await.expect("the opener's transaction");
+        let opener_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *opener)
+            .await
+            .expect("the opener's session");
+        let opening = sqlx::query(
+            "INSERT INTO telemetry.open_runs (id, project_id, organization_id, monitor_id, \
+                 agent, source, ends_by)
+             SELECT $1, project_id, organization_id, id, agent, 'ping', now() + interval '1 day'
+               FROM telemetry.monitors WHERE id = $2",
+        )
+        .bind(Uuid::parse_str(run).expect("a run's id"))
+        .bind(monitor)
+        .execute(&mut *opener)
+        .await
+        .expect("a run being opened")
+        .rows_affected();
+        assert_eq!(opening, 1, "no monitor to open a run of");
+        tokio::join!(self.ping(path), async {
+            waiting_on(pool, opener_pid, "the ping waits on the run being opened").await;
+            let done = beside.await;
+            opener.rollback().await.expect("the opener lets go");
+            done
+        })
+    }
+
+    /// A `GET` ping and the console's pause of `slug`, the pause still being
+    /// written as the ping comes to settle the monitor: a session of
+    /// `pool`'s holds the outbox, so the ping, its monitor read, waits there
+    /// to file its run; the pause is sent once it does, and a second session
+    /// holds the chain's records, so the pause, its monitor written, waits
+    /// there to record itself; the first lets go, and the second once the
+    /// ping waits on the pause. The ping's answer and the pause's status.
+    async fn ping_as_a_pause_commits(
+        &self,
+        pool: &PgPool,
+        path: &str,
+        slug: &str,
+    ) -> ((StatusCode, String), StatusCode) {
+        let mut outbox = pool.begin().await.expect("a holder's transaction");
+        let outbox_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *outbox)
+            .await
+            .expect("a holder's session");
+        sqlx::query("LOCK TABLE telemetry.outbox IN SHARE MODE")
+            .execute(&mut *outbox)
+            .await
+            .expect("hold the outbox");
+        let mut chain = pool.begin().await.expect("a holder's transaction");
+        let chain_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *chain)
+            .await
+            .expect("a holder's session");
+        sqlx::query("LOCK TABLE audit.events IN SHARE MODE")
+            .execute(&mut *chain)
+            .await
+            .expect("hold the chain's records");
+        let pause = self.request("POST", &format!("{MONITORS}/{slug}/pause"), None);
+        tokio::join!(self.ping(path), async {
+            waiting_on(pool, outbox_pid, "the ping waits to file its run").await;
+            let paused = tokio::time::timeout(Duration::from_secs(10), self.send(pause));
+            let (paused, ()) = tokio::join!(paused, async {
+                let pause_pid =
+                    waiting_on(pool, chain_pid, "the pause waits to record itself").await;
+                outbox.commit().await.expect("the ping goes on");
+                waiting_on(pool, pause_pid, "the ping waits on the pause").await;
+                chain.commit().await.expect("the pause goes on");
+            });
+            paused.expect("the pause was answered").0
+        })
+    }
+
+    /// A `GET` ping sent while a purge is under way: the project's, or its
+    /// organization's where `whole_organization` says so. Two sessions of
+    /// `pool`'s hold the monitors and the outbox, so the purge waits first at
+    /// its first delete, where the project is tried as a ping holds it in
+    /// place, and, the first session let go, at its second, the project's
+    /// monitors deleted, where the project is tried again and the ping sent;
+    /// the second lets go once the ping waits on the purge, or has had a
+    /// moment to — a ping kept out never does, and the probes are what catch
+    /// a purge that does not hold the project. The ping's answer, what the
+    /// purge came to, and whether a ping could hold the project in place at
+    /// either point.
+    async fn ping_as_a_purge_runs(
+        &self,
+        pool: &PgPool,
+        path: &str,
+        whole_organization: bool,
+    ) -> ((StatusCode, String), sqlx::Result<u64>, bool) {
+        let (monitors, monitors_pid) = holding(pool, "telemetry.monitors").await;
+        let (outbox, outbox_pid) = holding(pool, "telemetry.outbox").await;
+        let mut purger = maintenance_scope(&self.state.db, TelemetryLane)
+            .await
+            .expect("the lane");
+        let purger_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(purger.conn())
+            .await
+            .expect("the purge's session");
+        let probed = std::slice::from_ref(&self.project);
+        let (purged, (answer, held)) = tokio::join!(
+            async {
+                let purged = if whole_organization {
+                    db::purge_organization(&mut purger, &self.organization).await
+                } else {
+                    db::purge_project(&mut purger, &self.project).await
+                };
+                match purged {
+                    Ok(purged) => purger.commit().await.map(|()| purged),
+                    Err(e) => {
+                        purger.rollback().await.expect("the purge lets go");
+                        Err(e)
+                    }
+                }
+            },
+            async {
+                waiting_on(pool, monitors_pid, "the purge waits to delete the monitors").await;
+                let held_first = !holdable(pool, probed).await.is_empty();
+                monitors.commit().await.expect("the monitors let go");
+                waiting_on(pool, outbox_pid, "the purge waits to delete the outbox").await;
+                let held_then = !holdable(pool, probed).await.is_empty();
+                let (answer, _) = tokio::join!(self.ping(path), async {
+                    let waited =
+                        waits_on_within(pool, purger_pid, Duration::from_millis(150)).await;
+                    outbox.commit().await.expect("the outbox lets go");
+                    waited
+                });
+                (answer, held_first || held_then)
+            },
+        );
+        (answer, purged, held)
     }
 
     /// A `GET` ping sent while another writer, a session of `pool`'s, takes
@@ -808,6 +995,81 @@ async fn waiting_on(pool: &PgPool, pid: i32, what: &str) -> i32 {
     .expect("the sessions waiting");
     assert_eq!(waiting.len(), 1, "{what}: {waiting:?} wait");
     waiting.first().copied().expect("the session waiting")
+}
+
+/// A transaction of `pool`'s holding `table` in `SHARE` mode, which every
+/// write to the table waits on, and its session.
+async fn holding(pool: &PgPool, table: &str) -> (sqlx::Transaction<'static, sqlx::Postgres>, i32) {
+    let mut holder = pool.begin().await.expect("a holder's transaction");
+    let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *holder)
+        .await
+        .expect("a holder's session");
+    sqlx::query(&format!("LOCK TABLE {table} IN SHARE MODE"))
+        .execute(&mut *holder)
+        .await
+        .expect("hold the table");
+    (holder, pid)
+}
+
+/// Those of `projects` a ping could hold in place now.
+async fn holdable(pool: &PgPool, projects: &[ProjectId]) -> Vec<ProjectId> {
+    let mut held = Vec::new();
+    for project in projects {
+        let mut probe = pool.begin().await.expect("a probe's transaction");
+        if project_move::try_hold_in_place(&mut probe, project)
+            .await
+            .expect("try the project")
+        {
+            held.push(project.clone());
+        }
+        probe.rollback().await.expect("the probe lets go");
+    }
+    held
+}
+
+/// Whether a session comes to wait on `pid`'s locks within `within`, for a
+/// step one may or may not come to wait at.
+async fn waits_on_within(pool: &PgPool, pid: i32, within: Duration) -> bool {
+    let deadline = std::time::Instant::now() + within;
+    loop {
+        let waiting: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+                             WHERE $1 = ANY (pg_blocking_pids(pid)))",
+        )
+        .bind(pid)
+        .fetch_one(pool)
+        .await
+        .expect("ask who waits");
+        if waiting || std::time::Instant::now() >= deadline {
+            return waiting;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// The tables a purge empties in which the project has a row still.
+async fn left_of(pool: &PgPool, project: &ProjectId) -> Vec<&'static str> {
+    let mut left = Vec::new();
+    for table in [
+        "monitors",
+        "open_runs",
+        "ping_keys",
+        "outbox",
+        "project_settings",
+    ] {
+        let rows: i64 = sqlx::query_scalar(&format!(
+            "SELECT count(*) FROM telemetry.{table} WHERE project_id = $1"
+        ))
+        .bind(project)
+        .fetch_one(pool)
+        .await
+        .expect("count the project's rows");
+        if rows > 0 {
+            left.push(table);
+        }
+    }
+    left
 }
 
 /// Whether every row the project has in `table` is filed under
@@ -1231,6 +1493,23 @@ async fn a_run_is_opened_heard_and_ended_by_its_pings(pool: PgPool) {
     assert_eq!(monitor["state"], "paused");
     assert!(monitor["next_due_at"].is_null());
     assert_eq!(finished_runs(&pool, &p.project).await.len(), 8);
+
+    // Resumed, a success with no run open keeps the monitor's state, and so
+    // the clock of its last change, and moves its due time on; a failure
+    // moves both.
+    let (status, resumed) = p
+        .send(p.request("POST", &format!("{MONITORS}/hourly-sync/resume"), None))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{resumed}");
+    p.ping_ok(&format!("/{key}/hourly-sync")).await;
+    let monitor = p.monitor("hourly-sync").await;
+    assert_eq!(monitor["state"], "healthy");
+    assert_eq!(monitor["state_changed_at"], resumed["state_changed_at"]);
+    assert!(at(&monitor["next_due_at"]) > at(&resumed["next_due_at"]));
+    p.ping_ok(&format!("/{key}/hourly-sync/fail")).await;
+    let failed = p.monitor("hourly-sync").await;
+    assert_eq!(failed["state"], "failed");
+    assert!(at(&failed["state_changed_at"]) > at(&monitor["state_changed_at"]));
 }
 
 /// A checkpoint's steps and spend are totals so far, which never fall: one
@@ -1823,6 +2102,244 @@ async fn a_ping_beside_its_monitors_delete_waits_and_makes_it_anew(pool: PgPool)
     );
 }
 
+/// A ping settles its monitor from the row as it stands, held as its write
+/// holds it, never from the monitor as it read it at its start: a pause or a
+/// save the console commits in between is what the ping settles, and stands.
+/// An end ping that comes as its monitor is paused files its run and leaves
+/// the monitor paused and due at no time, and a `/start` opens its run and
+/// leaves it the same; an end ping that comes to settle the monitor while a
+/// pause is still being written waits for the pause, and leaves it be; an
+/// end ping as the monitor's timing moves from hourly to daily makes it due
+/// a day on, and a `/start` as it moves back leaves it due when the save
+/// said; a rename in between changes nothing of what an end ping settles;
+/// a `/fail` as the monitor is paused and resumed fails it after the resume,
+/// its clocks later than the resume's, not the ping's start; and a `/start`
+/// as another ping's settling moves the due time keeps the due time it moved
+/// to, and one as another run's checkpoint takes the monitor past its bound
+/// leaves it there. A ping
+/// that wrote what it had read would undo each: the paused monitor watched
+/// again, healthy or running and due, its owner's pause still on the chain;
+/// the daily one due within the hour, which the ticker would call late.
+#[sqlx::test]
+async fn a_ping_settles_its_monitor_as_it_stands_not_as_it_read_it(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.make(hourly()).await;
+    let monitor = format!("{MONITORS}/hourly-sync");
+    let pause = || p.request("POST", &format!("{monitor}/pause"), None);
+    let resume = || p.request("POST", &format!("{monitor}/resume"), None);
+    let saved = |interval_s: i32, name: &str| {
+        let mut saved = hourly();
+        saved["interval_s"] = json!(interval_s);
+        saved["name"] = json!(name);
+        p.request("PUT", &monitor, Some(saved))
+    };
+
+    // An end ping as its monitor is paused: the run filed, the monitor left
+    // paused and due at no time.
+    let run = rid();
+    p.ping_ok(&format!("/{key}/hourly-sync/start?rid={run}"))
+        .await;
+    let (ended, changed) = p
+        .ping_as_its_monitor_changes(
+            &pool,
+            &format!("/{key}/hourly-sync?rid={run}"),
+            "outbox",
+            vec![pause()],
+        )
+        .await;
+    assert_eq!((ended.0, ended.1.as_str()), (StatusCode::OK, "OK"));
+    assert_eq!(changed[0].0, StatusCode::OK, "{}", changed[0].1);
+    let settled = p.monitor("hourly-sync").await;
+    assert_eq!(settled["state"], "paused", "{settled}");
+    assert_eq!(settled["next_due_at"], Value::Null, "{settled}");
+    assert_eq!(finished_runs(&pool, &p.project).await.len(), 1);
+
+    // A `/start` as it is paused again: the run opened, the monitor left
+    // paused.
+    let (resumed, body) = p.send(resume()).await;
+    assert_eq!(resumed, StatusCode::OK, "{body}");
+    let run = rid();
+    let (started, changed) = p
+        .ping_as_its_monitor_changes(
+            &pool,
+            &format!("/{key}/hourly-sync/start?rid={run}"),
+            "open_runs",
+            vec![pause()],
+        )
+        .await;
+    assert_eq!((started.0, started.1.as_str()), (StatusCode::OK, "OK"));
+    assert_eq!(changed[0].0, StatusCode::OK, "{}", changed[0].1);
+    let settled = p.monitor("hourly-sync").await;
+    assert_eq!(settled["state"], "paused", "{settled}");
+    assert_eq!(settled["next_due_at"], Value::Null, "{settled}");
+    assert_eq!(open_runs(&pool, &p.project).await.len(), 1);
+
+    // Its end, as a pause is still being written when the ping comes to
+    // settle the monitor: the ping waits for the pause, and leaves it be.
+    let (resumed, body) = p.send(resume()).await;
+    assert_eq!(resumed, StatusCode::OK, "{body}");
+    let (ended, paused) = p
+        .ping_as_a_pause_commits(
+            &pool,
+            &format!("/{key}/hourly-sync?rid={run}"),
+            "hourly-sync",
+        )
+        .await;
+    assert_eq!((ended.0, ended.1.as_str()), (StatusCode::OK, "OK"));
+    assert_eq!(paused, StatusCode::OK);
+    let settled = p.monitor("hourly-sync").await;
+    assert_eq!(settled["state"], "paused", "{settled}");
+    assert_eq!(settled["next_due_at"], Value::Null, "{settled}");
+    assert_eq!(finished_runs(&pool, &p.project).await.len(), 2);
+
+    // A run's end, as the monitor's timing moves from hourly to daily: due a
+    // day on from the end, not an hour.
+    let (resumed, body) = p.send(resume()).await;
+    assert_eq!(resumed, StatusCode::OK, "{body}");
+    let run = rid();
+    p.ping_ok(&format!("/{key}/hourly-sync/start?rid={run}"))
+        .await;
+    let (ended, changed) = p
+        .ping_as_its_monitor_changes(
+            &pool,
+            &format!("/{key}/hourly-sync?rid={run}"),
+            "outbox",
+            vec![saved(86_400, "Hourly sync")],
+        )
+        .await;
+    assert_eq!((ended.0, ended.1.as_str()), (StatusCode::OK, "OK"));
+    assert_eq!(changed[0].0, StatusCode::OK, "{}", changed[0].1);
+    let settled = p.monitor("hourly-sync").await;
+    assert_eq!(settled["state"], "healthy", "{settled}");
+    let due_in = at(&settled["next_due_at"]) - Utc::now();
+    assert!(due_in > chrono::Duration::hours(23), "{settled}");
+
+    // A `/start` as it moves back to hourly: due when the save said.
+    let run = rid();
+    let (started, changed) = p
+        .ping_as_its_monitor_changes(
+            &pool,
+            &format!("/{key}/hourly-sync/start?rid={run}"),
+            "open_runs",
+            vec![saved(3_600, "Hourly sync")],
+        )
+        .await;
+    assert_eq!((started.0, started.1.as_str()), (StatusCode::OK, "OK"));
+    let (saved_hourly, body) = &changed[0];
+    assert_eq!(*saved_hourly, StatusCode::OK, "{body}");
+    let settled = p.monitor("hourly-sync").await;
+    assert_eq!(settled["state"], "running", "{settled}");
+    assert_eq!(settled["next_due_at"], body["next_due_at"], "{settled}");
+
+    // Its end, as the monitor is renamed: settled as if nothing had changed,
+    // due an hour on from the end.
+    let (ended, changed) = p
+        .ping_as_its_monitor_changes(
+            &pool,
+            &format!("/{key}/hourly-sync?rid={run}"),
+            "outbox",
+            vec![saved(3_600, "Hourly sync, renamed")],
+        )
+        .await;
+    assert_eq!((ended.0, ended.1.as_str()), (StatusCode::OK, "OK"));
+    let (renamed, body) = &changed[0];
+    assert_eq!(*renamed, StatusCode::OK, "{body}");
+    let settled = p.monitor("hourly-sync").await;
+    assert_eq!(settled["name"], "Hourly sync, renamed");
+    assert_eq!(settled["state"], "healthy", "{settled}");
+    assert!(
+        at(&settled["next_due_at"]) > at(&body["next_due_at"]),
+        "{settled}"
+    );
+    assert_eq!(finished_runs(&pool, &p.project).await.len(), 4);
+
+    // A run's `/fail`, as the monitor is paused and resumed: the monitor
+    // failed, its state changed, and the row written, after the resume, not
+    // when the ping began, before it.
+    let run = rid();
+    p.ping_ok(&format!("/{key}/hourly-sync/start?rid={run}"))
+        .await;
+    let (failed, changed) = p
+        .ping_as_its_monitor_changes(
+            &pool,
+            &format!("/{key}/hourly-sync/fail?rid={run}"),
+            "outbox",
+            vec![pause(), resume()],
+        )
+        .await;
+    assert_eq!((failed.0, failed.1.as_str()), (StatusCode::OK, "OK"));
+    for (status, body) in &changed {
+        assert_eq!(*status, StatusCode::OK, "{body}");
+    }
+    let resumed = &changed[1].1;
+    let settled = p.monitor("hourly-sync").await;
+    assert_eq!(settled["state"], "failed", "{settled}");
+    assert!(
+        at(&settled["state_changed_at"]) > at(&resumed["state_changed_at"]),
+        "{settled}"
+    );
+    assert!(
+        at(&settled["updated_at"]) > at(&resumed["updated_at"]),
+        "{settled}"
+    );
+    assert_eq!(finished_runs(&pool, &p.project).await.len(), 5);
+
+    // A `/start` as another ping files a run of no duration: the `/start`
+    // held up on a run being opened under the id it names while the other's
+    // settling commits, moving the due time on; the `/start` runs the
+    // monitor and keeps that due time, not the one it read.
+    p.ping_ok(&format!("/{key}/hourly-sync")).await;
+    let id = Uuid::parse_str(
+        p.monitor("hourly-sync").await["id"]
+            .as_str()
+            .expect("an id"),
+    )
+    .expect("a monitor's id");
+    let opened = rid();
+    let (started, due) = p
+        .ping_as_its_run_is_opened(
+            &pool,
+            &format!("/{key}/hourly-sync/start?rid={opened}"),
+            &opened,
+            id,
+            async {
+                p.ping_ok(&format!("/{key}/hourly-sync")).await;
+                p.monitor("hourly-sync").await["next_due_at"].clone()
+            },
+        )
+        .await;
+    assert_eq!((started.0, started.1.as_str()), (StatusCode::OK, "OK"));
+    let settled = p.monitor("hourly-sync").await;
+    assert_eq!(settled["state"], "running", "{settled}");
+    assert_eq!(settled["next_due_at"], due, "{settled}");
+    assert_eq!(finished_runs(&pool, &p.project).await.len(), 7);
+
+    // A `/start` as another run's checkpoint takes it past its step cap: the
+    // monitor, found healthy when the `/start` read it, stays over its bound
+    // while that run goes on, as the checkpoint left it.
+    for (status, body) in [p.send(pause()).await, p.send(resume()).await] {
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    let next = rid();
+    let (started, ()) = p
+        .ping_as_its_run_is_opened(
+            &pool,
+            &format!("/{key}/hourly-sync/start?rid={next}"),
+            &next,
+            id,
+            p.ping_ok(&format!(
+                "/{key}/hourly-sync/checkpoint?rid={opened}&steps=4"
+            )),
+        )
+        .await;
+    assert_eq!((started.0, started.1.as_str()), (StatusCode::OK, "OK"));
+    let settled = p.monitor("hourly-sync").await;
+    assert_eq!(settled["state"], "over_bound", "{settled}");
+    assert_eq!(open_runs(&pool, &p.project).await.len(), 2);
+}
+
 /// A ping a move kept out files its rows where the project went: the move
 /// holds the project's move lock alone, taken before any chain lock as a
 /// transfer takes it, and the ping reads its key's organization only once it
@@ -2401,7 +2918,18 @@ async fn a_monitor_whose_saved_timing_cannot_be_read_refuses_no_ping(pool: PgPoo
         .rows_affected();
         assert_eq!(written, 1, "{unreadable}");
         p.ping_ok(&format!("/{key}/hourly-sync/start")).await;
+        // Logged once for the ping that ends the run, however its settling
+        // goes: not again for the row it holds, where nothing moved it.
+        let (capturing, logs) = telmoni_shared::test_util::captured_logs();
         p.ping_ok(&format!("/{key}/hourly-sync{end}")).await;
+        drop(capturing);
+        assert_eq!(
+            logs.text()
+                .matches("a saved monitor's timing cannot be read")
+                .count(),
+            1,
+            "{unreadable}"
+        );
         assert!(
             open_runs(&pool, &p.project).await.is_empty(),
             "{unreadable}: the run's end was rolled back"
@@ -3506,9 +4034,10 @@ async fn the_purges_and_a_move_take_the_keys_runs_and_outbox_rows_with_the_proje
     assert!(open_runs(&pool, &q.project).await.is_empty());
 }
 
-/// A purge deletes its monitors before anything else, each taking its runs
-/// by the cascade, as every writer of a monitor and its runs takes the
-/// monitor first: a ping in flight, which holds its monitor from its read,
+/// A purge holds the project alone before it deletes anything, as a move
+/// does, and its monitors go first, each taking its runs by the cascade, as
+/// every writer of a monitor and its runs takes the monitor first: a ping in
+/// flight, which holds its project in place and its monitor from its read,
 /// is waited for before any row of the project's is taken, so the outbox
 /// row it writes goes with the rest, where a purge that took the outbox
 /// first left it behind. A project's purge and an organization's alike.
@@ -3566,6 +4095,216 @@ async fn a_purge_waits_for_the_pings_in_flight_before_it_takes_their_runs(pool: 
     }
 }
 
+/// A purge holds each project it purges alone, as a move does, before it
+/// deletes any of the project's rows: so a first ping sent while one is under
+/// way is kept out until it commits, and then finds its key gone, a 404 —
+/// where it took the project's settings row and then waited on a row the
+/// purge had deleted, the monitor its own would share an agent with or, by
+/// the cascade, the run its own would share an id with, while the purge
+/// waited on the settings row: a circle Postgres breaks by failing one of
+/// them, a 500 for the crontab or a purge auth does not try again. The
+/// project is held from before the purge's first delete, so no ping is
+/// let in while the purge deletes its monitors either. A project's purge and
+/// an organization's alike.
+#[sqlx::test]
+async fn a_purge_keeps_out_the_first_pings_beside_it(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    for whole_organization in [false, true] {
+        for shares_its_run in [false, true] {
+            let p = project(&pool);
+            let key = p.mint().await;
+            // A run of another monitor's under the id the first ping names,
+            // or another monitor for the agent its monitor would carry.
+            let path = if shares_its_run {
+                p.make(json!({ "name": "Report", "slug": "report-a" }))
+                    .await;
+                let run = rid();
+                p.ping_ok(&format!("/{key}/report-a/start?rid={run}")).await;
+                format!("/{key}/nightly-report/start?rid={run}")
+            } else {
+                p.make(json!({ "name": "Report", "slug": "report-a", "agent": "nightly-report" }))
+                    .await;
+                format!("/{key}/nightly-report")
+            };
+            let (answer, purged, held) = p
+                .ping_as_a_purge_runs(&pool, &path, whole_organization)
+                .await;
+            assert_eq!(answer.0, StatusCode::NOT_FOUND, "{path}: {}", answer.1);
+            assert!(purged.expect("purged") > 0, "{path}");
+            assert!(
+                !held,
+                "{path}: a ping held the project in place beside the purge"
+            );
+            assert!(
+                left_of(&pool, &p.project).await.is_empty(),
+                "{path}: outlived the purge in {:?}",
+                left_of(&pool, &p.project).await
+            );
+        }
+    }
+}
+
+/// A purge waits for a project held in place no longer than a tier's roles
+/// wait for any lock, set on its own transaction: so where the roles carry
+/// none — the Compose quickstart connects as the superuser, as this suite
+/// does — a purge its caller has given up on never stays queued for the
+/// lock, turning the project's pings away for as long as the hold lasts.
+/// Past two seconds it fails, and the project's rows stand for the next.
+#[sqlx::test]
+async fn a_purge_waits_two_seconds_at_most_for_a_project_held_in_place(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    p.mint().await;
+    let mut in_place = pool.begin().await.expect("a ping's transaction");
+    assert!(
+        project_move::try_hold_in_place(&mut in_place, &p.project)
+            .await
+            .expect("try the project")
+    );
+    let mut purger = maintenance_scope(&p.state.db, TelemetryLane)
+        .await
+        .expect("the lane");
+    let started = std::time::Instant::now();
+    let purged = tokio::time::timeout(
+        Duration::from_secs(10),
+        db::purge_project(&mut purger, &p.project),
+    )
+    .await
+    .expect("the purge waited on past its lock's time");
+    let waited = started.elapsed();
+    let refused = purged.expect_err("a purge beside a project held in place");
+    assert_eq!(
+        refused
+            .as_database_error()
+            .and_then(|e| e.code())
+            .as_deref(),
+        Some("55P03"),
+        "{refused}"
+    );
+    assert!(
+        (Duration::from_secs(2)..Duration::from_secs(4)).contains(&waited),
+        "{waited:?}"
+    );
+    purger.rollback().await.expect("the purge lets go");
+    in_place.rollback().await.expect("the ping ends");
+    assert_eq!(
+        left_of(&pool, &p.project).await,
+        ["ping_keys", "project_settings"]
+    );
+}
+
+/// A project's purge closes its ping lane before anything that can fail: its
+/// keys go first, on their own, so a purge cut short — by a store that does
+/// not answer, as this suite's does not, or by a ping holding the project
+/// past the purge's two seconds — leaves no key opening the lane, where the
+/// deleted project's pings went on being answered, and its first pings
+/// making monitors, until its organization's purge. The rest of its rows
+/// stand for that purge, which finds them through the settings row.
+#[sqlx::test]
+async fn a_projects_purge_closes_its_ping_lane_before_anything_can_fail(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.make(hourly()).await;
+    p.ping_ok(&format!("/{key}/hourly-sync")).await;
+    let refused = TelemetrySeam(p.state.clone())
+        .purge_project(&p.project)
+        .await
+        .expect_err("a purge over a store that does not answer");
+    assert_eq!(
+        refused.to_problem_details().type_uri,
+        "/errors/telemetry/store-unavailable"
+    );
+    for path in [
+        format!("/{key}/hourly-sync"),
+        format!("/{key}/nightly-report"),
+    ] {
+        let (status, body) = p.ping(&path).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}: {body}");
+    }
+    assert_eq!(
+        left_of(&pool, &p.project).await,
+        ["monitors", "outbox", "project_settings"],
+        "the rest stands for the organization's purge, and no first ping made more"
+    );
+}
+
+/// An organization's purge holds every project its rows name before it
+/// deletes any of them, wherever the organization is named: a project whose
+/// settings row is filed under another organization — as an export racing
+/// the project's transfer leaves one — and whose monitors, ping keys or
+/// outbox rows alone name this one is held as one whose rows all do, and
+/// only the rows filed under the organization go with its purge.
+#[sqlx::test]
+async fn an_organizations_purge_holds_every_project_its_rows_name(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let (organization, elsewhere) = (OrganizationId::new(), OrganizationId::new());
+    let tables = ["monitors", "ping_keys", "outbox", "project_settings"];
+    let mut named = Vec::new();
+    for named_by in tables {
+        let p = project_under(&pool, organization.clone(), Arc::new(NoLimits));
+        let key = p.mint().await;
+        p.make(hourly()).await;
+        p.ping_ok(&format!("/{key}/hourly-sync")).await;
+        for table in tables.iter().filter(|table| **table != named_by) {
+            let refiled = sqlx::query(&format!(
+                "UPDATE telemetry.{table} SET organization_id = $2 WHERE project_id = $1"
+            ))
+            .bind(&p.project)
+            .bind(&elsewhere)
+            .execute(&pool)
+            .await
+            .expect("re-file the project's rows")
+            .rows_affected();
+            assert!(refiled > 0, "{named_by}: no row in {table} to re-file");
+        }
+        named.push((named_by, p.project.clone(), p.state.clone()));
+    }
+    let projects: Vec<ProjectId> = named
+        .iter()
+        .map(|(_, project, _)| project.clone())
+        .collect();
+    let (monitors, monitors_pid) = holding(&pool, "telemetry.monitors").await;
+    let mut purger = maintenance_scope(&named[0].2.db, TelemetryLane)
+        .await
+        .expect("the lane");
+    let (purged, held) = tokio::join!(
+        async {
+            let purged = db::purge_organization(&mut purger, &organization)
+                .await
+                .expect("purged");
+            purger.commit().await.expect("the purge commits");
+            purged
+        },
+        async {
+            waiting_on(
+                &pool,
+                monitors_pid,
+                "the purge waits to delete the monitors",
+            )
+            .await;
+            let held = holdable(&pool, &projects).await;
+            monitors.commit().await.expect("the monitors let go");
+            held
+        },
+    );
+    assert!(held.is_empty(), "held in place beside the purge: {held:?}");
+    assert_eq!(purged, 4, "one row named the organization in each project");
+    for (named_by, project, _) in &named {
+        let filed_elsewhere: Vec<&str> = [
+            "monitors",
+            "open_runs",
+            "ping_keys",
+            "outbox",
+            "project_settings",
+        ]
+        .into_iter()
+        .filter(|table| *table != *named_by && *table != "open_runs")
+        .collect();
+        assert_eq!(left_of(&pool, project).await, filed_elsewhere, "{named_by}");
+    }
+}
+
 /// The hourly monitor made in `p`, with a run of its open and another
 /// ended and waiting in the outbox: a row in each table a move rewrites.
 async fn a_run_open_and_one_filed(pool: &PgPool, p: &Project, key: &str) {
@@ -3581,13 +4320,14 @@ async fn a_run_open_and_one_filed(pool: &PgPool, p: &Project, key: &str) {
 /// A project's move holds its monitors before it rewrites anything, as
 /// every writer of a monitor and its runs takes the monitor first, so a
 /// monitor's delete or the project's purge beside it — a settling's move
-/// holds no chain lock, and keeps no purge out — waits for the move holding
-/// nothing the move wants: here the move is held up on the project's ping
-/// key, its monitors held and its outbox rows and runs rewritten already,
-/// and each, sent then, waits on it; once the key is let go the move commits
-/// and the other goes through. Without the share each took the monitor and
-/// then met the move's runs or outbox rows while the move waited on the
-/// monitor, a circle Postgres breaks by failing one of them.
+/// holds no chain lock, and the move here no move lock, which the purge
+/// would wait on first — waits for the move holding nothing the move wants:
+/// here the move is held up on the project's ping key, its monitors held and
+/// its outbox rows and runs rewritten already, and each, sent then, waits on
+/// it; once the key is let go the move commits and the other goes through.
+/// Without the share each took the monitor and then met the move's runs or
+/// outbox rows while the move waited on the monitor, a circle Postgres
+/// breaks by failing one of them.
 #[sqlx::test]
 async fn a_move_and_a_delete_or_a_purge_beside_it_wait_in_turn(pool: PgPool) {
     apply_audit_migrations(&pool).await;

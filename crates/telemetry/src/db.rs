@@ -5,6 +5,7 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::{
     HasProject, Lane, Maintenance, MaintenanceLane, ProjectAndOrganization, Scoped,
 };
@@ -92,11 +93,19 @@ pub async fn projects_of(
 /// Every settings row of an organization's projects, their saved views,
 /// found through those rows before they go, since a view names no
 /// organization, and their monitors, each with its open runs, ping keys and
-/// outbox rows, which name it (`PURGED_TABLES`).
+/// outbox rows, which name it (`PURGED_TABLES`): each project the rows name
+/// held alone first, as [`purge_project`] holds its one, in id order, so two
+/// purges of the organization take them in one order. ⚠ Each is held to the
+/// purge's commit, an entry each in Postgres's lock table, which holds
+/// `max_locks_per_transaction` entries for each connection the server
+/// allows, shared by all of them: an organization of thousands of projects
+/// needs it raised before its purge can finish.
 pub async fn purge_organization(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     organization_id: &OrganizationId,
 ) -> sqlx::Result<u64> {
+    let named = projects_named(tx, organization_id).await?;
+    hold_alone(tx, &named).await?;
     let mut purged = 0;
     for table in PURGED_TABLES {
         purged += sqlx::query(&format!("DELETE FROM {table} WHERE organization_id = $1"))
@@ -122,16 +131,96 @@ pub async fn purge_organization(
     Ok(purged + views + settings)
 }
 
+/// Every project the organization's rows here name as they stand when read
+/// — its settings rows, monitors, ping keys and outbox rows — in id order:
+/// the projects its purge deletes rows of, and holds alone first. Every
+/// table the purge deletes from by the organization, so a project whose
+/// rows a writer filed under the organization apart from its settings row
+/// is held as well.
+async fn projects_named(
+    tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
+    organization_id: &OrganizationId,
+) -> sqlx::Result<Vec<ProjectId>> {
+    sqlx::query_scalar(
+        "SELECT project_id FROM telemetry.project_settings WHERE organization_id = $1
+          UNION SELECT project_id FROM telemetry.monitors WHERE organization_id = $1
+          UNION SELECT project_id FROM telemetry.ping_keys WHERE organization_id = $1
+          UNION SELECT project_id FROM telemetry.outbox WHERE organization_id = $1
+          ORDER BY project_id",
+    )
+    .bind(organization_id)
+    .fetch_all(tx.conn())
+    .await
+}
+
+/// How long a purge waits to hold a project alone, and for every lock after
+/// it: what a tier's roles wait for any lock, set on the purge's transaction
+/// as well, so that where the roles carry none — the Compose quickstart
+/// connects as the superuser — a purge its caller has given up on is not
+/// left queued for the lock, turning the project's pings away for as long
+/// as one in flight holds it.
+const PURGE_LOCK_WAIT: &str = "2s";
+
+/// `project_ids` held alone, in the order given, as a move holds its
+/// project, the transaction waiting no longer than [`PURGE_LOCK_WAIT`] for
+/// any lock from here on.
+async fn hold_alone(
+    tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
+    project_ids: &[ProjectId],
+) -> sqlx::Result<()> {
+    wait_no_longer(tx).await?;
+    for project_id in project_ids {
+        project_move::lock_for_move(tx.conn(), project_id).await?;
+    }
+    Ok(())
+}
+
+/// The purge's transaction held to [`PURGE_LOCK_WAIT`] for any lock it
+/// waits on from here on.
+async fn wait_no_longer(tx: &mut Scoped<'_, Maintenance<TelemetryLane>>) -> sqlx::Result<()> {
+    sqlx::query("SELECT set_config('lock_timeout', $1, true)")
+        .bind(PURGE_LOCK_WAIT)
+        .execute(tx.conn())
+        .await?;
+    Ok(())
+}
+
+/// A deleted project's ping keys, gone in a transaction of their own before
+/// the rest of its purge: so the ping lane is closed to the project whatever
+/// comes after, where the store's mark or the held purge, each of which can
+/// fail and leave the rest to the organization's purge, would leave its keys
+/// opening the lane — its pings answered, its first pings making monitors.
+/// Safe outside the project's hold: a ping takes no lock on its key's row in
+/// its own transaction, touching it where it resolves it, and reads the key
+/// again once it holds the project, so one in flight finds it gone, a 404.
+/// Answers how many went.
+pub async fn close_ping_lane(
+    tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
+    project_id: &ProjectId,
+) -> sqlx::Result<u64> {
+    wait_no_longer(tx).await?;
+    Ok(
+        sqlx::query("DELETE FROM telemetry.ping_keys WHERE project_id = $1")
+            .bind(project_id)
+            .execute(tx.conn())
+            .await?
+            .rows_affected(),
+    )
+}
+
 /// The tables a purge deletes a project's rows from, filed under its
 /// organization as well as the project, in the order it deletes them: the
 /// monitors first, each locked and then its open runs deleted with it by
-/// the cascade, uncounted. Every writer of a monitor and its runs takes the
-/// monitor first — a ping holds its monitor from its read ([`hold_monitor`])
-/// — and a purge that took a run of a monitor it did not hold, one made
-/// beside it since it began, could wait on that monitor while a ping holding
-/// it waited on the run. The settings row, which the purges find a project
-/// by, and the views, which name no organization, are taken apart from
-/// these, last.
+/// the cascade, uncounted, as every writer of a monitor and its runs takes
+/// the monitor first. The purge holds the project alone before any of them
+/// ([`purge_project`]), so no ping, rotation or move runs beside it, but a
+/// move its caller gave up on over its budget, whose last statement may
+/// still be running; the console's changes take no move lock, and a delete
+/// of a monitor among them, which takes the monitor and then its runs,
+/// meets the purge at the monitor, before either holds a run the other
+/// wants. The settings row,
+/// which the purges find a project by, and the views, which name no
+/// organization, are taken apart from these, last.
 const PURGED_TABLES: [&str; 3] = [
     "telemetry.monitors",
     "telemetry.outbox",
@@ -149,11 +238,30 @@ const MOVED_TABLES: [&str; 4] = [
 ];
 
 /// One project's monitors, each with its open runs, ping keys, outbox rows,
-/// saved views and settings row (`PURGED_TABLES`).
+/// saved views and settings row (`PURGED_TABLES`), the project held alone
+/// first, as a move holds it ([`project_move::lock_for_move`]): the purge
+/// waits for the pings and the rotation's retirements in flight, which hold
+/// it in place, and deletes their rows with the rest, and turns away those
+/// that come after until it commits, when each finds its key gone. So no
+/// ping's transaction writes into the project beside its purge, and a first
+/// ping never takes the settings row, which the purge deletes last, and then
+/// waits on a monitor or a run the purge has deleted, by the agent or the id
+/// its own would share: a circle Postgres breaks by failing one of them.
+/// ⚠ It waits two seconds at most (`PURGE_LOCK_WAIT`) — less what the
+/// store's mark took, where auth gives a project's whole purge two seconds —
+/// and a first ping can hold its project longer, the plan's ceiling read in
+/// a second at most and then the chain lock waited for two: a purge beside
+/// one that does fails, as one ClickHouse does not take fails, and is left
+/// to the organization's, its ping lane closed already ([`close_ping_lane`]).
+/// And it waits with a connection of this pool held: a ping or a retirement
+/// holding the lock needs no other to let go, writing in the one
+/// transaction it holds the lock in, and a move's caller, which needs one
+/// for telemetry's half of the move, gives that half two seconds.
 pub async fn purge_project(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     project_id: &ProjectId,
 ) -> sqlx::Result<u64> {
+    hold_alone(tx, std::slice::from_ref(project_id)).await?;
     let mut purged = 0;
     for table in PURGED_TABLES {
         purged += sqlx::query(&format!("DELETE FROM {table} WHERE project_id = $1"))
@@ -369,11 +477,15 @@ pub async fn monitor<B: HasProject>(
 /// (`PURGED_TABLES`), and a move, which holds its monitors as a ping does
 /// before it rewrites anything ([`move_project`]) — so a ping and such a
 /// writer each wait on the other holding nothing the other wants, never in
-/// a circle. `FOR KEY SHARE` is the share a run's foreign key takes
-/// anyway: it keeps out a delete and a change of the monitor's key — its id,
-/// or the agent its unique index holds — alone, so the pings of one monitor
-/// and the console's other changes go on beside it; and a ping that waited
-/// on a delete finds no monitor by that slug, as a ping after it would.
+/// a circle; a purge and a move hold the project alone besides, so a ping
+/// meets neither, but for a move its caller gave up on over its budget
+/// (`held_in_place` in the ping lane). `FOR KEY SHARE` is the share a run's foreign
+/// key takes anyway: it keeps out a delete and a change of the monitor's
+/// key — its id, or the agent its unique index holds — alone, so the pings
+/// of one monitor and the console's other changes go on beside it, until a
+/// ping raises it to settle the monitor ([`monitor_to_settle`]); and a ping
+/// that waited on a delete finds no monitor by that slug, as a ping after it
+/// would.
 pub async fn hold_monitor<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
@@ -521,24 +633,55 @@ pub async fn set_monitor_state(
     .await
 }
 
+/// One of the project's monitors, by its id, as a ping settles it once its
+/// run is heard: held as the settling's write holds it, `FOR NO KEY
+/// UPDATE`, and read as it stands. The ping read its monitor at its start
+/// ([`hold_monitor`]), and a pause, a resume or a save may have committed
+/// since, which a settling found from that read would write over; found
+/// from this row, it settles what stands, and no other change commits over
+/// it before the ping does. The lock is the one the write takes, raised from
+/// the share the ping holds already, at the same point in the ping, its
+/// last, and taken only where the monitor as the ping read it would be
+/// written: so no writer waits on the ping for it that would not have waited
+/// on the write. `None` where it has no monitor by that id.
+pub async fn monitor_to_settle(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    id: Uuid,
+) -> sqlx::Result<Option<MonitorRow>> {
+    sqlx::query_as(&format!(
+        "SELECT {MONITOR_COLUMNS} FROM telemetry.monitors
+          WHERE project_id = $1 AND id = $2
+            FOR NO KEY UPDATE"
+    ))
+    .bind(project_id)
+    .bind(id)
+    .fetch_optional(tx.conn())
+    .await
+}
+
 /// One of the project's monitors, by its id, after a run of its was heard:
-/// put in `state` where one is named, its `state_changed_at` moved only
-/// where that differs from the state it was in, and its next due time set
-/// to `next_due_at`. `None` where it has no monitor by that id.
+/// put in `state`, its `state_changed_at` moved only where that differs
+/// from the state it was in, and its next due time set to `next_due_at`,
+/// both found from the row [`monitor_to_settle`] holds. Its clocks are this
+/// statement's, never the ping's `now()`: the ping's transaction began
+/// before any change it waited on, and a pause or a save committed since
+/// would otherwise be followed by a state that changed before it. `None`
+/// where it has no monitor by that id.
 pub async fn settle_monitor_run(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
     id: Uuid,
-    state: Option<MonitorState>,
+    state: MonitorState,
     next_due_at: Option<DateTime<Utc>>,
 ) -> sqlx::Result<Option<MonitorRow>> {
     sqlx::query_as(&format!(
         "UPDATE telemetry.monitors
-            SET state = COALESCE($3::text, state),
-                state_changed_at = CASE WHEN $3::text IS NULL OR $3::text = state
-                                        THEN state_changed_at ELSE now() END,
+            SET state = $3,
+                state_changed_at = CASE WHEN state = $3 THEN state_changed_at
+                                        ELSE statement_timestamp() END,
                 next_due_at = $4,
-                updated_at = now()
+                updated_at = statement_timestamp()
           WHERE project_id = $1 AND id = $2
          RETURNING {MONITOR_COLUMNS}"
     ))
@@ -579,13 +722,15 @@ pub async fn delete_monitor<B: HasProject>(
 /// outbox rows, handed to the organization that now holds the project, its
 /// monitors held first as a ping holds its own ([`hold_monitor`]): a move
 /// takes a monitor before its runs as every writer of both does, so a
-/// delete or a purge beside it — a settling's move holds no chain lock —
-/// meets it at the monitors, before either has taken a run of theirs. The
-/// share keeps out only a delete, a purge and a change of a monitor's agent;
-/// the rows are rewritten after it, runs before monitors, an order a ping
-/// that holds a run and then writes its monitor never meets the other way,
-/// and a first ping, which writes the settings row before its monitor, is
-/// kept out by the move lock. Answers whether there was a settings row.
+/// monitor's delete beside it — a settling's move holds no chain lock, and
+/// the console's delete no move lock — meets it at the monitors, before
+/// either has taken a run of theirs. The share keeps out only a delete, a
+/// purge and a change of a monitor's agent; the rows are rewritten after
+/// it, runs before monitors, an order a ping that holds a run and then
+/// writes its monitor never meets the other way; and a first ping, which
+/// writes the settings row before its monitor, is kept out by the move lock
+/// the move's caller holds, which a purge, deleting that row last, waits on.
+/// Answers whether there was a settings row.
 pub async fn move_project(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     project_id: &ProjectId,

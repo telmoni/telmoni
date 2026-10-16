@@ -13,7 +13,12 @@
 //! move holding the lock, or waiting for it, turns a write away at once, to
 //! let go of its connection and try again, so writes kept out by a move hold
 //! no connection while they wait — they take turns on the pool with the
-//! move's own work — and never wait on each other.
+//! move's own work — and never wait on each other. Telemetry's purges take
+//! it alone too, in their own transaction, for each project whose rows they
+//! delete, so no write runs beside a purge either: one in flight is waited
+//! for, as long as the purge's `lock_timeout` lets it, its rows going with
+//! the rest, and one kept out, let in once the purge commits, finds the
+//! project's key gone.
 //!
 //! ⚠ **Before any chain lock.** A write holding its project in place may wait
 //! for its organization's chain lock ([`crate::audit::lock_chain`]), so a
@@ -25,14 +30,15 @@
 //! let in since, until the settling that follows takes the lock again.
 //!
 //! Advisory, so it names no row: no writer of the project's rows waits on it
-//! but those two, whatever order they take their rows in.
+//! but these, whatever order they take their rows in.
 
 use sqlx::PgConnection;
 
 use crate::types::ProjectId;
 
 /// Wait for `project_id`'s move lock alone, held to the end of the caller's
-/// transaction: for a move of the project's rows to another organization.
+/// transaction: for a move of the project's rows to another organization,
+/// or a purge of them.
 pub async fn lock_for_move(conn: &mut PgConnection, project_id: &ProjectId) -> sqlx::Result<()> {
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('move:' || $1, 0))")
         .bind(project_id)

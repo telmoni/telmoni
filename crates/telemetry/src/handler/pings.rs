@@ -5,8 +5,8 @@
 //! `spans` through the outbox ([`crate::outbox`]), as every finished span
 //! does. The key rides in the URL and is resolved outside any tenant, as
 //! auth resolves an API key; the request then runs in the project's scope,
-//! the project held in place while it writes, so a transfer waits for the
-//! ping and the ping for a transfer, its rows filed where the project is.
+//! the project held in place while it writes, so a transfer or a purge waits
+//! for the ping and the ping for either, its rows filed where the project is.
 //! A slug no monitor has makes its monitor, paused as `new`, and the owner
 //! is told once; past the plan's limit, or past the monitors nobody has set
 //! up that one project may hold, nothing is made and the ping is refused
@@ -63,8 +63,8 @@ const SOURCE: &str = "ping";
 /// The zone a monitor a ping makes is in, until its owner sets one.
 const DEFAULT_TIMEZONE: &str = "UTC";
 /// The longest a ping waits out a move of its project to another
-/// organization before it is refused: as long as it waits for its
-/// organization's chain lock.
+/// organization, or its purge, before it is refused: as long as it waits for
+/// its organization's chain lock.
 const MOVE_WAIT: Duration = Duration::from_secs(2);
 /// How long a ping a move keeps out lets go before it first tries again,
 /// doubled at each try after up to [`MOVE_RETRY_MAX`]: a move is over in
@@ -432,14 +432,17 @@ async fn resolve_key(state: &AppState, key: &str) -> Result<ResolvedPingKey, Tel
 /// them. A ping a move keeps out lets go of its connection and tries again a
 /// moment later ([`MOVE_RETRY`]), so the pings waiting out a move hold no
 /// connection while they wait, and is refused once [`MOVE_WAIT`] has passed,
-/// as on the chain lock. A key retired since, or gone with a purged project,
-/// is a 404, as for any key the table does not hold or holds retired.
-/// ⚠ Neither a move given up on over its budget, which may commit once its
-/// caller has let the project go, nor a purge holds the project. Beside the
-/// one, a ping may be refused an update of a row it moved, or file a row
-/// under the organization its key named, the one the settling that follows
-/// then moves every row to; beside the other, a row a ping inserts may
-/// outlive it.
+/// as on the chain lock. A purge holds the project alone as a move does
+/// ([`db::purge_project`]), so a ping in flight is waited for, two seconds
+/// at most, and its rows purged with the rest; one kept out, let in once the
+/// purge commits, finds its key gone — and a project's own purge deletes
+/// the keys before anything else ([`db::close_ping_lane`]). A
+/// key retired since, or gone with a purged project, is a 404, as for any
+/// key the table does not hold or holds retired. ⚠ A move given up on over
+/// its budget, which may commit once its caller has let the project go,
+/// holds it no longer: beside it, a ping may be refused an update of a row
+/// it moved, or file a row under the organization its key named, the one
+/// the settling that follows then moves every row to.
 async fn held_in_place(
     state: &AppState,
     mut key: ResolvedPingKey,
@@ -476,10 +479,10 @@ async fn held_in_place(
         if now >= deadline {
             tracing::warn!(
                 project_id = %key.project_id,
-                "ping: gave up waiting out its project's move to another organization"
+                "ping: gave up waiting out its project's move to another organization, or its purge"
             );
             return Err(AuthError::Conflict(
-                "the project is moving to another organization; try again".into(),
+                "the project is moving to another organization, or being deleted; try again".into(),
             )
             .into());
         }
@@ -489,12 +492,11 @@ async fn held_in_place(
 }
 
 /// The key read again once a first ping holds its organization's chain lock,
-/// which a retirement holds across its own, and has read its monitor again
-/// under it, which a purge of the project may have held it on: a ping that
-/// waited either out finds its key retired or gone, a 404, and makes no
-/// monitor under a key that opens nothing — nor the purged project's rows
-/// anew. Its organization is the one [`held_in_place`] read: a move that
-/// takes the project's lock cannot have passed since.
+/// which a retirement holds across its own: a ping that waited one out finds
+/// its key retired, a 404, and makes no monitor under a key that opens
+/// nothing. Its organization is the one [`held_in_place`] read, and its key
+/// is not gone with a purge: a move or a purge, which take the project's
+/// lock, cannot have passed since.
 async fn still_live(
     key: &ResolvedPingKey,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
@@ -1046,7 +1048,16 @@ fn hearing(run: &OpenRunRow) -> RunEvent {
 /// `new`, and one paused keep, their runs still kept — and its next due
 /// time found again once a run ended, so a run that came is not late; none
 /// where the timing it saved cannot be read now, logged, as a ping and the
-/// run it ends are never refused for that ([`due_after`]).
+/// run it ends are never refused for that ([`due_after`]). Found from the
+/// monitor as it stands once held as the write holds it
+/// ([`db::monitor_to_settle`]), never from the monitor as this ping read
+/// it: a pause, a resume or a save committed since is what the ping
+/// settles, and it stands, where a write found from the read would put a
+/// paused monitor back under watch, or a moved timing's due time back where
+/// the old timing had it. A ping with nothing to change of the monitor as it
+/// read it — one paused or `new`, or one whose state and due time the run
+/// leaves as they are — writes nothing and holds nothing more, as though it
+/// had come before the change.
 async fn settle(
     project_id: &ProjectId,
     monitor: &MonitorRow,
@@ -1054,16 +1065,50 @@ async fn settle(
     now: DateTime<Utc>,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
 ) -> Result<(), TelmoniError> {
-    let state = state_after(monitor.state, event);
-    let next_due_at = match (state, event) {
-        (Some(_), RunEvent::EndedOk | RunEvent::EndedError) => due_after(project_id, monitor, now),
+    let Some(found) = settled(project_id, monitor, event, now) else {
+        return Ok(());
+    };
+    let Some(held) = db::monitor_to_settle(tx, project_id, monitor.id).await? else {
+        return Ok(());
+    };
+    // Found again only where the row moved since the read: a timing that
+    // cannot be read is logged once a ping, not once each finding.
+    let settling = if same_settling(monitor, &held) {
+        Some(found)
+    } else {
+        settled(project_id, &held, event, now)
+    };
+    let Some((state, next_due_at)) = settling else {
+        return Ok(());
+    };
+    db::settle_monitor_run(tx, project_id, held.id, state, next_due_at).await?;
+    Ok(())
+}
+
+/// Whether `held` gives a settling what `read` gave it: the same state,
+/// timing and due time, everything [`settled`] reads.
+fn same_settling(read: &MonitorRow, held: &MonitorRow) -> bool {
+    read.state == held.state
+        && read.next_due_at == held.next_due_at
+        && read.schedule == held.schedule
+        && read.interval_s == held.interval_s
+        && read.timezone == held.timezone
+}
+
+/// What a run's event changes of `monitor`: its state and next due time
+/// after it, or `None` where it changes neither.
+fn settled(
+    project_id: &ProjectId,
+    monitor: &MonitorRow,
+    event: RunEvent,
+    now: DateTime<Utc>,
+) -> Option<(MonitorState, Option<DateTime<Utc>>)> {
+    let state = state_after(monitor.state, event)?;
+    let next_due_at = match event {
+        RunEvent::EndedOk | RunEvent::EndedError => due_after(project_id, monitor, now),
         _ => monitor.next_due_at,
     };
-    if state.is_none_or(|state| state == monitor.state) && next_due_at == monitor.next_due_at {
-        return Ok(());
-    }
-    db::settle_monitor_run(tx, project_id, monitor.id, state, next_due_at).await?;
-    Ok(())
+    (state != monitor.state || next_due_at != monitor.next_due_at).then_some((state, next_due_at))
 }
 
 /// The state a monitor is put in by what its run did, or `None` where its

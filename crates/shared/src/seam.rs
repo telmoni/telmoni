@@ -446,12 +446,20 @@ pub trait Agent: Send + Sync {
 #[async_trait]
 pub trait Telemetry: Send + Sync {
     /// Everything held for an organization's projects, before its row goes.
+    ///
+    /// ⚠ **Called with nothing held.** A purge holds each project it purges
+    /// alone, as a move does ([`crate::db::project_move::lock_for_move`]),
+    /// and waits for the pings in flight, which may be waiting on the
+    /// organization's chain lock: a caller holding that lock across the
+    /// call would have the purge wait on it in a circle Postgres cannot see,
+    /// through the caller.
     async fn purge_organization(
         &self,
         organization_id: &OrganizationId,
     ) -> Result<u64, TelmoniError>;
 
-    /// Everything held for one project, after it is deleted.
+    /// Everything held for one project, after it is deleted. ⚠ Called with
+    /// nothing held, as [`Telemetry::purge_organization`] is.
     async fn purge_project(&self, project_id: &ProjectId) -> Result<u64, TelmoniError>;
 
     /// A project handed to another organization: its settings — its content

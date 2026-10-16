@@ -166,9 +166,12 @@ pub(crate) async fn purge_organization_siblings(
 /// cannot be allowed the console's whole ten seconds.
 const PROJECT_PURGE_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// The longest telemetry's project purge or move may take: a delete recorded
-/// on each of two ClickHouse tables, answered once recorded rather than once
-/// run, and one statement on one Postgres row. The transfer's accept calls
+/// The longest telemetry's project purge or move may take. A purge is its
+/// ping keys deleted, a delete recorded on each of two ClickHouse tables,
+/// answered once recorded rather than once run, and the project's rows in
+/// Postgres once the pings in flight let go of it, which it waits two
+/// seconds at most for, less what the rest took; a move rewrites the
+/// project's rows once its monitors are held. The transfer's accept calls
 /// the move before notifications' purge, while its own transaction holds
 /// both organizations' locks, and the two together stay under the console's
 /// ten seconds.

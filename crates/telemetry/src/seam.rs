@@ -3,10 +3,13 @@
 //! Auth runs its purges and a project's move through this.
 //!
 //! A purge takes a project's spans and totals with its settings, saved
-//! views, monitors, ping keys, open runs and outbox rows: the rows marked
-//! deleted in ClickHouse first, so a settings row stands for as long as its
-//! project's spans do and a purge cut short finds them again, then the rest
-//! and the row removed. An organization's projects are the ones its
+//! views, monitors, ping keys, open runs and outbox rows: a project's ping
+//! keys first, on their own, so its ping lane is closed whatever fails after
+//! ([`db::close_ping_lane`]); then the rows marked deleted in ClickHouse, so
+//! a settings row stands for as long as its project's spans do and a purge
+//! cut short finds them again; then the rest and the row removed, the
+//! project held alone meanwhile so that no ping writes beside it
+//! ([`db::purge_project`]). An organization's projects are the ones its
 //! settings rows name, since neither a span nor a view names an
 //! organization; its monitors, keys, runs and outbox rows name it.
 
@@ -73,9 +76,12 @@ impl Telemetry for TelemetrySeam {
     }
 
     async fn purge_project(&self, project_id: &ProjectId) -> Result<u64, TelmoniError> {
+        let mut tx = maintenance_scope(&self.0.db, TelemetryLane).await?;
+        let closed = db::close_ping_lane(&mut tx, project_id).await?;
+        tx.commit().await?;
         self.mark_deleted(project_id).await?;
         let mut tx = maintenance_scope(&self.0.db, TelemetryLane).await?;
-        let purged = db::purge_project(&mut tx, project_id).await?;
+        let purged = closed + db::purge_project(&mut tx, project_id).await?;
         tx.commit().await?;
         tracing::info!(
             project_id = %project_id,

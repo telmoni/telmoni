@@ -299,9 +299,9 @@ enum Retirement {
     /// Retired already — by another replica's tick, or a person — or gone
     /// with its project: nothing to do.
     Gone,
-    /// Its project is moving to another organization: left for a later
-    /// tick, which finds it where it went.
-    Moving,
+    /// Its project is held alone, by a move to another organization or a
+    /// purge: left for a later tick, which finds it where it went, or gone.
+    KeptOut,
     /// Its organization's chain lock was not had in time: left for a later
     /// tick, as every other key the tick then finds standing under that
     /// organization is.
@@ -325,13 +325,13 @@ pub async fn retire_stale_keys(state: &AppState) -> Result<Rotated, TelmoniError
 /// The tick's work on the stale keys it read, in turn: each retired in its
 /// project's own scope, recorded on the chain as the module's own act and
 /// told to the project. Each key on its own: one that cannot be retired now
-/// — its project moving, its organization's chain lock busy past its wait,
-/// its retirement refused — is logged and left for a later tick, and the
-/// tick goes on to the rest, so one organization holds up its own keys
-/// alone; and an organization whose lock was busy is passed over for the
-/// rest of the tick, so its keys cost the tick one wait, not one each. A
-/// database that stops answering ends the tick, as a failed read of the
-/// keys does, since every key after it would wait it out in turn.
+/// — its project moving or being purged, its organization's chain lock busy
+/// past its wait, its retirement refused — is logged and left for a later
+/// tick, and the tick goes on to the rest, so one organization holds up its
+/// own keys alone; and an organization whose lock was busy is passed over
+/// for the rest of the tick, so its keys cost the tick one wait, not one
+/// each. A database that stops answering ends the tick, as a failed read of
+/// the keys does, since every key after it would wait it out in turn.
 pub async fn retire_each(
     state: &AppState,
     stale: &[ResolvedPingKey],
@@ -342,7 +342,7 @@ pub async fn retire_each(
         match retire_stale_key(state, key, &busy).await {
             Ok(Retirement::Retired) => rotated.retired += 1,
             Ok(Retirement::Gone) => {}
-            Ok(Retirement::Moving | Retirement::PassedOver) => rotated.left += 1,
+            Ok(Retirement::KeptOut | Retirement::PassedOver) => rotated.left += 1,
             Ok(Retirement::Busy(organization_id)) => {
                 tracing::warn!(
                     organization_id = %organization_id,
@@ -386,14 +386,14 @@ fn unanswered(error: &TelmoniError) -> bool {
 }
 
 /// One stale key retired, in a transaction of its own: its project held in
-/// place, so no move of it commits meanwhile, and the organization the key
-/// stands under read there — not the one the tick's read named, which a
-/// move committed since would have the retirement filed under and the row
-/// policy refuse — then, unless the tick found that organization's chain
-/// lock busy already (`passed_over`), under that lock, retired, recorded,
-/// and the project's notice put in the outbox. Told, since a line not moved
-/// over to the newer key is refused from now on, and its owner would
-/// otherwise learn of it from cron's mail.
+/// place, so no move or purge of it commits meanwhile, and the organization
+/// the key stands under read there — not the one the tick's read named,
+/// which a move committed since would have the retirement filed under and
+/// the row policy refuse — then, unless the tick found that organization's
+/// chain lock busy already (`passed_over`), under that lock, retired,
+/// recorded, and the project's notice put in the outbox. Told, since a line
+/// not moved over to the newer key is refused from now on, and its owner
+/// would otherwise learn of it from cron's mail.
 async fn retire_stale_key(
     state: &AppState,
     key: &ResolvedPingKey,
@@ -406,10 +406,10 @@ async fn retire_stale_key(
         tracing::debug!(
             project_id = %project_id,
             ping_key_id = %key.id,
-            "telemetry: a stale ping key's project is moving to another organization; a later \
-             tick retires the key where it went"
+            "telemetry: a stale ping key's project is moving to another organization or being \
+             purged; a later tick retires the key where it went, or finds it gone"
         );
-        return Ok(Retirement::Moving);
+        return Ok(Retirement::KeptOut);
     }
     let Some(organization_id) = db::live_ping_key_organization(&mut tx, project_id, key.id).await?
     else {
