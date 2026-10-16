@@ -64,20 +64,25 @@ describe("the proxy's matcher", () => {
   const matchers = config.matcher.map(compile);
   const proxied = (path: string) => matchers.some((matcher) => matcher.test(path));
 
-  it.each(["icon-svg", "favicon-ico", "apple-icon-png", "opengraph-image-png", "acme"])(
-    "runs for an organization that goes by %s",
-    (slug) => {
-      expect(isSlug(slug) && !RESERVED_ORGANIZATION_SLUGS.has(slug)).toBe(true);
-      expect(proxied(`/${slug}`)).toBe(true);
-      expect(proxied(`/${slug}/settings`)).toBe(true);
-    },
-  );
+  it.each([
+    "icon-svg",
+    "favicon-ico",
+    "apple-icon-png",
+    "opengraph-image-png",
+    "twitter-image-png",
+    "acme",
+  ])("runs for an organization that goes by %s", (slug) => {
+    expect(isSlug(slug) && !RESERVED_ORGANIZATION_SLUGS.has(slug)).toBe(true);
+    expect(proxied(`/${slug}`)).toBe(true);
+    expect(proxied(`/${slug}/settings`)).toBe(true);
+  });
 
   it.each([
     "/icon.svg",
     "/favicon.ico",
     "/apple-icon.png",
     "/opengraph-image.png",
+    "/twitter-image.png",
     "/_next/static/chunk.js",
   ])("skips the asset %s", (path) => {
     expect(proxied(path)).toBe(false);

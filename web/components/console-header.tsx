@@ -102,7 +102,7 @@ export function ConsoleHeader({
             collapsed && "md:hidden",
           )}
         >
-          <TelmoniMark className="size-5 shrink-0" />
+          <TelmoniMark className="size-6 shrink-0" />
           <span className="truncate">{PRODUCT_NAME}</span>
         </Link>
         {collapsed ? (
@@ -115,7 +115,7 @@ export function ConsoleHeader({
             title="Open sidebar"
             className="group hidden size-9 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-sidebar-accent/50 md:flex"
           >
-            <TelmoniMark className="size-5 group-hover/brand:hidden group-focus-visible:hidden" />
+            <TelmoniMark className="size-6 group-hover/brand:hidden group-focus-visible:hidden" />
             <PanelLeft className="hidden size-4 text-muted-foreground group-hover/brand:block group-focus-visible:block" />
           </button>
         ) : (

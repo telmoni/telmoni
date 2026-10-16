@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="880" height="420" viewBox="0 0 880 420">
+  <title>How Telmoni fits together</title>
+  <style>
+    .sans{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
+    .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace}
+    .head{font-size:11px;font-weight:600;letter-spacing:.12em;fill:#59636e}
+    .title{font-size:14px;font-weight:600;fill:#1f2328}
+    .sub{font-size:12px;fill:#59636e}
+    .name{font-size:17px;font-weight:700;fill:#1f2328}
+    .route{font-size:11.5px;font-weight:500}
+    .card{fill:#ffffff;stroke:#d1d9e0}
+    .hero{fill:#c2410c;fill-opacity:.05;stroke:#c2410c;stroke-opacity:.55;stroke-width:1.5}
+    .chip{fill:#ffffff;stroke:#0e7490;stroke-opacity:.35}
+    .chip-text{font-size:11.5px;font-weight:500;fill:#0e7490}
+    .edge{fill:none;stroke:#8c959f;stroke-width:1.5}
+    .edge.cyan{stroke:#0e7490;stroke-width:2}
+    .edge.ember{stroke:#c2410c;stroke-width:2}
+    .tip{fill:#8c959f}.tip.cyan{fill:#0e7490}.tip.ember{fill:#c2410c}
+    .route.plain{fill:#59636e}.route.cyan{fill:#0e7490}.route.ember{fill:#c2410c}
+    .glyph{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .tile.cyan{fill:#0e7490;fill-opacity:.1}.glyph.cyan{stroke:#0e7490}
+    .tile.ember{fill:#c2410c;fill-opacity:.1}.glyph.ember{stroke:#c2410c}
+    .tile.ink{fill:#1f2937;fill-opacity:.07}.glyph.ink{stroke:#1f2937}
+    .tile.red{fill:#dc2626;fill-opacity:.1}.glyph.red{stroke:#dc2626}
+    .tile.blue{fill:#2563eb;fill-opacity:.1}.glyph.blue{stroke:#2563eb}
+    .tile.yellow{fill:#ca8a04;fill-opacity:.14}.glyph.yellow{stroke:#a16207}
+    .dot.cyan{fill:#0e7490}.dot.ember{fill:#c2410c}.dot.slate{fill:#59636e}
+    .mark-ink{fill:#1f2937}.mark-cyan{fill:#0e7490}.mark-ember{fill:#c2410c}
+  </style>
+  <defs>
+    <marker id="tip" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path class="tip" d="M1 1 7 4 1 7Z"/></marker>
+    <marker id="tip-cyan" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path class="tip cyan" d="M1 1 7 4 1 7Z"/></marker>
+    <marker id="tip-ember" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path class="tip ember" d="M1 1 7 4 1 7Z"/></marker>
+    <symbol id="user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4.5 20.5c.8-3.9 3.9-6.5 7.5-6.5s6.7 2.6 7.5 6.5"/></symbol>
+    <symbol id="code" viewBox="0 0 24 24"><path d="M8.5 7 3.5 12l5 5M15.5 7l5 5-5 5M13.5 5l-3 14"/></symbol>
+    <symbol id="terminal" viewBox="0 0 24 24"><path d="M5 7.5 9.5 12 5 16.5M12.5 17H19"/></symbol>
+    <symbol id="bell" viewBox="0 0 24 24"><path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15ZM10 21h4"/></symbol>
+    <symbol id="window" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M3 9h18M6 6.8h.01M8.5 6.8h.01"/></symbol>
+    <symbol id="store" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7.5" ry="2.75"/><path d="M4.5 6v12c0 1.5 3.4 2.75 7.5 2.75s7.5-1.25 7.5-2.75V6M4.5 12c0 1.5 3.4 2.75 7.5 2.75s7.5-1.25 7.5-2.75"/></symbol>
+  </defs>
+
+  <g class="sans">
+    <rect class="dot cyan" x="12" y="18" width="7" height="7" rx="2"/><text class="head" x="25" y="25">YOUR SIDE</text>
+    <rect class="dot ember" x="360" y="18" width="7" height="7" rx="2"/><text class="head" x="373" y="25">TELMONI</text>
+    <rect class="dot slate" x="652" y="18" width="7" height="7" rx="2"/><text class="head" x="665" y="25">STORAGE</text>
+  </g>
+
+  <g>
+    <path class="edge" d="M236 76H358" marker-end="url(#tip)"/>
+    <path class="edge cyan" d="M236 172H358" marker-end="url(#tip-cyan)"/>
+    <path class="edge" d="M236 268H358" marker-end="url(#tip)"/>
+    <path class="edge" d="M480 108V130" marker-end="url(#tip)"/>
+    <path class="edge" d="M600 68H650" marker-end="url(#tip)"/>
+    <path class="edge" d="M600 148H616A10 10 0 0 0 626 138V94A10 10 0 0 1 636 84H650" marker-end="url(#tip)"/>
+    <path class="edge" d="M600 172H650" marker-end="url(#tip)"/>
+    <path class="edge" d="M600 268H650" marker-end="url(#tip)"/>
+    <path class="edge ember" d="M480 300V362A10 10 0 0 1 470 372H238" marker-end="url(#tip-ember)"/>
+  </g>
+  <g class="mono" text-anchor="middle">
+    <text class="route cyan" x="298" y="164">/otlp/v1/traces</text>
+    <text class="route plain" x="298" y="260">/cli, /v1</text>
+    <text class="route ember" x="298" y="364">notifications</text>
+  </g>
+
+  <g class="sans">
+    <rect class="card" x="12.5" y="44.5" width="224" height="64" rx="12"/>
+    <rect class="tile cyan" x="26" y="61" width="30" height="30" rx="8"/><use class="glyph cyan" href="#user" xlink:href="#user" x="33" y="68" width="16" height="16"/>
+    <text class="title" x="68" y="74">People</text><text class="sub" x="68" y="91">in a browser</text>
+
+    <rect class="card" x="12.5" y="132.5" width="224" height="80" rx="12"/>
+    <rect class="tile cyan" x="26" y="157" width="30" height="30" rx="8"/><use class="glyph cyan" href="#code" xlink:href="#code" x="33" y="164" width="16" height="16"/>
+    <text class="title" x="68" y="160">SDKs in your agents</text><text class="sub" x="68" y="177">Python · TypeScript</text><text class="sub" x="68" y="192">Go · Rust</text>
+
+    <rect class="card" x="12.5" y="236.5" width="224" height="64" rx="12"/>
+    <rect class="tile cyan" x="26" y="253" width="30" height="30" rx="8"/><use class="glyph cyan" href="#terminal" xlink:href="#terminal" x="33" y="260" width="16" height="16"/>
+    <text class="title" x="68" y="266">The CLI and scripts</text><text class="sub" x="68" y="283">a sign-in or an API key</text>
+
+    <rect class="card" x="12.5" y="340.5" width="224" height="64" rx="12"/>
+    <rect class="tile ember" x="26" y="357" width="30" height="30" rx="8"/><use class="glyph ember" href="#bell" xlink:href="#bell" x="33" y="364" width="16" height="16"/>
+    <text class="title" x="68" y="370">Slack, webhooks</text><text class="sub" x="68" y="387">your channel or endpoint</text>
+
+    <rect class="card" x="360.5" y="44.5" width="240" height="64" rx="12"/>
+    <rect class="tile ink" x="374" y="61" width="30" height="30" rx="8"/><use class="glyph ink" href="#window" xlink:href="#window" x="381" y="68" width="16" height="16"/>
+    <text class="title" x="416" y="74">Console</text><text class="sub" x="416" y="91">Next.js, a thin proxy</text>
+
+    <rect class="hero" x="360.75" y="132.75" width="239.5" height="167.5" rx="14"/>
+    <g transform="translate(376 150) scale(.0432432) translate(-40 -125)">
+      <rect class="mark-ink" x="145" y="125" width="130" height="740" rx="65"/>
+      <rect class="mark-ink" x="40" y="335" width="350" height="120" rx="60"/>
+      <rect class="mark-cyan" x="385" y="455" width="130" height="410" rx="65"/>
+      <path class="mark-cyan" d="M385 520A185 185 0 0 1 755 520H625A55 55 0 0 0 515 520Z"/>
+      <rect class="mark-cyan" x="625" y="455" width="130" height="410" rx="65"/>
+      <path class="mark-ember" d="M625 520A185 185 0 0 1 995 520H865A55 55 0 0 0 755 520Z"/>
+      <rect class="mark-ember" x="865" y="455" width="130" height="410" rx="65"/>
+    </g>
+    <text class="name" x="428" y="165">telmoni</text><text class="sub" x="428" y="183">one Rust binary</text>
+    <rect class="chip" x="376.5" y="214.5" width="100" height="26" rx="13"/><text class="chip-text" x="426.5" y="231.5" text-anchor="middle">auth</text>
+    <rect class="chip" x="484.5" y="214.5" width="100" height="26" rx="13"/><text class="chip-text" x="534.5" y="231.5" text-anchor="middle">telemetry</text>
+    <rect class="chip" x="376.5" y="248.5" width="100" height="26" rx="13"/><text class="chip-text" x="426.5" y="265.5" text-anchor="middle">notifications</text>
+    <rect class="chip" x="484.5" y="248.5" width="100" height="26" rx="13"/><text class="chip-text" x="534.5" y="265.5" text-anchor="middle">console agent</text>
+
+    <rect class="card" x="652.5" y="44.5" width="216" height="64" rx="12"/>
+    <rect class="tile red" x="666" y="61" width="30" height="30" rx="8"/><use class="glyph red" href="#store" xlink:href="#store" x="673" y="68" width="16" height="16"/>
+    <text class="title" x="708" y="74">Redis</text><text class="sub" x="708" y="91">limits and live events</text>
+
+    <rect class="card" x="652.5" y="140.5" width="216" height="64" rx="12"/>
+    <rect class="tile blue" x="666" y="157" width="30" height="30" rx="8"/><use class="glyph blue" href="#store" xlink:href="#store" x="673" y="164" width="16" height="16"/>
+    <text class="title" x="708" y="170">PostgreSQL</text><text class="sub" x="708" y="187">a schema per module</text>
+
+    <rect class="card" x="652.5" y="236.5" width="216" height="64" rx="12"/>
+    <rect class="tile yellow" x="666" y="253" width="30" height="30" rx="8"/><use class="glyph yellow" href="#store" xlink:href="#store" x="673" y="260" width="16" height="16"/>
+    <text class="title" x="708" y="266">ClickHouse</text><text class="sub" x="708" y="283">spans and hourly totals</text>
+  </g>
+</svg>

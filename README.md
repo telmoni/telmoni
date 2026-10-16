@@ -1,8 +1,8 @@
 <div align="center">
   <a href="https://telmoni.com">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset=".github/assets/emblem-color-on-dark.svg">
-      <img src=".github/assets/emblem-color-on-light.svg" alt="telmoni" width="300">
+      <source media="(prefers-color-scheme: dark)" srcset=".github/assets/lockup-color-on-dark.svg">
+      <img src=".github/assets/lockup-color-on-light.svg" alt="telmoni" width="360">
     </picture>
   </a>
   <h3>Privacy-first telemetry and monitoring for AI agents</h3>
@@ -127,27 +127,10 @@ Configuration comes only from the environment ([every setting](https://telmoni.c
 
 ## 🧭 How it works
 
-```mermaid
-flowchart LR
-  SDKs["SDKs in your agents<br/>Python · TypeScript · Go · Rust"]
-  Clients["The CLI and scripts"]
-  People["People, in a browser"]
-  Console["Console<br/>Next.js"]
-  Server["telmoni<br/>one Rust binary"]
-  PG[("PostgreSQL<br/>a schema per module")]
-  CH[("ClickHouse<br/>spans and hourly totals")]
-  Redis[("Redis")]
-  Out["Slack, webhooks"]
-  SDKs -->|"/otlp/v1/traces"| Server
-  Clients -->|"/cli, /v1"| Server
-  People --> Console
-  Console --> Server
-  Console --> Redis
-  Server --> Redis
-  Server --> PG
-  Server --> CH
-  Server -->|"notifications"| Out
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/how-it-works-dark.svg">
+  <img src=".github/assets/how-it-works-light.svg" alt="The SDKs in your agents send spans to /otlp/v1/traces and the CLI and scripts call /cli and /v1 on the telmoni binary, which runs auth, telemetry, notifications and the console agent; people use the Next.js console, which calls the binary; the binary keeps its data in PostgreSQL, ClickHouse and Redis, and sends notifications to Slack and webhooks.">
+</picture>
 
 The `telmoni` binary runs every module (auth, notifications, telemetry and the console agent) in one process. Each module keeps its own Postgres schema under its own role, behind forced row-level security, and the spans and their hourly totals live in ClickHouse. The console is a thin proxy, so every rule lives in Rust. [ARCHITECTURE.md](ARCHITECTURE.md) explains how it's built, and why.
 
@@ -188,7 +171,7 @@ sdk/              the SDKs: python/, typescript/, go/, rust/, and the fixtures e
 contract/         the generated wire contract and OpenAPI document
 deploy/           the Helm chart and the self-host compose file
 scripts/          `up.sh` behind `make up`, `book.sh` behind `make book`, and the webhook tunnel and receiver for testing a connector
-.github/          CI, the image publishing workflow, and the logo this README shows
+.github/          CI, the image publishing workflow, and the logo and diagram this README shows
 ARCHITECTURE.md   how it is built, and why, on one page
 ```
 

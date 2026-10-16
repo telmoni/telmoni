@@ -1,15 +1,17 @@
 import { cn } from "@/lib/utils";
 
-/** The chip mark from `app/icon.svg` in colour, as the brand pack's
- *  `mark-color-on-light` and `-on-dark` masters draw it. Its three parts are
- *  painted from tokens (`--mark-*`, `globals.css`) rather than spelled here,
- *  so the chip inverts with the theme it sits on, as the masters do. */
+/** The tm monogram from `app/icon.svg`, painted from tokens (`--mark-*`,
+ *  `globals.css`) so it takes the shades of the surface it sits on. */
 export function TelmoniMark({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 1024 1024" aria-hidden="true" className={cn("size-5", className)}>
-      <path className="fill-mark-chip" d="M320 256H704A256 256 0 0 1 704 768H320A256 256 0 0 1 320 256Z" />
-      <path className="fill-mark-light" d="M192 512A128 128 0 1 1 448 512A128 128 0 1 1 192 512Z" />
-      <path className="fill-mark-line" d="M640 448H768A64 64 0 0 1 768 576H640A64 64 0 0 1 640 448Z" />
+    <svg viewBox="40 125 955 740" aria-hidden="true" className={cn("size-5", className)}>
+      <rect className="fill-mark-ink" x="145" y="125" width="130" height="740" rx="65" />
+      <rect className="fill-mark-ink" x="40" y="335" width="350" height="120" rx="60" />
+      <rect className="fill-mark-cyan" x="385" y="455" width="130" height="410" rx="65" />
+      <path className="fill-mark-cyan" d="M385 520A185 185 0 0 1 755 520H625A55 55 0 0 0 515 520Z" />
+      <rect className="fill-mark-cyan" x="625" y="455" width="130" height="410" rx="65" />
+      <path className="fill-mark-ember" d="M625 520A185 185 0 0 1 995 520H865A55 55 0 0 0 755 520Z" />
+      <rect className="fill-mark-ember" x="865" y="455" width="130" height="410" rx="65" />
     </svg>
   );
 }
