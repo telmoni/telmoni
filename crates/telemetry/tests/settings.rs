@@ -9,14 +9,21 @@
 mod common;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use sqlx::PgPool;
 
+use uuid::Uuid;
+
+use telmoni_shared::acting::ActingKey;
+use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::{organization_scope, project_scope};
 use telmoni_shared::seam::Telemetry;
-use telmoni_shared::{ContentMode, OrganizationId, ProjectId, SpanKind};
+use telmoni_shared::{
+    ApiKeyScope, ContentMode, OrganizationId, OrganizationRole, ProjectId, SpanKind,
+};
 use telmoni_telemetry::seam::TelemetrySeam;
-use telmoni_telemetry::{AppState, db};
+use telmoni_telemetry::{AppState, db, hashing};
 
 /// The module over `pool` connected as its own role, with nobody seated:
 /// nothing here asks who is acting.
@@ -260,4 +267,146 @@ async fn the_purges_and_the_move_reach_only_what_they_name(pool: PgPool) {
             "a purge took the rows of a project it did not name"
         );
     }
+}
+
+/// A project's first export files its settings row, and seals its hashing
+/// key in it, under the organization that holds the project now — the one
+/// the project's row names, where it has one, or auth's answer, asked with
+/// the project held in place so that no transfer commits meanwhile — never
+/// the one the export's key was resolved under before a transfer committed.
+/// Filed under the organization the project left, the row would have that
+/// organization's purge mark the moved project's spans deleted, and the new
+/// one's never find them. Gone since its key was read, the project refuses
+/// the export as its key now would; kept out by a move under way, the
+/// export is answered as one an exporter tries again; and neither writes
+/// anything.
+#[sqlx::test]
+async fn a_first_export_files_the_settings_row_where_the_project_is_now(pool: PgPool) {
+    let (left, holds) = (OrganizationId::new(), OrganizationId::new());
+    let auth = common::AuthStub::probing(&pool);
+    let state = common::state(&pool, auth.clone());
+    // The export's key, resolved while `left` held the project, before a
+    // transfer to `holds` committed.
+    let resolved = |project: &ProjectId| ActingKey {
+        token_id: Uuid::new_v4(),
+        organization_id: left.clone(),
+        project_id: project.clone(),
+        scopes: vec![ApiKeyScope::Ingest],
+    };
+
+    // Its row moved with it, and no key in it yet: filed where the row
+    // stands, and auth not asked.
+    let moved = ProjectId::new();
+    auth.seat("user_owner", &holds, &moved, OrganizationRole::Owner, None);
+    seed(&pool, &holds, &moved, ContentMode::Off).await;
+    hashing::storage_for(&state, &resolved(&moved))
+        .await
+        .expect("its storage");
+    assert_eq!(
+        organization_of(&pool, &moved).await,
+        Some(holds.to_string())
+    );
+    assert_eq!(auth.homes_asked(), 0);
+
+    // No row yet: auth's answer, asked with the project held in place.
+    let fresh = ProjectId::new();
+    auth.seat("user_owner", &holds, &fresh, OrganizationRole::Owner, None);
+    hashing::storage_for(&state, &resolved(&fresh))
+        .await
+        .expect("its storage");
+    assert_eq!(
+        organization_of(&pool, &fresh).await,
+        Some(holds.to_string())
+    );
+    assert_eq!(auth.homes_asked(), 1);
+
+    // Deleted since its key was resolved: refused as the key now is, and
+    // nothing written.
+    let gone = ProjectId::new();
+    let refused = hashing::storage_for(&state, &resolved(&gone))
+        .await
+        .expect_err("a project auth no longer holds");
+    let problem = refused.to_problem_details();
+    assert_eq!(
+        (problem.status, problem.type_uri.as_str()),
+        (401, "/errors/auth/invalid-token"),
+        "{refused}"
+    );
+    assert_eq!(organization_of(&pool, &gone).await, None);
+    assert_eq!(
+        auth.homes_held(),
+        [1, 1],
+        "where the project is asked without its project held in place"
+    );
+
+    // A move under way: answered as one an exporter tries again.
+    let moving = ProjectId::new();
+    auth.seat("user_owner", &holds, &moving, OrganizationRole::Owner, None);
+    let mut mover = pool.begin().await.expect("a move's transaction");
+    project_move::lock_for_move(&mut mover, &moving)
+        .await
+        .expect("the move lock");
+    let refused = hashing::storage_for(&state, &resolved(&moving))
+        .await
+        .expect_err("kept out by a move");
+    assert_eq!(refused.to_problem_details().status, 503, "{refused}");
+    assert_eq!(organization_of(&pool, &moving).await, None);
+    mover.rollback().await.expect("the move lets go");
+}
+
+/// A project's first export that auth cannot place — auth failing, or
+/// slower than its second — is answered as auth unavailable, a 503 an
+/// exporter tries again, never as a fault of ours it would drop, and writes
+/// nothing; once auth answers, the row is filed.
+#[sqlx::test]
+async fn a_first_export_auth_cannot_place_is_tried_again(pool: PgPool) {
+    let holds = OrganizationId::new();
+    let auth = common::AuthStub::new();
+    let state = common::state(&pool, auth.clone());
+    let project = ProjectId::new();
+    auth.seat(
+        "user_owner",
+        &holds,
+        &project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let key = ActingKey {
+        token_id: Uuid::new_v4(),
+        organization_id: holds.clone(),
+        project_id: project.clone(),
+        scopes: vec![ApiKeyScope::Ingest],
+    };
+
+    for slow in [false, true] {
+        auth.failing_homes(!slow).delaying_homes(if slow {
+            Duration::from_secs(3)
+        } else {
+            Duration::ZERO
+        });
+        let started = std::time::Instant::now();
+        let refused = hashing::storage_for(&state, &key)
+            .await
+            .expect_err("a project auth cannot place");
+        let problem = refused.to_problem_details();
+        assert_eq!(
+            (problem.status, problem.type_uri.as_str()),
+            (503, "/errors/auth/identity-unavailable"),
+            "slow {slow}: {refused}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "slow {slow}: auth waited out past its second"
+        );
+        assert_eq!(organization_of(&pool, &project).await, None, "slow {slow}");
+    }
+
+    auth.delaying_homes(Duration::ZERO);
+    hashing::storage_for(&state, &key)
+        .await
+        .expect("its storage once auth answers");
+    assert_eq!(
+        organization_of(&pool, &project).await,
+        Some(holds.to_string())
+    );
 }

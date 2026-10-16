@@ -418,8 +418,9 @@ pub enum TelemetryError {
     },
 
     /// ClickHouse, or the key service a project's hashing key is sealed
-    /// under, did not answer: nothing was kept. Maps to 503, with a
-    /// `Retry-After` of one second, the answer an exporter retries.
+    /// under, did not answer, or a move or a purge held the project as its
+    /// first export went to make that key: nothing was kept. Maps to 503,
+    /// with a `Retry-After` of one second, the answer an exporter retries.
     #[error("store unavailable: {0}")]
     StoreUnavailable(String),
 }

@@ -787,6 +787,22 @@ type HashingRow = (
     Option<i16>,
 );
 
+/// The organization a project's settings row is filed under, or `None`
+/// where it has no row yet: read in the project's own scope, as a write
+/// that will file the row where it stands reads it, its project held in
+/// place so that no move passes meanwhile.
+pub async fn settings_organization<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+) -> sqlx::Result<Option<OrganizationId>> {
+    sqlx::query_scalar(
+        "SELECT organization_id FROM telemetry.project_settings WHERE project_id = $1",
+    )
+    .bind(project_id)
+    .fetch_optional(tx.conn())
+    .await
+}
+
 /// A project's hashing settings, or `None` where it has no row yet.
 pub async fn hashing_settings<B: HasProject>(
     tx: &mut Scoped<'_, B>,
@@ -822,15 +838,17 @@ pub async fn hashing_settings<B: HasProject>(
 }
 
 /// A project's row, made where it has none and filed under
-/// `organization_id`, the organization auth says holds the project now — so
-/// the purges find every project with spans, and a row a transfer's failed
-/// settling left under another organization is re-filed. Its mode and its
-/// key are left as they are. ⚠ The caller owes it an organization no move
-/// has passed since it was read — auth's answer under the chain lock a
-/// transfer holds across its move, or a ping's key read with the project
-/// held in place: one read before a transfer committed files the row back
-/// under the organization that gave the project up, as an export's can,
-/// which `hashing::storage_for_project` reads under neither.
+/// `organization_id`, so the purges find every project with spans. Its mode
+/// and its key are left as they are. A row a transfer's failed settling left
+/// under another organization is re-filed by a caller that passes auth's
+/// answer, as the console's changes do; a first export passes the row's own
+/// organization where it has one, and re-files nothing. ⚠ The caller owes
+/// it an organization no move has passed since it was read — auth's answer
+/// under the chain lock a transfer holds across its move, a ping's key read
+/// with the project held in place, or, for an export's first, the row's own
+/// organization or auth's answer, read with the project held in place
+/// (`hashing::storage_for_project`): one read before a transfer committed
+/// files the row back under the organization that gave the project up.
 pub async fn ensure_settings(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
@@ -959,9 +977,10 @@ pub async fn insert_ping_key(
     .await
 }
 
-/// One of the project's live ping keys, retired now; `None` where the
-/// project has no live key by that id, so a second retirement changes
-/// nothing and records nothing.
+/// One of the project's live ping keys, retired now by a person; `None`
+/// where the project has no live key by that id, so a second retirement
+/// changes nothing and records nothing. The rotation retires a key only
+/// where it is stale still ([`retire_stale_ping_key`]).
 pub async fn retire_ping_key(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
@@ -1033,29 +1052,63 @@ pub async fn resolve_ping_key(
     .await
 }
 
-/// The live keys a rotation retires: each `replaced_after_s` past its last
-/// ping — or its minting, where no ping ever came — with a newer live key
-/// of its project standing, so the crontab lines have had their week to
-/// move over. Up to `limit` of them, across every tenant.
+/// What makes a live key, `k`, one the rotation retires: `$1` seconds past
+/// its last ping — or its minting, where no ping ever came — with a newer
+/// live key of its project standing, so the crontab lines have had their
+/// week to move over. Asked by the tick's read and again by the retirement
+/// itself ([`retire_stale_ping_key`]).
+const STALE_KEY: &str = "coalesce(k.last_ping_at, k.created_at) < now() - make_interval(secs => $1)
+            AND EXISTS (SELECT 1 FROM telemetry.ping_keys n
+                         WHERE n.project_id = k.project_id
+                           AND n.retired_at IS NULL
+                           AND n.created_at > k.created_at)";
+
+/// The live keys a rotation retires (`STALE_KEY`, `replaced_after_s` past
+/// their last ping): up to `limit` of them, across every tenant.
 pub async fn stale_ping_keys(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     replaced_after_s: i64,
     limit: i64,
 ) -> sqlx::Result<Vec<ResolvedPingKey>> {
-    sqlx::query_as(
+    sqlx::query_as(&format!(
         "SELECT k.id, k.project_id, k.organization_id, k.prefix
            FROM telemetry.ping_keys k
           WHERE k.retired_at IS NULL
-            AND coalesce(k.last_ping_at, k.created_at) < now() - make_interval(secs => $1)
-            AND EXISTS (SELECT 1 FROM telemetry.ping_keys n
-                         WHERE n.project_id = k.project_id
-                           AND n.retired_at IS NULL
-                           AND n.created_at > k.created_at)
-          LIMIT $2",
-    )
+            AND {STALE_KEY}
+          LIMIT $2"
+    ))
     .bind(replaced_after_s)
     .bind(limit)
     .fetch_all(tx.conn())
+    .await
+}
+
+/// One of the project's live keys, retired by its rotation where it is
+/// stale still (`STALE_KEY`), asked again in the statement that retires it,
+/// not only by the tick's read before: so a ping that touched the key since
+/// keeps it, its touch committed, or waited on and its row's newest version
+/// asked again, as `READ COMMITTED` asks an `UPDATE`; and so does its newer
+/// key's retirement by a person, which takes the organization's chain lock
+/// the rotation holds here, and would otherwise leave the project no live
+/// key. The retirement and the notice that says why hold together. `None`
+/// where the key is retired, gone, or stale no longer.
+pub async fn retire_stale_ping_key(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    id: Uuid,
+    replaced_after_s: i64,
+) -> sqlx::Result<Option<PingKeyRow>> {
+    sqlx::query_as(&format!(
+        "UPDATE telemetry.ping_keys k
+            SET retired_at = now()
+          WHERE k.project_id = $2 AND k.id = $3 AND k.retired_at IS NULL
+            AND {STALE_KEY}
+         RETURNING {PING_KEY_COLUMNS}"
+    ))
+    .bind(replaced_after_s)
+    .bind(project_id)
+    .bind(id)
+    .fetch_optional(tx.conn())
     .await
 }
 

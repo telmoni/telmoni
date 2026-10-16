@@ -890,6 +890,64 @@ async fn a_key_two_ticks_find_is_retired_recorded_and_told_once(pool: PgPool) {
     assert_eq!(notices_waiting(&pool, &p.project).await.len(), 1);
 }
 
+/// A key is retired only where it is stale when the rotation retires it, not
+/// merely when the tick read it: a ping that came under it since keeps it,
+/// and so does its newer key's retirement by a person since, which would
+/// otherwise have left the project no live key — so a retirement, and the
+/// notice that says why, hold when they are made.
+#[sqlx::test]
+async fn a_key_stale_when_read_but_not_when_retired_stands(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+
+    // Heard from since the tick read it.
+    let p = project(&pool);
+    let old = stale(&p, &pool).await;
+    let read = stale_keys(&p.state).await;
+    let key = old["key"].as_str().expect("the key");
+    let (status, body) = p.ping(&format!("/{key}/nightly-report")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let rotated = retire_each(&p.state, &[key_of(&read, &p)])
+        .await
+        .expect("a tick");
+    assert_eq!(rotated, Rotated::default(), "a key a ping had just used");
+    assert!(all_live(&p).await);
+    let (status, body) = p.ping(&format!("/{key}/nightly-report")).await;
+    assert_eq!(status, StatusCode::OK, "the key a ping kept: {body}");
+
+    // Its newer key retired by a person since the tick read it.
+    let q = project(&pool);
+    let (_, older) = q.mint(OWNER).await;
+    let (_, newer) = q.mint(ADMIN).await;
+    aged(&pool, older["id"].as_str().expect("an id"), 9, Some(8)).await;
+    let read = stale_keys(&q.state).await;
+    let newer_id = newer["id"].as_str().expect("an id");
+    let (status, body) = q
+        .send(q.request("DELETE", &format!("{LANE}/{newer_id}"), OWNER))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let rotated = retire_each(&q.state, &[key_of(&read, &q)])
+        .await
+        .expect("a tick");
+    assert_eq!(rotated, Rotated::default(), "the project's last live key");
+    let keys = q.list(OWNER).await;
+    let live: Vec<&Value> = keys
+        .iter()
+        .filter(|key| key["retired_at"].is_null())
+        .collect();
+    assert_eq!(live.len(), 1, "{keys:?}");
+    assert_eq!(live[0]["id"], older["id"]);
+
+    for (project, organization) in [(&p.project, &p.organization), (&q.project, &q.organization)] {
+        assert_eq!(retired_by_the_rotation(&pool, organization).await, 0);
+        let told = notices_waiting(&pool, project).await;
+        assert!(
+            told.iter()
+                .all(|notice| notice["kind"] != "ping_key_retired"),
+            "{told:?}"
+        );
+    }
+}
+
 /// How many sessions wait on an advisory lock in this database.
 async fn advisory_waits(pool: &PgPool) -> i64 {
     sqlx::query_scalar(

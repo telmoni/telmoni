@@ -12,13 +12,15 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use telmoni_shared::acting::ActingKey;
+use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::project_scope;
 use telmoni_shared::digest::{HmacKey, hex_lower};
 use telmoni_shared::envelope::{KEK_VERSION, KekError, Sealed};
-use telmoni_shared::{OrganizationId, ProjectId, Redacted, TelemetryError, TelmoniError};
+use telmoni_shared::{AuthError, ProjectId, Redacted, TelemetryError, TelmoniError};
 
 use crate::AppState;
-use crate::db::{self, SealedHashingKey};
+use crate::db::{self, HashingSettings, SealedHashingKey};
+use crate::handler::chain;
 
 /// How much of the HMAC is kept: 16 bytes, 32 hex characters, which no two
 /// users of one project share in practice and nobody reverses.
@@ -83,15 +85,18 @@ impl Cache {
 ///
 /// # Errors
 ///
-/// Postgres did not answer; the key service did not answer, which an
-/// exporter retries; or the row's key will not open, which is an outage of
-/// ours, logged by project.
+/// Postgres did not answer; the key service did not answer, or a move or a
+/// purge of the project held it as its first export went to key it, which
+/// an exporter retries; auth did not say, in time or at all, which
+/// organization holds a project with no settings row yet, which it retries
+/// too; the project is gone since its key was read, refused as its key now
+/// is; or the row's key will not open, which is an outage of ours, logged
+/// by project.
 pub async fn storage_for(state: &AppState, key: &ActingKey) -> Result<UserIdStorage, TelmoniError> {
-    storage_for_project(state, &key.project_id, &key.organization_id).await
+    storage_for_project(state, &key.project_id).await
 }
 
-/// [`storage_for`], for a project named by itself and the organization that
-/// holds it, with no key in hand.
+/// [`storage_for`], for a project named by itself, with no key in hand.
 ///
 /// # Errors
 ///
@@ -99,29 +104,18 @@ pub async fn storage_for(state: &AppState, key: &ActingKey) -> Result<UserIdStor
 pub async fn storage_for_project(
     state: &AppState,
     project_id: &ProjectId,
-    organization_id: &OrganizationId,
 ) -> Result<UserIdStorage, TelmoniError> {
     if let Some(storage) = state.hashing_keys.get(project_id) {
         return Ok(storage);
     }
     let aad = project_id.as_str().as_bytes();
-    let mut tx = project_scope(&state.db, project_id)
-        .await?
-        .bind_organization(organization_id)
-        .await?;
-    let mut settings = db::hashing_settings(&mut tx, project_id).await?;
-    if settings.as_ref().is_none_or(|s| s.key.is_none()) {
-        let sealed = seal_new_key(state, aad).await?;
-        db::ensure_settings(&mut tx, project_id, organization_id).await?;
-        db::set_hashing_key_if_none(&mut tx, project_id, &sealed).await?;
-        // Ours, or the one a racing export wrote first: the row's.
-        settings = db::hashing_settings(&mut tx, project_id).await?;
-    }
+    let mut tx = project_scope(&state.db, project_id).await?;
+    let read = db::hashing_settings(&mut tx, project_id).await?;
     tx.commit().await?;
-
-    let settings = settings.ok_or_else(|| {
-        TelmoniError::Internal("telemetry: the settings row just written is not there".into())
-    })?;
+    let settings = match read {
+        Some(settings) if settings.key.is_some() => settings,
+        _ => key_project(state, project_id, aad).await?,
+    };
     let storage = if settings.user_id_hashed {
         let sealed = settings.key.ok_or_else(|| {
             TelmoniError::Internal("telemetry: the hashing key just written is not there".into())
@@ -132,6 +126,62 @@ pub async fn storage_for_project(
     };
     state.hashing_keys.put(project_id.clone(), storage.clone());
     Ok(storage)
+}
+
+/// The project's hashing key made, and its settings row with it where it
+/// has none. The key is sealed first, holding nothing, since the key
+/// service is asked across the network; then, the project held in place as
+/// a ping holds it, so that no transfer of it commits meanwhile, the row is
+/// filed under the organization that holds the project now — the one the
+/// row names, where it has one, which a move takes with the project, or,
+/// where it has none, auth's answer, asked under the hold
+/// ([`chain::home`]) — and never under the organization the export's key
+/// was resolved to before, which a transfer committed since would have the
+/// row filed back under: that organization's purge, which finds its
+/// projects by their settings rows, would mark the moved project's spans
+/// deleted, and the new one's never find them. Kept out by a move or a
+/// purge holding the project, the export is refused as one an exporter
+/// tries again; for a project auth no longer has, as its key now is,
+/// deleted with it, rather than with a status the lane gives nothing else.
+/// The key is ours, or the one a racing export wrote first.
+async fn key_project(
+    state: &AppState,
+    project_id: &ProjectId,
+    aad: &[u8],
+) -> Result<HashingSettings, TelmoniError> {
+    let sealed = seal_new_key(state, aad).await?;
+    let mut tx = project_scope(&state.db, project_id).await?;
+    if !project_move::try_hold_in_place(tx.conn(), project_id).await? {
+        chain::rolled_back(tx.rollback().await, project_id, "hashing key");
+        return Err(TelemetryError::StoreUnavailable(
+            "the project is moving to another organization, or being deleted; the export is \
+             tried again"
+                .into(),
+        )
+        .into());
+    }
+    let organization_id = match db::settings_organization(&mut tx, project_id).await? {
+        Some(filed) => filed,
+        None => match chain::home(state.auth.as_ref(), project_id).await {
+            Ok(Some(holds)) => holds,
+            Ok(None) => {
+                chain::rolled_back(tx.rollback().await, project_id, "hashing key");
+                return Err(AuthError::InvalidToken.into());
+            }
+            Err(unanswered) => {
+                chain::rolled_back(tx.rollback().await, project_id, "hashing key");
+                return Err(unanswered);
+            }
+        },
+    };
+    let mut tx = tx.bind_organization(&organization_id).await?;
+    db::ensure_settings(&mut tx, project_id, &organization_id).await?;
+    db::set_hashing_key_if_none(&mut tx, project_id, &sealed).await?;
+    let settings = db::hashing_settings(&mut tx, project_id).await?;
+    tx.commit().await?;
+    settings.ok_or_else(|| {
+        TelmoniError::Internal("telemetry: the settings row just written is not there".into())
+    })
 }
 
 /// A fresh key for one project, sealed: the data key wrapped by the KEK, and

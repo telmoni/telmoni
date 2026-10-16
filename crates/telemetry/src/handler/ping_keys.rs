@@ -271,9 +271,10 @@ pub struct Rotated {
 enum Retirement {
     /// Retired, recorded and told.
     Retired,
-    /// Retired already — by another replica's tick, or a person — or gone
-    /// with its project: nothing to do.
-    Gone,
+    /// Nothing to do: retired already — by another replica's tick, or a
+    /// person — gone with its project, or stale no longer, a ping having
+    /// come under it since the tick read it, or its newer key gone.
+    Nothing,
     /// Its project is held alone, by a move to another organization or a
     /// purge: left for a later tick, which finds it where it went, or gone.
     KeptOut,
@@ -316,7 +317,7 @@ pub async fn retire_each(
     for key in stale {
         match retire_stale_key(state, key, &busy).await {
             Ok(Retirement::Retired) => rotated.retired += 1,
-            Ok(Retirement::Gone) => {}
+            Ok(Retirement::Nothing) => {}
             Ok(Retirement::KeptOut | Retirement::PassedOver) => rotated.left += 1,
             Ok(Retirement::Busy(organization_id)) => {
                 tracing::warn!(
@@ -389,7 +390,7 @@ async fn retire_stale_key(
     let Some(organization_id) = db::live_ping_key_organization(&mut tx, project_id, key.id).await?
     else {
         chain::rolled_back(tx.rollback().await, project_id, "ping key rotation");
-        return Ok(Retirement::Gone);
+        return Ok(Retirement::Nothing);
     };
     if passed_over.contains(&organization_id) {
         chain::rolled_back(tx.rollback().await, project_id, "ping key rotation");
@@ -419,7 +420,10 @@ async fn retire_stale_key(
 
 /// The retirement itself, inside the transaction [`retire_stale_key`]
 /// opened, the project held in place and bound to the organization its key
-/// stands under now.
+/// stands under now: under that organization's chain lock, the key retired
+/// where it is stale still ([`db::retire_stale_ping_key`]) — the tick read
+/// it stale before any lock, and a ping may have come under it since, or a
+/// person retired its newer key — and only then recorded and told.
 async fn retire_in_place(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
@@ -429,8 +433,8 @@ async fn retire_in_place(
     if !chain::lock_in_time(organization_id, tx).await? {
         return Ok(Retirement::Busy(organization_id.clone()));
     }
-    let Some(row) = db::retire_ping_key(tx, project_id, id).await? else {
-        return Ok(Retirement::Gone);
+    let Some(row) = db::retire_stale_ping_key(tx, project_id, id, REPLACED_AFTER_S).await? else {
+        return Ok(Retirement::Nothing);
     };
     emit_audit(
         tx,

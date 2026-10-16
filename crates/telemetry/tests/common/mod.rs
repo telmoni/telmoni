@@ -75,6 +75,19 @@ pub(crate) struct AuthStub {
     homes_fail_after: Mutex<Option<usize>>,
     /// Whether asking an organization's standing fails.
     standing_fail: AtomicBool,
+    /// For each ask of an organization's standing, how many advisory locks
+    /// the database held, asked from `chain_probe`'s session: a lane asks
+    /// with nothing held.
+    standing_held: Mutex<Vec<i64>>,
+    /// For each ask of where projects are, how many advisory locks the
+    /// database held, asked as `standing_held` is: a first export asks with
+    /// its project held in place, its own lock alone.
+    homes_held: Mutex<Vec<i64>>,
+    /// How long each answer of an organization's standing takes to come, as
+    /// an auth whose pool is spent takes.
+    standing_delay: Mutex<Duration>,
+    /// How long each answer of where projects are takes to come.
+    homes_delay: Mutex<Duration>,
 }
 
 impl AuthStub {
@@ -187,18 +200,23 @@ impl AuthStub {
         self
     }
 
-    /// Every seat on `project` gone, as auth holds a project once it is
-    /// deleted: asked where it is, auth leaves it out.
+    /// Every seat on `project` gone, and every key minted on it, as auth
+    /// holds a project once it is deleted: asked where it is, auth leaves it
+    /// out.
     pub(crate) fn forget(&self, project: &ProjectId) -> &Self {
         self.seats
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .retain(|(_, seated), _| *seated != project.to_string());
+        self.keys
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|_, key| key.project_id != *project);
         self
     }
 
-    /// Every seat on `project` moved to `organization`, as auth holds a
-    /// project once a transfer of it commits.
+    /// Every seat on `project` moved to `organization`, and every key minted
+    /// on it, as auth holds a project once a transfer of it commits.
     pub(crate) fn move_to(&self, project: &ProjectId, organization: &OrganizationId) -> &Self {
         for ((_, seated), (held_by, _, _)) in self
             .seats
@@ -208,6 +226,16 @@ impl AuthStub {
         {
             if *seated == project.to_string() {
                 *held_by = organization.clone();
+            }
+        }
+        for key in self
+            .keys
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values_mut()
+        {
+            if key.project_id == *project {
+                key.organization_id = organization.clone();
             }
         }
         self
@@ -267,6 +295,61 @@ impl AuthStub {
     pub(crate) fn failing_standing(&self, failing: bool) -> &Self {
         self.standing_fail.store(failing, Ordering::SeqCst);
         self
+    }
+
+    /// How many advisory locks were held at each ask of an organization's
+    /// standing, in order, where the stub probes.
+    pub(crate) fn standing_held(&self) -> Vec<i64> {
+        self.standing_held
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// How many advisory locks were held at each ask of where projects are,
+    /// in order, where the stub probes.
+    pub(crate) fn homes_held(&self) -> Vec<i64> {
+        self.homes_held
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Answer every ask of an organization's standing `delay` late from now
+    /// on, `Duration::ZERO` for at once.
+    pub(crate) fn delaying_standing(&self, delay: Duration) -> &Self {
+        *self
+            .standing_delay
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = delay;
+        self
+    }
+
+    /// Answer every ask of where projects are `delay` late from now on,
+    /// `Duration::ZERO` for at once.
+    pub(crate) fn delaying_homes(&self, delay: Duration) -> &Self {
+        *self
+            .homes_delay
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = delay;
+        self
+    }
+
+    /// How many advisory locks the database holds now, asked from `probe`'s
+    /// own session, recorded in `into`.
+    async fn record_locks_held(probe: &PgPool, into: &Mutex<Vec<i64>>) {
+        let held: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_locks
+              WHERE locktype = 'advisory' AND granted
+                AND database = (SELECT oid FROM pg_database
+                                 WHERE datname = current_database())",
+        )
+        .fetch_one(probe)
+        .await
+        .expect("count the advisory locks held");
+        into.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(held);
     }
 
     /// `user` on `project`, as the roster stands: the organization the
@@ -401,6 +484,16 @@ impl Auth for AuthStub {
         projects: &[ProjectId],
     ) -> Result<Vec<ProjectHome>, TelmoniError> {
         self.homes_asked.fetch_add(1, Ordering::SeqCst);
+        if let Some(probe) = &self.chain_probe {
+            Self::record_locks_held(probe, &self.homes_held).await;
+        }
+        let delay = *self
+            .homes_delay
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !delay.is_zero() {
+            tokio::time::sleep(delay).await;
+        }
         {
             let mut fail_after = self
                 .homes_fail_after
@@ -448,17 +541,28 @@ impl Auth for AuthStub {
             .seats
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let keys = self
+            .keys
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // A project auth knows by a seat on it, or by a key minted on it.
         Ok(projects
             .iter()
             .filter_map(|project| {
                 seats
                     .iter()
                     .find(|((_, p), _)| *p == project.to_string())
-                    .map(|(_, (organization, _, _))| ProjectHome {
+                    .map(|(_, (organization, _, _))| organization.clone())
+                    .or_else(|| {
+                        keys.values()
+                            .find(|key| key.project_id == *project)
+                            .map(|key| key.organization_id.clone())
+                    })
+                    .map(|organization| ProjectHome {
                         project_id: project.clone(),
                         slug: project.to_string(),
-                        organization_id: organization.clone(),
                         organization_slug: organization.to_string(),
+                        organization_id: organization,
                     })
             })
             .collect())
@@ -468,6 +572,16 @@ impl Auth for AuthStub {
         &self,
         organization_id: &OrganizationId,
     ) -> Result<Option<OrganizationStatus>, TelmoniError> {
+        if let Some(probe) = &self.chain_probe {
+            Self::record_locks_held(probe, &self.standing_held).await;
+        }
+        let delay = *self
+            .standing_delay
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !delay.is_zero() {
+            tokio::time::sleep(delay).await;
+        }
         if self.standing_fail.load(Ordering::SeqCst) {
             return Err(TelmoniError::Internal("auth cannot be reached".into()));
         }

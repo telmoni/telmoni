@@ -5,7 +5,7 @@
 //! and the ping lane's, `/ping/{ping_key}/{slug}`, which a crontab reaches
 //! with the project's ping key in the URL and nothing else.
 
-mod chain;
+pub(crate) mod chain;
 pub mod content_mode;
 pub mod field_inventory;
 pub mod ingest;

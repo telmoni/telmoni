@@ -9,14 +9,17 @@
 //! to none once that organization's deletion is marked or the project is
 //! gone, since a notice written after a deletion's purges would outlive them;
 //! a project found gone, before the write or after it, is purged from
-//! notifications once more. A run is written once but for a sliver: `spans`
-//! is a plain `MergeTree`, read without `FINAL`, which keeps every copy it is
-//! given, so before each insert the loop reads which of the batch's runs the
-//! table holds already and drops those rows as landed — a batch leased again
-//! after a loop died between its insert and its delete, a retried end ping
-//! that filed a second run under the same `rid`, two end pings for one run —
-//! and writes no run twice within one batch. What is left is two replicas
-//! landing one run inside one insert's time, which no read can see.
+//! notifications once more. A run lands by the same rule: nowhere for an
+//! organization being deleted or a project gone, and a project found gone,
+//! before the insert or after it, has its spans marked deleted once more. A
+//! run is written once but for a sliver: `spans` is a plain `MergeTree`,
+//! read without `FINAL`, which keeps every copy it is given, so before each
+//! insert the loop reads which of the batch's runs the table holds already
+//! and drops those rows as landed — a batch leased again after a loop died
+//! between its insert and its delete, a retried end ping that filed a second
+//! run under the same `rid`, two end pings for one run — and writes no run
+//! twice within one batch. What is left is two replicas landing one run
+//! inside one insert's time, which no read can see.
 //!
 //! The loop is one every replica runs, on the delivery loop's pattern: each
 //! tick leases rows across every tenant, `FOR UPDATE SKIP LOCKED` under a
@@ -36,7 +39,7 @@
 //! ping's row unwritten, so the process exits and the restart is the
 //! recovery.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Duration;
@@ -68,8 +71,10 @@ const BATCH: i64 = 100;
 /// every batch lands whole.
 const DRAIN_ROUNDS: usize = 20;
 /// How long a leased row is held before another replica may take it:
-/// longer than an insert's deadline and a notice's write, so a row is never
-/// landed twice by two replicas.
+/// longer than the asks and the read before a batch's insert and the
+/// insert's own deadline, which come first in the batch, so no run is
+/// written by two replicas; and than a notice's write, which a notice past
+/// it is told once all the same, by its dedup key.
 const LEASE_SECS: i64 = 120;
 /// How many times a row the store refused, or that does not parse, is tried
 /// before it is left for an operator: with the waits below, half an hour of
@@ -422,6 +427,10 @@ async fn drain_batch(state: &Arc<AppState>) -> Result<Settled, TelmoniError> {
     let mut held: Vec<Held> = Vec::new();
     let (runs, notices): (Vec<OutboxRow>, Vec<OutboxRow>) =
         leased.into_iter().partition(|row| row.kind == KIND_SPAN);
+    // The runs first, their insert ended well inside the lease: a run a
+    // replica leases again once it lapses is written twice where the first
+    // insert has not ended, and a notice landed past it is not, the seam
+    // answering its dedup key with its first row.
     land_runs(state, runs, &mut landed, &mut held).await;
     let mut notices = notices.into_iter();
     while let Some(row) = notices.next() {
@@ -538,11 +547,14 @@ fn parse_runs(rows: Vec<OutboxRow>, held: &mut Vec<Held>) -> Vec<QueuedRun> {
 }
 
 /// The batch's finished runs, as rows of `spans` in one insert — but for the
-/// runs the table holds already, dropped as landed rather than written twice
-/// ([`held_runs`]) — and the organization's open consoles told of what
-/// landed. A read that fails hands the whole batch back with its tries,
-/// whatever the read's fault: the rows did nothing. An insert the store
-/// refuses is tried again one row at a time ([`land_one_by_one`]).
+/// runs of a project auth no longer has or of an organization whose deletion
+/// is marked, which land nowhere ([`open_runs`]), and the runs the table
+/// holds already, dropped as landed rather than written twice
+/// ([`write_runs`]) — then, auth asked again whether each project outlived
+/// the write ([`settle_written`]), the organization's open consoles told of
+/// what landed, and each gone project's spans marked deleted once more
+/// ([`mark_gone`]): last, since a mark made twice by two replicas is no
+/// harm, where a run written twice is.
 async fn land_runs(
     state: &Arc<AppState>,
     rows: Vec<OutboxRow>,
@@ -552,6 +564,28 @@ async fn land_runs(
     let runs = parse_runs(rows, held);
     if runs.is_empty() {
         return;
+    }
+    let (open, mut gone) = open_runs(state, runs, landed, held).await;
+    let wrote = write_runs(state, open, landed, held).await;
+    settle_written(state, wrote, &mut gone, landed, held).await;
+    mark_gone(state, gone, landed, held).await;
+}
+
+/// The open runs as rows of `spans` in one insert, but for the runs the
+/// table holds already, dropped as landed rather than written twice
+/// ([`held_runs`]): what was written, for auth to be asked of again. A read
+/// that fails hands every run back with its try, whatever the read's fault:
+/// the rows did nothing. An insert the store refuses is tried again one row
+/// at a time ([`land_one_by_one`]).
+async fn write_runs(
+    state: &AppState,
+    runs: Vec<QueuedRun>,
+    landed: &mut Vec<Uuid>,
+    held: &mut Vec<Held>,
+) -> Vec<QueuedRun> {
+    let mut wrote: Vec<QueuedRun> = Vec::new();
+    if runs.is_empty() {
+        return wrote;
     }
     let mut written = match held_runs(state, &runs).await {
         Ok(written) => written,
@@ -574,7 +608,7 @@ async fn land_runs(
                 ),
             }
             held.extend(runs.into_iter().map(|queued| queued.held(Fault::Store)));
-            return;
+            return wrote;
         }
     };
     let mut queued: Vec<QueuedRun> = Vec::with_capacity(runs.len());
@@ -594,16 +628,10 @@ async fn land_runs(
         queued.push(run);
     }
     if spans.is_empty() {
-        return;
+        return wrote;
     }
-    let mut nudges: BTreeMap<(String, String), Vec<Uuid>> = BTreeMap::new();
     match state.store.insert_spans(&spans).await {
-        Ok(()) => {
-            for run in &queued {
-                nudge(&mut nudges, run);
-                landed.push(run.id);
-            }
-        }
+        Ok(()) => wrote = queued,
         Err(error) => {
             // ⚠ The error's text can carry ClickHouse's own message: its
             // kind alone is logged.
@@ -623,14 +651,252 @@ async fn land_runs(
                         rows = spans.len(),
                         "telemetry outbox: ClickHouse refused the runs' rows; each is tried alone"
                     );
-                    land_one_by_one(&state.store, queued, &spans, landed, held, &mut nudges).await;
+                    land_one_by_one(&state.store, queued, &spans, &mut wrote, held).await;
                 }
             }
         }
     }
-    for ((organization, project), runs) in nudges {
+    wrote
+}
+
+/// The batch's runs that may land, and the runs of projects auth no longer
+/// has, gathered by project for [`mark_gone`], as auth answers where their
+/// projects are and how the organizations holding them stand. A run of an
+/// organization whose deletion is marked is dropped as landed: the
+/// deletion's purges, a quarter of an hour on, take that organization's
+/// spans, and a row landed after them would outlive them; asking before the
+/// write is enough there, since the insert follows within its deadline, well
+/// inside the quarter of an hour. A run of a project auth no longer has,
+/// whose spans its deletion marked deleted once it committed, lands nowhere,
+/// and its project's spans are marked deleted once more, which takes what an
+/// earlier try wrote and was cut off before it could ask again. Auth unable
+/// to answer is an outage of ours: every run is handed back with its try,
+/// and none is left to write or mark.
+async fn open_runs(
+    state: &AppState,
+    runs: Vec<QueuedRun>,
+    landed: &mut Vec<Uuid>,
+    held: &mut Vec<Held>,
+) -> (Vec<QueuedRun>, Vec<(ProjectId, Vec<QueuedRun>)>) {
+    let mut open = Vec::with_capacity(runs.len());
+    let mut gone: Vec<(ProjectId, Vec<QueuedRun>)> = Vec::new();
+    let landings = match landings(state, &runs).await {
+        Ok(landings) => landings,
+        Err(error) => {
+            tracing::warn!(
+                rows = runs.len(),
+                error = %error,
+                "telemetry outbox: auth could not say where the runs' projects are; the rows wait with their tries"
+            );
+            held.extend(runs.into_iter().map(|run| run.held(Fault::Store)));
+            return (open, gone);
+        }
+    };
+    for run in runs {
+        match landings.get(&run.project_id) {
+            Some(Landing::Open(_)) => open.push(run),
+            Some(Landing::OrganizationClosing) => {
+                tracing::debug!(
+                    outbox_id = %run.id,
+                    project_id = %run.project_id,
+                    "telemetry outbox: a run's organization is being deleted; the row is dropped"
+                );
+                landed.push(run.id);
+            }
+            Some(Landing::ProjectGone) | None => by_project(&mut gone, run),
+        }
+    }
+    (open, gone)
+}
+
+/// Where each of the runs' projects lands, as auth answers: one ask for
+/// every project, then one for each organization holding them. An error
+/// answers nothing, never "nowhere".
+async fn landings(
+    state: &AppState,
+    runs: &[QueuedRun],
+) -> Result<HashMap<ProjectId, Landing>, TelmoniError> {
+    let projects = projects_of(runs);
+    let homes = state.auth.project_homes(&projects).await?;
+    let mut standings: HashMap<OrganizationId, bool> = HashMap::new();
+    let mut landings: HashMap<ProjectId, Landing> = projects
+        .into_iter()
+        .map(|project_id| (project_id, Landing::ProjectGone))
+        .collect();
+    for home in homes {
+        let Some(landing) = landings.get_mut(&home.project_id) else {
+            continue;
+        };
+        let open = match standings.get(&home.organization_id) {
+            Some(open) => *open,
+            None => {
+                let standing = state
+                    .auth
+                    .organization_standing(&home.organization_id)
+                    .await?;
+                let open = standing == Some(OrganizationStatus::Active);
+                standings.insert(home.organization_id.clone(), open);
+                open
+            }
+        };
+        *landing = if open {
+            Landing::Open(home.organization_id)
+        } else {
+            Landing::OrganizationClosing
+        };
+    }
+    Ok(landings)
+}
+
+/// The runs' projects, each once, in the order the runs name them, since a
+/// read and an ask name each project once.
+fn projects_of(runs: &[QueuedRun]) -> Vec<ProjectId> {
+    let mut projects: Vec<ProjectId> = Vec::new();
+    for queued in runs {
+        if !projects.contains(&queued.project_id) {
+            projects.push(queued.project_id.clone());
+        }
+    }
+    projects
+}
+
+/// `run` gathered with the other runs of its project, the projects in the
+/// order first met, so a gone project is marked once however many of its
+/// runs a batch holds.
+fn by_project(gathered: &mut Vec<(ProjectId, Vec<QueuedRun>)>, run: QueuedRun) {
+    match gathered
+        .iter_mut()
+        .find(|(project_id, _)| *project_id == run.project_id)
+    {
+        Some((_, runs)) => runs.push(run),
+        None => gathered.push((run.project_id.clone(), vec![run])),
+    }
+}
+
+/// The runs of projects auth no longer has: each project's spans marked
+/// deleted once more — the deletion's own mark, so idempotent, and taking
+/// every row ClickHouse holds by the time it is recorded, though not the
+/// rows of an insert a try gave up on past its deadline that the server
+/// finishes after the mark — and its rows dropped as landed. A mark that
+/// fails hands its project's rows back with
+/// their tries, whatever its fault, for the next tick to find the project
+/// gone and mark it again, and ends the pass: every project after it is
+/// handed back unmarked, as a store gone away mid-pass hands back every row
+/// after the one it failed on.
+async fn mark_gone(
+    state: &AppState,
+    gone: Vec<(ProjectId, Vec<QueuedRun>)>,
+    landed: &mut Vec<Uuid>,
+    held: &mut Vec<Held>,
+) {
+    let mut gone = gone.into_iter();
+    while let Some((project_id, runs)) = gone.next() {
+        let error = match state.store.delete_project(&project_id).await {
+            Ok(()) => {
+                tracing::debug!(
+                    project_id = %project_id,
+                    rows = runs.len(),
+                    "telemetry outbox: a run's project is gone; its spans are marked deleted again and the rows dropped"
+                );
+                landed.extend(runs.iter().map(|run| run.id));
+                continue;
+            }
+            Err(error) => error,
+        };
+        // ⚠ The error's text can carry ClickHouse's own message: its kind
+        // alone is logged.
+        let kind = store::error_kind(&error);
+        match fault_of(&error) {
+            Fault::Store => tracing::warn!(
+                project_id = %project_id,
+                kind,
+                "telemetry outbox: ClickHouse did not mark a gone project's spans deleted again; its runs and the rest wait with their tries"
+            ),
+            // A mark the server refused is this deployment's to mend, as a
+            // refused read is: said at error, every tick, until it is.
+            Fault::Row => tracing::error!(
+                project_id = %project_id,
+                kind,
+                "telemetry outbox: ClickHouse refused the mark of a gone project's spans, so it did not mark them deleted again; its runs and the rest wait with their tries"
+            ),
+        }
+        held.extend(
+            runs.into_iter()
+                .chain(gone.flat_map(|(_, runs)| runs))
+                .map(|run| run.held(Fault::Store)),
+        );
+        return;
+    }
+}
+
+/// The runs this try wrote, settled once auth is asked again whether their
+/// projects outlived the write. Auth commits a project's deletion before
+/// telemetry marks its spans deleted, so a row that landed after the mark —
+/// the deletion committed after [`open_runs`] asked, and its purge run
+/// before the insert ended — is found here, its project gone, and gathered
+/// into `gone` to be marked again ([`mark_gone`]). What still has its
+/// project lands, and its organization's open consoles are told. Auth
+/// unable to answer hands every row back with its try, for the next tick to
+/// ask again, which drops a row whose run `spans` holds rather than write it
+/// twice, or finds its project gone and marks it; the consoles are told now,
+/// since the run is in `spans` and that drop tells nobody.
+async fn settle_written(
+    state: &Arc<AppState>,
+    wrote: Vec<QueuedRun>,
+    gone: &mut Vec<(ProjectId, Vec<QueuedRun>)>,
+    landed: &mut Vec<Uuid>,
+    held: &mut Vec<Held>,
+) {
+    if wrote.is_empty() {
+        return;
+    }
+    let projects = projects_of(&wrote);
+    let still: HashSet<ProjectId> = match state.auth.project_homes(&projects).await {
+        Ok(homes) => homes.into_iter().map(|home| home.project_id).collect(),
+        Err(error) => {
+            tracing::warn!(
+                rows = wrote.len(),
+                error = %error,
+                "telemetry outbox: auth could not say whether the runs' projects outlived their write; the rows wait with their tries"
+            );
+            tell(state, &wrote);
+            held.extend(wrote.into_iter().map(|run| run.held(Fault::Store)));
+            return;
+        }
+    };
+    let mut kept: Vec<QueuedRun> = Vec::with_capacity(wrote.len());
+    for run in wrote {
+        if still.contains(&run.project_id) {
+            kept.push(run);
+        } else {
+            by_project(gone, run);
+        }
+    }
+    tell(state, &kept);
+    landed.extend(kept.iter().map(|run| run.id));
+}
+
+/// The open consoles of each run's organization told that its project's
+/// runs landed, so a page reading them draws itself again rather than
+/// polling ([`nudges`]).
+fn tell(state: &Arc<AppState>, runs: &[QueuedRun]) {
+    for ((organization, project), runs) in nudges(runs) {
         live::tell(Arc::clone(state), &organization, &project, runs);
     }
+}
+
+/// The runs' ids gathered by the organization each is told under and its
+/// project: a nudge names one project, and a trace's page looks for its own
+/// run among the ids.
+fn nudges(runs: &[QueuedRun]) -> BTreeMap<(String, String), Vec<Uuid>> {
+    let mut nudges: BTreeMap<(String, String), Vec<Uuid>> = BTreeMap::new();
+    for run in runs {
+        nudges
+            .entry((run.organization_id.to_string(), run.project_id.to_string()))
+            .or_default()
+            .push(run.run.run_id);
+    }
+    nudges
 }
 
 /// A batch the store refused, written again one row at a time, so one row
@@ -641,34 +907,31 @@ async fn land_one_by_one(
     store: &store::Store,
     queued: Vec<QueuedRun>,
     spans: &[SpanRow],
-    landed: &mut Vec<Uuid>,
+    wrote: &mut Vec<QueuedRun>,
     held: &mut Vec<Held>,
-    nudges: &mut BTreeMap<(String, String), Vec<Uuid>>,
 ) {
     let mut rows = queued.into_iter().zip(spans);
     while let Some((run, span)) = rows.next() {
         let took = store.insert_spans(std::slice::from_ref(span)).await;
-        if settle_one(took, run, landed, held, nudges).is_break() {
+        if settle_one(took, run, wrote, held).is_break() {
             held.extend(rows.map(|(run, _)| run.held(Fault::Store)));
             return;
         }
     }
 }
 
-/// One row's insert settled: landed and told of, held as the row's fault,
-/// or — the store gone away — handed back, which ends the pass
+/// One row's insert settled: written, held as the row's fault, or — the
+/// store gone away — handed back, which ends the pass
 /// ([`ControlFlow::Break`]) for every row after it to be handed back too.
 fn settle_one(
     took: clickhouse::error::Result<()>,
     run: QueuedRun,
-    landed: &mut Vec<Uuid>,
+    wrote: &mut Vec<QueuedRun>,
     held: &mut Vec<Held>,
-    nudges: &mut BTreeMap<(String, String), Vec<Uuid>>,
 ) -> ControlFlow<()> {
     let error = match took {
         Ok(()) => {
-            nudge(nudges, &run);
-            landed.push(run.id);
+            wrote.push(run);
             return ControlFlow::Continue(());
         }
         Err(error) => error,
@@ -698,14 +961,6 @@ fn settle_one(
     }
 }
 
-/// A landed run gathered for `live::tell`, by its organization and project.
-fn nudge(nudges: &mut BTreeMap<(String, String), Vec<Uuid>>, run: &QueuedRun) {
-    nudges
-        .entry((run.organization_id.to_string(), run.project_id.to_string()))
-        .or_default()
-        .push(run.run.run_id);
-}
-
 /// Which of the batch's runs `spans` holds already, by project and run id,
 /// among the rows that arrived within [`HELD_RUNS_WINDOW_SECS`] of the
 /// batch's earliest: read before the insert, under the row policy as every
@@ -715,13 +970,7 @@ async fn held_runs(
     state: &AppState,
     runs: &[QueuedRun],
 ) -> clickhouse::error::Result<HashSet<(String, Uuid)>> {
-    let mut projects: Vec<ProjectId> = Vec::new();
-    for queued in runs {
-        if !projects.contains(&queued.project_id) {
-            projects.push(queued.project_id.clone());
-        }
-    }
-    let Some(projects) = store::Projects::of(projects) else {
+    let Some(projects) = store::Projects::of(projects_of(runs)) else {
         return Ok(HashSet::new());
     };
     let run_ids: Vec<Uuid> = runs
@@ -779,10 +1028,12 @@ impl NoticeRow {
     }
 }
 
-/// Where a notice of a project's lands, as auth answers.
+/// Where a notice or a run of a project's lands, as auth answers.
 enum Landing {
-    /// The feed of the organization holding the project now.
-    Feed(OrganizationId),
+    /// Where the organization holding the project now, whose deletion is not
+    /// marked, takes it: a notice in that organization's feed, a run in
+    /// `spans`.
+    Open(OrganizationId),
     /// Nowhere, since the organization's deletion is marked: its purges are
     /// still to come, and take whatever lands before them.
     OrganizationClosing,
@@ -843,7 +1094,7 @@ async fn land_notice(
         }
     };
     let organization_id = match landing(state, &row.project_id).await {
-        Ok(Landing::Feed(organization_id)) => organization_id,
+        Ok(Landing::Open(organization_id)) => organization_id,
         Ok(Landing::OrganizationClosing) => {
             tracing::debug!(
                 outbox_id = %row.id,
@@ -954,7 +1205,7 @@ async fn landing(state: &AppState, project_id: &ProjectId) -> Result<Landing, Te
         .organization_standing(&home.organization_id)
         .await?;
     Ok(if standing == Some(OrganizationStatus::Active) {
-        Landing::Feed(home.organization_id)
+        Landing::Open(home.organization_id)
     } else {
         Landing::OrganizationClosing
     })
@@ -1204,9 +1455,10 @@ mod tests {
         (queued, spans)
     }
 
-    /// A row written alone: landed and told of; refused, held with its try
-    /// counted and the pass going on; the store gone away, handed back and
-    /// the pass ended.
+    /// A row written alone: written, to be told of once auth says its
+    /// project outlived the write; refused, held with its try counted and
+    /// the pass going on; the store gone away, handed back and the pass
+    /// ended.
     #[test]
     fn one_row_settled_alone() {
         use clickhouse::error::Error;
@@ -1214,19 +1466,19 @@ mod tests {
         let (queued, spans) = a_batch();
         let ids: Vec<Uuid> = queued.iter().map(|run| run.id).collect();
         let mut rows = queued.into_iter();
-        let mut landed = Vec::new();
+        let mut wrote = Vec::new();
         let mut held = Vec::new();
-        let mut nudges = BTreeMap::new();
+        let written = |wrote: &[QueuedRun]| wrote.iter().map(|run| run.id).collect::<Vec<_>>();
 
         let first = rows.next().expect("a row");
         assert_eq!(
-            settle_one(Ok(()), first, &mut landed, &mut held, &mut nudges),
+            settle_one(Ok(()), first, &mut wrote, &mut held),
             ControlFlow::Continue(())
         );
-        assert_eq!(landed, [ids[0]]);
+        assert_eq!(written(&wrote), [ids[0]]);
         assert!(held.is_empty());
         assert_eq!(
-            nudges
+            nudges(&wrote)
                 .get(&("org_a".to_owned(), "project_a".to_owned()))
                 .map(|runs| runs.as_slice()),
             Some([spans[0].run_id].as_slice()),
@@ -1241,14 +1493,13 @@ mod tests {
                         .into()
                 )),
                 second,
-                &mut landed,
-                &mut held,
-                &mut nudges
+                &mut wrote,
+                &mut held
             ),
             ControlFlow::Continue(()),
             "one row stops one row"
         );
-        assert_eq!(landed, [ids[0]]);
+        assert_eq!(written(&wrote), [ids[0]]);
         assert_eq!(held.len(), 1);
         assert_eq!(held[0].id, ids[1]);
         assert_eq!(held[0].fault, Fault::Row);
@@ -1258,20 +1509,15 @@ mod tests {
 
         let third = rows.next().expect("a row");
         assert_eq!(
-            settle_one(
-                Err(Error::TimedOut),
-                third,
-                &mut landed,
-                &mut held,
-                &mut nudges
-            ),
+            settle_one(Err(Error::TimedOut), third, &mut wrote, &mut held),
             ControlFlow::Break(()),
             "the store gone away ends the pass"
         );
         assert_eq!(held.len(), 2);
         assert_eq!(held[1].id, ids[2]);
         assert_eq!(held[1].fault, Fault::Store);
-        assert_eq!(nudges.values().map(Vec::len).sum::<usize>(), 1);
+        assert_eq!(written(&wrote), [ids[0]]);
+        assert_eq!(nudges(&wrote).values().map(Vec::len).sum::<usize>(), 1);
     }
 
     /// A store that cannot be reached ends the pass at its first row: every
@@ -1282,11 +1528,10 @@ mod tests {
         let store = store::Store::connect("http://127.0.0.1:1").expect("a store nobody runs");
         let (queued, spans) = a_batch();
         let ids: Vec<Uuid> = queued.iter().map(|run| run.id).collect();
-        let mut landed = Vec::new();
+        let mut wrote = Vec::new();
         let mut held = Vec::new();
-        let mut nudges = BTreeMap::new();
-        land_one_by_one(&store, queued, &spans, &mut landed, &mut held, &mut nudges).await;
-        assert!(landed.is_empty());
+        land_one_by_one(&store, queued, &spans, &mut wrote, &mut held).await;
+        assert!(wrote.is_empty(), "a run counted written, and told of");
         assert_eq!(
             held.iter()
                 .map(|row| (row.id, row.fault))
@@ -1297,6 +1542,5 @@ mod tests {
                 (ids[2], Fault::Store)
             ]
         );
-        assert!(nudges.is_empty());
     }
 }

@@ -343,12 +343,13 @@ fn answer(outcome: Result<Heard, TelmoniError>) -> Response {
     }
 }
 
-/// The lane's order: the key, then the slug, then the query, then the
-/// organization's standing, then the body, and only then the project's
-/// scope, the project held in place and the organization its rows are filed
-/// under read there ([`held_in_place`]). A key the table does not hold, or
-/// holds retired, is a 404 whatever else the request says, so a scanner
-/// learns nothing from the rest.
+/// The lane's order: the key and whether its organization is open, then the
+/// slug, then the query, then whether the organization is paused, then the
+/// body, and only then the project's scope, the project held in place and
+/// the organization its rows are filed under read there ([`held_in_place`]).
+/// A key the table does not hold, or holds retired, or whose organization
+/// auth says is closed ([`closed`]), is a 404 whatever else the request
+/// says, so a scanner learns nothing from the rest.
 async fn handle(
     state: &Arc<AppState>,
     headers: &HeaderMap,
@@ -359,6 +360,9 @@ async fn handle(
     report: Report,
 ) -> Result<Heard, TelmoniError> {
     let key = resolve_key(state, key).await?;
+    if !chain::open(state.auth.as_ref(), &key.organization_id).await {
+        return Err(closed(&key));
+    }
     let slug = checked_slug(slug)?;
     let progress = Progress::read(query)?;
     // A paused organization keeps what it holds and takes in nothing new: a
@@ -454,6 +458,9 @@ async fn held_in_place(
                         ping_key_id = %key.id,
                         "ping: its project moved to another organization since its key was resolved; following it"
                     );
+                    if !chain::open(state.auth.as_ref(), &organization_id).await {
+                        return Err(closed(&key));
+                    }
                     seam::admit_new(state.entitlements.as_ref(), &organization_id).await?;
                     key.organization_id = organization_id;
                     continue;
@@ -513,6 +520,22 @@ pub fn well_formed(key: &str) -> bool {
 #[must_use]
 pub fn unknown_key() -> TelmoniError {
     AuthError::NotFound("no ping key by that value".into()).into()
+}
+
+/// A key whose organization's deletion is marked, or that auth no longer
+/// has: refused as a key the table does not hold, as ingest refuses an API
+/// key of such an organization's. The mark closes the organization to every
+/// lane a quarter of an hour before its purges, so a crontab's pings
+/// meanwhile make no monitor, end no run and tell nobody — but for one auth
+/// could not answer for in time, let in ([`chain::open`]), and one in flight
+/// as the mark committed, whose rows the purges take.
+fn closed(key: &ResolvedPingKey) -> TelmoniError {
+    tracing::debug!(
+        project_id = %key.project_id,
+        ping_key_id = %key.id,
+        "ping: its organization is being deleted, or is gone; refused as an unknown key"
+    );
+    unknown_key()
 }
 
 /// A slug of the core's shape and no word a monitor may not go by, else a

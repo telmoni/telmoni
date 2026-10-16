@@ -23,7 +23,9 @@ use telmoni_shared::acting::Acting;
 use telmoni_shared::audit::lock_chain;
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
 use telmoni_shared::seam::{self, Auth, Entitlements};
-use telmoni_shared::{AuthError, MonitorCeiling, OrganizationId, ProjectId, TelmoniError};
+use telmoni_shared::{
+    AuthError, MonitorCeiling, OrganizationId, OrganizationStatus, ProjectId, TelmoniError,
+};
 
 /// The longest a change waits for the organization's chain lock: the
 /// role's own `lock_timeout` on a tier, set on the transaction too, so that a
@@ -151,6 +153,74 @@ pub(crate) async fn lock_in_time(
             Ok(false)
         }
         Err(e) => Err(e),
+    }
+}
+
+/// The organization holding `project_id` now, as auth answers it within the
+/// same second auth's second answer gets: `None` where auth holds no such
+/// project, deleted since. For a write that holds the project in place
+/// while it asks, which no transfer passes, so the answer stands to its
+/// commit. Not answered in time, or not answered at all, the write is
+/// refused as auth unavailable, which a machine tries again, never as the
+/// fault of ours auth's own error would be, which an exporter drops.
+pub(crate) async fn home(
+    auth: &dyn Auth,
+    project_id: &ProjectId,
+) -> Result<Option<OrganizationId>, TelmoniError> {
+    let homes = match tokio::time::timeout(
+        ANSWER_BUDGET,
+        auth.project_homes(std::slice::from_ref(project_id)),
+    )
+    .await
+    {
+        Ok(Ok(homes)) => homes,
+        Ok(Err(e)) => {
+            tracing::warn!(
+                project_id = %project_id,
+                error = %e,
+                "telemetry: auth could not say which organization holds a project"
+            );
+            return Err(AuthError::IdentityUnavailable.into());
+        }
+        Err(_) => {
+            tracing::warn!(
+                project_id = %project_id,
+                "telemetry: auth did not say in time which organization holds a project"
+            );
+            return Err(AuthError::IdentityUnavailable.into());
+        }
+    };
+    Ok(homes
+        .into_iter()
+        .find(|home| home.project_id == *project_id)
+        .map(|home| home.organization_id))
+}
+
+/// Whether `organization_id` takes writes now, as auth answers it within the
+/// same second auth's second answer gets: not once its deletion is marked,
+/// which closes it to every lane, nor once auth no longer has it. Asked with
+/// nothing held. An answer not had in time, or not had at all, is taken as
+/// open, logged, as an unread ceiling is taken as none: the organization's
+/// purge holds each of its projects, and takes what such a write left.
+pub(crate) async fn open(auth: &dyn Auth, organization_id: &OrganizationId) -> bool {
+    match tokio::time::timeout(ANSWER_BUDGET, auth.organization_standing(organization_id)).await {
+        Ok(Ok(standing)) => standing == Some(OrganizationStatus::Active),
+        Ok(Err(e)) => {
+            tracing::warn!(
+                organization_id = %organization_id,
+                error = %e,
+                "telemetry: auth could not say whether an organization is open; it is taken as open"
+            );
+            true
+        }
+        Err(_) => {
+            tracing::warn!(
+                organization_id = %organization_id,
+                "telemetry: auth did not say in time whether an organization is open; it is taken \
+                 as open"
+            );
+            true
+        }
     }
 }
 

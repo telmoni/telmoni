@@ -24,9 +24,12 @@
 //! paths to the lane's, and no answer one a cache may keep; past the plan's
 //! limit, or past the monitors nobody has set up that a project may hold,
 //! nothing is made and the ping is refused with the bound's words; a paused
-//! organization takes no ping; a finished run reaches ClickHouse through the
-//! outbox; and the purges and a move take the keys, runs and outbox rows
-//! with the project.
+//! organization takes no ping, and one being deleted none at all, its keys
+//! answered as unknown; a finished run reaches ClickHouse through the
+//! outbox, and lands nowhere for an organization being deleted or a project
+//! gone, whose spans are marked deleted again before the insert or after
+//! it; and the purges and a move take the keys, runs and outbox rows with
+//! the project.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
 mod common;
@@ -57,8 +60,9 @@ use telmoni_shared::{
 };
 use telmoni_telemetry::db::{self, TelemetryLane};
 use telmoni_telemetry::handler::pings::NEW_MONITORS_MAX;
-use telmoni_telemetry::outbox::{self, Settled};
+use telmoni_telemetry::outbox::{self, FinishedRun, Settled};
 use telmoni_telemetry::seam::TelemetrySeam;
+use telmoni_telemetry::store::SpanRow;
 use telmoni_telemetry::{AppState, ping_router, router};
 
 const MONITORS: &str = "/internal/telemetry/monitors";
@@ -2423,6 +2427,30 @@ async fn a_ping_a_move_kept_out_is_filed_where_the_project_went(pool: PgPool) {
     assert_eq!(monitors_of(&pool, &r.project).await, 0);
     assert!(outbox_of(&pool, &r.project).await.is_empty());
 
+    // Moved into an organization whose deletion is marked: refused as a key
+    // the lane does not know, its standing asked once the move has let the
+    // project go, and nothing written.
+    let closing = OrganizationId::new();
+    let (t, auth) = project_and_auth(&pool);
+    auth.stand(&closing, Some(OrganizationStatus::PendingDeletion));
+    let key = t.mint().await;
+    let (status, body) = t
+        .ping_resolved_before_a_move(&pool, &format!("/{key}/nightly-report"), &closing)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(monitors_of(&pool, &t.project).await, 0);
+    assert!(outbox_of(&pool, &t.project).await.is_empty());
+    let held = auth.standing_held();
+    assert_eq!(
+        held.len(),
+        2,
+        "the standings of the organization the key named and of the one the project went to: {held:?}"
+    );
+    assert_eq!(
+        held[1], 0,
+        "the new organization's standing asked holding a lock"
+    );
+
     // The new organization's standing asked once, with nothing held.
     let next = OrganizationId::new();
     let standing = StandingAsked::of(&pool, &next);
@@ -3330,6 +3358,76 @@ async fn a_paused_organization_takes_no_ping(pool: PgPool) {
     assert_eq!(monitors_of(&pool, &p.project).await, 0);
 }
 
+/// A ping for an organization whose deletion is marked is refused as a key
+/// the lane does not know, whatever else it says: the mark closes the
+/// organization to every lane a quarter of an hour before its purges, so
+/// the pings a crontab sends meanwhile make no monitor, end no run and tell
+/// nobody, and leave nothing for a purge to miss. So too once auth has no
+/// such organization. The standing is asked with nothing held. Auth unable
+/// to say refuses nothing, as an unread ceiling holds none: the lane stays
+/// up through auth's outage, and a purge takes what such a ping writes.
+#[sqlx::test]
+async fn a_ping_for_an_organization_being_deleted_is_refused_as_an_unknown_key(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let (p, auth) = project_and_auth(&pool);
+    let key = p.mint().await;
+    p.ping_ok(&format!("/{key}/nightly-report/start")).await;
+    let waiting = outbox_of(&pool, &p.project).await;
+    assert_eq!(waiting.len(), 1, "the first ping's notice: {waiting:?}");
+
+    for standing in [Some(OrganizationStatus::PendingDeletion), None] {
+        auth.stand(&p.organization, standing);
+        for path in [
+            format!("/{key}/nightly-report"),
+            format!("/{key}/nightly-report/fail?exit_code=1"),
+            format!("/{key}/weekly-digest"),
+            format!("/{key}/Weekly_Digest"),
+            format!("/{key}/nightly-report/checkpoint?steps=many"),
+        ] {
+            let (status, body) = p.ping(&path).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{standing:?} {path}: {body}");
+            assert!(
+                body.contains("no ping key by that value"),
+                "{standing:?} {path}: {body}"
+            );
+        }
+    }
+    assert_eq!(monitors_of(&pool, &p.project).await, 1);
+    assert_eq!(
+        open_runs(&pool, &p.project).await.len(),
+        1,
+        "a ping for a closed organization ended its run"
+    );
+    assert_eq!(
+        outbox_of(&pool, &p.project).await,
+        waiting,
+        "a ping for a closed organization wrote to the outbox"
+    );
+
+    auth.stand(&p.organization, Some(OrganizationStatus::PendingDeletion))
+        .failing_standing(true);
+    p.ping_ok(&format!("/{key}/nightly-report")).await;
+    assert!(
+        open_runs(&pool, &p.project).await.is_empty(),
+        "a ping auth could not place was refused"
+    );
+    // Nor one auth answers past its second: the answer is not waited for.
+    auth.failing_standing(false)
+        .delaying_standing(Duration::from_secs(3));
+    let started = std::time::Instant::now();
+    p.ping_ok(&format!("/{key}/nightly-report")).await;
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "a ping waited out auth past its second"
+    );
+    let held = auth.standing_held();
+    assert_eq!(held.len(), 13, "one ask a ping: {held:?}");
+    assert!(
+        held.iter().all(|&locks| locks == 0),
+        "the standing asked holding a lock: {held:?}"
+    );
+}
+
 #[sqlx::test]
 async fn a_finished_run_reaches_clickhouse_through_the_outbox(pool: PgPool) {
     let Some(clickhouse) =
@@ -3694,9 +3792,10 @@ async fn kinds_waiting(pool: &PgPool, project: &ProjectId) -> Vec<String> {
 /// A notice goes nowhere once its organization's deletion is marked: the
 /// deletion's purges take that organization's feeds, and a notice written
 /// after them would outlive them, the monitor's slug and the key's prefix in
-/// its body. The row is dropped as landed; the run's row beside it waits on
-/// the store as before. Nor once the organization is gone, between auth
-/// saying where the project is and saying how the organization stands.
+/// its body. The row is dropped as landed, as the run's row beside it is,
+/// whose span would outlive them the same way. Nor once the organization is
+/// gone, between auth saying where the project is and saying how the
+/// organization stands.
 #[sqlx::test]
 async fn a_notice_for_an_organization_being_deleted_is_dropped(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -3707,26 +3806,28 @@ async fn a_notice_for_an_organization_being_deleted_is_dropped(pool: PgPool) {
     auth.stand(&p.organization, Some(OrganizationStatus::PendingDeletion));
     assert_eq!(
         outbox::tick_once(&p.state).await.expect("a tick"),
-        Settled { landed: 1, held: 1 },
-        "the notice dropped as landed, the run's row handed back"
+        Settled { landed: 2, held: 0 },
+        "the notice and the run's row dropped as landed"
     );
     assert!(
         p.notices.notices().is_empty(),
         "a notice was written to a feed the deletion purges"
     );
-    assert_eq!(kinds_waiting(&pool, &p.project).await, ["span"]);
+    assert!(kinds_waiting(&pool, &p.project).await.is_empty());
 
+    // Pinged while the organization stood, and landed once it is gone.
+    auth.stand(&p.organization, Some(OrganizationStatus::Active));
     p.ping_ok(&format!("/{key}/weekly-digest")).await;
     auth.stand(&p.organization, None);
     assert_eq!(
         outbox::tick_once(&p.state).await.expect("a tick"),
-        Settled { landed: 1, held: 2 }
+        Settled { landed: 2, held: 0 }
     );
     assert!(
         p.notices.notices().is_empty(),
         "a notice was written for an organization that is gone"
     );
-    assert_eq!(kinds_waiting(&pool, &p.project).await, ["span", "span"]);
+    assert!(kinds_waiting(&pool, &p.project).await.is_empty());
 }
 
 /// A notice goes nowhere once auth has no such project — deleted, or its
@@ -3815,7 +3916,9 @@ async fn a_notice_whose_project_moves_as_it_is_written_purges_nothing(pool: PgPo
     let key = p.mint().await;
     p.ping_ok(&format!("/{key}/nightly-report")).await;
 
-    auth.move_after(&p.project, &OrganizationId::new(), 1);
+    // Said where it is to the batch's run and to the notice's ask, then
+    // moved as the notice is written.
+    auth.move_after(&p.project, &OrganizationId::new(), 2);
     assert_eq!(
         outbox::tick_once(&p.state).await.expect("a tick"),
         Settled { landed: 1, held: 1 }
@@ -3842,6 +3945,8 @@ async fn a_notice_auth_cannot_place_waits_with_its_try(pool: PgPool) {
     p.ping_ok(&format!("/{key}/nightly-report")).await;
     p.ping_ok(&format!("/{key}/weekly-digest")).await;
 
+    // Asked once for the batch's runs, which land first, and once for its
+    // first notice, never for its second.
     auth.failing_homes(true);
     let asked = auth.homes_asked();
     assert_eq!(
@@ -3850,7 +3955,7 @@ async fn a_notice_auth_cannot_place_waits_with_its_try(pool: PgPool) {
     );
     assert_eq!(
         auth.homes_asked() - asked,
-        1,
+        2,
         "auth asked again for the second notice"
     );
     assert_eq!(
@@ -3867,7 +3972,7 @@ async fn a_notice_auth_cannot_place_waits_with_its_try(pool: PgPool) {
     );
     assert_eq!(
         auth.homes_asked() - asked,
-        1,
+        2,
         "auth asked again for the second notice"
     );
     assert_eq!(
@@ -3898,7 +4003,9 @@ async fn a_notice_written_as_its_project_is_deleted_goes_with_it(pool: PgPool) {
     let key = p.mint().await;
     p.ping_ok(&format!("/{key}/nightly-report")).await;
 
-    auth.forget_after(&p.project, 1);
+    // Said where it is to the batch's run, which lands first, and to the
+    // notice's ask, then gone as the notice is written.
+    auth.forget_after(&p.project, 2);
     assert_eq!(
         outbox::tick_once(&p.state).await.expect("a tick"),
         Settled { landed: 1, held: 1 }
@@ -3921,7 +4028,9 @@ async fn a_notice_auth_cannot_place_once_written_is_tried_again(pool: PgPool) {
     let key = p.mint().await;
     p.ping_ok(&format!("/{key}/nightly-report")).await;
 
-    auth.failing_homes_after(1);
+    // Answered for the batch's run and for the notice's ask, then lost once
+    // the notice is written.
+    auth.failing_homes_after(2);
     assert_eq!(
         outbox::tick_once(&p.state).await.expect("a tick"),
         Settled { landed: 0, held: 2 }
@@ -3956,7 +4065,9 @@ async fn a_purge_that_fails_or_does_not_end_in_time_hands_the_notice_back(pool: 
     let key = p.mint().await;
     p.ping_ok(&format!("/{key}/nightly-report")).await;
 
-    auth.forget_after(&p.project, 1);
+    // Said where it is to the batch's run and to the notice's ask, then
+    // gone as the notice is written.
+    auth.forget_after(&p.project, 2);
     p.notices.failing_purges(true);
     assert_eq!(
         outbox::tick_once(&p.state).await.expect("a tick"),
@@ -3985,6 +4096,265 @@ async fn a_purge_that_fails_or_does_not_end_in_time_hands_the_notice_back(pool: 
         "the notice outlived its project"
     );
     assert_eq!(p.notices.purged(), std::slice::from_ref(&p.project));
+}
+
+/// A project of `organization`'s, seated for its owner, over `state` and
+/// the `auth` behind it: two of a suite's projects under one loop.
+fn project_over(
+    state: &Arc<AppState>,
+    auth: &AuthStub,
+    notices: &Arc<NoticeLog>,
+    organization: &OrganizationId,
+) -> Project {
+    let project = ProjectId::new();
+    auth.seat(OWNER, organization, &project, OrganizationRole::Owner, None);
+    Project::over(
+        Arc::clone(state),
+        Arc::clone(notices),
+        organization.clone(),
+        project,
+    )
+}
+
+/// A run lands nowhere once its organization's deletion is marked: the
+/// deletion's purges, a quarter of an hour on, take the organization's
+/// spans, and a row landed after them would outlive them, so the row is
+/// dropped as landed. Nor once auth has no such project, whose spans its
+/// deletion marked deleted as it committed: the project's spans are marked
+/// deleted once more, which takes whatever an earlier try wrote and was cut
+/// off before it could ask again, and the row is dropped.
+#[sqlx::test]
+async fn a_run_whose_organization_is_closing_or_whose_project_is_gone_lands_nowhere(pool: PgPool) {
+    let Some(clickhouse) = common::clickhouse_or_skip(
+        "a_run_whose_organization_is_closing_or_whose_project_is_gone_lands_nowhere",
+    )
+    .await
+    else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let auth = AuthStub::probing(&pool);
+    let notices = NoticeLog::new();
+    let state = common::state_with_stores_and_notices(&pool, auth.clone(), notices.clone());
+
+    let p = project_over(&state, &auth, &notices, &OrganizationId::new());
+    let key = p.mint().await;
+    p.ping_ok(&format!("/{key}/nightly-report")).await;
+    auth.stand(&p.organization, Some(OrganizationStatus::PendingDeletion));
+    assert_eq!(
+        outbox::tick_once(&state).await.expect("a tick"),
+        Settled { landed: 2, held: 0 },
+        "the notice and the run dropped as landed"
+    );
+    assert!(outbox_of(&pool, &p.project).await.is_empty());
+    assert_eq!(
+        common::rows_of(&clickhouse.store, &p.project).await,
+        (0, 0),
+        "a run landed for an organization being deleted"
+    );
+
+    let q = project_over(&state, &auth, &notices, &OrganizationId::new());
+    let key = q.mint().await;
+    q.ping_ok(&format!("/{key}/nightly-report")).await;
+    // The earlier try: the run written, then cut off with its row leased.
+    let earlier: Vec<SpanRow> = finished_runs(&pool, &q.project)
+        .await
+        .into_iter()
+        .map(|run| {
+            serde_json::from_value::<FinishedRun>(run)
+                .expect("a finished run")
+                .row(&q.project)
+        })
+        .collect();
+    assert_eq!(earlier.len(), 1);
+    clickhouse
+        .store
+        .insert_spans(&earlier)
+        .await
+        .expect("the earlier try's write");
+    assert_eq!(common::rows_of(&clickhouse.store, &q.project).await, (1, 1));
+
+    auth.forget(&q.project);
+    assert_eq!(
+        outbox::tick_once(&state).await.expect("a tick"),
+        Settled { landed: 2, held: 0 },
+        "the notice and the run dropped as landed"
+    );
+    assert!(outbox_of(&pool, &q.project).await.is_empty());
+    common::eventually("the earlier try's run is marked deleted", || async {
+        common::rows_of(&clickhouse.store, &q.project).await == (0, 0)
+    })
+    .await;
+}
+
+/// A project deleted as its run is written — the deletion committing after
+/// the loop asked where the project is, and its purge marking the project's
+/// spans deleted before the run's row lands — would leave the row behind
+/// the mark: asked again once the row is in, auth has no such project, and
+/// the loop marks the project's spans deleted once more, which takes it.
+#[sqlx::test]
+async fn a_run_written_as_its_project_is_deleted_goes_with_it(pool: PgPool) {
+    let Some(clickhouse) =
+        common::clickhouse_or_skip("a_run_written_as_its_project_is_deleted_goes_with_it").await
+    else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let auth = AuthStub::probing(&pool);
+    let notices = NoticeLog::new();
+    let state = common::state_with_stores_and_notices(&pool, auth.clone(), notices.clone());
+    let p = project_over(&state, &auth, &notices, &OrganizationId::new());
+    let key = p.mint().await;
+    p.ping_ok(&format!("/{key}/nightly-report/start")).await;
+    assert_eq!(
+        outbox::tick_once(&state).await.expect("a tick"),
+        Settled { landed: 1, held: 0 },
+        "the first ping's notice"
+    );
+    p.ping_ok(&format!("/{key}/nightly-report/fail?exit_code=1"))
+        .await;
+
+    auth.forget_after(&p.project, 1);
+    let asked = auth.homes_asked();
+    assert_eq!(
+        outbox::tick_once(&state).await.expect("a tick"),
+        Settled { landed: 1, held: 0 }
+    );
+    assert_eq!(
+        auth.homes_asked() - asked,
+        2,
+        "asked before the insert, and again once the row was in"
+    );
+    assert!(outbox_of(&pool, &p.project).await.is_empty());
+    common::eventually(
+        "the run written as its project went is marked deleted",
+        || async { common::rows_of(&clickhouse.store, &p.project).await == (0, 0) },
+    )
+    .await;
+}
+
+/// Auth unable to say where a run's project is, or how its organization
+/// stands, is an outage of ours: the row is handed back with its try and
+/// nothing written. Unable to say, once the row is in, whether the project
+/// outlived the write, it hands the row back too, for the next tick to ask
+/// again — which, finding the run in `spans`, drops the row rather than
+/// write the run twice.
+#[sqlx::test]
+async fn a_run_auth_cannot_place_waits_with_its_try(pool: PgPool) {
+    let Some(clickhouse) =
+        common::clickhouse_or_skip("a_run_auth_cannot_place_waits_with_its_try").await
+    else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let auth = AuthStub::probing(&pool);
+    let notices = NoticeLog::new();
+    let state = common::state_with_stores_and_notices(&pool, auth.clone(), notices.clone());
+    let p = project_over(&state, &auth, &notices, &OrganizationId::new());
+    let key = p.mint().await;
+    p.ping_ok(&format!("/{key}/nightly-report/start")).await;
+    assert_eq!(
+        outbox::tick_once(&state).await.expect("a tick"),
+        Settled { landed: 1, held: 0 },
+        "the first ping's notice"
+    );
+    p.ping_ok(&format!("/{key}/nightly-report/fail?exit_code=1"))
+        .await;
+
+    for unanswered in ["where the project is", "how its organization stands"] {
+        auth.failing_homes(unanswered == "where the project is")
+            .failing_standing(unanswered == "how its organization stands");
+        assert_eq!(
+            outbox::tick_once(&state).await.expect("a tick"),
+            Settled { landed: 0, held: 1 },
+            "{unanswered}"
+        );
+        assert_eq!(
+            tries_of(&pool, &p.project).await,
+            [(0, false)],
+            "{unanswered}: the row not handed back with its try"
+        );
+        assert_eq!(
+            common::rows_of(&clickhouse.store, &p.project).await,
+            (0, 0),
+            "{unanswered}: the run written"
+        );
+    }
+
+    auth.failing_standing(false).failing_homes_after(1);
+    assert_eq!(
+        outbox::tick_once(&state).await.expect("a tick"),
+        Settled { landed: 0, held: 1 }
+    );
+    assert_eq!(tries_of(&pool, &p.project).await, [(0, false)]);
+    assert_eq!(
+        common::rows_of(&clickhouse.store, &p.project).await,
+        (1, 1),
+        "the run not written"
+    );
+
+    auth.failing_homes(false);
+    assert_eq!(
+        outbox::tick_once(&state).await.expect("a tick"),
+        Settled { landed: 1, held: 0 }
+    );
+    assert!(outbox_of(&pool, &p.project).await.is_empty());
+    assert_eq!(
+        common::rows_of(&clickhouse.store, &p.project).await,
+        (1, 1),
+        "the run written twice"
+    );
+}
+
+/// A run of a project that is gone, whose spans ClickHouse does not mark
+/// deleted once more, waits with its try for the next tick to mark them,
+/// since a row an earlier try wrote would stay otherwise. A mark that fails
+/// ends the pass, the batch's other gone projects handed back unmarked, as
+/// a store gone away mid-pass hands back every row after the one it failed.
+#[sqlx::test]
+async fn a_mark_clickhouse_does_not_take_hands_the_run_back(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let auth = AuthStub::probing(&pool);
+    let notices = NoticeLog::new();
+    let state =
+        common::state_with_notices(&pool, auth.clone(), Arc::new(NoLimits), notices.clone());
+    let gone = [
+        project_over(&state, &auth, &notices, &OrganizationId::new()),
+        project_over(&state, &auth, &notices, &OrganizationId::new()),
+    ];
+    for p in &gone {
+        let key = p.mint().await;
+        p.ping_ok(&format!("/{key}/nightly-report/start")).await;
+        p.ping_ok(&format!("/{key}/nightly-report/fail?exit_code=1"))
+            .await;
+    }
+    assert_eq!(
+        outbox::tick_once(&state).await.expect("a tick"),
+        Settled { landed: 2, held: 2 },
+        "the notices landed, the runs waiting on ClickHouse"
+    );
+
+    for p in &gone {
+        auth.forget(&p.project);
+    }
+    let (capturing, logs) = telmoni_shared::test_util::captured_logs();
+    assert_eq!(
+        outbox::tick_once(&state).await.expect("a tick"),
+        Settled { landed: 0, held: 2 }
+    );
+    drop(capturing);
+    for p in &gone {
+        assert_eq!(
+            tries_of(&pool, &p.project).await,
+            [(0, false)],
+            "the row not handed back with its try"
+        );
+    }
+    assert_eq!(
+        logs.text().matches("did not mark").count(),
+        1,
+        "a mark tried after one failed"
+    );
 }
 
 #[sqlx::test]
