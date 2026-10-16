@@ -334,8 +334,11 @@ CREATE TABLE telemetry.open_runs (
     -- by project: a `rid` a script derives from its own name — `uuidgen
     -- --sha1` on the job's name and the day, the stable UUID the manual
     -- gives — is open in two projects at once, neither told of the other.
-    -- The lane names this key, `open_runs_pkey`, for the `/start` that runs
-    -- into it under another of the project's monitors.
+    -- The lane opens a run with `ON CONFLICT (project_id, id) DO NOTHING`,
+    -- which names this key by its columns, so a change of the key is a
+    -- change of that insert. A ping that meets the key reads the run it
+    -- found: its own monitor's, opened beside it by another of the run's
+    -- pings, it hears; another monitor's, it is refused.
     PRIMARY KEY (project_id, id),
     CONSTRAINT open_runs_agent_check CHECK (char_length(agent) BETWEEN 1 AND 128),
     CONSTRAINT open_runs_source_check CHECK (source IN ('ping', 'ingest')),

@@ -77,10 +77,6 @@ const MOVE_RETRY_MAX: Duration = Duration::from_millis(400);
 /// monitor of another slug may carry.
 const SLUG_TAKEN: &str = "monitors_project_slug_idx";
 const AGENT_TAKEN: &str = "monitors_project_agent_idx";
-/// The primary key a run opened under a `rid` the project has open already
-/// runs into: the key is the project's and the id's, so the run it finds is
-/// one of the project's own, under another of its monitors.
-const RUN_TAKEN: &str = "open_runs_pkey";
 /// The most monitors one project holds that its pings made and nobody has
 /// set up — `new` — before a ping that would make one more is refused: room
 /// for a crontab's worth of first pings at once, and a bound on what a slug
@@ -261,7 +257,9 @@ pub async fn start(
 /// progress: steps and spend so far, numbers alone, each kept where it is
 /// more than the run holds, so an older checkpoint sent again moves neither
 /// back; the stall timeout starts again. With no run open, it opens the run
-/// it reports on, since the run's `/start` was lost on the way.
+/// it reports on, since the run's `/start` was lost on the way — or hears
+/// the one its `/start`, or another of its checkpoints, opened while it was
+/// itself on the way.
 pub async fn checkpoint(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -757,13 +755,15 @@ enum RunEvent {
 /// finished span, once — an end that finds the run ended beside it hands
 /// over nothing, and a checkpoint or a `/start` sent again that finds it
 /// ended since it was read changes nothing, the end having decided the run
-/// and the monitor. A run that never said it ended — a job that crashed
-/// after its `/start`, a `/checkpoint` that came after its run's end — is
-/// ended `error` by the next ping that finds it ([`abandon`]): a `/start`
-/// naming no run ends what its monitor still has open, and an end ping
-/// naming none ends the newest with its verdict and the rest the same way;
-/// a ping naming a run leaves the others be, since runs that overlap name
-/// themselves. Answers the run's id and what happened to it.
+/// and the monitor; one that read no run under the id it names, and finds
+/// it opened beside it when it goes to open it, hears it as though it had
+/// read it open ([`open_run`]). A run that never said it ended — a job that
+/// crashed after its `/start`, a `/checkpoint` that came after its run's
+/// end — is ended `error` by the next ping that finds it ([`abandon`]): a
+/// `/start` naming no run ends what its monitor still has open, and an end
+/// ping naming none ends the newest with its verdict and the rest the same
+/// way; a ping naming a run leaves the others be, since runs that overlap
+/// name themselves. Answers the run's id and what happened to it.
 async fn record(
     key: &ResolvedPingKey,
     monitor: &MonitorRow,
@@ -783,18 +783,14 @@ async fn record(
     match report {
         Report::Start => match (open, progress.rid) {
             // A `/start` sent again for the run it named — a retried curl —
-            // is heard, not a second run; one whose run ended beside it
-            // since it was read changes nothing.
+            // is heard, not a second run, here or, where its first copy was
+            // still being answered when this one read, in `open_run`; one
+            // whose run ended beside it since it was read changes nothing.
             (Some(run), Some(_)) => {
                 let heard =
                     db::hear_open_run(tx, project_id, run.id, run.monitor_id, now, None, None)
                         .await?;
-                let event = if heard.is_some() {
-                    RunEvent::Heard
-                } else {
-                    RunEvent::Gone
-                };
-                Ok((run.id, event))
+                Ok((run.id, heard.as_ref().map_or(RunEvent::Gone, hearing)))
             }
             (_, rid) => {
                 // The monitor's next run: whatever it still has open never
@@ -804,8 +800,12 @@ async fn record(
                     abandon(key, monitor, stale, now, tx).await?;
                 }
                 let id = rid.unwrap_or_else(Uuid::new_v4);
-                let run = open_run(key, monitor, id, now, 0, 0.0, tx).await?;
-                Ok((run.id, RunEvent::Opened))
+                let event = match open_run(key, monitor, id, now, None, None, tx).await? {
+                    Opening::Opened(_) => RunEvent::Opened,
+                    Opening::Heard(run) => hearing(&run),
+                    Opening::Gone => RunEvent::Gone,
+                };
+                Ok((id, event))
             }
         },
         Report::Checkpoint => {
@@ -828,28 +828,21 @@ async fn record(
                     // this one saw the run open, so nothing was lost.
                     None => return Ok((run.id, RunEvent::Gone)),
                 },
-                // Its `/start` was lost on the way: the checkpoint opens the
-                // run it reports on.
+                // Its `/start` was lost on the way, or is still being
+                // answered: the checkpoint opens the run it reports on, or
+                // hears the one its `/start`, or another of its checkpoints,
+                // opened beside it.
                 None => {
                     let id = progress.rid.unwrap_or_else(Uuid::new_v4);
-                    open_run(
-                        key,
-                        monitor,
-                        id,
-                        now,
-                        progress.steps.unwrap_or(0),
-                        progress.cost_usd.unwrap_or(0.0),
-                        tx,
-                    )
-                    .await?
+                    match open_run(key, monitor, id, now, progress.steps, progress.cost_usd, tx)
+                        .await?
+                    {
+                        Opening::Opened(run) | Opening::Heard(run) => run,
+                        Opening::Gone => return Ok((id, RunEvent::Gone)),
+                    }
                 }
             };
-            let event = if over_bound(&run) {
-                RunEvent::OverBound
-            } else {
-                RunEvent::Heard
-            };
-            Ok((run.id, event))
+            Ok((run.id, hearing(&run)))
         }
         Report::Success | Report::Fail => {
             let status = if report == Report::Success {
@@ -955,20 +948,43 @@ async fn abandon(
     Ok(())
 }
 
+/// What a ping that went to open its run came to.
+enum Opening {
+    /// The run, opened by this ping.
+    Opened(OpenRunRow),
+    /// The run another of its pings opened beside this one under its id and
+    /// its monitor, once this one had read none, heard as though this one
+    /// had read it open.
+    Heard(OpenRunRow),
+    /// The run it found under its id, ended before it could be read again:
+    /// whose it was is not known, and nothing is changed.
+    Gone,
+}
+
 /// A run opened under `id`, held to its monitor's bounds — a `curl` run
-/// declares none of its own — with what the ping reported so far.
+/// declares none of its own — with what the ping reported so far. Where the
+/// project holds a run by that id under this ping's monitor, this ping read
+/// none, so another of the run's pings opened it beside this one — a copy of
+/// the same `/start`, a retry sent while the first was still being answered,
+/// or the `/start` or checkpoint it raced, in either order — and it is heard
+/// with what the ping reported, as it would have been had this ping read it
+/// open. Under another of the project's monitors, the id is refused: the
+/// key is the project's and the id's, so the run it finds is one of the
+/// project's own. One ended before it could be read again changes nothing,
+/// whichever monitor's it was, as for a ping that read its run open.
 async fn open_run(
     key: &ResolvedPingKey,
     monitor: &MonitorRow,
     id: Uuid,
     now: DateTime<Utc>,
-    steps: i32,
-    cost_usd: f64,
+    steps: Option<i32>,
+    cost_usd: Option<f64>,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
-) -> Result<OpenRunRow, TelmoniError> {
-    db::insert_open_run(
+) -> Result<Opening, TelmoniError> {
+    let project_id = &key.project_id;
+    let opened = db::insert_open_run(
         tx,
-        &key.project_id,
+        project_id,
         &key.organization_id,
         id,
         OpenRunWrite {
@@ -978,29 +994,48 @@ async fn open_run(
             ping_key_id: Some(key.id),
             started_at: now,
             ends_by: ends_by(now, monitor.expected_duration_s),
-            steps,
-            cost_usd,
+            steps: steps.unwrap_or(0),
+            cost_usd: cost_usd.unwrap_or(0.0),
             stall_after_s: monitor.stall_after_s,
             max_steps: monitor.max_steps,
             max_cost_usd: monitor.max_cost_usd,
         },
     )
-    .await
-    .map_err(
-        |error| match error.as_database_error().and_then(|db| db.constraint()) {
-            Some(RUN_TAKEN) => AuthError::Conflict(
-                "a run by that rid is open already, under another monitor".into(),
-            )
-            .into(),
-            _ => error.into(),
-        },
-    )
+    .await?;
+    if let Some(run) = opened {
+        return Ok(Opening::Opened(run));
+    }
+    match db::open_run(tx, project_id, id).await? {
+        Some(run) if run.monitor_id != monitor.id => Err(AuthError::Conflict(
+            "a run by that rid is open already, under another monitor".into(),
+        )
+        .into()),
+        Some(_) => Ok(
+            match db::hear_open_run(tx, project_id, id, monitor.id, now, steps, cost_usd).await? {
+                Some(run) => Opening::Heard(run),
+                None => Opening::Gone,
+            },
+        ),
+        None => Ok(Opening::Gone),
+    }
 }
 
 /// Whether a run is past its step cap. Its spend is held to its cost cap
 /// from 3.9, which prices a call; a `/checkpoint`'s cost is kept meanwhile.
 fn over_bound(run: &OpenRunRow) -> bool {
     run.max_steps.is_some_and(|cap| run.steps > cap)
+}
+
+/// What hearing a run says of it: past its step cap, or going on within its
+/// bounds. Read from the run as the write left it, never from the monitor as
+/// the ping read it: another of the run's pings may have taken it past its
+/// cap since, as one that opened the run beside this ping has.
+fn hearing(run: &OpenRunRow) -> RunEvent {
+    if over_bound(run) {
+        RunEvent::OverBound
+    } else {
+        RunEvent::Heard
+    }
 }
 
 /// The monitor after its run was heard: its state from what the run did —

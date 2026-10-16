@@ -12,17 +12,16 @@
 //! and takes their rows, and a ping a move keeps out holds no connection
 //! while it waits, files its rows where the project went once let in, its
 //! new organization's standing asked with nothing held, or gives up as on
-//! the chain lock; the run a ping names by `rid`; every run's ceiling, and
-//! the stall timeout a discovered
-//! monitor is given; a monitor whose saved timing cannot be read refusing
-//! none of its pings; a body is dropped and said so, the query held to
-//! numbers, the methods and paths to the lane's, and no answer one a cache
-//! may keep; past the
-//! plan's limit, or past the monitors nobody has set up that a project may
-//! hold, nothing is made and the ping is refused with the bound's words; a
-//! paused organization takes no ping; a finished run reaches ClickHouse
-//! through the outbox; and the purges and a move take the keys, runs and
-//! outbox rows with the project.
+//! the chain lock; the run a ping names by `rid`, heard by a ping that races
+//! the one opening it; every run's ceiling, and the stall timeout a
+//! discovered monitor is given; a monitor whose saved timing cannot be read
+//! refusing none of its pings; a body is dropped and said so, the query held
+//! to numbers, the methods and paths to the lane's, and no answer one a cache
+//! may keep; past the plan's limit, or past the monitors nobody has set up
+//! that a project may hold, nothing is made and the ping is refused with the
+//! bound's words; a paused organization takes no ping; a finished run
+//! reaches ClickHouse through the outbox; and the purges and a move take the
+//! keys, runs and outbox rows with the project.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
 mod common;
@@ -289,6 +288,48 @@ impl Project {
         answer
     }
 
+    /// Two `GET` pings, the second sent while the first is still being
+    /// answered: a session of `pool`'s holds the project's monitors' rows in
+    /// the one mode a run's insert passes — its key check shares a monitor's
+    /// row with it — and a monitor's write waits on, so the first, its run
+    /// opened, waits there to write its monitor; the second is sent once it
+    /// does, and the session lets go once the second waits on the first.
+    /// Both answers, in order. The first must change its monitor's state, or
+    /// it writes the monitor nothing and waits on nothing.
+    async fn pings_racing(
+        &self,
+        pool: &PgPool,
+        first: &str,
+        second: &str,
+    ) -> ((StatusCode, String), (StatusCode, String)) {
+        let mut holder = pool.begin().await.expect("the holder's transaction");
+        let holder_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *holder)
+            .await
+            .expect("the holder's session");
+        let held =
+            sqlx::query("SELECT 1 FROM telemetry.monitors WHERE project_id = $1 FOR NO KEY UPDATE")
+                .bind(&self.project)
+                .execute(&mut *holder)
+                .await
+                .expect("hold the project's monitors")
+                .rows_affected();
+        assert!(held > 0, "the project has no monitor to hold");
+        tokio::join!(self.ping(first), async {
+            let first_pid = waiting_on(
+                pool,
+                holder_pid,
+                "the first ping waits to write its monitor",
+            )
+            .await;
+            let (second, ()) = tokio::join!(self.ping(second), async {
+                waiting_on(pool, first_pid, "the second ping waits on the first's run").await;
+                holder.commit().await.expect("the holder lets go");
+            });
+            second
+        })
+    }
+
     /// A `GET` ping sent while another writer, a session of `pool`'s, takes
     /// `order`'s locks: the first before the ping is sent, the rest once the
     /// ping waits on it, then its commit. A ping holding a lock the writer
@@ -526,6 +567,23 @@ async fn open_runs(pool: &PgPool, project: &ProjectId) -> Vec<(Uuid, i32, f64)> 
     .fetch_all(pool)
     .await
     .expect("read a project's open runs")
+}
+
+/// When one of the project's open runs started, and when it was last heard.
+async fn clocks_of(
+    pool: &PgPool,
+    project: &ProjectId,
+    run: &str,
+) -> (DateTime<Utc>, DateTime<Utc>) {
+    sqlx::query_as(
+        "SELECT started_at, last_heard_at FROM telemetry.open_runs
+          WHERE project_id = $1 AND id = $2",
+    )
+    .bind(project)
+    .bind(Uuid::parse_str(run).expect("a run's id"))
+    .fetch_one(pool)
+    .await
+    .expect("read a run's clocks")
 }
 
 /// Each open run's ceiling, in seconds past its start, oldest first.
@@ -1799,6 +1857,166 @@ async fn a_rid_is_a_runs_own_name_within_its_project(pool: PgPool) {
     assert_eq!(finished[0]["steps"], 2);
     assert_eq!(finished[0]["exit_code"], 1);
     assert_eq!(b.monitor("hourly-sync").await["state"], "failed");
+}
+
+/// A ping that reads no run under the `rid` it names, and finds one opened
+/// beside it when it goes to open its own — by a copy of the same `/start`,
+/// a retry sent while the first was still being answered, or by the
+/// `/start` or `/checkpoint` it raced, in either order — hears that run as a
+/// ping that read it open would: both are answered `OK`, one run is open, a
+/// checkpoint's progress is heard on it, and the monitor's state follows the
+/// run as it stands, past its cap or not, where the second was refused as
+/// though the run were another monitor's. A run opened beside it under
+/// another of the project's monitors is that refusal still.
+#[sqlx::test]
+async fn a_ping_racing_its_runs_first_ping_hears_the_run(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.make(hourly()).await;
+    p.make(json!({
+        "name": "Other sync",
+        "slug": "other-sync",
+        "interval_s": 3600,
+        "grace_s": 60,
+    }))
+    .await;
+    let ok = |answer: &(StatusCode, String)| answer.0 == StatusCode::OK && answer.1 == "OK";
+
+    // A `/start` sent again while its first copy is still being answered:
+    // the copy hears the run, at its own later clock.
+    let retried = rid();
+    let start = format!("/{key}/hourly-sync/start?rid={retried}");
+    let (first, second) = p.pings_racing(&pool, &start, &start).await;
+    assert!(ok(&first), "{first:?}");
+    assert!(ok(&second), "the copy was refused: {second:?}");
+    let runs = open_runs(&pool, &p.project).await;
+    assert_eq!(runs.len(), 1, "one run, not a second");
+    assert_eq!(runs[0].0.to_string(), retried);
+    assert_eq!(p.monitor("hourly-sync").await["state"], "running");
+    let (started, heard) = clocks_of(&pool, &p.project, &retried).await;
+    assert!(heard > started, "the copy did not hear the run");
+
+    // A ping's clock is read as it arrives and its write may land after a
+    // later ping's, as a copy's does after the run's first: a hearing at an
+    // earlier moment leaves the run's last one standing. The gap cannot be
+    // held open from outside, so the clock is put to the write itself.
+    let hourly = Uuid::parse_str(
+        p.monitor("hourly-sync").await["id"]
+            .as_str()
+            .expect("an id"),
+    )
+    .expect("a monitor's id");
+    let mut tx = telmoni_shared::db::tenant_session::project_scope(&pool, &p.project)
+        .await
+        .expect("a scope");
+    db::hear_open_run(
+        &mut tx,
+        &p.project,
+        Uuid::parse_str(&retried).expect("a run's id"),
+        hourly,
+        started - chrono::Duration::seconds(1),
+        None,
+        None,
+    )
+    .await
+    .expect("a write")
+    .expect("the run");
+    tx.commit().await.expect("committed");
+    assert_eq!(
+        clocks_of(&pool, &p.project, &retried).await,
+        (started, heard),
+        "an earlier clock moved the run's last hearing back"
+    );
+    p.ping_ok(&format!("/{key}/hourly-sync?rid={retried}"))
+        .await;
+
+    // A `/checkpoint` sent before its `/start` has committed: heard on the
+    // run the `/start` opened, with what it reports.
+    let overtaken = rid();
+    let (first, second) = p
+        .pings_racing(
+            &pool,
+            &format!("/{key}/hourly-sync/start?rid={overtaken}"),
+            &format!("/{key}/hourly-sync/checkpoint?rid={overtaken}&steps=4&cost=0.5"),
+        )
+        .await;
+    assert!(ok(&first), "{first:?}");
+    assert!(ok(&second), "the checkpoint was refused: {second:?}");
+    let runs = open_runs(&pool, &p.project).await;
+    assert_eq!(runs.len(), 1, "one run, not a second");
+    assert_eq!(runs[0].0.to_string(), overtaken);
+    assert_eq!(
+        (runs[0].1, runs[0].2),
+        (4, 0.5),
+        "the checkpoint's progress"
+    );
+    assert_eq!(p.monitor("hourly-sync").await["state"], "over_bound");
+    p.ping_ok(&format!("/{key}/hourly-sync?rid={overtaken}"))
+        .await;
+
+    // The `/start` a checkpoint overtook, the run past its step cap: heard on
+    // the run the checkpoint opened, the monitor left past its bound, where
+    // a `/start` going by the monitor as it read it would set it running.
+    let reversed = rid();
+    let (first, second) = p
+        .pings_racing(
+            &pool,
+            &format!("/{key}/hourly-sync/checkpoint?rid={reversed}&steps=4"),
+            &format!("/{key}/hourly-sync/start?rid={reversed}"),
+        )
+        .await;
+    assert!(ok(&first), "{first:?}");
+    assert!(ok(&second), "the start was refused: {second:?}");
+    let runs = open_runs(&pool, &p.project).await;
+    assert_eq!(runs.len(), 1, "one run, not a second");
+    assert_eq!((runs[0].0.to_string(), runs[0].1), (reversed.clone(), 4));
+    assert_eq!(p.monitor("hourly-sync").await["state"], "over_bound");
+    p.ping_ok(&format!("/{key}/hourly-sync?rid={reversed}"))
+        .await;
+
+    // The same without a race: a `/start` sent again for a run past its cap,
+    // once another run's end has set the monitor healthy, puts it back past
+    // its bound, as the run's next checkpoint would.
+    let (capped, beside) = (rid(), rid());
+    p.ping_ok(&format!("/{key}/hourly-sync/start?rid={capped}"))
+        .await;
+    p.ping_ok(&format!(
+        "/{key}/hourly-sync/checkpoint?rid={capped}&steps=4"
+    ))
+    .await;
+    p.ping_ok(&format!("/{key}/hourly-sync/start?rid={beside}"))
+        .await;
+    p.ping_ok(&format!("/{key}/hourly-sync?rid={beside}")).await;
+    assert_eq!(p.monitor("hourly-sync").await["state"], "healthy");
+    p.ping_ok(&format!("/{key}/hourly-sync/start?rid={capped}"))
+        .await;
+    assert_eq!(p.monitor("hourly-sync").await["state"], "over_bound");
+    p.ping_ok(&format!("/{key}/hourly-sync?rid={capped}")).await;
+
+    // Opened beside it under another monitor, the run is that monitor's:
+    // the 409, and the run stands as the first ping opened it.
+    let taken = rid();
+    let (first, second) = p
+        .pings_racing(
+            &pool,
+            &format!("/{key}/hourly-sync/start?rid={taken}"),
+            &format!("/{key}/other-sync/start?rid={taken}"),
+        )
+        .await;
+    assert!(ok(&first), "{first:?}");
+    assert_eq!(second.0, StatusCode::CONFLICT, "{second:?}");
+    assert!(second.1.contains("under another monitor"), "{second:?}");
+    let runs = open_runs(&pool, &p.project).await;
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].0.to_string(), taken);
+    assert_eq!(p.monitor("hourly-sync").await["state"], "running");
+    assert_eq!(p.monitor("other-sync").await["state"], "healthy");
+    assert_eq!(
+        finished_runs(&pool, &p.project).await.len(),
+        5,
+        "the five runs ended, and nothing else"
+    );
 }
 
 /// A monitor whose timing was read as it was saved and cannot be read now —

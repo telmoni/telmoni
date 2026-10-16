@@ -933,22 +933,24 @@ pub async fn newest_open_run<B: HasProject>(
     .await
 }
 
-/// A run opened, under `id`, which is its own within the project: one open
-/// already under that id in the project is the primary key's refusal,
-/// `open_runs_pkey`, and one in another project is nothing to this one,
-/// since the key is the project's and the id's.
+/// A run opened, under `id`, which is its own within the project: one in
+/// another project is nothing to this one, since the key is the project's
+/// and the id's. `None` where the project holds a run by that id already —
+/// committed before this insert, or by a transaction it waited on — for the
+/// caller to read whose it is.
 pub async fn insert_open_run(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
     organization_id: &OrganizationId,
     id: Uuid,
     run: OpenRunWrite<'_>,
-) -> sqlx::Result<OpenRunRow> {
+) -> sqlx::Result<Option<OpenRunRow>> {
     sqlx::query_as(&format!(
         "INSERT INTO telemetry.open_runs (id, project_id, organization_id, monitor_id, agent, \
              source, ping_key_id, started_at, last_heard_at, ends_by, steps, cost_usd, \
              stall_after_s, max_steps, max_cost_usd)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, $13, $14)
+         ON CONFLICT (project_id, id) DO NOTHING
          RETURNING {OPEN_RUN_COLUMNS}"
     ))
     .bind(id)
@@ -965,14 +967,17 @@ pub async fn insert_open_run(
     .bind(run.stall_after_s)
     .bind(run.max_steps)
     .bind(run.max_cost_usd)
-    .fetch_one(tx.conn())
+    .fetch_optional(tx.conn())
     .await
 }
 
 /// One of the project's open runs heard at `heard_at`, its stall timeout
 /// starting again, with its steps and spend so far where a checkpoint
 /// reported more than the run holds: each is a total so far, which never
-/// falls, so an older checkpoint sent again moves neither back; `None`
+/// falls, so an older checkpoint sent again moves neither back; and its
+/// last hearing never moves back either, since a ping's clock is read as
+/// it arrives and its write may land after a later ping's — one racing the
+/// ping that opened the run would have it heard before it started. `None`
 /// where the project has no open run by that id under `monitor_id`, the
 /// monitor it was read under, so a run another monitor opened under the id
 /// once this one ended is never taken for it.
@@ -988,7 +993,7 @@ pub async fn hear_open_run<B: HasProject>(
     // `GREATEST` passes over a NULL, so a total the ping did not send stands.
     sqlx::query_as(&format!(
         "UPDATE telemetry.open_runs
-            SET last_heard_at = $4,
+            SET last_heard_at = GREATEST($4, last_heard_at),
                 steps = GREATEST($5, steps),
                 cost_usd = GREATEST($6, cost_usd)
           WHERE project_id = $1 AND id = $2 AND monitor_id = $3
