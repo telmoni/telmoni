@@ -20,15 +20,19 @@ after typing the project's name
 - **In the same purge:** every span and every hour of totals the project
   sent is marked deleted, gone from every read within moments as the store
   applies the mark, and the nightly rotation removes them from disk; its
-  telemetry settings, its saved views of its traces, and the key its
-  end-user ids were hashed under, go with them. Its connectors, their
-  delivery history and its activity feed are purged in the same request,
-  just before its telemetry, and the console agent removes what it holds
-  about the project within the hour.
+  telemetry settings, its saved views of its traces, the key its end-user
+  ids were hashed under, and its monitors with the runs they still had
+  open go with them, its ping keys first, so the ping lane is closed to the
+  project before anything else. Its connectors, their delivery history and
+  its activity feed are purged in the same request, just before its
+  telemetry, and the console agent removes what it holds about the project
+  within the hour.
 - **What stays:** the project's events in the organization's audit log.
-- **If a step fails** — a store that did not answer — the organization's own
-  deletion finishes it: telemetry finds the project again through the
-  settings row the failure left.
+- **If a step fails** — a store that did not answer, or a ping still being
+  answered that held the project past the purge's two seconds — the
+  organization's own deletion finishes it: telemetry finds the project
+  again through the settings row the failure left, and its ping keys are
+  gone already.
 
 ## Deleting an organization
 
