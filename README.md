@@ -119,7 +119,7 @@ Configuration comes only from the environment ([every setting](https://telmoni.c
 | [SDKs](https://telmoni.com/docs/api/sdks) | Python, TypeScript, Go, Rust | Open a run around an agent and record its steps, model calls and tool calls as OpenTelemetry spans. |
 | [Coding-agent plugins](https://telmoni.com/docs/api/coding-agents) | Claude Code, Codex, OpenCode, Cursor | Record each turn of a coding agent you already use as a run, with no code to write and never a prompt or a file. They install from a checkout until they're on npm. |
 | [CLI](https://github.com/telmoni/telmoni-cli) | macOS, Linux | `telmoni`: device-code sign-in and your organizations from a terminal, or an API key in CI. |
-| [Agent skills](https://github.com/telmoni/skills) | Claude Code, Codex, Cursor | Teach coding agents to work with the SDKs, the CLI, the API, webhooks and self-hosting. |
+| [Agent skills](https://github.com/telmoni/skills) | Claude Code, Codex, Cursor | Teach coding agents to work with the SDKs, the coding-agent plugins, the CLI, the API, webhooks and self-hosting. |
 | [Slack](https://telmoni.com/docs/integrations/slack) | Notifications | A project's notifications, posted to a channel. |
 | [Webhooks](https://telmoni.com/docs/integrations/webhooks) | Notifications | A project's notifications, delivered to your endpoint and signed with HMAC-SHA256. |
 | [OIDC](https://telmoni.com/docs/self-host/configuration) | Any OIDC provider | Single sign-on beside the password form, or instead of it. |
