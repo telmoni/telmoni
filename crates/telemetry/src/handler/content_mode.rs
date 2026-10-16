@@ -104,25 +104,13 @@ pub async fn put_content_mode(
     }
     let organization_id = &acting.organization_id;
 
-    let mut tx = project_scope(&state.db, project_id)
-        .await?
-        .bind_organization(organization_id)
-        .await?;
-    // Nothing is written on a refusal, and the chain lock is let go before
-    // the answer rather than whenever the pool next sees the connection.
+    let mut tx = chain::scoped(&state.db, &acting, project_id).await?;
     let switched =
         match switch_content_mode(&*state.auth, &acting, project_id, &mut tx, &headers, mode).await
         {
             Ok(switched) => switched,
             Err(refused) => {
-                if let Err(e) = tx.rollback().await {
-                    tracing::warn!(
-                        project_id = %project_id,
-                        error = %e,
-                        "telemetry: a refused content mode change could not be rolled back; \
-                         its connection drops it"
-                    );
-                }
+                chain::rolled_back(tx.rollback().await, project_id, "content mode");
                 return Err(refused);
             }
         };

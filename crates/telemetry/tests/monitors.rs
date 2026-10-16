@@ -264,6 +264,10 @@ async fn every_role_reads_the_monitors_and_owners_and_admins_make_them(pool: PgP
         ))
         .await;
     assert_eq!(status, StatusCode::CONFLICT, "its slug again: {body}");
+    assert_eq!(
+        body["detail"], "this project has a monitor by that slug already",
+        "{body}"
+    );
     let (status, body) = p
         .send(p.request(
             "POST",
@@ -273,6 +277,10 @@ async fn every_role_reads_the_monitors_and_owners_and_admins_make_them(pool: PgP
         ))
         .await;
     assert_eq!(status, StatusCode::CONFLICT, "its agent again: {body}");
+    assert_eq!(
+        body["detail"], "this project has a monitor for that agent already",
+        "{body}"
+    );
 
     // One with no schedule: it expects no run, and has no due time.
     let (status, support) = p

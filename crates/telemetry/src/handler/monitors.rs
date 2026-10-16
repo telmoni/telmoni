@@ -50,11 +50,12 @@ pub const MAX_COST_USD_MAX: f64 = 1_000_000.0;
 /// beside the monitor's own, each of which a monitor so named would shadow.
 pub const RESERVED: &[&str] = &["new", "schedule"];
 /// The unique indexes a second monitor of one slug, or of one agent, runs
-/// into.
+/// into, whichever lane writes it ([`refused_as_taken`]).
 const SLUG_TAKEN: &str = "monitors_project_slug_idx";
 const AGENT_TAKEN: &str = "monitors_project_agent_idx";
-/// The zone a monitor is in when none is sent.
-const DEFAULT_TIMEZONE: &str = "UTC";
+/// The zone a monitor is in when none is sent, by its owner or by the ping
+/// that made it.
+pub(crate) const DEFAULT_TIMEZONE: &str = "UTC";
 
 /// A run's bounds, as a monitor holds its runs to them: none is no bound.
 /// The tighter of these and the run's own, sent with it by the SDK, is what
@@ -451,32 +452,33 @@ fn monitor_slug(given: &str) -> Result<String, TelmoniError> {
     }
 }
 
-/// A write a unique index refused: a monitor of that slug, or for that
-/// agent, is the project's already. Any other failure is the database's.
-fn taken(error: sqlx::Error) -> TelmoniError {
-    match error.as_database_error().and_then(|db| db.constraint()) {
-        Some(SLUG_TAKEN) => {
-            AuthError::Conflict("this project has a monitor by that slug already".into()).into()
-        }
-        Some(AGENT_TAKEN) => {
-            AuthError::Conflict("this project has a monitor for that agent already".into()).into()
-        }
-        _ => error.into(),
-    }
+/// A write a monitor's unique index refused, said in the words of the lane
+/// that wrote it — `slug_taken` where a monitor of that slug is the
+/// project's already, `agent_taken` where one for that agent is — or, for any
+/// other failure, the database's. The words are the lane's own, fixed in its
+/// code: never the slug or the agent a request sent, which a refusal echoes
+/// none of.
+pub(crate) fn refused_as_taken(
+    error: sqlx::Error,
+    slug_taken: &'static str,
+    agent_taken: &'static str,
+) -> TelmoniError {
+    let words = match error.as_database_error().and_then(|db| db.constraint()) {
+        Some(SLUG_TAKEN) => slug_taken,
+        Some(AGENT_TAKEN) => agent_taken,
+        _ => return error.into(),
+    };
+    AuthError::Conflict(words.to_owned()).into()
 }
 
-/// A refused change let go of: nothing was written, and the chain lock goes
-/// with the transaction rather than whenever the pool next sees the
-/// connection.
-fn rolled_back(result: sqlx::Result<()>, project_id: &ProjectId) {
-    if let Err(e) = result {
-        tracing::warn!(
-            project_id = %project_id,
-            error = %e,
-            "telemetry: a refused change to a monitor could not be rolled back; its connection \
-             drops it"
-        );
-    }
+/// A write a unique index refused, in the console's words: a monitor of
+/// that slug, or for that agent, is the project's already.
+fn taken(error: sqlx::Error) -> TelmoniError {
+    refused_as_taken(
+        error,
+        "this project has a monitor by that slug already",
+        "this project has a monitor for that agent already",
+    )
 }
 
 /// `GET /internal/telemetry/monitors` — the project's monitors, the worst
@@ -551,11 +553,11 @@ pub async fn create_monitor(
         .project_id
         .clone();
     let monitor = input.checked(None)?;
-    seam::admit_new(&*state.entitlements, &acting.organization_id).await?;
+    seam::admit_new(state.entitlements.as_ref(), &acting.organization_id).await?;
     // The plan's ceiling, read before a transaction is opened and the lock
     // taken: only the count under the lock needs it.
-    let ceiling = chain::ceiling(&*state.entitlements, &acting.organization_id).await;
-    let mut tx = scoped(&state, &acting, &project_id).await?;
+    let ceiling = chain::ceiling(state.entitlements.as_ref(), &acting.organization_id).await;
+    let mut tx = chain::scoped(&state.db, &acting, &project_id).await?;
     let row = match make_monitor(
         &state,
         &acting,
@@ -569,7 +571,7 @@ pub async fn create_monitor(
     {
         Ok(row) => row,
         Err(refused) => {
-            rolled_back(tx.rollback().await, &project_id);
+            chain::rolled_back(tx.rollback().await, &project_id, "monitor");
             return Err(refused);
         }
     };
@@ -598,7 +600,9 @@ async fn make_monitor(
     db::ensure_settings(tx, project_id, organization_id).await?;
     if let Some(ceiling) = ceiling {
         let held = db::monitor_count(tx, organization_id).await?;
-        ceiling.admit(u64::try_from(held).unwrap_or_default())?;
+        // A count below zero, which no table gives, is past every ceiling:
+        // the bound fails closed.
+        ceiling.admit(u64::try_from(held).unwrap_or(u64::MAX))?;
     }
     let next_due_at = monitor.timing.read.next_due(Utc::now()).map_err(fault)?;
     let row = db::insert_monitor(
@@ -628,19 +632,6 @@ async fn make_monitor(
     )
     .await?;
     Ok(row)
-}
-
-/// A transaction bound to the project and its organization both, as every
-/// write to a monitor needs: the row's policy files a write under both.
-async fn scoped<'a>(
-    state: &'a AppState,
-    acting: &Acting,
-    project_id: &ProjectId,
-) -> Result<Scoped<'a, ProjectAndOrganization>, TelmoniError> {
-    Ok(project_scope(&state.db, project_id)
-        .await?
-        .bind_organization(&acting.organization_id)
-        .await?)
 }
 
 /// The monitor a change is about, read under the organization's chain lock,
@@ -682,7 +673,7 @@ pub async fn update_monitor(
         .clone();
     let slug = monitor_slug(&slug)?;
     let monitor = input.checked(Some(&slug))?;
-    let mut tx = scoped(&state, &acting, &project_id).await?;
+    let mut tx = chain::scoped(&state.db, &acting, &project_id).await?;
     let row = match change_monitor(
         &state,
         &acting,
@@ -696,7 +687,7 @@ pub async fn update_monitor(
     {
         Ok(row) => row,
         Err(refused) => {
-            rolled_back(tx.rollback().await, &project_id);
+            chain::rolled_back(tx.rollback().await, &project_id, "monitor");
             return Err(refused);
         }
     };
@@ -789,11 +780,11 @@ pub async fn pause_monitor(
         .project_id
         .clone();
     let slug = monitor_slug(&slug)?;
-    let mut tx = scoped(&state, &acting, &project_id).await?;
+    let mut tx = chain::scoped(&state.db, &acting, &project_id).await?;
     let row = match halt_monitor(&state, &acting, &project_id, &mut tx, &headers, &slug).await {
         Ok(row) => row,
         Err(refused) => {
-            rolled_back(tx.rollback().await, &project_id);
+            chain::rolled_back(tx.rollback().await, &project_id, "monitor");
             return Err(refused);
         }
     };
@@ -857,11 +848,11 @@ pub async fn resume_monitor(
         .project_id
         .clone();
     let slug = monitor_slug(&slug)?;
-    let mut tx = scoped(&state, &acting, &project_id).await?;
+    let mut tx = chain::scoped(&state.db, &acting, &project_id).await?;
     let row = match restart_monitor(&state, &acting, &project_id, &mut tx, &headers, &slug).await {
         Ok(row) => row,
         Err(refused) => {
-            rolled_back(tx.rollback().await, &project_id);
+            chain::rolled_back(tx.rollback().await, &project_id, "monitor");
             return Err(refused);
         }
     };
@@ -934,11 +925,11 @@ pub async fn delete_monitor(
         .project_id
         .clone();
     let slug = monitor_slug(&slug)?;
-    let mut tx = scoped(&state, &acting, &project_id).await?;
+    let mut tx = chain::scoped(&state.db, &acting, &project_id).await?;
     let row = match remove_monitor(&state, &acting, &project_id, &mut tx, &headers, &slug).await {
         Ok(row) => row,
         Err(refused) => {
-            rolled_back(tx.rollback().await, &project_id);
+            chain::rolled_back(tx.rollback().await, &project_id, "monitor");
             return Err(refused);
         }
     };

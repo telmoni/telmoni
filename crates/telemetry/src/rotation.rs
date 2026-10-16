@@ -38,8 +38,7 @@ const START_DELAY: Duration = Duration::from_secs(60);
 /// every `EVERY`; a tick that overruns delays the next rather than
 /// stacking.
 pub async fn run(state: Arc<AppState>) {
-    tokio::time::sleep(START_DELAY).await;
-    let mut ticker = tokio::time::interval(EVERY);
+    let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + START_DELAY, EVERY);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         ticker.tick().await;

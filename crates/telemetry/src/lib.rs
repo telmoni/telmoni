@@ -38,7 +38,7 @@ use std::sync::Arc;
 
 use axum::{
     Router, middleware,
-    routing::{delete, get, post, put},
+    routing::{MethodFilter, delete, get, on, post, put},
 };
 use sqlx::PgPool;
 
@@ -219,23 +219,16 @@ pub fn router(state: Arc<AppState>) -> Router {
 /// answered as the other machine lanes answer one; and no answer, those
 /// included, is one a cache may keep ([`handler::pings::never_stored`]).
 pub fn ping_router(state: Arc<AppState>) -> Router {
+    // `GET`'s handler answers `HEAD` too, as axum serves a `GET` route.
+    let lane = MethodFilter::GET.or(MethodFilter::POST);
     Router::new()
-        .route(
-            "/{ping_key}/{slug}",
-            get(handler::pings::success).post(handler::pings::success),
-        )
-        .route(
-            "/{ping_key}/{slug}/start",
-            get(handler::pings::start).post(handler::pings::start),
-        )
+        .route("/{ping_key}/{slug}", on(lane, handler::pings::success))
+        .route("/{ping_key}/{slug}/start", on(lane, handler::pings::start))
         .route(
             "/{ping_key}/{slug}/checkpoint",
-            get(handler::pings::checkpoint).post(handler::pings::checkpoint),
+            on(lane, handler::pings::checkpoint),
         )
-        .route(
-            "/{ping_key}/{slug}/fail",
-            get(handler::pings::fail).post(handler::pings::fail),
-        )
+        .route("/{ping_key}/{slug}/fail", on(lane, handler::pings::fail))
         .method_not_allowed_fallback(handler::pings::method_not_allowed)
         .fallback(handler::pings::not_found)
         .layer(middleware::map_response(handler::pings::never_stored))

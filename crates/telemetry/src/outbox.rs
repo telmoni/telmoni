@@ -322,9 +322,13 @@ struct Held {
 
 /// The outbox loop. A failed tick is logged and the next one runs.
 pub async fn run(state: Arc<AppState>) {
-    let mut ticker = tokio::time::interval(Duration::from_secs(POLL_SECS));
+    let poll = Duration::from_secs(POLL_SECS);
+    // The first drain a poll after boot, as each after it: a lease spends a
+    // row's try and holds it for its lease, so a process that dies within
+    // its first poll — one crash-looping at boot — strands no row and spends
+    // no try of one.
+    let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + poll, poll);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    ticker.tick().await; // skip the immediate first tick
     let mut ticks = 0;
     loop {
         ticker.tick().await;

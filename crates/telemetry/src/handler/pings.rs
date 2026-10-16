@@ -52,7 +52,9 @@ use crate::db::{
     self, MonitorRow, MonitorWrite, OpenRunRow, OpenRunWrite, ResolvedPingKey, TelemetryLane,
 };
 use crate::handler::chain;
-use crate::handler::monitors::{MAX_COST_USD_MAX, MAX_STEPS_MAX, RESERVED, due_after};
+use crate::handler::monitors::{
+    DEFAULT_TIMEZONE, MAX_COST_USD_MAX, MAX_STEPS_MAX, RESERVED, due_after, refused_as_taken,
+};
 use crate::notify;
 use crate::outbox::{self, FinishedRun};
 
@@ -60,8 +62,6 @@ use crate::outbox::{self, FinishedRun};
 const ALLOW: &str = "GET, HEAD, POST";
 /// What an open run's `source` says of a run reported by pings.
 const SOURCE: &str = "ping";
-/// The zone a monitor a ping makes is in, until its owner sets one.
-const DEFAULT_TIMEZONE: &str = "UTC";
 /// The longest a ping waits out a move of its project to another
 /// organization, or its purge, before it is refused: as long as it waits for
 /// its organization's chain lock.
@@ -72,11 +72,6 @@ const MOVE_WAIT: Duration = Duration::from_secs(2);
 /// the pool its own work needs.
 const MOVE_RETRY: Duration = Duration::from_millis(50);
 const MOVE_RETRY_MAX: Duration = Duration::from_millis(400);
-/// The unique indexes a monitor a ping makes can run into: its slug, which
-/// no monitor has or the ping would have found it, and its agent, which a
-/// monitor of another slug may carry.
-const SLUG_TAKEN: &str = "monitors_project_slug_idx";
-const AGENT_TAKEN: &str = "monitors_project_agent_idx";
 /// The most monitors one project holds that its pings made and nobody has
 /// set up — `new` — before a ping that would make one more is refused: room
 /// for a crontab's worth of first pings at once, and a bound on what a slug
@@ -164,21 +159,14 @@ impl Progress {
                     .into(),
             )
         })?;
-        let sent = |value: &Option<String>| {
-            value
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(str::to_owned)
-        };
-        let rid = sent(&query.rid)
+        let rid = sent(query.rid.as_deref())
             .map(|v| {
-                Uuid::parse_str(&v).map_err(|_| {
+                Uuid::parse_str(v).map_err(|_| {
                     TelmoniError::BadRequest("a ping's rid is a UUID: the run it names".into())
                 })
             })
             .transpose()?;
-        let steps = sent(&query.steps)
+        let steps = sent(query.steps.as_deref())
             .map(|v| {
                 v.parse::<i32>()
                     .ok()
@@ -190,7 +178,7 @@ impl Progress {
                     })
             })
             .transpose()?;
-        let cost_usd = sent(&query.cost)
+        let cost_usd = sent(query.cost.as_deref())
             .map(|v| {
                 v.parse::<f64>()
                     .ok()
@@ -202,7 +190,7 @@ impl Progress {
                     })
             })
             .transpose()?;
-        let exit_code = sent(&query.exit_code)
+        let exit_code = sent(query.exit_code.as_deref())
             .map(|v| {
                 v.parse::<i32>().map_err(|_| {
                     TelmoniError::BadRequest(
@@ -220,13 +208,17 @@ impl Progress {
     }
 }
 
-/// What a ping did, for the answer and the log.
+/// A query's value as sent, trimmed, where one was: none for a field left
+/// out or sent blank.
+fn sent(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|v| !v.is_empty())
+}
+
+/// What a ping did, for its answer.
 #[derive(Debug, Clone, Copy)]
 struct Heard {
     /// The request carried a body, which was dropped.
     body_dropped: bool,
-    run_id: Uuid,
-    monitor_id: Uuid,
 }
 
 /// `GET` or `POST /ping/{ping_key}/{slug}` — success: the open run ends `ok`,
@@ -376,27 +368,25 @@ async fn handle(
     let now = Utc::now().trunc_subsecs(6);
 
     let (key, mut tx) = held_in_place(state, key).await?;
-    let heard = match ping(state, headers, &key, &slug, progress, report, now, &mut tx).await {
-        Ok(heard) => heard,
-        Err(refused) => {
-            rolled_back(tx.rollback().await, &key.project_id);
-            return Err(refused);
-        }
-    };
+    let (run_id, monitor_id) =
+        match ping(state, headers, &key, slug, progress, report, now, &mut tx).await {
+            Ok(ids) => ids,
+            Err(refused) => {
+                chain::rolled_back(tx.rollback().await, &key.project_id, "ping");
+                return Err(refused);
+            }
+        };
     tx.commit().await?;
     tracing::debug!(
         project_id = %key.project_id,
         ping_key_id = %key.id,
-        monitor_id = %heard.monitor_id,
-        run_id = %heard.run_id,
+        monitor_id = %monitor_id,
+        run_id = %run_id,
         report = ?report,
         body_dropped,
         "ping: heard"
     );
-    Ok(Heard {
-        body_dropped,
-        ..heard
-    })
+    Ok(Heard { body_dropped })
 }
 
 /// The key a ping presents, resolved outside any tenant as auth resolves an
@@ -458,7 +448,7 @@ async fn held_in_place(
                     return Ok((key, tx));
                 }
                 Some(organization_id) => {
-                    rolled_back(tx.rollback().await, &key.project_id);
+                    chain::rolled_back(tx.rollback().await, &key.project_id, "ping");
                     tracing::debug!(
                         project_id = %key.project_id,
                         ping_key_id = %key.id,
@@ -469,12 +459,12 @@ async fn held_in_place(
                     continue;
                 }
                 None => {
-                    rolled_back(tx.rollback().await, &key.project_id);
+                    chain::rolled_back(tx.rollback().await, &key.project_id, "ping");
                     return Err(unknown_key());
                 }
             }
         }
-        rolled_back(tx.rollback().await, &key.project_id);
+        chain::rolled_back(tx.rollback().await, &key.project_id, "ping");
         let now = tokio::time::Instant::now();
         if now >= deadline {
             tracing::warn!(
@@ -529,7 +519,7 @@ pub fn unknown_key() -> TelmoniError {
 /// 400 that echoes none of it. The words beside `/monitors/{slug}` are
 /// refused as a monitor's slug is, so a ping can never name a monitor the
 /// console could not.
-fn checked_slug(given: &str) -> Result<String, TelmoniError> {
+fn checked_slug(given: &str) -> Result<&str, TelmoniError> {
     if !slug::is_slug(given) {
         return Err(TelmoniError::BadRequest(format!(
             "a monitor's slug is lowercase letters and digits joined by single hyphens, up to \
@@ -542,7 +532,7 @@ fn checked_slug(given: &str) -> Result<String, TelmoniError> {
             "a monitor may not go by that word".into(),
         ));
     }
-    Ok(given.to_owned())
+    Ok(given)
 }
 
 /// Whether the request carried a body, which is dropped. A ping's body is
@@ -565,25 +555,12 @@ async fn dropped(headers: &HeaderMap, body: Body) -> bool {
     }
 }
 
-/// A ping's transaction let go of, refused or kept out by a move: nothing
-/// was written, and its locks — the project's move lock, which a move may be
-/// waiting on, and the chain lock, where one was taken — go with the
-/// transaction rather than whenever the pool next sees the connection.
-fn rolled_back(result: sqlx::Result<()>, project_id: &ProjectId) {
-    if let Err(e) = result {
-        tracing::warn!(
-            project_id = %project_id,
-            error = %e,
-            "ping: its transaction could not be rolled back; its connection drops it"
-        );
-    }
-}
-
 /// The ping itself, inside the transaction [`held_in_place`] opened and
 /// bound to where its key stands, the project held in place: the monitor
 /// found and held before any of its runs ([`db::hold_monitor`]) or made,
 /// the run recorded and the monitor settled. Its key was touched where it
 /// was resolved ([`resolve_key`]), so nothing here waits on the key's row.
+/// Answers the run's id and the monitor's.
 #[expect(
     clippy::too_many_arguments,
     reason = "a ping is these eight things; a struct built once for one call would say the same in more lines"
@@ -597,7 +574,7 @@ async fn ping(
     report: Report,
     now: DateTime<Utc>,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
-) -> Result<Heard, TelmoniError> {
+) -> Result<(Uuid, Uuid), TelmoniError> {
     let project_id = &key.project_id;
     let monitor = match db::hold_monitor(tx, project_id, slug).await? {
         Some(monitor) => monitor,
@@ -605,11 +582,7 @@ async fn ping(
     };
     let (run_id, event) = record(key, &monitor, progress, report, now, tx).await?;
     settle(project_id, &monitor, event, now, tx).await?;
-    Ok(Heard {
-        body_dropped: false,
-        run_id,
-        monitor_id: monitor.id,
-    })
+    Ok((run_id, monitor.id))
 }
 
 /// A monitor made by its first ping, as the owner's Decide has it: in the
@@ -656,6 +629,8 @@ async fn discover_monitor(
     }
     if let Some(ceiling) = ceiling {
         let held = db::monitor_count(tx, organization_id).await?;
+        // A count below zero, which no table gives, is past every ceiling:
+        // the bound fails closed.
         if let Err(refused) = ceiling.admit(u64::try_from(held).unwrap_or(u64::MAX)) {
             tracing::debug!(
                 project_id = %project_id,
@@ -726,22 +701,15 @@ async fn discover_monitor(
     Ok(monitor)
 }
 
-/// A write a unique index refused: a monitor of that slug was made beside
-/// this ping, which the lock should have put after it, or a monitor of
-/// another slug carries the agent this one would. Any other failure is the
-/// database's.
+/// A write a unique index refused, in a crontab's words: a monitor of that
+/// slug was made beside this ping, which the lock should have put after it,
+/// or a monitor of another slug carries the agent this one would.
 fn taken(error: sqlx::Error) -> TelmoniError {
-    match error.as_database_error().and_then(|db| db.constraint()) {
-        Some(SLUG_TAKEN) => {
-            AuthError::Conflict("a monitor by that slug was made just now; ping again".into())
-                .into()
-        }
-        Some(AGENT_TAKEN) => AuthError::Conflict(
-            "this project has a monitor for that agent under another slug; ping that slug".into(),
-        )
-        .into(),
-        _ => error.into(),
-    }
+    refused_as_taken(
+        error,
+        "a monitor by that slug was made just now; ping again",
+        "this project has a monitor for that agent under another slug; ping that slug",
+    )
 }
 
 /// What a ping did to its run, which decides the monitor's state.

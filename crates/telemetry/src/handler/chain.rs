@@ -1,8 +1,12 @@
 //! The organization's chain lock, as a lane takes it before it files a row
-//! under a project's organization: a project's content mode, and the
-//! settings row the first view saved on a project makes; and what a change
-//! reads from across a seam, bounded, so that nobody waits under the lock on
-//! an answer another deployment's database gives.
+//! under a project's organization — a monitor, a ping key, a saved view, a
+//! project's content mode, a monitor its first ping makes, a key its
+//! rotation retires — and the settings row the first of them makes; what a
+//! change reads from across a seam, bounded, so that nobody waits under the
+//! lock on an answer another deployment's database gives; and the
+//! transaction a lane's write runs in, bound to the project and its
+//! organization, and let go of, with whatever locks it holds, where it does
+//! not commit.
 //!
 //! ⚠ A transfer's accept holds the lock from its audit rows to its commit and
 //! moves the project's settings in between, as an ownership hand-over and a
@@ -13,9 +17,11 @@
 
 use std::time::Duration;
 
+use sqlx::PgPool;
+
 use telmoni_shared::acting::Acting;
 use telmoni_shared::audit::lock_chain;
-use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped};
+use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
 use telmoni_shared::seam::{self, Auth, Entitlements};
 use telmoni_shared::{AuthError, MonitorCeiling, OrganizationId, ProjectId, TelmoniError};
 
@@ -34,6 +40,39 @@ const ANSWER_BUDGET: Duration = Duration::from_secs(1);
 
 /// Postgres's `lock_not_available`: a `lock_timeout` ran out.
 const LOCK_NOT_AVAILABLE: &str = "55P03";
+
+/// A transaction of `pool`'s bound to the project and to the organization
+/// `acting` acts in, as every write a lane files under both needs: each
+/// row's policy files a write under the two, and [`hold`] checks the
+/// organization this binds.
+pub(crate) async fn scoped<'a>(
+    pool: &'a PgPool,
+    acting: &Acting,
+    project_id: &ProjectId,
+) -> Result<Scoped<'a, ProjectAndOrganization>, TelmoniError> {
+    Ok(project_scope(pool, project_id)
+        .await?
+        .bind_organization(&acting.organization_id)
+        .await?)
+}
+
+/// A transaction let go of without its commit — its write refused, its
+/// project kept from it, or nothing left for it to do — answered by
+/// `rollback`: nothing was written, and whichever locks it holds, the
+/// organization's chain lock or the project's move lock, go with it before
+/// the answer rather than whenever the pool next sees the connection, since
+/// a move, a purge or the organization's other writers may be waiting on
+/// them. `write` names the lane, for the log.
+pub(crate) fn rolled_back(rollback: sqlx::Result<()>, project_id: &ProjectId, write: &'static str) {
+    if let Err(e) = rollback {
+        tracing::warn!(
+            project_id = %project_id,
+            write,
+            error = %e,
+            "telemetry: a transaction let go of could not be rolled back; its connection drops it"
+        );
+    }
+}
 
 /// The organization's chain lock, taken in `tx` and let go with it, then
 /// who `acting` is now: auth's second answer, the one that stands until the

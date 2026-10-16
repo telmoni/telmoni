@@ -1235,6 +1235,28 @@ async fn a_ping_to_a_slug_no_monitor_has_makes_it_and_tells_the_owner_once(pool:
     assert_eq!(monitors_of(&pool, &p.project).await, 1);
 }
 
+/// A first ping whose monitor's agent — its slug, as a ping makes one —
+/// another monitor of the project carries under a slug of its own makes
+/// nothing, and is refused with a 409 that tells the crontab to ping that
+/// slug, in the lane's own words rather than the console's.
+#[sqlx::test]
+async fn a_first_ping_whose_agent_another_monitor_carries_is_told_its_slug(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.make(json!({ "name": "Report", "slug": "report-a", "agent": "nightly-report" }))
+        .await;
+    let (status, body) = p.ping(&format!("/{key}/nightly-report")).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        body.contains(
+            "this project has a monitor for that agent under another slug; ping that slug"
+        ),
+        "{body}"
+    );
+    assert_eq!(monitors_of(&pool, &p.project).await, 1);
+}
+
 /// A monitor its first ping made starts once its owner saves its settings,
 /// and not before: a resume is refused with how to start it, changing and
 /// recording nothing; a save starts it `healthy`, due under the timing it
@@ -3148,6 +3170,16 @@ async fn no_answer_of_the_lane_is_one_a_cache_may_keep(pool: PgPool) {
             Some("no-store"),
             "{method} {sent}"
         );
+        if status == StatusCode::METHOD_NOT_ALLOWED {
+            assert_eq!(
+                response
+                    .headers()
+                    .get("allow")
+                    .and_then(|v| v.to_str().ok()),
+                Some("GET, HEAD, POST"),
+                "{method} {sent}"
+            );
+        }
     }
     let finished = finished_runs(&pool, &p.project).await;
     assert_eq!(

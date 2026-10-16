@@ -89,31 +89,6 @@ fn not_found() -> TelmoniError {
     AuthError::NotFound("no ping key by that id in this project".into()).into()
 }
 
-/// A refused change let go of, its chain lock with it.
-fn rolled_back(result: sqlx::Result<()>, project_id: &ProjectId) {
-    if let Err(e) = result {
-        tracing::warn!(
-            project_id = %project_id,
-            error = %e,
-            "telemetry: a refused change to a ping key could not be rolled back; its \
-             connection drops it"
-        );
-    }
-}
-
-/// A transaction bound to the project and its organization both, as every
-/// write to a key needs.
-async fn scoped<'a>(
-    state: &'a AppState,
-    acting: &Acting,
-    project_id: &ProjectId,
-) -> Result<Scoped<'a, ProjectAndOrganization>, TelmoniError> {
-    Ok(project_scope(&state.db, project_id)
-        .await?
-        .bind_organization(&acting.organization_id)
-        .await?)
-}
-
 /// `GET /internal/telemetry/ping-keys` — the project's keys, as its API keys
 /// are listed: what each shows of itself, when it was made, its last ping
 /// and when it was retired.
@@ -146,11 +121,11 @@ pub async fn create_ping_key(
         .project_id
         .clone();
     seam::admit_new(state.entitlements.as_ref(), &acting.organization_id).await?;
-    let mut tx = scoped(&state, &acting, &project_id).await?;
+    let mut tx = chain::scoped(&state.db, &acting, &project_id).await?;
     let minted = match mint_key(&state, &acting, &project_id, &mut tx, &headers).await {
         Ok(minted) => minted,
         Err(refused) => {
-            rolled_back(tx.rollback().await, &project_id);
+            chain::rolled_back(tx.rollback().await, &project_id, "ping key");
             return Err(refused);
         }
     };
@@ -228,11 +203,11 @@ pub async fn delete_ping_key(
         .project_id
         .clone();
     let id = Uuid::parse_str(&id).map_err(|_| not_found())?;
-    let mut tx = scoped(&state, &acting, &project_id).await?;
+    let mut tx = chain::scoped(&state.db, &acting, &project_id).await?;
     let row = match retire_key(&state, &acting, &project_id, &mut tx, &headers, id).await {
         Ok(row) => row,
         Err(refused) => {
-            rolled_back(tx.rollback().await, &project_id);
+            chain::rolled_back(tx.rollback().await, &project_id, "ping key");
             return Err(refused);
         }
     };
@@ -402,7 +377,7 @@ async fn retire_stale_key(
     let project_id = &key.project_id;
     let mut tx = project_scope(&state.db, project_id).await?;
     if !project_move::try_hold_in_place(tx.conn(), project_id).await? {
-        rolled_back(tx.rollback().await, project_id);
+        chain::rolled_back(tx.rollback().await, project_id, "ping key rotation");
         tracing::debug!(
             project_id = %project_id,
             ping_key_id = %key.id,
@@ -413,11 +388,11 @@ async fn retire_stale_key(
     }
     let Some(organization_id) = db::live_ping_key_organization(&mut tx, project_id, key.id).await?
     else {
-        rolled_back(tx.rollback().await, project_id);
+        chain::rolled_back(tx.rollback().await, project_id, "ping key rotation");
         return Ok(Retirement::Gone);
     };
     if passed_over.contains(&organization_id) {
-        rolled_back(tx.rollback().await, project_id);
+        chain::rolled_back(tx.rollback().await, project_id, "ping key rotation");
         return Ok(Retirement::PassedOver);
     }
     let mut tx = tx.bind_organization(&organization_id).await?;
@@ -432,11 +407,11 @@ async fn retire_stale_key(
             Ok(Retirement::Retired)
         }
         Ok(left) => {
-            rolled_back(tx.rollback().await, project_id);
+            chain::rolled_back(tx.rollback().await, project_id, "ping key rotation");
             Ok(left)
         }
         Err(refused) => {
-            rolled_back(tx.rollback().await, project_id);
+            chain::rolled_back(tx.rollback().await, project_id, "ping key rotation");
             Err(refused)
         }
     }

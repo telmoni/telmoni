@@ -254,14 +254,11 @@ pub async fn create_view(
         .project_id
         .clone();
     let view = input.checked()?;
-    let mut tx = project_scope(&state.db, &project_id)
-        .await?
-        .bind_organization(&acting.organization_id)
-        .await?;
+    let mut tx = chain::scoped(&state.db, &acting, &project_id).await?;
     let row = match save(&*state.auth, &acting, &project_id, &mut tx, &view).await {
         Ok(row) => row,
         Err(refused) => {
-            rolled_back(tx.rollback().await, &project_id);
+            chain::rolled_back(tx.rollback().await, &project_id, "view");
             return Err(refused);
         }
     };
@@ -341,19 +338,6 @@ pub async fn delete_view(
     tx.commit().await?;
     tracing::info!(project_id = %project_id, view_id = %id, "telemetry: a view deleted");
     Ok(StatusCode::NO_CONTENT)
-}
-
-/// A refused save let go of: nothing was written, and the chain lock goes
-/// with the transaction rather than whenever the pool next sees the
-/// connection.
-fn rolled_back(result: sqlx::Result<()>, project_id: &ProjectId) {
-    if let Err(e) = result {
-        tracing::warn!(
-            project_id = %project_id,
-            error = %e,
-            "telemetry: a refused view could not be rolled back; its connection drops it"
-        );
-    }
 }
 
 #[cfg(test)]
