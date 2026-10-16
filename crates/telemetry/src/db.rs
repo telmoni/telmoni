@@ -9,7 +9,7 @@ use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::{
     HasProject, Lane, Maintenance, MaintenanceLane, ProjectAndOrganization, Scoped,
 };
-use telmoni_shared::{ContentMode, MonitorState, OrganizationId, ProjectId, TelmoniError};
+use telmoni_shared::{ContentMode, MonitorState, OrganizationId, ProjectId};
 
 /// This module's cross-tenant lane: the one declaration, so a sibling's lane
 /// is unnameable here. See `tenant_session::Lane`.
@@ -17,24 +17,6 @@ use telmoni_shared::{ContentMode, MonitorState, OrganizationId, ProjectId, Telmo
 pub struct TelemetryLane;
 impl Lane for TelemetryLane {
     const SET_ROLE: &'static str = MaintenanceLane::Telemetry.set_role();
-}
-
-/// Whether a loop's work on one item failed for want of the database — no
-/// connection to be had, or the one it had lost — rather than for anything
-/// about the item: every item after it would wait the same out in turn, so
-/// the loop ends its pass instead (the rotation's, the purge sweep's).
-pub(crate) fn unanswered(error: &TelmoniError) -> bool {
-    matches!(
-        error,
-        TelmoniError::Database(
-            sqlx::Error::PoolTimedOut
-                | sqlx::Error::PoolClosed
-                | sqlx::Error::WorkerCrashed
-                | sqlx::Error::Io(_)
-                | sqlx::Error::Tls(_)
-                | sqlx::Error::Protocol(_)
-        )
-    )
 }
 
 /// A project's content mode: its own row's, or `off` where it has none.

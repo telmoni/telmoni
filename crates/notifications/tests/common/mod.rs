@@ -6,8 +6,9 @@
 #![allow(dead_code, reason = "each suite uses the part of the harness it needs")]
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use axum::{
@@ -23,7 +24,7 @@ use serde_json::json;
 use telmoni_notifications::{AppState, Config, handler};
 use telmoni_shared::acting::{Acting, ActingProject};
 use telmoni_shared::extract::Json;
-use telmoni_shared::seam::{Auth, Notice};
+use telmoni_shared::seam::{Auth, Notice, ProjectHome};
 use telmoni_shared::{
     AuthError, AuthzError, FlagSet, NotificationKind, OrganizationId, OrganizationRole,
     OrganizationStatus, ProjectId, Role, TelmoniError, UserId,
@@ -52,16 +53,61 @@ pub(crate) struct AuthStub {
     roster: Mutex<HashMap<(String, String), Seat>>,
     flags: Mutex<Option<Flags>>,
     asked: AtomicUsize,
+    /// The projects auth holds, and the organization holding each: asked
+    /// where projects are, it answers these and leaves out the rest, as it
+    /// leaves out a project deleted.
+    projects: Mutex<HashMap<ProjectId, OrganizationId>>,
+    /// Whether asking where projects are fails, as it does while auth cannot
+    /// be reached.
+    homes_fail: AtomicBool,
+    /// How many times auth was asked where projects are.
+    homes_asked: AtomicUsize,
+    /// How long each answer of where projects are takes to come.
+    homes_delay: Mutex<Duration>,
 }
 
 impl AuthStub {
-    /// Nobody seated, every flag on.
+    /// Nobody seated, no project held, every flag on.
     pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self {
             roster: Mutex::new(HashMap::new()),
             flags: Mutex::new(None),
             asked: AtomicUsize::new(0),
+            projects: Mutex::new(HashMap::new()),
+            homes_fail: AtomicBool::new(false),
+            homes_asked: AtomicUsize::new(0),
+            homes_delay: Mutex::new(Duration::ZERO),
         })
+    }
+
+    /// `project` held by `organization`, as auth holds a project until it is
+    /// deleted.
+    pub(crate) fn hold(&self, project: &ProjectId, organization: &OrganizationId) -> &Self {
+        self.projects
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(project.clone(), organization.clone());
+        self
+    }
+
+    /// Fail every ask of where projects are from now on, or stop failing.
+    pub(crate) fn failing_homes(&self, failing: bool) -> &Self {
+        self.homes_fail.store(failing, Ordering::SeqCst);
+        self
+    }
+
+    /// Answer every ask of where projects are `delay` late from now on.
+    pub(crate) fn delaying_homes(&self, delay: Duration) -> &Self {
+        *self
+            .homes_delay
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = delay;
+        self
+    }
+
+    /// How many times auth was asked where projects are.
+    pub(crate) fn homes_asked(&self) -> usize {
+        self.homes_asked.load(Ordering::SeqCst)
     }
 
     /// Seat `user` on `organization` at `organization_role`, and on its
@@ -179,6 +225,40 @@ impl Auth for AuthStub {
         _organization_id: &OrganizationId,
     ) -> Result<Option<OrganizationStatus>, TelmoniError> {
         Ok(Some(OrganizationStatus::Active))
+    }
+
+    /// Where each project is held, from the projects the suite holds; the
+    /// slugs are the ids.
+    async fn project_homes(
+        &self,
+        projects: &[ProjectId],
+    ) -> Result<Vec<ProjectHome>, TelmoniError> {
+        self.homes_asked.fetch_add(1, Ordering::SeqCst);
+        let delay = *self
+            .homes_delay
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !delay.is_zero() {
+            tokio::time::sleep(delay).await;
+        }
+        if self.homes_fail.load(Ordering::SeqCst) {
+            return Err(TelmoniError::Internal("auth cannot be reached".into()));
+        }
+        let held = self
+            .projects
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Ok(projects
+            .iter()
+            .filter_map(|project| {
+                held.get(project).map(|organization| ProjectHome {
+                    project_id: project.clone(),
+                    slug: project.to_string(),
+                    organization_id: organization.clone(),
+                    organization_slug: organization.to_string(),
+                })
+            })
+            .collect())
     }
 }
 

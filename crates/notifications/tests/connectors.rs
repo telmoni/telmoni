@@ -10,6 +10,7 @@
 mod common;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
@@ -24,14 +25,16 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use common::{AuthStub, Flags, SECRET};
 use telmoni_notifications::connector::{Connectors, Provider, slack, webhook};
 use telmoni_notifications::db::NotificationsLane;
+use telmoni_notifications::retention::{self, Purged};
 use telmoni_notifications::{AppState, db, delivery, router};
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::envelope::{KEK_VERSION, Kek, KmsKek, LocalKek, Vault};
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::net_guard::Egress;
-use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, service_pool};
+use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, captured_logs, service_pool};
 use telmoni_shared::{
-    NotificationKind, OrganizationId, OrganizationRole, ProjectId, Redacted, Role, UserId,
+    NotificationKind, OrganizationId, OrganizationRole, ProjectId, Redacted, Role, TelmoniError,
+    UserId,
 };
 const SIGNING_SECRET: &str = "8f742231b10e8888abcd99yyyzzz85a5";
 const CONNECTOR_KEY: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
@@ -50,6 +53,14 @@ const MEMBER: &str = "user_member";
 
 const SLACK_WORKSPACE: &str = "T0001";
 
+/// Organizations whose projects auth no longer has, deleted with rows left
+/// behind, in the order the sweep reads their projects; and who installed
+/// what they left.
+const GONE: &str = "org_gone_1";
+const GONE_TOO: &str = "org_gone_2";
+const GONE_THIRD: &str = "org_gone_3";
+const GONE_OWNER: &str = "user_owner_gone";
+
 fn project_of(organization: &str) -> String {
     format!("project_{organization}")
 }
@@ -67,6 +78,7 @@ fn owner_of(organization: &str) -> &'static str {
     match organization {
         ORGANIZATION => OWNER,
         OTHER_ORGANIZATION => OTHER_OWNER,
+        GONE | GONE_TOO | GONE_THIRD => GONE_OWNER,
         other => panic!("{other} is not a fixture organization"),
     }
 }
@@ -180,6 +192,34 @@ fn state_full(
     kek: Kek,
     egress: Egress,
 ) -> Arc<AppState> {
+    let auth = people();
+    if let Some(flags) = flags {
+        auth.flags(flags);
+    }
+    state_over(pool, mocks, connectors, kek, egress, auth)
+}
+
+/// [`state`], with `auth` answering: the projects it holds, for a sweep to
+/// ask of.
+fn state_asking(pool: PgPool, mocks: &MockServer, auth: Arc<AuthStub>) -> Arc<AppState> {
+    state_over(
+        pool,
+        mocks,
+        both_connectors(mocks),
+        local_kek(),
+        Egress::unguarded(reqwest::Client::new()),
+        auth,
+    )
+}
+
+fn state_over(
+    pool: PgPool,
+    mocks: &MockServer,
+    connectors: Connectors,
+    kek: Kek,
+    egress: Egress,
+    auth: Arc<AuthStub>,
+) -> Arc<AppState> {
     let config = telmoni_notifications::Config {
         app_url: "https://app.example".into(),
         slack_signing_secret: Some(SIGNING_SECRET.into()),
@@ -189,10 +229,6 @@ fn state_full(
         metadata_api_base: mocks.uri(),
         ..common::config()
     };
-    let auth = people();
-    if let Some(flags) = flags {
-        auth.flags(flags);
-    }
     Arc::new(AppState {
         db: service_pool(&pool, ServiceRole::Notifications),
         config,
@@ -2190,6 +2226,318 @@ async fn the_sweep_removes_finished_deliveries_and_expired_states(pool: PgPool) 
             .await
             .unwrap();
     assert_eq!(states, ["live"]);
+}
+
+/// How many rows of `organization`'s project each table the purge takes
+/// holds: its connections, their deliveries, its handshakes and its notices.
+async fn rows_of_project(pool: &PgPool, organization: &str) -> Vec<i64> {
+    let mut counts = Vec::new();
+    for table in ["connections", "deliveries", "oauth_states", "feed"] {
+        counts.push(
+            sqlx::query_scalar(&format!(
+                "SELECT count(*) FROM notifications.{table} WHERE project_id = $1"
+            ))
+            .bind(project_of(organization))
+            .fetch_one(pool)
+            .await
+            .unwrap(),
+        );
+    }
+    counts
+}
+
+/// A notice on `organization`'s project's feed, planted straight into the
+/// table.
+async fn seed_notice(pool: &PgPool, organization: &str) {
+    sqlx::query(
+        "INSERT INTO notifications.feed (project_id, organization_id, kind, title, body)
+         VALUES ($1, $2, 'member_added', 'Sam joined', 'Sam accepted the invitation.')",
+    )
+    .bind(project_of(organization))
+    .bind(organization)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// A deleted project's purge cut short — a vendor slow to take its grant
+/// back spends auth's budget before the rows are reached — is finished by
+/// the retention sweep, which finds the project by any row it left: a
+/// connection and its delivery, a notice, a handshake in flight. Its grant
+/// is torn down upstream and its rows removed, as its delete would have
+/// done, beside a project auth still has, untouched; and a sweep auth cannot
+/// answer leaves every row as it is, never taking the silence for none of
+/// them standing.
+#[sqlx::test]
+async fn a_deleted_projects_purge_cut_short_is_finished_by_the_sweep(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let kept = seed_connection(
+        &pool,
+        ORGANIZATION,
+        Provider::Slack,
+        SLACK_WORKSPACE,
+        "C0KEPT",
+        &slack_hook_url(&mocks, "kept"),
+        Some("xoxb-kept"),
+    )
+    .await;
+    seed_delivery(&pool, ORGANIZATION, kept).await;
+    seed_notice(&pool, ORGANIZATION).await;
+    let gone = seed_connection(
+        &pool,
+        GONE,
+        Provider::Slack,
+        "T0GONE",
+        "C0GONE",
+        &slack_hook_url(&mocks, "gone"),
+        Some("xoxb-gone"),
+    )
+    .await;
+    seed_delivery(&pool, GONE, gone).await;
+    seed_notice(&pool, GONE_TOO).await;
+    {
+        let mut tx = project_scope(&pool, &pid(GONE_THIRD)).await.unwrap();
+        db::insert_oauth_state(
+            &mut tx,
+            "in-flight",
+            &pid(GONE_THIRD),
+            &oid(GONE_THIRD),
+            &uid(GONE_OWNER),
+            Provider::Slack,
+            600,
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+    }
+    Mock::given(method("POST"))
+        .and(path("/api/apps.uninstall"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+        .mount(&mocks)
+        .await;
+    let auth = people();
+    auth.hold(&pid(ORGANIZATION), &oid(ORGANIZATION));
+    let st = state_asking(pool.clone(), &mocks, auth.clone());
+    let standing = [
+        (ORGANIZATION, vec![1, 1, 0, 1]),
+        (GONE, vec![1, 1, 0, 0]),
+        (GONE_TOO, vec![0, 0, 0, 1]),
+        (GONE_THIRD, vec![0, 0, 1, 0]),
+    ];
+
+    auth.failing_homes(true);
+    retention::purge_gone_projects(&st)
+        .await
+        .expect_err("a sweep auth cannot answer");
+    for (organization, rows) in &standing {
+        assert_eq!(
+            &rows_of_project(&pool, organization).await,
+            rows,
+            "{organization}"
+        );
+    }
+    assert!(posts_to(&mocks, "/api/apps.uninstall").await.is_empty());
+
+    auth.failing_homes(false);
+    assert_eq!(
+        retention::purge_gone_projects(&st).await.unwrap(),
+        Purged { purged: 3, left: 0 }
+    );
+    for organization in [GONE, GONE_TOO, GONE_THIRD] {
+        assert_eq!(
+            rows_of_project(&pool, organization).await,
+            [0, 0, 0, 0],
+            "{organization}"
+        );
+    }
+    assert_eq!(rows_of_project(&pool, ORGANIZATION).await, [1, 1, 0, 1]);
+    let uninstalls: Vec<String> = posts_to(&mocks, "/api/apps.uninstall")
+        .await
+        .into_iter()
+        .map(|r| {
+            r.headers
+                .get("authorization")
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(uninstalls, ["Bearer xoxb-gone"]);
+    assert_eq!(connection_status(&pool, kept).await.0, "active");
+    assert_eq!(
+        retention::purge_gone_projects(&st).await.unwrap(),
+        Purged::default(),
+        "nothing is left to finish"
+    );
+}
+
+/// A deleted project's purge the sweep cannot finish now — a row of it held
+/// past the purge's own two-second lock wait, which holds here though the
+/// suites' roles carry none — is left for the next sweep, and the pass goes
+/// on: the deleted project read after it is purged beside it, and the next
+/// sweep, the row let go, finishes the first.
+#[sqlx::test]
+async fn a_purge_the_sweep_cannot_finish_now_waits_for_the_next_sweep(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    for organization in [GONE, GONE_TOO] {
+        seed_webhook(
+            &pool,
+            organization,
+            "https://hooks.example.invalid/telmoni",
+            "whsec_gone",
+        )
+        .await;
+    }
+    let st = state_asking(pool.clone(), &mocks, people());
+
+    let mut holder = pool.begin().await.unwrap();
+    sqlx::query("SELECT 1 FROM notifications.connections WHERE project_id = $1 FOR UPDATE")
+        .bind(project_of(GONE))
+        .execute(&mut *holder)
+        .await
+        .unwrap();
+    let pass = tokio::time::timeout(Duration::from_secs(20), retention::purge_gone_projects(&st))
+        .await
+        .expect("the purge waited out the held row for good");
+    assert_eq!(pass.unwrap(), Purged { purged: 1, left: 1 });
+    holder.rollback().await.unwrap();
+    assert_eq!(rows_of_project(&pool, GONE).await, [1, 0, 0, 0]);
+    assert_eq!(rows_of_project(&pool, GONE_TOO).await, [0, 0, 0, 0]);
+
+    assert_eq!(
+        retention::purge_gone_projects(&st).await.unwrap(),
+        Purged { purged: 1, left: 0 }
+    );
+    assert_eq!(rows_of_project(&pool, GONE).await, [0, 0, 0, 0]);
+}
+
+/// The sweep reads every page of the projects the rows name: of 501, each
+/// with two notices, a page of 500 and then one, each asked of auth, the
+/// first and the last gone.
+#[sqlx::test]
+async fn the_sweep_reads_every_page_of_the_projects_the_rows_name(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    sqlx::query(
+        "INSERT INTO notifications.feed (project_id, organization_id, kind, title, body)
+         SELECT 'project_page_' || lpad(n::text, 4, '0'), $1, 'member_added', 'Sam joined',
+                'Sam accepted the invitation.'
+           FROM generate_series(1, 501) AS n, generate_series(1, 2)",
+    )
+    .bind(ORGANIZATION)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let auth = people();
+    for n in 2..=500 {
+        auth.hold(
+            &ProjectId::try_new(format!("project_page_{n:04}")).unwrap(),
+            &oid(ORGANIZATION),
+        );
+    }
+    let st = state_asking(pool.clone(), &mocks, auth.clone());
+
+    assert_eq!(
+        retention::purge_gone_projects(&st).await.unwrap(),
+        Purged { purged: 2, left: 0 }
+    );
+    assert_eq!(auth.homes_asked(), 2, "a page of 500, then one");
+    let left: Vec<String> =
+        sqlx::query_scalar("SELECT project_id FROM notifications.feed ORDER BY project_id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(left.len(), 998);
+    assert_eq!(left.first().map(String::as_str), Some("project_page_0002"));
+    assert_eq!(left.last().map(String::as_str), Some("project_page_0500"));
+}
+
+/// Each hourly sweep finishes the deleted projects' purges and then prunes
+/// what its windows close on; a pass auth cannot answer leaves the deleted
+/// project's rows and prunes all the same.
+#[sqlx::test]
+async fn a_sweep_finishes_deleted_projects_and_prunes_the_rest(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    seed_notice(&pool, GONE).await;
+    for hash in ["expired", "expired-too"] {
+        let mut tx = project_scope(&pool, &pid(ORGANIZATION)).await.unwrap();
+        db::insert_oauth_state(
+            &mut tx,
+            hash,
+            &pid(ORGANIZATION),
+            &oid(ORGANIZATION),
+            &uid(OWNER),
+            Provider::Slack,
+            -1,
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+    }
+    let auth = people();
+    auth.hold(&pid(ORGANIZATION), &oid(ORGANIZATION));
+    let st = state_asking(pool.clone(), &mocks, auth.clone());
+
+    auth.failing_homes(true);
+    retention::tick(&st).await;
+    assert_eq!(rows_of_project(&pool, GONE).await, [0, 0, 0, 1]);
+    assert_eq!(
+        rows_of_project(&pool, ORGANIZATION).await,
+        [0, 0, 0, 0],
+        "the expired handshakes pruned all the same"
+    );
+
+    auth.failing_homes(false);
+    retention::tick(&st).await;
+    assert_eq!(rows_of_project(&pool, GONE).await, [0, 0, 0, 0]);
+}
+
+/// A database that stops answering mid-sweep ends the pass where it
+/// stopped, as a failed read of a page does, rather than costing every
+/// deleted project after it the same wait and a line of its own.
+#[sqlx::test]
+async fn a_sweep_that_loses_its_database_ends_there(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    for organization in [GONE, GONE_TOO] {
+        seed_webhook(
+            &pool,
+            organization,
+            "https://hooks.example.invalid/telmoni",
+            "whsec_gone",
+        )
+        .await;
+    }
+    let auth = people();
+    let st = state_asking(pool.clone(), &mocks, auth.clone());
+    // The page read, auth's answer still to come when the pool closes.
+    auth.delaying_homes(Duration::from_millis(500));
+    let (_logging, logs) = captured_logs();
+    let (ended, ()) = tokio::join!(retention::purge_gone_projects(&st), async {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while auth.homes_asked() == 0 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the sweep never asked auth"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        st.db.close().await;
+    });
+    assert!(
+        matches!(ended, Err(TelmoniError::Database(sqlx::Error::PoolClosed))),
+        "{ended:?}"
+    );
+    assert!(
+        !logs
+            .text()
+            .contains("a deleted project's purge failed again"),
+        "a project was tried as though the database had answered"
+    );
 }
 
 /// A webhook connects by URL: checked, secret answered ONCE, row sealed, and

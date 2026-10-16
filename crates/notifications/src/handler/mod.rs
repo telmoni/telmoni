@@ -313,7 +313,10 @@ pub async fn purge_organization(
 /// Auth calls it before a project is handed to another organization, since
 /// the connectors are the old organization's grants and would post the new
 /// owner's events into the old owner's channels, and after a project is
-/// deleted.
+/// deleted; and the retention sweep calls it again for a deleted project
+/// whose rows a failed call left ([`crate::retention::purge_gone_projects`]).
+/// Safe to repeat: a grant torn down twice is refused by its vendor the
+/// second time, logged, and the rows are deleted either way.
 pub async fn purge_project(state: &AppState, project_id: &ProjectId) -> Result<u64, TelmoniError> {
     let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
     let held = db::sealed_connections_for_project(&mut tx, project_id).await?;

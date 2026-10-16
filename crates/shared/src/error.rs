@@ -160,6 +160,25 @@ impl TelmoniError {
         Self::Internal(format!("{service} {op} returned {status}"))
     }
 
+    /// Whether this is the database not answering — no connection to be had,
+    /// or the one held lost — rather than anything about the statement or its
+    /// rows. A loop that goes on past one item's failure ends its pass on
+    /// this one instead: every item after it would wait the same out in turn.
+    #[must_use]
+    pub const fn is_database_unanswered(&self) -> bool {
+        matches!(
+            self,
+            Self::Database(
+                sqlx::Error::PoolTimedOut
+                    | sqlx::Error::PoolClosed
+                    | sqlx::Error::WorkerCrashed
+                    | sqlx::Error::Io(_)
+                    | sqlx::Error::Tls(_)
+                    | sqlx::Error::Protocol(_)
+            )
+        )
+    }
+
     /// Render this error as an RFC 9457 problem-details payload.
     #[must_use]
     pub fn to_problem_details(&self) -> ProblemDetails {
@@ -405,7 +424,8 @@ impl AuthzError {
 #[non_exhaustive]
 pub enum TelemetryError {
     /// The body did not decode as OTLP in the encoding its `Content-Type`
-    /// named, held no span, or held more than the batch allows. Maps to 400.
+    /// named, held no span, held more than the batch allows, or did not
+    /// arrive within the lane's wait. Maps to 400.
     #[error("invalid batch: {0}")]
     InvalidBatch(String),
 

@@ -949,6 +949,26 @@ pub(crate) fn state_waiting_out_moves(
     })
 }
 
+/// The module over no store a suite can reach, refusing an export whose body
+/// has not arrived within `body_wait`, where the module waits a minute.
+pub(crate) fn state_waiting_bodies(
+    pool: &PgPool,
+    auth: Arc<dyn Auth>,
+    body_wait: Duration,
+) -> Arc<AppState> {
+    Arc::new(AppState {
+        body_wait,
+        ..module_at(
+            pool,
+            auth,
+            "http://telemetry:telemetry@127.0.0.1:1",
+            "redis://127.0.0.1:1",
+            Arc::new(NoLimits),
+            NoticeLog::new(),
+        )
+    })
+}
+
 /// The module over `pool`, with the stores a suite can reach: ClickHouse as
 /// `TELEMETRY_CLICKHOUSE_URL` names it, which the caller has checked with
 /// [`clickhouse_or_skip`], and Redis as `REDIS_URL` names it, or the compose

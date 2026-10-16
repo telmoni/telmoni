@@ -3,6 +3,7 @@
 //! are sealed under.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context;
 use telmoni_shared::envelope::{Kek, Vault, on_deployed_tier};
@@ -10,10 +11,15 @@ use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::seam::{Auth, Entitlements, Notifications};
 
 use crate::contract::EXPORTS_PER_MINUTE;
+use crate::handler::ingest::BODY_WAIT;
 use crate::handler::pings::MOVE_WAIT;
 use crate::rate_limit::RateLimit;
 use crate::replica::Redis;
 use crate::{AppState, Config, hashing, store::Store};
+
+/// The longest one call to the key service may take, the metadata server's
+/// token included.
+const KEY_SERVICE_WAIT: Duration = Duration::from_secs(15);
 
 /// The module's pool, opened as its own database role.
 pub async fn open_pool(config: &Config) -> anyhow::Result<sqlx::PgPool> {
@@ -52,7 +58,11 @@ pub fn state(
              and a deployed tier names a Cloud KMS key"
         );
     }
+    // Bounded, as notifications' client for the same hops is: an export that
+    // keys its project waits this long at most on the key service, and so
+    // ends inside an organization's deletion grace.
     let http = reqwest::Client::builder()
+        .timeout(KEY_SERVICE_WAIT)
         .redirect(reqwest::redirect::Policy::none())
         .user_agent("telmoni-telemetry")
         .build()?;
@@ -74,5 +84,6 @@ pub fn state(
         redis,
         rate_limit: RateLimit::new("telemetry:ingest:limit", EXPORTS_PER_MINUTE),
         move_wait: MOVE_WAIT,
+        body_wait: BODY_WAIT,
     })
 }

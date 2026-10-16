@@ -328,7 +328,7 @@ pub async fn retire_each(
                 busy.insert(organization_id);
                 rotated.left += 1;
             }
-            Err(e) if db::unanswered(&e) => return Err(e),
+            Err(e) if e.is_database_unanswered() => return Err(e),
             Err(e) => {
                 tracing::warn!(
                     project_id = %key.project_id,

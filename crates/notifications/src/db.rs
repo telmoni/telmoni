@@ -390,14 +390,69 @@ pub async fn purge_organization(
     Ok(purged)
 }
 
+/// The projects this module's rows name after `after`, in id order, `limit`
+/// of them: the tables the project's purge deletes from, and only those,
+/// since a delivery and its attempts go with their connection. Each table
+/// gives its first `limit` past `after`, and the page is the first `limit`
+/// of the three. The feed, which can hold thousands of notices a project, is
+/// walked one project at a time down its index, a step from each project to
+/// the next, so a page costs its projects and never their notices; a
+/// project's connections are few and its handshakes fewer. For the
+/// retention sweep, to find a deleted project's purge cut short.
+pub async fn projects_after(
+    tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
+    after: &str,
+    limit: i64,
+) -> sqlx::Result<Vec<ProjectId>> {
+    sqlx::query_scalar(
+        "WITH RECURSIVE notified (project_id, n) AS (
+             (SELECT project_id, 1::bigint FROM notifications.feed
+               WHERE project_id > $1 ORDER BY project_id LIMIT 1)
+             UNION ALL
+             (SELECT (SELECT f.project_id FROM notifications.feed f
+                       WHERE f.project_id > notified.project_id
+                       ORDER BY f.project_id LIMIT 1),
+                     notified.n + 1
+                FROM notified
+               WHERE notified.project_id IS NOT NULL AND notified.n < $2)
+         )
+         SELECT project_id FROM (
+             (SELECT DISTINCT project_id FROM notifications.connections
+               WHERE project_id > $1 ORDER BY project_id LIMIT $2)
+             UNION
+             (SELECT DISTINCT project_id FROM notifications.oauth_states
+               WHERE project_id > $1 ORDER BY project_id LIMIT $2)
+             UNION
+             (SELECT project_id FROM notified WHERE project_id IS NOT NULL)
+         ) named
+         ORDER BY project_id
+         LIMIT $2",
+    )
+    .bind(after)
+    .bind(limit)
+    .fetch_all(tx.conn())
+    .await
+}
+
+/// The longest a project's purge waits for a row another transaction holds:
+/// the role's own `lock_timeout` on a tier, set on the transaction too, since
+/// the Compose quickstart's superuser carries none, and a purge waiting there
+/// would hold up the retention sweep that tries it again.
+const PURGE_LOCK_WAIT: &str = "2000ms";
+
 /// Hard-delete every notifications row for one PROJECT: what a project
 /// handed to another organization leaves behind, and what a deleted one
 /// does. The same three tables as the organization's purge; deliveries and
-/// their attempts cascade from the connections.
+/// their attempts cascade from the connections. A row held past
+/// `PURGE_LOCK_WAIT` fails the purge, for its caller to try again.
 pub async fn purge_project(
     tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
     project_id: &ProjectId,
 ) -> sqlx::Result<u64> {
+    sqlx::query("SELECT set_config('lock_timeout', $1, true)")
+        .bind(PURGE_LOCK_WAIT)
+        .execute(tx.conn())
+        .await?;
     let mut purged = 0u64;
     for sql in [
         "DELETE FROM notifications.connections WHERE project_id = $1",

@@ -3,13 +3,16 @@
 //! the answer, its user ids hashed under the project's own key, and its
 //! rows put in ClickHouse; a key without the scope, a body past the cap, one
 //! that is not OTLP and one with no span are each refused in OTLP's `Status`
-//! in the request's encoding; a body sent again is answered as it first was.
+//! in the request's encoding; a body sent again is answered as it first was;
+//! and an export whose project was deleted as it landed is marked deleted
+//! with the rest of the project's spans.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
 mod common;
 
 use std::io::Write as _;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::body::Body;
@@ -22,12 +25,16 @@ use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span};
 use prost::Message as _;
 use serde_json::{Value, json};
 use sqlx::PgPool;
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tower::ServiceExt;
 
 use common::{AuthStub, clickhouse_or_skip};
+use telmoni_shared::seam::Telemetry as _;
+use telmoni_shared::test_util::captured_logs;
 use telmoni_shared::{ApiKeyScope, OrganizationId, ProjectId};
 use telmoni_telemetry::contract;
 use telmoni_telemetry::router;
+use telmoni_telemetry::seam::TelemetrySeam;
 use telmoni_telemetry::store::Projects;
 
 const LANE: &str = "/otlp/v1/traces";
@@ -35,11 +42,13 @@ const INGEST_KEY: &str = "telmoni_ingest_key";
 const READ_KEY: &str = "telmoni_read_only_key";
 const RUN: &str = "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01";
 
-/// The module's router and the project its two keys open.
+/// The module's router, the project its two keys open, and auth as the
+/// module holds it.
 struct Lane {
     app: Router,
     project: ProjectId,
     state: Arc<telmoni_telemetry::AppState>,
+    auth: Arc<AuthStub>,
 }
 
 /// A lane over the stores a suite can reach, or over none.
@@ -49,14 +58,15 @@ fn lane(pool: &PgPool, with_stores: bool) -> Lane {
     auth.key(INGEST_KEY, &organization, &project, &[ApiKeyScope::Ingest])
         .key(READ_KEY, &organization, &project, &[ApiKeyScope::Read]);
     let state = if with_stores {
-        common::state_with_stores(pool, auth)
+        common::state_with_stores(pool, auth.clone())
     } else {
-        common::state(pool, auth)
+        common::state(pool, auth.clone())
     };
     Lane {
         app: router(state.clone()),
         project,
         state,
+        auth,
     }
 }
 
@@ -94,6 +104,26 @@ impl Lane {
             .to_bytes()
             .to_vec();
         (status, headers, body)
+    }
+
+    /// An export of one span named `name` under the ingest key, answered
+    /// `200`: its headers.
+    async fn export(&self, name: &str) -> HeaderMap {
+        let (status, headers, answer) = self
+            .send(
+                Some(INGEST_KEY),
+                "application/json",
+                None,
+                export_json(&[name]).to_string().into_bytes(),
+            )
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "{name}: {}",
+            String::from_utf8_lossy(&answer)
+        );
+        headers
     }
 }
 
@@ -275,13 +305,14 @@ async fn a_paused_organizations_export_is_refused_whole(pool: PgPool) {
     auth.key(INGEST_KEY, &organization, &project, &[ApiKeyScope::Ingest]);
     let state = common::state_with_entitlements(
         &pool,
-        auth,
+        auth.clone(),
         Arc::new(common::PausedOrganization(organization)),
     );
     let lane = Lane {
         app: router(state.clone()),
         project,
         state,
+        auth,
     };
 
     let (status, headers, answer) = lane
@@ -446,6 +477,11 @@ async fn spans_outside_a_run_are_refused_one_by_one(pool: PgPool) {
         "{}",
         partial.error_message
     );
+    assert_eq!(
+        lane.auth.homes_asked(),
+        1,
+        "auth asked where the project is to key it, and not again with nothing written"
+    );
 }
 
 /// An exporter retries with the same bytes when an answer was lost: the
@@ -490,4 +526,243 @@ async fn an_export_sent_again_is_answered_as_it_was_and_written_once(pool: PgPoo
         .await
         .expect("a count");
     assert_eq!(count, 1, "written once");
+}
+
+/// An export whose key was read before its project was deleted, landing
+/// after the purge marked the project's spans deleted — on a replica that
+/// holds the project's hashing key, and so reads nothing that would refuse
+/// it — is marked deleted with the rest: auth, asked once the rows are in,
+/// no longer has the project. So whether the purge has gone on to delete the
+/// settings row or not yet, which it does only once its mark is made. It is
+/// answered as any other, its key having held when it came.
+#[sqlx::test]
+async fn an_export_landing_after_its_projects_purge_is_marked_with_it(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    for purged in ["the mark alone", "the whole purge"] {
+        let lane = lane(&pool, true);
+        lane.export("chat before").await;
+        assert_eq!(
+            common::rows_of(&ch.store, &lane.project).await,
+            (1, 1),
+            "{purged}"
+        );
+
+        // Deleted, auth's answer to change once the next export it read the
+        // key of is in; and the purge run, to its mark or to its end.
+        lane.auth.forget_after(&lane.project, 0);
+        if purged == "the mark alone" {
+            ch.store
+                .delete_project(&lane.project)
+                .await
+                .expect("the purge's mark");
+        } else {
+            TelemetrySeam(lane.state.clone())
+                .purge_project(&lane.project)
+                .await
+                .expect("the project's purge");
+        }
+        common::eventually("the purge marks the project's spans deleted", || async {
+            common::rows_of(&ch.store, &lane.project).await == (0, 0)
+        })
+        .await;
+        let settings: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM telemetry.project_settings WHERE project_id = $1",
+        )
+        .bind(lane.project.as_str())
+        .fetch_one(&pool)
+        .await
+        .expect("count the settings row");
+        assert_eq!(
+            settings,
+            i64::from(purged == "the mark alone"),
+            "{purged}: the settings row"
+        );
+
+        let (logging, logs) = captured_logs();
+        let headers = lane.export("chat after").await;
+        drop(logging);
+        assert_eq!(
+            headers.get("telmoni-content-mode").expect("the mode"),
+            "off",
+            "{purged}"
+        );
+        common::eventually(
+            "the export's spans are marked deleted with the project's",
+            || async { common::rows_of(&ch.store, &lane.project).await == (0, 0) },
+        )
+        .await;
+        assert!(
+            logs.text()
+                .contains("deleted as it landed; its spans are marked deleted again"),
+            "{purged}: {}",
+            logs.text()
+        );
+        assert_eq!(
+            lane.auth.homes_asked(),
+            3,
+            "{purged}: asked where the project is to key it, then once after each write"
+        );
+    }
+}
+
+/// Auth unable to say, once an export's rows are in, whether their project
+/// outlived the write — failing, or slower than its second — keeps the rows
+/// as written, and is not waited out: its silence is never taken as the
+/// project gone, which would mark a live project's spans deleted.
+#[sqlx::test]
+async fn an_export_auth_cannot_settle_keeps_its_rows(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let lane = lane(&pool, true);
+    lane.export("chat first").await;
+
+    lane.auth.failing_homes(true);
+    let (logging, logs) = captured_logs();
+    lane.export("chat unanswered").await;
+    drop(logging);
+    let logged = logs.text();
+    assert!(
+        logged.contains("auth could not say whether an export's project outlived its write"),
+        "{logged}"
+    );
+    assert!(!logged.contains("deleted as it landed"), "{logged}");
+
+    lane.auth
+        .failing_homes(false)
+        .delaying_homes(Duration::from_secs(5));
+    let (logging, logs) = captured_logs();
+    let started = Instant::now();
+    lane.export("chat late").await;
+    let took = started.elapsed();
+    drop(logging);
+    assert!(
+        took < Duration::from_secs(4),
+        "auth's late answer is not waited for: {took:?}"
+    );
+    let logged = logs.text();
+    assert!(
+        logged.contains("auth did not say in time whether an export's project outlived its write"),
+        "{logged}"
+    );
+    assert!(!logged.contains("deleted as it landed"), "{logged}");
+
+    // A mark records at once and hides the rows within the second.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(
+        common::rows_of(&ch.store, &lane.project).await.0,
+        3,
+        "every export's span kept"
+    );
+}
+
+/// An exporter that stops waiting once its rows are in — its own timeout, a
+/// load balancer's, a pod ending — does not cut the write off between its
+/// insert and the settling after it: a project deleted as the rows landed
+/// has them marked deleted all the same.
+#[sqlx::test]
+async fn an_export_nobody_waits_for_is_settled_all_the_same(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let lane = lane(&pool, true);
+    lane.export("chat before").await;
+    lane.auth.forget_after(&lane.project, 0);
+    ch.store
+        .delete_project(&lane.project)
+        .await
+        .expect("the purge's mark");
+    common::eventually("the purge marks the project's spans deleted", || async {
+        common::rows_of(&ch.store, &lane.project).await == (0, 0)
+    })
+    .await;
+
+    // Auth's answer to come after the exporter has gone, within its second.
+    lane.auth.delaying_homes(Duration::from_millis(500));
+    let asked = lane.auth.homes_asked();
+    let request = lane.app.clone().oneshot(
+        Request::builder()
+            .method("POST")
+            .uri(LANE)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, format!("Bearer {INGEST_KEY}"))
+            .body(Body::from(
+                export_json(&["chat after"]).to_string().into_bytes(),
+            ))
+            .expect("a request"),
+    );
+    tokio::select! {
+        answered = request => panic!(
+            "answered before auth was asked: {:?}",
+            answered.map(|response| response.status())
+        ),
+        () = async {
+            while lane.auth.homes_asked() == asked {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        } => {}
+    }
+    common::eventually(
+        "the export nobody waited for is settled, its spans marked deleted",
+        || async { common::rows_of(&ch.store, &lane.project).await == (0, 0) },
+    )
+    .await;
+}
+
+/// A body that has not arrived within the wait is refused — here a fifth of
+/// a second, where every binary waits a minute — so no export runs on past
+/// an organization's deletion grace: answered `invalid-batch` before its
+/// project is keyed or anything is written.
+#[sqlx::test]
+async fn a_body_that_does_not_arrive_in_time_is_refused(pool: PgPool) {
+    let (organization, project) = (OrganizationId::new(), ProjectId::new());
+    let auth = AuthStub::new();
+    auth.key(INGEST_KEY, &organization, &project, &[ApiKeyScope::Ingest]);
+    let state = common::state_waiting_bodies(&pool, auth.clone(), Duration::from_millis(200));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a port");
+    let address = listener.local_addr().expect("its address");
+    tokio::spawn(async move { axum::serve(listener, router(state)).await });
+
+    // Its headers whole, and the first byte of the thousand its body says.
+    let mut stream = tokio::net::TcpStream::connect(address)
+        .await
+        .expect("a connection");
+    stream
+        .write_all(
+            format!(
+                "POST {LANE} HTTP/1.1\r\nhost: localhost\r\nauthorization: Bearer {INGEST_KEY}\r\n\
+                 content-type: application/json\r\ncontent-length: 1000\r\n\r\n{{"
+            )
+            .as_bytes(),
+        )
+        .await
+        .expect("the request's start");
+    let started = Instant::now();
+    let mut answer = Vec::new();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let mut buffer = [0u8; 4096];
+        loop {
+            let read = stream.read(&mut buffer).await.expect("the answer");
+            answer.extend_from_slice(buffer.get(..read).expect("within the buffer"));
+            if read == 0 || String::from_utf8_lossy(&answer).contains("invalid-batch") {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("answered within ten seconds");
+    let answer = String::from_utf8_lossy(&answer);
+    assert!(answer.starts_with("HTTP/1.1 400"), "{answer}");
+    assert!(
+        answer.contains(
+            "/errors/telemetry/invalid-batch: the body did not arrive within 0.2 seconds"
+        ),
+        "{answer}"
+    );
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert_eq!(auth.homes_asked(), 0, "nothing keyed");
 }

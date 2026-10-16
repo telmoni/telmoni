@@ -171,8 +171,9 @@ pub async fn create_project(
 /// Notifications keys its rows on `project_id` with no cross-schema foreign
 /// key, so its purge lane is called once the row is gone, best effort: what a
 /// failed purge leaves — sealed vendor grants and webhook secrets on a project
-/// that no longer exists — is reached by nothing until the organization's own
-/// purge, which sweeps it.
+/// that no longer exists — is found by notifications' own retention sweep,
+/// which purges again, every hour, each project its rows name that this
+/// module no longer has; as telemetry's own sweep does its purge's.
 pub async fn delete_project(
     State(state): State<Arc<AppState>>,
     axum::extract::Path(project_id): axum::extract::Path<String>,

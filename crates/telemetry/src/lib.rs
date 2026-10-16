@@ -113,6 +113,10 @@ pub struct AppState {
     /// Held here rather than read from the constant so a suite can hold a
     /// move for longer than a busy machine lets two seconds last.
     pub move_wait: std::time::Duration,
+    /// The longest an export's body may take to arrive before the export is
+    /// refused: a minute on every binary (`handler::ingest::BODY_WAIT`). Held
+    /// here so a suite can refuse a body sooner than a minute.
+    pub body_wait: std::time::Duration,
 }
 
 impl AppState {

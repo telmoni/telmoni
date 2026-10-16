@@ -89,7 +89,8 @@ pub async fn run(state: Arc<AppState>) {
 ///
 /// # Errors
 ///
-/// Postgres did not answer a page's read, or a purge (`db::unanswered`);
+/// Postgres did not answer a page's read, or a purge
+/// ([`TelmoniError::is_database_unanswered`]);
 /// auth could not say where a page's projects are; or ClickHouse did not
 /// answer a purge's mark. Each ends the pass, every row not purged yet as
 /// it was.
@@ -116,7 +117,7 @@ pub async fn sweep(state: &AppState) -> Result<Swept, TelmoniError> {
                 Err(e @ TelmoniError::Telemetry(TelemetryError::StoreUnavailable(_))) => {
                     return Err(e);
                 }
-                Err(e) if db::unanswered(&e) => return Err(e),
+                Err(e) if e.is_database_unanswered() => return Err(e),
                 Err(e) => {
                     tracing::warn!(
                         project_id = %project_id,

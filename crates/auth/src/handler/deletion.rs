@@ -182,9 +182,12 @@ const TELEMETRY_PROJECT_BUDGET: std::time::Duration = std::time::Duration::from_
 /// to another organization, whose events must never post into the old
 /// one's channels, and after one is deleted. No notifications module is
 /// nothing to purge; a refusal or a purge over budget is an `Err`, which the
-/// transfer treats as a refusal to move. The agent needs no call: it finds
-/// what it holds of a project under an organization that no longer has it,
-/// and removes it, itself.
+/// transfer treats as a refusal to move, and which a delete logs: a purge
+/// that fails after a delete is tried again by notifications' own retention
+/// sweep, every hour until it lands, which finds the project through the
+/// rows the failure left once the delete has committed. The agent needs no
+/// call: it finds what it holds of a project under an organization that no
+/// longer has it, and removes it, itself.
 pub(crate) async fn purge_project_connectors(
     state: &AppState,
     project_id: &ProjectId,

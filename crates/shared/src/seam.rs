@@ -359,7 +359,10 @@ pub trait Notifications: Send + Sync {
     ) -> Result<u64, TelmoniError>;
 
     /// Everything held for one project: before it is handed to another
-    /// organization, and after it is deleted. Idempotent.
+    /// organization, and after it is deleted. Idempotent. One that fails
+    /// after a delete is left for the module's own retention sweep, which
+    /// tries it again every hour until it lands, once the delete has
+    /// committed: the caller logs the failure and need not retry it.
     async fn purge_project(&self, project_id: &ProjectId) -> Result<u64, TelmoniError>;
 
     /// Every notice that named the person, rewritten to name a former
