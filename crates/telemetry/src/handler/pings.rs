@@ -258,9 +258,10 @@ pub async fn start(
 }
 
 /// `GET` or `POST /ping/{ping_key}/{slug}/checkpoint?steps=4&cost=0.08` —
-/// progress: steps and spend so far, numbers alone; the stall timeout
-/// starts again. With no run open, it opens the run it reports on, since
-/// the run's `/start` was lost on the way.
+/// progress: steps and spend so far, numbers alone, each kept where it is
+/// more than the run holds, so an older checkpoint sent again moves neither
+/// back; the stall timeout starts again. With no run open, it opens the run
+/// it reports on, since the run's `/start` was lost on the way.
 pub async fn checkpoint(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,

@@ -128,7 +128,7 @@ pub struct FinishedRun {
     pub status: SpanStatus,
     /// What a `/fail` reported.
     pub exit_code: Option<i32>,
-    /// What its `/checkpoint`s reported last, where they reported anything.
+    /// The most its `/checkpoint`s reported, where they reported anything.
     pub steps: Option<i32>,
     pub cost_usd: Option<f64>,
 }

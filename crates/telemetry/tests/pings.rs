@@ -1,10 +1,10 @@
 //! The ping lane as a crontab reaches it: a ping to a slug no monitor has
 //! makes the monitor, paused as `new` until its owner saves it, which no
 //! resume does, recorded on the chain as made by the key, and the owner told
-//! once through the outbox; a run is opened by its
-//! `/start`, heard by its `/checkpoint`s, which hold it to its monitor's
-//! step cap, and ended by a bare ping or a `/fail`, when it waits in the
-//! outbox as a finished span and the monitor's state and next due time
+//! once through the outbox; a run is opened by its `/start`, heard by its
+//! `/checkpoint`s, which hold it to its monitor's step cap and never move
+//! its progress back, and ended by a bare ping or a `/fail`, when it waits in
+//! the outbox as a finished span and the monitor's state and next due time
 //! follow, or as `error` by the next ping that finds it never said it ended;
 //! a ping whose run ends beside it changing nothing; a ping waiting on no
 //! other writer in a circle; the project held in place while a ping writes,
@@ -1057,6 +1057,53 @@ async fn a_run_is_opened_heard_and_ended_by_its_pings(pool: PgPool) {
     assert_eq!(monitor["state"], "paused");
     assert!(monitor["next_due_at"].is_null());
     assert_eq!(finished_runs(&pool, &p.project).await.len(), 8);
+}
+
+/// A checkpoint's steps and spend are totals so far, which never fall: one
+/// lower than the run holds — an older checkpoint sent again, a retried
+/// curl — leaves it where it stands, each total on its own, so the run ends
+/// with the most it reported whatever order its checkpoints came in.
+#[sqlx::test]
+async fn a_checkpoint_never_moves_its_runs_progress_back(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.make(hourly()).await;
+    let run = rid();
+    let checkpoint = |query: &str| format!("/{key}/hourly-sync/checkpoint?rid={run}&{query}");
+
+    p.ping_ok(&format!("/{key}/hourly-sync/start?rid={run}"))
+        .await;
+    p.ping_ok(&checkpoint("steps=4&cost=0.5")).await;
+    assert_eq!(p.monitor("hourly-sync").await["state"], "over_bound");
+
+    // The checkpoint before it, sent again: neither total falls, and the
+    // monitor stays past its bound.
+    p.ping_ok(&checkpoint("steps=2&cost=0.25")).await;
+    let runs = open_runs(&pool, &p.project).await;
+    assert_eq!(
+        (runs[0].1, runs[0].2),
+        (4, 0.5),
+        "an older checkpoint moved the run's progress back"
+    );
+    assert_eq!(p.monitor("hourly-sync").await["state"], "over_bound");
+
+    // Each total on its own: the one that grew is kept beside the one that
+    // did not, and one not sent stands.
+    p.ping_ok(&checkpoint("steps=3&cost=0.75")).await;
+    let runs = open_runs(&pool, &p.project).await;
+    assert_eq!((runs[0].1, runs[0].2), (4, 0.75));
+    p.ping_ok(&checkpoint("steps=6")).await;
+    let runs = open_runs(&pool, &p.project).await;
+    assert_eq!((runs[0].1, runs[0].2), (6, 0.75));
+
+    // The run ends with the most it reported, an older checkpoint sent last.
+    p.ping_ok(&checkpoint("steps=5&cost=0.5")).await;
+    p.ping_ok(&format!("/{key}/hourly-sync?rid={run}")).await;
+    let finished = finished_runs(&pool, &p.project).await;
+    assert_eq!(finished.len(), 1);
+    assert_eq!(finished[0]["steps"], 6);
+    assert_eq!(finished[0]["cost_usd"], 0.75);
 }
 
 /// A run that never said it ended — a job that crashed after its `/start`,

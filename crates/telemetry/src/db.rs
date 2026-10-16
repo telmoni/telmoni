@@ -971,9 +971,11 @@ pub async fn insert_open_run(
 
 /// One of the project's open runs heard at `heard_at`, its stall timeout
 /// starting again, with its steps and spend so far where a checkpoint
-/// reported them; `None` where the project has no open run by that id
-/// under `monitor_id`, the monitor it was read under, so a run another
-/// monitor opened under the id once this one ended is never taken for it.
+/// reported more than the run holds: each is a total so far, which never
+/// falls, so an older checkpoint sent again moves neither back; `None`
+/// where the project has no open run by that id under `monitor_id`, the
+/// monitor it was read under, so a run another monitor opened under the id
+/// once this one ended is never taken for it.
 pub async fn hear_open_run<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
@@ -983,11 +985,12 @@ pub async fn hear_open_run<B: HasProject>(
     steps: Option<i32>,
     cost_usd: Option<f64>,
 ) -> sqlx::Result<Option<OpenRunRow>> {
+    // `GREATEST` passes over a NULL, so a total the ping did not send stands.
     sqlx::query_as(&format!(
         "UPDATE telemetry.open_runs
             SET last_heard_at = $4,
-                steps = COALESCE($5, steps),
-                cost_usd = COALESCE($6, cost_usd)
+                steps = GREATEST($5, steps),
+                cost_usd = GREATEST($6, cost_usd)
           WHERE project_id = $1 AND id = $2 AND monitor_id = $3
          RETURNING {OPEN_RUN_COLUMNS}"
     ))
