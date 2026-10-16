@@ -19,7 +19,8 @@ after typing the project's name
   authenticating, and its member seats and pending invitations go with it.
 - **In the same purge:** every span and every hour of totals the project
   sent is marked deleted, gone from every read within moments as the store
-  applies the mark, and the nightly rotation removes them from disk; its
+  applies the mark — an export still being written as the project went
+  marked once it lands — and the nightly rotation removes them from disk; its
   telemetry settings, its saved views of its traces, the key its end-user
   ids were hashed under, and its monitors with the runs they still had
   open go with them, its ping keys first, so the ping lane is closed to the
@@ -32,8 +33,9 @@ after typing the project's name
   did not answer, or by a ping still being answered that held the project
   past the purge's two seconds — is tried again every ten minutes until it
   lands, telemetry finding the project through the settings row the failure
-  left, its ping keys gone already; what its connectors' purge misses goes
-  when the organization itself is deleted.
+  left, its ping keys gone already; its connectors' purge — cut short by a
+  database that did not answer, or by a vendor slow to take a grant back —
+  is tried again every hour until it lands.
 
 ## Deleting an organization
 

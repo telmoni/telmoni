@@ -250,9 +250,9 @@ Only the **Owner** can delete a project. Deletion is initiated from the
 - It takes effect at once, with no undo.
 - Deleting a project deletes its API keys, member seats, and pending
   invitations with it, and its connectors, their delivery history, and its
-  activity feed are purged right after (whatever fails then goes when the
-  organization itself is purged). The console agent removes what it holds
-  about the project.
+  activity feed are purged right after (whatever fails then is tried again
+  every hour until it goes). The console agent removes what it holds about
+  the project.
 - Its traces go with it: every span and every hour of totals the project
   sent is marked deleted in the same purge, gone from every read within
   moments as the store applies the mark, and the nightly rotation removes

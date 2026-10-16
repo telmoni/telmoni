@@ -132,7 +132,7 @@ status maps to:
 
 | Status | Type | When |
 |---|---|---|
-| `400` | `/errors/telemetry/invalid-batch` | `Content-Type` is not `application/json`, `application/x-protobuf` or `application/protobuf`; `Content-Encoding` is neither `gzip` nor `identity`; a gzipped body does not inflate; or the body does not decode in the encoding `Content-Type` names, holds no span, or holds more than 1,000 |
+| `400` | `/errors/telemetry/invalid-batch` | `Content-Type` is not `application/json`, `application/x-protobuf` or `application/protobuf`; `Content-Encoding` is neither `gzip` nor `identity`; the body did not arrive within 60 seconds; a gzipped body does not inflate; or the body does not decode in the encoding `Content-Type` names, holds no span, or holds more than 1,000 |
 | `401` | `/errors/auth/invalid-token` | No live key |
 | `402` | `/errors/plan/limit-reached` | On the hosted service, the key's organization is paused ([One Hobby organization](https://telmoni.com/docs/workspace/billing#one-hobby-organization)): nothing is kept, and the message says what lifts it. A self-hosted server never answers it |
 | `403` | `/errors/authz/forbidden` | A key without the ingest scope |
