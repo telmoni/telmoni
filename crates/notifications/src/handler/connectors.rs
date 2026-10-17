@@ -281,7 +281,14 @@ pub async fn callback(
     if provider.installed_per_workspace() {
         db::lock_workspace(&mut tx, provider, &installed.workspace_id).await?;
     }
-    super::lock_audit_chain(&mut tx, &identity.organization_id).await?;
+    super::hold_chain(
+        &state,
+        &mut tx,
+        &identity,
+        Verb::Create,
+        Resource::Connector,
+    )
+    .await?;
     let now_existing = db::existing_connection_id(
         &mut tx,
         &identity.project_id,
@@ -452,7 +459,14 @@ pub async fn create_webhook(
         .await?
         .bind_organization(&identity.organization_id)
         .await?;
-    super::lock_audit_chain(&mut tx, &identity.organization_id).await?;
+    super::hold_chain(
+        &state,
+        &mut tx,
+        &identity,
+        Verb::Create,
+        Resource::Connector,
+    )
+    .await?;
     if db::existing_connection_id(
         &mut tx,
         &identity.project_id,

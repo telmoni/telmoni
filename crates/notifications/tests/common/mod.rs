@@ -62,6 +62,10 @@ pub(crate) struct AuthStub {
     homes_asked: AtomicUsize,
     /// How long each answer of where projects are takes to come.
     homes_delay: Mutex<Duration>,
+    /// How many times a lane asked again who was calling.
+    asked_again: AtomicUsize,
+    /// How long each second answer takes to come.
+    again_delay: Mutex<Duration>,
 }
 
 impl AuthStub {
@@ -75,6 +79,8 @@ impl AuthStub {
             homes_fail: AtomicBool::new(false),
             homes_asked: AtomicUsize::new(0),
             homes_delay: Mutex::new(Duration::ZERO),
+            asked_again: AtomicUsize::new(0),
+            again_delay: Mutex::new(Duration::ZERO),
         })
     }
 
@@ -140,6 +146,20 @@ impl AuthStub {
     pub(crate) fn asked(&self) -> usize {
         self.asked.load(Ordering::SeqCst)
     }
+
+    /// Answer every second ask of who is calling `delay` late from now on.
+    pub(crate) fn delaying_again(&self, delay: Duration) -> &Self {
+        *self
+            .again_delay
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = delay;
+        self
+    }
+
+    /// How many times a lane asked again who was calling.
+    pub(crate) fn asked_again(&self) -> usize {
+        self.asked_again.load(Ordering::SeqCst)
+    }
 }
 
 fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
@@ -197,6 +217,46 @@ impl Auth for AuthStub {
             project,
             session_id: None,
             expires_at: chrono::Utc::now().timestamp() + 3600,
+        })
+    }
+
+    /// The person's seat in the organization holding the project now: where
+    /// the suite moved it, else where they were resolved.
+    async fn resolve_again(&self, acting: &Acting) -> Result<Acting, TelmoniError> {
+        self.asked_again.fetch_add(1, Ordering::SeqCst);
+        let delay = *self
+            .again_delay
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !delay.is_zero() {
+            tokio::time::sleep(delay).await;
+        }
+        let project_id = acting.project_or_bad_request()?.project_id.clone();
+        let organization_id = self
+            .projects
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&project_id)
+            .cloned()
+            .unwrap_or_else(|| acting.organization_id.clone());
+        let seat = self
+            .roster
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&(acting.user_id.to_string(), organization_id.to_string()))
+            .copied();
+        let Some((organization_role, Some(role))) = seat else {
+            return Err(
+                AuthzError::Forbidden("you are not a member of this project".into()).into(),
+            );
+        };
+        Ok(Acting {
+            user_id: acting.user_id.clone(),
+            organization_id,
+            organization_role: Some(organization_role),
+            project: Some(ActingProject { project_id, role }),
+            session_id: acting.session_id.clone(),
+            expires_at: acting.expires_at,
         })
     }
 

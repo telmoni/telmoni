@@ -6,6 +6,7 @@ pub mod connectors;
 pub mod slack_events;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::{extract::State, http::HeaderMap, response::IntoResponse};
 use serde_json::json;
@@ -32,6 +33,10 @@ const CHAIN_LOCK_WAIT: &str = "2000ms";
 
 /// Postgres's `lock_not_available`: a `lock_timeout` ran out.
 const LOCK_NOT_AVAILABLE: &str = "55P03";
+
+/// How long a lane under the chain lock waits for auth's second answer: well
+/// inside the two seconds the organization's other writers wait for that lock.
+const ANSWER_BUDGET: Duration = Duration::from_secs(1);
 
 /// The organization's audit chain lock, before any row: a transfer holds it
 /// while it awaits the purge, which must never wait on a lane waiting on it.
@@ -63,6 +68,37 @@ pub(crate) async fn lock_audit_chain<B: Binding>(
     }
 }
 
+/// The chain lock, then auth's answer again, which stands to the commit as a transfer
+/// holds that lock to its own: a project moved since, or a role lost, is refused.
+pub(crate) async fn hold_chain<B: Binding>(
+    state: &AppState,
+    tx: &mut Scoped<'_, B>,
+    identity: &ProjectIdentity,
+    verb: Verb,
+    resource: Resource,
+) -> Result<(), TelmoniError> {
+    lock_audit_chain(tx, &identity.organization_id).await?;
+    let Ok(now) =
+        tokio::time::timeout(ANSWER_BUDGET, state.auth.resolve_again(&identity.acting)).await
+    else {
+        tracing::warn!(
+            project_id = %identity.project_id,
+            organization_id = %identity.organization_id,
+            "notifications: auth did not answer a change to a project again in time"
+        );
+        return Err(AuthError::IdentityUnavailable.into());
+    };
+    let now = now?;
+    if now.organization_id != identity.organization_id {
+        return Err(AuthError::Conflict(
+            "the project has moved to another organization; reload and try again".into(),
+        )
+        .into());
+    }
+    now.require_project(verb, resource)?;
+    Ok(())
+}
+
 /// Who is behind this request's bearer, as auth resolves it for the
 /// organization and project the headers name. This module cannot decide
 /// that itself: it holds no grant on `auth.project_members`.
@@ -79,6 +115,8 @@ pub(crate) struct ProjectIdentity {
     pub project_id: ProjectId,
     /// The organization that OWNS that project, as auth resolved it.
     pub organization_id: OrganizationId,
+    /// Auth's whole answer, for asking it again under the chain lock ([`hold_chain`]).
+    pub acting: Acting,
 }
 
 pub(crate) async fn authorize(
@@ -88,11 +126,12 @@ pub(crate) async fn authorize(
     resource: Resource,
 ) -> Result<ProjectIdentity, TelmoniError> {
     let acting = resolve(state, headers).await?;
-    let project = acting.require_project(verb, resource)?;
+    let project_id = acting.require_project(verb, resource)?.project_id.clone();
     Ok(ProjectIdentity {
-        project_id: project.project_id.clone(),
-        user_id: acting.user_id,
-        organization_id: acting.organization_id,
+        project_id,
+        user_id: acting.user_id.clone(),
+        organization_id: acting.organization_id.clone(),
+        acting,
     })
 }
 

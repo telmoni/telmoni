@@ -3808,6 +3808,191 @@ async fn a_connect_kept_from_its_chain_is_answered_conflict(pool: PgPool) {
     assert_eq!(stored, 0);
 }
 
+/// A transfer of the organization's project committing beside `lane`, after its purge:
+/// auth then holds the project in OTHER_ORGANIZATION, its previous owner an admin there.
+async fn across_a_transfer(
+    st: &Arc<AppState>,
+    pool: &PgPool,
+    auth: &AuthStub,
+    lane: Request<Body>,
+) -> axum::response::Response {
+    let transfer = transferring(pool, ORGANIZATION).await;
+    let lane = tokio::spawn(app(st).oneshot(lane));
+    eventually("the lane waits for the organization's chain", || async {
+        lock_waiters(pool).await == 1
+    })
+    .await;
+    handler::purge_project(st, &pid(ORGANIZATION))
+        .await
+        .unwrap();
+    auth.hold(&pid(ORGANIZATION), &oid(OTHER_ORGANIZATION))
+        .seat(
+            OWNER,
+            OTHER_ORGANIZATION,
+            OrganizationRole::Member,
+            Some(Role::Admin),
+        );
+    transfer.commit().await.unwrap();
+    lane.await.unwrap().unwrap()
+}
+
+/// What connecting filed: the connections stored, and the events on the chains.
+async fn connects_filed(pool: &PgPool) -> (i64, i64) {
+    let connections: i64 = sqlx::query_scalar("SELECT count(*) FROM notifications.connections")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let events: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit.events WHERE resource_kind = 'connector'")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    (connections, events)
+}
+
+/// A webhook connected as its project's transfer commits is refused, nothing filed.
+#[sqlx::test]
+async fn a_webhook_connected_across_its_projects_transfer_is_refused(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let auth = people();
+    let st = state_asking(pool.clone(), &mocks, auth.clone());
+
+    let lane = owner(
+        "POST",
+        "/internal/connectors/webhook",
+        Some(r#"{"url":"https://hooks.example.invalid/telmoni/events"}"#),
+    );
+    let resp = across_a_transfer(&st, &pool, &auth, lane).await;
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    let detail = json_body(resp).await["detail"].to_string();
+    assert!(detail.contains("moved to another organization"), "{detail}");
+    assert_eq!(connects_filed(&pool).await, (0, 0));
+}
+
+/// A Slack install finished as its project's transfer commits is refused, nothing filed.
+#[sqlx::test]
+async fn a_slack_install_finished_across_its_projects_transfer_is_refused(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/oauth.v2.access"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(slack_access_ok(&slack_hook_url(&mocks, "new"))),
+        )
+        .mount(&mocks)
+        .await;
+    let auth = people();
+    let st = state_asking(pool.clone(), &mocks, auth.clone());
+    let resp = app(&st)
+        .oneshot(owner("POST", "/internal/connectors/slack/authorize", None))
+        .await
+        .unwrap();
+    let raw_state = json_body(resp).await["state"].as_str().unwrap().to_owned();
+
+    let lane = owner(
+        "POST",
+        "/internal/connectors/slack/callback",
+        Some(&format!(r#"{{"code":"c0de","state":"{raw_state}"}}"#)),
+    );
+    let resp = across_a_transfer(&st, &pool, &auth, lane).await;
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    let detail = json_body(resp).await["detail"].to_string();
+    assert!(detail.contains("moved to another organization"), "{detail}");
+    assert_eq!(connects_filed(&pool).await, (0, 0));
+}
+
+/// A connect by an admin its project's transfer leaves without a seat is refused, nothing filed.
+#[sqlx::test]
+async fn a_connect_by_an_admin_a_transfer_leaves_behind_is_refused(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let auth = people();
+    auth.seat(
+        "user_admin",
+        ORGANIZATION,
+        OrganizationRole::Admin,
+        Some(Role::Admin),
+    );
+    let st = state_asking(pool.clone(), &mocks, auth.clone());
+
+    let lane = req_as(
+        "POST",
+        "/internal/connectors/webhook",
+        ORGANIZATION,
+        "user_admin",
+        Some(r#"{"url":"https://hooks.example.invalid/telmoni/events"}"#),
+    );
+    let resp = across_a_transfer(&st, &pool, &auth, lane).await;
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert_eq!(connects_filed(&pool).await, (0, 0));
+}
+
+/// A connect checks the role on auth's second answer: an admin demoted as it waits is refused.
+#[sqlx::test]
+async fn a_connect_by_an_admin_demoted_as_it_waits_is_refused(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let auth = people();
+    auth.seat(
+        "user_admin",
+        ORGANIZATION,
+        OrganizationRole::Admin,
+        Some(Role::Admin),
+    );
+    let st = state_asking(pool.clone(), &mocks, auth.clone());
+
+    let held = holding_chain(&pool, &oid(ORGANIZATION)).await;
+    let connect = tokio::spawn(app(&st).oneshot(req_as(
+        "POST",
+        "/internal/connectors/webhook",
+        ORGANIZATION,
+        "user_admin",
+        Some(r#"{"url":"https://hooks.example.invalid/telmoni/events"}"#),
+    )));
+    eventually("the connect waits for the chain", || async {
+        lock_waiters(&pool).await == 1
+    })
+    .await;
+    auth.seat(
+        "user_admin",
+        ORGANIZATION,
+        OrganizationRole::Member,
+        Some(Role::Member),
+    );
+    held.rollback().await.unwrap();
+
+    let resp = connect.await.unwrap().unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert_eq!(connects_filed(&pool).await, (0, 0));
+}
+
+/// A connect whose second answer does not come within a second is refused 503, nothing filed.
+#[sqlx::test]
+async fn a_connect_auth_does_not_answer_again_in_time_is_refused(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let auth = people();
+    auth.delaying_again(Duration::from_secs(30));
+    let st = state_asking(pool.clone(), &mocks, auth.clone());
+
+    let resp = tokio::time::timeout(
+        Duration::from_secs(10),
+        app(&st).oneshot(owner(
+            "POST",
+            "/internal/connectors/webhook",
+            Some(r#"{"url":"https://hooks.example.invalid/telmoni/events"}"#),
+        )),
+    )
+    .await
+    .expect("the connect waited on auth past its bound")
+    .unwrap();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(auth.asked_again(), 1);
+    assert_eq!(connects_filed(&pool).await, (0, 0));
+}
+
 /// A webhook connects by URL: checked, secret answered ONCE, row sealed, and
 /// only the host shown.
 #[sqlx::test]
