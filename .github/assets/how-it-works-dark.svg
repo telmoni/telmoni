@@ -35,14 +35,14 @@
     <symbol id="code" viewBox="0 0 24 24"><path d="M8.5 7 3.5 12l5 5M15.5 7l5 5-5 5M13.5 5l-3 14"/></symbol>
     <symbol id="terminal" viewBox="0 0 24 24"><path d="M5 7.5 9.5 12 5 16.5M12.5 17H19"/></symbol>
     <symbol id="bell" viewBox="0 0 24 24"><path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15ZM10 21h4"/></symbol>
-    <symbol id="window" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M3 9h18M6 6.8h.01M8.5 6.8h.01"/></symbol>
+    <symbol id="window" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15"/><path d="M3 9h18M6 6.8h.01M8.5 6.8h.01"/></symbol>
     <symbol id="store" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7.5" ry="2.75"/><path d="M4.5 6v12c0 1.5 3.4 2.75 7.5 2.75s7.5-1.25 7.5-2.75V6M4.5 12c0 1.5 3.4 2.75 7.5 2.75s7.5-1.25 7.5-2.75"/></symbol>
   </defs>
 
   <g class="sans">
-    <rect class="dot cyan" x="12" y="18" width="7" height="7" rx="2"/><text class="head" x="25" y="25">YOUR SIDE</text>
-    <rect class="dot ember" x="360" y="18" width="7" height="7" rx="2"/><text class="head" x="373" y="25">TELMONI</text>
-    <rect class="dot slate" x="652" y="18" width="7" height="7" rx="2"/><text class="head" x="665" y="25">STORAGE</text>
+    <rect class="dot cyan" x="12" y="18" width="7" height="7"/><text class="head" x="25" y="25">YOUR SIDE</text>
+    <rect class="dot ember" x="360" y="18" width="7" height="7"/><text class="head" x="373" y="25">TELMONI</text>
+    <rect class="dot slate" x="652" y="18" width="7" height="7"/><text class="head" x="665" y="25">STORAGE</text>
   </g>
 
   <g>
@@ -51,10 +51,10 @@
     <path class="edge" d="M236 268H358" marker-end="url(#tip)"/>
     <path class="edge" d="M480 108V130" marker-end="url(#tip)"/>
     <path class="edge" d="M600 68H650" marker-end="url(#tip)"/>
-    <path class="edge" d="M600 148H616A10 10 0 0 0 626 138V94A10 10 0 0 1 636 84H650" marker-end="url(#tip)"/>
+    <path class="edge" d="M600 148H626V84H650" marker-end="url(#tip)"/>
     <path class="edge" d="M600 172H650" marker-end="url(#tip)"/>
     <path class="edge" d="M600 268H650" marker-end="url(#tip)"/>
-    <path class="edge ember" d="M480 300V362A10 10 0 0 1 470 372H238" marker-end="url(#tip-ember)"/>
+    <path class="edge ember" d="M480 300V372H238" marker-end="url(#tip-ember)"/>
   </g>
   <g class="mono" text-anchor="middle">
     <text class="route cyan" x="298" y="164">/otlp/v1/traces</text>
@@ -63,27 +63,27 @@
   </g>
 
   <g class="sans">
-    <rect class="card" x="12.5" y="44.5" width="224" height="64" rx="12"/>
-    <rect class="tile cyan" x="26" y="61" width="30" height="30" rx="8"/><use class="glyph cyan" href="#user" xlink:href="#user" x="33" y="68" width="16" height="16"/>
+    <rect class="card" x="12.5" y="44.5" width="224" height="64"/>
+    <rect class="tile cyan" x="26" y="61" width="30" height="30"/><use class="glyph cyan" href="#user" xlink:href="#user" x="33" y="68" width="16" height="16"/>
     <text class="title" x="68" y="74">People</text><text class="sub" x="68" y="91">in a browser</text>
 
-    <rect class="card" x="12.5" y="132.5" width="224" height="80" rx="12"/>
-    <rect class="tile cyan" x="26" y="157" width="30" height="30" rx="8"/><use class="glyph cyan" href="#code" xlink:href="#code" x="33" y="164" width="16" height="16"/>
+    <rect class="card" x="12.5" y="132.5" width="224" height="80"/>
+    <rect class="tile cyan" x="26" y="157" width="30" height="30"/><use class="glyph cyan" href="#code" xlink:href="#code" x="33" y="164" width="16" height="16"/>
     <text class="title" x="68" y="160">SDKs in your agents</text><text class="sub" x="68" y="177">Python · TypeScript</text><text class="sub" x="68" y="192">Go · Rust</text>
 
-    <rect class="card" x="12.5" y="236.5" width="224" height="64" rx="12"/>
-    <rect class="tile cyan" x="26" y="253" width="30" height="30" rx="8"/><use class="glyph cyan" href="#terminal" xlink:href="#terminal" x="33" y="260" width="16" height="16"/>
+    <rect class="card" x="12.5" y="236.5" width="224" height="64"/>
+    <rect class="tile cyan" x="26" y="253" width="30" height="30"/><use class="glyph cyan" href="#terminal" xlink:href="#terminal" x="33" y="260" width="16" height="16"/>
     <text class="title" x="68" y="266">The CLI and scripts</text><text class="sub" x="68" y="283">a sign-in or an API key</text>
 
-    <rect class="card" x="12.5" y="340.5" width="224" height="64" rx="12"/>
-    <rect class="tile ember" x="26" y="357" width="30" height="30" rx="8"/><use class="glyph ember" href="#bell" xlink:href="#bell" x="33" y="364" width="16" height="16"/>
+    <rect class="card" x="12.5" y="340.5" width="224" height="64"/>
+    <rect class="tile ember" x="26" y="357" width="30" height="30"/><use class="glyph ember" href="#bell" xlink:href="#bell" x="33" y="364" width="16" height="16"/>
     <text class="title" x="68" y="370">Slack, webhooks</text><text class="sub" x="68" y="387">your channel or endpoint</text>
 
-    <rect class="card" x="360.5" y="44.5" width="240" height="64" rx="12"/>
-    <rect class="tile ink" x="374" y="61" width="30" height="30" rx="8"/><use class="glyph ink" href="#window" xlink:href="#window" x="381" y="68" width="16" height="16"/>
+    <rect class="card" x="360.5" y="44.5" width="240" height="64"/>
+    <rect class="tile ink" x="374" y="61" width="30" height="30"/><use class="glyph ink" href="#window" xlink:href="#window" x="381" y="68" width="16" height="16"/>
     <text class="title" x="416" y="74">Console</text><text class="sub" x="416" y="91">Next.js, a thin proxy</text>
 
-    <rect class="hero" x="360.75" y="132.75" width="239.5" height="167.5" rx="14"/>
+    <rect class="hero" x="360.75" y="132.75" width="239.5" height="167.5"/>
     <g transform="translate(376 150) scale(.0432432) translate(-40 -125)">
       <rect class="mark-ink" x="145" y="125" width="130" height="740" rx="65"/>
       <rect class="mark-ink" x="40" y="335" width="350" height="120" rx="60"/>
@@ -94,21 +94,21 @@
       <rect class="mark-ember" x="865" y="455" width="130" height="410" rx="65"/>
     </g>
     <text class="name" x="428" y="165">telmoni</text><text class="sub" x="428" y="183">one Rust binary</text>
-    <rect class="chip" x="376.5" y="214.5" width="100" height="26" rx="13"/><text class="chip-text" x="426.5" y="231.5" text-anchor="middle">auth</text>
-    <rect class="chip" x="484.5" y="214.5" width="100" height="26" rx="13"/><text class="chip-text" x="534.5" y="231.5" text-anchor="middle">telemetry</text>
-    <rect class="chip" x="376.5" y="248.5" width="100" height="26" rx="13"/><text class="chip-text" x="426.5" y="265.5" text-anchor="middle">notifications</text>
-    <rect class="chip" x="484.5" y="248.5" width="100" height="26" rx="13"/><text class="chip-text" x="534.5" y="265.5" text-anchor="middle">console agent</text>
+    <rect class="chip" x="376.5" y="214.5" width="100" height="26"/><text class="chip-text" x="426.5" y="231.5" text-anchor="middle">auth</text>
+    <rect class="chip" x="484.5" y="214.5" width="100" height="26"/><text class="chip-text" x="534.5" y="231.5" text-anchor="middle">telemetry</text>
+    <rect class="chip" x="376.5" y="248.5" width="100" height="26"/><text class="chip-text" x="426.5" y="265.5" text-anchor="middle">notifications</text>
+    <rect class="chip" x="484.5" y="248.5" width="100" height="26"/><text class="chip-text" x="534.5" y="265.5" text-anchor="middle">console agent</text>
 
-    <rect class="card" x="652.5" y="44.5" width="216" height="64" rx="12"/>
-    <rect class="tile red" x="666" y="61" width="30" height="30" rx="8"/><use class="glyph red" href="#store" xlink:href="#store" x="673" y="68" width="16" height="16"/>
+    <rect class="card" x="652.5" y="44.5" width="216" height="64"/>
+    <rect class="tile red" x="666" y="61" width="30" height="30"/><use class="glyph red" href="#store" xlink:href="#store" x="673" y="68" width="16" height="16"/>
     <text class="title" x="708" y="74">Redis</text><text class="sub" x="708" y="91">limits and live events</text>
 
-    <rect class="card" x="652.5" y="140.5" width="216" height="64" rx="12"/>
-    <rect class="tile blue" x="666" y="157" width="30" height="30" rx="8"/><use class="glyph blue" href="#store" xlink:href="#store" x="673" y="164" width="16" height="16"/>
+    <rect class="card" x="652.5" y="140.5" width="216" height="64"/>
+    <rect class="tile blue" x="666" y="157" width="30" height="30"/><use class="glyph blue" href="#store" xlink:href="#store" x="673" y="164" width="16" height="16"/>
     <text class="title" x="708" y="170">PostgreSQL</text><text class="sub" x="708" y="187">a schema per module</text>
 
-    <rect class="card" x="652.5" y="236.5" width="216" height="64" rx="12"/>
-    <rect class="tile yellow" x="666" y="253" width="30" height="30" rx="8"/><use class="glyph yellow" href="#store" xlink:href="#store" x="673" y="260" width="16" height="16"/>
+    <rect class="card" x="652.5" y="236.5" width="216" height="64"/>
+    <rect class="tile yellow" x="666" y="253" width="30" height="30"/><use class="glyph yellow" href="#store" xlink:href="#store" x="673" y="260" width="16" height="16"/>
     <text class="title" x="708" y="266">ClickHouse</text><text class="sub" x="708" y="283">spans and hourly totals</text>
   </g>
 </svg>
