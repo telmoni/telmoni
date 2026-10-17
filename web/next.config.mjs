@@ -34,6 +34,9 @@ const nextConfig = {
   devIndicators: { position: "bottom-right" },
   ...(devTunnelHost ? { allowedDevOrigins: [devTunnelHost] } : {}),
   experimental: {
+    // A dev server that takes up its stored build again, on a new run or a
+    // config change, can set every open tab reloading in a loop.
+    turbopackFileSystemCacheForDev: false,
     // lucide-react is on Next's own list of packages it imports this way.
     optimizePackageImports: ["radix-ui"],
     ...(devTunnelHost ? { serverActions: { allowedOrigins: [devTunnelHost] } } : {}),
