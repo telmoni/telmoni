@@ -340,8 +340,8 @@ pub async fn held(
     .await
 }
 
-/// The organizations this person owns, in id order — the order their locks
-/// are taken in.
+/// The organizations this person owns, in id order by byte — the order their
+/// locks are taken in, which the database's collation would not give.
 pub async fn owned_by(
     tx: &mut Scoped<'_, Person>,
     user_id: &UserId,
@@ -349,7 +349,7 @@ pub async fn owned_by(
     sqlx::query_scalar(
         "SELECT organization_id FROM auth.organization_members
           WHERE user_id = $1 AND role = 'owner'
-          ORDER BY organization_id",
+          ORDER BY organization_id COLLATE \"C\"",
     )
     .bind(user_id)
     .fetch_all(tx.conn())
@@ -430,7 +430,7 @@ pub async fn label_parts<B: RosterRead>(
 }
 
 /// Every organization this person holds a row in, with the role — the
-/// erasure's read.
+/// erasure's read, in id order by byte, the order its locks are taken in.
 pub async fn memberships_of_person(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     user_id: &UserId,
@@ -438,7 +438,7 @@ pub async fn memberships_of_person(
     sqlx::query_as(
         "SELECT organization_id, role FROM auth.organization_members
           WHERE user_id = $1
-          ORDER BY organization_id",
+          ORDER BY organization_id COLLATE \"C\"",
     )
     .bind(user_id)
     .fetch_all(tx.conn())

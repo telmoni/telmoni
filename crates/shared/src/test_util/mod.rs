@@ -73,6 +73,43 @@ pub async fn move_lock_held(pool: &sqlx::PgPool, project: &crate::types::Project
     !taken
 }
 
+/// A session of `pool`'s holding `organization`'s audit chain lock until it is
+/// rolled back, as a writer mid-change holds it.
+pub async fn holding_chain(
+    pool: &sqlx::PgPool,
+    organization: &crate::types::OrganizationId,
+) -> sqlx::Transaction<'static, sqlx::Postgres> {
+    let mut held = pool.begin().await.expect("a holding transaction");
+    crate::audit::lock_chain(&mut held, organization)
+        .await
+        .expect("take the chain lock");
+    held
+}
+
+/// Waits until at least `n` sessions of `pool`'s database are queued on an
+/// advisory lock, failing after ten seconds.
+pub async fn until_queued_on_advisory_locks(pool: &sqlx::PgPool, n: i64) {
+    let mut queued = 0;
+    for _ in 0..400 {
+        queued = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_locks
+              WHERE locktype = 'advisory' AND NOT granted
+                AND database = (SELECT oid FROM pg_database WHERE datname = current_database())",
+        )
+        .fetch_one(pool)
+        .await
+        .expect("count the sessions queued on advisory locks");
+        if queued >= n {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert!(
+        queued >= n,
+        "{n} sessions never queued on an advisory lock within ten seconds"
+    );
+}
+
 /// A pool whose connections can never be established: port 1 is reserved and
 /// refuses. `connect_lazy` succeeds anyway, the production behaviour that once
 /// let `/health` report Ready without ever reaching Postgres.

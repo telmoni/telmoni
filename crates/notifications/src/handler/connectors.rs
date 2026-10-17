@@ -281,6 +281,7 @@ pub async fn callback(
     if provider.installed_per_workspace() {
         db::lock_workspace(&mut tx, provider, &installed.workspace_id).await?;
     }
+    super::lock_audit_chain(&mut tx, &identity.organization_id).await?;
     let now_existing = db::existing_connection_id(
         &mut tx,
         &identity.project_id,
@@ -451,6 +452,7 @@ pub async fn create_webhook(
         .await?
         .bind_organization(&identity.organization_id)
         .await?;
+    super::lock_audit_chain(&mut tx, &identity.organization_id).await?;
     if db::existing_connection_id(
         &mut tx,
         &identity.project_id,
@@ -600,6 +602,7 @@ pub async fn rotate_webhook_secret(
         .await?
         .bind_organization(&identity.organization_id)
         .await?;
+    super::lock_audit_chain(&mut tx, &identity.organization_id).await?;
     let Some(summary) = db::reseal_webhook_secret(
         &mut tx,
         &identity.project_id,
@@ -684,6 +687,7 @@ pub async fn delete_connector(
     let request_id = correlation_id(&headers);
 
     let mut tx = project_scope(&state.db, &identity.project_id).await?;
+    super::lock_audit_chain(&mut tx, &identity.organization_id).await?;
     let sealed = db::delete_connection(&mut tx, &identity.project_id, id)
         .await?
         .ok_or_else(|| AuthError::NotFound(format!("connection not found: {id}")))?;
@@ -822,6 +826,7 @@ pub async fn update_webhook_events(
         .await?
         .bind_organization(&identity.organization_id)
         .await?;
+    super::lock_audit_chain(&mut tx, &identity.organization_id).await?;
     let Some(summary) =
         db::set_event_kinds(&mut tx, &identity.project_id, id, event_kinds.as_deref()).await?
     else {
@@ -1030,11 +1035,12 @@ async fn record_redelivery_outcome(
     let attempt = sent.attempt(delivery.id, db::AttemptTrigger::Manual);
     let error = sent.result.as_ref().err().map(|e| e.message().to_owned());
     let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
+    super::lock_audit_chain(&mut tx, &identity.organization_id).await?;
     db::record_attempts(&mut tx, std::slice::from_ref(&attempt)).await?;
     if !db::finish_redelivery(&mut tx, &identity.project_id, claim, error.as_deref()).await? {
         tracing::warn!(
             delivery_id = %delivery.id,
-            "a resend outlived its lease; the attempt is logged and the row left to its holder"
+            "a resend outlived its lease, or its delivery is gone; the row is left to its holder"
         );
     }
     if error.is_none() {

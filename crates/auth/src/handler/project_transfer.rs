@@ -46,7 +46,7 @@ use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
 
-use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
+use telmoni_shared::audit::{Actor, AuditEvent, emit_audit, lock_chain};
 use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::{
     Maintenance, ProjectAndOrganization, Scoped, maintenance_scope,
@@ -486,8 +486,7 @@ async fn emit_project_transfer_audits(
     conn: &mut sqlx::PgConnection,
     audits: TransferAudits<'_>,
 ) -> Result<(), TelmoniError> {
-    // Both chains, the source's first. Every other writer of two chains takes
-    // the same membership locks this holds, so the chain locks cannot cycle.
+    // Both chains, the source's first, their locks taken already by id.
     emit_audit(
         conn,
         AuditEvent {
@@ -666,25 +665,64 @@ fn resolve_destination_organization(
     Ok(destination)
 }
 
+/// The two organizations by id, by byte as `str` compares: the order every
+/// lane that locks several takes them in, so no two can cross into a deadlock.
+fn by_id<'a>(
+    source: &'a OrganizationId,
+    destination: &'a OrganizationId,
+) -> [&'a OrganizationId; 2] {
+    if source.as_str() <= destination.as_str() {
+        [source, destination]
+    } else {
+        [destination, source]
+    }
+}
+
 async fn lock_transfer_organizations(
     conn: &mut sqlx::PgConnection,
     source: &OrganizationId,
     destination: &OrganizationId,
 ) -> Result<(), TelmoniError> {
-    // Both organizations' locks, by id — the order every lane that takes
-    // several uses, so two accepts crossing each other cannot deadlock.
-    let (first, second) = if source.as_str() <= destination.as_str() {
-        (source, destination)
-    } else {
-        (destination, source)
-    };
-    locks::lock_organization(conn, first).await?;
-    locks::lock_organization(conn, second).await?;
+    for organization in by_id(source, destination) {
+        locks::lock_organization(conn, organization).await?;
+    }
+    Ok(())
+}
+
+/// Both organizations' audit chain locks, by id, before either audit row:
+/// Slack's revocation takes several without the organizations' locks.
+async fn lock_transfer_chains(
+    conn: &mut sqlx::PgConnection,
+    source: &OrganizationId,
+    destination: &OrganizationId,
+) -> Result<(), TelmoniError> {
+    for organization in by_id(source, destination) {
+        let Err(e) = lock_chain(conn, organization).await else {
+            continue;
+        };
+        if !timed_out(&e) {
+            return Err(e.into());
+        }
+        tracing::warn!(
+            organization_id = %organization,
+            "a move of a project gave up waiting for an organization's chain lock"
+        );
+        return Err(AuthError::Conflict(
+            "an organization in this move is busy — try again in a moment".into(),
+        )
+        .into());
+    }
     Ok(())
 }
 
 /// Postgres's `lock_not_available`: a `lock_timeout` ran out.
 const LOCK_NOT_AVAILABLE: &str = "55P03";
+
+fn timed_out(e: &sqlx::Error) -> bool {
+    e.as_database_error()
+        .and_then(|db| db.code())
+        .is_some_and(|code| code == LOCK_NOT_AVAILABLE)
+}
 
 /// The project's move lock, alone, for a move of its rows. A wait the role's
 /// `lock_timeout` ends — a ping holding the project across a slow answer, or
@@ -698,11 +736,7 @@ async fn lock_project_for_move(
     let Err(e) = project_move::lock_for_move(conn, project_id).await else {
         return Ok(());
     };
-    let timed_out = e
-        .as_database_error()
-        .and_then(|db| db.code())
-        .is_some_and(|code| code == LOCK_NOT_AVAILABLE);
-    if !timed_out {
+    if !timed_out(&e) {
         return Err(e.into());
     }
     tracing::warn!(
@@ -889,9 +923,10 @@ pub async fn accept(
     }
 
     // The project's move lock once every check has passed, so an accept a
-    // check refuses never waits on a ping, and before the audit rows take a
-    // chain lock, which a ping holding the project may be waiting for.
+    // check refuses never waits on a ping, and before the chain locks, which a
+    // ping holding the project may be waiting for.
     lock_project_for_move(&mut tx, &project_id).await?;
+    lock_transfer_chains(&mut tx, &source, &destination).await?;
     emit_project_transfer_audits(
         &mut tx,
         TransferAudits {
@@ -1083,6 +1118,7 @@ pub async fn move_project(
     // Where the accept takes it, for the accept's reasons: no refused move
     // waits on a ping, and no chain lock is held while one does.
     lock_project_for_move(&mut tx, &project_id).await?;
+    lock_transfer_chains(&mut tx, &source, &destination).await?;
     emit_project_move_audits(
         &mut tx,
         MoveAudits {
@@ -1135,8 +1171,7 @@ async fn emit_project_move_audits(
     conn: &mut sqlx::PgConnection,
     audits: MoveAudits<'_>,
 ) -> Result<(), TelmoniError> {
-    // Both chains, the source's first, as a transfer's: every other writer of
-    // two chains takes the same locks this holds.
+    // Both chains, the source's first, their locks taken already by id.
     emit_audit(
         conn,
         AuditEvent {

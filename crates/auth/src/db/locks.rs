@@ -23,10 +23,8 @@
 //! self-service lanes decide under it whether the person is in any
 //! organization at all.
 //!
-//! **Order: the person before any organization, organizations by id.** Account
-//! deletion takes several organizations, and it, the invite accepts and
-//! ownership accept take the person's first; a fixed order is what keeps any
-//! two of them from deadlocking.
+//! **Order: the person before any organization, organizations by id, compared
+//! by byte.** A fixed order keeps the lanes that take several from deadlocking.
 //!
 //! Released at commit or rollback. The keys are namespaced so neither can ever
 //! collide with the audit chain's per-organization lock (`emit_audit`), which

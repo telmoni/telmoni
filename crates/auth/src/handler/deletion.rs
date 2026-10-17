@@ -579,6 +579,8 @@ pub async fn erase_person(
     // written below, as a build finishing one holds the export's row before
     // the chain's lock.
     let exports = audit_exports::delete_of_person(&mut mtx, user_id).await?;
+    // The chains by id, as every writer of several takes them, a stray seat's too.
+    removed.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
     for (organization, row) in &removed {
         let (in_project, role) = match row {
             Removed::Seat { project, role } => (Some(project), json!(role)),

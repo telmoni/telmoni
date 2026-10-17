@@ -32,7 +32,8 @@ use telmoni_auth::{AppState, Config, Siblings, router};
 use telmoni_shared::db::project_move;
 use telmoni_shared::mail::{Mail, MailError, MailSender, NoopSender};
 use telmoni_shared::test_util::{
-    ServiceRole, apply_audit_migrations, chain_lock_held, seed_identity, service_pool,
+    ServiceRole, apply_audit_migrations, chain_lock_held, holding_chain, seed_identity,
+    service_pool, until_queued_on_advisory_locks,
 };
 use telmoni_shared::{OrganizationId, ProjectId, UserId};
 
@@ -232,11 +233,23 @@ async fn rename(pool: &PgPool, organization: &str, project: &str, name: &str) {
 /// Seat `user` on `project` at `role` the way the product does: the owner
 /// invites, they spend the link.
 async fn seat(pool: &PgPool, organization: &str, project: &str, user: &str, role: &str) {
+    seat_by(pool, OWNER, organization, project, user, role).await;
+}
+
+/// `user` invited by `inviter`, an owner of `organization`, and seated.
+async fn seat_by(
+    pool: &PgPool,
+    inviter: &str,
+    organization: &str,
+    project: &str,
+    user: &str,
+    role: &str,
+) {
     let (status, body) = call(
         pool,
         "POST",
         &format!("/internal/projects/{project}/invites"),
-        OWNER,
+        inviter,
         Some(organization),
         Some(json!({ "email": format!("{user}@example.test"), "role": role })),
     )
@@ -419,23 +432,7 @@ async fn offers_on_project(pool: &PgPool, project: &str) -> i64 {
 /// lock — proof it got past the person gate and into the lane — before the
 /// test moves the world under it.
 async fn until_a_request_waits_on_a_lock(pool: &PgPool) {
-    let mut queued = false;
-    for _ in 0..200 {
-        let waiting: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM pg_locks
-              WHERE locktype = 'advisory' AND NOT granted
-                AND database = (SELECT oid FROM pg_database WHERE datname = current_database())",
-        )
-        .fetch_one(pool)
-        .await
-        .unwrap();
-        if waiting > 0 {
-            queued = true;
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-    }
-    assert!(queued, "no request queued on a lock within five seconds");
+    until_queued_on_advisory_locks(pool, 1).await;
 }
 
 /// Mark an organization pending deletion straight in the table, as the
@@ -2137,4 +2134,181 @@ async fn only_the_owner_of_both_moves_a_project_and_only_between_live_ones(pool:
         "it moved out of an organization being deleted: {status} {body}"
     );
     assert_eq!(organization_of_project(&pool, &h.project).await, h.source);
+}
+
+fn oid(organization: &str) -> OrganizationId {
+    OrganizationId::try_new(organization).unwrap()
+}
+
+/// A writer of both chains that takes them by id under no lock of auth's, as
+/// Slack's revocation of a workspace two organizations share does.
+fn writing_both_chains_by_id(
+    pool: &PgPool,
+    mut organizations: [String; 2],
+) -> tokio::task::JoinHandle<()> {
+    organizations.sort();
+    let pool = pool.clone();
+    tokio::spawn(async move {
+        let mut tx = pool.begin().await.unwrap();
+        for organization in &organizations {
+            telmoni_shared::audit::lock_chain(&mut tx, &oid(organization))
+                .await
+                .unwrap();
+        }
+        tx.commit().await.unwrap();
+    })
+}
+
+/// An accept takes both chain locks by id, so a writer taking them by id never deadlocks with it.
+#[sqlx::test]
+async fn an_accept_takes_both_chains_by_id(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let owners = sign_in(&pool, OWNER).await;
+    let admins = sign_in(&pool, ADMIN).await;
+    // From the organization that sorts last into the one that sorts first.
+    let (giver, taker, source, destination) = if owners > admins {
+        (OWNER, ADMIN, owners, admins)
+    } else {
+        (ADMIN, OWNER, admins, owners)
+    };
+    let project = create_project(&pool, giver, &source, PROJECT_NAME).await;
+    seat_by(&pool, giver, &source, &project, taker, "admin").await;
+    let h = Handover {
+        source: source.clone(),
+        project,
+        admins: destination.clone(),
+        members: String::new(),
+    };
+    assert_eq!(
+        offer(&pool, &h, giver, &source, taker).await.0,
+        StatusCode::OK
+    );
+
+    let held = holding_chain(&pool, &oid(&destination)).await;
+    let writer = writing_both_chains_by_id(&pool, [source.clone(), destination.clone()]);
+    until_queued_on_advisory_locks(&pool, 1).await;
+    let accepting = {
+        let pool = pool.clone();
+        let (project, destination) = (h.project.clone(), destination.clone());
+        tokio::spawn(async move {
+            call(
+                &pool,
+                "POST",
+                &format!("/internal/projects/{project}/transfer/accept"),
+                taker,
+                Some(&destination),
+                None,
+            )
+            .await
+        })
+    };
+    until_queued_on_advisory_locks(&pool, 2).await;
+    assert!(
+        !chain_lock_held(&pool, &oid(&source)).await,
+        "the accept holds the source's chain while it waits for the destination's"
+    );
+    held.rollback().await.unwrap();
+    writer.await.unwrap();
+    let (status, body) = accepting.await.unwrap();
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        organization_of_project(&pool, &h.project).await,
+        destination
+    );
+}
+
+/// An owner's move takes both chain locks by id, as an accept does.
+#[sqlx::test]
+async fn an_owners_move_takes_both_chains_by_id(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let first = sign_in(&pool, OWNER).await;
+    let second = found(&pool, OWNER, "Second").await;
+    // From the organization that sorts last into the one that sorts first.
+    let (source, destination) = if first > second {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    let h = Handover {
+        project: create_project(&pool, OWNER, &source, PROJECT_NAME).await,
+        source: source.clone(),
+        admins: destination.clone(),
+        members: String::new(),
+    };
+
+    let held = holding_chain(&pool, &oid(&destination)).await;
+    let writer = writing_both_chains_by_id(&pool, [source.clone(), destination.clone()]);
+    until_queued_on_advisory_locks(&pool, 1).await;
+    let moving = {
+        let pool = pool.clone();
+        let (project, source, destination) =
+            (h.project.clone(), source.clone(), destination.clone());
+        tokio::spawn(async move {
+            call(
+                &pool,
+                "POST",
+                &format!("/internal/projects/{project}/move"),
+                OWNER,
+                Some(&source),
+                Some(json!({ "organizationId": destination })),
+            )
+            .await
+        })
+    };
+    until_queued_on_advisory_locks(&pool, 2).await;
+    assert!(
+        !chain_lock_held(&pool, &oid(&source)).await,
+        "the move holds the source's chain while it waits for the destination's"
+    );
+    held.rollback().await.unwrap();
+    writer.await.unwrap();
+    let (status, body) = moving.await.unwrap();
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        organization_of_project(&pool, &h.project).await,
+        destination
+    );
+}
+
+/// A transfer kept from a chain past the role's `lock_timeout` is a 409 that moves nothing.
+#[sqlx::test]
+async fn a_transfer_kept_waiting_for_a_chain_is_a_conflict(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    assert_eq!(
+        offer(&pool, &h, OWNER, &h.source, ADMIN).await.0,
+        StatusCode::OK
+    );
+    // A tier sets `lock_timeout` on the role, which the suite's `SET ROLE`
+    // does not take up: the database's own reaches every new connection.
+    let database: String = sqlx::query_scalar("SELECT current_database()")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    sqlx::query(&format!(
+        "ALTER DATABASE \"{database}\" SET lock_timeout = '1s'"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let held = holding_chain(&pool, &oid(&h.admins)).await;
+
+    let (status, body) = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        accept(&pool, &h, ADMIN, &h.admins, None),
+    )
+    .await
+    .expect("the accept waited past its lock_timeout");
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        body["detail"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("busy")),
+        "{body}"
+    );
+    assert_eq!(organization_of_project(&pool, &h.project).await, h.source);
+    held.rollback().await.unwrap();
+    assert_eq!(
+        accept(&pool, &h, ADMIN, &h.admins, None).await.0,
+        StatusCode::OK
+    );
 }

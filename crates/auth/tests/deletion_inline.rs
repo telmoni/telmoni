@@ -35,7 +35,10 @@ use telmoni_auth::test_provider::{
 };
 use telmoni_auth::{AppState, AuthProvider, Authenticated, Config, Siblings, router};
 use telmoni_shared::seam::Auth as _;
-use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, seed_identity, service_pool};
+use telmoni_shared::test_util::{
+    ServiceRole, apply_audit_migrations, chain_lock_held, holding_chain, seed_identity,
+    service_pool, until_queued_on_advisory_locks,
+};
 use telmoni_shared::{AuthError, OrganizationId, OrganizationStatus, TelmoniError, UserId};
 
 const SERVICE_SECRET: &str = "test-service-secret";
@@ -2965,4 +2968,121 @@ async fn a_failed_redaction_leaves_the_person_pending_for_the_sweep(pool: PgPool
         ],
         "the first pass, the second that failed, and the retry's two"
     );
+}
+
+/// Organization ids that sort one way by byte and another by the database's
+/// collation: by byte, `org_Beta`, `org_Delta`, `org_alpha`, `org_charlie`.
+const MIXED_CASE: [&str; 4] = ["org_alpha", "org_Beta", "org_charlie", "org_Delta"];
+
+/// A session holding `organization`'s membership lock, auth's key for it,
+/// until it is rolled back.
+async fn holding_membership(
+    pool: &PgPool,
+    organization: &str,
+) -> sqlx::Transaction<'static, sqlx::Postgres> {
+    let mut held = pool.begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('membership:' || $1, 0))")
+        .bind(organization)
+        .execute(&mut *held)
+        .await
+        .unwrap();
+    held
+}
+
+/// Whether another session holds `organization`'s membership lock: a try that
+/// fails, and one that succeeds lets it go at once.
+async fn membership_lock_held(pool: &PgPool, organization: &str) -> bool {
+    let mut probe = pool.begin().await.unwrap();
+    let taken: bool = sqlx::query_scalar(
+        "SELECT pg_try_advisory_xact_lock(hashtextextended('membership:' || $1, 0))",
+    )
+    .bind(organization)
+    .fetch_one(&mut *probe)
+    .await
+    .unwrap();
+    probe.rollback().await.unwrap();
+    !taken
+}
+
+fn oid(organization: &str) -> OrganizationId {
+    OrganizationId::try_new(organization).unwrap()
+}
+
+/// An account's deletion takes its organizations' chain locks by id, compared by byte.
+#[sqlx::test]
+async fn an_account_deletion_takes_its_chains_by_byte(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    seed_person(&pool, USER).await;
+    for organization in MIXED_CASE {
+        seed_organization(&pool, organization, USER, "active").await;
+    }
+    plant_code(&pool, USER, "account_deletion", None).await;
+    let (app, _) = app(pool.clone(), None, 8_000);
+
+    let held = holding_chain(&pool, &oid("org_Beta")).await;
+    let request = delete_account(&pool, USER, CODE).await;
+    let deleting = tokio::spawn(app.oneshot(request));
+    until_queued_on_advisory_locks(&pool, 1).await;
+    for organization in ["org_alpha", "org_charlie", "org_Delta"] {
+        assert!(
+            !chain_lock_held(&pool, &oid(organization)).await,
+            "{organization}'s chain was taken before org_Beta's"
+        );
+    }
+    held.rollback().await.unwrap();
+    assert_eq!(
+        deleting.await.unwrap().unwrap().status(),
+        StatusCode::ACCEPTED
+    );
+}
+
+/// An erasure takes its organizations' locks by byte, as every writer of several does.
+#[sqlx::test]
+async fn an_erasure_takes_its_organizations_by_byte(pool: PgPool) {
+    seed_account_deletion_owning_nothing(&pool).await;
+    seed_person(&pool, COLLEAGUE).await;
+    for organization in ["org_alpha", "org_Beta"] {
+        seed_organization(&pool, organization, COLLEAGUE, "active").await;
+        seat(&pool, organization, USER, "member").await;
+    }
+    let (app, _) = app(pool.clone(), None, 8_000);
+
+    let held = holding_membership(&pool, "org_Beta").await;
+    let request = delete_account(&pool, USER, CODE).await;
+    let deleting = tokio::spawn(app.oneshot(request));
+    until_queued_on_advisory_locks(&pool, 1).await;
+    assert!(
+        !membership_lock_held(&pool, "org_alpha").await,
+        "org_alpha was locked before org_Beta"
+    );
+    held.rollback().await.unwrap();
+    assert!(deleting.await.unwrap().unwrap().status().is_success());
+}
+
+/// An erasure writes its chains by byte, a stray seat's organization among them.
+#[sqlx::test]
+async fn an_erasure_writes_its_chains_by_byte(pool: PgPool) {
+    seed_account_deletion_owning_nothing(&pool).await;
+    seed_person(&pool, COLLEAGUE).await;
+    for organization in ["org_alpha", "org_Beta", "org_Aardvark"] {
+        seed_organization(&pool, organization, COLLEAGUE, "active").await;
+    }
+    seat(&pool, "org_alpha", USER, "member").await;
+    seat(&pool, "org_Beta", USER, "member").await;
+    // A seat outside any organization they belong to.
+    seat_on_project(&pool, &project_of("org_Aardvark"), USER, "member").await;
+    let (app, _) = app(pool.clone(), None, 8_000);
+
+    let held = holding_chain(&pool, &oid("org_Aardvark")).await;
+    let request = delete_account(&pool, USER, CODE).await;
+    let deleting = tokio::spawn(app.oneshot(request));
+    until_queued_on_advisory_locks(&pool, 1).await;
+    for organization in ["org_Beta", "org_alpha"] {
+        assert!(
+            !chain_lock_held(&pool, &oid(organization)).await,
+            "{organization}'s chain was written before org_Aardvark's"
+        );
+    }
+    held.rollback().await.unwrap();
+    assert!(deleting.await.unwrap().unwrap().status().is_success());
 }

@@ -32,7 +32,10 @@ use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::envelope::{KEK_VERSION, Kek, KmsKek, LocalKek, Vault};
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::net_guard::Egress;
-use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, captured_logs, service_pool};
+use telmoni_shared::test_util::{
+    ServiceRole, apply_audit_migrations, captured_logs, chain_lock_held, holding_chain,
+    service_pool,
+};
 use telmoni_shared::{
     NotificationKind, OrganizationId, OrganizationRole, ProjectId, Redacted, Role, TelmoniError,
     UserId,
@@ -2817,7 +2820,7 @@ async fn an_install_landing_as_a_purge_decides_keeps_the_app_installed(pool: PgP
         .unwrap();
     let raw_state = json_body(resp).await["state"].as_str().unwrap().to_owned();
 
-    // The audit chain held, so the install waits with its row written.
+    // The audit chain held, so the install waits holding its workspace's lock.
     let mut chain = pool.begin().await.unwrap();
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
         .bind(ORGANIZATION)
@@ -3353,6 +3356,456 @@ async fn a_batch_a_deadlock_ends_is_written_down_again(pool: PgPool) {
     for id in [first, second] {
         assert_eq!(delivery_status(&pool, id).await.0, "delivered", "{id}");
     }
+}
+
+/// A transfer of `organization`'s project as this module meets it: the
+/// organization's audit chain lock, held while the transfer awaits the purge.
+async fn transferring(
+    pool: &PgPool,
+    organization: &str,
+) -> sqlx::Transaction<'static, sqlx::Postgres> {
+    holding_chain(pool, &oid(organization)).await
+}
+
+/// Sends `lane` beside a transfer of the organization's project, awaits the
+/// purge under the transfer's lock, ends the transfer, and answers the lane.
+async fn beside_a_transfer(
+    st: &Arc<AppState>,
+    pool: &PgPool,
+    lane: Request<Body>,
+) -> axum::response::Response {
+    let transfer = transferring(pool, ORGANIZATION).await;
+    let lane = tokio::spawn(app(st).oneshot(lane));
+    eventually("the lane waits for the organization's chain", || async {
+        lock_waiters(pool).await == 1
+    })
+    .await;
+    let purged = handler::purge_project(st, &pid(ORGANIZATION)).await;
+    assert!(
+        purged.is_ok(),
+        "the transfer's purge waited on the lane: {purged:?}"
+    );
+    let left: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM notifications.connections WHERE project_id = $1")
+            .bind(pid(ORGANIZATION))
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(left, 0, "the purge left the project's connections");
+    transfer.rollback().await.unwrap();
+    lane.await.unwrap().unwrap()
+}
+
+/// A disconnect beside a transfer waits for the chain lock before its row, so the purge goes first.
+#[sqlx::test]
+async fn a_disconnect_beside_a_transfer_waits_before_its_row(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let hook = seed_webhook(
+        &pool,
+        ORGANIZATION,
+        &format!("{}/hooks/t", mocks.uri()),
+        "whsec_x",
+    )
+    .await;
+    let st = state(pool.clone(), &mocks, None);
+
+    let lane = owner("DELETE", &format!("/internal/connectors/{hook}"), None);
+    let resp = beside_a_transfer(&st, &pool, lane).await;
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+/// A secret's rotation beside a transfer waits for the chain lock before its row.
+#[sqlx::test]
+async fn a_rotation_beside_a_transfer_waits_before_its_row(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let hook = seed_webhook(
+        &pool,
+        ORGANIZATION,
+        &format!("{}/hooks/t", mocks.uri()),
+        "whsec_x",
+    )
+    .await;
+    let st = state(pool.clone(), &mocks, None);
+
+    let lane = owner(
+        "POST",
+        &format!("/internal/connectors/{hook}/rotate"),
+        Some(r#"{"keep_previous_for_hours":0}"#),
+    );
+    let resp = beside_a_transfer(&st, &pool, lane).await;
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    let detail = json_body(resp).await["detail"].to_string();
+    assert!(detail.contains("rotated by another request"), "{detail}");
+}
+
+/// A webhook's change of events beside a transfer waits for the chain lock before its row.
+#[sqlx::test]
+async fn an_events_change_beside_a_transfer_waits_before_its_row(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let hook = seed_webhook(
+        &pool,
+        ORGANIZATION,
+        &format!("{}/hooks/t", mocks.uri()),
+        "whsec_x",
+    )
+    .await;
+    let st = state(pool.clone(), &mocks, None);
+
+    let lane = owner(
+        "PUT",
+        &format!("/internal/connectors/{hook}/events"),
+        Some(r#"{"event_kinds":["member_added"]}"#),
+    );
+    let resp = beside_a_transfer(&st, &pool, lane).await;
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+/// A reconnecting callback beside a transfer waits for the chain lock before its row.
+#[sqlx::test]
+async fn a_reconnect_beside_a_transfer_waits_before_its_row(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    seed_connection(
+        &pool,
+        ORGANIZATION,
+        Provider::Slack,
+        SLACK_WORKSPACE,
+        "C0ALERTS",
+        &slack_hook_url(&mocks, "oldhook"),
+        Some("xoxb-old"),
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/api/oauth.v2.access"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(slack_access_ok(&slack_hook_url(&mocks, "new"))),
+        )
+        .mount(&mocks)
+        .await;
+    mount_uninstall(&mocks, Duration::ZERO).await;
+    let st = state(pool.clone(), &mocks, None);
+    let resp = app(&st)
+        .oneshot(owner("POST", "/internal/connectors/slack/authorize", None))
+        .await
+        .unwrap();
+    let raw_state = json_body(resp).await["state"].as_str().unwrap().to_owned();
+
+    let lane = owner(
+        "POST",
+        "/internal/connectors/slack/callback",
+        Some(&format!(r#"{{"code":"c0de","state":"{raw_state}"}}"#)),
+    );
+    let resp = beside_a_transfer(&st, &pool, lane).await;
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    let detail = json_body(resp).await["detail"].to_string();
+    assert!(detail.contains("connected by another request"), "{detail}");
+    uninstalls_settled(&pool).await;
+}
+
+/// A resend's outcome beside a transfer waits for the chain before its rows, and answers the send.
+#[sqlx::test]
+async fn a_resends_outcome_beside_a_transfer_waits_before_its_rows(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/hooks/resend"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&mocks)
+        .await;
+    let hook = seed_webhook(
+        &pool,
+        ORGANIZATION,
+        &format!("{}/hooks/resend", mocks.uri()),
+        "whsec_resend",
+    )
+    .await;
+    let st = state(pool.clone(), &mocks, None);
+    let delivery = seed_delivery(&pool, ORGANIZATION, hook).await;
+    assert_eq!(delivery::tick_once(&st).await.unwrap(), 1);
+
+    let lane = owner(
+        "POST",
+        &format!("/internal/connectors/{hook}/deliveries/{delivery}/redeliver"),
+        None,
+    );
+    let resp = beside_a_transfer(&st, &pool, lane).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(json_body(resp).await["delivered"], true);
+    assert_eq!(posts_to(&mocks, "/hooks/resend").await.len(), 2);
+}
+
+/// Slack's revocation beside a transfer takes its chain locks before any row, and revokes the rest.
+#[sqlx::test]
+async fn a_revocation_beside_a_transfer_waits_before_its_rows(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    seed_connection(
+        &pool,
+        ORGANIZATION,
+        Provider::Slack,
+        SLACK_WORKSPACE,
+        "C0MINE",
+        &slack_hook_url(&mocks, "mine"),
+        Some("xoxb-shared"),
+    )
+    .await;
+    let theirs = seed_connection(
+        &pool,
+        OTHER_ORGANIZATION,
+        Provider::Slack,
+        SLACK_WORKSPACE,
+        "C0THEIRS",
+        &slack_hook_url(&mocks, "theirs"),
+        Some("xoxb-shared"),
+    )
+    .await;
+    mount_uninstall(&mocks, Duration::ZERO).await;
+    let st = state(pool.clone(), &mocks, None);
+
+    let lane = slack_event(
+        &uninstalled(SLACK_WORKSPACE),
+        chrono::Utc::now().timestamp(),
+        None,
+    );
+    let resp = beside_a_transfer(&st, &pool, lane).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(json_body(resp).await["revoked"], 1);
+    assert_eq!(connection_status(&pool, theirs).await.0, "revoked");
+    uninstalls_settled(&pool).await;
+}
+
+/// A revocation revokes only the organizations it read and locked, so one connected since is left.
+#[sqlx::test]
+async fn a_revocation_leaves_a_connection_made_since_its_read(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let mine = seed_connection(
+        &pool,
+        ORGANIZATION,
+        Provider::Slack,
+        SLACK_WORKSPACE,
+        "C0MINE",
+        &slack_hook_url(&mocks, "mine"),
+        Some("xoxb-shared"),
+    )
+    .await;
+    let st = state(pool.clone(), &mocks, None);
+
+    let held = transferring(&pool, ORGANIZATION).await;
+    let revocation = tokio::spawn(app(&st).oneshot(slack_event(
+        &uninstalled(SLACK_WORKSPACE),
+        chrono::Utc::now().timestamp(),
+        None,
+    )));
+    eventually("the revocation waits for the chain", || async {
+        lock_waiters(&pool).await == 1
+    })
+    .await;
+    let theirs = seed_connection(
+        &pool,
+        OTHER_ORGANIZATION,
+        Provider::Slack,
+        SLACK_WORKSPACE,
+        "C0THEIRS",
+        &slack_hook_url(&mocks, "theirs"),
+        Some("xoxb-fresh"),
+    )
+    .await;
+    held.rollback().await.unwrap();
+
+    let resp = revocation.await.unwrap().unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(json_body(resp).await["revoked"], 1);
+    assert_eq!(connection_status(&pool, mine).await.0, "revoked");
+    assert_eq!(connection_status(&pool, theirs).await.0, "active");
+}
+
+/// A revocation takes its organizations' chain locks by byte, as auth does, not by the collation.
+#[sqlx::test]
+async fn a_revocation_takes_its_chains_by_byte(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let mut seeded = Vec::new();
+    for (organization, channel) in [
+        (ORGANIZATION, "C0A"),
+        (OTHER_ORGANIZATION, "C0B"),
+        (GONE, "C0C"),
+        (GONE_TOO, "C0D"),
+    ] {
+        let id = seed_connection(
+            &pool,
+            organization,
+            Provider::Slack,
+            SLACK_WORKSPACE,
+            channel,
+            &slack_hook_url(&mocks, channel),
+            Some("xoxb"),
+        )
+        .await;
+        seeded.push(id);
+    }
+    for (id, organization) in
+        seeded
+            .into_iter()
+            .zip(["org_alpha", "org_Beta", "org_charlie", "org_Delta"])
+    {
+        sqlx::query("UPDATE notifications.connections SET organization_id = $2 WHERE id = $1")
+            .bind(id)
+            .bind(organization)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let st = state(pool.clone(), &mocks, None);
+
+    let held = transferring(&pool, "org_Beta").await;
+    let revocation = tokio::spawn(app(&st).oneshot(slack_event(
+        &uninstalled(SLACK_WORKSPACE),
+        chrono::Utc::now().timestamp(),
+        None,
+    )));
+    eventually(
+        "the revocation waits for the first chain by byte",
+        || async { lock_waiters(&pool).await == 1 },
+    )
+    .await;
+    for organization in ["org_alpha", "org_charlie", "org_Delta"] {
+        assert!(
+            !chain_lock_held(&pool, &oid(organization)).await,
+            "{organization}'s chain was taken before org_Beta's"
+        );
+    }
+    held.rollback().await.unwrap();
+
+    let resp = revocation.await.unwrap().unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(json_body(resp).await["revoked"], 4);
+}
+
+/// A disconnect and a connect in one project take the chain lock in turn, and neither deadlocks.
+#[sqlx::test]
+async fn a_disconnect_and_a_connect_in_one_project_go_in_turn(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let hook = seed_webhook(
+        &pool,
+        ORGANIZATION,
+        &format!("{}/hooks/t", mocks.uri()),
+        "whsec_x",
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/hooks/t"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&mocks)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/oauth.v2.access"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(slack_access_ok(&slack_hook_url(&mocks, "new"))),
+        )
+        .mount(&mocks)
+        .await;
+    let st = state(pool.clone(), &mocks, None);
+    let resp = app(&st)
+        .oneshot(owner("POST", "/internal/connectors/slack/authorize", None))
+        .await
+        .unwrap();
+    let raw_state = json_body(resp).await["state"].as_str().unwrap().to_owned();
+
+    let held = transferring(&pool, ORGANIZATION).await;
+    let connect = tokio::spawn(app(&st).oneshot(owner(
+        "POST",
+        "/internal/connectors/slack/callback",
+        Some(&format!(r#"{{"code":"c0de","state":"{raw_state}"}}"#)),
+    )));
+    eventually("the connect waits for the chain", || async {
+        lock_waiters(&pool).await == 1
+    })
+    .await;
+    let disconnect = tokio::spawn(app(&st).oneshot(owner(
+        "DELETE",
+        &format!("/internal/connectors/{hook}"),
+        None,
+    )));
+    eventually("the disconnect waits behind it", || async {
+        lock_waiters(&pool).await == 2
+    })
+    .await;
+    held.rollback().await.unwrap();
+
+    assert_eq!(
+        connect.await.unwrap().unwrap().status(),
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        disconnect.await.unwrap().unwrap().status(),
+        StatusCode::NO_CONTENT
+    );
+}
+
+/// A lane kept from its organization's chain past two seconds is answered 409, its row untouched.
+#[sqlx::test]
+async fn a_lane_kept_from_its_chain_is_answered_conflict(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let hook = seed_webhook(
+        &pool,
+        ORGANIZATION,
+        &format!("{}/hooks/t", mocks.uri()),
+        "whsec_x",
+    )
+    .await;
+    let st = state(pool.clone(), &mocks, None);
+
+    let held = transferring(&pool, ORGANIZATION).await;
+    let resp = tokio::time::timeout(
+        Duration::from_secs(10),
+        app(&st).oneshot(owner(
+            "DELETE",
+            &format!("/internal/connectors/{hook}"),
+            None,
+        )),
+    )
+    .await
+    .expect("the lane waited past its bound")
+    .unwrap();
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    held.rollback().await.unwrap();
+    assert_eq!(connection_status(&pool, hook).await.0, "active");
+}
+
+/// A webhook's connect kept from its chain past two seconds is answered 409, nothing stored.
+#[sqlx::test]
+async fn a_connect_kept_from_its_chain_is_answered_conflict(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let st = state(pool.clone(), &mocks, None);
+
+    let held = transferring(&pool, ORGANIZATION).await;
+    let resp = tokio::time::timeout(
+        Duration::from_secs(10),
+        app(&st).oneshot(owner(
+            "POST",
+            "/internal/connectors/webhook",
+            Some(r#"{"url":"https://hooks.example.invalid/telmoni/events"}"#),
+        )),
+    )
+    .await
+    .expect("the connect waited past its bound")
+    .unwrap();
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    held.rollback().await.unwrap();
+    let stored: i64 = sqlx::query_scalar("SELECT count(*) FROM notifications.connections")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, 0);
 }
 
 /// A webhook connects by URL: checked, secret answered ONCE, row sealed, and

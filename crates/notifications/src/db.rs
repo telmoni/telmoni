@@ -475,6 +475,27 @@ pub async fn lock_workspace<B: Binding>(
     Ok(())
 }
 
+/// The organizations holding a live connection into one vendor workspace, by
+/// id: the chain locks a revocation takes before it touches their rows.
+pub async fn workspace_organizations(
+    tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
+    provider: Provider,
+    external_workspace_id: &str,
+) -> sqlx::Result<Vec<String>> {
+    let mut organizations: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT organization_id FROM notifications.connections
+          WHERE provider = $1 AND external_workspace_id = $2 AND status <> $3",
+    )
+    .bind(provider)
+    .bind(external_workspace_id)
+    .bind(ConnectionStatus::Revoked)
+    .fetch_all(tx.conn())
+    .await?;
+    // By byte, as auth orders the chains it takes; a collation might not.
+    organizations.sort();
+    Ok(organizations)
+}
+
 /// Hard-delete one PROJECT's rows but its uninstalls, as a transfer or a delete
 /// leaves them; deliveries and their attempts go by the cascade.
 pub async fn purge_project(
@@ -1020,18 +1041,20 @@ pub async fn retire_connection(
     .await
 }
 
-/// Revoke every connection into one vendor workspace, across every tenant —
-/// the answer to `app_uninstalled`. Idempotent, as Slack's redeliveries need.
+/// Revoke the `organizations`' connections into one vendor workspace, their
+/// chain locks held: `app_uninstalled`'s answer, idempotent for Slack's retries.
 pub async fn revoke_workspace(
     tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
     provider: Provider,
     external_workspace_id: &str,
+    organizations: &[String],
     reason: &str,
 ) -> sqlx::Result<Vec<RetiredConnection>> {
     sqlx::query_as::<_, RetiredConnection>(&format!(
         "UPDATE notifications.connections
             SET status = $4, last_error = $3, revoked_at = now()
           WHERE provider = $1 AND external_workspace_id = $2 AND status <> $4
+            AND organization_id = ANY($5)
       RETURNING {RETIRED_COLUMNS}"
     ))
     .bind(provider)
@@ -1041,6 +1064,7 @@ pub async fn revoke_workspace(
         LAST_ERROR_MAX,
     ))
     .bind(ConnectionStatus::Revoked)
+    .bind(organizations)
     .fetch_all(tx.conn())
     .await
 }

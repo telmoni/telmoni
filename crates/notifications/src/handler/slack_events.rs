@@ -106,7 +106,8 @@ pub async fn slack_events(
     Ok(Json(json!({ "ok": true })))
 }
 
-/// Retire every connection into `workspace`, across tenants, on Slack's word.
+/// Retire the connections into `workspace`, across tenants, on Slack's word,
+/// each organization's chain lock taken first, by id.
 async fn revoke_workspace(
     state: &Arc<AppState>,
     workspace: &str,
@@ -115,7 +116,19 @@ async fn revoke_workspace(
     let event_type = revocation.as_str();
     let reason = format!("slack: {event_type}");
     let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
-    let retired = crate::db::revoke_workspace(&mut tx, Provider::Slack, workspace, &reason).await?;
+    let organizations =
+        crate::db::workspace_organizations(&mut tx, Provider::Slack, workspace).await?;
+    for organization in &organizations {
+        super::lock_audit_chain(
+            &mut tx,
+            &OrganizationId::from_trusted(organization.as_str()),
+        )
+        .await?;
+    }
+    // Only these organizations': one the read did not find has no lock held here.
+    let retired =
+        crate::db::revoke_workspace(&mut tx, Provider::Slack, workspace, &organizations, &reason)
+            .await?;
     let ids: Vec<_> = retired.iter().map(|c| c.id).collect();
     crate::db::fail_pending_for_connections(&mut tx, &ids, &reason).await?;
     let mut notices = Vec::new();

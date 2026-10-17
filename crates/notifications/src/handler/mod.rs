@@ -11,7 +11,7 @@ use axum::{extract::State, http::HeaderMap, response::IntoResponse};
 use serde_json::json;
 use telmoni_shared::acting::Acting;
 use telmoni_shared::db::tenant_session::{
-    Scoped, maintenance_scope, organization_scope, project_scope,
+    Binding, Scoped, maintenance_scope, organization_scope, project_scope,
 };
 use telmoni_shared::extract::Json;
 use telmoni_shared::rbac::{Resource, Verb};
@@ -25,6 +25,43 @@ use crate::{delivery, uninstall};
 
 /// Most feed rows a read returns (newest first; a dropdown, not an export).
 const FEED_LIMIT: i64 = 50;
+
+/// The longest a lane waits for its organization's chain lock, and for any lock
+/// after it: the role's own `lock_timeout` on a tier, set for roles with none.
+const CHAIN_LOCK_WAIT: &str = "2000ms";
+
+/// Postgres's `lock_not_available`: a `lock_timeout` ran out.
+const LOCK_NOT_AVAILABLE: &str = "55P03";
+
+/// The organization's audit chain lock, before any row: a transfer holds it
+/// while it awaits the purge, which must never wait on a lane waiting on it.
+pub(crate) async fn lock_audit_chain<B: Binding>(
+    tx: &mut Scoped<'_, B>,
+    organization_id: &OrganizationId,
+) -> Result<(), TelmoniError> {
+    sqlx::query("SELECT set_config('lock_timeout', $1, true)")
+        .bind(CHAIN_LOCK_WAIT)
+        .execute(tx.conn())
+        .await?;
+    match telmoni_shared::audit::lock_chain(tx.conn(), organization_id).await {
+        Ok(()) => Ok(()),
+        Err(e)
+            if e.as_database_error()
+                .and_then(|db| db.code())
+                .is_some_and(|code| code == LOCK_NOT_AVAILABLE) =>
+        {
+            tracing::warn!(
+                organization_id = %organization_id,
+                "notifications: a change gave up on the organization's chain lock"
+            );
+            Err(AuthError::Conflict(
+                "another change to this organization is under way; try again".into(),
+            )
+            .into())
+        }
+        Err(e) => Err(e.into()),
+    }
+}
 
 /// Who is behind this request's bearer, as auth resolves it for the
 /// organization and project the headers name. This module cannot decide
