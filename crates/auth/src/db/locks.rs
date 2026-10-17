@@ -1,19 +1,17 @@
 //! Transaction-scoped advisory locks that serialise the lanes which decide who
 //! is in an organization and who owns it.
 //!
-//! **Why locks and not the rows.** Under READ COMMITTED an UPDATE or DELETE
-//! that waited on a row lock re-checks its WHERE against the row's NEW version,
-//! so a removal blocked behind an ownership transfer would go on to act on the
-//! person as the new owner; and a lane that read "you are the owner" and then
-//! acted could act for somebody who stopped being the owner in between. The
-//! lanes that change the roster or its ownership — roles, removal and leaving,
-//! both invite accepts, every ownership lane, organization and account deletion
-//! — take the organization's lock first and read the roles again under it.
-//! The owner's and admins' lanes that change something else (renames,
-//! projects, invites out) read the role unlocked, as a sibling's `resolve`
-//! does: a transfer racing one of them lets the owner of a moment ago finish.
-//! `auth.organizations` itself cannot be the lock: the maintenance lane holds
-//! no UPDATE on it.
+//! **Why locks and not the rows.** Under READ COMMITTED a write that waited on
+//! a row lock re-checks its WHERE against the row's new version: a removal held
+//! up by an ownership transfer would act on the new owner, and a lane that read
+//! "you are the owner" could act for somebody who no longer is. The lanes that
+//! change the roster or its ownership — among them the invite accepts and
+//! organization and account deletion — take the organization's lock first and
+//! read the roles again under it, as do a project's seat lanes, hand-over lanes
+//! and delete, which also refuse a project a transfer moved meanwhile. Others
+//! (renames, a new project, invites out) read the role unlocked: an ownership
+//! transfer racing one lets the owner of a moment ago finish.
+//! `auth.organizations` cannot be the lock: the maintenance lane cannot UPDATE it.
 //!
 //! **The person's lock** is taken by every lane that changes what they own or
 //! belong to, or writes their own rows: `/me`'s provisioning, both invite
@@ -54,7 +52,7 @@ pub async fn lock_email(conn: &mut PgConnection, email: &str) -> sqlx::Result<()
     Ok(())
 }
 
-/// Serialise the lanes that change an organization's roster or its owner.
+/// Serialise the lanes that change an organization's roster, its owner or its projects' seats.
 pub async fn lock_organization(
     conn: &mut PgConnection,
     organization_id: &OrganizationId,

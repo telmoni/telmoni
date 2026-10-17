@@ -187,6 +187,15 @@ pub async fn delete_project(
         telmoni_shared::rbac::Verb::Delete,
         telmoni_shared::rbac::Resource::Project,
     )?;
+    // The organization's lock before the cascade takes the seats, as a member's removal does.
+    let acting = acting
+        .hold(
+            &project_id,
+            &user_id,
+            telmoni_shared::rbac::Verb::Delete,
+            telmoni_shared::rbac::Resource::Project,
+        )
+        .await?;
 
     let organization_id = acting.organization.clone();
 

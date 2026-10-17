@@ -22,8 +22,11 @@ use tower::ServiceExt;
 use telmoni_auth::test_provider::{ScriptedProvider, as_person};
 use telmoni_auth::{AppState, Config, db::members, router};
 use telmoni_shared::db::tenant_session::project_scope;
-use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, seed_identity, service_pool};
-use telmoni_shared::{ProjectId, Role, UserId};
+use telmoni_shared::test_util::{
+    ServiceRole, apply_audit_migrations, holding_chain, seed_identity, service_pool,
+    until_queued_on_advisory_locks,
+};
+use telmoni_shared::{OrganizationId, ProjectId, Role, UserId};
 
 const SERVICE_SECRET: &str = "test-service-secret";
 
@@ -1322,4 +1325,125 @@ async fn cannot_modify_or_remove_project_owner_from_members(pool: PgPool) {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+/// A seat changed as its holder is removed from the organization waits for the removal.
+#[sqlx::test]
+async fn a_seat_changed_as_its_holder_is_removed_goes_in_turn(pool: PgPool) {
+    let (owner, admin) = owner_and_member(&pool, "admin").await;
+    let third = "user_third";
+    sign_in(&pool, third).await;
+    let (status, offer) = invite(&pool, &owner, &address_of(third), "member").await;
+    assert_eq!(status, StatusCode::CREATED, "{offer}");
+    let secret = secret_of(offer["link"].as_str().expect("the link"));
+    assert_eq!(accept(&pool, third, &secret).await.0, StatusCode::CREATED);
+    let organization = OrganizationId::try_new(organization_of(&pool, &owner).await).unwrap();
+    let project = project_of(&pool, &owner).await;
+
+    let pin = holding_chain(&pool, &organization).await;
+    let removing = {
+        let (pool, owner) = (pool.clone(), owner.clone());
+        tokio::spawn(async move {
+            call(
+                &pool,
+                "DELETE",
+                &format!("/internal/organization/members/{third}"),
+                &owner,
+                None,
+            )
+            .await
+        })
+    };
+    until_queued_on_advisory_locks(&pool, 1).await;
+    let changing = {
+        let (pool, admin) = (pool.clone(), admin.clone());
+        tokio::spawn(async move {
+            call(
+                &pool,
+                "PUT",
+                &format!("/internal/projects/{project}/members/{third}/role"),
+                &admin,
+                Some(json!({ "role": "admin" })),
+            )
+            .await
+        })
+    };
+    until_queued_on_advisory_locks(&pool, 2).await;
+    pin.rollback().await.unwrap();
+
+    let (removed, body) = removing.await.unwrap();
+    assert_eq!(removed, StatusCode::NO_CONTENT, "{body}");
+    let (changed, body) = changing.await.unwrap();
+    assert_eq!(changed, StatusCode::NOT_FOUND, "{body}");
+}
+
+/// A project deleted as one of its seat holders is removed waits for the removal.
+#[sqlx::test]
+async fn a_project_deleted_as_a_holder_is_removed_goes_in_turn(pool: PgPool) {
+    let (owner, member) = owner_and_member(&pool, "member").await;
+    let organization = OrganizationId::try_new(organization_of(&pool, &owner).await).unwrap();
+    let project = project_of(&pool, &owner).await;
+
+    let pin = holding_chain(&pool, &organization).await;
+    let removing = {
+        let (pool, owner, member) = (pool.clone(), owner.clone(), member.clone());
+        tokio::spawn(async move {
+            call(
+                &pool,
+                "DELETE",
+                &format!("/internal/organization/members/{member}"),
+                &owner,
+                None,
+            )
+            .await
+        })
+    };
+    until_queued_on_advisory_locks(&pool, 1).await;
+    let deleting = {
+        let (pool, owner) = (pool.clone(), owner.clone());
+        tokio::spawn(async move {
+            call(
+                &pool,
+                "DELETE",
+                &format!("/internal/projects/{project}"),
+                &owner,
+                None,
+            )
+            .await
+        })
+    };
+    until_queued_on_advisory_locks(&pool, 2).await;
+    pin.rollback().await.unwrap();
+
+    let (removed, body) = removing.await.unwrap();
+    assert_eq!(removed, StatusCode::NO_CONTENT, "{body}");
+    let (deleted, body) = deleting.await.unwrap();
+    assert_eq!(deleted, StatusCode::OK, "{body}");
+}
+
+/// Leaving a project that is not there answers as leaving one you hold no seat on.
+#[sqlx::test]
+async fn leaving_a_project_that_is_not_there_answers_as_one_without_a_seat(pool: PgPool) {
+    let (owner, _) = owner_and_member(&pool, "member").await;
+    let stranger = "user_stranger";
+    sign_in(&pool, stranger).await;
+
+    let theirs = call(
+        &pool,
+        "DELETE",
+        &format!("/internal/memberships/{}", project_of(&pool, &owner).await),
+        stranger,
+        None,
+    )
+    .await;
+    let nowhere = call(
+        &pool,
+        "DELETE",
+        "/internal/memberships/project_gone",
+        stranger,
+        None,
+    )
+    .await;
+    assert_eq!(theirs.0, StatusCode::NOT_FOUND, "{}", theirs.1);
+    assert_eq!(nowhere, theirs);
 }

@@ -22,8 +22,10 @@ use telmoni_shared::{
 
 use crate::{
     AppState,
-    db::{AuthLane, members, organization_members},
-    handler::{ActingProject, acting_project, authorize, parse_project_id, parse_user_id},
+    db::{AuthLane, members, organization_members, projects},
+    handler::{
+        ActingProject, acting_project, authorize, hold_project, parse_project_id, parse_user_id,
+    },
     model::AuditKind,
 };
 
@@ -110,6 +112,9 @@ pub async fn update_role(
 
     let acting = acting_project(&state, &project_id, &actor).await?;
     authorize(acting.role, Verb::Update, Resource::Member)?;
+    let acting = acting
+        .hold(&project_id, &actor, Verb::Update, Resource::Member)
+        .await?;
 
     let (mut acting, owner, _) = is_organization_owner(acting, &member_id).await?;
     if owner {
@@ -155,6 +160,9 @@ pub async fn remove_member(
 
     let acting = acting_project(&state, &project_id, &actor).await?;
     authorize(acting.role, Verb::Delete, Resource::Member)?;
+    let acting = acting
+        .hold(&project_id, &actor, Verb::Delete, Resource::Member)
+        .await?;
 
     let (mut acting, owner, leaver_name) = is_organization_owner(acting, &member_id).await?;
     if owner {
@@ -201,23 +209,40 @@ pub async fn leave(
     let project_id = parse_project_id(&project_id)?;
     let actor = principal.user_id;
 
+    let not_a_member = || -> TelmoniError {
+        AuthError::NotFound("you are not a member of this project".into()).into()
+    };
+
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-    let owner = crate::handler::get_project_organization(&mut tx, &project_id).await;
-    if let Ok(ref organization) = owner
-        && organization_members::role_on_organization(&mut tx, organization, &actor).await?
-            == Some(OrganizationRole::Owner)
+    // A missing project answers as a seat the caller does not hold: a stranger learns nothing.
+    let Some(owner) = projects::organization_of(&mut tx, &project_id).await? else {
+        return Err(not_a_member());
+    };
+    if organization_members::role_on_organization(&mut tx, &owner, &actor).await?
+        == Some(OrganizationRole::Owner)
     {
         return Err(AuthzError::Forbidden(
             "you own this project — delete it instead of leaving it".into(),
         )
         .into());
     }
-
-    let owner = owner?;
+    // The seat before the lock, so a stranger never stands in the organization's queue.
+    if members::role_on(&mut tx, &project_id, &actor)
+        .await?
+        .is_none()
+    {
+        return Err(not_a_member());
+    }
+    if hold_project(&mut tx, &owner, &project_id, &actor)
+        .await?
+        .is_none()
+    {
+        return Err(not_a_member());
+    }
     let leaver_name = organization_members::member_display_name(&mut tx, &owner, &actor).await?;
 
     if !members::remove(&mut tx, &project_id, &actor).await? {
-        return Err(AuthError::NotFound("you are not a member of this project".into()).into());
+        return Err(not_a_member());
     }
     emit_audit(
         &mut tx,

@@ -30,10 +30,9 @@
 //! offer — `/internal/projects/{project_id}/move` — the accept's own steps with
 //! nobody to ask and nothing changing hands.
 //!
-//! ⚠ **Offer, withdraw and decline take the owning organization's lock and
-//! read the roles again under it; accept takes the caller's own lock, then
-//! both organizations' in id order** — the order account deletion takes them
-//! in — and re-reads every role and status under them (see `db::locks`).
+//! ⚠ **Offer, withdraw and decline take the owning organization's lock and refuse a project
+//! moved while they waited for it; accept takes the caller's lock, then both organizations' by
+//! id**, as account deletion does; every lane reads the roles again under its locks (`db::locks`).
 
 use std::sync::Arc;
 
@@ -62,8 +61,9 @@ use crate::{
     AppState,
     db::{AuthLane, identities, locks, members, organization_members, organizations, projects},
     handler::{
-        ActingProject, BEING_DELETED, acting_project, parse_organization_id, parse_project_id,
-        parse_user_id, projects::MAX_PROJECT_NAME, refuse_unless_active,
+        ActingProject, BEING_DELETED, acting_project, hold_project, parse_organization_id,
+        parse_project_id, parse_user_id, projects::MAX_PROJECT_NAME, refuse_unless_active,
+        timed_out,
     },
     model::AuditKind,
 };
@@ -88,30 +88,25 @@ pub struct AcceptRequest {
     pub organization_id: Option<String>,
 }
 
-/// The project's transaction with its owning organization bound and locked,
-/// and the caller's role on the project read again under the lock.
-///
-/// ⚠ **Membership is checked before the lock is taken, and again under it.**
-/// The project's id arrives from the caller, and a lock is a queue: a
-/// stranger naming this project must not be able to stand in it, holding a
-/// pooled connection while its organization's roster waits.
+/// The project's transaction, its organization bound and held ([`hold_project`]), and the
+/// caller's role read before the lock, so no stranger queues on it, and again under it.
 async fn locked<'a>(
     state: &'a AppState,
     project_id: &ProjectId,
     user_id: &UserId,
-) -> Result<(ActingProject<'a, ProjectAndOrganization>, Role), TelmoniError> {
+) -> Result<ActingProject<'a, ProjectAndOrganization>, TelmoniError> {
     let acting = acting_project(state, project_id, user_id).await?;
     let mut acting = acting.enter_owner_scope().await?;
     let organization = acting.organization.clone();
-    locks::lock_organization(&mut acting.tx, &organization).await?;
-    let on_organization =
-        organization_members::role_on_organization(&mut acting.tx, &organization, user_id).await?;
-    let seat = members::role_on(&mut acting.tx, project_id, user_id).await?;
-    let Some(role) = telmoni_shared::rbac::project_role(on_organization, seat) else {
+    let Some((role, organization_role)) =
+        hold_project(&mut acting.tx, &organization, project_id, user_id).await?
+    else {
         return Err(AuthzError::Forbidden("you are not a member of this project".into()).into());
     };
     refuse_unless_active(&mut acting.tx, &organization).await?;
-    Ok((acting, role))
+    acting.role = role;
+    acting.organization_role = organization_role;
+    Ok(acting)
 }
 
 /// A name ending in a plain number from 2 up, as `"Payments 2"`: the part
@@ -246,8 +241,8 @@ pub async fn offer(
         return Err(AuthError::BadRequest("you already own this project".into()).into());
     }
 
-    let (mut acting, role) = locked(&state, &project_id, &user_id).await?;
-    if role != Role::Owner {
+    let mut acting = locked(&state, &project_id, &user_id).await?;
+    if acting.role != Role::Owner {
         return Err(AuthzError::Forbidden(
             "only the project's owner — its organization's owner — can hand it over".into(),
         )
@@ -357,8 +352,8 @@ pub async fn cancel(
     let project_id = parse_project_id(&project_id)?;
     let user_id = principal.user_id;
 
-    let (mut acting, role) = locked(&state, &project_id, &user_id).await?;
-    if role != Role::Owner {
+    let mut acting = locked(&state, &project_id, &user_id).await?;
+    if acting.role != Role::Owner {
         return Err(AuthzError::Forbidden(
             "only the project's owner can withdraw its offer".into(),
         )
@@ -424,7 +419,7 @@ pub async fn decline(
     let project_id = parse_project_id(&project_id)?;
     let user_id = principal.user_id;
 
-    let (mut acting, _) = locked(&state, &project_id, &user_id).await?;
+    let mut acting = locked(&state, &project_id, &user_id).await?;
     if !members::decline_project_offer(&mut acting.tx, &project_id, &user_id).await? {
         return Err(AuthError::NotFound("you hold no offer for this project".into()).into());
     }
@@ -684,7 +679,20 @@ async fn lock_transfer_organizations(
     destination: &OrganizationId,
 ) -> Result<(), TelmoniError> {
     for organization in by_id(source, destination) {
-        locks::lock_organization(conn, organization).await?;
+        let Err(e) = locks::lock_organization(conn, organization).await else {
+            continue;
+        };
+        if !timed_out(&e) {
+            return Err(e.into());
+        }
+        tracing::warn!(
+            organization_id = %organization,
+            "a move of a project gave up waiting for an organization's lock"
+        );
+        return Err(AuthError::Conflict(
+            "an organization in this move is busy — try again in a moment".into(),
+        )
+        .into());
     }
     Ok(())
 }
@@ -713,15 +721,6 @@ async fn lock_transfer_chains(
         .into());
     }
     Ok(())
-}
-
-/// Postgres's `lock_not_available`: a `lock_timeout` ran out.
-const LOCK_NOT_AVAILABLE: &str = "55P03";
-
-fn timed_out(e: &sqlx::Error) -> bool {
-    e.as_database_error()
-        .and_then(|db| db.code())
-        .is_some_and(|code| code == LOCK_NOT_AVAILABLE)
 }
 
 /// The project's move lock, alone, for a move of its rows. A wait the role's

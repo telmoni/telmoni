@@ -97,6 +97,61 @@ pub(crate) async fn acting_organization<'a>(
 /// been requested.
 pub(crate) const BEING_DELETED: &str = "this organization is being deleted";
 
+/// The refusal of a lane whose project moved to another organization since it read it.
+pub(crate) const MOVED: &str =
+    "the project has moved to another organization; reload and try again";
+
+/// Postgres's `lock_not_available`: a `lock_timeout` ran out.
+const LOCK_NOT_AVAILABLE: &str = "55P03";
+
+/// Whether `e` is a lock wait the role's `lock_timeout` ended: a 409 to try again, not a 500.
+pub(crate) fn timed_out(e: &sqlx::Error) -> bool {
+    e.as_database_error()
+        .and_then(|db| db.code())
+        .is_some_and(|code| code == LOCK_NOT_AVAILABLE)
+}
+
+/// The organization's membership lock, under which transfers move its projects, then the
+/// caller's role, `None` without one, and only then whether the project moved (409) or went (404).
+pub(crate) async fn hold_project<B: RosterRead + crate::db::members::SeatRead>(
+    tx: &mut Scoped<'_, B>,
+    organization: &telmoni_shared::OrganizationId,
+    project_id: &telmoni_shared::ProjectId,
+    user_id: &telmoni_shared::UserId,
+) -> Result<
+    Option<(
+        telmoni_shared::Role,
+        Option<telmoni_shared::OrganizationRole>,
+    )>,
+    telmoni_shared::TelmoniError,
+> {
+    if let Err(e) = crate::db::locks::lock_organization(tx.conn(), organization).await {
+        if !timed_out(&e) {
+            return Err(e.into());
+        }
+        tracing::warn!(
+            organization_id = %organization,
+            project_id = %project_id,
+            "a change to a project gave up waiting for its organization's lock"
+        );
+        return Err(telmoni_shared::AuthError::Conflict(
+            "the organization is busy — try again in a moment".to_string(),
+        )
+        .into());
+    }
+    let organization_role =
+        crate::db::organization_members::role_on_organization(tx, organization, user_id).await?;
+    let seat = crate::db::members::role_on(tx, project_id, user_id).await?;
+    let Some(role) = telmoni_shared::rbac::project_role(organization_role, seat) else {
+        return Ok(None);
+    };
+    match crate::db::projects::organization_of(tx, project_id).await? {
+        Some(now) if now == *organization => Ok(Some((role, organization_role))),
+        Some(_) => Err(telmoni_shared::AuthError::Conflict(MOVED.to_string()).into()),
+        None => Err(telmoni_shared::AuthError::NotFound("project not found".to_string()).into()),
+    }
+}
+
 /// The caller's role on an organization, or a 403, on a transaction somebody
 /// else opened. ⚠ The ONE spelling of this refusal: it stands between a forged
 /// `x-organization-id` and another tenant's rows, and eight hand-written copies
@@ -290,6 +345,31 @@ impl<'a> ActingProject<'a, Project> {
             organization_role: self.organization_role,
         })
     }
+
+    /// [`hold_project`], then the organization's standing read again under the lock: a demotion,
+    /// a removal or a deletion committed while it waited stands.
+    pub(crate) async fn hold(
+        self,
+        project_id: &telmoni_shared::ProjectId,
+        user_id: &telmoni_shared::UserId,
+        verb: telmoni_shared::rbac::Verb,
+        resource: telmoni_shared::rbac::Resource,
+    ) -> Result<Self, telmoni_shared::TelmoniError> {
+        let mut owner = self.enter_owner_scope().await?;
+        let held = hold_project(&mut owner.tx, &owner.organization, project_id, user_id).await?;
+        let mut acting = owner.leave_owner_scope().await?;
+        let Some((role, organization_role)) = held else {
+            return Err(telmoni_shared::AuthzError::Forbidden(
+                "you are not a member of this project".to_string(),
+            )
+            .into());
+        };
+        refuse_unless_active(&mut acting.tx, &acting.organization).await?;
+        authorize(role, verb, resource)?;
+        acting.role = role;
+        acting.organization_role = organization_role;
+        Ok(acting)
+    }
 }
 
 impl<'a> ActingProject<'a, ProjectAndOrganization> {
@@ -355,16 +435,4 @@ pub(crate) async fn acting_project<'a>(
         organization: context.organization_id,
         organization_role: context.organization_role,
     })
-}
-
-/// The organization a project belongs to — the audit chain's root for anything
-/// done inside that project. A project the scope cannot see is an error, as a
-/// row that is not there.
-pub(crate) async fn get_project_organization<B: Binding>(
-    tx: &mut Scoped<'_, B>,
-    project_id: &telmoni_shared::types::ProjectId,
-) -> Result<telmoni_shared::OrganizationId, telmoni_shared::TelmoniError> {
-    Ok(crate::db::projects::organization_of(tx, project_id)
-        .await?
-        .ok_or(sqlx::Error::RowNotFound)?)
 }

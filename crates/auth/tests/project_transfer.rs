@@ -2278,18 +2278,7 @@ async fn a_transfer_kept_waiting_for_a_chain_is_a_conflict(pool: PgPool) {
         offer(&pool, &h, OWNER, &h.source, ADMIN).await.0,
         StatusCode::OK
     );
-    // A tier sets `lock_timeout` on the role, which the suite's `SET ROLE`
-    // does not take up: the database's own reaches every new connection.
-    let database: String = sqlx::query_scalar("SELECT current_database()")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    sqlx::query(&format!(
-        "ALTER DATABASE \"{database}\" SET lock_timeout = '1s'"
-    ))
-    .execute(&pool)
-    .await
-    .unwrap();
+    lock_timeout_of_a_tier(&pool).await;
     let held = holding_chain(&pool, &oid(&h.admins)).await;
 
     let (status, body) = tokio::time::timeout(
@@ -2310,5 +2299,720 @@ async fn a_transfer_kept_waiting_for_a_chain_is_a_conflict(pool: PgPool) {
     assert_eq!(
         accept(&pool, &h, ADMIN, &h.admins, None).await.0,
         StatusCode::OK
+    );
+}
+
+/// The admin's accept of the project into their organization, under way.
+fn admins_accept(pool: &PgPool, h: &Handover) -> tokio::task::JoinHandle<(StatusCode, Value)> {
+    let pool = pool.clone();
+    let (project, admins) = (h.project.clone(), h.admins.clone());
+    tokio::spawn(async move {
+        call(
+            &pool,
+            "POST",
+            &format!("/internal/projects/{project}/transfer/accept"),
+            ADMIN,
+            Some(&admins),
+            None,
+        )
+        .await
+    })
+}
+
+/// Sends `lane` as the admin's accept commits: the source's chain pinned, so the accept waits
+/// holding its organizations' locks and rows and the lane queues behind it, then let go.
+async fn across_an_accept(
+    pool: &PgPool,
+    h: &Handover,
+    lane: impl std::future::Future<Output = (StatusCode, Value)> + Send + 'static,
+) -> (StatusCode, Value) {
+    assert_eq!(
+        offer(pool, h, OWNER, &h.source, ADMIN).await.0,
+        StatusCode::OK
+    );
+    let pin = holding_chain(pool, &oid(&h.source)).await;
+    let accepting = admins_accept(pool, h);
+    until_queued_on_advisory_locks(pool, 1).await;
+    let lane = tokio::spawn(lane);
+    until_queued_on_advisory_locks(pool, 2).await;
+    pin.rollback().await.unwrap();
+    let (status, body) = accepting.await.unwrap();
+    assert_eq!(status, StatusCode::OK, "{body}");
+    lane.await.unwrap()
+}
+
+/// The changes to `user`'s seat on `project` that any chain records.
+async fn seat_changes(pool: &PgPool, project: &str, user: &str) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM audit.events
+          WHERE in_project = $1 AND resource_kind = 'member' AND resource_id = $2
+            AND action IN ('updated', 'deleted')",
+    )
+    .bind(project)
+    .bind(user)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// A refusal naming the move, as a seat lane answers a project that changed organization.
+fn moved(status: StatusCode, body: &Value) {
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        body["detail"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("moved to another organization")),
+        "{body}"
+    );
+}
+
+/// A seat's role changed as its project's accept commits is refused, and nothing is recorded.
+#[sqlx::test]
+async fn a_role_changed_as_its_project_is_accepted_is_refused(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let lane = {
+        let pool = pool.clone();
+        let (project, source) = (h.project.clone(), h.source.clone());
+        async move {
+            call(
+                &pool,
+                "PUT",
+                &format!("/internal/projects/{project}/members/{MEMBER}/role"),
+                OWNER,
+                Some(&source),
+                Some(json!({ "role": "admin" })),
+            )
+            .await
+        }
+    };
+    let (status, body) = across_an_accept(&pool, &h, lane).await;
+    moved(status, &body);
+    assert_eq!(
+        seat_of(&pool, &h.project, MEMBER).await,
+        Some(("member".into(), false))
+    );
+    assert_eq!(seat_changes(&pool, &h.project, MEMBER).await, 0);
+}
+
+/// A seat removed as its project's accept commits is refused, and nothing is recorded.
+#[sqlx::test]
+async fn a_seat_removed_as_its_project_is_accepted_is_refused(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let lane = {
+        let pool = pool.clone();
+        let (project, source) = (h.project.clone(), h.source.clone());
+        async move {
+            call(
+                &pool,
+                "DELETE",
+                &format!("/internal/projects/{project}/members/{MEMBER}"),
+                OWNER,
+                Some(&source),
+                None,
+            )
+            .await
+        }
+    };
+    let (status, body) = across_an_accept(&pool, &h, lane).await;
+    moved(status, &body);
+    assert!(seat_of(&pool, &h.project, MEMBER).await.is_some());
+    assert_eq!(seat_changes(&pool, &h.project, MEMBER).await, 0);
+}
+
+/// A seat given up as its project's accept commits is refused, and nothing is recorded.
+#[sqlx::test]
+async fn a_seat_left_as_its_project_is_accepted_is_refused(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let lane = {
+        let pool = pool.clone();
+        let project = h.project.clone();
+        async move {
+            call(
+                &pool,
+                "DELETE",
+                &format!("/internal/memberships/{project}"),
+                MEMBER,
+                None,
+                None,
+            )
+            .await
+        }
+    };
+    let (status, body) = across_an_accept(&pool, &h, lane).await;
+    moved(status, &body);
+    assert!(seat_of(&pool, &h.project, MEMBER).await.is_some());
+    assert_eq!(seat_changes(&pool, &h.project, MEMBER).await, 0);
+}
+
+/// A project its old owner deletes as its accept commits is refused, and stays where it went.
+#[sqlx::test]
+async fn a_project_deleted_as_it_is_accepted_is_refused(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let lane = {
+        let pool = pool.clone();
+        let (project, source) = (h.project.clone(), h.source.clone());
+        async move {
+            call(
+                &pool,
+                "DELETE",
+                &format!("/internal/projects/{project}"),
+                OWNER,
+                Some(&source),
+                None,
+            )
+            .await
+        }
+    };
+    let (status, body) = across_an_accept(&pool, &h, lane).await;
+    moved(status, &body);
+    assert_eq!(organization_of_project(&pool, &h.project).await, h.admins);
+}
+
+/// `lane`, queued on the source's membership lock, which the transaction answered holds: what the
+/// test writes there is what the lane reads under it.
+async fn queued_on_the_source(
+    pool: &PgPool,
+    h: &Handover,
+    lane: impl std::future::Future<Output = (StatusCode, Value)> + Send + 'static,
+) -> (
+    sqlx::Transaction<'static, sqlx::Postgres>,
+    tokio::task::JoinHandle<(StatusCode, Value)>,
+) {
+    let mut held = pool.begin().await.unwrap();
+    telmoni_auth::db::locks::lock_organization(&mut held, &oid(&h.source))
+        .await
+        .unwrap();
+    let lane = tokio::spawn(lane);
+    until_queued_on_advisory_locks(pool, 1).await;
+    (held, lane)
+}
+
+/// The admin's change of the member's role, queued on the source's membership lock.
+async fn queued_role_change(
+    pool: &PgPool,
+    h: &Handover,
+) -> (
+    sqlx::Transaction<'static, sqlx::Postgres>,
+    tokio::task::JoinHandle<(StatusCode, Value)>,
+) {
+    let lane = {
+        let pool = pool.clone();
+        let (project, source) = (h.project.clone(), h.source.clone());
+        async move {
+            call(
+                &pool,
+                "PUT",
+                &format!("/internal/projects/{project}/members/{MEMBER}/role"),
+                ADMIN,
+                Some(&source),
+                Some(json!({ "role": "admin" })),
+            )
+            .await
+        }
+    };
+    queued_on_the_source(pool, h, lane).await
+}
+
+/// A seat lane reads the caller's role again under the lock: an admin demoted meanwhile is refused.
+#[sqlx::test]
+async fn a_role_change_by_an_admin_demoted_as_it_waits_is_refused(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let (mut held, lane) = queued_role_change(&pool, &h).await;
+    sqlx::query(
+        "UPDATE auth.project_members SET role = 'member' WHERE project_id = $1 AND user_id = $2",
+    )
+    .bind(&h.project)
+    .bind(ADMIN)
+    .execute(&mut *held)
+    .await
+    .unwrap();
+    held.commit().await.unwrap();
+
+    let (status, body) = lane.await.unwrap();
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(
+        seat_of(&pool, &h.project, MEMBER).await,
+        Some(("member".into(), false))
+    );
+}
+
+/// Marks `organization` pending deletion in `held`, as the deletion lane does under its lock.
+async fn mark_pending_in(
+    held: &mut sqlx::Transaction<'static, sqlx::Postgres>,
+    organization: &str,
+) {
+    sqlx::query(
+        "UPDATE auth.organizations
+            SET status = 'pending_deletion', deletion_requested_at = now(),
+                erase_after = now() + interval '15 minutes', deletion_kind = 'owner'
+          WHERE external_id = $1",
+    )
+    .bind(organization)
+    .execute(&mut **held)
+    .await
+    .unwrap();
+}
+
+/// A seat lane reads the organization's standing again under the lock: a deletion refuses it.
+#[sqlx::test]
+async fn a_role_change_as_its_organization_is_deleted_is_refused(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let (mut held, lane) = queued_role_change(&pool, &h).await;
+    mark_pending_in(&mut held, &h.source).await;
+    held.commit().await.unwrap();
+
+    let (status, body) = lane.await.unwrap();
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(
+        body["detail"], "this organization is being deleted",
+        "{body}"
+    );
+    assert_eq!(
+        seat_of(&pool, &h.project, MEMBER).await,
+        Some(("member".into(), false))
+    );
+}
+
+/// A caller removed as their seat lane waits is told only that, not that the organization is going.
+#[sqlx::test]
+async fn a_caller_removed_as_their_change_waits_learns_nothing_of_a_deletion(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let (mut held, lane) = queued_role_change(&pool, &h).await;
+    sqlx::query("DELETE FROM auth.project_members WHERE project_id = $1 AND user_id = $2")
+        .bind(&h.project)
+        .bind(ADMIN)
+        .execute(&mut *held)
+        .await
+        .unwrap();
+    sqlx::query(
+        "DELETE FROM auth.organization_members WHERE organization_id = $1 AND user_id = $2",
+    )
+    .bind(&h.source)
+    .bind(ADMIN)
+    .execute(&mut *held)
+    .await
+    .unwrap();
+    mark_pending_in(&mut held, &h.source).await;
+    held.commit().await.unwrap();
+
+    let (status, body) = lane.await.unwrap();
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(
+        body["detail"], "you are not a member of this project",
+        "{body}"
+    );
+}
+
+/// Takes `user`'s seat away and moves the project into `destination`, in `held`.
+async fn unseat_and_move_in(
+    held: &mut sqlx::Transaction<'static, sqlx::Postgres>,
+    h: &Handover,
+    user: &str,
+    destination: &str,
+) {
+    sqlx::query("DELETE FROM auth.project_members WHERE project_id = $1 AND user_id = $2")
+        .bind(&h.project)
+        .bind(user)
+        .execute(&mut **held)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE auth.projects SET organization_id = $2 WHERE external_id = $1")
+        .bind(&h.project)
+        .bind(destination)
+        .execute(&mut **held)
+        .await
+        .unwrap();
+}
+
+/// A caller removed as their seat lane waits is told only that, not that the project moved.
+#[sqlx::test]
+async fn a_caller_removed_as_their_change_waits_learns_nothing_of_a_move(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let (mut held, lane) = queued_role_change(&pool, &h).await;
+    unseat_and_move_in(&mut held, &h, ADMIN, &h.members).await;
+    held.commit().await.unwrap();
+
+    let (status, body) = lane.await.unwrap();
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(
+        body["detail"], "you are not a member of this project",
+        "{body}"
+    );
+}
+
+/// A member removed as their decline waits is told only that, not that the project moved.
+#[sqlx::test]
+async fn a_decline_by_a_member_removed_as_it_waits_learns_nothing_of_a_move(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let lane = {
+        let pool = pool.clone();
+        let (project, source) = (h.project.clone(), h.source.clone());
+        async move {
+            call(
+                &pool,
+                "POST",
+                &format!("/internal/projects/{project}/transfer/decline"),
+                MEMBER,
+                Some(&source),
+                None,
+            )
+            .await
+        }
+    };
+    let (mut held, lane) = queued_on_the_source(&pool, &h, lane).await;
+    unseat_and_move_in(&mut held, &h, MEMBER, &h.admins).await;
+    held.commit().await.unwrap();
+
+    let (status, body) = lane.await.unwrap();
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(
+        body["detail"], "you are not a member of this project",
+        "{body}"
+    );
+}
+
+/// A leave whose seat is taken away as it waits answers as one without a seat, not with the move.
+#[sqlx::test]
+async fn a_leave_whose_seat_goes_as_it_waits_learns_nothing_of_a_move(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let lane = {
+        let pool = pool.clone();
+        let project = h.project.clone();
+        async move {
+            call(
+                &pool,
+                "DELETE",
+                &format!("/internal/memberships/{project}"),
+                MEMBER,
+                None,
+                None,
+            )
+            .await
+        }
+    };
+    let (mut held, lane) = queued_on_the_source(&pool, &h, lane).await;
+    unseat_and_move_in(&mut held, &h, MEMBER, &h.admins).await;
+    held.commit().await.unwrap();
+
+    let (status, body) = lane.await.unwrap();
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(
+        body["detail"], "you are not a member of this project",
+        "{body}"
+    );
+}
+
+/// A stranger to the project is refused by every seat lane without queueing on the lock.
+#[sqlx::test]
+async fn a_stranger_is_refused_by_the_seat_lanes_without_queueing(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let stranger = "user_handover_stranger";
+    let strangers = sign_in(&pool, stranger).await;
+
+    let mut busy = pool.begin().await.unwrap();
+    telmoni_auth::db::locks::lock_organization(&mut busy, &oid(&h.source))
+        .await
+        .unwrap();
+    for (method, path, body, refused) in [
+        (
+            "PUT",
+            format!("/internal/projects/{}/members/{MEMBER}/role", h.project),
+            Some(json!({ "role": "admin" })),
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            "DELETE",
+            format!("/internal/projects/{}/members/{MEMBER}", h.project),
+            None,
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            "DELETE",
+            format!("/internal/memberships/{}", h.project),
+            None,
+            StatusCode::NOT_FOUND,
+        ),
+    ] {
+        let answered = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            call(&pool, method, &path, stranger, Some(&strangers), body),
+        )
+        .await;
+        let (status, body) = answered.expect("the stranger queued on the organization's lock");
+        assert_eq!(status, refused, "{method} {path}: {body}");
+    }
+    busy.rollback().await.unwrap();
+}
+
+/// A tier's `lock_timeout` on every new connection: the suite's `SET ROLE` skips the role's own.
+async fn lock_timeout_of_a_tier(pool: &PgPool) {
+    let database: String = sqlx::query_scalar("SELECT current_database()")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    sqlx::query(&format!(
+        "ALTER DATABASE \"{database}\" SET lock_timeout = '1s'"
+    ))
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// A seat lane kept from its organization's lock past the role's `lock_timeout` is a 409.
+#[sqlx::test]
+async fn a_seat_lane_kept_waiting_for_its_organization_is_a_conflict(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    lock_timeout_of_a_tier(&pool).await;
+    let mut busy = pool.begin().await.unwrap();
+    telmoni_auth::db::locks::lock_organization(&mut busy, &oid(&h.source))
+        .await
+        .unwrap();
+
+    let (status, body) = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        call(
+            &pool,
+            "PUT",
+            &format!("/internal/projects/{}/members/{MEMBER}/role", h.project),
+            OWNER,
+            Some(&h.source),
+            Some(json!({ "role": "admin" })),
+        ),
+    )
+    .await
+    .expect("the seat lane waited past its lock_timeout");
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        body["detail"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("busy")),
+        "{body}"
+    );
+    busy.rollback().await.unwrap();
+    assert_eq!(
+        seat_of(&pool, &h.project, MEMBER).await,
+        Some(("member".into(), false))
+    );
+}
+
+/// A transfer kept from an organization's lock past the role's `lock_timeout` is a 409.
+#[sqlx::test]
+async fn a_transfer_kept_waiting_for_an_organizations_lock_is_a_conflict(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    assert_eq!(
+        offer(&pool, &h, OWNER, &h.source, ADMIN).await.0,
+        StatusCode::OK
+    );
+    lock_timeout_of_a_tier(&pool).await;
+    let mut busy = pool.begin().await.unwrap();
+    telmoni_auth::db::locks::lock_organization(&mut busy, &oid(&h.admins))
+        .await
+        .unwrap();
+
+    let (status, body) = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        accept(&pool, &h, ADMIN, &h.admins, None),
+    )
+    .await
+    .expect("the accept waited past its lock_timeout");
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        body["detail"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("busy")),
+        "{body}"
+    );
+    assert_eq!(organization_of_project(&pool, &h.project).await, h.source);
+    busy.rollback().await.unwrap();
+}
+
+/// The owner makes the member an admin, one the project can be offered to.
+async fn promote_member(pool: &PgPool, h: &Handover) {
+    let (status, body) = call(
+        pool,
+        "PUT",
+        &format!("/internal/projects/{}/members/{MEMBER}/role", h.project),
+        OWNER,
+        Some(&h.source),
+        Some(json!({ "role": "admin" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+}
+
+/// The source's chain as the accept leaves it: the offer it spent, then the transfer.
+async fn transferred_last(pool: &PgPool, h: &Handover) {
+    assert_eq!(
+        chain(pool, &h.source, &h.project).await,
+        vec!["project_offered", "project_transferred"]
+    );
+}
+
+/// An offer sent as its project's accept commits is refused, so the new organization keeps it.
+#[sqlx::test]
+async fn an_offer_sent_as_its_project_is_accepted_is_refused(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    promote_member(&pool, &h).await;
+    let lane = {
+        let pool = pool.clone();
+        let (project, source) = (h.project.clone(), h.source.clone());
+        async move {
+            call(
+                &pool,
+                "POST",
+                &format!("/internal/projects/{project}/transfer"),
+                OWNER,
+                Some(&source),
+                Some(json!({ "memberId": MEMBER })),
+            )
+            .await
+        }
+    };
+    let (status, body) = across_an_accept(&pool, &h, lane).await;
+    moved(status, &body);
+    assert_eq!(
+        seat_of(&pool, &h.project, MEMBER).await,
+        Some(("admin".into(), false))
+    );
+    transferred_last(&pool, &h).await;
+    let (status, body) = accept(&pool, &h, MEMBER, &h.members, None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        body["detail"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("no longer open")),
+        "{body}"
+    );
+    assert_eq!(organization_of_project(&pool, &h.project).await, h.admins);
+}
+
+/// As [`across_an_accept`], the source's membership lock queued for ahead of the lane, which
+/// Postgres grants in turn, and held through `meanwhile`, whose writes the lane then meets.
+async fn across_an_accept_then(
+    pool: &PgPool,
+    h: &Handover,
+    lane: impl std::future::Future<Output = (StatusCode, Value)> + Send + 'static,
+    meanwhile: impl std::future::Future<Output = ()>,
+) -> (StatusCode, Value) {
+    assert_eq!(
+        offer(pool, h, OWNER, &h.source, ADMIN).await.0,
+        StatusCode::OK
+    );
+    let pin = holding_chain(pool, &oid(&h.source)).await;
+    let accepting = admins_accept(pool, h);
+    until_queued_on_advisory_locks(pool, 1).await;
+    let next = {
+        let (pool, source) = (pool.clone(), oid(&h.source));
+        tokio::spawn(async move {
+            let mut held = pool.begin().await.unwrap();
+            telmoni_auth::db::locks::lock_organization(&mut held, &source)
+                .await
+                .unwrap();
+            held
+        })
+    };
+    until_queued_on_advisory_locks(pool, 2).await;
+    let lane = tokio::spawn(lane);
+    until_queued_on_advisory_locks(pool, 3).await;
+    pin.rollback().await.unwrap();
+    let (status, body) = accepting.await.unwrap();
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let held = next.await.unwrap();
+    meanwhile.await;
+    held.rollback().await.unwrap();
+    lane.await.unwrap()
+}
+
+/// The new owner offers the project on to the member.
+async fn new_owners_offer(pool: &PgPool, h: &Handover) {
+    let (status, body) = offer(pool, h, ADMIN, &h.admins, MEMBER).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+/// A withdrawal sent as its project's accept commits is refused: the new owner's offer stands.
+#[sqlx::test]
+async fn a_withdrawal_sent_as_its_project_is_accepted_is_refused(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    promote_member(&pool, &h).await;
+    let lane = {
+        let pool = pool.clone();
+        let (project, source) = (h.project.clone(), h.source.clone());
+        async move {
+            call(
+                &pool,
+                "DELETE",
+                &format!("/internal/projects/{project}/transfer"),
+                OWNER,
+                Some(&source),
+                None,
+            )
+            .await
+        }
+    };
+    let (status, body) = across_an_accept_then(&pool, &h, lane, new_owners_offer(&pool, &h)).await;
+    moved(status, &body);
+    assert_eq!(
+        seat_of(&pool, &h.project, MEMBER).await,
+        Some(("admin".into(), true))
+    );
+    transferred_last(&pool, &h).await;
+}
+
+/// A decline sent as its project's accept commits is refused, and the old chain records nothing.
+#[sqlx::test]
+async fn a_decline_sent_as_its_project_is_accepted_is_refused(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    promote_member(&pool, &h).await;
+    let lane = {
+        let pool = pool.clone();
+        let (project, source) = (h.project.clone(), h.source.clone());
+        async move {
+            call(
+                &pool,
+                "POST",
+                &format!("/internal/projects/{project}/transfer/decline"),
+                MEMBER,
+                Some(&source),
+                None,
+            )
+            .await
+        }
+    };
+    let (status, body) = across_an_accept_then(&pool, &h, lane, new_owners_offer(&pool, &h)).await;
+    moved(status, &body);
+    assert_eq!(
+        seat_of(&pool, &h.project, MEMBER).await,
+        Some(("admin".into(), true))
+    );
+    transferred_last(&pool, &h).await;
+}
+
+/// A hand-over lane kept from its organization's lock past the role's `lock_timeout` is a 409.
+#[sqlx::test]
+async fn a_handover_lane_kept_waiting_for_its_organization_is_a_conflict(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    lock_timeout_of_a_tier(&pool).await;
+    let mut busy = pool.begin().await.unwrap();
+    telmoni_auth::db::locks::lock_organization(&mut busy, &oid(&h.source))
+        .await
+        .unwrap();
+
+    let (status, body) = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        offer(&pool, &h, OWNER, &h.source, ADMIN),
+    )
+    .await
+    .expect("the offer waited past its lock_timeout");
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        body["detail"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("busy")),
+        "{body}"
+    );
+    busy.rollback().await.unwrap();
+    assert_eq!(
+        seat_of(&pool, &h.project, ADMIN).await,
+        Some(("admin".into(), false))
     );
 }
