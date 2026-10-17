@@ -45,20 +45,6 @@ const nextConfig = {
         source: "/(.*)",
         headers: securityHeaders,
       },
-      // Behind a dev tunnel, the proxy in front of `next dev` caches scripts
-      // and stylesheets by their extension and tells the browser to keep them
-      // for hours, while a dev chunk keeps its name when its contents change:
-      // the page then runs the last change's HTML on the change before's
-      // code. `no-store` keeps every cache out of the way, as the page's own
-      // header already does. Unset, as on every tier, there is no rule.
-      ...(devTunnelHost
-        ? [
-            {
-              source: "/_next/static/:path*",
-              headers: [{ key: "Cache-Control", value: "no-store" }],
-            },
-          ]
-        : []),
     ];
   },
 
