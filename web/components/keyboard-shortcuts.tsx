@@ -27,6 +27,7 @@ import {
   goSequences,
   MODAL_SELECTOR,
   NEXT_KEY,
+  OPEN_KEY,
   PAGE_ACTION_KEY,
   PREVIOUS_KEY,
   pressedKey,
@@ -132,6 +133,11 @@ export function KeyboardShortcuts() {
         (k === NEXT_KEY ? step.next : step.previous)();
         return;
       }
+      if (step?.open && k === OPEN_KEY) {
+        e.preventDefault();
+        step.open();
+        return;
+      }
       // The sheet is the `?` the keyboard types and Search the `/`, whatever
       // Shift took to type them: on a German, Nordic, Spanish, Italian or
       // French keyboard `/` is itself a shifted key, and reading Shift as the
@@ -170,6 +176,9 @@ export function KeyboardShortcuts() {
       ? [
           { label: `Next ${steps.noun}`, chords: [[NEXT_KEY.toUpperCase()]] },
           { label: `Previous ${steps.noun}`, chords: [[PREVIOUS_KEY.toUpperCase()]] },
+          ...(steps.open
+            ? [{ label: `Open or shut the ${steps.noun}`, chords: [[OPEN_KEY.toUpperCase()]] }]
+            : []),
         ]
       : []),
     { label: "Search", chords: letterKeys ? [[modifier, "K"], [SEARCH_KEY]] : [[modifier, "K"]] },

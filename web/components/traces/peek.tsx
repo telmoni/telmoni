@@ -1,15 +1,6 @@
 "use client";
 
-import {
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type PointerEvent as ReactPointerEvent,
-  type ReactNode,
-} from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowDown,
@@ -25,13 +16,13 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useConsoleShell } from "@/components/console-shell";
 import { CopyButton } from "@/components/copy-button";
 import { PanelAction, SidePanel, SidePanelHeader } from "@/components/side-panel";
+import { PanelEdge, usePanelWidth } from "@/components/traces/panel-width";
 import { TraceBody, TraceMeta } from "@/components/traces/trace-view";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { NEXT_KEY, PREVIOUS_KEY } from "@/lib/keys";
 import {
   closePeek,
-  draggedWidth,
   followEntry,
   keepRead,
   openPeek,
@@ -45,7 +36,6 @@ import type { TraceDetail } from "@/lib/server/entities/traces";
 import { summarizeTrace } from "@/lib/trace-tree";
 import { PEEK_PARAM, PEEKED_RUN_LANDED, shortId, traceHref } from "@/lib/traces";
 import { offerPageSteps } from "@/lib/use-page-steps";
-import { setTracePrefs, useTracePrefs } from "@/lib/use-trace-prefs";
 import { cn } from "@/lib/utils";
 
 // A trace opened from the list without leaving it, as Langfuse's peek opens
@@ -121,7 +111,7 @@ export function TracePeek(props: Props) {
 function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: string }) {
   const titleId = useId();
   const panel = useRef<HTMLDivElement>(null);
-  const { peekFull, peekWidth } = useTracePrefs();
+  const { full, width, toggleFull, edge } = usePanelWidth(panel);
   const [version, setVersion] = useState(0);
   const { read, stale } = useTraceRead(
     `/api/traces/${encodeURIComponent(run)}?project=${encodeURIComponent(projectId)}`,
@@ -194,65 +184,16 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
     if (!panel.current?.contains(document.activeElement)) panel.current?.focus({ preventScroll: true });
   }, [trace?.run_id]);
 
-  // Its left edge dragged, as the agent's window is sized by its own
-  // (`agent-window.tsx`): followed as the pointer moves, and kept with the
-  // list's other choices once it lets go — one write a drag.
-  const [dragged, setDragged] = useState<number | null>(null);
-  const drag = useRef<{ pointerId: number; x: number; start: number; width: number | null } | null>(
-    null,
-  );
-  const beginDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || !e.isPrimary || !panel.current) return;
-    e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    const start = panel.current.getBoundingClientRect().width;
-    drag.current = { pointerId: e.pointerId, x: e.clientX, start, width: null };
-  };
-  const trackDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
-    const d = drag.current;
-    const area = panel.current?.parentElement?.getBoundingClientRect().width;
-    if (!d || d.pointerId !== e.pointerId || !area) return;
-    d.width = draggedWidth(d.start, d.x, e.clientX, area);
-    setDragged(d.width);
-  };
-  const endDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
-    const d = drag.current;
-    if (!d || d.pointerId !== e.pointerId) return;
-    drag.current = null;
-    if (d.width !== null) setTracePrefs({ peekWidth: d.width });
-    setDragged(null);
-  };
-  const width = dragged ?? peekWidth;
-
   return (
     <SidePanel
       panel={panel}
       titleId={titleId}
       onClose={close}
-      full={peekFull}
+      full={full}
       width={width}
       returnFocus={openRow}
     >
-      {/* The edge to drag, on the panel's own left edge: a pointer's alone,
-          as the agent window's edges are, Full size being the keyboard's way
-          to more room. A double click puts the panel back at its own width. */}
-      {!peekFull && (
-        <div
-          aria-hidden="true"
-          data-testid="peek-resize"
-          onPointerDown={beginDrag}
-          onPointerMove={trackDrag}
-          onPointerUp={endDrag}
-          onPointerCancel={endDrag}
-          onLostPointerCapture={endDrag}
-          onDoubleClick={() => setTracePrefs({ peekWidth: null })}
-          className={cn(
-            "absolute inset-y-0 left-0 z-10 hidden w-1.5 cursor-ew-resize touch-none md:block",
-            "hover:bg-foreground/10",
-            dragged !== null && "bg-foreground/10",
-          )}
-        />
-      )}
+      <PanelEdge edge={edge} />
       <SidePanelHeader
         icon={ListTree}
         titleId={titleId}
@@ -301,11 +242,11 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
             {/* Named as the agent's window names its own; a phone's width
                 has the panel at full size already. */}
             <PanelAction
-              label={peekFull ? "Exit full size" : "Full size"}
-              onClick={() => setTracePrefs({ peekFull: !peekFull })}
+              label={full ? "Exit full size" : "Full size"}
+              onClick={toggleFull}
               className="max-md:hidden"
             >
-              {peekFull ? <Minimize2 /> : <Maximize2 />}
+              {full ? <Minimize2 /> : <Maximize2 />}
             </PanelAction>
           </>
         }

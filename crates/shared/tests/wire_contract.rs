@@ -9,8 +9,9 @@ use std::path::PathBuf;
 use serde::Serialize;
 use serde_json::{Value, json};
 use telmoni_shared::{
-    ApiKeyScope, ContentMode, Flag, MonitorState, NotificationKind, OrganizationStatus, Role,
-    SessionSort, SortDirection, SpanKind, SpanStatus, TraceColumn, TraceSort, UserSort, slug,
+    ApiKeyScope, ContentMode, Flag, LayoutDepth, LayoutOpen, MonitorState, NotificationKind,
+    OrganizationStatus, Role, SessionSort, SortDirection, SpanKind, SpanStatus, TraceColumn,
+    TraceSort, UserSort, ViewKind, slug,
 };
 
 /// Serialize each variant to its wire string, per the enum's `#[serde(rename_all)]`.
@@ -59,6 +60,9 @@ fn generated_contract() -> Value {
             "SortDirection": wire(&SortDirection::all()),
             "ContentMode": wire(&ContentMode::all()),
             "ApiKeyScope": wire(&ApiKeyScope::all()),
+            "LayoutDepth": wire(&LayoutDepth::all()),
+            "LayoutOpen": wire(&LayoutOpen::all()),
+            "ViewKind": wire(&ViewKind::all()),
             "Flag": wire(&all_variants!(Flag; Connectors, PublicApi, ApiTokens,
                 Members, Signup)),
         },

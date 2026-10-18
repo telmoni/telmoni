@@ -14,7 +14,7 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use telmoni_shared::{ContentMode, ProjectId, SpanKind};
+use telmoni_shared::{ContentMode, ProjectId, SpanKind, ViewKind};
 use telmoni_telemetry::schema::{MIGRATION, statements};
 use telmoni_telemetry::store::{PROJECTS_SETTING, SpanRow};
 
@@ -74,6 +74,23 @@ fn the_content_mode_check_admits_exactly_the_modes_rust_holds() {
         sql.contains(&format!("DEFAULT '{}'", ContentMode::default())),
         "the column's default is not the enum's"
     );
+}
+
+/// The same for a view's kind: a `TEXT` read back through its enum.
+#[test]
+fn the_kind_check_admits_exactly_what_rust_holds() {
+    let sql = postgres_migration();
+    let admitted = |constraint: &str| -> BTreeSet<String> {
+        check_body(&sql, constraint)
+            .split('\'')
+            .skip(1)
+            .step_by(2)
+            .map(ToOwned::to_owned)
+            .collect()
+    };
+    let kinds: BTreeSet<String> = ViewKind::all().iter().map(ToString::to_string).collect();
+    assert_eq!(admitted("trace_views_kind_check"), kinds);
+    assert!(sql.contains(&format!("DEFAULT '{}'", ViewKind::default())));
 }
 
 /// ClickHouse's HTTP interface takes a statement at a time, and `migrate`

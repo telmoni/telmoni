@@ -50,6 +50,10 @@ CREATE TABLE telemetry.project_settings (
     hashing_key_nonce       BYTEA,
     hashing_key_wrapped_dek BYTEA,
     hashing_key_version     SMALLINT,
+    -- The saved layout its sessions and traces open in, which stands until
+    -- it is deleted and the console's own default holds again (the key,
+    -- below the views); none for the default.
+    session_view_id         UUID,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT project_settings_content_mode_check CHECK (content_mode IN ('off', 'on', 'sealed')),
     -- The key is there whole or not at all.
@@ -60,6 +64,9 @@ CREATE TABLE telemetry.project_settings (
 );
 
 CREATE INDEX project_settings_organization_idx ON telemetry.project_settings (organization_id);
+-- The key a deleted layout's SET NULL follows (the rule at `monitors_organization_idx`).
+CREATE INDEX project_settings_session_view_idx ON telemetry.project_settings (session_view_id)
+    WHERE session_view_id IS NOT NULL;
 
 ALTER TABLE telemetry.project_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE telemetry.project_settings FORCE ROW LEVEL SECURITY;
@@ -93,28 +100,35 @@ GRANT UPDATE (organization_id) ON telemetry.project_settings TO telemetry_mainte
 -- 2. SAVED VIEWS
 -- ══════════════════════════════════════════════════════════════════════════════
 -- A project's trace list as somebody left it, under a name: its filters, sort
--- and window as the list's query takes them, and the columns it showed. Every
--- role on the project applies one; its owners and admins save them. Filed under
--- the project alone: the purges find a project by its settings row, which the
+-- and window as the list's query takes them, and the columns it showed
+-- (`kind` = 'list'); or a layout of a session's page and a trace's, its
+-- options and the columns a trace shows (`kind` = 'layout'). Every role on
+-- the project applies one; its owners and admins save them. Filed under the
+-- project alone: the purges find a project by its settings row, which the
 -- first view saved makes where the project has none.
 CREATE TABLE telemetry.trace_views (
     id          UUID        PRIMARY KEY,
     project_id  TEXT        NOT NULL,
+    kind        TEXT        NOT NULL DEFAULT 'list',
     name        TEXT        NOT NULL,
-    -- The list's query, each filter's values a list (`{"agent": ["…"],
-    -- "sort": "tokens", "days": 30}`); the lane checks it as the list would.
+    -- A list's query, each filter's values a list (`{"agent": ["…"],
+    -- "sort": "tokens", "days": 30}`), or a layout's options (`{"depth":
+    -- "calls", "open": "failed", …}`); the lane checks each as its page
+    -- would read it.
     query       JSONB       NOT NULL,
     -- The columns shown, by `TraceColumn`'s words, in the list's order.
     columns     TEXT[]      NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT trace_views_kind_check CHECK (kind IN ('list', 'layout')),
     CONSTRAINT trace_views_name_check CHECK (char_length(name) BETWEEN 1 AND 60),
     CONSTRAINT trace_views_query_check CHECK (jsonb_typeof(query) = 'object')
 );
 
--- One name per view in a project, whatever its case: a menu that offered two
--- "Errors" would make a person guess.
-CREATE UNIQUE INDEX trace_views_project_name_idx ON telemetry.trace_views (project_id, lower(name));
+-- One name per view of a kind in a project, whatever its case: a menu that
+-- offered two "Errors" would make a person guess.
+CREATE UNIQUE INDEX trace_views_project_name_idx
+    ON telemetry.trace_views (project_id, kind, lower(name));
 
 ALTER TABLE telemetry.trace_views ENABLE ROW LEVEL SECURITY;
 ALTER TABLE telemetry.trace_views FORCE ROW LEVEL SECURITY;
@@ -131,6 +145,13 @@ CREATE POLICY maintenance_access ON telemetry.trace_views
 -- The purges delete a deleted project's views, and those of an organization's
 -- projects. A transfer moves nothing: a view names no organization.
 GRANT SELECT, DELETE ON telemetry.trace_views TO telemetry_maintenance;
+
+-- A project's default layout, where it is a saved one: deleted, the project
+-- opens in its preset again. The action runs as the table's owner, so no
+-- role needs a grant on the column for it.
+ALTER TABLE telemetry.project_settings
+    ADD CONSTRAINT project_settings_session_view_fkey
+    FOREIGN KEY (session_view_id) REFERENCES telemetry.trace_views (id) ON DELETE SET NULL;
 
 
 -- ══════════════════════════════════════════════════════════════════════════════

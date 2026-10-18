@@ -1,4 +1,4 @@
-import type { SessionQuery } from "@/lib/server/entities/sessions";
+import type { SessionQuery, SessionTrace } from "@/lib/server/entities/sessions";
 import { SessionSort, SortDirection } from "@/lib/types/enums";
 
 import {
@@ -82,4 +82,26 @@ export function nextSessionSort(
   column: SessionSort,
 ): { sort: SessionSort; dir: SortDirection } {
   return sortAfterClick(SESSION_COLUMNS, DEFAULT_SORT, query, column);
+}
+
+/** What a session's traces add up to, as its page and its panel show them:
+ *  the user the first run that named one was with; the runs with a span that
+ *  failed, a run that recovered from a failed call among them, as the list
+ *  counts; their steps and tokens; and when the last run ended. */
+export function sessionSums(traces: readonly SessionTrace[]): {
+  user: string;
+  errors: number;
+  steps: number;
+  inputTokens: number;
+  outputTokens: number;
+  lastEnded: string;
+} {
+  return {
+    user: traces.find((t) => t.user_id)?.user_id ?? "",
+    errors: traces.filter((t) => t.errors > 0).length,
+    steps: traces.reduce((sum, t) => sum + t.steps, 0),
+    inputTokens: traces.reduce((sum, t) => sum + t.input_tokens, 0),
+    outputTokens: traces.reduce((sum, t) => sum + t.output_tokens, 0),
+    lastEnded: traces.reduce((latest, t) => (t.ended_at > latest ? t.ended_at : latest), ""),
+  };
 }

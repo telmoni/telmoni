@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { DEFAULT_COLUMNS } from "@/lib/traces";
 
-import { DEFAULT_PREFS, orderedColumns, readPrefs, refreshLabel } from "./trace-prefs";
+import { DEFAULT_LAYOUT } from "./layout";
+import { DEFAULT_PREFS, readPrefs, refreshLabel } from "./trace-prefs";
+
+/** The default customized to steps and calls, as a kept layout might be. */
+const COMPLEX = { ...DEFAULT_LAYOUT, depth: "calls" as const, open: "failed" as const, timeline: true };
 
 describe("what a browser kept of the trace list's look", () => {
   it("reads every choice, the columns in the list's order", () => {
@@ -15,6 +19,7 @@ describe("what a browser kept of the trace list's look", () => {
           filters: false,
           peekFull: true,
           peekWidth: 720,
+          layout: { view: null, options: COMPLEX },
         }),
       ),
     ).toEqual({
@@ -24,6 +29,7 @@ describe("what a browser kept of the trace list's look", () => {
       filters: false,
       peekFull: true,
       peekWidth: 720,
+      layout: { view: null, options: COMPLEX },
     });
   });
 
@@ -40,6 +46,7 @@ describe("what a browser kept of the trace list's look", () => {
           filters: "yes",
           peekFull: 1,
           peekWidth: 12.5,
+          layout: { view: null, options: {} },
         }),
       ),
     ).toEqual({ ...DEFAULT_PREFS, columns: ["agent"] });
@@ -51,11 +58,6 @@ describe("what a browser kept of the trace list's look", () => {
       columns: DEFAULT_COLUMNS,
       density: "compact",
     });
-  });
-
-  it("orders columns as the list does, each once", () => {
-    expect(orderedColumns(["tools", "agent", "agent", "run_id"])).toEqual(["agent", "tools"]);
-    expect(orderedColumns([])).toEqual([]);
   });
 
   it("says how often the page reads itself again", () => {

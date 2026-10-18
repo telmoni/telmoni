@@ -17,7 +17,7 @@ use clickhouse::Row;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use telmoni_shared::{SortDirection, SpanStatus, TraceSort};
+use telmoni_shared::{SortDirection, SpanKind, SpanStatus, TraceSort};
 
 use crate::store::{Projects, Read, SpanRow, Store, text};
 
@@ -46,6 +46,12 @@ pub const EXPORT_MAX: u32 = 10_000;
 /// The most runs a download names by id: the rows chosen on one page, which
 /// the console shows a hundred at a time at most.
 pub const RUNS_MAX: usize = 100;
+/// The most span names a layout pins: the intermediate steps a reviewer
+/// checks under each trace, few enough to read without opening it.
+pub const PINNED_MAX: usize = 8;
+/// The most pinned spans one trace shows: a step a loop ran again and again
+/// is read in the trace itself.
+pub const PINNED_PER_RUN: u32 = 32;
 
 /// A window of days and a cap on rows: what the users and sessions pages are
 /// read by, each one aggregation over the spans of those days and never the
@@ -125,6 +131,9 @@ pub struct TraceRow {
     /// How it ended.
     #[serde(with = "text")]
     pub status: SpanStatus,
+    /// The class of the error its own span ended on, never its message;
+    /// empty otherwise, and until that span arrives.
+    pub error_type: String,
     /// Its first span's start.
     #[serde(with = "clickhouse::serde::chrono::datetime64::micros")]
     pub started_at: DateTime<Utc>,
@@ -175,6 +184,30 @@ pub struct FacetRow {
     pub value: String,
     /// How many runs carry it.
     pub runs: u64,
+}
+
+/// One span a layout pinned by name, as a session's page shows it under a
+/// trace: enough to read without opening the trace.
+#[derive(Debug, Clone, PartialEq, Eq, Row, Serialize, Deserialize)]
+pub struct PinnedRow {
+    /// The run it belongs to.
+    #[serde(with = "clickhouse::serde::uuid")]
+    pub run_id: Uuid,
+    pub span_id: String,
+    pub parent_span_id: String,
+    #[serde(with = "text")]
+    pub kind: SpanKind,
+    pub name: String,
+    #[serde(with = "clickhouse::serde::chrono::datetime64::micros")]
+    pub started_at: DateTime<Utc>,
+    #[serde(with = "clickhouse::serde::chrono::datetime64::micros")]
+    pub ended_at: DateTime<Utc>,
+    #[serde(with = "text")]
+    pub status: SpanStatus,
+    pub error_type: String,
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
 }
 
 /// One bar of the histogram as the read answers it: the runs that started in
@@ -231,6 +264,7 @@ macro_rules! run_sums {
             "toUInt8(countIf(kind = 'run') > 0) AS run_ended, ",
             "if(countIf(kind = 'run') > 0, anyIf(status, kind = 'run'), ",
             "if(countIf(status = 'error') > 0, 'error', 'ok')) AS run_status, ",
+            "anyIf(error_type, kind = 'run') AS run_error_type, ",
             "min(started_at) AS first_started_at, max(ended_at) AS last_ended_at, ",
             "greatest(dateDiff('millisecond', first_started_at, last_ended_at), 0) AS duration_ms, ",
             "count() AS spans, countIf(kind = 'step') AS steps, ",
@@ -290,6 +324,7 @@ macro_rules! list_sql {
         concat!(
             "SELECT run_id, run_agent AS agent, run_user_id AS user_id, ",
             "run_session_id AS session_id, run_ended AS ended, run_status AS status, ",
+            "run_error_type AS error_type, ",
             "first_started_at AS started_at, last_ended_at AS ended_at, duration_ms, ",
             "spans, steps, model_calls, tool_calls, errors, ",
             "input_total AS input_tokens, output_total AS output_tokens, ",
@@ -424,6 +459,19 @@ const SPANS_SQL: &str = "SELECT project_id, received_at, units, run_id, agent, t
      WHERE project_id IN {projects:Array(String)} AND run_id = {run:UUID} \
      ORDER BY started_at, ended_at DESC, span_id \
      LIMIT {limit:UInt32}";
+
+/// The spans a layout pinned by name under the runs a session's page lists,
+/// in the order they started within each run, up to [`PINNED_PER_RUN`] a
+/// run; of two that started together, the one that ended later first, as a
+/// trace's spans are read.
+const PINNED_SQL: &str = "SELECT run_id, span_id, parent_span_id, kind, name, started_at, \
+     ended_at, status, error_type, model, input_tokens, output_tokens \
+     FROM telemetry.spans \
+     WHERE project_id IN {projects:Array(String)} \
+     AND received_at >= now64(6) - toIntervalDay({days:UInt16}) \
+     AND has({runs:Array(UUID)}, run_id) AND has({names:Array(String)}, name) \
+     ORDER BY run_id, started_at, ended_at DESC, span_id \
+     LIMIT {per_run:UInt32} BY run_id";
 
 /// `read` with the filter's every value bound: each read binds them all,
 /// since each names them all.
@@ -584,6 +632,33 @@ pub fn bars(
     drawn
 }
 
+/// The spans named by `names` under the runs `runs` names, in `projects` and
+/// within `days`: what a session's page shows under each trace while it is
+/// shut. Nothing for no names, and nothing for no runs.
+///
+/// # Errors
+///
+/// ClickHouse did not answer, or refused the read.
+pub async fn pinned(
+    store: &Store,
+    projects: &Projects,
+    runs: &[Uuid],
+    names: &[String],
+    days: u16,
+) -> clickhouse::error::Result<Vec<PinnedRow>> {
+    if runs.is_empty() || names.is_empty() {
+        return Ok(Vec::new());
+    }
+    store
+        .read(projects, PINNED_SQL)
+        .param("days", days)
+        .param("runs", runs)
+        .param("names", names)
+        .param("per_run", PINNED_PER_RUN)
+        .fetch_all()
+        .await
+}
+
 /// The spans of run `run_id` in `projects`, in the order they started: up
 /// to `limit` of them, and none for a run the projects do not hold.
 ///
@@ -658,6 +733,31 @@ mod tests {
         }
         assert!(SPANS_SQL.contains(PROJECTS_PARAM));
         assert!(SPANS_SQL.contains("{run:UUID}"));
+    }
+
+    /// Each row of the list carries the class of error its run ended on,
+    /// read off the run's own span and never a call's.
+    #[test]
+    fn the_list_reads_the_runs_own_error_class() {
+        let sql = list_sql(TraceSort::Started, SortDirection::Desc);
+        assert!(sql.contains("anyIf(error_type, kind = 'run') AS run_error_type"));
+        assert!(sql.contains("run_error_type AS error_type"));
+    }
+
+    /// The pinned spans are read under the projects, the window, the runs
+    /// listed and the names pinned, a run's capped.
+    #[test]
+    fn the_pinned_spans_bind_the_runs_and_the_names() {
+        assert!(PINNED_SQL.contains(PROJECTS_PARAM));
+        for param in [
+            "{days:UInt16}",
+            "{runs:Array(UUID)}",
+            "{names:Array(String)}",
+            "{per_run:UInt32} BY run_id",
+        ] {
+            assert!(PINNED_SQL.contains(param), "lacks {param}");
+        }
+        assert!(!PINNED_SQL.to_ascii_lowercase().contains(" settings "));
     }
 
     /// The count, the histogram and the facets read the same window under

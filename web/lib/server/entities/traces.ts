@@ -6,11 +6,14 @@ import { env } from "@/lib/env";
 import { queryString } from "@/lib/list-query";
 import { logger } from "@/lib/logger";
 import {
+  LayoutDepth,
+  LayoutOpen,
   SortDirection,
   SpanKind,
   SpanStatus,
   TraceColumn,
   TraceSort,
+  ViewKind,
 } from "@/lib/types/enums";
 
 import { identityContext, projectHeaders } from "./identity-context";
@@ -26,6 +29,9 @@ export const TraceSchema = z.object({
   session_id: z.string(),
   ended: z.boolean(),
   status: z.enum(SpanStatus),
+  /** The class of the error the run's own span ended on, never its
+   *  message; empty otherwise. */
+  error_type: z.string(),
   started_at: z.string(),
   ended_at: z.string(),
   duration_ms: z.number(),
@@ -96,8 +102,9 @@ const TraceHistogramSchema = z.object({
 });
 export type TraceHistogram = z.infer<typeof TraceHistogramSchema>;
 
-// A saved view's query: the list's, each filter's values a list.
-export const ViewQuerySchema = z.object({
+// A saved view's query: the list's, each filter's values a list, and no
+// key the list does not take, as the server refuses one.
+export const ViewQuerySchema = z.strictObject({
   agent: z.array(z.string()).optional(),
   user: z.array(z.string()).optional(),
   session: z.array(z.string()).optional(),
@@ -111,19 +118,59 @@ export const ViewQuerySchema = z.object({
 });
 export type ViewQuery = z.infer<typeof ViewQuerySchema>;
 
-// One of the project's saved views: the list's query and the columns it
-// showed, under a name.
-export const TraceViewSchema = z.object({
+// The calls a layout shows: by kind, by how they ended and by name, any
+// value of each admitting a call, and a list left out every call.
+export const LayoutFilterSchema = z.strictObject({
+  kind: z.array(z.enum(SpanKind)).optional(),
+  status: z.array(z.enum(SpanStatus)).optional(),
+  name: z.array(z.string()).optional(),
+});
+
+// A layout of a session's page and a trace's, as a saved layout's `query`
+// holds it, its columns beside it (`lib/layout.ts` reads both as one).
+export const LayoutQuerySchema = z.strictObject({
+  depth: z.enum(LayoutDepth),
+  open: z.enum(LayoutOpen),
+  timeline: z.boolean(),
+  pinned: z.array(z.string()).optional(),
+  filter: LayoutFilterSchema,
+  messages: z.boolean(),
+  scores: z.boolean(),
+});
+export type LayoutQuery = z.infer<typeof LayoutQuerySchema>;
+
+const SavedViewSchema = z.object({
   id: z.string(),
   name: z.string(),
-  query: ViewQuerySchema,
   columns: z.array(z.enum(TraceColumn)),
   created_at: z.string(),
   updated_at: z.string(),
 });
+
+// One of the project's saved views of the list: its query and the columns it
+// showed, under a name.
+export const TraceViewSchema = SavedViewSchema.extend({
+  kind: z.literal(ViewKind.List),
+  query: ViewQuerySchema,
+});
 export type TraceView = z.infer<typeof TraceViewSchema>;
 
+// One of the project's saved layouts: a layout's options and the columns a
+// trace shows, under a name.
+export const TraceLayoutSchema = SavedViewSchema.extend({
+  kind: z.literal(ViewKind.Layout),
+  query: LayoutQuerySchema,
+});
+export type TraceLayout = z.infer<typeof TraceLayoutSchema>;
+
+/** A saved view of either kind, as a save answers it. */
+export const SavedViewOfAnyKindSchema = z.discriminatedUnion("kind", [
+  TraceViewSchema,
+  TraceLayoutSchema,
+]);
+
 const TraceViewListSchema = z.object({ views: z.array(TraceViewSchema) });
+const TraceLayoutListSchema = z.object({ views: z.array(TraceLayoutSchema) });
 
 // One span of a trace, as the server answers it: the row with its maps as
 // objects and its times as text.
@@ -216,6 +263,11 @@ export type HistogramAccess =
 
 export type ViewsAccess =
   | { kind: "ok"; views: TraceView[] }
+  | { kind: "forbidden" }
+  | { kind: "unavailable" };
+
+export type LayoutsAccess =
+  | { kind: "ok"; layouts: TraceLayout[] }
   | { kind: "forbidden" }
   | { kind: "unavailable" };
 
@@ -314,8 +366,24 @@ export const fetchTraceHistogram = cache(
 
 /** The project's saved views of the list, by name. */
 export const fetchTraceViews = cache(async (projectId: string): Promise<ViewsAccess> => {
-  const read = await readLane("fetchTraceViews", projectId, "/views", TraceViewListSchema);
+  const read = await readLane(
+    "fetchTraceViews",
+    projectId,
+    `/views?kind=${ViewKind.List}`,
+    TraceViewListSchema,
+  );
   return read.kind === "ok" ? { kind: "ok", views: read.value.views } : read;
+});
+
+/** The project's saved layouts of a session's page and a trace's, by name. */
+export const fetchTraceLayouts = cache(async (projectId: string): Promise<LayoutsAccess> => {
+  const read = await readLane(
+    "fetchTraceLayouts",
+    projectId,
+    `/views?kind=${ViewKind.Layout}`,
+    TraceLayoutListSchema,
+  );
+  return read.kind === "ok" ? { kind: "ok", layouts: read.value.views } : read;
 });
 
 /** The list as a file: every trace the filters admit, sorted as the page is,

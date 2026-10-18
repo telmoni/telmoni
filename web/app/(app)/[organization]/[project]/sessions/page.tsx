@@ -7,15 +7,20 @@ import { LocalTime } from "@/components/local-time";
 import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { SortHeading } from "@/components/sort-heading";
+import { SessionLink } from "@/components/traces/session-link";
+import { SessionPeek } from "@/components/traces/session-peek";
 import { Card } from "@/components/ui/card";
 import { WindowPicker } from "@/components/window-picker";
 import { ownerContact } from "@/lib/identity";
 import { LIST_DIMS_WHILE_PENDING } from "@/lib/list-pending";
 import { MAX_LIMIT, type SearchParams } from "@/lib/list-query";
+import { administersProject } from "@/lib/project-role";
 import {
   activeOrganization,
   fetchProjectBySlug,
+  fetchSessionLayout,
   fetchSessions,
+  fetchTraceLayouts,
   getServerContext,
   type SessionQuery,
   type SessionRow,
@@ -36,8 +41,10 @@ export const metadata = { title: "Sessions" };
 // The sessions list: a row per session this project's agents took part in
 // within a window of days, by the id the application gave it, with the user
 // it was with and what its runs added up to. Every column is a sort, carried
-// in the URL; a session opens its own page, a replay of its runs in metadata.
-// Nothing here is a message: the server sums spans.
+// in the URL; a session opens beside the list, in the console's side panel
+// (`components/traces/session-peek.tsx`), a replay of its runs in metadata,
+// and has a page of its own. Nothing here is a message: the server sums
+// spans.
 export default async function SessionsPage({
   params,
   searchParams,
@@ -50,7 +57,12 @@ export default async function SessionsPage({
   const [gate, project] = await Promise.all([getServerContext(), fetchProjectBySlug(slug)]);
   if (!gate || !project) return <ServiceUnavailable />;
 
-  const access = await fetchSessions(project.id, query);
+  // The layouts and the project's default, for the session the panel opens.
+  const [access, setting, layouts] = await Promise.all([
+    fetchSessions(project.id, query),
+    fetchSessionLayout(project.id),
+    fetchTraceLayouts(project.id),
+  ]);
   if (access.kind === "unavailable") return <ServiceUnavailable />;
   if (access.kind === "forbidden") {
     return (
@@ -78,7 +90,7 @@ export default async function SessionsPage({
           <p className="text-sm text-muted-foreground">
             Every session this project&rsquo;s agents took part in, last heard from first, with the
             user it was with and its traces, errors, steps and tokens. Click a session to replay
-            its runs; click a heading to sort by it.
+            its runs beside the list; click a heading to sort by it.
           </p>
 
           <div>
@@ -151,6 +163,16 @@ export default async function SessionsPage({
           )}
         </section>
       </div>
+      <SessionPeek
+        organization={organization}
+        slug={slug}
+        projectId={project.id}
+        sessions={list.sessions.map((s) => s.session_id)}
+        window={{ days: query.days, limit: query.limit }}
+        layouts={layouts.kind === "ok" ? layouts.layouts : null}
+        project={setting}
+        canSave={administersProject(project.role)}
+      />
     </>
   );
 }
@@ -167,9 +189,9 @@ function SessionTableRow({
   return (
     <tr>
       <Td className="max-w-64 truncate font-mono text-xs" title={session.session_id}>
-        <Link href={open} className="underline-offset-4 hover:underline">
+        <SessionLink sessionId={session.session_id} href={open}>
           {session.session_id}
-        </Link>
+        </SessionLink>
       </Td>
       <Td className="max-w-48 truncate font-mono text-xs" title={session.user_id || undefined}>
         {session.user_id ? (

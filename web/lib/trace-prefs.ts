@@ -1,14 +1,16 @@
+import { readLayoutChoice, type LayoutChoice } from "@/lib/layout";
 import { PEEK_WIDTH_MIN } from "@/lib/peek";
-import { DEFAULT_COLUMNS, TRACE_COLUMNS } from "@/lib/traces";
+import { DEFAULT_COLUMNS, orderedColumns } from "@/lib/traces";
 import type { TraceColumn } from "@/lib/types/enums";
 
 // What a person chose of the trace list's look, kept in their own browser as
 // Langfuse keeps a table's columns: which columns show, how tightly the rows
 // sit, how often the page reads itself again, whether the filters stand
-// beside it, and how wide a trace opened from it stands, full size or
-// dragged. None of it is the list's state — a link a colleague opens shows
-// their own columns — so none of it is in the URL; a saved view carries its
-// columns with it, and applying one sets them here.
+// beside it, how wide a trace opened from it stands, full size or dragged,
+// and the layout they last chose for a session's page and a trace's. None
+// of it is the list's state — a link a colleague opens shows their own
+// columns — so none of it is in the URL; a saved view carries its columns
+// with it, and applying one sets them here.
 
 /** How tightly the rows sit. */
 export const DENSITIES = ["comfortable", "compact"] as const;
@@ -30,6 +32,10 @@ export type TracePrefs = {
   /** How wide, in pixels, the person dragged that panel beside the list;
    *  `null` for its own width. */
   peekWidth: number | null;
+  /** The layout a session's page and a trace's last opened in, with its
+   *  options (`lib/layout.ts`); `null` until one is chosen, when the
+   *  project's default holds. */
+  layout: LayoutChoice | null;
 };
 
 export const DEFAULT_PREFS: TracePrefs = {
@@ -39,6 +45,7 @@ export const DEFAULT_PREFS: TracePrefs = {
   filters: true,
   peekFull: false,
   peekWidth: null,
+  layout: null,
 };
 
 /** A dragged width this build keeps: whole pixels, no narrower than a drag
@@ -55,12 +62,6 @@ function keptWidth(value: unknown): number | null {
 
 /** Where the browser keeps them. */
 export const TRACE_PREFS_KEY = "telmoni-traces";
-
-/** `columns` as the table shows them: each a column of the list, once, in
- *  the list's order, whatever order they were picked in. */
-export function orderedColumns(columns: readonly string[]): TraceColumn[] {
-  return TRACE_COLUMNS.filter((c) => columns.includes(c.key)).map((c) => c.key);
-}
 
 /** What the browser kept, read: a value this build does not know — an older
  *  spelling, a column since renamed, storage edited by hand — falls back to
@@ -89,6 +90,7 @@ export function readPrefs(stored: string | null): TracePrefs {
     filters: typeof kept.filters === "boolean" ? kept.filters : DEFAULT_PREFS.filters,
     peekFull: typeof kept.peekFull === "boolean" ? kept.peekFull : DEFAULT_PREFS.peekFull,
     peekWidth: keptWidth(kept.peekWidth),
+    layout: readLayoutChoice(kept.layout),
   };
 }
 

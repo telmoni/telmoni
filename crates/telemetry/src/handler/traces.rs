@@ -215,7 +215,11 @@ impl TraceQuery {
 
 /// A filter's values, trimmed: an empty one dropped, as a form's untouched
 /// field, and one given twice read once.
-fn values(name: &str, given: &[String], max: usize) -> Result<Vec<String>, TelmoniError> {
+pub(crate) fn values(
+    name: &str,
+    given: &[String],
+    max: usize,
+) -> Result<Vec<String>, TelmoniError> {
     let mut kept: Vec<String> = Vec::new();
     for value in given {
         let value = value.trim();
@@ -371,6 +375,9 @@ pub struct Trace {
     /// Whether the run's own span has arrived.
     pub ended: bool,
     pub status: SpanStatus,
+    /// The class of the error the run's own span ended on, never its
+    /// message; empty otherwise.
+    pub error_type: String,
     pub started_at: DateTime<Utc>,
     pub ended_at: DateTime<Utc>,
     pub duration_ms: i64,
@@ -396,6 +403,7 @@ impl From<TraceRow> for Trace {
             session_id: row.session_id,
             ended: row.ended != 0,
             status: row.status,
+            error_type: row.error_type,
             started_at: row.started_at,
             ended_at: row.ended_at,
             duration_ms: row.duration_ms,
@@ -415,13 +423,14 @@ impl From<TraceRow> for Trace {
 }
 
 /// A download's header row: the list's fields, in its order.
-const CSV_HEADER: [&str; 20] = [
+const CSV_HEADER: [&str; 21] = [
     "run_id",
     "agent",
     "user_id",
     "session_id",
     "ended",
     "status",
+    "error_type",
     "started_at",
     "ended_at",
     "duration_ms",
@@ -441,7 +450,7 @@ const CSV_HEADER: [&str; 20] = [
 impl Trace {
     /// The row a download writes for it, under [`CSV_HEADER`]: its times as
     /// RFC 3339, and its models and tools each one cell, `; ` between them.
-    fn cells(&self) -> [String; 20] {
+    fn cells(&self) -> [String; 21] {
         let time = |t: &DateTime<Utc>| t.to_rfc3339_opts(SecondsFormat::Micros, true);
         [
             self.run_id.to_string(),
@@ -450,6 +459,7 @@ impl Trace {
             self.session_id.clone(),
             self.ended.to_string(),
             self.status.to_string(),
+            self.error_type.clone(),
             time(&self.started_at),
             time(&self.ended_at),
             self.duration_ms.to_string(),
@@ -1049,6 +1059,7 @@ mod tests {
             session_id: "thread, 42".into(),
             ended: true,
             status: SpanStatus::Error,
+            error_type: "RuntimeError".into(),
             started_at: DateTime::from_timestamp_millis(1_791_721_800_000).expect("a time"),
             ended_at: DateTime::from_timestamp_millis(1_791_721_801_500).expect("a time"),
             duration_ms: 1_500,
@@ -1068,7 +1079,7 @@ mod tests {
         csv::row(&mut out, &trace.cells());
         let line = String::from_utf8(out).expect("UTF-8");
         assert!(line.starts_with(
-            "00000000-0000-0000-0000-000000000000,\"'=cmd\",,\"thread, 42\",true,error,"
+            "00000000-0000-0000-0000-000000000000,\"'=cmd\",,\"thread, 42\",true,error,RuntimeError,"
         ));
         assert!(line.contains("2026-10-11T12:30:00.000000Z,2026-10-11T12:30:01.500000Z,1500,"));
         assert!(line.ends_with(",a; b,\r\n"));

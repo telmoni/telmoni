@@ -20,6 +20,7 @@ import {
   queryOfView,
   shortId,
   showsView,
+  orderedColumns,
   timelineBars,
   toggled,
   traceHref,
@@ -62,6 +63,7 @@ function span(over: Partial<TraceSpan> & Pick<TraceSpan, "span_id" | "kind">): T
 
 const VIEW: TraceView = {
   id: "0b6f2c1e-6a4f-4d2b-9e3a-5c7d8e9f0a1b",
+  kind: "list",
   name: "Errors",
   query: { status: ["error"], agent: ["support-bot", "zeta"], sort: "duration", days: 30 },
   columns: [TraceColumn.Started, TraceColumn.Duration],
@@ -191,6 +193,11 @@ describe("the URL as the list's state", () => {
     for (const column of TRACE_COLUMNS) {
       expect(Boolean(column.sort) === Boolean(column.first), column.key).toBe(true);
     }
+  });
+
+  it("orders columns as the list does, each once", () => {
+    expect(orderedColumns(["tools", "agent", "agent", "run_id"])).toEqual(["agent", "tools"]);
+    expect(orderedColumns([])).toEqual([]);
   });
 
   it("files the columns menu as the table's order, the counts and the tokens each one group", () => {

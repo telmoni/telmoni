@@ -18,6 +18,7 @@ import {
   fetchTrace,
   fetchTraceFacets,
   fetchTraceHistogram,
+  fetchTraceLayouts,
   fetchTraces,
   fetchTraceViews,
   traceDownload,
@@ -33,6 +34,7 @@ const TRACE = {
   session_id: "conv-1",
   ended: true,
   status: "ok",
+  error_type: "",
   started_at: "2026-10-11T03:00:00Z",
   ended_at: "2026-10-11T03:00:02Z",
   duration_ms: 2000,
@@ -96,7 +98,26 @@ const HISTOGRAM = {
   ],
 };
 
+const LAYOUT = {
+  id: "7c1e0b6f-6a4f-4d2b-9e3a-5c7d8e9f0a1b",
+  kind: "layout",
+  name: "Review",
+  query: {
+    depth: "calls",
+    open: "failed",
+    timeline: true,
+    pinned: ["plan"],
+    filter: { kind: ["tool_call"] },
+    messages: false,
+    scores: true,
+  },
+  columns: ["started", "error_type"],
+  created_at: "2026-10-17T00:00:00Z",
+  updated_at: "2026-10-17T00:00:00Z",
+};
+
 const VIEW = {
+  kind: "list",
   id: "0b6f2c1e-6a4f-4d2b-9e3a-5c7d8e9f0a1b",
   name: "Errors",
   query: { status: ["error"], sort: "duration" },
@@ -200,11 +221,23 @@ describe("the reads beside the list", () => {
     );
   });
 
-  it("reads the project's saved views", async () => {
+  it("reads the project's saved views of the list, and its layouts apart from them", async () => {
     answer(200, { views: [VIEW] });
     expect(await fetchTraceViews(PROJECT)).toEqual({ kind: "ok", views: [VIEW] });
     const [url] = fetchWithTimeout.mock.calls[0];
-    expect(url).toBe("http://server/internal/telemetry/views");
+    expect(url).toBe("http://server/internal/telemetry/views?kind=list");
+
+    answer(200, { views: [LAYOUT] });
+    expect(await fetchTraceLayouts(PROJECT)).toEqual({ kind: "ok", layouts: [LAYOUT] });
+    expect(fetchWithTimeout.mock.calls[1][0]).toBe(
+      "http://server/internal/telemetry/views?kind=layout",
+    );
+    // A layout among the list's views, or a view among the layouts, is an
+    // answer this console cannot read.
+    answer(200, { views: [LAYOUT] });
+    expect(await fetchTraceViews(PROJECT)).toEqual({ kind: "unavailable" });
+    answer(200, { views: [{ ...LAYOUT, query: { ...LAYOUT.query, depth: "spans" } }] });
+    expect(await fetchTraceLayouts(PROJECT)).toEqual({ kind: "unavailable" });
   });
 
   it("reads a refusal as forbidden, and a shape it cannot read as unavailable", async () => {

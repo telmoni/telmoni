@@ -17,6 +17,16 @@
       "members",
       "signup"
     ],
+    "LayoutDepth": [
+      "trace",
+      "steps",
+      "calls"
+    ],
+    "LayoutOpen": [
+      "none",
+      "failed",
+      "all"
+    ],
     "MonitorState": [
       "failed",
       "stalled",
@@ -79,6 +89,7 @@
       "user",
       "session",
       "status",
+      "error_type",
       "steps",
       "model_calls",
       "tool_calls",
@@ -116,6 +127,10 @@
       "tokens",
       "first_seen",
       "last_seen"
+    ],
+    "ViewKind": [
+      "list",
+      "layout"
     ]
   },
   "flags": {

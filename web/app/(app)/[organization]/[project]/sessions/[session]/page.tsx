@@ -1,35 +1,42 @@
 import Link from "next/link";
 
 import { AccessDenied } from "@/components/access-denied";
-import { DataTable, THead, Th, Td } from "@/components/data-table";
 import { LocalTime } from "@/components/local-time";
 import { PageHeader } from "@/components/page-header";
 import { Row, Rows } from "@/components/rows";
 import { Section } from "@/components/section";
 import { ServiceUnavailable } from "@/components/service-unavailable";
-import { TraceStatusBadge } from "@/components/trace-status-badge";
+import { LayoutControls } from "@/components/traces/layout-controls";
+import { SessionRuns } from "@/components/traces/session-runs";
 import { Card } from "@/components/ui/card";
 import { WindowPicker } from "@/components/window-picker";
 import { ownerContact } from "@/lib/identity";
+import { parseLayoutUi, resolveLayout } from "@/lib/layout";
 import { MAX_LIMIT, parseWindow, type SearchParams } from "@/lib/list-query";
+import { administersProject } from "@/lib/project-role";
 import {
   activeOrganization,
   fetchProjectBySlug,
   fetchSession,
+  fetchSessionLayout,
+  fetchTraceLayouts,
   getServerContext,
-  type Trace,
 } from "@/lib/server/data";
-import { sessionHref, sessionsHref } from "@/lib/sessions";
+import { sessionHref, sessionSums, sessionsHref } from "@/lib/sessions";
 import { projectPath } from "@/lib/slug";
-import { formatCount, formatDuration, shortId, traceHref, tracesHref } from "@/lib/traces";
+import { formatCount, tracesHref } from "@/lib/traces";
 
 export const metadata = { title: "Session" };
 
 // One session: its runs in the window, in the order they ran, each summed as
-// the trace list sums it — a replay in metadata, never a message. The session
-// id is the application's own text, up to 200 characters: the path carries it
-// URL-encoded, and Next hands it here decoded, as the fetcher re-encodes it
-// for the server.
+// the trace list sums it — a replay in metadata, never a message — under the
+// layout the page stands in: a turn of a conversation a line, or each
+// trace's steps and calls, as Customize has it (`lib/layout.ts`). The list
+// opens a session in the console's side panel (`components/traces/
+// session-peek.tsx`); this page is the same session with the page's room.
+// The session id is the application's own text, up to
+// 200 characters: the path carries it URL-encoded, and Next hands it here
+// decoded, as the fetcher re-encodes it for the server.
 export default async function SessionPage({
   params,
   searchParams,
@@ -38,12 +45,24 @@ export default async function SessionPage({
   searchParams?: Promise<SearchParams>;
 }) {
   const { organization, project: slug, session: sessionId } = await params;
-  const query = parseWindow((await searchParams) ?? {});
+  const given = (await searchParams) ?? {};
+  const query = parseWindow(given);
+  const ui = parseLayoutUi(given);
   const [gate, project] = await Promise.all([getServerContext(), fetchProjectBySlug(slug)]);
   if (!gate || !project) return <ServiceUnavailable />;
 
+  // The layout the server can know — a link's, or the project's — names the
+  // spans to read with the session; the browser's own last choice is read
+  // again in the page (`components/traces/session-runs.tsx`).
+  const [setting, layouts] = await Promise.all([
+    fetchSessionLayout(project.id),
+    fetchTraceLayouts(project.id),
+  ]);
+  const known = layouts.kind === "ok" ? layouts.layouts : [];
+  const { pinned } = resolveLayout(ui, null, setting, known).choice.options;
+
   const list = sessionsHref(organization, slug, { days: query.days });
-  const access = await fetchSession(project.id, sessionId, query);
+  const access = await fetchSession(project.id, sessionId, query, pinned);
   if (access.kind === "unavailable") return <ServiceUnavailable />;
   if (access.kind === "forbidden") {
     return (
@@ -76,24 +95,26 @@ export default async function SessionPage({
   const { session } = access;
   const traces = session.traces;
   const first = traces[0]!;
-  const user = traces.find((t) => t.user_id)?.user_id ?? "";
-  // As the list counts a session's errors: the runs with a span that failed,
-  // a run that recovered from a failed call among them.
-  const errors = traces.filter((t) => t.errors > 0).length;
-  const steps = traces.reduce((sum, t) => sum + t.steps, 0);
-  const inputTokens = traces.reduce((sum, t) => sum + t.input_tokens, 0);
-  const outputTokens = traces.reduce((sum, t) => sum + t.output_tokens, 0);
-  const lastEnded = traces.reduce(
-    (latest, t) => (t.ended_at > latest ? t.ended_at : latest),
-    first.ended_at,
-  );
+  const { user, errors, steps, inputTokens, outputTokens, lastEnded } = sessionSums(traces);
   const days = query.days ?? session.days;
   const here = (patch: { days?: number; limit?: number }) =>
     sessionHref(organization, slug, session.session_id, { ...query, ...patch });
+  const page = {
+    organization,
+    slug,
+    projectId: project.id,
+    layouts: layouts.kind === "ok" ? layouts.layouts : null,
+    project: setting,
+  };
 
   return (
     <>
-      <PageHeader title="Session" backHref={list} backLabel="Sessions" />
+      <PageHeader
+        title="Session"
+        backHref={list}
+        backLabel="Sessions"
+        action={<LayoutControls {...page} canSave={administersProject(project.role)} />}
+      />
       <div className="grid gap-6">
         <Section
           title="Session"
@@ -154,27 +175,18 @@ export default async function SessionPage({
 
         <Section
           title="Runs"
-          description="Each run of the session in the order it started, with its agent, status, steps and tokens."
+          description="Each run of the session in the order it started, as the layout lays it out; j and k step through them, and o opens one where the layout opens its steps."
         >
           <div>
             <WindowPicker days={days} />
           </div>
-          <DataTable>
-            <THead>
-              <Th className="whitespace-nowrap">Trace</Th>
-              <Th className="whitespace-nowrap">Started</Th>
-              <Th className="whitespace-nowrap">Agent</Th>
-              <Th className="whitespace-nowrap">Status</Th>
-              <Th className="whitespace-nowrap">Steps</Th>
-              <Th className="whitespace-nowrap">Tokens</Th>
-              <Th className="whitespace-nowrap">Duration</Th>
-            </THead>
-            <tbody>
-              {traces.map((t) => (
-                <RunRow key={t.run_id} trace={t} open={traceHref(organization, slug, t.run_id)} />
-              ))}
-            </tbody>
-          </DataTable>
+          <SessionRuns
+            {...page}
+            sessionId={session.session_id}
+            traces={traces}
+            readWith={session.pinned}
+            window={query}
+          />
           {session.more && (
             <p className="text-sm text-muted-foreground">
               The first {formatCount(session.limit)} of more in this window.{" "}
@@ -193,39 +205,5 @@ export default async function SessionPage({
         </Section>
       </div>
     </>
-  );
-}
-
-function RunRow({ trace, open }: { trace: Trace; open: string }) {
-  return (
-    <tr>
-      <Td className="whitespace-nowrap">
-        <Link href={open} className="font-mono text-xs underline-offset-4 hover:underline">
-          {shortId(trace.run_id)}
-        </Link>
-      </Td>
-      <Td className="whitespace-nowrap text-xs text-muted-foreground">
-        <LocalTime iso={trace.started_at} />
-      </Td>
-      <Td className="whitespace-nowrap font-medium">{trace.agent}</Td>
-      <Td className="whitespace-nowrap">
-        <TraceStatusBadge trace={trace} />
-      </Td>
-      <Td
-        className="whitespace-nowrap text-right tabular-nums"
-        title={`${formatCount(trace.model_calls)} model calls, ${formatCount(trace.tool_calls)} tool calls`}
-      >
-        {formatCount(trace.steps)}
-      </Td>
-      <Td
-        className="whitespace-nowrap text-right tabular-nums"
-        title={`${formatCount(trace.input_tokens)} in, ${formatCount(trace.output_tokens)} out`}
-      >
-        {formatCount(trace.input_tokens + trace.output_tokens)}
-      </Td>
-      <Td className="whitespace-nowrap text-right tabular-nums">
-        {formatDuration(trace.duration_ms)}
-      </Td>
-    </tr>
   );
 }

@@ -9,6 +9,8 @@ import {
   ContentMode,
   Flag,
   FlagOffDetail,
+  LayoutDepth,
+  LayoutOpen,
   MonitorState,
   NotificationKind,
   OrganizationStatus,
@@ -20,6 +22,7 @@ import {
   TraceColumn,
   TraceSort,
   UserSort,
+  ViewKind,
 } from "./enums";
 import { RESERVED_ORGANIZATION_SLUGS, RESERVED_PROJECT_SLUGS, SLUG_MAX_LENGTH } from "../slug";
 
@@ -40,6 +43,8 @@ const CONSOLE: Record<string, Record<string, string>> = {
   ApiKeyScope,
   ContentMode,
   Flag,
+  LayoutDepth,
+  LayoutOpen,
   MonitorState,
   NotificationKind,
   OrganizationStatus,
@@ -51,6 +56,7 @@ const CONSOLE: Record<string, Record<string, string>> = {
   TraceColumn,
   TraceSort,
   UserSort,
+  ViewKind,
 };
 
 describe("wire contract", () => {

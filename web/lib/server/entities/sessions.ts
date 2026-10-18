@@ -5,7 +5,7 @@ import { fetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
 import { queryString } from "@/lib/list-query";
 import { logger } from "@/lib/logger";
-import { SessionSort, SortDirection } from "@/lib/types/enums";
+import { SessionSort, SortDirection, SpanKind, SpanStatus } from "@/lib/types/enums";
 
 import { identityContext, projectHeaders } from "./identity-context";
 import { TraceSchema } from "./traces";
@@ -38,11 +38,35 @@ const SessionListSchema = z.object({
 });
 export type SessionList = z.infer<typeof SessionListSchema>;
 
+// One span a layout pinned by name, shown under a trace while it is shut:
+// enough to read without opening the trace.
+export const PinnedSpanSchema = z.object({
+  span_id: z.string(),
+  parent_span_id: z.string(),
+  kind: z.enum(SpanKind),
+  name: z.string(),
+  started_at: z.string(),
+  ended_at: z.string(),
+  status: z.enum(SpanStatus),
+  error_type: z.string(),
+  model: z.string(),
+  input_tokens: z.number(),
+  output_tokens: z.number(),
+});
+export type PinnedSpan = z.infer<typeof PinnedSpanSchema>;
+
+// One trace of a session's page: the list's sums, and the spans the layout
+// pinned under it.
+export const SessionTraceSchema = TraceSchema.extend({ pinned: z.array(PinnedSpanSchema) });
+export type SessionTrace = z.infer<typeof SessionTraceSchema>;
+
 // A session's own page: its traces in the order they ran, each summed as the
-// trace list sums it — a replay in metadata, never a message.
-const SessionDetailSchema = z.object({
+// trace list sums it — a replay in metadata, never a message — and the span
+// names their pinned spans were read by.
+export const SessionDetailSchema = z.object({
   session_id: z.string(),
-  traces: z.array(TraceSchema),
+  traces: z.array(SessionTraceSchema),
+  pinned: z.array(z.string()),
   days: z.number(),
   limit: z.number(),
   more: z.boolean(),
@@ -114,20 +138,22 @@ export const fetchSessions = cache(
 );
 
 /** One session's traces in the window, by its id, which the path carries
- *  URL-encoded since it is the application's own text. An id the server
- *  refuses — empty, or past its length — is read as missing. */
+ *  URL-encoded since it is the application's own text, each with the spans
+ *  `pinned` names under it. An id the server refuses — empty, or past its
+ *  length — is read as missing. */
 export const fetchSession = cache(
   async (
     projectId: string,
     sessionId: string,
     query: Pick<SessionQuery, "days" | "limit">,
+    pinned: readonly string[] = [],
   ): Promise<SessionAccess> => {
     if (!projectId) return { kind: "unavailable" };
     const ctx = await identityContext();
     if (!ctx) return { kind: "unavailable" };
     try {
       const res = await fetchWithTimeout(
-        `${env.SERVER_URL}/internal/telemetry/sessions/${encodeURIComponent(sessionId)}${queryString(query)}`,
+        `${env.SERVER_URL}/internal/telemetry/sessions/${encodeURIComponent(sessionId)}${queryString({ ...query, pinned })}`,
         { headers: projectHeaders(ctx, projectId), cache: "no-store" },
       );
       if (res.status === 403) return { kind: "forbidden" };

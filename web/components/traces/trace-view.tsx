@@ -33,6 +33,15 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  OPEN_ALL_UP_TO,
+  PINNED_PER_TRACE,
+  openingFor,
+  shutBranches,
+  spanTitle,
+  visibleTree,
+  type LayoutOptions,
+} from "@/lib/layout";
 import { windowReaching } from "@/lib/list-query";
 import type { TraceDetail, TraceSpan } from "@/lib/server/entities/traces";
 import { sessionHref } from "@/lib/sessions";
@@ -84,14 +93,8 @@ const INDENT_MAX = 8;
  *  measure. */
 const INDENT_REM = 1.25;
 
-/** Past this many spans a trace opens with its branches shut but the run's
- *  own — the run and what ran straight under it — so a run of thousands
- *  draws its first rows at once; a search, or a branch opened, finds the
- *  rest. */
-const OPEN_ALL_UP_TO = 400;
-
 /** A span's kind, in the error's colour where it failed. */
-function KindIcon({
+export function KindIcon({
   span,
   className,
 }: {
@@ -248,20 +251,29 @@ function SpansButton({
 }
 
 /** The trace's spans and the one chosen among them, side by side; under each
- *  other on a phone. The run's own span is chosen first. Drawn again only
- *  for another trace (`memo`), as the line above it is. */
+ *  other on a phone. The run's own span is chosen first. Under a `layout`
+ *  (`lib/layout.ts`) the tree shows what the depth and the filter admit,
+ *  starts open as the layout opens it, with its timeline on or off, and the
+ *  spans the layout pinned stand above it; the caller keys the body on the
+ *  layout, so a change starts it afresh. Drawn again only for another trace
+ *  (`memo`), as the line above it is. */
 export const TraceBody = memo(function TraceBody({
   trace,
   organization,
   slug,
+  layout,
   className,
 }: {
   trace: TraceDetail;
   organization: string;
   slug: string;
+  layout?: LayoutOptions;
   className?: string;
 }) {
-  const nodes = useMemo(() => spanTree(trace.spans), [trace.spans]);
+  const nodes = useMemo(
+    () => (layout ? visibleTree(spanTree(trace.spans), layout) : spanTree(trace.spans)),
+    [trace.spans, layout],
+  );
   const summary = useMemo(() => summarizeTrace(trace.spans), [trace.spans]);
   const bars = useMemo(
     () => new Map(timelineBars(trace.spans).map((bar) => [bar.span.span_id, bar])),
@@ -271,12 +283,23 @@ export const TraceBody = memo(function TraceBody({
     () => new Map(trace.spans.map((s) => [s.span_id, s.parent_span_id])),
     [trace.spans],
   );
-  const [chosen, setChosen] = useState(summary.root.span_id);
-  const [shut, setShut] = useState<ReadonlySet<string>>(() =>
-    trace.spans.length > OPEN_ALL_UP_TO ? branchesFrom(nodes, 1) : new Set(),
+  const pinned = useMemo(
+    () =>
+      layout
+        ? trace.spans.filter((s) => layout.pinned.includes(s.name)).slice(0, PINNED_PER_TRACE)
+        : [],
+    [trace.spans, layout],
   );
+  const [chosen, setChosen] = useState(summary.root.span_id);
+  // Past OPEN_ALL_UP_TO spans a trace opens with its branches shut but the
+  // run's own, whatever the layout says, so its first rows draw at once; a
+  // search, or a branch opened, finds the rest.
+  const [shut, setShut] = useState<ReadonlySet<string>>(() => {
+    if (layout) return shutBranches(nodes, openingFor(trace.spans.length, layout.open));
+    return trace.spans.length > OPEN_ALL_UP_TO ? branchesFrom(nodes, 1) : new Set();
+  });
   const [search, setSearch] = useState("");
-  const [timeline, setTimeline] = useState(false);
+  const [timeline, setTimeline] = useState(layout?.timeline ?? false);
   const [spansShown, setSpansShown] = useState(true);
   const tree = useRef<HTMLDivElement>(null);
   const hideSpans = useRef<HTMLButtonElement>(null);
@@ -402,6 +425,28 @@ export const TraceBody = memo(function TraceBody({
               <ToggleGroupItem value="timeline">Timeline</ToggleGroupItem>
             </ToggleGroup>
           </div>
+          {pinned.length > 0 && (
+            <div className="flex shrink-0 flex-wrap gap-1.5 px-3.5 pb-2" aria-label="Pinned spans">
+              {pinned.map((span) => (
+                <button
+                  key={span.span_id}
+                  type="button"
+                  onClick={() => chooseAndFocus(span.span_id)}
+                  aria-pressed={span.span_id === chosen}
+                  className={cn(
+                    "inline-flex max-w-full cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 py-0.5 text-xs hover:bg-muted/50",
+                    span.span_id === chosen && "bg-muted",
+                  )}
+                >
+                  <KindIcon span={span} className="size-3.5" />
+                  <span className="truncate">{spanTitle(span)}</span>
+                  <span className="tabular-nums text-muted-foreground">
+                    {formatDuration(spanMillis(span))}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
           <div className="relative shrink-0 px-3.5 pb-2">
             <SearchIcon
               className="pointer-events-none absolute top-1/2 left-6 size-4 -translate-y-1/2 text-muted-foreground"

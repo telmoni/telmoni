@@ -25,6 +25,8 @@ pub enum TraceColumn {
     Session,
     /// How the run ended.
     Status,
+    /// The class of the error it ended on, never its message.
+    ErrorType,
     /// How many steps it took.
     Steps,
     /// How many model calls it made.
@@ -56,7 +58,7 @@ pub enum TraceColumn {
 impl TraceColumn {
     /// Every column, in wire order: the list's own, left to right.
     #[must_use]
-    pub const fn all() -> [Self; 19] {
+    pub const fn all() -> [Self; 20] {
         [
             Self::Started,
             Self::Ended,
@@ -64,6 +66,7 @@ impl TraceColumn {
             Self::User,
             Self::Session,
             Self::Status,
+            Self::ErrorType,
             Self::Steps,
             Self::ModelCalls,
             Self::ToolCalls,
@@ -90,6 +93,7 @@ impl TraceColumn {
             Self::User => "user",
             Self::Session => "session",
             Self::Status => "status",
+            Self::ErrorType => "error_type",
             Self::Steps => "steps",
             Self::ModelCalls => "model_calls",
             Self::ToolCalls => "tool_calls",
@@ -127,7 +131,7 @@ impl FromStr for TraceColumn {
 mod tests {
     use super::*;
 
-    const ALL: [TraceColumn; 19] = TraceColumn::all();
+    const ALL: [TraceColumn; 20] = TraceColumn::all();
 
     /// `all()` is a hand-written array, so nothing but a `match` forces it to
     /// stay complete: a new variant fails to compile here until it is listed.
@@ -141,6 +145,7 @@ mod tests {
                 | TraceColumn::User
                 | TraceColumn::Session
                 | TraceColumn::Status
+                | TraceColumn::ErrorType
                 | TraceColumn::Steps
                 | TraceColumn::ModelCalls
                 | TraceColumn::ToolCalls

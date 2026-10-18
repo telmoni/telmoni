@@ -113,6 +113,7 @@ export const TraceColumn = {
   User:             "user",
   Session:          "session",
   Status:           "status",
+  ErrorType:        "error_type",
   Steps:            "steps",
   ModelCalls:       "model_calls",
   ToolCalls:        "tool_calls",
@@ -153,6 +154,30 @@ export const SessionSort = {
   LastSeen:  "last_seen",
 } as const;
 export type SessionSort = typeof SessionSort[keyof typeof SessionSort];
+
+/** Wire vocabulary of the Rust `LayoutDepth`: how far a trace opens. */
+export const LayoutDepth = {
+  Trace: "trace",
+  Steps: "steps",
+  Calls: "calls",
+} as const;
+export type LayoutDepth = typeof LayoutDepth[keyof typeof LayoutDepth];
+
+/** Wire vocabulary of the Rust `LayoutOpen`: which traces, and which
+ *  branches of them, start open. */
+export const LayoutOpen = {
+  None:   "none",
+  Failed: "failed",
+  All:    "all",
+} as const;
+export type LayoutOpen = typeof LayoutOpen[keyof typeof LayoutOpen];
+
+/** Wire vocabulary of the Rust `ViewKind`: what a saved view is a view of. */
+export const ViewKind = {
+  List:   "list",
+  Layout: "layout",
+} as const;
+export type ViewKind = typeof ViewKind[keyof typeof ViewKind];
 
 /** Wire vocabulary of the Rust `SortDirection`: which way a list is sorted. */
 export const SortDirection = {

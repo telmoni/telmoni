@@ -41,7 +41,6 @@ import type { TraceQuery, TraceView } from "@/lib/server/entities/traces";
 import {
   DENSITIES,
   REFRESH_INTERVALS,
-  orderedColumns,
   refreshLabel,
   type Density,
   type RefreshSeconds,
@@ -55,6 +54,7 @@ import {
   TRACE_PRESETS,
   downloadHref,
   formatCount,
+  orderedColumns,
   presetActive,
   presetToggled,
   tracesHref,

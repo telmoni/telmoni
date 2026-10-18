@@ -237,6 +237,11 @@ export const TRACE_COLUMNS: readonly ColumnSpec[] = [
     hint: "OK, Error or Cancelled once the run's own span arrives; Running until it does.",
   },
   {
+    key: TraceColumn.ErrorType,
+    label: "Error",
+    hint: "The class of the error the run ended on, never its message: TimeoutError, RateLimitError.",
+  },
+  {
     key: TraceColumn.Steps,
     label: "Steps",
     sort: TraceSort.Steps,
@@ -354,6 +359,12 @@ export const COLUMN_MENU: readonly ColumnBlock[] = TRACE_COLUMNS.reduce<ColumnBl
   },
   [],
 );
+
+/** `columns` as the table shows them: each a column of the list, once, in
+ *  the list's order, whatever order they were picked in. */
+export function orderedColumns(columns: readonly string[]): TraceColumn[] {
+  return TRACE_COLUMNS.filter((c) => columns.includes(c.key)).map((c) => c.key);
+}
 
 /** The columns a list shows until a person picks others: what it showed
  *  before it offered the rest. */

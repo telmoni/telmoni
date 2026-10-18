@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/page-header", () => ({
@@ -11,15 +11,29 @@ vi.mock("@/components/page-header", () => ({
   ),
 }));
 
-// The window picker reads and writes the URL through the router.
+// The window picker reads and writes the URL through the router; the
+// session opened beside the list is the URL's `?peek=`.
+let mockSearch = "";
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
   usePathname: () => "/acme/web/sessions",
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(mockSearch),
 }));
 
 vi.mock("@/components/service-unavailable", () => ({
   ServiceUnavailable: () => <div data-testid="outage">unavailable</div>,
+}));
+
+// The panel is drawn in the console's content area.
+vi.mock("@/components/console-shell", () => ({
+  useConsoleShell: () => ({ element: document.body, cover: () => () => {} }),
+}));
+
+vi.mock("@/app/(app)/[organization]/[project]/traces/actions", () => ({
+  saveTraceViewAction: vi.fn(),
+  updateTraceViewAction: vi.fn(),
+  deleteTraceViewAction: vi.fn(),
+  setSessionLayoutAction: vi.fn(),
 }));
 
 import { Role } from "@/lib/types/enums";
@@ -37,6 +51,8 @@ vi.mock("@/lib/server/data", () => ({
   getServerContext: async () => mockContext,
   fetchProjectBySlug: (slug: string) => fetchProjectBySlug(slug),
   fetchSessions: (projectId: string, query: unknown) => fetchSessions(projectId, query),
+  fetchSessionLayout: async () => ({ view_id: null }),
+  fetchTraceLayouts: async () => ({ kind: "ok", layouts: [] }),
 }));
 
 import SessionsPage from "./page";
@@ -85,6 +101,8 @@ function list(over: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockSearch = "";
+  window.history.replaceState(null, "", "/acme/web/sessions");
   mockContext = {
     person: { userId: "user_1", email: "ada@example.test", analyticsOptIn: false },
     organizations: [],
@@ -98,7 +116,7 @@ beforeEach(() => {
 });
 
 describe("SessionsPage", () => {
-  it("lists each session with its user and sums, the session opening its page and the user their traces", async () => {
+  it("lists each session with its user and sums, the session opening beside the list — its page from a new tab — and the user their traces", async () => {
     render(await SessionsPage({ params: PARAMS }));
     expect(screen.getByTestId("page-header")).toHaveTextContent("Sessions");
     expect(screen.getByTestId("count")).toHaveTextContent("2");
@@ -116,6 +134,11 @@ describe("SessionsPage", () => {
       "href",
       `/acme/web/traces?user=${HASHED}`,
     );
+    // A plain click opens the session beside the list, in the URL; a click
+    // for a new tab keeps the link's page.
+    fireEvent.click(screen.getByRole("link", { name: "chat/42 b" }));
+    expect(new URL(window.location.href).searchParams.get("peek")).toBe("chat/42 b");
+    expect(screen.getByRole("link", { name: "conv-1" })).toHaveAttribute("data-peek-session", "conv-1");
     // A session whose runs named no user shows a dash, not a link.
     expect(screen.getByText("—")).toBeInTheDocument();
     expect(screen.getByText("1,500")).toHaveAttribute("title", "1,200 in, 300 out");
@@ -137,6 +160,18 @@ describe("SessionsPage", () => {
       "href",
       "/acme/web/sessions?sort=errors&dir=desc",
     );
+  });
+
+  it("opens the session the URL names beside the list, read by the project's id in the list's window", async () => {
+    mockSearch = "days=30&peek=conv-1";
+    const fetchMock = vi.fn(async () => Response.json({ session_id: "conv-1", traces: [], pinned: [], days: 30, limit: 100, more: false }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(await SessionsPage({ params: PARAMS, searchParams: Promise.resolve({ days: "30" }) }));
+    const panel = screen.getByRole("dialog");
+    expect(panel).toHaveAttribute("aria-modal", "false");
+    expect(fetchMock).toHaveBeenCalledWith("/api/sessions/conv-1?project=project_7bQx2mNv9BcK4dLp&days=30", expect.anything());
+    expect(await screen.findByText("No session with this id in this project's window.")).toBeInTheDocument();
+    vi.unstubAllGlobals();
   });
 
   it("reads the URL's sort and window, hands them to the server, and shows the window picked", async () => {

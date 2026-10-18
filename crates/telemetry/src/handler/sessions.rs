@@ -3,27 +3,32 @@
 //! session the project's runs belonged to in a window of days, with the end
 //! user it was with and what its runs came to, sorted as the URL says — and
 //! `GET /internal/telemetry/sessions/{session_id}`, one session's traces
-//! in the order they ran: a replay in metadata, never a message, since
-//! content is not metadata. Each reads the spans of the project
-//! `x-project-id` names and no other.
+//! in the order they ran, each with the spans a layout pinned by name
+//! (`?pinned=`): a replay in metadata, never a message, since content is
+//! not metadata. Each reads the spans of the project `x-project-id` names
+//! and no other.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::rbac::{Resource, Verb};
-use telmoni_shared::{AuthError, SessionSort, SortDirection, TelmoniError, TraceSort};
+use telmoni_shared::{
+    AuthError, SessionSort, SortDirection, SpanKind, SpanStatus, TelmoniError, TraceSort,
+};
 
 use crate::AppState;
-use crate::contract::SESSION_ID_MAX;
-use crate::handler::traces::{Trace, parse_days, parse_limit, read_failed};
+use crate::contract::{NAME_MAX, SESSION_ID_MAX};
+use crate::handler::traces::{Trace, parse_days, parse_limit, read_failed, values};
 use crate::sessions::{self, SessionRow};
 use crate::store::Projects;
-use crate::traces::{self, TraceFilter, Window};
+use crate::traces::{self, PINNED_MAX, PinnedRow, TraceFilter, Window};
 
 /// The page's query string, every value text until it is checked, so an
 /// empty value asks for the default and a value that is not what its
@@ -94,16 +99,73 @@ pub const fn default_direction(sort: SessionSort) -> SortDirection {
     }
 }
 
-/// A session's own page's query string: the window its traces are read in.
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// A session's own page's query string, every value text until it is
+/// checked: the window its traces are read in, and the span names a layout
+/// pinned, `pinned` given again for each.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SessionQuery {
     /// How many days back.
-    #[serde(default)]
-    pub days: String,
+    pub days: Option<String>,
     /// The most traces to answer.
-    #[serde(default)]
-    pub limit: String,
+    pub limit: Option<String>,
+    /// The span names whose spans each trace answers beside its sums.
+    pub pinned: Vec<String>,
+}
+
+impl SessionQuery {
+    /// The query string's pairs, read.
+    ///
+    /// # Errors
+    ///
+    /// A parameter the lane does not take, never echoed, or one given twice
+    /// that is not `pinned`.
+    pub fn read(pairs: Vec<(String, String)>) -> Result<Self, TelmoniError> {
+        let mut query = Self::default();
+        for (name, value) in pairs {
+            let once = match name.as_str() {
+                "pinned" => {
+                    query.pinned.push(value);
+                    continue;
+                }
+                "days" => &mut query.days,
+                "limit" => &mut query.limit,
+                _ => {
+                    return Err(TelmoniError::BadRequest(
+                        "the lane takes no parameter by that name".into(),
+                    ));
+                }
+            };
+            if once.replace(value).is_some() {
+                return Err(TelmoniError::BadRequest(format!(
+                    "{name} is given more than once"
+                )));
+            }
+        }
+        Ok(query)
+    }
+
+    /// The window and the pinned names, each value checked: a name trimmed
+    /// and once, and at most [`PINNED_MAX`] of them.
+    ///
+    /// # Errors
+    ///
+    /// A value that is not what its parameter takes, named by the parameter
+    /// and never echoed.
+    pub fn into_parts(self) -> Result<(Window, Vec<String>), TelmoniError> {
+        let pinned = values("pinned", &self.pinned, NAME_MAX)?;
+        if pinned.len() > PINNED_MAX {
+            return Err(TelmoniError::BadRequest(format!(
+                "pinned names at most {PINNED_MAX} spans"
+            )));
+        }
+        Ok((
+            Window {
+                days: parse_days(self.days.as_deref().unwrap_or_default())?,
+                limit: parse_limit(self.limit.as_deref().unwrap_or_default())?,
+            },
+            pinned,
+        ))
+    }
 }
 
 /// What the page's lane answers.
@@ -158,14 +220,59 @@ impl From<SessionRow> for Session {
 pub struct SessionDetail {
     pub session_id: String,
     /// The session's runs, earliest first, each summed as the trace list sums
-    /// it.
-    pub traces: Vec<Trace>,
+    /// it, with the spans pinned under it.
+    pub traces: Vec<SessionTrace>,
+    /// The span names the traces' pinned spans were read by.
+    pub pinned: Vec<String>,
     /// How many days back the lane read.
     pub days: u16,
     /// The most traces it would answer.
     pub limit: u32,
     /// Whether the window held more of the session's traces than the limit.
     pub more: bool,
+}
+
+/// One trace of a session's page: the list's sums, and the spans a layout
+/// pinned by name, in the order they started.
+#[derive(Debug, Serialize)]
+pub struct SessionTrace {
+    #[serde(flatten)]
+    pub trace: Trace,
+    pub pinned: Vec<PinnedSpan>,
+}
+
+/// One pinned span, as the page shows it under a trace that is shut.
+#[derive(Debug, Serialize)]
+pub struct PinnedSpan {
+    pub span_id: String,
+    pub parent_span_id: String,
+    pub kind: SpanKind,
+    pub name: String,
+    pub started_at: DateTime<Utc>,
+    pub ended_at: DateTime<Utc>,
+    pub status: SpanStatus,
+    pub error_type: String,
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
+impl From<PinnedRow> for PinnedSpan {
+    fn from(row: PinnedRow) -> Self {
+        Self {
+            span_id: row.span_id,
+            parent_span_id: row.parent_span_id,
+            kind: row.kind,
+            name: row.name,
+            started_at: row.started_at,
+            ended_at: row.ended_at,
+            status: row.status,
+            error_type: row.error_type,
+            model: row.model,
+            input_tokens: row.input_tokens,
+            output_tokens: row.output_tokens,
+        }
+    }
 }
 
 /// `GET /internal/telemetry/sessions` — the project's sessions in the window,
@@ -206,14 +313,14 @@ pub async fn list_sessions(
 }
 
 /// `GET /internal/telemetry/sessions/{session_id}` — one session's traces in
-/// the window, earliest first; `404` for a session the project's runs in the
-/// window did not belong to, which is also what another project's session id
-/// gets.
+/// the window, earliest first, each with the spans `pinned` names under it;
+/// `404` for a session the project's runs in the window did not belong to,
+/// which is also what another project's session id gets.
 pub async fn get_session(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(session_id): Path<String>,
-    Query(query): Query<SessionQuery>,
+    Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Json<SessionDetail>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = acting
@@ -226,19 +333,17 @@ pub async fn get_session(
             "a session is named by its id, up to {SESSION_ID_MAX} characters"
         )));
     }
-    let window = Window {
-        days: parse_days(&query.days)?,
-        limit: parse_limit(&query.limit)?,
-    };
+    let (window, pinned) = SessionQuery::read(pairs)?.into_parts()?;
+    let projects = Projects::one(project_id);
     let filter = TraceFilter {
         session_ids: vec![session_id.clone()],
         days: window.days,
         ..TraceFilter::default()
     };
     // One past the limit, so the answer can say whether there were more.
-    let rows = traces::list(
+    let mut rows = traces::list(
         &state.store,
-        &Projects::one(project_id),
+        &projects,
         &filter,
         TraceSort::Started,
         SortDirection::Asc,
@@ -254,13 +359,28 @@ pub async fn get_session(
         .into());
     }
     let more = rows.len() > window.limit as usize;
+    rows.truncate(window.limit as usize);
+    let runs: Vec<Uuid> = rows.iter().map(|row| row.run_id).collect();
+    let mut spans: HashMap<Uuid, Vec<PinnedSpan>> = HashMap::new();
+    for row in traces::pinned(&state.store, &projects, &runs, &pinned, window.days)
+        .await
+        .map_err(read_failed)?
+    {
+        spans
+            .entry(row.run_id)
+            .or_default()
+            .push(PinnedSpan::from(row));
+    }
     Ok(Json(SessionDetail {
         session_id,
         traces: rows
             .into_iter()
-            .take(window.limit as usize)
-            .map(Trace::from)
+            .map(|row| SessionTrace {
+                pinned: spans.remove(&row.run_id).unwrap_or_default(),
+                trace: Trace::from(row),
+            })
             .collect(),
+        pinned,
         days: window.days,
         limit: window.limit,
         more,
@@ -298,6 +418,60 @@ mod tests {
             default_direction(SessionSort::LastSeen),
             SortDirection::Desc
         );
+    }
+
+    fn pairs(query: &[(&str, &str)]) -> Vec<(String, String)> {
+        query
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect()
+    }
+
+    /// A session's page reads its window and the names pinned, each trimmed
+    /// and once, and refuses a parameter it does not take, one given twice,
+    /// or more names than a trace shows — naming the parameter, never the
+    /// value.
+    #[test]
+    fn a_sessions_page_reads_its_window_and_the_names_pinned() {
+        let (window, pinned) = SessionQuery::read(pairs(&[
+            ("days", "30"),
+            ("pinned", " plan "),
+            ("pinned", "plan"),
+            ("pinned", ""),
+            ("pinned", "search_docs"),
+        ]))
+        .expect("read")
+        .into_parts()
+        .expect("checked");
+        assert_eq!(window.days, 30);
+        assert_eq!(window.limit, DEFAULT_LIMIT);
+        assert_eq!(pinned, ["plan", "search_docs"]);
+        let (window, pinned) = SessionQuery::read(Vec::new())
+            .expect("read")
+            .into_parts()
+            .expect("the default");
+        assert_eq!(window, Window::default());
+        assert!(pinned.is_empty());
+
+        let names: Vec<String> = (0..=PINNED_MAX)
+            .map(|i| format!("step-{i}<script>"))
+            .collect();
+        let nine: Vec<(&str, &str)> = names.iter().map(|name| ("pinned", name.as_str())).collect();
+        let long = "p".repeat(NAME_MAX + 1);
+        for query in [
+            vec![("sort<script>", "started")],
+            vec![("days", "7"), ("days", "30")],
+            vec![("days", "0<script>")],
+            vec![("pinned", long.as_str())],
+            nine,
+        ] {
+            let refused = SessionQuery::read(pairs(&query))
+                .and_then(SessionQuery::into_parts)
+                .expect_err("refused")
+                .to_problem_details();
+            assert_eq!(refused.status, 400, "{query:?}");
+            assert!(!refused.detail.unwrap_or_default().contains("script"));
+        }
     }
 
     /// A value a parameter does not take is refused by the parameter's name,

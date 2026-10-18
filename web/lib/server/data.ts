@@ -77,6 +77,7 @@ export {
   fetchTrace,
   fetchTraceFacets,
   fetchTraceHistogram,
+  fetchTraceLayouts,
   fetchTraces,
   fetchTraceViews,
   traceDownload,
@@ -84,11 +85,13 @@ export {
 export type {
   DownloadFormat,
   Facet,
+  LayoutQuery,
   Trace,
   TraceAccess,
   TraceDetail,
   TraceFacets,
   TraceHistogram,
+  TraceLayout,
   TraceList,
   TraceQuery,
   TraceSpan,
@@ -97,17 +100,22 @@ export type {
   ViewQuery,
 } from "./entities/traces";
 
+export { fetchSessionLayout } from "./entities/session-layout";
+export type { SessionLayoutSetting } from "./entities/session-layout";
+
 export { fetchUsers } from "./entities/users";
 export type { UserList, UserQuery, UserRow, UsersAccess } from "./entities/users";
 
 export { fetchSession, fetchSessions } from "./entities/sessions";
 export type {
+  PinnedSpan,
   SessionAccess,
   SessionDetail,
   SessionList,
   SessionQuery,
   SessionRow,
   SessionsAccess,
+  SessionTrace,
 } from "./entities/sessions";
 
 export { fetchConnectors } from "./entities/connectors";

@@ -3,14 +3,19 @@ import Link from "next/link";
 import { AccessDenied } from "@/components/access-denied";
 import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
-import { TraceBody, TraceMeta } from "@/components/traces/trace-view";
+import { LayoutControls } from "@/components/traces/layout-controls";
+import { TraceLayoutBody } from "@/components/traces/trace-layout";
+import { TraceMeta } from "@/components/traces/trace-view";
 import { Card } from "@/components/ui/card";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ownerContact } from "@/lib/identity";
+import { administersProject } from "@/lib/project-role";
 import {
   activeOrganization,
   fetchProjectBySlug,
+  fetchSessionLayout,
   fetchTrace,
+  fetchTraceLayouts,
   getServerContext,
 } from "@/lib/server/data";
 import { projectPath } from "@/lib/slug";
@@ -22,8 +27,9 @@ export const metadata = { title: "Trace" };
 // One trace: a run's record, named by the run's id, read as the list's peek
 // reads it (`components/traces/peek.tsx`) with the page's room: how it ended
 // and what it spent on one line, then its spans as the tree they ran in
-// beside the span chosen, in full. Every pixel is metadata: no prompt,
-// completion or tool payload reaches this page, in any content mode.
+// beside the span chosen, in full, opened as far as the page's layout goes
+// (`lib/layout.ts`). Every pixel is metadata: no prompt, completion or tool
+// payload reaches this page, in any content mode.
 export default async function TracePage({
   params,
 }: {
@@ -34,7 +40,11 @@ export default async function TracePage({
   if (!gate || !project) return <ServiceUnavailable />;
 
   const list = tracesHref(organization, slug, {});
-  const access = await fetchTrace(project.id, runId);
+  const [access, setting, layouts] = await Promise.all([
+    fetchTrace(project.id, runId),
+    fetchSessionLayout(project.id),
+    fetchTraceLayouts(project.id),
+  ]);
   if (access.kind === "unavailable") return <ServiceUnavailable />;
   if (access.kind === "forbidden") {
     return (
@@ -65,9 +75,21 @@ export default async function TracePage({
 
   const { trace } = access;
   const { root } = summarizeTrace(trace.spans);
+  const page = {
+    organization,
+    slug,
+    projectId: project.id,
+    layouts: layouts.kind === "ok" ? layouts.layouts : null,
+    project: setting,
+  };
   return (
     <TooltipProvider>
-      <PageHeader title={root.agent} backHref={list} backLabel="Traces" />
+      <PageHeader
+        title={root.agent}
+        backHref={list}
+        backLabel="Traces"
+        action={<LayoutControls {...page} canSave={administersProject(project.role)} />}
+      />
       {/* As tall as the window leaves under the header and the page's title,
           both of a set height, so the spans and the span chosen scroll each
           on its own, as they do in the peek; never so short that neither
@@ -77,7 +99,7 @@ export default async function TracePage({
         <div className="shrink-0 border-b border-border p-3.5">
           <TraceMeta trace={trace} organization={organization} slug={slug} />
         </div>
-        <TraceBody trace={trace} organization={organization} slug={slug} className="min-h-0 flex-1" />
+        <TraceLayoutBody {...page} trace={trace} />
       </Card>
     </TooltipProvider>
   );

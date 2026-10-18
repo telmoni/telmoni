@@ -1,10 +1,11 @@
 //! A project's saved views through the module's own router: every role on the
 //! project reads them, and its owners and admins save, save over and delete
-//! them; a view is kept as the list would read it, two of one name are
-//! refused in any case, and a project keeps a hundred at most; the first view
-//! saved gives the project the settings row the purges find it by, filed
-//! under the organization that holds the project while its chain lock is
-//! held; a project reads its own views and no other's, and the purges take a
+//! them; a view is kept as the list would read it, a layout as the page
+//! would, two of one kind and name are refused in any case, and a project
+//! keeps a hundred of each kind at most; the first view saved gives the
+//! project the settings row the purges find it by, filed under the
+//! organization that holds the project while its chain lock is held; a
+//! project reads its own views and no other's, and the purges take a
 //! project's views with it.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
@@ -122,7 +123,16 @@ impl Project {
 
     /// The names of the views `user` reads on the project, in order.
     async fn names(&self, user: &str) -> Vec<String> {
-        let (status, body) = self.send(self.request("GET", LANE, user, None)).await;
+        self.names_of(user, LANE).await
+    }
+
+    /// The names of the layouts `user` reads on the project, in order.
+    async fn layouts(&self, user: &str) -> Vec<String> {
+        self.names_of(user, &format!("{LANE}?kind=layout")).await
+    }
+
+    async fn names_of(&self, user: &str, path: &str) -> Vec<String> {
+        let (status, body) = self.send(self.request("GET", path, user, None)).await;
         assert_eq!(status, StatusCode::OK, "{body}");
         body.get("views")
             .and_then(Value::as_array)
@@ -255,6 +265,141 @@ async fn every_role_reads_the_views_and_owners_and_admins_save_them(pool: PgPool
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
+/// A layout is a view of its own kind: listed under `?kind=layout` and never
+/// among the list's views, named once among the layouts and freely beside a
+/// list view of the same name, kept as the page reads it, and saved over as
+/// the kind it was saved as.
+#[sqlx::test]
+async fn a_layout_is_a_view_of_its_own_kind(pool: PgPool) {
+    let p = project(&pool);
+    let (status, _) = p
+        .send(p.request("POST", LANE, OWNER, Some(json!({ "name": "Review" }))))
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert!(
+        p.layouts(MEMBER).await.is_empty(),
+        "a list view is no layout"
+    );
+
+    let review = json!({
+        "name": " Review ",
+        "kind": "layout",
+        "query": {
+            "depth": "calls",
+            "open": "failed",
+            "timeline": true,
+            "pinned": ["answer", " answer ", "plan"],
+            "filter": { "kind": ["tool_call"], "status": ["error"] },
+        },
+        "columns": ["tokens", "started", "error_type"],
+    });
+    let (status, _) = p
+        .send(p.request("POST", LANE, MEMBER, Some(review.clone())))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, saved) = p.send(p.request("POST", LANE, ADMIN, Some(review))).await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    assert_eq!(saved["kind"], "layout");
+    assert_eq!(
+        saved["name"], "Review",
+        "the list's Review stands beside it"
+    );
+    assert_eq!(
+        saved["query"],
+        json!({
+            "depth": "calls",
+            "open": "failed",
+            "timeline": true,
+            "pinned": ["answer", "plan"],
+            "filter": { "kind": ["tool_call"], "status": ["error"] },
+            "messages": false,
+            "scores": false,
+        }),
+        "kept as the page reads it"
+    );
+    assert_eq!(saved["columns"], json!(["started", "error_type", "tokens"]));
+    assert_eq!(p.layouts(MEMBER).await, ["Review"]);
+    assert_eq!(p.names(MEMBER).await, ["Review"], "the list's own, alone");
+
+    let (status, body) = p
+        .send(p.request(
+            "POST",
+            LANE,
+            OWNER,
+            Some(json!({ "name": "review", "kind": "layout" })),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        body["detail"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("layout")
+    );
+
+    let id = saved["id"].as_str().expect("an id").to_owned();
+    let one = format!("{LANE}/{id}");
+    let (status, body) = p
+        .send(p.request(
+            "PUT",
+            &one,
+            OWNER,
+            Some(json!({ "name": "Review", "kind": "list" })),
+        ))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "a layout is never a list view: {body}"
+    );
+    let (status, over) = p
+        .send(p.request(
+            "PUT",
+            &one,
+            OWNER,
+            Some(json!({ "name": "Deep", "kind": "layout", "query": { "depth": "steps" } })),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{over}");
+    assert_eq!(over["kind"], "layout");
+    assert_eq!(over["query"]["depth"], "steps");
+    assert_eq!(over["query"]["pinned"], Value::Null, "left out, so none");
+    assert_eq!(p.layouts(MEMBER).await, ["Deep"]);
+
+    for body in [
+        json!({ "name": "Spans", "kind": "layout", "query": { "depth": "spans<script>" } }),
+        json!({ "name": "List", "kind": "layout", "query": { "agent": ["support-bot"] } }),
+        json!({ "name": "Pins", "kind": "layout", "query": { "pinned": (0..9).map(|i| format!("s{i}")).collect::<Vec<_>>() } }),
+        json!({ "name": "Kind", "kind": "page<script>" }),
+    ] {
+        let (status, problem) = p
+            .send(p.request("POST", LANE, OWNER, Some(body.clone())))
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(
+            !problem["detail"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("script")
+        );
+    }
+    let (status, body) = p
+        .send(p.request("GET", &format!("{LANE}?kind=page<script>"), MEMBER, None))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(
+        !body["detail"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("script")
+    );
+
+    let (status, _) = p.send(p.request("DELETE", &one, ADMIN, None)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(p.layouts(MEMBER).await.is_empty());
+    assert_eq!(p.names(MEMBER).await, ["Review"]);
+}
+
 /// A project reads and writes its own views and no other's: the row policy
 /// and each query's own `WHERE` both name the project.
 #[sqlx::test]
@@ -314,8 +459,10 @@ async fn a_view_the_list_would_refuse_is_a_400_that_echoes_none_of_it(pool: PgPo
     assert_eq!(views_of(&pool, &p.project).await, 0);
 }
 
+/// A hundred of each kind: a project at its hundred list views still saves
+/// a layout.
 #[sqlx::test]
-async fn a_project_keeps_a_hundred_views_at_most(pool: PgPool) {
+async fn a_project_keeps_a_hundred_views_of_each_kind_at_most(pool: PgPool) {
     let p = project(&pool);
     sqlx::query(
         "INSERT INTO telemetry.trace_views (id, project_id, name, query, columns)
@@ -331,6 +478,16 @@ async fn a_project_keeps_a_hundred_views_at_most(pool: PgPool) {
         .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(views_of(&pool, &p.project).await, 100);
+    let (status, body) = p
+        .send(p.request(
+            "POST",
+            LANE,
+            OWNER,
+            Some(json!({ "name": "One more", "kind": "layout" })),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(views_of(&pool, &p.project).await, 101);
 }
 
 /// The purges take a project's views with it: a deleted project's, and

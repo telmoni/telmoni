@@ -41,8 +41,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { TraceQuery, TraceView } from "@/lib/server/entities/traces";
-import { orderedColumns } from "@/lib/trace-prefs";
-import { showsView, viewHref, viewQueryOf, type TraceUi } from "@/lib/traces";
+import { orderedColumns, showsView, viewHref, viewQueryOf, type TraceUi } from "@/lib/traces";
+import { ViewKind } from "@/lib/types/enums";
 import { setTracePrefs, useTracePrefs } from "@/lib/use-trace-prefs";
 import { cn } from "@/lib/utils";
 
@@ -82,6 +82,7 @@ export function ViewsMenu({ organization, slug, projectId, query, ui, views, can
     start(async () => {
       const result = await updateTraceViewAction(projectId, view.id, {
         name: view.name,
+        kind: ViewKind.List,
         query: viewQueryOf(query),
         columns: orderedColumns(prefs.columns),
       });
@@ -207,6 +208,7 @@ export function ViewsMenu({ organization, slug, projectId, query, ui, views, can
           if (naming === "rename" && current) {
             const result = await updateTraceViewAction(projectId, current.id, {
               name,
+              kind: ViewKind.List,
               query: current.query,
               columns: current.columns,
             });
@@ -218,6 +220,7 @@ export function ViewsMenu({ organization, slug, projectId, query, ui, views, can
           // redirect goes on to the router; only a refusal answers here.
           const result = await saveTraceViewAction(projectId, {
             name,
+            kind: ViewKind.List,
             query: viewQueryOf(query),
             columns: orderedColumns(prefs.columns),
           });
@@ -243,8 +246,9 @@ export function ViewsMenu({ organization, slug, projectId, query, ui, views, can
 }
 
 /** A view's name, asked for: saved, or the server's refusal shown beside
- *  the field — a name taken, a project at its hundred views. */
-function NameDialog({
+ *  the field — a name taken, a project at its hundred views. The layouts
+ *  menu asks the same way (`layout-controls.tsx`). */
+export function NameDialog({
   open,
   onOpenChange,
   title,

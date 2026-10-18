@@ -46,10 +46,13 @@ export const PAGE_ACTION_KEY = "c";
 
 /** Step to the next and the previous of what a page steps through
  *  (`lib/use-page-steps.ts`): the trace list's peek through the page's runs,
- *  as a mail reader's j and k do. `k` is also the API keys row's `g k`, and
- *  the pending-`g` branch takes it first, as it does `c`. */
+ *  and a session's page through its traces, as a mail reader's j and k do;
+ *  `o` opens the one stood on, where the page offers that. `k` is also the
+ *  API keys row's `g k` and `o` the Overview's `g o`, and the pending-`g`
+ *  branch takes both first, as it does `c`. */
 export const NEXT_KEY = "j";
 export const PREVIOUS_KEY = "k";
+export const OPEN_KEY = "o";
 
 /** `g` then this reaches the organization's overview from anywhere, Account
  *  included: the one sequence that is not a row of the rail you stand in. */

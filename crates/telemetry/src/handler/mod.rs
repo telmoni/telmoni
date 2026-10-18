@@ -12,6 +12,7 @@ pub mod ingest;
 pub mod monitors;
 pub mod ping_keys;
 pub mod pings;
+pub mod session_layout;
 pub mod sessions;
 pub mod traces;
 pub mod users;

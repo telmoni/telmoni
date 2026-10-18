@@ -3,19 +3,21 @@
 import { useSyncExternalStore } from "react";
 
 // What a page lets `j` and `k` step through — the trace list's peek, through
-// the runs of the page — offered while it is open and taken back as it goes.
-// The console's one key handler reads it (`components/keyboard-shortcuts.tsx`),
-// so the keys pass the pending `g` first and keep the rules every bare key
-// keeps; module state, as the trace list's preferences are, since a tab
-// shows one page at a time.
+// the runs of the page; a session's page, through its traces — offered while
+// it is open and taken back as it goes. The console's one key handler reads
+// it (`components/keyboard-shortcuts.tsx`), so the keys pass the pending `g`
+// first and keep the rules every bare key keeps; module state, as the trace
+// list's preferences are, since a tab shows one page at a time.
 
-/** One page's steps: what they are called, and each way's move, which does
- *  nothing at its end of the page. */
+/** One page's steps: what they are called, each way's move, which does
+ *  nothing at its end of the page, and `open`, where `o` opens the one
+ *  stood on. */
 export interface PageSteps {
   /** What one step moves to, as the shortcuts sheet names it: "trace". */
   noun: string;
   next: () => void;
   previous: () => void;
+  open?: () => void;
 }
 
 let current: PageSteps | null = null;

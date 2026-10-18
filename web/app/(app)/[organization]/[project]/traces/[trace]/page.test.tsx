@@ -3,9 +3,18 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/page-header", () => ({
-  PageHeader: ({ title, backHref }: { title: string; backHref?: string }) => (
+  PageHeader: ({
+    title,
+    backHref,
+    action,
+  }: {
+    title: string;
+    backHref?: string;
+    action?: React.ReactNode;
+  }) => (
     <div data-testid="page-header" data-back={backHref}>
       {title}
+      {action}
     </div>
   ),
 }));
@@ -14,11 +23,28 @@ vi.mock("@/components/service-unavailable", () => ({
   ServiceUnavailable: () => <div data-testid="outage">unavailable</div>,
 }));
 
+// The layout reads the link's part of the URL.
+let mockSearch = "";
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  usePathname: () => "/acme/web/traces/5d4f5c68-0000-4000-8000-000000000001",
+  useSearchParams: () => new URLSearchParams(mockSearch),
+}));
+
+vi.mock("@/app/(app)/[organization]/[project]/traces/actions", () => ({
+  saveTraceViewAction: vi.fn(),
+  updateTraceViewAction: vi.fn(),
+  deleteTraceViewAction: vi.fn(),
+  setSessionLayoutAction: vi.fn(),
+}));
+
 import { Role } from "@/lib/types/enums";
 
 let mockContext: unknown;
 let mockProject: unknown;
 let mockTrace: unknown;
+let mockSetting: unknown;
+let mockLayouts: unknown;
 const fetchProjectBySlug = vi.fn<(slug: string) => Promise<unknown>>(async () => mockProject);
 const fetchTrace = vi.fn<(projectId: string, runId: string) => Promise<unknown>>(
   async () => mockTrace,
@@ -29,12 +55,52 @@ vi.mock("@/lib/server/data", () => ({
   getServerContext: async () => mockContext,
   fetchProjectBySlug: (slug: string) => fetchProjectBySlug(slug),
   fetchTrace: (projectId: string, runId: string) => fetchTrace(projectId, runId),
+  fetchSessionLayout: async () => mockSetting,
+  fetchTraceLayouts: async () => mockLayouts,
 }));
 
 import TracePage from "./page";
 
 const RUN = "5d4f5c68-0000-4000-8000-000000000001";
 const PARAMS = Promise.resolve({ organization: "acme", project: "web", trace: RUN });
+const LAYOUT_ID = "0b6f2c1e-6a4f-4d2b-9e3a-5c7d8e9f0a1b";
+const FULL_ID = "1c7e3d2f-7b5a-4e3c-8f4b-6d8e9f0a1b2c";
+/** The default customized all the way: steps and calls, the failed open on
+ *  a timeline. */
+const FULL = {
+  id: FULL_ID,
+  kind: "layout",
+  name: "Full",
+  query: {
+    depth: "calls",
+    open: "failed",
+    timeline: true,
+    pinned: [],
+    filter: {},
+    messages: false,
+    scores: true,
+  },
+  columns: ["started"],
+  created_at: "2026-10-17T00:00:00Z",
+  updated_at: "2026-10-17T00:00:00Z",
+};
+const PINNING = {
+  id: LAYOUT_ID,
+  kind: "layout",
+  name: "Pinned tools",
+  query: {
+    depth: "steps",
+    open: "none",
+    timeline: false,
+    pinned: ["search_docs"],
+    filter: {},
+    messages: false,
+    scores: true,
+  },
+  columns: ["started"],
+  created_at: "2026-10-17T00:00:00Z",
+  updated_at: "2026-10-17T00:00:00Z",
+};
 
 function span(over: Record<string, unknown>) {
   return {
@@ -109,6 +175,12 @@ const SPANS = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockSearch = "";
+  window.localStorage.clear();
+  // The project opens in a layout of steps and calls, as the tests below
+  // read the whole tree; the default is tested on its own.
+  mockSetting = { view_id: FULL_ID };
+  mockLayouts = { kind: "ok", layouts: [PINNING, FULL] };
   mockContext = {
     person: { userId: "user_1", email: "ada@example.test", analyticsOptIn: false },
     organizations: [],
@@ -127,6 +199,15 @@ describe("TracePage", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-15T12:00:00.000Z"));
+    // A menu's popper measures its trigger, which jsdom cannot.
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -249,6 +330,34 @@ describe("TracePage", () => {
 
     fireEvent.click(screen.getByRole("radio", { name: "Timeline" }));
     expect(tree.querySelectorAll('[role="treeitem"] span[style*="width"]')).toHaveLength(4);
+  });
+
+  it("opens on the run's own row alone by default, and names the layout as changed once customized", async () => {
+    mockSetting = { view_id: null };
+    render(await TracePage({ params: PARAMS }));
+    expect(screen.getByRole("button", { name: "Customize the layout" })).toBeInTheDocument();
+    const tree = screen.getByRole("tree", { name: "Spans" });
+    expect(within(tree).getAllByRole("treeitem")).toHaveLength(1);
+    // The run's own span, chosen, still reads with the whole trace's sums.
+    expect(within(chosen()).getByText(/1 step, 2 calls/)).toBeInTheDocument();
+    // Customized to its steps, the layout is named as changed. The menu opens
+    // from the keyboard, as Radix opens one in a document with no pointer.
+    fireEvent.keyDown(screen.getByRole("button", { name: "Customize the layout" }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Its steps" }));
+    expect(within(screen.getByRole("tree", { name: "Spans" })).getAllByRole("treeitem")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Customize the layout, changed" })).toBeInTheDocument();
+  });
+
+  it("opens a saved layout from a link, its pinned spans above the tree, chosen at a press", async () => {
+    mockSearch = `view=${LAYOUT_ID}`;
+    render(await TracePage({ params: PARAMS }));
+    expect(screen.getByRole("button", { name: "Saved layout: Pinned tools" })).toBeInTheDocument();
+    const tree = screen.getByRole("tree", { name: "Spans" });
+    expect(within(tree).getAllByRole("treeitem")).toHaveLength(2);
+    const pin = screen.getByRole("button", { name: /search_docs/ });
+    fireEvent.click(pin);
+    expect(pin).toHaveAttribute("aria-pressed", "true");
+    expect(within(chosen()).getByRole("heading", { name: "search_docs" })).toBeInTheDocument();
   });
 
   it("calls a run whose own span has not arrived running", async () => {

@@ -168,6 +168,11 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(handler::sessions::get_session),
         )
         .route(
+            "/telemetry/session-layout",
+            get(handler::session_layout::get_session_layout)
+                .put(handler::session_layout::put_session_layout),
+        )
+        .route(
             "/telemetry/views",
             get(handler::views::list_views).post(handler::views::create_view),
         )

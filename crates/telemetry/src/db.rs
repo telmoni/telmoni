@@ -1,6 +1,7 @@
 //! The telemetry module's Postgres: each project's settings, its saved views
-//! of the trace list, its monitors, its ping keys, its runs still going, and
-//! the outbox of what it hands on once a transaction has committed.
+//! of the trace list and layouts of a session, its monitors, its ping keys,
+//! its runs still going, and the outbox of what it hands on once a
+//! transaction has committed.
 
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -9,7 +10,7 @@ use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::{
     HasProject, Lane, Maintenance, MaintenanceLane, ProjectAndOrganization, Scoped,
 };
-use telmoni_shared::{ContentMode, MonitorState, OrganizationId, ProjectId};
+use telmoni_shared::{ContentMode, MonitorState, OrganizationId, ProjectId, ViewKind};
 
 /// This module's cross-tenant lane: the one declaration, so a sibling's lane
 /// is unnameable here. See `tenant_session::Lane`.
@@ -265,17 +266,22 @@ pub async fn purge_project(
     Ok(purged + views + settings)
 }
 
-/// A saved view as its row keeps it. Its query is the JSON the lane checked
-/// when it was written; its columns, `TraceColumn`'s words.
+/// A saved view as its row keeps it: a view of the trace list, or a layout
+/// of a session's page and a trace's (`kind`). Its query is the JSON the
+/// lane checked when it was written; its columns, `TraceColumn`'s words.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ViewRow {
     pub id: Uuid,
+    pub kind: ViewKind,
     pub name: String,
     pub query: serde_json::Value,
     pub columns: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
+
+/// The columns a [`ViewRow`] is read from, in its order.
+const VIEW_COLUMNS: &str = "id, kind, name, query, columns, created_at, updated_at";
 
 /// What saving a view writes.
 #[derive(Debug, Clone, Copy)]
@@ -285,48 +291,56 @@ pub struct ViewWrite<'a> {
     pub columns: &'a [String],
 }
 
-/// The project's saved views, by name.
+/// The project's saved views of one kind, by name.
 pub async fn views<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
+    kind: ViewKind,
 ) -> sqlx::Result<Vec<ViewRow>> {
-    sqlx::query_as(
-        "SELECT id, name, query, columns, created_at, updated_at
+    sqlx::query_as(&format!(
+        "SELECT {VIEW_COLUMNS}
            FROM telemetry.trace_views
-          WHERE project_id = $1
-          ORDER BY lower(name), id",
-    )
+          WHERE project_id = $1 AND kind = $2
+          ORDER BY lower(name), id"
+    ))
     .bind(project_id)
+    .bind(kind)
     .fetch_all(tx.conn())
     .await
 }
 
-/// How many views the project keeps.
+/// How many views of one kind the project keeps.
 pub async fn view_count<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
+    kind: ViewKind,
 ) -> sqlx::Result<i64> {
-    sqlx::query_scalar("SELECT count(*) FROM telemetry.trace_views WHERE project_id = $1")
-        .bind(project_id)
-        .fetch_one(tx.conn())
-        .await
+    sqlx::query_scalar(
+        "SELECT count(*) FROM telemetry.trace_views WHERE project_id = $1 AND kind = $2",
+    )
+    .bind(project_id)
+    .bind(kind)
+    .fetch_one(tx.conn())
+    .await
 }
 
-/// A new view of the project. Its name taken already, in any case, is the
-/// unique index's refusal, `trace_views_project_name_idx`.
+/// A new view of the project. Its name taken already by one of its kind, in
+/// any case, is the unique index's refusal, `trace_views_project_name_idx`.
 pub async fn insert_view(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
     id: Uuid,
+    kind: ViewKind,
     view: ViewWrite<'_>,
 ) -> sqlx::Result<ViewRow> {
-    sqlx::query_as(
-        "INSERT INTO telemetry.trace_views (id, project_id, name, query, columns)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, name, query, columns, created_at, updated_at",
-    )
+    sqlx::query_as(&format!(
+        "INSERT INTO telemetry.trace_views (id, project_id, kind, name, query, columns)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING {VIEW_COLUMNS}"
+    ))
     .bind(id)
     .bind(project_id)
+    .bind(kind)
     .bind(view.name)
     .bind(view.query)
     .bind(view.columns)
@@ -334,27 +348,91 @@ pub async fn insert_view(
     .await
 }
 
-/// One of the project's views, written over, or `None` where it has no view
-/// by that id.
+/// One of the project's views of `kind`, written over, or `None` where it
+/// has no view of that kind by that id: a view never changes its kind.
 pub async fn update_view<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
     id: Uuid,
+    kind: ViewKind,
     view: ViewWrite<'_>,
 ) -> sqlx::Result<Option<ViewRow>> {
-    sqlx::query_as(
+    sqlx::query_as(&format!(
         "UPDATE telemetry.trace_views
-            SET name = $3, query = $4, columns = $5, updated_at = now()
-          WHERE project_id = $1 AND id = $2
-         RETURNING id, name, query, columns, created_at, updated_at",
-    )
+            SET name = $4, query = $5, columns = $6, updated_at = now()
+          WHERE project_id = $1 AND id = $2 AND kind = $3
+         RETURNING {VIEW_COLUMNS}"
+    ))
     .bind(project_id)
     .bind(id)
+    .bind(kind)
     .bind(view.name)
     .bind(view.query)
     .bind(view.columns)
     .fetch_optional(tx.conn())
     .await
+}
+
+/// Whether the project keeps a layout by that id, held (`FOR KEY SHARE`)
+/// until the transaction ends: a delete of the layout then waits for the
+/// settings row to name it, the order its own `SET NULL` takes the two in,
+/// so neither waits on the other in a circle.
+pub async fn layout_exists<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    id: Uuid,
+) -> sqlx::Result<bool> {
+    sqlx::query_scalar::<_, i32>(
+        "SELECT 1 FROM telemetry.trace_views
+          WHERE project_id = $1 AND id = $2 AND kind = $3
+            FOR KEY SHARE",
+    )
+    .bind(project_id)
+    .bind(id)
+    .bind(ViewKind::Layout)
+    .fetch_optional(tx.conn())
+    .await
+    .map(|found| found.is_some())
+}
+
+/// The saved layout a project's sessions and traces open in, while it names
+/// one; `None` for the console's own default, and where the project has no
+/// row.
+pub async fn session_layout<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+) -> sqlx::Result<Option<Uuid>> {
+    let row: Option<Option<Uuid>> = sqlx::query_scalar(
+        "SELECT session_view_id FROM telemetry.project_settings WHERE project_id = $1",
+    )
+    .bind(project_id)
+    .fetch_optional(tx.conn())
+    .await?;
+    Ok(row.flatten())
+}
+
+/// A project's layout, set: its row made where it has none, and filed under
+/// `organization_id`, as [`set_content_mode`] files it.
+pub async fn set_session_layout(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    organization_id: &OrganizationId,
+    view_id: Option<Uuid>,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO telemetry.project_settings
+             (project_id, organization_id, session_view_id)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (project_id) DO UPDATE
+            SET organization_id = EXCLUDED.organization_id,
+                session_view_id = EXCLUDED.session_view_id",
+    )
+    .bind(project_id)
+    .bind(organization_id)
+    .bind(view_id)
+    .execute(tx.conn())
+    .await?;
+    Ok(())
 }
 
 /// One of the project's views, removed. Answers whether there was one.

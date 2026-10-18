@@ -96,6 +96,7 @@ const TRACE_A = {
   session_id: "conv-1",
   ended: true,
   status: "ok",
+  error_type: "",
   started_at: "2026-10-11T03:00:00Z",
   ended_at: "2026-10-11T03:00:02Z",
   duration_ms: 2000,
@@ -245,7 +246,7 @@ describe("TracesPage", () => {
     // Columns past the first eight are offered, not shown; the count, as
     // Langfuse's, holds the trace's id, which always shows.
     expect(table.queryByRole("columnheader", { name: /Model calls/ })).toBeNull();
-    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("9/20");
+    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("9/21");
     // The window and the refresh stand on the title's row.
     const header = within(screen.getByTestId("page-header"));
     expect(header.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 7 days");

@@ -12,7 +12,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use chrono::{Duration, SubsecRound, Utc};
 use http_body_util::BodyExt;
-use serde_json::Value;
+use serde_json::{Value, json};
 use sqlx::PgPool;
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -337,10 +337,54 @@ async fn a_session_is_its_traces_in_the_order_they_ran(pool: PgPool) {
     assert_eq!(runs(&detail), [seeded.a, seeded.b], "earliest first");
     assert_eq!(detail["traces"][0]["agent"], "support-bot");
     assert_eq!(detail["traces"][0]["status"], "ok");
+    assert_eq!(detail["traces"][0]["error_type"], "");
     assert_eq!(detail["traces"][1]["status"], "error");
+    assert_eq!(
+        detail["traces"][1]["error_type"], "RuntimeError",
+        "the run's own error class, never its message"
+    );
     assert_eq!(detail["traces"][1]["user_id"], "user-a");
+    assert_eq!(detail["pinned"], json!([]));
+    assert_eq!(detail["traces"][0]["pinned"], json!([]));
     assert_eq!(detail["days"], 7);
     assert_eq!(detail["more"], false);
+
+    // The spans a layout pinned by name stand under each trace: the step
+    // every run of the seed took, and nothing for a name no span has.
+    let (status, pinned) = p
+        .detail("conv-1?pinned=answer&pinned=nothing&pinned=answer")
+        .await;
+    assert_eq!(status, StatusCode::OK, "{pinned}");
+    assert_eq!(pinned["pinned"], json!(["answer", "nothing"]));
+    for trace in pinned["traces"].as_array().expect("traces") {
+        let spans = trace["pinned"].as_array().expect("pinned spans");
+        assert_eq!(spans.len(), 1, "{trace}");
+        assert_eq!(spans[0]["name"], "answer");
+        assert_eq!(spans[0]["kind"], "step");
+        assert_eq!(spans[0]["status"], "ok");
+        assert!(spans[0]["started_at"].as_str().is_some());
+        assert_eq!(
+            spans[0]["parent_span_id"],
+            trace["run_id"]
+                .as_str()
+                .map_or(String::new(), |_| spans[0]["parent_span_id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned())
+        );
+    }
+    let nine = (0..=8)
+        .map(|i| format!("pinned=step-{i}"))
+        .collect::<Vec<_>>()
+        .join("&");
+    let (status, body) = p.detail(&format!("conv-1?{nine}")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let (status, _) = p.detail("conv-1?sort=started").await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "a parameter the lane does not take"
+    );
 
     // An id with a slash and a space, as the path encodes it.
     let (status, spaced) = p.detail("chat%2F42%20b").await;

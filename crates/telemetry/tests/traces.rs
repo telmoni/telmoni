@@ -625,7 +625,9 @@ async fn a_download_is_the_lists_rows_as_csv_or_json(pool: PgPool) {
     let text = text.strip_prefix('\u{feff}').expect("the byte-order mark");
     let lines: Vec<&str> = text.split("\r\n").filter(|l| !l.is_empty()).collect();
     assert_eq!(lines.len(), 4, "the header and a row a run");
-    assert!(lines[0].starts_with("run_id,agent,user_id,session_id,ended,status,started_at"));
+    assert!(
+        lines[0].starts_with("run_id,agent,user_id,session_id,ended,status,error_type,started_at")
+    );
     assert!(
         lines[1].starts_with(&format!("{c},zeta,,,false,ok,")),
         "{}",
