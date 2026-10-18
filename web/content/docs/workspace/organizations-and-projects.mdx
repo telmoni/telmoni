@@ -203,8 +203,10 @@ An organization Owner or Admin can create a new project from the organization's
 **Projects** page (`/{organization}/projects`) or the switcher's project menu:
 
 1. Select **New project** on the Projects page, or **New project** in the
-   switcher's project menu. The project lands in the
-   organization you are in; the dialog asks only for a name.
+   switcher's project menu. A panel opens over the page, as a trace opens
+   over its list at full size: it names the organization the project lands
+   in, the one you are in, and asks only for a name. Escape, **Cancel** or
+   its close button shuts it, and so does moving to another page.
 2. Provide a project name: up to 100 characters, and not one another project in
    the organization already has (compared without regard to case).
 3. The project is created immediately. Its API keys and connectors are its own.
@@ -315,7 +317,8 @@ An organization Owner can hand a project to one of the project's Admins:
 Anyone signed in to the console can create another organization, and becomes
 its **Owner**:
 
-1. Open the switcher in the console header and select **New organization**.
+1. Open the switcher in the console header and select **New organization**;
+   a panel opens over the page, as **New project** does.
 2. Give it a **Name**: up to 80 characters, the name everyone in it sees.
 3. Give it a **URL**, or leave the field blank to have one derived from the
    name, as [Name and URL](#name-and-url) describes: "Acme Robotics" becomes
@@ -327,7 +330,7 @@ its **Owner**:
 4. Select **Create organization**. The console opens the new organization's
    **Overview**; [create its first project](#creating-a-project) from its
    **Projects** page or the switcher. On the hosted service, a second
-   organization is paid for first, as below: the dialog asks for its plan and
+   organization is paid for first, as below: the panel asks for its plan and
    sends you to the payment page, and the organization opens once the
    payment is confirmed.
 
