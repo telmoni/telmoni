@@ -6,7 +6,7 @@ package telmoni
 var (
 	WithRandom         = withRandom
 	WithQueue          = withQueue
-	Hold               = func(c *Client) (release func()) { return c.processor.hold() }
+	Hold               = func(c *Client) (release func()) { release, _ = c.processor.hold(0); return release }
 	EncodeBaggageValue = encodeBaggageValue
 	DecodeBaggageValue = decodeBaggageValue
 	ParseTraceparent   = parseTraceparent

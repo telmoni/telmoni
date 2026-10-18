@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -451,5 +453,49 @@ func TestARecordAsLargeAsABatchTravelsInOneExport(t *testing.T) {
 	}
 	if spans[0] != "telmoni.run.start" || spans[511] != "invoke_agent claude-code" {
 		t.Errorf("the export runs from %s to %s, want from the start to the run", spans[0], spans[511])
+	}
+}
+
+// A record the queue has no room for is refused whole, before anything is
+// queued, since its tail — the run's own span first — would otherwise be
+// dropped; drained, the queue takes it whole.
+func TestARecordTheQueueHasNoRoomForIsRefusedWhole(t *testing.T) {
+	// Room for five spans, and a worker that will not wake until flushed.
+	h := newHarness(t, testConfig(), nil, telmoni.WithQueue(5, 100, time.Minute))
+	record := theRecord(t)
+	record.Inside = nil
+	for range 2 {
+		record.Inside = append(record.Inside, telmoni.ToolCallRecord{Name: "t", Start: record.Start, End: record.Start})
+	}
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	// The start goes alone; two steps then hold two of the five slots.
+	if !h.transport.waitFor(1, waitTimeout) {
+		t.Fatal("the run's start was not sent at once")
+	}
+	for n := range 2 {
+		_, step := run.Step(ctx, fmt.Sprintf("s%d", n))
+		step.End()
+	}
+	if err := h.client.RecordRun(context.Background(), record); !errors.Is(err, telmoni.ErrQueueFull) {
+		t.Fatalf("RecordRun with room for three of the record's four spans = %v, want ErrQueueFull", err)
+	}
+	run.End()
+	h.flush()
+	if err := h.client.RecordRun(context.Background(), record); err != nil {
+		t.Fatalf("RecordRun with the queue drained = %v", err)
+	}
+	h.flush()
+	got := names(h.transport.spans(t))
+	calls := 0
+	for _, name := range got {
+		if name == "execute_tool t" {
+			calls++
+		}
+	}
+	if calls != 2 || len(got) != 8 {
+		t.Errorf("spans sent: %v, want the live run's four and the record's four", got)
+	}
+	if warnings := h.logs.warnings(); len(warnings) != 0 {
+		t.Errorf("warnings: %q, want none, since nothing was dropped", warnings)
 	}
 }

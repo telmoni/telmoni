@@ -121,7 +121,8 @@ time you send it. A record holds no content. A blank agent, a run id that is
 not a UUID or is the nil UUID, a time that is not one or an item of no known
 `type` throws a
 `TypeError`, and a span that ends before it starts a `RangeError`; either
-sends nothing.
+sends nothing. A record the export queue has no room for throws
+`QueueFullError`, nothing of it queued: flush, or wait, and record it again.
 
 ## Configuration
 

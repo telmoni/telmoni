@@ -14,6 +14,7 @@ from .models import (
     ToolCallRecord,
     Usage,
 )
+from .processor import QueueFullError
 from .runs import ModelCall, Run, Step, ToolCall, current_run
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "Config",
     "ModelCall",
     "ModelCallRecord",
+    "QueueFullError",
     "Run",
     "RunRecord",
     "Secret",

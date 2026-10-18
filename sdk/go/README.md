@@ -131,7 +131,9 @@ bytes, which ingest answers once: give a run the same id each time you send
 it. A record holds no content. A blank agent, a run id that is not a UUID or
 is the nil UUID, a zero time, a nil item or a span that ends before it starts
 returns an error,
-and nothing is sent: a record is handed over whole, so it is refused whole.
+and nothing is sent: a record is handed over whole, so it is refused whole. One
+the export queue has no room for is `ErrQueueFull`, nothing of it queued:
+flush, or wait, and record it again.
 
 ## Content
 

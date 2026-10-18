@@ -31,6 +31,12 @@ SCHEDULE_DELAY_S = 5.0
 SHUTDOWN_TIMEOUT_S = 30.0
 
 
+class QueueFullError(RuntimeError):
+    """``record_run`` refused a record the export queue has no room for,
+    queuing nothing of it: flush, or wait for the queue to drain, and record
+    it again."""
+
+
 class Processor(SpanProcessor):
     def __init__(
         self,
@@ -87,11 +93,18 @@ class Processor(SpanProcessor):
             self._sampled_out.add(run_id)
 
     @contextmanager
-    def hold(self) -> Iterator[None]:
+    def hold(self, need: int = 0) -> Iterator[None]:
         """Take no batch until the block ends, so the spans a record queues
         inside it travel together, in their order, and the record sent again
-        is the same bytes."""
+        is the same bytes. Refused, holding nothing, when the queue has no room
+        for the record's ``need`` spans, so a record is queued whole or not at
+        all; a live span ending meanwhile still takes a slot."""
         with self._lock:
+            if len(self._queue) + need > self._max_queue_size:
+                raise QueueFullError(
+                    f"the export queue has no room for the record's {need} spans; "
+                    "flush or wait, then record it again"
+                )
             self._held += 1
         try:
             yield

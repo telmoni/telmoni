@@ -15,8 +15,8 @@ use opentelemetry::Context;
 use opentelemetry::trace::TraceContextExt as _;
 use serde_json::{Value, json};
 use telmoni_sdk::{
-    CallRecord, Config, Error, ModelCallRecord, RecordItem, RunOptions, RunRecord, StepRecord,
-    Telmoni, ToolCallRecord, Usage,
+    Batching, CallRecord, Config, Error, ModelCallRecord, RecordItem, RunOptions, RunRecord,
+    StepRecord, Telmoni, ToolCallRecord, Usage,
 };
 
 /// A time as the fixture writes it, RFC 3339 in UTC to the millisecond:
@@ -474,5 +474,69 @@ fn a_record_refused_sends_nothing() -> Outcome {
     ));
     misconfigured.flush()?;
     assert_eq!(misconfigured.transport.count(), 0);
+    Ok(())
+}
+
+/// A record the queue has no room for is refused whole, before anything is
+/// queued, since its tail — the run's own span first — would otherwise be
+/// dropped; drained, the queue takes it whole.
+#[test]
+fn a_record_the_queue_has_no_room_for_is_refused_whole() -> Outcome {
+    let transport = FakeTransport::new([])?;
+    let warnings = Warnings::default();
+    let sleeps = Sleeps::default();
+    let mut hooks = hooks(&transport, &warnings, &sleeps);
+    // Room for five spans, and a worker that will not wake until flushed.
+    hooks.batching = Batching {
+        max_queue_size: 5,
+        max_batch_size: 100,
+        schedule_delay: Duration::from_secs(60),
+    };
+    let telmoni = Telmoni::with_hooks(keyed(), hooks);
+    let golden = the_record()?;
+    let at = golden.start;
+    let record = RunRecord {
+        inside: vec![
+            ToolCallRecord::new("t", at, at).into(),
+            ToolCallRecord::new("t", at, at).into(),
+        ],
+        ..golden
+    };
+
+    // The start's export is held at the gate, the worker inside it; two
+    // steps then hold two of the five slots.
+    transport.close_gate();
+    let run = telmoni.run("bot", RunOptions::default())?;
+    assert!(transport.wait_for(1));
+    for n in 0..2 {
+        let step = run.step(&format!("s{n}"));
+        step.end();
+    }
+    assert_eq!(
+        telmoni.record_run(record.clone()),
+        Err(Error::QueueFull { spans: 4 }),
+        "room for three of the record's four spans"
+    );
+    transport.open_gate();
+    run.end();
+    assert!(telmoni.flush());
+    telmoni.record_run(record)?;
+    assert!(telmoni.flush());
+    telmoni.shutdown();
+
+    let names: Vec<String> = transport
+        .spans()?
+        .iter()
+        .map(|span| name_of(span).to_owned())
+        .collect();
+    let calls = names
+        .iter()
+        .filter(|name| *name == "execute_tool t")
+        .count();
+    assert!(
+        calls == 2 && names.len() == 8,
+        "the live run's four spans and the record's four: {names:?}"
+    );
+    assert!(warnings.all().is_empty(), "{:?}", warnings.all());
     Ok(())
 }

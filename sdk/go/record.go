@@ -96,6 +96,11 @@ func (ToolCallRecord) callRecord()  {}
 
 var errNotAnItem = errors.New("telmoni: a recorded item must be a StepRecord, a ModelCallRecord or a ToolCallRecord")
 
+// ErrQueueFull is returned by RecordRun when the export queue has no room for
+// the whole record, so nothing of it was queued: flush, or wait for the queue
+// to drain, and record it again.
+var ErrQueueFull = errors.New("telmoni: the export queue has no room for the record; flush or wait, then record it again")
+
 // RecordRun sends a run that has already ended, from its record, as the live
 // calls would have sent it: for a job that keeps its own log, or a hook that
 // runs once the turn it reports is over. It goes through the same exporter,
@@ -106,8 +111,9 @@ var errNotAnItem = errors.New("telmoni: a recorded item must be a StepRecord, a 
 // the same bytes, which ingest answers once. A record holds no content.
 //
 // It returns an error, and sends nothing, for a blank agent, a run id that is
-// not a UUID, a zero time, a nil item, or a span that ends before it starts.
-// A record is handed over whole, so it is refused whole, where a live run's
+// not a UUID, a zero time, a nil item, or a span that ends before it starts,
+// and ErrQueueFull when the export queue has no room for the whole record. A
+// record is handed over whole, so it is refused whole, where a live run's
 // mistakes are warned of and the run goes on.
 func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 	if strings.TrimSpace(record.Agent) == "" {
@@ -151,15 +157,22 @@ func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 	for _, key := range slices.Sorted(maps.Keys(record.Tags)) {
 		attrs = append(attrs, attribute.String(tagPrefix+key, record.Tags[key]))
 	}
+	need := recordSpans(record)
 	if rate < 1 && c.random() >= rate {
 		c.processor.sampleOut(runID)
+		need = 0
 	}
+	// Queued whole or not at all: a record that outgrows the queue's room
+	// would lose its tail, the run's own span first.
+	release, ok := c.processor.hold(need)
+	if !ok {
+		return ErrQueueFull
+	}
+	defer release()
 	r := &recorder{tracer: c.tracer, runID: runUUID, inherited: inherited}
 	// No span in it: whatever span ctx carries, the record's trace is its
 	// own.
 	root := trace.ContextWithSpanContext(ctx, trace.SpanContext{})
-	release := c.processor.hold()
-	defer release()
 	run := r.open(root, runOperation+" "+record.Agent, trace.SpanKindInternal, attrs, record.Start)
 	inRun := trace.ContextWithSpan(root, run)
 	opener := r.open(inRun, runStart, trace.SpanKindInternal, slices.Concat(inherited, []attribute.KeyValue{sampleRate}), record.Start)
@@ -288,6 +301,19 @@ func checkRecord(record RunRecord) error {
 		}
 	}
 	return nil
+}
+
+// recordSpans counts the spans a record queues: the run and its start, then
+// each step and each call.
+func recordSpans(record RunRecord) int {
+	n := 2
+	for _, item := range record.Inside {
+		n++
+		if step, ok := itemValue(item).(StepRecord); ok {
+			n += len(step.Calls)
+		}
+	}
+	return n
 }
 
 func checkCall(call CallRecord) error {

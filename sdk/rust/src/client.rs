@@ -318,7 +318,7 @@ impl Telmoni {
     /// own tests, and not part of the API.
     #[doc(hidden)]
     pub fn with_exports_held<R>(&self, f: impl FnOnce() -> R) -> R {
-        let _hold = self.inner.processor.hold();
+        let _hold = self.inner.processor.hold(0);
         f()
     }
 

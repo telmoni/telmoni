@@ -30,6 +30,17 @@ export function errorName(error: unknown): string {
   return name || ctor || 'Error';
 }
 
+/**
+ * `recordRun` refused a record the export queue has no room for, queuing
+ * nothing of it: flush, or wait for the queue to drain, and record it again.
+ */
+export class QueueFullError extends Error {
+  constructor(spans: number) {
+    super(`the export queue has no room for the record's ${spans} spans; flush or wait, then record it again`);
+    this.name = 'QueueFullError';
+  }
+}
+
 /** An abort is the agent stopping, which is neither ok nor an error. */
 export function isAbort(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as Named).name === 'AbortError';

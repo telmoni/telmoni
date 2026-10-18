@@ -15,6 +15,7 @@ from conftest import FakeTransport, attributes_of, load_fixture
 from telmoni import (
     Config,
     ModelCallRecord,
+    QueueFullError,
     RunRecord,
     StepRecord,
     Telmoni,
@@ -22,6 +23,8 @@ from telmoni import (
     Usage,
     current_run,
 )
+from telmoni.exporter import Exporter
+from telmoni.processor import Processor
 
 VERSIONED = {"telemetry.sdk.version", "telemetry.distro.version"}
 
@@ -226,3 +229,43 @@ def test_a_record_refused_sends_nothing(
         telmoni.record_run(record)
     assert telmoni.flush()
     assert transport.requests == []
+
+
+def test_a_record_the_queue_has_no_room_for_is_refused_whole(
+    transport: FakeTransport,
+) -> None:
+    """Refused whole before anything is queued; drained, the queue takes it."""
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    # Room for five spans, and a worker that will not wake until flushed.
+    client.processor.shutdown()
+    exporter = Exporter(client.config, transport=transport)
+    processor = Processor(
+        exporter, max_queue_size=5, max_batch_size=100, schedule_delay_s=60
+    )
+    client.processor = processor
+    client._provider._active_span_processor._span_processors = (processor,)
+    golden = the_record()
+    record = dataclasses.replace(
+        golden,
+        inside=[
+            ToolCallRecord(name="t", start=golden.start, end=golden.start),
+            ToolCallRecord(name="t", start=golden.start, end=golden.start),
+        ],
+    )
+    try:
+        with client.run("bot"):
+            # The start goes alone; two steps then hold two of the five slots.
+            assert transport.wait_for(1)
+            for n in range(2):
+                with client.step(f"s{n}"):
+                    pass
+            with pytest.raises(QueueFullError, match="4 spans"):
+                client.record_run(record)
+        assert client.flush()
+        client.record_run(record)
+        assert client.flush()
+    finally:
+        processor.shutdown()
+        client.shutdown()
+    names = [s["name"] for s in transport.spans()]
+    assert names.count("execute_tool t") == 2 and len(names) == 8, names

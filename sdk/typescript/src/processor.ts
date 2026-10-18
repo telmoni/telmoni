@@ -54,6 +54,11 @@ export class Processor implements SpanProcessor {
     this.#delayMs = (options.scheduleDelaySeconds ?? SCHEDULE_DELAY_S) * 1000;
   }
 
+  /** Whether the queue has room for `need` more spans: a record is queued whole or not at all. */
+  hasRoom(need: number): boolean {
+    return this.#queue.length + need <= this.#maxQueueSize;
+  }
+
   /** Drop every span of this run, the run's own among them. */
   sampleOut(runId: string): void {
     this.#sampledOut.add(runId);

@@ -15,7 +15,7 @@ import type { Attributes, Context, HrTime, Span, SpanContext, SpanOptions, Trace
 import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 
 import * as contract from './contract.js';
-import { errorType, isAbort } from './errors.js';
+import { QueueFullError, errorType, isAbort } from './errors.js';
 import { type Ids, spanIdAt } from './ids.js';
 import type { Processor } from './processor.js';
 import type {
@@ -317,7 +317,8 @@ export class Opener {
    * The spans end in one synchronous pass, the run's start first and the run's
    * own last, and the processor's worker is a timer, which runs only once
    * this returns: so they are queued together, and the same record sent again
-   * is the same bytes.
+   * is the same bytes. Throws `QueueFullError`, queuing nothing, when the
+   * export queue has no room for the whole record.
    */
   record(record: RunRecord): void {
     if (typeof record.agent !== 'string' || record.agent.trim() === '') {
@@ -351,7 +352,14 @@ export class Opener {
     for (const [key, value] of Object.entries(record.tags ?? {})) {
       attributes[`${contract.TAG_PREFIX}${key}`] = value;
     }
-    if (rate < 1 && Math.random() >= rate) this.#processor.sampleOut(runId);
+    if (rate < 1 && Math.random() >= rate) {
+      this.#processor.sampleOut(runId);
+    } else {
+      // Queued whole or not at all: a record that outgrows the queue's room
+      // would lose its tail, the run's own span first.
+      const spans = spansIn(record);
+      if (!this.#processor.hasRoom(spans)) throw new QueueFullError(spans);
+    }
     let place = 0;
     const open = (name: string, parent: Context, spanAttributes: Attributes, kind: SpanKind, at: RecordTime): Span =>
       this.#ids.given(runHex, spanIdAt(runHex, place++), () =>
@@ -435,6 +443,16 @@ function later(a: HrTime, b: HrTime): boolean {
 }
 
 type Recorded = RunRecord | StepRecord | CallRecord;
+
+/** How many spans a record queues: the run and its start, then each step and each call. */
+function spansIn(record: RunRecord): number {
+  let spans = 2;
+  for (const item of record.inside ?? []) {
+    spans += 1;
+    if (item.type === 'step') spans += (item.calls ?? []).length;
+  }
+  return spans;
+}
 
 function* walk(record: RunRecord): Generator<Recorded> {
   yield record;

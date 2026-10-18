@@ -79,9 +79,16 @@ func (p *processor) sampleOut(runID string) {
 
 // hold has the worker take no batch, unless it is stopping, until release is
 // called, so the spans a record queues in between travel together, in their
-// order, and the record sent again is the same bytes.
-func (p *processor) hold() (release func()) {
+// order, and the record sent again is the same bytes. Refused, holding
+// nothing, when the queue has no room for the record's need spans, so a
+// record is queued whole or not at all; a live span ending meanwhile still
+// takes a slot.
+func (p *processor) hold(need int) (release func(), ok bool) {
 	p.mu.Lock()
+	if len(p.queue)+need > p.limits.maxQueue {
+		p.mu.Unlock()
+		return func() {}, false
+	}
 	p.held++
 	p.mu.Unlock()
 	return func() {
@@ -89,7 +96,7 @@ func (p *processor) hold() (release func()) {
 		p.held--
 		p.signal()
 		p.mu.Unlock()
-	}
+	}, true
 }
 
 func (p *processor) OnStart(context.Context, sdktrace.ReadWriteSpan) {}

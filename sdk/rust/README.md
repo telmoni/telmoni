@@ -128,7 +128,9 @@ span's place in the record, so the same record sent again is the same bytes,
 which ingest answers once: give a run the same id each time you send it. A
 record holds no content. A blank agent (`Error::EmptyAgent`), a run id that is
 not a UUID or is the nil UUID (`Error::RunId`) or a span that ends before it starts
-(`Error::EndBeforeStart`) is returned as an error, and nothing is sent.
+(`Error::EndBeforeStart`) is returned as an error, and nothing is sent. A record
+the export queue has no room for is `Error::QueueFull`, nothing of it queued:
+flush, or wait, and record it again.
 
 ## Configuration
 

@@ -113,10 +113,16 @@ impl Processor {
 
     /// Takes no batch until the guard drops, so the spans a record queues
     /// meanwhile travel together, in their order, and the record sent again
-    /// is the same bytes.
-    pub(crate) fn hold(&self) -> Hold<'_> {
-        lock(&self.shared.state).held += 1;
-        Hold(&self.shared)
+    /// is the same bytes. `None`, holding nothing, when the queue has no room
+    /// for the record's `need` spans, so a record is queued whole or not at
+    /// all; a live span ending meanwhile still takes a slot.
+    pub(crate) fn hold(&self, need: usize) -> Option<Hold<'_>> {
+        let mut state = lock(&self.shared.state);
+        if state.queue.len() + need > self.shared.batching.max_queue_size {
+            return None;
+        }
+        state.held += 1;
+        Some(Hold(&self.shared))
     }
 
     /// Everything queued sent, waiting up to `timeout`.

@@ -396,7 +396,8 @@ class Opener:
         each span's id is derived from that id and the span's place in the
         record. Its spans are queued together under the processor's hold, the
         run's start first and the run's own last, so the same record sent again
-        is the same bytes.
+        is the same bytes. Raises ``QueueFullError``, sending nothing, when
+        the export queue has no room for the whole record.
         """
         if not record.agent.strip():
             raise ValueError("a run needs its agent's name")
@@ -432,8 +433,15 @@ class Opener:
         }
         for key, value in (record.tags or {}).items():
             attributes[f"{contract.TAG_PREFIX}{key}"] = value
+        # Queued whole or not at all: a record that outgrows the queue's room
+        # would lose its tail, the run's own span first.
+        need = 2 + sum(
+            1 + (len(item.calls) if isinstance(item, StepRecord) else 0)
+            for item in record.inside
+        )
         if rate < 1 and random.random() >= rate:
             self._client.processor.sample_out(run_id)
+            need = 0
         places = itertools.count()
 
         def open_span(
@@ -468,7 +476,7 @@ class Opener:
                 name, kind = f"execute_tool {item.name}", SpanKind.INTERNAL
             _close(open_span(name, parent, attributes, kind, item.start), item)
 
-        with self._client.processor.hold():
+        with self._client.processor.hold(need):
             root = context.Context()
             span = open_span(
                 f"invoke_agent {record.agent}",

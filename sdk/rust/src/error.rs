@@ -19,6 +19,13 @@ pub enum Error {
     /// A recorded span — the run's own, a step's or a call's — ended before
     /// it started.
     EndBeforeStart,
+    /// The export queue had no room for the whole record, so nothing of it
+    /// was queued: flush, or wait for the queue to drain, and record it
+    /// again.
+    QueueFull {
+        /// How many spans the record would have queued.
+        spans: usize,
+    },
 }
 
 impl fmt::Display for Error {
@@ -32,6 +39,10 @@ impl fmt::Display for Error {
                 f.write_str("a recorded run's id must be a UUID other than the nil UUID")
             }
             Self::EndBeforeStart => f.write_str("a recorded span cannot end before it starts"),
+            Self::QueueFull { spans } => write!(
+                f,
+                "the export queue has no room for the record's {spans} spans; flush or wait, then record it again"
+            ),
         }
     }
 }

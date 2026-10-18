@@ -273,6 +273,7 @@ pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
     if !(rate > 0.0 && rate <= 1.0) {
         return Err(Error::SampleRate(rate));
     }
+    let need = spans_in(&record);
 
     let RunRecord {
         agent,
@@ -289,11 +290,17 @@ pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
     let run_id = run_uuid.to_string();
     let inherited = runs::inherited(&run_id, &agent, user_id, session_id);
     let attributes = runs::run_attributes(&agent, &inherited, &[], rate, tags);
-    if rate < 1.0 && (inner.random)() >= rate {
+    let sampled_out = rate < 1.0 && (inner.random)() >= rate;
+    if sampled_out {
         inner.processor.sample_out(&run_id);
     }
 
-    let _hold = inner.processor.hold();
+    // Queued whole or not at all: a record that outgrows the queue's room
+    // would lose its tail, the run's own span first.
+    let need = if sampled_out { 0 } else { need };
+    let Some(_hold) = inner.processor.hold(need) else {
+        return Err(Error::QueueFull { spans: need });
+    };
     let mut spans = Spans {
         tracer: &inner.tracer,
         run_id: run_uuid,
@@ -340,6 +347,19 @@ pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
     }
     close(&run, error_type, cancelled, end);
     Ok(())
+}
+
+/// How many spans `record` queues: the run and its start, then each step and
+/// each call.
+fn spans_in(record: &RunRecord) -> usize {
+    2 + record
+        .inside
+        .iter()
+        .map(|item| match item {
+            RecordItem::Step(step) => 1 + step.calls.len(),
+            RecordItem::ModelCall(_) | RecordItem::ToolCall(_) => 1,
+        })
+        .sum::<usize>()
 }
 
 /// Whether any span of `record` — the run's own, a step's or a call's — ends

@@ -4,6 +4,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { QueueFullError } from '../src/index';
 import type { CallRecord, ModelCallRecord, RunRecord, StepRecord, ToolCallRecord } from '../src/index';
 import { type ExportBody, type JsonAttribute, attributesOf, harness, loadFixture } from './helpers';
 
@@ -152,6 +153,32 @@ afterEach(() => {
 });
 
 describe('a recorded run', () => {
+  it('is refused whole when the queue has no room for it, and goes whole once there is', async () => {
+    // Room for five spans, and a worker that will not wake until flushed.
+    const h = harness({}, { processor: { maxQueueSize: 5, maxBatchSize: 100, scheduleDelaySeconds: 60 } });
+    const golden = theRecord();
+    const call: ToolCallRecord = { type: 'tool_call', name: 't', start: golden.start, end: golden.start };
+    const record: RunRecord = { ...golden, inside: [call, call] };
+    try {
+      // Nothing yields inside the run, so its start and two steps hold three of the five slots.
+      h.telmoni.run('bot', (run) => {
+        run.step('s0', () => {});
+        run.step('s1', () => {});
+        expect(() => h.telmoni.recordRun(record)).toThrow(QueueFullError);
+        expect(() => h.telmoni.recordRun(record)).toThrow('4 spans');
+      });
+      expect(await h.telmoni.flush()).toBe(true);
+      h.telmoni.recordRun(record);
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    const names = h.transport.spans().map((span) => span.name);
+    expect(names.filter((name) => name === 'execute_tool t')).toHaveLength(2);
+    expect(names).toHaveLength(8);
+    expect(h.warnings).toEqual([]);
+  });
+
   it('matches the golden export', async () => {
     const fixture = loadFixture<RecordedFixture>('recorded.json');
     const h = harness();
