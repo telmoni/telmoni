@@ -33,7 +33,7 @@ pub const EXPORTS_PER_MINUTE: u32 = 600;
 /// How long a body's digest is held while its rows are being written: a
 /// copy that arrives inside it is told to retry rather than written twice.
 pub const CLAIM_PENDING_SECS: u64 = 60;
-/// How long a written body's answer is held for its retry: an exporter's
+/// How long a written body's retry is answered, not written: an exporter's
 /// retry follows a lost answer within minutes.
 pub const CLAIM_ANSWER_SECS: u64 = 60 * 60;
 

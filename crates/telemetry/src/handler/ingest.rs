@@ -30,8 +30,9 @@ use telmoni_shared::{ContentMode, ProjectId, TelemetryError, TelmoniError};
 
 use crate::contract::{BATCH_MAX_BYTES, BATCH_SPANS_MAX};
 use crate::ingest::batch::{self, BatchError};
-use crate::ingest::claims::{self, Claim, Guard, StoredAnswer};
+use crate::ingest::claims::{self, Claim, Guard};
 use crate::ingest::decode::{self, DecodeError, Encoding};
+use crate::ingest::report::Report;
 use crate::live;
 use crate::{AppState, db, hashing};
 
@@ -120,12 +121,12 @@ async fn handle(
             )
             .into());
         }
-        Claim::Answered(stored) => {
+        Claim::Answered(content_mode) => {
             tracing::debug!(
                 project_id = %key.project_id,
                 "ingest: an export sent again, answered as it was"
             );
-            return Ok(answer(encoding, &stored.content_mode, stored.body));
+            return answer_again(encoding, &key.project_id, &bytes, content_mode);
         }
     };
 
@@ -137,15 +138,7 @@ async fn handle(
         async move {
             match write(&state, &key, encoding, &bytes).await {
                 Ok((content_mode, body)) => {
-                    guard
-                        .answer(
-                            &state.redis,
-                            &StoredAnswer {
-                                content_mode: content_mode.to_string(),
-                                body: body.clone(),
-                            },
-                        )
-                        .await;
+                    guard.answer(&state.redis, content_mode).await;
                     Ok((content_mode, body))
                 }
                 Err(error) => {
@@ -156,7 +149,7 @@ async fn handle(
         }
     });
     match written.await {
-        Ok(Ok((content_mode, body))) => Ok(answer(encoding, &content_mode.to_string(), body)),
+        Ok(Ok((content_mode, body))) => Ok(answer(encoding, content_mode, body)),
         Ok(Err(error)) => Err(error),
         Err(died) => Err(TelmoniError::internal("ingest: the write died", died)),
     }
@@ -179,12 +172,7 @@ async fn write(
     let batch = batch::read(&request, &key.project_id, received_at, &|raw| {
         storage.store(raw)
     })
-    .map_err(|error| match error {
-        BatchError::NoSpans => TelemetryError::InvalidBatch("the export holds no span".into()),
-        BatchError::TooManySpans(count) => TelemetryError::InvalidBatch(format!(
-            "the export holds {count} spans; at most {BATCH_SPANS_MAX}"
-        )),
-    })?;
+    .map_err(batch_error)?;
 
     let mut tx = project_scope(&state.db, &key.project_id).await?;
     let content_mode = db::content_mode(&mut tx, &key.project_id).await?;
@@ -215,16 +203,40 @@ async fn write(
             batch.rows.iter().map(|row| row.run_id),
         );
     }
-    let response = ExportTraceServiceResponse {
-        partial_success: batch.report.partial_success(content_mode),
-    };
-    let body = match encoding {
-        Encoding::Json => serde_json::to_vec(&response).map_err(|e| {
-            TelmoniError::Internal(format!("ingest: the answer did not encode: {e}"))
-        })?,
-        Encoding::Protobuf => response.encode_to_vec(),
-    };
+    let body = response_body(encoding, &batch.report, content_mode)?;
     Ok((content_mode, body))
+}
+
+/// The answer to an export sent again: its own bytes, the first copy's by
+/// their digest, read by the contract again under the mode the first answer
+/// named. Nothing is kept, so no user id is hashed.
+fn answer_again(
+    encoding: Encoding,
+    project_id: &ProjectId,
+    bytes: &[u8],
+    content_mode: ContentMode,
+) -> Result<Response, TelmoniError> {
+    let request = decode::request(bytes, encoding).map_err(decode_error)?;
+    let batch =
+        batch::read(&request, project_id, Utc::now(), &|_| String::new()).map_err(batch_error)?;
+    let body = response_body(encoding, &batch.report, content_mode)?;
+    Ok(answer(encoding, content_mode, body))
+}
+
+/// OTLP's response to what an export lost, in the request's encoding.
+fn response_body(
+    encoding: Encoding,
+    report: &Report,
+    content_mode: ContentMode,
+) -> Result<Vec<u8>, TelmoniError> {
+    let response = ExportTraceServiceResponse {
+        partial_success: report.partial_success(content_mode),
+    };
+    match encoding {
+        Encoding::Json => serde_json::to_vec(&response)
+            .map_err(|e| TelmoniError::Internal(format!("ingest: the answer did not encode: {e}"))),
+        Encoding::Protobuf => Ok(response.encode_to_vec()),
+    }
 }
 
 /// How long an export waits for auth to say whether its project still exists.
@@ -287,13 +299,13 @@ async fn release(guard: Guard, state: &AppState) {
 }
 
 /// A `200`: OTLP's response, in the request's encoding, under the mode.
-fn answer(encoding: Encoding, content_mode: &str, body: Vec<u8>) -> Response {
+fn answer(encoding: Encoding, content_mode: ContentMode, body: Vec<u8>) -> Response {
     let mut response = (StatusCode::OK, body).into_response();
     response.headers_mut().insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static(encoding.content_type()),
     );
-    if let Ok(value) = HeaderValue::from_str(content_mode) {
+    if let Ok(value) = HeaderValue::from_str(&content_mode.to_string()) {
         response.headers_mut().insert(CONTENT_MODE_HEADER, value);
     }
     response
@@ -375,6 +387,16 @@ fn decode_error(error: DecodeError) -> TelmoniError {
             "the export holds {count} spans; at most {BATCH_SPANS_MAX}"
         )),
         DecodeError::Invalid(detail) => TelemetryError::InvalidBatch(detail),
+    }
+    .into()
+}
+
+fn batch_error(error: BatchError) -> TelmoniError {
+    match error {
+        BatchError::NoSpans => TelemetryError::InvalidBatch("the export holds no span".into()),
+        BatchError::TooManySpans(count) => TelemetryError::InvalidBatch(format!(
+            "the export holds {count} spans; at most {BATCH_SPANS_MAX}"
+        )),
     }
     .into()
 }

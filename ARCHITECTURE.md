@@ -456,6 +456,7 @@ A deployment that needs more builds on the core rather than forking it, and the 
 - **What runs one at a time:** audit writes within one organization, each leader sweep, each indexer source, each retention chunk, `rotate` and `migrate`.
 - **What each process caps:** first delivery attempts, concurrent sends and export builds, each a named constant.
 - **What each read of ClickHouse may take:** eight seconds and 512 MiB of the one node (`store.rs`), so a read too large fails alone, answered as the store being unavailable, rather than taking the memory every project's reads and writes share; the trace list reaches it at about a hundred thousand runs in its window. A trace stops at 5,000 spans or at 8,192 of their units, a KiB of text each, its order and its cut found on the light columns before any span is read whole (`traces.rs`).
+- **What an export leaves in Redis:** its claim, for the hour: the answer's content mode alone, some 210 bytes on Redis 7.4 whatever the answer said, a retry's own bytes — the first copy's, by their digest — being read again for the rest (`ingest/claims.rs`). A project at ingest's ceiling, 600 exports a minute, holds about 8 MB of claims; answers held whole, up to 5 KB each, would be 190 MB.
 
 ## Where it goes next
 

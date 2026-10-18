@@ -621,6 +621,10 @@ async fn an_export_sent_again_is_answered_as_it_was_and_written_once(pool: PgPoo
         "{}",
         String::from_utf8_lossy(&first)
     );
+    assert!(
+        json_body(&first)["partialSuccess"]["errorMessage"].is_string(),
+        "an answer naming what was dropped, which the retry's is rebuilt to"
+    );
     let (again_status, headers, again) = lane
         .send(Some(INGEST_KEY), "application/json", None, body)
         .await;
