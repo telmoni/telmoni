@@ -3378,6 +3378,53 @@ async fn no_answer_of_the_lane_is_one_a_cache_may_keep(pool: PgPool) {
     );
 }
 
+/// A path axum cannot decode is refused as the lane refuses: a slug that is
+/// no slug gets its 400 problem, echoing none of it, a key the door's 404 —
+/// never axum's plain text — and nothing is recorded.
+#[sqlx::test]
+async fn a_path_that_does_not_decode_is_refused_as_the_lane_refuses(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    let shape = format!(
+        "a monitor's slug is lowercase letters and digits joined by single hyphens, up to {} \
+         characters",
+        telmoni_shared::slug::MAX_LEN
+    );
+    for (sent, status, detail) in [
+        (
+            format!("/{key}/%FF"),
+            StatusCode::BAD_REQUEST,
+            shape.as_str(),
+        ),
+        (
+            format!("/{key}/%FF/start"),
+            StatusCode::BAD_REQUEST,
+            shape.as_str(),
+        ),
+        (
+            "/%FF/nightly-report".to_owned(),
+            StatusCode::NOT_FOUND,
+            "no ping key by that value",
+        ),
+    ] {
+        let (got, media_type, body) = p.send_ping("GET", &sent, &[], Body::empty()).await;
+        assert_eq!(got, status, "{sent}: {body}");
+        assert!(
+            media_type.starts_with("application/problem+json"),
+            "{sent}: {media_type}"
+        );
+        let problem: Value = serde_json::from_str(&body).expect("a problem document");
+        assert_eq!(problem["detail"], detail, "{sent}");
+        assert!(
+            !body.contains("Invalid UTF-8"),
+            "{sent}: axum's words: {body}"
+        );
+    }
+    assert_eq!(monitors_of(&pool, &p.project).await, 0);
+    assert!(finished_runs(&pool, &p.project).await.is_empty());
+}
+
 /// Past the plan's limit a ping to a slug no monitor has is refused with the
 /// ceiling's own 402 — what `curl -f` turns into cron's mail — naming what
 /// lifts it and never the key; nothing is made or recorded, and no notice is

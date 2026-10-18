@@ -15,7 +15,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::{Body, to_bytes};
-use axum::extract::rejection::QueryRejection;
+use axum::extract::path::ErrorKind;
+use axum::extract::rejection::{PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -219,11 +220,11 @@ struct Heard {
 pub async fn success(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Path((key, slug)): Path<(String, String)>,
+    path: Result<Path<(String, String)>, PathRejection>,
     query: Result<Query<PingQuery>, QueryRejection>,
     body: Body,
 ) -> Response {
-    answer(handle(&state, &headers, &key, &slug, query, body, Report::Success).await)
+    answer(handle(&state, &headers, path, query, body, Report::Success).await)
 }
 
 /// `GET` or `POST /ping/{ping_key}/{slug}/start` — a run opens, and its
@@ -231,11 +232,11 @@ pub async fn success(
 pub async fn start(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Path((key, slug)): Path<(String, String)>,
+    path: Result<Path<(String, String)>, PathRejection>,
     query: Result<Query<PingQuery>, QueryRejection>,
     body: Body,
 ) -> Response {
-    answer(handle(&state, &headers, &key, &slug, query, body, Report::Start).await)
+    answer(handle(&state, &headers, path, query, body, Report::Start).await)
 }
 
 /// `GET` or `POST /ping/{ping_key}/{slug}/checkpoint?steps=4&cost=0.08` —
@@ -248,22 +249,11 @@ pub async fn start(
 pub async fn checkpoint(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Path((key, slug)): Path<(String, String)>,
+    path: Result<Path<(String, String)>, PathRejection>,
     query: Result<Query<PingQuery>, QueryRejection>,
     body: Body,
 ) -> Response {
-    answer(
-        handle(
-            &state,
-            &headers,
-            &key,
-            &slug,
-            query,
-            body,
-            Report::Checkpoint,
-        )
-        .await,
-    )
+    answer(handle(&state, &headers, path, query, body, Report::Checkpoint).await)
 }
 
 /// `GET` or `POST /ping/{ping_key}/{slug}/fail?exit_code=1` — the open run
@@ -272,11 +262,11 @@ pub async fn checkpoint(
 pub async fn fail(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Path((key, slug)): Path<(String, String)>,
+    path: Result<Path<(String, String)>, PathRejection>,
     query: Result<Query<PingQuery>, QueryRejection>,
     body: Body,
 ) -> Response {
-    answer(handle(&state, &headers, &key, &slug, query, body, Report::Fail).await)
+    answer(handle(&state, &headers, path, query, body, Report::Fail).await)
 }
 
 /// A path under `/ping` no lane serves: a `404` problem document, as the
@@ -336,24 +326,25 @@ fn answer(outcome: Result<Heard, TelmoniError>) -> Response {
     }
 }
 
-/// The lane's order: the key and whether its organization is open, the slug,
-/// the query, whether the organization is paused, the body, and only then
-/// the project's scope ([`held_in_place`]). A key that opens nothing is a
-/// 404 whatever else the request says, so a scanner learns nothing.
+/// The lane's order: the path's two words ([`named`]), the key and whether
+/// its organization is open, the slug, the query, whether the organization
+/// is paused, the body, and only then the project's scope
+/// ([`held_in_place`]). A key that opens nothing is a 404 whatever else the
+/// request says, so a scanner learns nothing.
 async fn handle(
     state: &Arc<AppState>,
     headers: &HeaderMap,
-    key: &str,
-    slug: &str,
+    path: Result<Path<(String, String)>, PathRejection>,
     query: Result<Query<PingQuery>, QueryRejection>,
     body: Body,
     report: Report,
 ) -> Result<Heard, TelmoniError> {
-    let key = resolve_key(state, key).await?;
+    let (key, slug) = named(path)?;
+    let key = resolve_key(state, &key).await?;
     if !chain::open(state.auth.as_ref(), &key.organization_id).await {
         return Err(closed(&key));
     }
-    let slug = checked_slug(slug)?;
+    let slug = checked_slug(&slug)?;
     let progress = Progress::read(query)?;
     // A paused organization keeps what it holds and takes in nothing new: a
     // 402, as ingest answers one.
@@ -512,17 +503,43 @@ fn closed(key: &ResolvedPingKey) -> TelmoniError {
     unknown_key()
 }
 
+/// The key and the slug as the path spells them — or, where axum could not
+/// decode one, the lane's own refusal in place of axum's plain-text 400: a
+/// key is the door's 404, as one spelled otherwise than minted is, and a
+/// slug the 400 a slug of the wrong shape gets, echoing none of it.
+fn named(
+    path: Result<Path<(String, String)>, PathRejection>,
+) -> Result<(String, String), TelmoniError> {
+    match path {
+        Ok(Path(named)) => Ok(named),
+        Err(PathRejection::FailedToDeserializePathParams(error))
+            if matches!(
+                error.kind(),
+                ErrorKind::InvalidUtf8InPathParam { key } if key == "ping_key"
+            ) =>
+        {
+            Err(unknown_key())
+        }
+        Err(_) => Err(not_a_slug()),
+    }
+}
+
+/// The 400 for a slug of the wrong shape: the shape, and nothing of the slug.
+fn not_a_slug() -> TelmoniError {
+    TelmoniError::BadRequest(format!(
+        "a monitor's slug is lowercase letters and digits joined by single hyphens, up to \
+         {} characters",
+        slug::MAX_LEN
+    ))
+}
+
 /// A slug of the core's shape and no word a monitor may not go by, else a
 /// 400 that echoes none of it. The words beside `/monitors/{slug}` are
 /// refused as a monitor's slug is, so a ping can never name a monitor the
 /// console could not.
 fn checked_slug(given: &str) -> Result<&str, TelmoniError> {
     if !slug::is_slug(given) {
-        return Err(TelmoniError::BadRequest(format!(
-            "a monitor's slug is lowercase letters and digits joined by single hyphens, up to \
-             {} characters",
-            slug::MAX_LEN
-        )));
+        return Err(not_a_slug());
     }
     if slug::offends(given) || RESERVED.contains(&given) {
         return Err(TelmoniError::BadRequest(
