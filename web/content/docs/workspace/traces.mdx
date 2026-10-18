@@ -28,8 +28,10 @@ row each, fifty to a page:
 | Duration | From its first span's start to its last span's end |
 
 **Columns** shows or hides each of these, and more beside them: when the
-run's last span ended, its model calls, tool calls, errors and spans, its
-input, output and cached tokens, and the models and tools its calls used.
+run's last span ended, the class of the error it ended on (**Error**:
+`TimeoutError`, `RateLimitError` — never its message), its model calls, tool
+calls, errors and spans, its input, output and cached tokens, and the models
+and tools its calls used.
 The counts and the tokens are each a group that opens under its heading,
 which says how many of it show; a column whose name does not say what it
 holds says so behind its ⓘ; and the trace's id always shows. Your columns,
@@ -94,7 +96,9 @@ the menu to open the list as it was saved, with its columns. A view the list
 has moved off since — a filter or a column changed — is starred, and **Save
 changes** writes it over. Every member of the project applies its views; its
 Owners and Admins save, rename and delete them
-([Roles](/docs/workspace/roles#project-roles)). A project keeps up to 100.
+([Roles](/docs/workspace/roles#project-roles)). A project keeps up to 100,
+and up to 100 [layouts](/docs/workspace/sessions#keeping-a-layout) of a
+session's page and a trace's beside them.
 
 ### Downloading the list
 
@@ -148,3 +152,16 @@ trace holds a run's first 5,000 spans; a run with more says so under them.
 A run whose own span has not arrived yet is shown as running, and its trace
 is read again as more of its spans land. A trace that is not in the project —
 a run that has passed its retention, or one of another project's — says so.
+
+### Layouts
+
+The trace's own page opens in the same layout as
+[a session's](/docs/workspace/sessions#customize), changed by **Customize**
+beside its title: to begin with the tree holds the run's own row alone, its
+details beside it, until Customize opens its steps or calls, the branches
+with a failure inside, and the timeline. The depth and the
+calls shown narrow what the tree lists, what starts open opens its branches,
+and the pinned spans stand above the tree, each a press away from being
+chosen, wherever the depth leaves them. **Layouts** keeps a cut under a name
+for everyone on the project and sets what the project opens in, as the
+session's page does. The trace opened over the list keeps the tree whole.
