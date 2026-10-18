@@ -3910,16 +3910,12 @@ async fn a_slack_install_finished_across_its_projects_transfer_is_refused(pool: 
     let detail = json_body(resp).await["detail"].to_string();
     assert!(detail.contains("moved to another organization"), "{detail}");
     assert_eq!(connects_filed(&pool).await, (0, 0));
-    uninstalls_settled(&pool).await;
-    assert!(filed_uninstalls(&pool).await.is_empty());
-    let uninstalled = mocks
-        .received_requests()
-        .await
-        .unwrap()
-        .into_iter()
-        .filter(|r| r.url.path() == "/api/apps.uninstall")
-        .count();
-    assert_eq!(uninstalled, 1, "the refused install's app is uninstalled");
+    // The uninstall is filed and sent on a task of its own, after the answer.
+    eventually("the refused install's app is uninstalled", || async {
+        !uninstalled_with(&mocks).await.is_empty() && filed_uninstalls(&pool).await.is_empty()
+    })
+    .await;
+    assert_eq!(uninstalled_with(&mocks).await, ["Bearer xoxb-live-token"]);
 }
 
 /// A connect by an admin its project's transfer leaves without a seat is refused, nothing filed.
