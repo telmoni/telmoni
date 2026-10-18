@@ -43,7 +43,7 @@ your code can branch on.
 | `/errors/authz/forbidden` | 403 | You are signed in and this is not allowed. `detail` says why. | |
 | `/errors/authz/insufficient-role` | 403 | Your role does not allow this. `detail` names the least role that would, such as `required admin, have member`. | |
 | `/errors/tenant/cross-tenant-denied` | 403 | Reserved for a request that reaches outside the organization or project it may act in; no lane returns it. | |
-| `/errors/bad-request` | 400 | The request body did not parse or failed validation. `detail` names the field. | |
+| `/errors/bad-request` | 400 | The request body or query string is not the shape the lane takes, or a value failed its rule. `detail` names the shape or the parameter, never the value sent. | |
 | `/errors/payload-too-large` | 413 | The request body is larger than this route accepts, such as a body over 8 KiB sent to the CLI's lanes. | |
 | `/errors/not-found` | 404 | No lane answers at this path on the machine host, under `/v1`, `/cli` or `/ping`. Not a resource a lane looked for: that is `/errors/auth/not-found`. | |
 | `/errors/method-not-allowed` | 405 | The lane does not take this method. The `Allow` header lists the ones it does. | |
