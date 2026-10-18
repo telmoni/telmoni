@@ -1,5 +1,11 @@
+import contextlib
+import http.client
+import http.server
 import os
+import threading
+from collections.abc import Iterator
 from dataclasses import asdict
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -105,6 +111,55 @@ def test_the_client_builds_from_env_with_the_real_transport() -> None:
         assert client.exporter._transport is _urllib_transport
     finally:
         client.shutdown()
+
+
+_ANSWERS = {
+    "/kept": (200, 2 << 20, 2 << 20),
+    "/refused": (503, 2 << 20, 2 << 20),
+    "/short": (200, 300, 300),
+    "/cut": (200, 300, 100),
+}
+"""Each path's status, the length its answer declares, and how much is sent."""
+
+
+class _Answering(http.server.BaseHTTPRequestHandler):
+    def do_POST(self) -> None:
+        self.rfile.read(int(self.headers["Content-Length"]))
+        status, declared, sent = _ANSWERS[self.path]
+        self.send_response(status)
+        self.send_header("Content-Length", str(declared))
+        self.end_headers()
+        with contextlib.suppress(OSError):  # the client hangs up past its cap
+            self.wfile.write(b"x" * sent)
+
+    def log_message(self, format: str, *args: Any) -> None:
+        pass
+
+
+@pytest.fixture
+def answering() -> Iterator[str]:
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Answering)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_an_answer_is_read_up_to_its_first_mebibyte(answering: str) -> None:
+    for path, status, read in (
+        ("/kept", 200, 1 << 20),
+        ("/refused", 503, 1 << 20),
+        ("/short", 200, 300),
+    ):
+        answer = _urllib_transport(answering + path, {}, b"{}")
+        assert (answer.status, len(answer.body)) == (status, read)
+
+
+def test_an_answer_cut_short_is_still_a_broken_one(answering: str) -> None:
+    with pytest.raises(http.client.IncompleteRead):
+        _urllib_transport(answering + "/cut", {}, b"{}")
 
 
 def test_plain_http_is_refused_except_to_this_machine() -> None:

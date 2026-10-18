@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
+	"net/http"
 	"regexp"
 	"strings"
 	"testing"
@@ -171,6 +173,46 @@ func TestTheClientBuildsFromEnvWithTheRealTransport(t *testing.T) {
 		t.Errorf("the content mode is %q before any answer", mode)
 	}
 }
+
+func TestAnAnswerIsReadUpToItsFirstMebibyte(t *testing.T) {
+	// Appended by the worker alone, and read once the shutdown has stopped it.
+	var answers []*countedBody
+	transport := func(*http.Request) (*http.Response, error) {
+		answer := &countedBody{left: 2 << 20}
+		answers = append(answers, answer)
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: answer}, nil
+	}
+	h := newHarness(t, testConfig(), nil, telmoni.WithTransport(transport))
+	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	run.End()
+	h.shutdown()
+	if len(answers) == 0 {
+		t.Fatal("nothing was sent")
+	}
+	for _, answer := range answers {
+		if answer.read != 1<<20 {
+			t.Errorf("%d bytes of an answer read, want its first mebibyte", answer.read)
+		}
+	}
+}
+
+// countedBody is an answer's body of left spaces, counting what is read of it.
+type countedBody struct {
+	left, read int
+}
+
+func (b *countedBody) Read(p []byte) (int, error) {
+	if b.left == 0 {
+		return 0, io.EOF
+	}
+	n := min(len(p), b.left)
+	copy(p, strings.Repeat(" ", n))
+	b.left -= n
+	b.read += n
+	return n, nil
+}
+
+func (b *countedBody) Close() error { return nil }
 
 func TestPlainHTTPIsRefusedExceptToThisMachine(t *testing.T) {
 	for _, endpoint := range []string{

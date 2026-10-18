@@ -1,8 +1,11 @@
 import { readFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { inspect } from 'node:util';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { ANSWER_MAX, fetchTransport } from '../src/exporter';
 import { DEFAULT_ENDPOINT, Telmoni, VERSION, type Config } from '../src/index';
 
 afterEach(() => vi.unstubAllEnvs());
@@ -123,6 +126,38 @@ describe('the endpoint', () => {
     }
     for (const endpoint of ['http://api.example.com', 'http://10.0.0.5:8080']) {
       expect(() => new Telmoni({ endpoint })).toThrow(/unencrypted HTTP/);
+    }
+  });
+});
+
+describe('the transport', () => {
+  it('reads an answer up to its first mebibyte', async () => {
+    // Each path's status and the length of its answer.
+    const answers: Record<string, [number, number]> = {
+      '/kept': [200, 2 << 20],
+      '/refused': [503, 2 << 20],
+      '/short': [200, 300],
+    };
+    const server = createServer((request, response) => {
+      request.resume().on('end', () => {
+        const [status, size] = answers[request.url ?? ''] ?? [404, 0];
+        response.writeHead(status, { 'Content-Length': size }).end('x'.repeat(size));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    try {
+      for (const [path, status, read] of [
+        ['/kept', 200, ANSWER_MAX],
+        ['/refused', 503, ANSWER_MAX],
+        ['/short', 200, 300],
+      ] as const) {
+        const answer = await fetchTransport(`http://127.0.0.1:${port}${path}`, { method: 'POST', headers: {}, body: '{}' });
+        expect([answer.status, (await answer.text()).length]).toEqual([status, read]);
+      }
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
     }
   });
 });

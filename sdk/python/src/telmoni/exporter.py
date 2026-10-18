@@ -33,6 +33,9 @@ logger = logging.getLogger("telmoni")
 ATTEMPTS = 3
 """How many times one batch is sent before it is dropped."""
 REQUEST_TIMEOUT_S = 10.0
+ANSWER_MAX = 1 << 20
+"""How much of an answer is read: a problem's JSON is small, and an export
+never pays for more."""
 RETRY_AFTER_MAX_S = 60.0
 WARNED_MAX = 1024
 """How many distinct warnings are remembered before the set starts over."""
@@ -88,10 +91,20 @@ def _urllib_transport(url: str, headers: Mapping[str, str], body: bytes) -> Answ
     try:
         with _OPENER.open(request, timeout=REQUEST_TIMEOUT_S) as response:
             return Answer(
-                response.status, dict(response.headers.items()), response.read()
+                response.status, dict(response.headers.items()), _body(response)
             )
     except urllib.error.HTTPError as error:
-        return Answer(error.code, dict(error.headers.items()), error.read())
+        return Answer(error.code, dict(error.headers.items()), _body(error))
+
+
+def _body(response: Any) -> bytes:
+    """At most ``ANSWER_MAX`` bytes of the answer's body."""
+    body: bytes = response.read(ANSWER_MAX)
+    if len(body) < ANSWER_MAX:
+        # Read to the end, which raises `IncompleteRead` for a body cut short
+        # as `read()` would: a read of a given size returns what came.
+        response.read()
+    return body
 
 
 def _sdk_version() -> str:

@@ -20,6 +20,8 @@ import { VERSION } from './version.js';
 /** How many times one batch is sent before it is dropped. */
 export const ATTEMPTS = 3;
 export const REQUEST_TIMEOUT_MS = 10_000;
+/** How much of an answer is read: a problem's JSON is small, and an export never pays for more. */
+export const ANSWER_MAX = 1 << 20;
 export const RETRY_AFTER_MAX_S = 60;
 /** How many distinct warnings are remembered before the set starts over. */
 export const WARNED_MAX = 1024;
@@ -91,12 +93,35 @@ export interface ExporterHooks {
 }
 
 /**
- * The platform's `fetch`, given up on after ten seconds. A redirect is
- * answered as the 3xx it is: followed, it would resend the bearer to wherever
- * it points.
+ * The platform's `fetch`, given up on after ten seconds, the answer's body
+ * included. A redirect is answered as the 3xx it is: followed, it would
+ * resend the bearer to wherever it points.
  */
-export const fetchTransport: Transport = (url, init) =>
-  fetch(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+export const fetchTransport: Transport = async (url, init) => {
+  const response = await fetch(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  return { status: response.status, headers: response.headers, text: () => textOf(response.body) };
+};
+
+/** At most `ANSWER_MAX` bytes of a body, as text; the rest is never read. */
+async function textOf(body: ReadableStream<Uint8Array> | null): Promise<string> {
+  if (body === null) return '';
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  let left = ANSWER_MAX;
+  try {
+    while (left > 0) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const part = value.subarray(0, left);
+      text += decoder.decode(part, { stream: true });
+      left -= part.byteLength;
+    }
+  } finally {
+    await reader.cancel();
+  }
+  return text + decoder.decode();
+}
 
 /**
  * A real wait between attempts. It holds the process, since a retry is pending
