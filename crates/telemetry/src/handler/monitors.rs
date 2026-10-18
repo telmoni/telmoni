@@ -769,7 +769,8 @@ async fn change_monitor(
 }
 
 /// `POST /internal/telemetry/monitors/{slug}/pause` — the monitor paused:
-/// never late, its runs still kept. One paused already is answered as it is.
+/// never late, its runs still kept. One paused already is answered as it is,
+/// and so is one its first ping or run made, paused until its owner saves it.
 pub async fn pause_monitor(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -797,7 +798,9 @@ pub async fn pause_monitor(
 /// The pause itself, inside the transaction [`pause_monitor`] opened: under
 /// the organization's chain lock, a monitor not paused already put in
 /// `paused` with no next due time, and recorded with the state it wrote
-/// over; one paused already is answered as it is, and nothing is recorded.
+/// over; one paused already, or `new` — paused until its owner saves its
+/// settings, which a pause must not let a resume skip — is answered as it
+/// is, and nothing is recorded.
 async fn halt_monitor(
     state: &AppState,
     acting: &Acting,
@@ -810,7 +813,7 @@ async fn halt_monitor(
     // Only a change under the chain lock pauses or resumes, so the plain
     // read says whether to write; the state recorded is read again, locked,
     // since a ping may have moved it.
-    if read.state == MonitorState::Paused {
+    if matches!(read.state, MonitorState::Paused | MonitorState::New) {
         return Ok(read);
     }
     let before = db::monitor_to_change(tx, project_id, slug)

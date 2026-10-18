@@ -1315,6 +1315,27 @@ async fn a_monitor_a_ping_made_starts_once_its_owner_saves_it(pool: PgPool) {
         "the two discoveries alone"
     );
 
+    // A pause of `new` is answered as it is — paused until saved already —
+    // so a resume after it still asks for the settings.
+    let (status, paused) = p
+        .send(p.request("POST", &format!("{MONITORS}/nightly-report/pause"), None))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{paused}");
+    assert_eq!(paused, made, "answered as it is");
+    let (status, body) = p
+        .send(p.request("POST", &format!("{MONITORS}/nightly-report/resume"), None))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "a pause let the resume skip the settings: {body}"
+    );
+    assert_eq!(
+        recorded(&pool, &p.organization).await.len(),
+        2,
+        "nothing recorded"
+    );
+
     let (status, saved) = p
         .send(p.request(
             "PUT",
