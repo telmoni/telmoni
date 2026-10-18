@@ -7,10 +7,11 @@
 //! "you are the owner" could act for somebody who no longer is. The lanes that
 //! change the roster or its ownership — among them the invite accepts and
 //! organization and account deletion — take the organization's lock first and
-//! read the roles again under it, as do a project's seat lanes, hand-over lanes
-//! and delete, which also refuse a project a transfer moved meanwhile. Others
-//! (renames, a new project, invites out) read the role unlocked: an ownership
-//! transfer racing one lets the owner of a moment ago finish.
+//! read the roles again under it, as do a project's seat lanes, hand-over lanes,
+//! delete, key lanes and invitation lanes (sent, withdrawn, accepted, declined),
+//! which also refuse a project a transfer moved meanwhile. Others (renames, a
+//! new project) read the role unlocked: an ownership transfer racing one lets
+//! the owner of a moment ago finish.
 //! `auth.organizations` cannot be the lock: the maintenance lane cannot UPDATE it.
 //!
 //! **The person's lock** is taken by every lane that changes what they own or
@@ -52,7 +53,8 @@ pub async fn lock_email(conn: &mut PgConnection, email: &str) -> sqlx::Result<()
     Ok(())
 }
 
-/// Serialise the lanes that change an organization's roster, its owner or its projects' seats.
+/// Serialise the lanes that change an organization's roster, its owner, or its projects' seats,
+/// keys and invitations.
 pub async fn lock_organization(
     conn: &mut PgConnection,
     organization_id: &OrganizationId,

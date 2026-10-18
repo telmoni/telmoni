@@ -8,8 +8,7 @@ use uuid::Uuid;
 use crate::db::AuthLane;
 use crate::model::{DeletionKind, Organization};
 use telmoni_shared::db::tenant_session::{
-    self, Binding, HasOrganization, Maintenance, PersonAndOrganization, ProjectAndOrganization,
-    Scoped,
+    self, Binding, HasOrganization, Maintenance, PersonAndOrganization, Scoped,
 };
 use telmoni_shared::{OrganizationId, OrganizationStatus, derive_shard_key};
 
@@ -221,22 +220,7 @@ pub async fn record_hook_purged(
     Ok(result.rows_affected() > 0)
 }
 
-/// The organization's lifecycle status, read under `FOR SHARE`.
-pub async fn status_for_share(
-    tx: &mut Scoped<'_, ProjectAndOrganization>,
-    external_id: &OrganizationId,
-) -> sqlx::Result<Option<OrganizationStatus>> {
-    sqlx::query_scalar::<_, OrganizationStatus>(
-        "SELECT status FROM auth.organizations WHERE external_id = $1 FOR SHARE",
-    )
-    .bind(external_id)
-    .fetch_optional(tx.conn())
-    .await
-}
-
 /// The organization's lifecycle status, or `None` when there is no such row.
-/// For a lane that already holds the organization's lock, where `FOR SHARE`
-/// would add nothing.
 pub async fn status<B: Binding>(
     tx: &mut Scoped<'_, B>,
     external_id: &OrganizationId,

@@ -111,8 +111,45 @@ pub(crate) fn timed_out(e: &sqlx::Error) -> bool {
         .is_some_and(|code| code == LOCK_NOT_AVAILABLE)
 }
 
-/// The organization's membership lock, under which transfers move its projects, then the
-/// caller's role, `None` without one, and only then whether the project moved (409) or went (404).
+/// The organization's membership lock, under which its roster changes, its projects move and
+/// its deletion runs. A wait the role's `lock_timeout` ends is a 409 to try again, as the
+/// transfer's own waits are.
+pub(crate) async fn lock_membership(
+    conn: &mut sqlx::PgConnection,
+    organization: &telmoni_shared::OrganizationId,
+) -> Result<(), telmoni_shared::TelmoniError> {
+    match crate::db::locks::lock_organization(conn, organization).await {
+        Ok(()) => Ok(()),
+        Err(e) if timed_out(&e) => {
+            tracing::warn!(
+                organization_id = %organization,
+                "a lane gave up waiting for its organization's lock"
+            );
+            Err(telmoni_shared::AuthError::Conflict(
+                "the organization is busy — try again in a moment".to_string(),
+            )
+            .into())
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Where the project is, read again under its organization's lock: moved since the lane
+/// first read it, a 409; gone, a 404.
+pub(crate) async fn refuse_unless_still_in<B: Binding>(
+    tx: &mut Scoped<'_, B>,
+    organization: &telmoni_shared::OrganizationId,
+    project_id: &telmoni_shared::ProjectId,
+) -> Result<(), telmoni_shared::TelmoniError> {
+    match crate::db::projects::organization_of(tx, project_id).await? {
+        Some(now) if now == *organization => Ok(()),
+        Some(_) => Err(telmoni_shared::AuthError::Conflict(MOVED.to_string()).into()),
+        None => Err(telmoni_shared::AuthError::NotFound("project not found".to_string()).into()),
+    }
+}
+
+/// The organization's membership lock ([`lock_membership`]), then the caller's role, `None`
+/// without one, and only then whether the project moved (409) or went (404).
 pub(crate) async fn hold_project<B: RosterRead + crate::db::members::SeatRead>(
     tx: &mut Scoped<'_, B>,
     organization: &telmoni_shared::OrganizationId,
@@ -125,31 +162,15 @@ pub(crate) async fn hold_project<B: RosterRead + crate::db::members::SeatRead>(
     )>,
     telmoni_shared::TelmoniError,
 > {
-    if let Err(e) = crate::db::locks::lock_organization(tx.conn(), organization).await {
-        if !timed_out(&e) {
-            return Err(e.into());
-        }
-        tracing::warn!(
-            organization_id = %organization,
-            project_id = %project_id,
-            "a change to a project gave up waiting for its organization's lock"
-        );
-        return Err(telmoni_shared::AuthError::Conflict(
-            "the organization is busy — try again in a moment".to_string(),
-        )
-        .into());
-    }
+    lock_membership(tx.conn(), organization).await?;
     let organization_role =
         crate::db::organization_members::role_on_organization(tx, organization, user_id).await?;
     let seat = crate::db::members::role_on(tx, project_id, user_id).await?;
     let Some(role) = telmoni_shared::rbac::project_role(organization_role, seat) else {
         return Ok(None);
     };
-    match crate::db::projects::organization_of(tx, project_id).await? {
-        Some(now) if now == *organization => Ok(Some((role, organization_role))),
-        Some(_) => Err(telmoni_shared::AuthError::Conflict(MOVED.to_string()).into()),
-        None => Err(telmoni_shared::AuthError::NotFound("project not found".to_string()).into()),
-    }
+    refuse_unless_still_in(tx, organization, project_id).await?;
+    Ok(Some((role, organization_role)))
 }
 
 /// The caller's role on an organization, or a 403, on a transaction somebody

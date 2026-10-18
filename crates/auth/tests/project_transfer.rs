@@ -3016,3 +3016,475 @@ async fn a_handover_lane_kept_waiting_for_its_organization_is_a_conflict(pool: P
         Some(("admin".into(), false))
     );
 }
+
+/// Somebody the owner invites onto the project as it moves.
+const INVITEE: &str = "user_handover_invitee";
+
+/// A key the owner minted for the project; its id.
+async fn mint_key(pool: &PgPool, h: &Handover) -> String {
+    let (status, body) = send(
+        app(pool.clone()),
+        pool,
+        "POST",
+        "/internal/tokens",
+        OWNER,
+        Some(&h.source),
+        Some(&h.project),
+        Some(json!({ "name": "ci", "created_by": OWNER, "scopes": ["read"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "minting a key: {body}");
+    body["id"].as_str().expect("the key's id").to_owned()
+}
+
+/// The project's keys: how many, and how many of them live.
+async fn keys_of(pool: &PgPool, project: &str) -> (i64, i64) {
+    sqlx::query_as(
+        "SELECT count(*), count(*) FILTER (WHERE revoked_at IS NULL)
+           FROM auth.api_tokens WHERE project_id = $1",
+    )
+    .bind(project)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// Key events on the project, on any chain.
+async fn key_events(pool: &PgPool, project: &str) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM audit.events WHERE in_project = $1 AND resource_kind = 'token'",
+    )
+    .bind(project)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// The owner invites `user` onto the project; the invitation's id and its link's secret.
+async fn invite_to(pool: &PgPool, h: &Handover, user: &str) -> (String, String) {
+    let (status, body) = call(
+        pool,
+        "POST",
+        &format!("/internal/projects/{}/invites", h.project),
+        OWNER,
+        Some(&h.source),
+        Some(json!({ "email": format!("{user}@example.test"), "role": "member" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "inviting {user}: {body}");
+    let id = body["id"].as_str().expect("the invitation's id").to_owned();
+    let secret = body["link"]
+        .as_str()
+        .expect("the link")
+        .rsplit('/')
+        .next()
+        .expect("a link with a segment")
+        .to_owned();
+    (id, secret)
+}
+
+/// Whether an invitation still stands: neither accepted, withdrawn nor declined.
+async fn invitation_stands(pool: &PgPool, id: &str) -> bool {
+    sqlx::query_scalar(
+        "SELECT accepted_at IS NULL AND revoked_at IS NULL
+           FROM auth.member_invites WHERE id = $1::uuid",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// Invitations to `email` on the project, whatever became of them.
+async fn invitations_to(pool: &PgPool, project: &str, email: &str) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM auth.member_invites WHERE project_id = $1 AND email = $2",
+    )
+    .bind(project)
+    .bind(email)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// What the chains record of an invitation: its events by id.
+async fn invitation_events(pool: &PgPool, id: &str) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM audit.events WHERE resource_kind = 'member' AND resource_id = $1",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[sqlx::test]
+async fn a_key_minted_as_its_project_is_accepted_is_refused(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let lane = {
+        let pool = pool.clone();
+        let (project, source) = (h.project.clone(), h.source.clone());
+        async move {
+            send(
+                app(pool.clone()),
+                &pool,
+                "POST",
+                "/internal/tokens",
+                OWNER,
+                Some(&source),
+                Some(&project),
+                Some(json!({ "name": "ci", "created_by": OWNER, "scopes": ["read"] })),
+            )
+            .await
+        }
+    };
+    let (status, body) = across_an_accept(&pool, &h, lane).await;
+    moved(status, &body);
+    assert_eq!(keys_of(&pool, &h.project).await, (0, 0));
+    assert_eq!(key_events(&pool, &h.project).await, 0);
+}
+
+#[sqlx::test]
+async fn a_key_rotated_as_its_project_is_accepted_is_refused(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let key = mint_key(&pool, &h).await;
+    let lane = {
+        let pool = pool.clone();
+        let (project, source, key) = (h.project.clone(), h.source.clone(), key.clone());
+        async move {
+            send(
+                app(pool.clone()),
+                &pool,
+                "POST",
+                &format!("/internal/tokens/{key}/rotate"),
+                OWNER,
+                Some(&source),
+                Some(&project),
+                None,
+            )
+            .await
+        }
+    };
+    let (status, body) = across_an_accept(&pool, &h, lane).await;
+    moved(status, &body);
+    assert_eq!(keys_of(&pool, &h.project).await, (1, 1));
+    assert_eq!(key_events(&pool, &h.project).await, 1);
+}
+
+#[sqlx::test]
+async fn a_key_revoked_as_its_project_is_accepted_is_refused(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let key = mint_key(&pool, &h).await;
+    let lane = {
+        let pool = pool.clone();
+        let (project, source, key) = (h.project.clone(), h.source.clone(), key.clone());
+        async move {
+            send(
+                app(pool.clone()),
+                &pool,
+                "DELETE",
+                &format!("/internal/tokens/{key}"),
+                OWNER,
+                Some(&source),
+                Some(&project),
+                None,
+            )
+            .await
+        }
+    };
+    let (status, body) = across_an_accept(&pool, &h, lane).await;
+    moved(status, &body);
+    assert_eq!(keys_of(&pool, &h.project).await, (1, 1));
+    assert_eq!(key_events(&pool, &h.project).await, 1);
+}
+
+#[sqlx::test]
+async fn an_invitation_sent_as_its_project_is_accepted_is_refused(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let lane = {
+        let pool = pool.clone();
+        let (project, source) = (h.project.clone(), h.source.clone());
+        async move {
+            call(
+                &pool,
+                "POST",
+                &format!("/internal/projects/{project}/invites"),
+                OWNER,
+                Some(&source),
+                Some(json!({ "email": format!("{INVITEE}@example.test"), "role": "member" })),
+            )
+            .await
+        }
+    };
+    let (status, body) = across_an_accept(&pool, &h, lane).await;
+    moved(status, &body);
+    assert_eq!(
+        invitations_to(&pool, &h.project, &format!("{INVITEE}@example.test")).await,
+        0
+    );
+}
+
+#[sqlx::test]
+async fn an_invitation_withdrawn_as_its_project_is_accepted_is_refused(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let (invitation, _) = invite_to(&pool, &h, INVITEE).await;
+    let lane = {
+        let pool = pool.clone();
+        let (project, source, invitation) =
+            (h.project.clone(), h.source.clone(), invitation.clone());
+        async move {
+            call(
+                &pool,
+                "DELETE",
+                &format!("/internal/projects/{project}/invites/{invitation}"),
+                OWNER,
+                Some(&source),
+                None,
+            )
+            .await
+        }
+    };
+    let (status, body) = across_an_accept(&pool, &h, lane).await;
+    moved(status, &body);
+    assert!(invitation_stands(&pool, &invitation).await);
+    assert_eq!(invitation_events(&pool, &invitation).await, 1);
+}
+
+/// The person is seated nowhere and enrolled nowhere: not on the project, not on the
+/// organization that gave it up, not on the one holding it now.
+async fn nobody_seated(pool: &PgPool, h: &Handover, invitation: &str) {
+    assert_eq!(seat_of(pool, &h.project, INVITEE).await, None);
+    assert_eq!(roster_role(pool, &h.source, INVITEE).await, None);
+    assert_eq!(roster_role(pool, &h.admins, INVITEE).await, None);
+    assert!(invitation_stands(pool, invitation).await);
+    assert_eq!(invitation_events(pool, invitation).await, 1);
+}
+
+#[sqlx::test]
+async fn an_invitation_accepted_by_its_link_as_its_project_is_accepted_is_refused(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    sign_in(&pool, INVITEE).await;
+    let (invitation, secret) = invite_to(&pool, &h, INVITEE).await;
+    let lane = {
+        let pool = pool.clone();
+        async move {
+            call(
+                &pool,
+                "POST",
+                "/internal/invites/accept",
+                INVITEE,
+                None,
+                Some(json!({ "token": secret })),
+            )
+            .await
+        }
+    };
+    let (status, body) = across_an_accept(&pool, &h, lane).await;
+    moved(status, &body);
+    nobody_seated(&pool, &h, &invitation).await;
+}
+
+#[sqlx::test]
+async fn an_invitation_accepted_in_the_console_as_its_project_is_accepted_is_refused(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    sign_in(&pool, INVITEE).await;
+    let (invitation, _) = invite_to(&pool, &h, INVITEE).await;
+    let lane = {
+        let pool = pool.clone();
+        let invitation = invitation.clone();
+        async move {
+            call(
+                &pool,
+                "POST",
+                &format!("/internal/me/invites/{invitation}/accept"),
+                INVITEE,
+                None,
+                None,
+            )
+            .await
+        }
+    };
+    let (status, body) = across_an_accept(&pool, &h, lane).await;
+    moved(status, &body);
+    nobody_seated(&pool, &h, &invitation).await;
+}
+
+#[sqlx::test]
+async fn an_invitation_declined_as_its_project_is_accepted_is_refused(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    sign_in(&pool, INVITEE).await;
+    let (invitation, _) = invite_to(&pool, &h, INVITEE).await;
+    let lane = {
+        let pool = pool.clone();
+        let invitation = invitation.clone();
+        async move {
+            call(
+                &pool,
+                "POST",
+                &format!("/internal/me/invites/{invitation}/decline"),
+                INVITEE,
+                None,
+                None,
+            )
+            .await
+        }
+    };
+    let (status, body) = across_an_accept(&pool, &h, lane).await;
+    moved(status, &body);
+    nobody_seated(&pool, &h, &invitation).await;
+}
+
+#[sqlx::test]
+async fn a_key_or_invitation_lane_kept_waiting_for_its_organization_is_a_conflict(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    sign_in(&pool, INVITEE).await;
+    let (invitation, secret) = invite_to(&pool, &h, INVITEE).await;
+    lock_timeout_of_a_tier(&pool).await;
+    let mut busy = pool.begin().await.unwrap();
+    telmoni_auth::db::locks::lock_organization(&mut busy, &oid(&h.source))
+        .await
+        .unwrap();
+
+    let lanes = vec![
+        (
+            "POST",
+            "/internal/tokens".to_owned(),
+            OWNER,
+            Some(h.source.as_str()),
+            Some(json!({ "name": "ci", "created_by": OWNER, "scopes": ["read"] })),
+        ),
+        (
+            "POST",
+            format!("/internal/projects/{}/invites", h.project),
+            OWNER,
+            Some(h.source.as_str()),
+            Some(json!({ "email": "user_handover_newcomer@example.test", "role": "member" })),
+        ),
+        (
+            "POST",
+            "/internal/invites/accept".to_owned(),
+            INVITEE,
+            None,
+            Some(json!({ "token": secret })),
+        ),
+        (
+            "POST",
+            format!("/internal/me/invites/{invitation}/decline"),
+            INVITEE,
+            None,
+            None,
+        ),
+    ];
+    for (method, path, caller, organization, body) in lanes {
+        let (status, body) = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            send(
+                app(pool.clone()),
+                &pool,
+                method,
+                &path,
+                caller,
+                organization,
+                Some(&h.project),
+                body,
+            ),
+        )
+        .await
+        .expect("the lane waited past its lock_timeout");
+        assert_eq!(status, StatusCode::CONFLICT, "{method} {path}: {body}");
+        assert!(
+            body["detail"]
+                .as_str()
+                .is_some_and(|detail| detail.contains("busy")),
+            "{method} {path}: {body}"
+        );
+    }
+    busy.rollback().await.unwrap();
+    assert_eq!(keys_of(&pool, &h.project).await, (0, 0));
+    nobody_seated(&pool, &h, &invitation).await;
+}
+
+#[sqlx::test]
+async fn a_stranger_is_refused_by_the_key_and_invitation_lanes_without_queueing(pool: PgPool) {
+    let h = staffed_project(&pool).await;
+    let key = mint_key(&pool, &h).await;
+    let (invitation, secret) = invite_to(&pool, &h, INVITEE).await;
+    let stranger = "user_handover_stranger";
+    let strangers = sign_in(&pool, stranger).await;
+
+    let mut busy = pool.begin().await.unwrap();
+    telmoni_auth::db::locks::lock_organization(&mut busy, &oid(&h.source))
+        .await
+        .unwrap();
+    for (method, path, body, refused) in [
+        (
+            "POST",
+            "/internal/tokens".to_owned(),
+            Some(json!({ "name": "ci", "created_by": stranger, "scopes": ["read"] })),
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            "POST",
+            format!("/internal/tokens/{key}/rotate"),
+            None,
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            "DELETE",
+            format!("/internal/tokens/{key}"),
+            None,
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            "POST",
+            format!("/internal/projects/{}/invites", h.project),
+            Some(json!({ "email": "user_handover_newcomer@example.test", "role": "member" })),
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            "DELETE",
+            format!("/internal/projects/{}/invites/{invitation}", h.project),
+            None,
+            StatusCode::FORBIDDEN,
+        ),
+        // A real link, addressed to somebody else: refused under the person's lock alone.
+        (
+            "POST",
+            "/internal/invites/accept".to_owned(),
+            Some(json!({ "token": secret })),
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            "POST",
+            format!("/internal/me/invites/{invitation}/accept"),
+            None,
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            "POST",
+            format!("/internal/me/invites/{invitation}/decline"),
+            None,
+            StatusCode::NOT_FOUND,
+        ),
+    ] {
+        let answered = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            send(
+                app(pool.clone()),
+                &pool,
+                method,
+                &path,
+                stranger,
+                Some(&strangers),
+                Some(&h.project),
+                body,
+            ),
+        )
+        .await;
+        let (status, body) = answered.expect("the stranger queued on the organization's lock");
+        assert_eq!(status, refused, "{method} {path}: {body}");
+    }
+    busy.rollback().await.unwrap();
+    assert_eq!(keys_of(&pool, &h.project).await, (1, 1));
+    assert!(invitation_stands(&pool, &invitation).await);
+}

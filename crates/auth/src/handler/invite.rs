@@ -34,7 +34,10 @@ use telmoni_shared::{
 use crate::{
     AppState,
     db::{AuthLane, identities, invites, locks, members, organization_members, organizations},
-    handler::{acting_project, authorize, member::grantable, parse_project_id},
+    handler::{
+        acting_project, authorize, lock_membership, member::grantable, parse_project_id,
+        refuse_unless_still_in,
+    },
     model::{AuditKind, InviteScope},
 };
 
@@ -191,6 +194,10 @@ pub async fn create_invite(
     // promises no further seat.
     let ceiling = ceiling_of(&state, &organization).await?;
     admit_invitation(&state, &organization, ceiling, &email).await?;
+    // Held in its organization, whose flags, roster, name and chain the rest reads and writes.
+    let acting = acting
+        .hold(&project_id, &actor, Verb::Create, Resource::Member)
+        .await?;
 
     // ⚠ **Under the owning organization's scope.** Its flag overrides, its
     // roster and every address on it are the organization's rows; with only
@@ -203,16 +210,6 @@ pub async fn create_invite(
             flag: telmoni_shared::Flag::Members,
         }
         .into());
-    }
-
-    match organizations::status_for_share(&mut acting.tx, &organization).await? {
-        Some(OrganizationStatus::Active) => {}
-        Some(_) | None => {
-            return Err(AuthError::Conflict(
-                "this organization is being deleted — it can take no new members".into(),
-            )
-            .into());
-        }
     }
 
     let inviter = identities::contact(&mut acting.tx, &actor).await?;
@@ -336,8 +333,11 @@ pub async fn revoke_invite(
     let project_id = parse_project_id(&project_id)?;
     let actor = principal.user_id;
 
-    let mut acting = acting_project(&state, &project_id, &actor).await?;
+    let acting = acting_project(&state, &project_id, &actor).await?;
     authorize(acting.role, Verb::Delete, Resource::Member)?;
+    let mut acting = acting
+        .hold(&project_id, &actor, Verb::Delete, Resource::Member)
+        .await?;
 
     let Some(email) = invites::revoke(&mut acting.tx, &project_id, invite_id).await? else {
         return Err(AuthError::NotFound("no such invitation".into()).into());
@@ -450,12 +450,13 @@ struct AcceptedOrganizationInvite<'a> {
 /// paths start here — after [`accepter`] has taken the person's lock, so the
 /// order is the person's, then the organization's, as every lane that takes
 /// both — and a person must never land in an organization whose deletion has
-/// already been confirmed.
+/// already been confirmed. A wait the role's `lock_timeout` ends is a 409 to
+/// try again ([`lock_membership`]).
 async fn lock_active(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     organization: &OrganizationId,
 ) -> Result<(), TelmoniError> {
-    locks::lock_organization(&mut *tx, organization).await?;
+    lock_membership(tx.conn(), organization).await?;
     if organizations::status(tx, organization).await? != Some(OrganizationStatus::Active) {
         return Err(AuthError::Conflict(
             "this organization is being deleted — it can take no new members".into(),
@@ -478,6 +479,9 @@ async fn seat_project_member(
 ) -> Result<(), TelmoniError> {
     let organization = invite.organization_id;
     lock_active(&mut tx, organization).await?;
+    // Where the project is, read again under the lock: the invitation was read before it, and
+    // a move committed meanwhile would seat the person on the project but enrol them here.
+    refuse_unless_still_in(&mut tx, organization, invite.project_id).await?;
     match organization_members::role_on_organization(&mut tx, organization, actor).await? {
         Some(OrganizationRole::Owner) => {
             return Err(AuthError::BadRequest(
@@ -898,10 +902,14 @@ pub async fn decline_my_incoming_invite(
     if let Some(invite) =
         invites::find_incoming_member_invite(&mut tx, invite_id, &me.email).await?
     {
+        // The organization it is recorded on, held, and the project's place in it read again
+        // under the lock, after the person's as the accepts take them.
+        let owner = invite.owner_organization_id;
+        lock_membership(tx.conn(), &owner).await?;
+        refuse_unless_still_in(&mut tx, &owner, &invite.project_id).await?;
         if !invites::decline_incoming_member_invite(&mut tx, invite_id, &me.email).await? {
             return Err(AuthError::Conflict("this invitation was already resolved".into()).into());
         }
-        let owner = invite.owner_organization_id;
         emit_audit(
             &mut tx,
             AuditEvent {

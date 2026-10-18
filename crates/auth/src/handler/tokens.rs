@@ -17,13 +17,14 @@ use telmoni_shared::person_token::Principal;
 use telmoni_shared::rbac::{Resource, Verb, can};
 use telmoni_shared::types::{API_TOKEN_PREFIX, ApiKeyScope};
 use telmoni_shared::{
-    AuditAction, AuthError, AuthzError, Flag, Role, TelmoniError, TelmoniResourceKind, TenantError,
+    AuditAction, AuthError, AuthzError, Flag, ProjectId, Role, TelmoniError, TelmoniResourceKind,
+    TenantError, UserId,
 };
 
 use crate::{
     AppState,
     db::{AuthLane, tokens},
-    handler::{acting_project, project_of},
+    handler::{ActingProject, acting_project, project_of},
     model::{
         CreateTokenRequest, CreateTokenResponse, RotateTokenRequest, ValidateTokenRequest,
         ValidateTokenResponse,
@@ -80,6 +81,19 @@ fn ensure_token_authz(role: Role, verb: Verb) -> Result<(), TelmoniError> {
         return Err(AuthzError::Forbidden(format!("role {role} may not {verb} API tokens")).into());
     }
     Ok(())
+}
+
+/// [`ensure_token_authz`] on the role first read, then the project held in its organization
+/// with the role read again (`ActingProject::hold`): a key minted, rotated or revoked as the
+/// project moves would be the old organization's row, and recorded on its chain.
+async fn held<'a>(
+    access: ActingProject<'a>,
+    project_id: &ProjectId,
+    actor: &UserId,
+    verb: Verb,
+) -> Result<ActingProject<'a>, TelmoniError> {
+    ensure_token_authz(access.role, verb)?;
+    access.hold(project_id, actor, verb, Resource::Token).await
 }
 
 /// Refuse to mint or rotate while `api_tokens` is off for the project's
@@ -150,7 +164,7 @@ pub async fn create_token(
         return Err(AuthError::BadRequest("created_by must be the acting user".into()).into());
     }
     let access = acting_project(&state, &project_id, &actor).await?;
-    ensure_token_authz(access.role, Verb::Create)?;
+    let access = held(access, &project_id, &actor, Verb::Create).await?;
     let access = refuse_unless_tokens_on(access).await?;
     let token_organization = access.organization.clone();
     let mut tx = access.tx;
@@ -250,7 +264,7 @@ pub async fn rotate_token(
 
     let project_id = project_of(&headers)?;
     let access = acting_project(&state, &project_id, &actor).await?;
-    ensure_token_authz(access.role, Verb::Update)?;
+    let access = held(access, &project_id, &actor, Verb::Update).await?;
     let access = refuse_unless_tokens_on(access).await?;
     let token_organization = access.organization.clone();
     let mut tx = access.tx;
@@ -365,7 +379,7 @@ pub async fn revoke_token(
     let actor = principal.user_id;
     let project_id = project_of(&headers)?;
     let access = acting_project(&state, &project_id, &actor).await?;
-    ensure_token_authz(access.role, Verb::Delete)?;
+    let access = held(access, &project_id, &actor, Verb::Delete).await?;
     let token_organization = access.organization.clone();
     let mut tx = access.tx;
     let revoked = tokens::revoke_in_project(&mut tx, &project_id, token_id).await?;
