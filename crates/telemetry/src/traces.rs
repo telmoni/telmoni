@@ -31,6 +31,10 @@ pub const DEFAULT_LIMIT: u32 = 100;
 pub const MAX_LIMIT: u32 = 500;
 /// The most spans a trace's page shows; a run past it is shown cut short.
 pub const SPANS_MAX: u32 = 5_000;
+/// The most units of its spans a trace's page shows, a KiB of their text
+/// each: a run of wide spans is cut short before [`SPANS_MAX`], at some
+/// 8 MiB of text.
+pub const TRACE_UNITS_MAX: u32 = 8_192;
 /// The most values one filter admits: more than a person ticks, and few
 /// enough that a URL made by hand cannot make a read's query long.
 pub const FILTER_VALUES_MAX: usize = 50;
@@ -512,9 +516,9 @@ const FACETS_SQL: &str = concat!(
     "LIMIT 51 BY facet"
 );
 
-/// A trace's spans, every column of the row, in the order they started; of
-/// two that started together, the one that ended later first, since that is
-/// the one holding the other, as a run holds its first step.
+/// A trace's spans whole, in the order they started — of two that started
+/// together, the one that ended later, which holds the other — up to the one
+/// that takes their units past `{units_max}`, summed on the light columns.
 const SPANS_SQL: &str = "SELECT project_id, received_at, units, run_id, agent, trace_id, \
      span_id, parent_span_id, kind, name, started_at, ended_at, status, error_type, model, \
      provider, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, \
@@ -522,6 +526,13 @@ const SPANS_SQL: &str = "SELECT project_id, received_at, units, run_id, agent, t
      bound_max_cost_usd, sample_rate, attributes \
      FROM telemetry.spans \
      WHERE project_id IN {projects:Array(String)} AND run_id = {run:UUID} \
+     AND span_id IN (SELECT span_id FROM (SELECT span_id, sum(units) OVER (\
+     ORDER BY started_at, ended_at DESC, span_id \
+     ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS units_before \
+     FROM (SELECT span_id, started_at, ended_at, units FROM telemetry.spans \
+     WHERE project_id IN {projects:Array(String)} AND run_id = {run:UUID} \
+     ORDER BY started_at, ended_at DESC, span_id LIMIT {limit:UInt32})) \
+     WHERE units_before <= {units_max:UInt32}) \
      ORDER BY started_at, ended_at DESC, span_id \
      LIMIT {limit:UInt32}";
 
@@ -728,8 +739,8 @@ pub async fn pinned(
         .await
 }
 
-/// The spans of run `run_id` in `projects`, in the order they started: up
-/// to `limit` of them, and none for a run the projects do not hold.
+/// The spans of run `run_id` in `projects` in the order they started, up to
+/// `limit`, through the one past `units` units; none for a run not theirs.
 ///
 /// # Errors
 ///
@@ -739,13 +750,29 @@ pub async fn spans(
     projects: &Projects,
     run_id: Uuid,
     limit: u32,
+    units: u32,
 ) -> clickhouse::error::Result<Vec<SpanRow>> {
     store
         .read(projects, SPANS_SQL)
         .param("run", run_id)
         .param("limit", limit)
+        .param("units_max", units)
         .fetch_all()
         .await
+}
+
+/// How many spans of a trace, by their units in the order [`spans`] read
+/// them, its page shows: up to `limit`, while they total at most `units`.
+#[must_use]
+pub fn shown(each: impl IntoIterator<Item = u32>, limit: u32, units: u32) -> usize {
+    let mut total = 0_u64;
+    each.into_iter()
+        .take(limit as usize)
+        .take_while(|&span| {
+            total += u64::from(span);
+            total <= u64::from(units)
+        })
+        .count()
 }
 
 #[cfg(test)]
@@ -806,6 +833,22 @@ mod tests {
         }
         assert!(SPANS_SQL.contains(PROJECTS_PARAM));
         assert!(SPANS_SQL.contains("{run:UUID}"));
+        assert!(SPANS_SQL.contains("{units_max:UInt32}"));
+    }
+
+    /// A trace shows its spans up to the count and while their units fit, a ping's taking none.
+    #[test]
+    fn a_trace_shows_its_spans_while_their_count_and_units_fit() {
+        assert_eq!(shown([1, 1, 1], 5, 8), 3, "a small run whole");
+        assert_eq!(shown([1, 1, 1, 1], 3, 8), 3, "cut at the count");
+        assert_eq!(shown([4, 4, 4], 5, 8), 2, "cut where the units pass");
+        assert_eq!(shown([4, 4], 5, 8), 2, "units that reach the cap fit");
+        assert_eq!(
+            shown([0, 0, 8, 0, 1], 5, 8),
+            4,
+            "a ping's row takes no units"
+        );
+        assert_eq!(shown([], 5, 8), 0);
     }
 
     /// What a run carries where any of its spans does — its deployments,

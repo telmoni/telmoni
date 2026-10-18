@@ -33,7 +33,7 @@ use crate::contract::{
 use crate::store::{self, Projects, SpanRow};
 use crate::traces::{
     self, Bar, DEFAULT_LIMIT, EXPORT_MAX, FACET_VALUES_MAX, FILTER_VALUES_MAX, FacetRow, MAX_DAYS,
-    MAX_LIMIT, MAX_PAGE, RUNS_MAX, SPANS_MAX, TraceFilter, TraceRow,
+    MAX_LIMIT, MAX_PAGE, RUNS_MAX, SPANS_MAX, TRACE_UNITS_MAX, TraceFilter, TraceRow,
 };
 
 /// Which lane a query string is read for. Each takes the filters and the
@@ -873,20 +873,23 @@ pub async fn get_trace(
     let run_id: Uuid = run_id
         .parse()
         .map_err(|_| TelmoniError::BadRequest("a trace is named by its run's id, a UUID".into()))?;
-    let rows = traces::spans(&state.store, &projects, run_id, SPANS_MAX + 1)
-        .await
-        .map_err(read_failed)?;
+    let rows = traces::spans(
+        &state.store,
+        &projects,
+        run_id,
+        SPANS_MAX + 1,
+        TRACE_UNITS_MAX,
+    )
+    .await
+    .map_err(read_failed)?;
     if rows.is_empty() {
         return Err(AuthError::NotFound("no trace with that run id in this project".into()).into());
     }
-    let truncated = rows.len() > SPANS_MAX as usize;
+    let shown = traces::shown(rows.iter().map(|row| row.units), SPANS_MAX, TRACE_UNITS_MAX);
+    let truncated = shown < rows.len();
     Ok(Json(TraceDetail {
         run_id,
-        spans: rows
-            .into_iter()
-            .take(SPANS_MAX as usize)
-            .map(TraceSpan::from)
-            .collect(),
+        spans: rows.into_iter().take(shown).map(TraceSpan::from).collect(),
         truncated,
     }))
 }

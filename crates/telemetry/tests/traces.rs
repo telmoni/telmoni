@@ -27,7 +27,7 @@ use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, Role, SpanKind, SpanStatus};
 use telmoni_telemetry::router;
 use telmoni_telemetry::store::SpanRow;
-use telmoni_telemetry::traces::RUNS_MAX;
+use telmoni_telemetry::traces::{RUNS_MAX, TRACE_UNITS_MAX};
 
 const LANE: &str = "/internal/telemetry/traces";
 const OWNER: &str = "user_owner";
@@ -847,6 +847,50 @@ async fn a_trace_is_its_runs_spans_in_order_and_another_projects_run_is_not_here
         .send(p.request(STRANGER, &p.ours, &format!("{LANE}/{a}")))
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+/// A run whose spans hold more units than a page shows is cut where they pass, and says so.
+#[sqlx::test]
+async fn a_trace_of_wide_spans_is_cut_where_their_units_pass_the_cap(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    let start = Utc::now().trunc_subsecs(6) - Duration::minutes(1);
+    let (cut, whole) = (Uuid::new_v4(), Uuid::new_v4());
+    let half = |run: Uuid, n: u64| SpanRow {
+        units: TRACE_UNITS_MAX / 2,
+        ..span_at(
+            &p.ours,
+            run,
+            SpanKind::Step,
+            "a wide step",
+            start + Duration::milliseconds(i64::try_from(n).expect("small")),
+            10,
+            n,
+        )
+    };
+    let rows = vec![
+        half(cut, 1),
+        half(cut, 2),
+        half(cut, 3),
+        half(whole, 1),
+        half(whole, 2),
+    ];
+    ch.store.insert_spans(&rows).await.expect("the spans land");
+
+    for (run, shown, truncated) in [(cut, 2, true), (whole, 2, false)] {
+        let (status, body) = p
+            .send(p.request(MEMBER, &p.ours, &format!("{LANE}/{run}")))
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["truncated"], truncated, "{run}");
+        assert_eq!(
+            body["spans"].as_array().expect("spans").len(),
+            shown,
+            "{run}"
+        );
+    }
 }
 
 /// ⚠ A query a parameter does not take is refused before the store is asked,

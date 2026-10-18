@@ -1036,6 +1036,45 @@ mod tests {
         );
     }
 
+    /// The widest span the contract keeps, four bytes a character, fits a trace's page whole.
+    #[test]
+    fn the_widest_span_fits_a_traces_page() {
+        let project = ProjectId::new();
+        let keep = |id: &str| id.to_owned();
+        let row = map(&call(), &context(&project, &[], &keep), &mut Vec::new())
+            .expect("kept")
+            .expect("a row");
+        let wide = |chars: usize| "\u{1F600}".repeat(chars);
+        let widest = SpanRow {
+            agent: wide(contract::NAME_MAX),
+            name: wide(contract::NAME_MAX),
+            error_type: wide(contract::ERROR_TYPE_MAX),
+            model: wide(contract::MODEL_MAX),
+            provider: wide(contract::PROVIDER_MAX),
+            user_id: wide(contract::USER_ID_MAX),
+            session_id: wide(contract::SESSION_ID_MAX),
+            environment: wide(contract::ENVIRONMENT_MAX),
+            release: wide(contract::RELEASE_MAX),
+            tags: (0..contract::TAGS_MAX)
+                .map(|_| (wide(contract::TAG_KEY_MAX), wide(contract::TAG_VALUE_MAX)))
+                .collect(),
+            attributes: (0..ATTRIBUTES_MAX)
+                .map(|_| {
+                    (
+                        wide(contract::ATTRIBUTE_KEY_MAX),
+                        wide(contract::ATTRIBUTE_VALUE_MAX),
+                    )
+                })
+                .collect(),
+            ..row
+        };
+        let units = units_of(&widest);
+        assert!(
+            units <= crate::traces::TRACE_UNITS_MAX,
+            "{units} units, past the page's"
+        );
+    }
+
     #[test]
     fn the_resource_keeps_the_inventory_and_nothing_else() {
         let resource = Resource {
