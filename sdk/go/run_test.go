@@ -320,7 +320,7 @@ func TestNothingIsSentOutsideARun(t *testing.T) {
 	}
 }
 
-func TestTheSampleRateDropsWholeRunsInTheExporter(t *testing.T) {
+func TestTheSampleRateDropsWholeRunsInTheProcessor(t *testing.T) {
 	random := 0.9
 	h := newHarness(t, telmoni.Config{APIKey: "k", SampleRate: 0.25}, nil,
 		telmoni.WithRandom(func() float64 { return random }))
@@ -346,6 +346,28 @@ func TestTheSampleRateDropsWholeRunsInTheExporter(t *testing.T) {
 	want := []string{"invoke_agent bot", "invoke_agent bot", "telmoni.run.start", "telmoni.run.start"}
 	if got := sortedNames(spans); !reflect.DeepEqual(got, want) {
 		t.Errorf("spans sent: %v", got)
+	}
+}
+
+func TestASpanEndingAfterItsSampledOutRunIsDroppedToo(t *testing.T) {
+	random := 0.9
+	h := newHarness(t, telmoni.Config{APIKey: "k", SampleRate: 0.25}, nil,
+		telmoni.WithRandom(func() float64 { return random }))
+	ctx, dropped := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	_, late := dropped.Step(ctx, "late")
+	dropped.End()
+	late.End()
+	random = 0.1
+	_, kept := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	kept.End()
+	h.flush()
+	sent := map[any][]string{}
+	for _, span := range h.transport.spans(t) {
+		id := attributesOf(t, span)["telmoni.run_id"]
+		sent[id] = append(sent[id], span["name"].(string))
+	}
+	if len(sent) != 1 || len(sent[kept.ID()]) == 0 {
+		t.Errorf("spans sent by run: %v; want the kept run's alone", sent)
 	}
 }
 

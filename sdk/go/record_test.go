@@ -323,8 +323,8 @@ func TestTheSampleRateDropsARecordWhole(t *testing.T) {
 	if sent := len(h.transport.all()); sent != 0 {
 		t.Fatalf("a record sampled out sent %d exports", sent)
 	}
-	// The run's own span took its id back out of those sampled out, so the
-	// same record, drawn in, is sent.
+	// A record sampled out builds no span, so the same record, drawn in, is
+	// sent.
 	random = 0.1
 	recordRun(t, h, record)
 	spans := h.transport.spans(t)

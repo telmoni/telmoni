@@ -94,7 +94,7 @@ class Config:
     # Content (prompts, completions, tool arguments and results) leaves the
     # process only when the code asks here and the project's mode allows.
     capture_content: bool = False
-    # The share of runs sent, decided per run in the exporter and never through
+    # The share of runs sent, decided per run in the processor and never through
     # the trace's sampled flag, so an application's own sampling is untouched.
     sample_rate: float = 1.0
     # The sampler whose root decision a run takes when it starts a trace of its

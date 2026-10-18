@@ -8,13 +8,13 @@
 //! worker at once, unless a hold keeps every batch back until what is queued
 //! under it is whole.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::fmt;
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use opentelemetry::{Context, Value};
+use opentelemetry::Context;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::trace::{Span, SpanData, SpanProcessor};
 
@@ -61,8 +61,6 @@ struct Shared {
 #[derive(Default)]
 struct State {
     queue: VecDeque<SpanData>,
-    /// The runs the sample rate kept out, by id, until each run's own span ends.
-    sampled_out: HashSet<String>,
     dropped: usize,
     urgent: bool,
     flushing: usize,
@@ -102,13 +100,6 @@ impl Processor {
             exporter_thread_failed(error.kind());
         }
         Self { shared }
-    }
-
-    /// Drop every span of this run, the run's own among them.
-    pub(crate) fn sample_out(&self, run_id: &str) {
-        lock(&self.shared.state)
-            .sampled_out
-            .insert(run_id.to_owned());
     }
 
     /// Takes no batch until the guard drops, so the spans a record queues
@@ -165,18 +156,15 @@ impl SpanProcessor for Processor {
     fn on_start(&self, _span: &mut Span, _cx: &Context) {}
 
     fn on_end(&self, span: SpanData) {
-        let mut state = lock(&self.shared.state);
-        if state.shutdown {
+        if span
+            .attributes
+            .iter()
+            .any(|attribute| attribute.key.as_str() == contract::SAMPLED_OUT)
+        {
             return;
         }
-        if let Some(run_id) = attribute(&span, contract::RUN_ID)
-            && state.sampled_out.contains(run_id)
-        {
-            if attribute(&span, contract::OPERATION)
-                .is_some_and(|operation| contract::RUN_OPERATIONS.contains(&operation))
-            {
-                state.sampled_out.remove(run_id);
-            }
+        let mut state = lock(&self.shared.state);
+        if state.shutdown {
             return;
         }
         if state.queue.len() >= self.shared.batching.max_queue_size {
@@ -310,16 +298,6 @@ impl Drop for Finished<'_> {
         drop(state);
         self.0.wake.notify_all();
     }
-}
-
-fn attribute<'a>(span: &'a SpanData, key: &str) -> Option<&'a str> {
-    span.attributes
-        .iter()
-        .find(|attribute| attribute.key.as_str() == key)
-        .and_then(|attribute| match &attribute.value {
-            Value::String(text) => Some(text.as_str()),
-            _ => None,
-        })
 }
 
 fn exporter_thread_failed(kind: std::io::ErrorKind) {

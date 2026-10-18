@@ -273,28 +273,36 @@ class Opener:
         rate = self._client.config.sample_rate if sample_rate is None else sample_rate
         if not 0 < rate <= 1:
             raise ValueError("sample_rate must be above 0 and up to 1")
+        limits = _bounds(bounds)
+        sampled_out = rate < 1 and random.random() >= rate
         run_id = str(uuid.uuid4())
         inherited: dict[str, str] = {contract.RUN_ID: run_id, contract.AGENT: agent}
         if user_id:
             inherited[contract.USER_ID] = user_id
         if session_id:
             inherited[contract.SESSION_ID] = session_id
+        # On every span of the run from its start, for the processor to drop:
+        # a sampler's drop would clear the flag the application's spans inherit.
+        if sampled_out:
+            inherited[contract.SAMPLED_OUT] = "true"
+        # Tags first: past the span's attribute limit the oldest is dropped,
+        # which must be a tag rather than the run's id or its mark.
         attributes: dict[str, Any] = {
-            contract.OPERATION: "invoke_agent",
-            contract.AGENT_NAME: agent,
-            **inherited,
-            **_bounds(bounds),
-            contract.SAMPLE_RATE: float(rate),
+            f"{contract.TAG_PREFIX}{key}": value for key, value in (tags or {}).items()
         }
-        for key, value in (tags or {}).items():
-            attributes[f"{contract.TAG_PREFIX}{key}"] = value
+        attributes.update(
+            {
+                contract.OPERATION: "invoke_agent",
+                contract.AGENT_NAME: agent,
+                **inherited,
+                **limits,
+                contract.SAMPLE_RATE: float(rate),
+            }
+        )
         parent = context.get_current()
         span = self._start(
             f"invoke_agent {agent}", parent, attributes, SpanKind.INTERNAL
         )
-        sampled_out = rate < 1 and random.random() >= rate
-        if sampled_out:
-            self._client.processor.sample_out(run_id)
         ctx = trace.set_span_in_context(span, parent)
         start = span.start_time if isinstance(span, ReadableSpan) else None
         # OpenTelemetry sends a span only once it ends; without this one a run
@@ -302,7 +310,7 @@ class Opener:
         opener = self._start(
             contract.RUN_START,
             ctx,
-            {**inherited, **_bounds(bounds), contract.SAMPLE_RATE: float(rate)},
+            {**inherited, **limits, contract.SAMPLE_RATE: float(rate)},
             SpanKind.INTERNAL,
             start_time=start,
         )
@@ -433,15 +441,16 @@ class Opener:
         }
         for key, value in (record.tags or {}).items():
             attributes[f"{contract.TAG_PREFIX}{key}"] = value
+        # Sampled out, no span is built: none of a record's ends after it, and
+        # the same record sent again draws again.
+        if rate < 1 and random.random() >= rate:
+            return
         # Queued whole or not at all: a record that outgrows the queue's room
         # would lose its tail, the run's own span first.
         need = 2 + sum(
             1 + (len(item.calls) if isinstance(item, StepRecord) else 0)
             for item in record.inside
         )
-        if rate < 1 and random.random() >= rate:
-            self._client.processor.sample_out(run_id)
-            need = 0
         places = itertools.count()
 
         def open_span(

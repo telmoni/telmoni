@@ -53,7 +53,6 @@ class Processor(SpanProcessor):
         self._lock = threading.Lock()
         self._wake = threading.Condition(self._lock)
         self._queue: deque[ReadableSpan] = deque()
-        self._sampled_out: set[str] = set()
         self._dropped = 0
         self._urgent = False
         self._flushing = 0
@@ -87,11 +86,6 @@ class Processor(SpanProcessor):
             )
             self._thread.start()
 
-    def sample_out(self, run_id: str) -> None:
-        """Drop every span of this run, the run's own among them."""
-        with self._lock:
-            self._sampled_out.add(run_id)
-
     @contextmanager
     def hold(self, need: int = 0) -> Iterator[None]:
         """Take no batch until the block ends, so the spans a record queues
@@ -117,14 +111,10 @@ class Processor(SpanProcessor):
         return None
 
     def on_end(self, span: ReadableSpan) -> None:
-        attributes = span.attributes or {}
-        run_id = attributes.get(contract.RUN_ID)
+        if contract.SAMPLED_OUT in (span.attributes or {}):
+            return
         with self._lock:
             if self._shutdown:
-                return
-            if isinstance(run_id, str) and run_id in self._sampled_out:
-                if attributes.get(contract.OPERATION) in contract.RUN_OPERATIONS:
-                    self._sampled_out.discard(run_id)
                 return
             if len(self._queue) >= self._max_queue_size:
                 self._dropped += 1

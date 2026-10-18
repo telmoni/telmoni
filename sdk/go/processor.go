@@ -39,15 +39,14 @@ type processor struct {
 	logger   *slog.Logger
 	limits   queueLimits
 
-	mu         sync.Mutex
-	queue      []sdktrace.ReadOnlySpan
-	sampledOut map[string]struct{}
-	dropped    int
-	urgent     bool
-	flushing   int
-	held       int
-	exporting  bool
-	stopped    bool
+	mu        sync.Mutex
+	queue     []sdktrace.ReadOnlySpan
+	dropped   int
+	urgent    bool
+	flushing  int
+	held      int
+	exporting bool
+	stopped   bool
 	// drained is closed for each Flush waiting, once the queue is empty.
 	drained []chan struct{}
 
@@ -59,22 +58,14 @@ type processor struct {
 
 func newProcessor(exp *exporter, logger *slog.Logger, limits queueLimits) *processor {
 	p := &processor{
-		exporter:   exp,
-		logger:     logger,
-		limits:     limits,
-		sampledOut: map[string]struct{}{},
-		wake:       make(chan struct{}, 1),
-		done:       make(chan struct{}),
+		exporter: exp,
+		logger:   logger,
+		limits:   limits,
+		wake:     make(chan struct{}, 1),
+		done:     make(chan struct{}),
 	}
 	go p.work()
 	return p
-}
-
-// sampleOut drops every span of this run, the run's own among them.
-func (p *processor) sampleOut(runID string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.sampledOut[runID] = struct{}{}
 }
 
 // hold has the worker take no batch, unless it is stopping, until release is
@@ -102,26 +93,14 @@ func (p *processor) hold(need int) (release func(), ok bool) {
 func (p *processor) OnStart(context.Context, sdktrace.ReadWriteSpan) {}
 
 func (p *processor) OnEnd(span sdktrace.ReadOnlySpan) {
-	var runID, operation string
 	for _, kv := range span.Attributes() {
-		switch string(kv.Key) {
-		case attrRunID:
-			runID = kv.Value.AsString()
-		case attrOperation:
-			operation = kv.Value.AsString()
+		if string(kv.Key) == attrSampledOut {
+			return
 		}
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.stopped {
-		return
-	}
-	if _, out := p.sampledOut[runID]; out && runID != "" {
-		// The run's own span is the last of its run to end, so its id leaves
-		// the set with it.
-		if runOperations[operation] {
-			delete(p.sampledOut, runID)
-		}
 		return
 	}
 	if len(p.queue) >= p.limits.maxQueue {

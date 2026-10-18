@@ -3,12 +3,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import threading
 from unittest import mock
 
 import pytest
 
 from conftest import FakeTransport, attributes_of
-from telmoni import Bounds, Config, Telmoni, current_run
+from telmoni import Bounds, Config, Run, Telmoni, current_run
 
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
@@ -176,7 +177,7 @@ def test_nothing_is_sent_outside_a_run(
     assert len(warnings) == 1 and "outside a run" in warnings[0]
 
 
-def test_the_sample_rate_drops_whole_runs_in_the_exporter(
+def test_the_sample_rate_drops_whole_runs_in_the_processor(
     transport: FakeTransport,
 ) -> None:
     client = Telmoni(Config(api_key="k", sample_rate=0.25), transport=transport)
@@ -201,8 +202,43 @@ def test_the_sample_rate_drops_whole_runs_in_the_exporter(
     assert attributes_of(spans[0])["telmoni.sample_rate"] == 0.25
 
 
+def test_a_span_ending_after_its_sampled_out_run_is_dropped_too(
+    transport: FakeTransport,
+) -> None:
+    client = Telmoni(Config(api_key="k", sample_rate=0.25), transport=transport)
+    opened, released = threading.Event(), threading.Event()
+
+    def late(run: Run) -> None:
+        with run.step("late"):
+            opened.set()
+            released.wait(5)
+
+    try:
+        with (
+            mock.patch("telmoni.runs.random.random", return_value=0.9),
+            client.run("bot") as dropped,
+        ):
+            worker = threading.Thread(target=late, args=(dropped,))
+            worker.start()
+            assert opened.wait(5)
+        released.set()
+        worker.join(5)
+        with (
+            mock.patch("telmoni.runs.random.random", return_value=0.1),
+            client.run("bot") as kept,
+        ):
+            pass
+        assert client.flush()
+    finally:
+        client.shutdown()
+    spans = transport.spans()
+    assert {attributes_of(s)["telmoni.run_id"] for s in spans} == {kept.run_id}
+    assert current_run() is None, "the test leaves no run current"
+
+
 def test_a_run_needs_an_agent_and_a_valid_rate(telmoni: Telmoni) -> None:
     with pytest.raises(ValueError), telmoni.run(" "):
         pass
     with pytest.raises(ValueError), telmoni.run("bot", sample_rate=0):
         pass
+

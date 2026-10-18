@@ -277,6 +277,42 @@ fn the_sample_rate_drops_whole_runs_in_the_processor() -> Outcome {
 }
 
 #[test]
+fn a_span_ending_after_its_sampled_out_run_is_dropped_too() -> Outcome {
+    let transport = FakeTransport::new([])?;
+    let warnings = Warnings::default();
+    let sleeps = Sleeps::default();
+    let draws = Arc::new(Mutex::new(VecDeque::from([0.9, 0.1])));
+    let source = Arc::clone(&draws);
+    let mut hooks = hooks(&transport, &warnings, &sleeps);
+    hooks.random = Box::new(move || lock(&source).pop_front().unwrap_or(0.0));
+    let telmoni = Telmoni::with_hooks(
+        Config {
+            sample_rate: 0.25,
+            ..keyed()
+        },
+        hooks,
+    );
+
+    let dropped = telmoni.run("bot", RunOptions::default())?;
+    let late = dropped.step("late");
+    dropped.end();
+    late.end();
+    let kept = telmoni.run("bot", RunOptions::default())?;
+    let kept_id = kept.run_id().to_owned();
+    kept.end();
+    assert!(telmoni.flush());
+    telmoni.shutdown();
+
+    let run_ids: HashSet<_> = transport
+        .spans()?
+        .iter()
+        .map(|span| Ok(attributes_of(span)?.get("telmoni.run_id").cloned()))
+        .collect::<Result<_, common::Failure>>()?;
+    assert_eq!(run_ids, HashSet::from([Some(json!(kept_id))]));
+    Ok(())
+}
+
+#[test]
 fn a_run_needs_an_agent_and_a_valid_rate() -> Outcome {
     let harness = Harness::new()?;
     assert!(matches!(

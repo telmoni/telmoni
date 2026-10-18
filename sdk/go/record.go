@@ -157,14 +157,14 @@ func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 	for _, key := range slices.Sorted(maps.Keys(record.Tags)) {
 		attrs = append(attrs, attribute.String(tagPrefix+key, record.Tags[key]))
 	}
-	need := recordSpans(record)
+	// Sampled out, no span is built: none of a record's ends after it, and
+	// the same record sent again draws again.
 	if rate < 1 && c.random() >= rate {
-		c.processor.sampleOut(runID)
-		need = 0
+		return nil
 	}
 	// Queued whole or not at all: a record that outgrows the queue's room
 	// would lose its tail, the run's own span first.
-	release, ok := c.processor.hold(need)
+	release, ok := c.processor.hold(recordSpans(record))
 	if !ok {
 		return ErrQueueFull
 	}

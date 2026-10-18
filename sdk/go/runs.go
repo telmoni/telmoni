@@ -192,6 +192,7 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 			c.exporter.warnOnce("run:rate", "telmoni: a run's SampleRate must be above 0 and up to 1; the client's is used")
 		}
 	}
+	sampledOut := rate < 1 && c.random() >= rate
 	runID := newUUID()
 	inherited := []attribute.KeyValue{
 		attribute.String(attrRunID, runID),
@@ -202,6 +203,11 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 	}
 	if opts.SessionID != "" {
 		inherited = append(inherited, attribute.String(attrSessionID, opts.SessionID))
+	}
+	// On every span of the run from its start, for the processor to drop: a
+	// sampler's drop would clear the flag the application's spans inherit.
+	if sampledOut {
+		inherited = append(inherited, attribute.Bool(attrSampledOut, true))
 	}
 	common := append(boundAttributes(opts.Bounds), attribute.Float64(attrSampleRate, rate))
 	attrs := make([]attribute.KeyValue, 0, 2+len(inherited)+len(common)+len(opts.Tags))
@@ -217,10 +223,6 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 		trace.WithAttributes(attrs...),
 		trace.WithTimestamp(start),
 	)
-	sampledOut := rate < 1 && c.random() >= rate
-	if sampledOut {
-		c.processor.sampleOut(runID)
-	}
 	// OpenTelemetry sends a span only once it ends; without this one a run
 	// stalled in its first call would never be heard.
 	openerAttrs := make([]attribute.KeyValue, 0, len(inherited)+len(common))

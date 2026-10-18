@@ -29,7 +29,6 @@ export class Processor implements SpanProcessor {
   readonly #maxBatchSize: number;
   readonly #delayMs: number;
   readonly #queue: ReadableSpan[] = [];
-  readonly #sampledOut = new Set<string>();
   #dropped = 0;
   #urgent = false;
   #flushers: Array<() => void> = [];
@@ -59,23 +58,10 @@ export class Processor implements SpanProcessor {
     return this.#queue.length + need <= this.#maxQueueSize;
   }
 
-  /** Drop every span of this run, the run's own among them. */
-  sampleOut(runId: string): void {
-    this.#sampledOut.add(runId);
-  }
-
   onStart(_span: Span, _parentContext: Context): void {}
 
   onEnd(span: ReadableSpan): void {
-    if (this.#down) return;
-    const runId = span.attributes[contract.RUN_ID];
-    if (typeof runId === 'string' && this.#sampledOut.has(runId)) {
-      const operation = span.attributes[contract.OPERATION];
-      if (typeof operation === 'string' && contract.RUN_OPERATIONS.has(operation)) {
-        this.#sampledOut.delete(runId);
-      }
-      return;
-    }
+    if (this.#down || contract.SAMPLED_OUT in span.attributes) return;
     if (this.#queue.length >= this.#maxQueueSize) {
       this.#dropped += 1;
       return;

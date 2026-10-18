@@ -22,6 +22,9 @@ BOUND_MAX_STEPS = "telmoni.bound.max_steps"
 BOUND_MAX_COST_USD = "telmoni.bound.max_cost_usd"
 SAMPLE_RATE = "telmoni.sample_rate"
 CANCELLED = "telmoni.cancelled"
+SAMPLED_OUT = "telmoni.sampled_out"
+"""Never sent: on every span of a run the sample rate kept out, from its start,
+so the processor drops each however late it ends."""
 RUN_START = "telmoni.run.start"
 """The span of no duration that opens a run, sent at once."""
 ENVIRONMENT = "deployment.environment.name"
@@ -73,7 +76,6 @@ CONTENT = frozenset(
 )
 """What the exporter takes off a span unless asked and the project allows."""
 
-RUN_OPERATIONS = frozenset({"invoke_agent", "invoke_workflow"})
 MODEL_OPERATIONS = frozenset(
     {"chat", "generate_content", "text_completion", "embeddings"}
 )

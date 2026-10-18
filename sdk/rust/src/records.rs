@@ -290,14 +290,14 @@ pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
     let run_id = run_uuid.to_string();
     let inherited = runs::inherited(&run_id, &agent, user_id, session_id);
     let attributes = runs::run_attributes(&agent, &inherited, &[], rate, tags);
-    let sampled_out = rate < 1.0 && (inner.random)() >= rate;
-    if sampled_out {
-        inner.processor.sample_out(&run_id);
+    // Sampled out, no span is built: none of a record's ends after it, and
+    // the same record sent again draws again.
+    if rate < 1.0 && (inner.random)() >= rate {
+        return Ok(());
     }
 
     // Queued whole or not at all: a record that outgrows the queue's room
     // would lose its tail, the run's own span first.
-    let need = if sampled_out { 0 } else { need };
     let Some(_hold) = inner.processor.hold(need) else {
         return Err(Error::QueueFull { spans: need });
     };

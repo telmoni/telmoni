@@ -153,7 +153,7 @@ Sampler, Environment, Release}`, or `telmoni.ConfigFromEnv()`, which reads
 counting as unset. `Environment` and `Release` name the deployment every span
 is sent from, as the resource's `deployment.environment.name` and
 `service.version`. `SampleRate` is the share of runs sent (0 means 1), dropped
-whole in the exporter and never through the trace's sampled flag; `Sampler`
+whole in the SDK's processor and never through the trace's sampled flag; `Sampler`
 is the OpenTelemetry sampler whose decision a run takes when it starts a
 trace of its own. The key never appears in `%v`, `%+v`, `%#v` or
 `json.Marshal` of the configuration or the client. Options for tests:

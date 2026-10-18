@@ -20,6 +20,10 @@ const (
 	attrBoundMaxCostUSD = "telmoni.bound.max_cost_usd"
 	attrSampleRate      = "telmoni.sample_rate"
 	attrCancelled       = "telmoni.cancelled"
+	// attrSampledOut is never sent: on every span of a run the sample rate
+	// kept out, from its start, so the processor drops each however late it
+	// ends.
+	attrSampledOut = "telmoni.sampled_out"
 	// runStart is the span of no duration that opens a run, sent at once.
 	runStart = "telmoni.run.start"
 	// The deployment, on the resource: the configuration's Environment and
@@ -77,6 +81,3 @@ var content = map[string]bool{
 	"user.full_name":              true,
 	"user.name":                   true,
 }
-
-// runOperations are the operations that make a span a run's own.
-var runOperations = map[string]bool{"invoke_agent": true, "invoke_workflow": true}

@@ -225,11 +225,15 @@ export class Opener {
     if (agent.trim() === '') throw new TypeError("a run needs its agent's name");
     const rate = options.sampleRate ?? this.#config.sampleRate;
     if (!(rate > 0 && rate <= 1)) throw new RangeError('sampleRate must be above 0 and up to 1');
+    const bounds = boundsOf(options.bounds);
+    const sampledOut = rate < 1 && Math.random() >= rate;
     const runId = randomUUID();
     const inherited: Attributes = { [contract.RUN_ID]: runId, [contract.AGENT]: agent };
     if (options.userId) inherited[contract.USER_ID] = options.userId;
     if (options.sessionId) inherited[contract.SESSION_ID] = options.sessionId;
-    const bounds = boundsOf(options.bounds);
+    // On every span of the run from its start, for the processor to drop: a
+    // sampler's drop would clear the flag the application's spans inherit.
+    if (sampledOut) inherited[contract.SAMPLED_OUT] = true;
     const attributes: Attributes = {
       [contract.OPERATION]: 'invoke_agent',
       [contract.AGENT_NAME]: agent,
@@ -242,10 +246,6 @@ export class Opener {
     }
     const parent = context.active();
     const span = this.#start(`invoke_agent ${agent}`, parent, attributes, SpanKind.INTERNAL);
-    // Decided once, here, and applied in the processor: never through the
-    // trace's sampled flag, which is the application's.
-    const sampledOut = rate < 1 && Math.random() >= rate;
-    if (sampledOut) this.#processor.sampleOut(runId);
     const run = new Run(this, span, parent, runId, agent, inherited, sampledOut);
     // OpenTelemetry sends a span only once it ends; without this one a run
     // stalled in its first call would never be heard.
@@ -352,14 +352,13 @@ export class Opener {
     for (const [key, value] of Object.entries(record.tags ?? {})) {
       attributes[`${contract.TAG_PREFIX}${key}`] = value;
     }
-    if (rate < 1 && Math.random() >= rate) {
-      this.#processor.sampleOut(runId);
-    } else {
-      // Queued whole or not at all: a record that outgrows the queue's room
-      // would lose its tail, the run's own span first.
-      const spans = spansIn(record);
-      if (!this.#processor.hasRoom(spans)) throw new QueueFullError(spans);
-    }
+    // Sampled out, no span is built: none of a record's ends after it, and
+    // the same record sent again draws again.
+    if (rate < 1 && Math.random() >= rate) return;
+    // Queued whole or not at all: a record that outgrows the queue's room
+    // would lose its tail, the run's own span first.
+    const spans = spansIn(record);
+    if (!this.#processor.hasRoom(spans)) throw new QueueFullError(spans);
     let place = 0;
     const open = (name: string, parent: Context, spanAttributes: Attributes, kind: SpanKind, at: RecordTime): Span =>
       this.#ids.given(runHex, spanIdAt(runHex, place++), () =>

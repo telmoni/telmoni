@@ -226,6 +226,25 @@ describe('the sample rate', () => {
     }
   });
 
+  it('drops a span that ends after its run', async () => {
+    const sampled = harness({ sampleRate: 0.25 });
+    try {
+      vi.spyOn(Math, 'random').mockReturnValue(0.9);
+      let late: Promise<void> | undefined;
+      sampled.telmoni.run('bot', (run) => {
+        late = run.step('late', () => new Promise<void>((resolve) => setTimeout(resolve, 10)));
+      });
+      await late;
+      vi.spyOn(Math, 'random').mockReturnValue(0.1);
+      const kept = sampled.telmoni.run('bot', (run) => run);
+      expect(await sampled.telmoni.flush()).toBe(true);
+      const spans = sampled.transport.spans();
+      expect(new Set(spans.map((span) => attributesOf(span)['telmoni.run_id']))).toEqual(new Set([kept.runId]));
+    } finally {
+      await sampled.telmoni.shutdown();
+    }
+  });
+
   it("is the run's own over the client's", async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0.5);
     h.telmoni.run('bot', { sampleRate: 0.4 }, () => {});

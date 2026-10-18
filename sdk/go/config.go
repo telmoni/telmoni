@@ -29,7 +29,7 @@ type Config struct {
 	// Otherwise the exporter takes them off every span.
 	CaptureContent bool `json:"capture_content"`
 	// SampleRate is the share of runs sent, above 0 and up to 1; 0 means 1.
-	// A run is dropped whole, in the exporter, never through the trace's
+	// A run is dropped whole, in the processor, never through the trace's
 	// sampled flag, so an application's own sampling is untouched.
 	SampleRate float64 `json:"sample_rate"`
 	// Sampler decides a run that starts a trace of its own, as the

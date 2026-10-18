@@ -19,6 +19,9 @@ pub(crate) const BOUND_MAX_STEPS: &str = "telmoni.bound.max_steps";
 pub(crate) const BOUND_MAX_COST_USD: &str = "telmoni.bound.max_cost_usd";
 pub(crate) const SAMPLE_RATE: &str = "telmoni.sample_rate";
 pub(crate) const CANCELLED: &str = "telmoni.cancelled";
+/// Never sent: on every span of a run the sample rate kept out, from its
+/// start, so the processor drops each however late it ends.
+pub(crate) const SAMPLED_OUT: &str = "telmoni.sampled_out";
 /// The span of no duration that opens a run, sent at once.
 pub(crate) const RUN_START: &str = "telmoni.run.start";
 /// The deployment, on the resource: the configuration's `environment` and
@@ -74,9 +77,6 @@ pub(crate) fn is_content(key: &str) -> bool {
     CONTENT.contains(&key)
 }
 
-/// The operations that make a span a run: the one whose end lifts a sampled-out
-/// run's id from the processor's set.
-pub(crate) const RUN_OPERATIONS: &[&str] = &["invoke_agent", "invoke_workflow"];
 pub(crate) const RUN_OPERATION: &str = "invoke_agent";
 pub(crate) const MODEL_OPERATION_DEFAULT: &str = "chat";
 pub(crate) const TOOL_OPERATION: &str = "execute_tool";

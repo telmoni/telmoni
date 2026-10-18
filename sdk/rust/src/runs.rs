@@ -528,8 +528,14 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
         return Err(Error::SampleRate(rate));
     }
 
+    let sampled_out = rate < 1.0 && (inner.random)() >= rate;
     let run_id = Uuid::new_v4().to_string();
-    let inherited = inherited(&run_id, agent, options.user_id, options.session_id);
+    let mut inherited = inherited(&run_id, agent, options.user_id, options.session_id);
+    // On every span of the run from its start, for the processor to drop: a
+    // sampler's drop would clear the flag the application's spans inherit.
+    if sampled_out {
+        inherited.push(KeyValue::new(contract::SAMPLED_OUT, true));
+    }
     let bounds = bound_attributes(&options.bounds);
     let attributes = run_attributes(agent, &inherited, &bounds, rate, options.tags);
 
@@ -542,10 +548,6 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
         .with_attributes(attributes)
         .with_start_time(start)
         .start_with_context(tracer, &parent);
-    let sampled_out = rate < 1.0 && (inner.random)() >= rate;
-    if sampled_out {
-        inner.processor.sample_out(&run_id);
-    }
     let cx = parent.with_span(span).with_value(RunInfo {
         run_id: run_id.clone(),
         agent: agent.to_owned(),
