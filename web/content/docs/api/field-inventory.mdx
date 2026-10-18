@@ -85,6 +85,13 @@ commas. It is kept as any tag is.
 | `gen_ai.usage.cache_read.input_tokens` | a model call | the column `cache_read_input_tokens` | any | a whole number, 0 or more |
 | `gen_ai.usage.cache_write.input_tokens` | a model call | the column `cache_write_input_tokens` | any | a whole number, 0 or more |
 | `gen_ai.conversation.id` | any span | the column `session_id` | any | 1 to 200 characters, kept as sent |
+| `deployment.environment.name` | the resource | the column `environment`, on every span of the export | any | up to 128 characters, as sent: `production`, `staging`; longer, read as none |
+| `service.version` | the resource | the column `release`, on every span of the export | any | up to 128 characters, as sent: a version or a commit; longer, read as none |
+
+The last two are the deployment a span was sent from, which Telmoni's SDKs set
+from their `environment` and `release` options, or `TELMONI_ENVIRONMENT` and
+`TELMONI_RELEASE`, and never from `OTEL_RESOURCE_ATTRIBUTES`; the trace list
+[filters](/docs/workspace/traces#filters) by both.
 
 ## Names the conventions replaced
 
@@ -120,8 +127,6 @@ them.
 | `gen_ai.data_source.id` | any span | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
 | `server.address` | any span | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
 | `service.name` | the resource | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
-| `service.version` | the resource | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
-| `deployment.environment.name` | the resource | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
 | `telemetry.sdk.*` | the resource | `attributes`, under its own name | any | what the OpenTelemetry SDK says of itself: its name, language and version |
 | `telemetry.distro.*` | the resource | `attributes`, under its own name | any | what the distribution says of itself: `telmoni` and its version, on everything Telmoni's SDKs send |
 

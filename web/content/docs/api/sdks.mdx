@@ -408,7 +408,14 @@ and conversation you named (`user.id`, `gen_ai.conversation.id`), each tag as
 span of no duration goes out at once under it. Every span inside the run
 carries the run's id, agent, user and session, so Telmoni knows each
 span's run without waiting
-for the trace's tree. A step is a span named as you named it; a model call is
+for the trace's tree. The resource every span of an export shares names the
+SDK (`telemetry.distro.name` `telmoni`, its version, and the OpenTelemetry
+SDK's name, language and version) and, where you set them, the deployment:
+`deployment.environment.name` from the `environment` option or
+`TELMONI_ENVIRONMENT` (`production`, `staging`), and `service.version` from
+`release` or `TELMONI_RELEASE` (a version or a commit), which Telmoni keeps as
+the `environment` and `release` of every span and the trace list
+[filters](/docs/workspace/traces#filters) by. A step is a span named as you named it; a model call is
 `chat <model>` (or the operation you gave) with the model asked for, the
 model that answered, the provider and the token counts under the GenAI
 conventions' names; a tool call is `execute_tool <name>`. The exception's
@@ -485,6 +492,8 @@ key never appears in a log, a warning or an error.
             organization_id="org_019a0b8c3f2e7d41",
             capture_content=False,
             sample_rate=1.0,
+            environment="production",
+            release="2026.10.18",
         )
     )
     ```
@@ -499,6 +508,8 @@ key never appears in a log, a warning or an error.
       organizationId: 'org_019a0b8c3f2e7d41',
       captureContent: false,
       sampleRate: 1.0,
+      environment: 'production',
+      release: '2026.10.18',
     });
     ```
   </Tab>
@@ -510,6 +521,8 @@ key never appears in a log, a warning or an error.
     	OrganizationID: "org_019a0b8c3f2e7d41",
     	CaptureContent: false,
     	SampleRate:     1.0,
+    	Environment:    "production",
+    	Release:        "2026.10.18",
     })
     ```
   </Tab>
@@ -521,11 +534,17 @@ key never appears in a log, a warning or an error.
         endpoint: "https://api.telmoni.com".into(),
         api_key: std::env::var("TELMONI_API_KEY").ok(),
         organization_id: Some("org_019a0b8c3f2e7d41".into()),
+        environment: Some("production".into()),
+        release: Some("2026.10.18".into()),
         ..Default::default()
     });
     ```
   </Tab>
 </Tabs>
+
+`environment` and `release` name the deployment every span is sent from, as
+the resource's `deployment.environment.name` and `service.version`; a blank
+one is unset, and nothing is sent for one unset.
 
 Each SDK keeps the API key out of the configuration's printed form: Rust's
 `Debug` shows `<redacted>` in its place and serialization skips it; Python
@@ -545,7 +564,10 @@ and `JSON.stringify` pass over.
 | `TELMONI_ENDPOINT` | The origin ingest is served on: Telmoni's machine host, or your own deployment's | `https://api.telmoni.com` when unset or blank |
 | `TELMONI_API_KEY` | An [API key](/docs/api/api-keys) holding the **ingest** scope, created on a project's API keys page | None |
 | `TELMONI_ORG` | The organization's ID (`org_...`), held and not sent: the key names the project | None |
+| `TELMONI_ENVIRONMENT` | The deployment this process runs in — `production`, `staging` — sent as `deployment.environment.name` | None: nothing is sent |
+| `TELMONI_RELEASE` | The release this process runs — a version or a commit — sent as `service.version` | None: nothing is sent |
 
-Every SDK reads these three and no others. OpenTelemetry's own `OTEL_*`
+Every SDK reads these five and no others. OpenTelemetry's own `OTEL_*`
 variables are your application's, for its own exporters, and change nothing
-of the SDK's.
+of the SDK's: `OTEL_RESOURCE_ATTRIBUTES` in particular reaches nothing the
+SDK sends.

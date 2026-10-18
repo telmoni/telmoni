@@ -28,10 +28,13 @@ row each, fifty to a page:
 | Duration | From its first span's start to its last span's end |
 
 **Columns** shows or hides each of these, and more beside them: when the
-run's last span ended, the class of the error it ended on (**Error**:
-`TimeoutError`, `RateLimitError` — never its message), its model calls, tool
-calls, errors and spans, its input, output and cached tokens, and the models
-and tools its calls used.
+run's last span ended, the deployment its spans were sent from
+(**Environment**: `production`, `staging`) and its release (**Release**: a
+version or a commit), each once where a run crossed services deployed apart,
+the class of the error it ended on (**Error**: `TimeoutError`,
+`RateLimitError` — never its message), its model calls, tool calls, errors
+and spans, its input, output and cached tokens, and the models and tools its
+calls used.
 The counts and the tokens are each a group that opens under its heading,
 which says how many of it show; a column whose name does not say what it
 holds says so behind its ⓘ; and the trace's id always shows. Your columns,
@@ -41,16 +44,21 @@ rather than in the page's link.
 ### Filters
 
 The **Filters** panel beside the list names each agent, status, model, tool,
-user and session among the window's runs, with how many runs carry it —
-counted under every other filter, so a value beside a ticked one says what
-ticking it would add. Tick values to narrow the list: the values of one
-filter add to each other, and filters narrow together. The panel names fifty
-values of each at most, the most runs first; a session's id can be typed in as
-well (**Text**), and so can a user's as it is stored, the hashed id the User
-column shows. Click an agent, a user, a session, a model or a tool in a row to
-narrow the list to it alone. The filters in force stand above the rows:
-clear one with its ×, or all of them at once. The button beside the panel's
-heading hides it, and opens it again.
+user, session, environment, release, tag and prompt among the window's runs,
+with how many runs carry it — counted under every other filter, so a value
+beside a ticked one says what ticking it would add. Tick values to narrow the
+list: the values of one filter add to each other, and filters narrow
+together. The panel names fifty values of each at most, the most runs first;
+a session's id can be typed in as well (**Text**), so can a user's as it is
+stored, the hashed id the User column shows, and so can a tag, as
+`key:value`. A run carries an environment, a release, a tag or a prompt
+where any of its spans does: the deployment is the resource's
+`deployment.environment.name` and `service.version`, a tag each
+`telmoni.tag.<key>` with its value, and a prompt a span's
+`gen_ai.prompt.name`. Click an agent, a user, a session, a model, a tool, an
+environment or a release in a row to narrow the list to it alone. The filters
+in force stand above the rows: clear one with its ×, or all of them at once.
+The button beside the panel's heading hides it, and opens it again.
 
 **Errors**, **Slow** and **Tokens** beside it are ready-made: the runs that
 ended in error, the longest runs first, or the runs that used the most tokens
@@ -140,10 +148,11 @@ it. A run of more than 400 spans opens with its branches shut but the run's
 own.
 
 Beside the tree stands the span you choose, the run's own first: its kind, its
-status and the error's type, its model and provider, the tool it called — the
-model and the tool each a link to the list narrowed to them — its tokens,
-input, output and cached, when it started and ended to the millisecond, how
-long it ran, when it was received, and its ids. The run's own span adds the
+status and the error's type, its model and provider, the environment and
+release it was sent from, the tool it called — the model, the environment,
+the release and the tool each a link to the list narrowed to them — its
+tokens, input, output and cached, when it started and ended to the
+millisecond, how long it ran, when it was received, and its ids. The run's own span adds the
 run's steps, calls and tokens, its user, session and tags, the bounds it
 declared and its sample rate. **Attributes** lists what else was kept with the
 span under its own name, and **Raw** shows either as it was stored. The
