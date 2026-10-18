@@ -513,3 +513,58 @@ describe("RealtimeListener - spans:ingested", () => {
     }
   });
 });
+
+// The ping lane's nudge: a page reading the project's monitors — its
+// overview, its Monitors page, one monitor's — is drawn again, and nothing
+// else moves.
+describe("RealtimeListener - monitors:changed", () => {
+  const nudge = (projectId: string) =>
+    MockEventSource.instances[0].emit("monitors:changed", { organizationId: "org_1", projectId });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    MockEventSource.instances = [];
+    mockActiveOrgId = "org_1";
+    mockProjects = [
+      { id: "project_1", slug: "web" },
+      { id: "project_10", slug: "web-2" },
+    ];
+  });
+
+  it.each(["/acme/web", "/acme/web/monitors", "/acme/web/monitors/nightly-report"])(
+    "draws %s again for the project on screen",
+    (pathname) => {
+      mockPathname = pathname;
+      render(<RealtimeListener />);
+      nudge("project_1");
+      expect(mockRefresh).toHaveBeenCalledTimes(1);
+      expect(mockReplace).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["/acme/web/traces", "/acme/web/members", "/acme/members"])(
+    "leaves %s alone, as it leaves a page of another project",
+    (pathname) => {
+      mockPathname = pathname;
+      render(<RealtimeListener />);
+      nudge("project_1");
+      nudge("project_10");
+      expect(mockRefresh).not.toHaveBeenCalled();
+    },
+  );
+
+  it("holds between redraws as a page reading spans does", () => {
+    vi.useFakeTimers();
+    try {
+      mockPathname = "/acme/web/monitors";
+      render(<RealtimeListener liveHoldMs={100} />);
+      nudge("project_1");
+      nudge("project_1");
+      expect(mockRefresh).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(100);
+      expect(mockRefresh).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

@@ -55,6 +55,7 @@ pub mod db;
 pub mod handler;
 pub mod hashing;
 pub mod ingest;
+pub mod live;
 pub mod notify;
 pub mod outbox;
 pub mod rate_limit;

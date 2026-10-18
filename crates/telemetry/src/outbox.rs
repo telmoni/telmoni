@@ -35,7 +35,7 @@ use telmoni_shared::{
 
 use crate::contract::{EXIT_CODE, RUN_COST_USD, RUN_STEPS};
 use crate::db::{self, OutboxRow, TelemetryLane};
-use crate::ingest::live;
+use crate::live;
 use crate::store::SpanRow;
 use crate::{AppState, store};
 
@@ -826,7 +826,7 @@ async fn settle_written(
 /// landed.
 fn tell(state: &Arc<AppState>, runs: &[QueuedRun]) {
     for ((organization, project), runs) in nudges(runs) {
-        live::tell(Arc::clone(state), &organization, &project, runs);
+        live::spans_ingested(Arc::clone(state), &organization, &project, runs);
     }
 }
 

@@ -1,10 +1,12 @@
-//! What ingest tells the console's open pages: that a project's spans
-//! arrived, on its organization's channel, so a page reading them draws
-//! itself again, or counts them for the reader, instead of polling. The
-//! message is a nudge, not the data: the batch's run ids, which a trace's
-//! page compares with its own, and nothing a span holds. It goes out on its
-//! own task, never waited on, and a Redis that stands in loses it, as the
-//! console's own events are lost then — the page's Refresh is there for that.
+//! What telemetry tells the console's open pages, on the organization's
+//! channel, so a page draws itself again instead of polling: that a project's
+//! spans arrived (`spans:ingested`), or that a ping landed on one of its
+//! monitors (`monitors:changed`). Each message is a nudge, not the data — the
+//! batch's run ids, which a trace's page compares with its own, and nothing a
+//! span holds; the ping's project, and nothing of the ping. It goes out on
+//! its own task, never waited on, and a Redis that stands in loses it, as
+//! the console's own events are lost then — the page's Refresh is there for
+//! that.
 
 use std::sync::Arc;
 
@@ -25,23 +27,33 @@ fn channel(organization_id: &str) -> String {
 /// met; past it `more` tells the page its run may be among the rest.
 const RUNS_MAX: usize = 32;
 
-/// The event's name, as the console's `RealtimeEventSchema` knows it.
-const EVENT: &str = "spans:ingested";
+/// The events' names, as the console's `RealtimeEventSchema` knows them.
+const SPANS_INGESTED: &str = "spans:ingested";
+const MONITORS_CHANGED: &str = "monitors:changed";
 
 #[derive(Debug, Serialize)]
-struct Event<'a> {
+struct Event<D> {
     #[serde(rename = "type")]
     kind: &'static str,
-    data: Data<'a>,
+    data: D,
 }
 
+/// A batch of a project's spans, kept.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Data<'a> {
+struct Spans<'a> {
     organization_id: &'a str,
     project_id: &'a str,
     runs: Vec<String>,
     more: bool,
+}
+
+/// A ping heard on one of a project's monitors.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Monitors<'a> {
+    organization_id: &'a str,
+    project_id: &'a str,
 }
 
 /// The batch's runs as the nudge names them: each once, in the order the
@@ -62,17 +74,17 @@ fn runs(run_ids: impl IntoIterator<Item = Uuid>) -> (Vec<Uuid>, bool) {
 
 /// The nudge for a batch whose kept rows belong to `run_ids`, in the batch's
 /// order with its repeats: the JSON the console reads. Plain strings and a
-/// bool encode without fail; the error is kept so the one caller skips the
+/// bool encode without fail; the error is kept so the caller skips the
 /// publish rather than sending a message of nothing.
-fn message(
+fn spans_message(
     organization_id: &str,
     project_id: &str,
     run_ids: impl IntoIterator<Item = Uuid>,
 ) -> serde_json::Result<String> {
     let (runs, more) = runs(run_ids);
     serde_json::to_string(&Event {
-        kind: EVENT,
-        data: Data {
+        kind: SPANS_INGESTED,
+        data: Spans {
             organization_id,
             project_id,
             runs: runs.iter().map(Uuid::to_string).collect(),
@@ -81,31 +93,68 @@ fn message(
     })
 }
 
+/// The nudge for a ping heard on one of `project_id`'s monitors: the JSON the
+/// console reads.
+fn monitors_message(organization_id: &str, project_id: &str) -> serde_json::Result<String> {
+    serde_json::to_string(&Event {
+        kind: MONITORS_CHANGED,
+        data: Monitors {
+            organization_id,
+            project_id,
+        },
+    })
+}
+
 /// Tell the organization's open consoles that a batch of `project_id`'s is
-/// in. Nothing here waits: the message is built now, cheaply, and the
-/// connection is taken and the publish sent on a task of their own, so the
-/// export's answer is never held for Redis. A failure is handed to the
-/// replica as every other call's is (`Redis::stood_in`), which logs its
-/// kind alone and has the next calls stand in rather than wait out a
-/// timeout each.
-pub fn tell(
+/// in. Nothing here waits: the message is built now, cheaply, and published
+/// on a task of its own (`publish`), so the export's answer is never held
+/// for Redis.
+pub fn spans_ingested(
     state: Arc<AppState>,
     organization_id: &str,
     project_id: &str,
     run_ids: impl IntoIterator<Item = Uuid>,
 ) {
+    match spans_message(organization_id, project_id, run_ids) {
+        Ok(message) => publish(
+            state,
+            organization_id,
+            message,
+            "telling the console of an export",
+        ),
+        Err(error) => tracing::debug!(
+            project_id = %project_id,
+            error = %error,
+            "ingest: the console's nudge did not encode"
+        ),
+    }
+}
+
+/// Tell the organization's open consoles that a ping landed on one of
+/// `project_id`'s monitors, once the ping is in; the ping's answer is never
+/// held for Redis (`publish`).
+pub fn monitors_changed(state: Arc<AppState>, organization_id: &str, project_id: &str) {
+    match monitors_message(organization_id, project_id) {
+        Ok(message) => publish(
+            state,
+            organization_id,
+            message,
+            "telling the console of a ping",
+        ),
+        Err(error) => tracing::debug!(
+            project_id = %project_id,
+            error = %error,
+            "ping: the console's nudge did not encode"
+        ),
+    }
+}
+
+/// The publish, on a task of its own: the connection is taken and the message
+/// sent there, so no answer waits for Redis. A failure is handed to the
+/// replica as every other call's is (`Redis::stood_in`), which logs its kind
+/// alone and has the next calls stand in rather than wait out a timeout each.
+fn publish(state: Arc<AppState>, organization_id: &str, message: String, what: &'static str) {
     let channel = channel(organization_id);
-    let message = match message(organization_id, project_id, run_ids) {
-        Ok(message) => message,
-        Err(error) => {
-            tracing::debug!(
-                project_id = %project_id,
-                error = %error,
-                "ingest: the console's nudge did not encode"
-            );
-            return;
-        }
-    };
     tokio::spawn(async move {
         let Some(mut connection) = state.redis.connection().await else {
             return;
@@ -116,9 +165,7 @@ pub fn tell(
             .query_async(&mut connection)
             .await;
         if let Err(error) = published {
-            state
-                .redis
-                .stood_in("telling the console of an export", &error);
+            state.redis.stood_in(what, &error);
         }
     });
 }
@@ -177,8 +224,22 @@ mod tests {
         );
     }
 
+    /// A ping's nudge names the project and nothing of the ping.
+    #[test]
+    fn a_pings_nudge_names_the_project_alone() {
+        let message = monitors_message("org_1", "project_1").expect("encodes");
+        let parsed: Value = serde_json::from_str(&message).expect("json");
+        assert_eq!(parsed["type"], "monitors:changed");
+        assert_eq!(parsed["data"]["organizationId"], "org_1");
+        assert_eq!(parsed["data"]["projectId"], "project_1");
+        assert_eq!(
+            parsed["data"].as_object().map(serde_json::Map::len),
+            Some(2)
+        );
+    }
+
     /// The nudge for `runs`, which plain ids and a bool always encode.
     fn message_of(runs: &[Uuid]) -> String {
-        message("org_1", "project_1", runs.iter().copied()).expect("encodes")
+        spans_message("org_1", "project_1", runs.iter().copied()).expect("encodes")
     }
 }

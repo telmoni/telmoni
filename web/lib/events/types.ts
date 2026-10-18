@@ -57,12 +57,21 @@ const SlugMovedSchema = z.object({
 /// trace page knows whether its own is among them, and `more` that the batch
 /// held runs past the cap the nudge carries. Nothing a span holds is in it:
 /// the nudge says "read again", never what to read. The server publishes it
-/// (`crates/telemetry/src/ingest/live.rs`), on the organization's channel.
+/// (`crates/telemetry/src/live.rs`), on the organization's channel.
 const SpansIngestedSchema = z.object({
   organizationId: z.string(),
   projectId: z.string(),
   runs: z.array(z.string()),
   more: z.boolean(),
+});
+
+/// A ping landed on one of a project's monitors — a run opened, heard or
+/// ended, a monitor made — so a page reading them draws itself again. The
+/// server publishes it (`crates/telemetry/src/live.rs`) once the ping is in;
+/// the nudge says "read again", never what changed.
+const MonitorsChangedSchema = z.object({
+  organizationId: z.string(),
+  projectId: z.string(),
 });
 
 export const RealtimeEventSchema = z.discriminatedUnion("type", [
@@ -102,6 +111,10 @@ export const RealtimeEventSchema = z.discriminatedUnion("type", [
     type: z.literal("spans:ingested"),
     data: SpansIngestedSchema,
   }),
+  z.object({
+    type: z.literal("monitors:changed"),
+    data: MonitorsChangedSchema,
+  }),
 ]);
 
 export type RealtimeEvent = z.infer<typeof RealtimeEventSchema>;
@@ -116,4 +129,5 @@ export const RealtimeEventDataSchema = {
   "invite:revoked": InviteRefSchema,
   "invite:resolved": InviteRefSchema,
   "spans:ingested": SpansIngestedSchema,
+  "monitors:changed": MonitorsChangedSchema,
 } as const;

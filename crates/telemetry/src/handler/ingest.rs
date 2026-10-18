@@ -6,7 +6,7 @@
 //! same bytes is answered rather than written again; then the spans read by
 //! the contract, their content dropped, and the rows written once ClickHouse
 //! holds them, marked deleted again if their project was deleted meanwhile;
-//! and the organization's open consoles told of them ([`crate::ingest::live`]).
+//! and the organization's open consoles told of them ([`crate::live`]).
 //! Every answer is OTLP's, in the request's encoding: the response on `200`,
 //! and on a refusal a `Status` whose message opens with the problem type,
 //! since OTLP asks that shape where every other lane answers a problem
@@ -32,7 +32,7 @@ use crate::contract::{BATCH_MAX_BYTES, BATCH_SPANS_MAX};
 use crate::ingest::batch::{self, BatchError};
 use crate::ingest::claims::{self, Claim, Guard, StoredAnswer};
 use crate::ingest::decode::{self, DecodeError, Encoding};
-use crate::ingest::live;
+use crate::live;
 use crate::{AppState, db, hashing};
 
 /// The header every `200` carries: the project's content mode, so an SDK
@@ -208,7 +208,7 @@ async fn write(
     // project's spans draws itself again — unless nothing was kept or the
     // project is gone. The answer waits for the settling, not the telling.
     if !batch.rows.is_empty() && settle_written(state, &key.project_id).await {
-        live::tell(
+        live::spans_ingested(
             Arc::clone(state),
             key.organization_id.as_str(),
             key.project_id.as_str(),

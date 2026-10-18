@@ -922,6 +922,28 @@ pub(crate) fn state_with_notices(
     ))
 }
 
+/// [`state_with_notices`], over Redis as `REDIS_URL` names it, or the compose
+/// file's, for a test that listens on the console's channel.
+pub(crate) fn state_with_redis_and_notices(
+    pool: &PgPool,
+    auth: Arc<dyn Auth>,
+    notices: Arc<NoticeLog>,
+) -> Arc<AppState> {
+    Arc::new(module_at(
+        pool,
+        auth,
+        "http://telemetry:telemetry@127.0.0.1:1",
+        &redis_url(),
+        Arc::new(NoLimits),
+        notices,
+    ))
+}
+
+/// Redis as `REDIS_URL` names it, or the compose file's.
+pub(crate) fn redis_url() -> String {
+    std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_owned())
+}
+
 /// [`state_with_notices`], with pings waiting out a move for `move_wait`
 /// rather than two seconds, for a test that holds a move longer.
 pub(crate) fn state_waiting_out_moves(
@@ -981,12 +1003,11 @@ pub(crate) fn state_with_stores_and_notices(
     let clickhouse = std::env::var("TELEMETRY_CLICKHOUSE_URL").expect(
         "state_with_stores: TELEMETRY_CLICKHOUSE_URL is set, checked by clickhouse_or_skip",
     );
-    let redis = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_owned());
     Arc::new(module_at(
         pool,
         auth,
         &clickhouse,
-        &redis,
+        &redis_url(),
         Arc::new(NoLimits),
         notices,
     ))

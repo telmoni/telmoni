@@ -48,6 +48,7 @@ use crate::handler::chain;
 use crate::handler::monitors::{
     DEFAULT_TIMEZONE, MAX_COST_USD_MAX, MAX_STEPS_MAX, RESERVED, due_after, refused_as_taken,
 };
+use crate::live;
 use crate::notify;
 use crate::outbox::{self, FinishedRun};
 
@@ -370,6 +371,13 @@ async fn handle(
             }
         };
     tx.commit().await?;
+    // The organization's open consoles are told, so a page reading the
+    // project's monitors draws itself again; the answer waits for no Redis.
+    live::monitors_changed(
+        Arc::clone(state),
+        key.organization_id.as_str(),
+        key.project_id.as_str(),
+    );
     tracing::debug!(
         project_id = %key.project_id,
         ping_key_id = %key.id,

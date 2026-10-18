@@ -28,6 +28,7 @@ use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::seam::{Entitlements, NoLimits, Notice, Notifications, Telemetry};
 use telmoni_shared::test_util::apply_audit_migrations;
+use telmoni_shared::types::{PING_KEY_PREFIX, PING_KEY_RANDOM_LEN};
 use telmoni_shared::{
     MonitorState, NotificationKind, OrganizationId, OrganizationRole, OrganizationStatus,
     ProjectId, SpanKind, TelmoniError,
@@ -3228,6 +3229,82 @@ async fn a_pings_body_is_dropped_its_query_held_to_numbers_and_the_lane_to_its_s
         );
         assert!(!body.contains(&key), "{missing} echoed the key: {body}");
     }
+}
+
+/// A ping tells the organization's open consoles that the project's monitors
+/// changed — on the channel the console subscribes to, once the ping is in,
+/// naming the project and nothing of the ping; a refused ping tells nothing.
+#[sqlx::test]
+async fn a_ping_tells_the_organizations_open_consoles_of_its_monitors(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let organization = OrganizationId::new();
+    let project = ProjectId::new();
+    let auth = AuthStub::probing(&pool);
+    auth.seat(
+        OWNER,
+        &organization,
+        &project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let notices = NoticeLog::new();
+    let state = common::state_with_redis_and_notices(&pool, auth, notices.clone());
+    if state.redis.connection().await.is_none() {
+        eprintln!(
+            "skipping {}: Redis is not reachable (REDIS_URL, or the compose file's)",
+            module_path!()
+        );
+        return;
+    }
+    let p = Project::over(state, notices, organization, project);
+    let key = p.mint().await;
+
+    // The console's subscription (`web/lib/events/subscriber.ts`): before the
+    // ping, on the organization's channel, RESP3 as a push message needs.
+    let (told, mut heard) = tokio::sync::mpsc::unbounded_channel();
+    let mut console = redis::Client::open(format!("{}/?protocol=resp3", common::redis_url()))
+        .expect("a Redis URL")
+        .get_multiplexed_async_connection_with_config(
+            &redis::AsyncConnectionConfig::new().set_push_sender(told),
+        )
+        .await
+        .expect("the console's connection");
+    console
+        .subscribe(format!("bfev:organization:{}", p.organization))
+        .await
+        .expect("subscribed");
+
+    p.ping_ok(&format!("/{key}/nightly-report")).await;
+    let nudge = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let push = heard.recv().await.expect("the subscription holds");
+            if push.kind == redis::PushKind::Message {
+                let payload = push.data.into_iter().nth(1).expect("the message");
+                return redis::from_redis_value::<String>(payload).expect("a string");
+            }
+        }
+    })
+    .await
+    .expect("told within five seconds");
+    let nudge: Value = serde_json::from_str(&nudge).expect("json");
+    assert_eq!(nudge["type"], "monitors:changed");
+    assert_eq!(nudge["data"]["organizationId"], p.organization.as_str());
+    assert_eq!(nudge["data"]["projectId"], p.project.as_str());
+    assert_eq!(
+        nudge["data"].as_object().map(serde_json::Map::len),
+        Some(2),
+        "the project, and nothing of the ping"
+    );
+
+    let unknown = format!("{PING_KEY_PREFIX}{}", "0".repeat(PING_KEY_RANDOM_LEN));
+    let (status, _) = p.ping(&format!("/{unknown}/nightly-report")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(300), heard.recv())
+            .await
+            .is_err(),
+        "a refused ping told the console"
+    );
 }
 
 /// No answer the lane gives is one a cache may keep: a `GET` records a run,
