@@ -134,6 +134,30 @@ pub(crate) async fn lock_membership(
     }
 }
 
+/// An audit row on the organization's chain, whose lock the shared `emit_audit` takes.
+/// A wait the role's `lock_timeout` ends there is a 409 to try again, as the membership
+/// lock's is ([`lock_membership`]), not a 500.
+pub(crate) async fn emit_audit(
+    conn: &mut sqlx::PgConnection,
+    evt: telmoni_shared::audit::AuditEvent<'_>,
+) -> Result<(), telmoni_shared::TelmoniError> {
+    let organization = evt.organization_id;
+    match telmoni_shared::audit::emit_audit(conn, evt).await {
+        Ok(()) => Ok(()),
+        Err(e) if timed_out(&e) => {
+            tracing::warn!(
+                organization_id = %organization,
+                "a writer gave up waiting for its organization's chain lock"
+            );
+            Err(telmoni_shared::AuthError::Conflict(
+                "the organization is busy — try again in a moment".to_string(),
+            )
+            .into())
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// Where the project is, read again under its organization's lock: moved since the lane
 /// first read it, a 409; gone, a 404.
 pub(crate) async fn refuse_unless_still_in<B: Binding>(

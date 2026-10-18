@@ -26,7 +26,7 @@ use std::sync::Arc;
 use axum::{extract::State, response::IntoResponse};
 use serde_json::{Value, json};
 
-use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
+use telmoni_shared::audit::{Actor, AuditEvent};
 use telmoni_shared::db::tenant_session::person_scope;
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
@@ -34,7 +34,7 @@ use telmoni_shared::{AuditAction, AuthzError, TelmoniError, TelmoniResourceKind}
 
 use crate::{
     AppState,
-    handler::{organization_of, organization_role_or_forbidden},
+    handler::{emit_audit, organization_of, organization_role_or_forbidden},
 };
 
 /// The most audit rows one export carries.

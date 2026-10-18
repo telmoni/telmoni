@@ -21,7 +21,7 @@ use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
-use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
+use telmoni_shared::audit::{Actor, AuditEvent};
 use telmoni_shared::db::tenant_session::{Maintenance, Scoped, maintenance_scope};
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
@@ -35,8 +35,8 @@ use crate::{
     AppState,
     db::{AuthLane, identities, invites, locks, members, organization_members, organizations},
     handler::{
-        acting_project, authorize, lock_membership, member::grantable, parse_project_id,
-        refuse_unless_still_in,
+        acting_project, authorize, emit_audit, lock_membership, member::grantable,
+        parse_project_id, refuse_unless_still_in,
     },
     model::{AuditKind, InviteScope},
 };

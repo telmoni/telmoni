@@ -7,7 +7,7 @@ use std::sync::Arc;
 use axum::{extract::State, http::HeaderMap, http::StatusCode, response::IntoResponse};
 use serde_json::json;
 
-use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
+use telmoni_shared::audit::{Actor, AuditEvent};
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
@@ -15,6 +15,7 @@ use telmoni_shared::{AuditAction, AuthError, AuthzError, TelmoniError, TelmoniRe
 
 use crate::AppState;
 use crate::db::{AuthLane, projects};
+use crate::handler::emit_audit;
 
 /// The longest a project name may be. The column is unconstrained, so this is
 /// the only thing enforcing it.

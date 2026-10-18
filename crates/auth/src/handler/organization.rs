@@ -33,11 +33,12 @@ use crate::{
     },
     handler::{
         ActingOrganization, account::DeletionRequest, account::wrong_code, acting_organization,
-        deletion::FINALIZE_GRACE_SECONDS, organization_of, organization_role_or_forbidden,
+        deletion::FINALIZE_GRACE_SECONDS, emit_audit, organization_of,
+        organization_role_or_forbidden,
     },
     model::{AuditKind, DeletionKind},
 };
-use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
+use telmoni_shared::audit::{Actor, AuditEvent};
 use telmoni_shared::db::tenant_session::{self, Scoped, maintenance_scope, person_scope};
 use telmoni_shared::{AuditAction, TelmoniResourceKind};
 use telmoni_shared::{AuthzError, slug};

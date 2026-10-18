@@ -45,7 +45,7 @@ use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
 
-use telmoni_shared::audit::{Actor, AuditEvent, emit_audit, lock_chain};
+use telmoni_shared::audit::{Actor, AuditEvent, lock_chain};
 use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::{
     Maintenance, ProjectAndOrganization, Scoped, maintenance_scope,
@@ -61,9 +61,9 @@ use crate::{
     AppState,
     db::{AuthLane, identities, locks, members, organization_members, organizations, projects},
     handler::{
-        ActingProject, BEING_DELETED, acting_project, hold_project, parse_organization_id,
-        parse_project_id, parse_user_id, projects::MAX_PROJECT_NAME, refuse_unless_active,
-        timed_out,
+        ActingProject, BEING_DELETED, acting_project, emit_audit, hold_project,
+        parse_organization_id, parse_project_id, parse_user_id, projects::MAX_PROJECT_NAME,
+        refuse_unless_active, timed_out,
     },
     model::AuditKind,
 };

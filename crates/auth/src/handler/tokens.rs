@@ -10,7 +10,7 @@ use chrono::{Duration as ChronoDuration, Utc};
 use uuid::Uuid;
 
 use serde_json::json;
-use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
+use telmoni_shared::audit::{Actor, AuditEvent};
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
@@ -24,7 +24,7 @@ use telmoni_shared::{
 use crate::{
     AppState,
     db::{AuthLane, tokens},
-    handler::{ActingProject, acting_project, project_of},
+    handler::{ActingProject, acting_project, emit_audit, project_of},
     model::{
         CreateTokenRequest, CreateTokenResponse, RotateTokenRequest, ValidateTokenRequest,
         ValidateTokenResponse,

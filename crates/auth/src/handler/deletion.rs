@@ -48,7 +48,7 @@ use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
 use serde_json::json;
 
-use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
+use telmoni_shared::audit::{Actor, AuditEvent};
 use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope, person_scope};
 use telmoni_shared::extract::Json;
 use telmoni_shared::{
@@ -62,6 +62,7 @@ use crate::{
         AuthLane, audit_exports, identities, invites, locks, members, organization_members,
         organizations::{self, FinalizeStanding},
     },
+    handler::emit_audit,
     model::AuditKind,
 };
 

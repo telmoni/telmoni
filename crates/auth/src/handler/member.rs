@@ -10,7 +10,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 
-use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
+use telmoni_shared::audit::{Actor, AuditEvent};
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
@@ -24,7 +24,8 @@ use crate::{
     AppState,
     db::{AuthLane, members, organization_members, projects},
     handler::{
-        ActingProject, acting_project, authorize, hold_project, parse_project_id, parse_user_id,
+        ActingProject, acting_project, authorize, emit_audit, hold_project, parse_project_id,
+        parse_user_id,
     },
     model::AuditKind,
 };
