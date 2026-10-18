@@ -31,6 +31,14 @@ Nothing is derived at random, so the export is compared nearly whole:
 
 The same record sent twice must be the same bytes, which ingest's claim on a body answers once.
 
+## `headers.json`
+
+A run across services: what `inject` writes into an outgoing request's headers, and what `extract` reads back from an incoming one's, so headers one SDK writes are read by each of the other three.
+
+`inject` is performed from inside a step of a run of `agent`: `traceparent` and `baggage` are what the headers must hold afterwards, `<trace>` and `<span>` standing for the step's trace and span ids as the export spells them, and `<uuid>` for the run's id. `beside` gives a `baggage` the headers held already (`given`) and what they hold afterwards (`written`): the carrier's own members kept, in their order, and ours — `telmoni.run_id` and `telmoni.agent` — replaced where they were there and written last, the agent percent-encoded as the W3C baggage grammar asks (its `baggage-octet` kept as it is, every other byte of the UTF-8 as `%XX`, and `%` itself encoded, since a reader decodes it).
+
+`extract` is a list of cases, each the `headers` given — their names in whatever case, matched as the language's headers are (Rust's `HashMap` carrier lowercases them on both sides, so its suite lowercases the fixture's) — and the `run` read, or `null` where the headers name none: its `run_id` (lowercase, whatever case it was given in), its `agent` (percent-decoded), and the `trace_id`, `parent_span_id` and `sampled` flag its steps and calls open under. A run is read only from a well-formed `traceparent` — a version other than `ff`, lowercase hex, a trace id and a span id that are not zeros, nothing after the flags under version `00` — and a `baggage` holding both members, the id a UUID and the agent not blank.
+
 ## `answers/`
 
 Each file is one answer from `POST /otlp/v1/traces` — `status`, `headers`, `body` — and `expect`, what the SDK must do with it. A suite's fake transport answers from these files; the asserted behaviour is the `expect` line.

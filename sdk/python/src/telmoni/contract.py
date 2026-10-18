@@ -27,6 +27,10 @@ RUN_START = "telmoni.run.start"
 ENVIRONMENT = "deployment.environment.name"
 """The deployment, on the resource: the client's ``environment`` and ``release``."""
 RELEASE = "service.version"
+TRACEPARENT = "traceparent"
+"""The W3C headers a run crosses services in: the span's context, and the
+run's id and agent as baggage members."""
+BAGGAGE = "baggage"
 
 # ── The conventions' ─────────────────────────────────────────────────────────
 

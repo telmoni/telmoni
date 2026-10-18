@@ -26,6 +26,9 @@ export const RUN_START = 'telmoni.run.start';
 /** The deployment, on the resource: the client's `environment` and `release`. */
 export const ENVIRONMENT = 'deployment.environment.name';
 export const RELEASE = 'service.version';
+/** The W3C headers a run crosses services in: the span's context, and the run's id and agent as baggage members. */
+export const TRACEPARENT = 'traceparent';
+export const BAGGAGE = 'baggage';
 
 // ── The conventions' ─────────────────────────────────────────────────────────
 

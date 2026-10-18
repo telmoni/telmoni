@@ -22,6 +22,18 @@ use uuid::Uuid;
 use crate::client::Inner;
 use crate::contract;
 use crate::error::Error;
+use crate::propagation::Continued;
+
+/// The run a context is inside, carried by every span opened under it: what
+/// `inject` reads off the current context.
+#[derive(Clone, Debug)]
+pub(crate) struct RunInfo {
+    pub(crate) run_id: String,
+    pub(crate) agent: String,
+    /// Whether the sample rate kept the run out: nothing of it is sent, nor
+    /// handed to another service.
+    pub(crate) sampled_out: bool,
+}
 
 /// What a monitor holds a run to; each optional. Integers are 64-bit, as the
 /// wire carries them.
@@ -530,10 +542,15 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
         .with_attributes(attributes)
         .with_start_time(start)
         .start_with_context(tracer, &parent);
-    if rate < 1.0 && (inner.random)() >= rate {
+    let sampled_out = rate < 1.0 && (inner.random)() >= rate;
+    if sampled_out {
         inner.processor.sample_out(&run_id);
     }
-    let cx = parent.with_span(span);
+    let cx = parent.with_span(span).with_value(RunInfo {
+        run_id: run_id.clone(),
+        agent: agent.to_owned(),
+        sampled_out,
+    });
 
     // OpenTelemetry sends a span only once it ends; without this one a run
     // stalled in its first call would never be heard.
@@ -556,6 +573,32 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
         run_id,
         agent: agent.to_owned(),
     })
+}
+
+/// A run another service opened, continued here under the span the headers
+/// named: a run whose own span is the caller's, remote and non-recording
+/// here, so its steps and calls nest under it and carry the run, and nothing
+/// of it is sent or ended from this side.
+pub(crate) fn continued(inner: &Arc<Inner>, read: Continued) -> Run {
+    let inherited = inherited(&read.run_id, &read.agent, None, None);
+    let cx = Context::current()
+        .with_remote_span_context(read.span_context)
+        .with_value(RunInfo {
+            run_id: read.run_id.clone(),
+            agent: read.agent.clone(),
+            sampled_out: false,
+        });
+    Run {
+        handle: Handle {
+            client: Arc::clone(inner),
+            cx,
+            inherited,
+            failed: AtomicBool::new(false),
+            ended: false,
+        },
+        run_id: read.run_id,
+        agent: read.agent,
+    }
 }
 
 /// What every span inside a run carries: its id and agent, and its user and

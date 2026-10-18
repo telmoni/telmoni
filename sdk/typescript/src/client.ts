@@ -1,5 +1,6 @@
 import { isIP } from 'node:net';
 
+import { context, isSpanContextValid, trace } from '@opentelemetry/api';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { BasicTracerProvider } from '@opentelemetry/sdk-trace-base';
 
@@ -7,9 +8,10 @@ import * as contract from './contract.js';
 import { Exporter, fetchTransport, realSleep } from './exporter.js';
 import { Ids } from './ids.js';
 import { Processor } from './processor.js';
-import { Opener, Run, split, within } from './runs.js';
+import { readHeaders, writeHeaders } from './propagation.js';
+import { type Handle, Opener, Run, currentRun, split, within } from './runs.js';
 import { RecordingSampler } from './sampler.js';
-import type { Config, Hooks, ResolvedConfig, RunOptions, RunRecord } from './types.js';
+import type { Config, HeaderCarrier, Hooks, ResolvedConfig, RunOptions, RunRecord } from './types.js';
 import { VERSION } from './version.js';
 
 /** The machine host; the console's, `https://telmoni.com`, serves people. */
@@ -194,6 +196,38 @@ export class Telmoni {
    */
   recordRun(record: RunRecord): void {
     this.#opener.record(record);
+  }
+
+  /**
+   * Writes into `headers` what the next service continues the run from: the
+   * W3C `traceparent` of the span current inside the run, and the run's id
+   * and agent as the W3C `baggage` members `telmoni.run_id` and
+   * `telmoni.agent`, beside whatever members the headers hold. The span is
+   * `from`'s — a run, a step or a call — or, without one, the active
+   * context's, which an application running OpenTelemetry's context manager
+   * carries into callbacks. Outside a run, or for a run sampled out, it
+   * writes nothing.
+   */
+  inject(headers: HeaderCarrier, from?: Handle): void {
+    const ctx = from?.context ?? context.active();
+    const run = currentRun(ctx);
+    if (run === undefined || run.sampledOut) return;
+    const span = trace.getSpanContext(ctx);
+    if (span === undefined || !isSpanContextValid(span)) return;
+    writeHeaders(headers, span, run.runId, run.agent);
+  }
+
+  /**
+   * The run `headers` name, continued here: its steps and calls take the
+   * caller's span as their parent and carry the caller's run, so the trace
+   * shows the work where it was asked for. Nothing ends a continued run
+   * here; the caller's own span does. Undefined for headers that name no
+   * run.
+   */
+  extract(headers: HeaderCarrier): Run | undefined {
+    const read = readHeaders(headers);
+    if (read === undefined) return undefined;
+    return this.#opener.continued(read.spanContext, read.runId, read.agent);
   }
 
   /** Send everything queued; true once the platform has it, false past the timeout. */

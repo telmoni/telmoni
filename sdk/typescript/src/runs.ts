@@ -11,7 +11,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { ROOT_CONTEXT, SpanKind, SpanStatusCode, context, createContextKey, trace } from '@opentelemetry/api';
-import type { Attributes, Context, HrTime, Span, SpanOptions, Tracer } from '@opentelemetry/api';
+import type { Attributes, Context, HrTime, Span, SpanContext, SpanOptions, Tracer } from '@opentelemetry/api';
 import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 
 import * as contract from './contract.js';
@@ -123,6 +123,8 @@ export abstract class Parent extends Handle {
 export class Run extends Parent {
   readonly runId: string;
   readonly agent: string;
+  /** Whether the sample rate kept this run out: nothing of it is sent, nor handed to another service. */
+  readonly sampledOut: boolean;
   readonly #inherited: Attributes;
 
   constructor(
@@ -132,10 +134,12 @@ export class Run extends Parent {
     runId: string,
     agent: string,
     inherited: Attributes,
+    sampledOut = false,
   ) {
     super(opener, span, parent, undefined);
     this.runId = runId;
     this.agent = agent;
+    this.sampledOut = sampledOut;
     this.#inherited = { ...inherited };
   }
 
@@ -240,8 +244,9 @@ export class Opener {
     const span = this.#start(`invoke_agent ${agent}`, parent, attributes, SpanKind.INTERNAL);
     // Decided once, here, and applied in the processor: never through the
     // trace's sampled flag, which is the application's.
-    if (rate < 1 && Math.random() >= rate) this.#processor.sampleOut(runId);
-    const run = new Run(this, span, parent, runId, agent, inherited);
+    const sampledOut = rate < 1 && Math.random() >= rate;
+    if (sampledOut) this.#processor.sampleOut(runId);
+    const run = new Run(this, span, parent, runId, agent, inherited, sampledOut);
     // OpenTelemetry sends a span only once it ends; without this one a run
     // stalled in its first call would never be heard.
     const start = startTimeOf(span);
@@ -252,6 +257,17 @@ export class Opener {
     if (start !== undefined) opening.startTime = start;
     this.#tracer.startSpan(contract.RUN_START, opening, run.context).end(start);
     return run;
+  }
+
+  /**
+   * A run another service opened, continued here under the span the headers
+   * named: a run whose own span is the caller's, non-recording here, so its
+   * steps and calls nest under it and carry the run, and nothing of it is
+   * sent or ended from this side.
+   */
+  continued(remote: SpanContext, runId: string, agent: string): Run {
+    const inherited: Attributes = { [contract.RUN_ID]: runId, [contract.AGENT]: agent };
+    return new Run(this, trace.wrapSpanContext(remote), context.active(), runId, agent, inherited);
   }
 
   step(run: Run, parent: Context, name: string): Step {

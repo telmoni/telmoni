@@ -128,5 +128,16 @@ never through the trace's sampled flag. The key never appears in `repr`,
 only: a plain-HTTP endpoint is refused with a `ValueError` unless its host is
 this machine, and no redirect is followed.
 
+## A run across services
+
+Before a request leaves a run, `telmoni.inject(headers)` writes the W3C
+`traceparent` of the span current and the run's id and agent as `baggage`
+members into any mutable mapping of headers. In the service that answers,
+`run = telmoni.extract(request.headers)` gives the run back, continued there:
+`telmoni.step("work", run=run)` and the calls inside nest under the caller's
+span and carry the caller's run, and nothing of the run itself is sent from
+this side. Headers that name no run give `None`, and a step opened with it
+is outside a run.
+
 The variables, the attributes each span carries, and the other SDKs are
 documented at [telmoni.com/docs/api/sdks](https://telmoni.com/docs/api/sdks).

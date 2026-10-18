@@ -4,6 +4,7 @@ export type {
   Bounds,
   CallRecord,
   Config,
+  HeaderCarrier,
   Hooks,
   ModelAnswer,
   ModelCallOptions,

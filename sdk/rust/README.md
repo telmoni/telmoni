@@ -152,6 +152,20 @@ shows it redacted, and `Serialize` leaves it out. It travels over HTTPS only:
 with a plain-HTTP endpoint whose host is not this machine, nothing is sent and
 the first export warns once, and no redirect is followed.
 
+## A run across services
+
+Before a request leaves a run, `telmoni.inject(&mut headers)` writes the W3C
+`traceparent` of the span current — what a handle's `attach()` or
+`FutureExt::with_context` made so — and the run's id and agent as `baggage`
+members; `telmoni.inject_from(&step.context(), &mut headers)` writes from a
+handle's context instead. In the service that answers,
+`telmoni.extract(&headers)` gives `Some(run)`, continued there: its steps and
+calls nest under the caller's span and carry the caller's run, and nothing of
+the run itself is sent from this side, so ending it sends nothing. Both take
+any `Carrier`, a type that is both an OpenTelemetry `Injector` and
+`Extractor`, as `HashMap<String, String>` is. Headers that name no run give
+`None`.
+
 ## Content
 
 Prompts, completions, tool arguments and results are content. They are set on

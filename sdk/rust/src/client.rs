@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use opentelemetry::trace::TracerProvider as _;
-use opentelemetry::{InstrumentationScope, KeyValue};
+use opentelemetry::{Context, InstrumentationScope, KeyValue};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::trace::{SdkTracer, SdkTracerProvider, SpanLimits, SpanProcessor as _};
 use uuid::Uuid;
@@ -17,6 +17,7 @@ use crate::error::Error;
 use crate::exporter::Exporter;
 use crate::ids::Ids;
 use crate::processor::{Batching, Processor};
+use crate::propagation::{self, Carrier};
 use crate::records::{self, RunRecord};
 use crate::runs::{self, Run, RunOptions};
 use crate::sampler::RecordingSampler;
@@ -281,6 +282,34 @@ impl Telmoni {
     /// A record refused sends nothing.
     pub fn record_run(&self, record: RunRecord) -> Result<(), Error> {
         records::send(&self.inner, record)
+    }
+
+    /// Writes into `headers` what the next service continues the run from:
+    /// the W3C `traceparent` of the span current inside the run, and the
+    /// run's id and agent as the W3C `baggage` members `telmoni.run_id` and
+    /// `telmoni.agent`, beside whatever members the headers hold. The span
+    /// is the current context's — what a handle's [`attach`](Run::attach) or
+    /// `FutureExt::with_context` made current; [`Self::inject_from`] takes
+    /// one given. Outside a run, or for a run sampled out, it writes nothing.
+    pub fn inject(&self, headers: &mut dyn Carrier) {
+        self.inject_from(&Context::current(), headers);
+    }
+
+    /// [`Self::inject`] from `cx` — a handle's [`context`](Run::context) —
+    /// rather than the current context.
+    pub fn inject_from(&self, cx: &Context, headers: &mut dyn Carrier) {
+        propagation::inject(cx, headers);
+    }
+
+    /// The run `headers` name, continued here: its steps and calls take the
+    /// caller's span as their parent and carry the caller's run, so the trace
+    /// shows the work where it was asked for. Nothing ends a continued run
+    /// here; the caller's own span does, so dropping the guard or calling
+    /// [`Run::end`] sends nothing. `None` for headers that name no run.
+    #[must_use]
+    pub fn extract(&self, headers: &dyn Carrier) -> Option<Run> {
+        let read = propagation::read_headers(headers)?;
+        Some(runs::continued(&self.inner, read))
     }
 
     /// Runs `f` with every batch held back until it returns, so the spans

@@ -26,6 +26,10 @@ const (
 	// Release.
 	attrEnvironment = "deployment.environment.name"
 	attrRelease     = "service.version"
+	// The W3C headers a run crosses services in: the span's context, and the
+	// run's id and agent as baggage members.
+	headerTraceparent = "traceparent"
+	headerBaggage     = "baggage"
 
 	attrOperation             = "gen_ai.operation.name"
 	attrAgentName             = "gen_ai.agent.name"

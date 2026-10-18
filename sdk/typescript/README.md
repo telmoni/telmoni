@@ -144,6 +144,17 @@ is read. The key is never printed or serialized: `console.log`,
 `util.inspect` and `JSON.stringify` of the client or its configuration leave
 it out.
 
+## A run across services
+
+Before a request leaves a run, `telmoni.inject(headers, step)` writes the W3C
+`traceparent` of the step's span and the run's id and agent as `baggage`
+members into a record or a `Headers`; without a handle it writes from the
+active context, where your application runs OpenTelemetry's context manager.
+In the service that answers, `telmoni.extract(req.headers)` gives the run
+back, continued there: its steps and calls nest under the caller's span and
+carry the caller's run, and nothing of the run itself is sent from this side.
+Headers that name no run give `undefined`.
+
 ## Content
 
 Prompts, completions, system instructions, tool arguments and tool results —

@@ -40,13 +40,16 @@ use telmoni_telemetry::store::Projects;
 const LANE: &str = "/otlp/v1/traces";
 const INGEST_KEY: &str = "telmoni_ingest_key";
 const READ_KEY: &str = "telmoni_read_only_key";
+/// Another project's ingest key, in another organization.
+const OTHER_KEY: &str = "telmoni_other_projects_key";
 const RUN: &str = "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01";
 
-/// The module's router, the project its two keys open, and auth as the
-/// module holds it.
+/// The module's router, the project its two keys open, another project its
+/// own key opens, and auth as the module holds it.
 struct Lane {
     app: Router,
     project: ProjectId,
+    other: ProjectId,
     state: Arc<telmoni_telemetry::AppState>,
     auth: Arc<AuthStub>,
 }
@@ -54,9 +57,16 @@ struct Lane {
 /// A lane over the stores a suite can reach, or over none.
 fn lane(pool: &PgPool, with_stores: bool) -> Lane {
     let (organization, project) = (OrganizationId::new(), ProjectId::new());
+    let other = ProjectId::new();
     let auth = AuthStub::new();
     auth.key(INGEST_KEY, &organization, &project, &[ApiKeyScope::Ingest])
-        .key(READ_KEY, &organization, &project, &[ApiKeyScope::Read]);
+        .key(READ_KEY, &organization, &project, &[ApiKeyScope::Read])
+        .key(
+            OTHER_KEY,
+            &OrganizationId::new(),
+            &other,
+            &[ApiKeyScope::Ingest],
+        );
     let state = if with_stores {
         common::state_with_stores(pool, auth.clone())
     } else {
@@ -65,6 +75,7 @@ fn lane(pool: &PgPool, with_stores: bool) -> Lane {
     Lane {
         app: router(state.clone()),
         project,
+        other,
         state,
         auth,
     }
@@ -134,11 +145,18 @@ fn json_body(bytes: &[u8]) -> Value {
 /// An export as our SDK sends one: a model call and its run, one content
 /// attribute among them, and a user id, from `reporter` deployed to staging.
 fn export_json(span_names: &[&str]) -> Value {
+    export_from("reporter", "staging", span_names)
+}
+
+/// [`export_json`] from the service `service` deployed to `environment`,
+/// each span's id from its place; a span carries `parentSpanId` where its
+/// name says `under <id>`.
+fn export_from(service: &str, environment: &str, span_names: &[&str]) -> Value {
     let spans: Vec<Value> = span_names
         .iter()
         .enumerate()
         .map(|(n, name)| {
-            json!({
+            let mut span = json!({
                 "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
                 "spanId": format!("00f067aa0ba902b{n}"),
                 "name": name,
@@ -154,14 +172,20 @@ fn export_json(span_names: &[&str]) -> Value {
                     { "key": contract::USER_ID, "value": { "stringValue": "acme-42" } },
                     { "key": "gen_ai.input.messages", "value": { "stringValue": "[{\"role\":\"user\",\"content\":\"hi\"}]" } }
                 ]
-            })
+            });
+            if let (Some((_, parent)), Some(object)) =
+                (name.split_once(" under "), span.as_object_mut())
+            {
+                object.insert("parentSpanId".to_owned(), json!(parent));
+            }
+            span
         })
         .collect();
     json!({
         "resourceSpans": [{
             "resource": { "attributes": [
-                { "key": "service.name", "value": { "stringValue": "reporter" } },
-                { "key": contract::ENVIRONMENT, "value": { "stringValue": "staging" } },
+                { "key": "service.name", "value": { "stringValue": service } },
+                { "key": contract::ENVIRONMENT, "value": { "stringValue": environment } },
                 { "key": contract::RELEASE, "value": { "stringValue": "2026.10.18" } },
                 { "key": contract::DISTRO_NAME, "value": { "stringValue": contract::DISTRO } }
             ]},
@@ -324,6 +348,7 @@ async fn a_paused_organizations_export_is_refused_whole(pool: PgPool) {
     let lane = Lane {
         app: router(state.clone()),
         project,
+        other: ProjectId::new(),
         state,
         auth,
     };
@@ -494,6 +519,75 @@ async fn spans_outside_a_run_are_refused_one_by_one(pool: PgPool) {
         lane.auth.homes_asked(),
         1,
         "auth asked where the project is to key it, and not again with nothing written"
+    );
+}
+
+/// A run's spans from two services — a worker continuing the orchestrator's
+/// run under its span, from another deployment — land as one run, under
+/// keys of one project; the same run id under another project's key is that
+/// project's own run, so a forged header reaches no other tenant.
+#[sqlx::test]
+async fn a_runs_spans_from_two_services_land_as_one_run_within_their_project(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let lane = lane(&pool, true);
+    for (key, body) in [
+        (
+            INGEST_KEY,
+            export_from("orchestrator", "production", &["chat plan"]),
+        ),
+        (
+            INGEST_KEY,
+            export_from("worker", "workers", &["chat under 00f067aa0ba902b0"]),
+        ),
+        (
+            OTHER_KEY,
+            export_from("elsewhere", "production", &["chat theirs"]),
+        ),
+    ] {
+        let (status, _, answer) = lane
+            .send(
+                Some(key),
+                "application/json",
+                None,
+                body.to_string().into_bytes(),
+            )
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "{}",
+            String::from_utf8_lossy(&answer)
+        );
+    }
+
+    let runs: Vec<(String, u64, String, String)> = ch
+        .store
+        .read(
+            &Projects::one(lane.project.clone()),
+            "SELECT toString(run_id), count(), \
+             arrayStringConcat(arraySort(groupUniqArray(environment)), ';'), \
+             arrayStringConcat(arraySort(groupUniqArray(parent_span_id)), ';') \
+             FROM telemetry.spans WHERE project_id IN {projects:Array(String)} \
+             GROUP BY run_id",
+        )
+        .fetch_all()
+        .await
+        .expect("the runs");
+    assert_eq!(runs.len(), 1, "one run, not one a service: {runs:?}");
+    let (run_id, spans, environments, parents) = &runs[0];
+    assert_eq!(run_id, RUN);
+    assert_eq!(*spans, 2);
+    assert_eq!(environments, "production;workers");
+    assert_eq!(
+        parents, ";00f067aa0ba902b0",
+        "the worker's span sits under the orchestrator's, as the headers said"
+    );
+    assert_eq!(
+        common::rows_of(&ch.store, &lane.other).await.0,
+        1,
+        "the other project's run of the same id is its own"
     );
 }
 

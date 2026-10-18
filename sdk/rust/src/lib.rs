@@ -69,6 +69,7 @@ mod error;
 mod exporter;
 mod ids;
 mod processor;
+mod propagation;
 mod records;
 mod runs;
 mod sampler;
@@ -79,6 +80,7 @@ pub use client::{Hooks, Telmoni};
 pub use config::{Config, DEFAULT_ENDPOINT};
 pub use error::Error;
 pub use processor::Batching;
+pub use propagation::Carrier;
 pub use records::{CallRecord, ModelCallRecord, RecordItem, RunRecord, StepRecord, ToolCallRecord};
 pub use runs::{
     Bounds, Content, ModelCall, ModelCallOptions, Reply, Run, RunOptions, Step, ToolCall,

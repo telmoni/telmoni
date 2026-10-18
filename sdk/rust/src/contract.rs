@@ -25,6 +25,10 @@ pub(crate) const RUN_START: &str = "telmoni.run.start";
 /// `release`.
 pub(crate) const ENVIRONMENT: &str = "deployment.environment.name";
 pub(crate) const RELEASE: &str = "service.version";
+/// The W3C headers a run crosses services in: the span's context, and the
+/// run's id and agent as baggage members.
+pub(crate) const TRACEPARENT: &str = "traceparent";
+pub(crate) const BAGGAGE: &str = "baggage";
 
 // ── The conventions' ─────────────────────────────────────────────────────────
 

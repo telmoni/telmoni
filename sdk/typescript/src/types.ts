@@ -64,6 +64,15 @@ export interface ResolvedConfig {
   readonly release: string | undefined;
 }
 
+/**
+ * Headers as `inject` writes them and `extract` reads them: a record, as
+ * Node's `IncomingHttpHeaders` or a plain object, or anything with `get` and
+ * `set`, as the Fetch `Headers` is. Names are matched whatever their case.
+ */
+export type HeaderCarrier =
+  | Record<string, string | readonly string[] | undefined>
+  | { get(name: string): string | null | undefined; set(name: string, value: string): void };
+
 /** What a monitor holds a run to; each optional. */
 export interface Bounds {
   stallAfterSeconds?: number | undefined;

@@ -157,6 +157,17 @@ trace of its own. The key never appears in `%v`, `%+v`, `%#v` or
 `json.Marshal` of the configuration or the client. Options for tests:
 `telmoni.WithTransport`, `telmoni.WithSleep`, `telmoni.WithLogger`.
 
+## A run across services
+
+Before a request leaves a run, `client.Inject(ctx, req.Header)` writes the
+W3C `traceparent` of the span `ctx` carries and the run's id and agent as
+`baggage` members. In the service that answers,
+`ctx := client.Extract(r.Context(), r.Header)` carries the run continued
+there, which `telmoni.RunFromContext(ctx)` finds: the steps and calls opened
+with it nest under the caller's span and carry the caller's run, and nothing
+of the run itself is sent from this side. Headers that name no run leave
+`ctx` as given, and a step opened then is outside a run.
+
 Spans are batched (a queue of 2048, batches of 512, every five seconds; a run's
 start goes at once) and sent as OTLP/JSON to `POST {endpoint}/otlp/v1/traces`
 over HTTPS, following no redirect. A `429` or `503` is retried after

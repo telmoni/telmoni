@@ -23,7 +23,14 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from opentelemetry import context, trace
 from opentelemetry.sdk.trace import ReadableSpan
-from opentelemetry.trace import Span, SpanKind, Status, StatusCode
+from opentelemetry.trace import (
+    NonRecordingSpan,
+    Span,
+    SpanContext,
+    SpanKind,
+    Status,
+    StatusCode,
+)
 
 from . import contract, ids
 from .models import (
@@ -97,11 +104,15 @@ class Run(Handle):
         run_id: str,
         agent: str,
         inherited: Mapping[str, str],
+        sampled_out: bool = False,
     ) -> None:
         super().__init__(span)
         self._client = client
         self.run_id = run_id
         self.agent = agent
+        # Whether the sample rate kept this run out: nothing of it is sent,
+        # nor handed to another service.
+        self.sampled_out = sampled_out
         self._inherited = dict(inherited)
 
     @property
@@ -281,7 +292,8 @@ class Opener:
         span = self._start(
             f"invoke_agent {agent}", parent, attributes, SpanKind.INTERNAL
         )
-        if rate < 1 and random.random() >= rate:
+        sampled_out = rate < 1 and random.random() >= rate
+        if sampled_out:
             self._client.processor.sample_out(run_id)
         ctx = trace.set_span_in_context(span, parent)
         start = span.start_time if isinstance(span, ReadableSpan) else None
@@ -295,11 +307,32 @@ class Opener:
             start_time=start,
         )
         opener.end(end_time=start)
-        run = Run(self._client, span, run_id=run_id, agent=agent, inherited=inherited)
+        run = Run(
+            self._client,
+            span,
+            run_id=run_id,
+            agent=agent,
+            inherited=inherited,
+            sampled_out=sampled_out,
+        )
         # The run is found from the context by step(), model_call() and
         # tool_call() called on the client rather than on the run.
         run._attach(context.set_value(_RUN_KEY, run, ctx))
         return run
+
+    def continued(self, remote: SpanContext, run_id: str, agent: str) -> Run:
+        """A run another service opened, continued here under the span the
+        headers named: a run whose own span is the caller's, non-recording
+        here, so its steps and calls nest under it and carry the run, and
+        nothing of it is sent or ended from this side."""
+        inherited = {contract.RUN_ID: run_id, contract.AGENT: agent}
+        return Run(
+            self._client,
+            NonRecordingSpan(remote),
+            run_id=run_id,
+            agent=agent,
+            inherited=inherited,
+        )
 
     def step(self, name: str, run: Run | None) -> Step | None:
         run = run or self._outside("step")

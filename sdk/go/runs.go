@@ -129,6 +129,9 @@ type Run struct {
 	id        string
 	agent     string
 	inherited []attribute.KeyValue
+	// sampledOut is whether the sample rate kept this run out: nothing of it
+	// is sent, nor handed to another service.
+	sampledOut bool
 }
 
 // Step is a step of a run.
@@ -214,7 +217,8 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 		trace.WithAttributes(attrs...),
 		trace.WithTimestamp(start),
 	)
-	if rate < 1 && c.random() >= rate {
+	sampledOut := rate < 1 && c.random() >= rate
+	if sampledOut {
 		c.processor.sampleOut(runID)
 	}
 	// OpenTelemetry sends a span only once it ends; without this one a run
@@ -228,7 +232,7 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 		trace.WithTimestamp(start),
 	)
 	opener.End(trace.WithTimestamp(start))
-	run := &Run{handle: handle{span: span}, client: c, id: runID, agent: agent, inherited: inherited}
+	run := &Run{handle: handle{span: span}, client: c, id: runID, agent: agent, inherited: inherited, sampledOut: sampledOut}
 	return contextWithRun(ctx, run), run
 }
 

@@ -4,10 +4,8 @@
  * still sent, and its `OTEL_*` variables change nothing of ours.
  */
 
-import { AsyncLocalStorage } from 'node:async_hooks';
-
-import { ROOT_CONTEXT, TraceFlags, context, trace } from '@opentelemetry/api';
-import type { Context, ContextManager, SpanContext } from '@opentelemetry/api';
+import { TraceFlags, context, trace } from '@opentelemetry/api';
+import type { SpanContext } from '@opentelemetry/api';
 import {
   AlwaysOffSampler,
   AlwaysOnSampler,
@@ -21,45 +19,7 @@ import type { Sampler, SamplingResult } from '@opentelemetry/sdk-trace-base';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type Run, currentRun } from '../src/index';
-import { type Harness, attributesOf, byName, harness, one, runsIn } from './helpers';
-
-/**
- * What OpenTelemetry's Node SDK registers: the active context follows the
- * asynchronous flow, so `context.with` reaches callbacks and awaits.
- */
-class AsyncLocalStorageContextManager implements ContextManager {
-  readonly #storage = new AsyncLocalStorage<Context>();
-
-  active(): Context {
-    return this.#storage.getStore() ?? ROOT_CONTEXT;
-  }
-
-  with<A extends unknown[], F extends (...args: A) => ReturnType<F>>(
-    ctx: Context,
-    fn: F,
-    thisArg?: ThisParameterType<F>,
-    ...args: A
-  ): ReturnType<F> {
-    return this.#storage.run(ctx, () => fn.call(thisArg, ...args) as ReturnType<F>);
-  }
-
-  bind<T>(ctx: Context, target: T): T {
-    if (typeof target !== 'function') return target;
-    const manager = this;
-    return function (this: unknown, ...args: unknown[]): unknown {
-      return manager.with(ctx, () => (target as (...inner: unknown[]) => unknown).apply(this, args));
-    } as unknown as T;
-  }
-
-  enable(): this {
-    return this;
-  }
-
-  disable(): this {
-    this.#storage.disable();
-    return this;
-  }
-}
+import { AsyncLocalStorageContextManager, type Harness, attributesOf, byName, harness, one, runsIn } from './helpers';
 
 /** The application's sampler in the tests: its target is swapped per test. */
 class SwitchableSampler implements Sampler {
