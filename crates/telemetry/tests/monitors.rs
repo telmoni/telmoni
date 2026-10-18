@@ -492,8 +492,7 @@ async fn a_project_reads_its_own_monitors_and_no_others(pool: PgPool) {
     assert_eq!(monitors_of(&pool, &p.project).await, 1);
 }
 
-/// ⚠ A field the lane cannot take is a 400 that names it and echoes none of
-/// what a person typed.
+/// ⚠ A field the lane cannot take is a 400 that echoes nothing typed, naming a field it knows.
 #[sqlx::test]
 async fn a_monitor_the_lane_cannot_take_is_a_400_that_echoes_none_of_it(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -526,7 +525,10 @@ async fn a_monitor_the_lane_cannot_take_is_a_400_that_echoes_none_of_it(pool: Pg
             json!({ "name": "Report", "bounds": { "max_steps": 0 } }),
             "max_steps",
         ),
-        (json!({ "name": "Report", "spend": 1 }), "spend"),
+        (
+            json!({ "name": "Report", "spend<script>": 1 }),
+            "fields this lane takes",
+        ),
     ] {
         let (status, problem) = p
             .send(p.request("POST", LANE, OWNER, Some(body.clone())))
