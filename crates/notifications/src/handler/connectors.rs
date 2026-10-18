@@ -1050,15 +1050,17 @@ async fn record_redelivery_outcome(
     let error = sent.result.as_ref().err().map(|e| e.message().to_owned());
     let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
     super::lock_audit_chain(&mut tx, &identity.organization_id).await?;
+    // The connection before its delivery: the order a purge's cascade, a retirement
+    // and the loop's bookkeeping take them, so none can deadlock with this.
+    if error.is_none() {
+        db::touch_connection(&mut tx, id).await?;
+    }
     db::record_attempts(&mut tx, std::slice::from_ref(&attempt)).await?;
     if !db::finish_redelivery(&mut tx, &identity.project_id, claim, error.as_deref()).await? {
         tracing::warn!(
             delivery_id = %delivery.id,
             "a resend outlived its lease, or its delivery is gone; the row is left to its holder"
         );
-    }
-    if error.is_none() {
-        db::touch_connection(&mut tx, id).await?;
     }
     emit_audit(
         &mut tx,
