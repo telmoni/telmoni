@@ -108,6 +108,9 @@ holding the **ingest** scope.
     span failed with the exception's class, never its message, and is raised
     again; a `KeyboardInterrupt` or `asyncio.CancelledError` marks it
     cancelled. `fail("TimeoutError")` and `cancel()` do the same by hand.
+    `run` raises `ValueError` for a blank agent name or a sample rate outside
+    its range; a bound that is not a finite number, or a whole one past 64
+    bits, is left off the run, with one warning.
   </Tab>
   <Tab value="TypeScript">
     ```ts
@@ -142,6 +145,9 @@ holding the **ingest** scope.
     with the error's class name and is thrown again; one named `AbortError`
     marks it cancelled. `fail('TimeoutError')` and `cancel()` do the same by
     hand, and `wrap` turns a function into one that opens a run per call.
+    `run` throws a `TypeError` for a blank agent name and a `RangeError` for
+    a sample rate outside its range; a bound that is not a finite number, or
+    a whole one past 64 bits, is left off the run, with one warning.
   </Tab>
   <Tab value="Go">
     ```go
@@ -186,8 +192,9 @@ holding the **ingest** scope.
     `Fail(err)` marks the span failed with the error's Go type, never its
     message, and marks it cancelled for `context.Canceled`;
     `FailWith("TimeoutError")` and `Cancel()` do the same by hand. The SDK
-    never panics: a blank agent name opens a run that does nothing, with one
-    warning.
+    never panics: a blank agent name opens a run that does nothing, and a
+    `MaxCostUSD` that is not a finite number is left off its run, each with
+    one warning.
   </Tab>
   <Tab value="Rust">
     ```rust
@@ -228,8 +235,10 @@ holding the **ingest** scope.
     Each handle is a guard that ends its span when dropped or on `end()`.
     `run` returns an error for a blank agent name or a sample rate outside
     its range, and `record_run` for the cases
-    [below](#a-run-recorded-after-it-ended); nothing else in the SDK fails: an
-    export that fails is warned about, never returned. The closure forms `run_with`, `step_with`,
+    [below](#a-run-recorded-after-it-ended); nothing else in the SDK fails: a
+    `max_cost_usd` that is not a finite number is left off the run with one
+    warning, and an export that fails is warned about, never returned. The
+    closure forms `run_with`, `step_with`,
     `model_call_with` and `tool_call_with` end the span when the closure
     returns, and their `try_` forms mark an `Err` on the span with the
     error's type name before returning it unchanged. `fail("TimeoutError")`
@@ -524,9 +533,10 @@ the `environment` and `release` of every span and the trace list
 [filters](/docs/workspace/traces#filters) by. A step is a span named as you named it; a model call is
 `chat <model>` (or the operation you gave) with the model asked for, the
 model that answered, the provider and the token counts under the GenAI
-conventions' names; a tool call is `execute_tool <name>`. The exception's
-class alone marks a failure, as `error.type`; no message, stack trace or
-event is ever sent. The [ingest page](/docs/api/ingest) lists every
+conventions' names, each a whole number, one that is not a finite number or
+does not fit 64 bits left off the call with one warning; a tool call is
+`execute_tool <name>`. The exception's class alone marks a failure, as
+`error.type`; no message, stack trace or event is ever sent. The [ingest page](/docs/api/ingest) lists every
 attribute and what the server keeps of each.
 
 ### Content
