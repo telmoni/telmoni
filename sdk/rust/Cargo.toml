@@ -16,8 +16,9 @@ publish = false
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 # Blocking, because the span processor's thread is the SDK's own and runs no
-# async runtime of the application's.
-reqwest = { workspace = true, features = ["blocking"] }
+# async runtime of the application's. The system's roots beside webpki's, so
+# a private CA's ingest is reached as Go and Python reach it.
+reqwest = { workspace = true, features = ["blocking", "rustls-tls-native-roots"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
