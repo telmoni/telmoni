@@ -132,10 +132,9 @@ impl AppState {
 }
 
 /// The module's router: the console's lanes under `/internal`, behind the
-/// service secret, and ingest at `/otlp/v1/traces`, behind a project API key
-/// holding the ingest scope and nothing else — a machine reaches it straight,
-/// and the key is its gate. The binary mounts it beside the other modules'
-/// and adds the health probes and the request layers once.
+/// service secret. The binary mounts it beside the other modules' and adds
+/// the health probes and the request layers once; ingest and the ping lane
+/// it nests behind the machine door ([`otlp_router`], [`ping_router`]).
 pub fn router(state: Arc<AppState>) -> Router {
     let internal = Router::new()
         .route(
@@ -214,17 +213,25 @@ pub fn router(state: Arc<AppState>) -> Router {
             state.service_secrets.clone(),
             require_service_secret,
         ));
+    Router::new().nest("/internal", internal).with_state(state)
+}
+
+/// Ingest, for the binary to nest at `/otlp` behind the machine door:
+/// `POST /v1/traces` behind a project API key holding the ingest scope and
+/// nothing else — a machine reaches it straight, and the key is its gate,
+/// refusing as the lane answers, in OTLP's shape
+/// ([`handler::ingest::refuse`]). The lane's own limit, per project, runs in
+/// its handler once the key is known, so the door meters it by address
+/// alone.
+pub fn otlp_router(state: Arc<AppState>) -> Router {
     let gate = ApiKeyGate {
         auth: state.auth.clone(),
         scope: ApiKeyScope::Ingest,
         refuse: handler::ingest::refuse,
     };
-    let otlp = Router::new()
-        .route("/otlp/v1/traces", post(handler::ingest::export))
-        .route_layer(middleware::from_fn_with_state(gate, require_api_key));
     Router::new()
-        .nest("/internal", internal)
-        .merge(otlp)
+        .route("/v1/traces", post(handler::ingest::export))
+        .route_layer(middleware::from_fn_with_state(gate, require_api_key))
         .with_state(state)
 }
 

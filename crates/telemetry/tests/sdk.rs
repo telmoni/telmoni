@@ -25,7 +25,7 @@ use telmoni_sdk::{Config, ModelCallRecord, RunRecord, Telmoni, ToolCallRecord, U
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::{ApiKeyScope, OrganizationId, OrganizationRole, ProjectId, Role};
 use telmoni_telemetry::hashing::HASH_BYTES;
-use telmoni_telemetry::router;
+use telmoni_telemetry::{otlp_router, router};
 
 /// The project's ingest key, as auth would resolve it.
 const INGEST_KEY: &str = "telmoni_sdk_ingest";
@@ -50,7 +50,8 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
     )
     .key(INGEST_KEY, &organization, &project, &[ApiKeyScope::Ingest]);
     let state = state_with_stores(&pool, auth);
-    let app = router(Arc::clone(&state));
+    // Ingest nested as the binary mounts it.
+    let app = router(Arc::clone(&state)).nest("/otlp", otlp_router(Arc::clone(&state)));
 
     // The door over TCP on this machine, as the SDK reaches it: the one host
     // it sends a key to over plain HTTP.

@@ -283,6 +283,15 @@ async fn problem(response: axum::response::Response) -> serde_json::Value {
     serde_json::from_slice(&body).expect("a problem document")
 }
 
+/// OTLP's `Status`, as ingest answers a refusal.
+async fn otlp_status(response: axum::response::Response) -> serde_json::Value {
+    assert_eq!(header(&response, "content-type"), Some("application/json"));
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    serde_json::from_slice(&body).expect("an OTLP status")
+}
+
 /// The public read API is on the binary's `/v1`, open to a machine with no
 /// service secret and refused without a key: a problem document with the
 /// bearer challenge; a method no lane takes and a path none serves are
@@ -413,6 +422,68 @@ async fn the_door_meters_the_cli_lanes_by_address() {
             .expect("router responds")
             .status(),
         StatusCode::NOT_FOUND,
+        "another address is metered on its own"
+    );
+}
+
+/// Ingest is on the binary's `/otlp`, behind the door, which meters it by
+/// the caller's address before the lane looks its key up: an export with no
+/// key is the lane's 401, in OTLP's shape, until the address's minute is
+/// spent, and the door's refusal is in the lane's shape too, with
+/// `Retry-After`; another address has a minute of its own. The door reads
+/// no credential here, since the key's limit is the lane's, per project.
+#[tokio::test]
+async fn the_door_meters_ingest_by_address_before_its_key() {
+    let app = app();
+    let router = app.router();
+    let from = |address: &str| {
+        router.clone().oneshot(
+            Request::post("/otlp/v1/traces")
+                .header("content-type", "application/json")
+                .header("x-forwarded-for", format!("{address}, 35.191.0.1"))
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+    };
+    let unkeyed = from("203.0.113.9").await.expect("router responds");
+    assert_eq!(unkeyed.status(), StatusCode::UNAUTHORIZED);
+    let body = otlp_status(unkeyed).await;
+    assert_eq!(body["code"], 16);
+    assert_eq!(body["message"], "/errors/auth/invalid-token");
+    for n in 1..1_200 {
+        assert_eq!(
+            from("203.0.113.9").await.expect("router responds").status(),
+            StatusCode::UNAUTHORIZED,
+            "export {n} is within the minute's allowance"
+        );
+    }
+    // The limit leaks twenty a second, so a slow machine earns a few more
+    // before the refusal; it comes within a handful either way.
+    let mut refused = None;
+    for _ in 0..200 {
+        let response = from("203.0.113.9").await.expect("router responds");
+        if response.status() == StatusCode::TOO_MANY_REQUESTS {
+            refused = Some(response);
+            break;
+        }
+    }
+    let refused = refused.expect("the minute's allowance was spent");
+    assert!(header(&refused, "retry-after").is_some());
+    let body = otlp_status(refused).await;
+    assert_eq!(body["code"], 8);
+    assert!(
+        body["message"]
+            .as_str()
+            .is_some_and(|message| message.starts_with("/errors/tenant/rate-limited")),
+        "{body}"
+    );
+
+    assert_eq!(
+        from("198.51.100.7")
+            .await
+            .expect("router responds")
+            .status(),
+        StatusCode::UNAUTHORIZED,
         "another address is metered on its own"
     );
 }

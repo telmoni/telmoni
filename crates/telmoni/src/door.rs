@@ -1,13 +1,14 @@
 //! The machine door: what the binary puts in front of the lanes a machine
 //! reaches straight on the machine host — the public read API under `/v1`,
-//! the CLI's session lanes under `/cli` and the ping lane under `/ping` —
-//! because they come in from the internet rather than from the console. Each
-//! lane has a gate of its own, an API key, a bearer or a device code, or the
-//! ping key in a ping's path; the door adds what every lane shares: the
-//! caller's address, read past the proxies in front, and the limits held in
-//! Redis by source and by credential, so one caller cannot spend the others'
-//! room. Ingest at `/otlp/v1/traces` keeps its own limit, per project,
-//! inside its handler.
+//! the CLI's session lanes under `/cli`, the ping lane under `/ping` and
+//! ingest under `/otlp` — because they come in from the internet rather than
+//! from the console. Each lane has a gate of its own, an API key, a bearer
+//! or a device code, or the ping key in a ping's path; the door adds what
+//! every lane shares: the caller's address, read past the proxies in front,
+//! and the limits held in Redis by source and by credential, so one caller
+//! cannot spend the others' room. Ingest's credential is its project, which
+//! its handler meters once the key is known, so the door meters it by
+//! source alone, before the key is looked up.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -21,7 +22,7 @@ use axum::{
 };
 
 use telmoni_shared::TelmoniError;
-use telmoni_telemetry::handler::pings;
+use telmoni_telemetry::handler::{ingest, pings};
 use telmoni_telemetry::rate_limit::RateLimit;
 
 /// How many a minute one credential may make: an API key on `/v1`, a bearer
@@ -36,6 +37,11 @@ const CLI_PER_SOURCE: u32 = 120;
 /// lines, each pinging its start and its end. The plan's own numbers, per
 /// organization and per key, come with the limiter (roadmap 2.11).
 const PING_PER_SOURCE: u32 = 1_200;
+/// How many a minute one address may make on `/otlp`, keyed or not: `/v1`'s
+/// rate, a hundred processes exporting at the batch cadence behind one
+/// address, and the most key lookups an unkeyed flood from one address can
+/// cost auth in a minute. The key's own limit is the lane's, per project.
+const OTLP_PER_SOURCE: u32 = 1_200;
 
 /// The door, as one replica holds it: the limits, and where they are kept.
 pub struct Door {
@@ -49,6 +55,7 @@ pub struct Door {
     cli_bearer: RateLimit,
     ping_source: RateLimit,
     ping_key: RateLimit,
+    otlp_source: RateLimit,
 }
 
 /// Which lanes a request came in on, since each has limits of its own.
@@ -57,6 +64,7 @@ enum Lane {
     V1,
     Cli,
     Ping,
+    Otlp,
 }
 
 impl Door {
@@ -73,6 +81,7 @@ impl Door {
             cli_bearer: RateLimit::new("telmoni:door:cli:bearer", PER_CREDENTIAL),
             ping_source: RateLimit::new("telmoni:door:ping:source", PING_PER_SOURCE),
             ping_key: RateLimit::new("telmoni:door:ping:key", PER_CREDENTIAL),
+            otlp_source: RateLimit::new("telmoni:door:otlp:source", OTLP_PER_SOURCE),
         })
     }
 
@@ -115,9 +124,24 @@ impl Door {
             .layer(middleware::map_response(pings::never_stored))
     }
 
+    /// Ingest behind the door's limit by source alone: its credential is the
+    /// project its key opens, metered in the lane once the key is known, and
+    /// the key is looked up only inside the address's allowance, so an
+    /// unkeyed flood from one address costs auth a bounded number of
+    /// lookups. A refusal here is answered as the lane answers one, OTLP's
+    /// `Status` in the request's encoding with `Retry-After`, so an exporter
+    /// retries it as it retries the lane's own.
+    pub fn otlp(self: &Arc<Self>, lanes: Router) -> Router {
+        lanes.layer(middleware::from_fn_with_state(
+            (self.clone(), Lane::Otlp),
+            admit,
+        ))
+    }
+
     /// The source's limit, then the credential's where one is presented: a
     /// flood from one address is refused before its credentials are read,
-    /// and a credential spent from many addresses is refused all the same.
+    /// and a credential spent from many addresses is refused all the same;
+    /// ingest presents none, its project being metered in the lane.
     async fn admit(
         &self,
         lane: Lane,
@@ -125,12 +149,13 @@ impl Door {
         credential: Option<&str>,
     ) -> Result<(), TelmoniError> {
         let (by_source, by_credential) = match lane {
-            Lane::V1 => (&self.v1_source, &self.v1_key),
-            Lane::Cli => (&self.cli_source, &self.cli_bearer),
-            Lane::Ping => (&self.ping_source, &self.ping_key),
+            Lane::V1 => (&self.v1_source, Some(&self.v1_key)),
+            Lane::Cli => (&self.cli_source, Some(&self.cli_bearer)),
+            Lane::Ping => (&self.ping_source, Some(&self.ping_key)),
+            Lane::Otlp => (&self.otlp_source, None),
         };
         by_source.admit(&self.telemetry.redis, source).await?;
-        if let Some(credential) = credential {
+        if let (Some(by_credential), Some(credential)) = (by_credential, credential) {
             by_credential
                 .admit(&self.telemetry.redis, credential)
                 .await?;
@@ -154,10 +179,15 @@ async fn admit(
             Ok(key) => key.map(RateLimit::digest),
             Err(refused) => return refused.into_response(),
         },
+        Lane::Otlp => None,
     };
     match door.admit(lane, &source, credential.as_deref()).await {
         Ok(()) => next.run(request).await,
-        Err(refused) => refused.into_response(),
+        // Ingest's refusals are OTLP's shape, the door's as the lane's own.
+        Err(refused) => match lane {
+            Lane::Otlp => ingest::refuse(refused, request.headers()),
+            Lane::V1 | Lane::Cli | Lane::Ping => refused.into_response(),
+        },
     }
 }
 

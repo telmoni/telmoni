@@ -371,10 +371,12 @@ impl App {
                 self.secrets.clone(),
                 require_service_secret,
             ));
-        // The machine lanes, on the one `/v1`, the one `/cli` and the one
-        // `/ping`, behind the door: every module's `/v1` lanes nest here as
-        // they come, auth's today, each module gating its own with the key
-        // check; the ping lane's gate is the key in its path.
+        // The machine lanes, on the one `/v1`, the one `/cli`, the one
+        // `/ping` and the one `/otlp`, behind the door: every module's `/v1`
+        // lanes nest here as they come, auth's today, each module gating its
+        // own with the key check; the ping lane's gate is the key in its
+        // path, and ingest's its key check, its per-project limit the lane's
+        // own.
         let core = Router::new()
             .merge(probes)
             .merge(log_level)
@@ -391,6 +393,11 @@ impl App {
                 "/ping",
                 self.door
                     .ping(telmoni_telemetry::ping_router(self.telemetry.clone())),
+            )
+            .nest(
+                "/otlp",
+                self.door
+                    .otlp(telmoni_telemetry::otlp_router(self.telemetry.clone())),
             )
             .merge(telmoni_notifications::router(self.notifications.clone()))
             .merge(telmoni_telemetry::router(self.telemetry.clone()))
