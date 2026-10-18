@@ -1,21 +1,18 @@
 "use client";
 
 import { unstable_rethrow, useRouter } from "next/navigation";
-import { startTransition, useState, useTransition } from "react";
+import { Building2 } from "lucide-react";
+import { startTransition, useId, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 
-import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  SidePanel,
+  SidePanelFooter,
+  SidePanelHeader,
+  SidePanelRow,
+} from "@/components/side-panel";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   type CreateOrganizationField,
   createOrganizationAction,
@@ -28,23 +25,27 @@ interface Refusal {
   field?: CreateOrganizationField;
 }
 
-export function CreateOrganizationDialog({
-  open,
-  onOpenChange,
+/** New organization, in the console's side panel (`create-panels.tsx`). */
+export function CreateOrganizationPanel({
   host,
   notice,
+  onClose,
+  returnFocus,
 }: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
   /// The console's host, shown ahead of the URL as the organization's Settings
   /// show it.
   host: string;
-  /// Drawn under the description: what a console built on this one says a
-  /// new organization starts on there, and any fields of its own it asks
-  /// for, which the action is handed by name.
+  /// Drawn first in the panel: what a console built on this one says a new
+  /// organization starts on there, and any fields of its own it asks for,
+  /// which the action is handed by name.
   notice?: React.ReactNode;
+  onClose: () => void;
+  returnFocus?: () => HTMLElement | null;
 }) {
   const router = useRouter();
+  const titleId = useId();
+  const panel = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLInputElement>(null);
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [refusal, setRefusal] = useState<Refusal | null>(null);
@@ -72,10 +73,10 @@ export function CreateOrganizationDialog({
         }
         // On to its Overview. Without an address to follow, auth's answer
         // could not be read; the switcher lists it all the same, the layout
-        // read again by the action's revalidation. The dialog closes in one
+        // read again by the action's revalidation. The panel shuts in one
         // transition with either, so it goes as the page lands.
         startTransition(() => {
-          onOpenChange(false);
+          onClose();
           if (res.href) router.push(res.href);
         });
         toast.success("Organization created.");
@@ -90,97 +91,111 @@ export function CreateOrganizationDialog({
   const urlError = under("slug");
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <form
-          className="contents"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!canSubmit) return;
-            // What the notice's own fields say, by name: the name and URL
-            // fields carry none, so they are not among them.
-            const extras: Record<string, string> = {};
-            for (const [key, value] of new FormData(e.currentTarget).entries()) {
-              if (typeof value === "string") extras[key] = value;
-            }
-            submit(extras);
-          }}
+    <SidePanel
+      panel={panel}
+      titleId={titleId}
+      onClose={onClose}
+      full
+      initialFocus={field}
+      returnFocus={returnFocus}
+    >
+      <form
+        className="flex min-h-0 flex-1 flex-col"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!canSubmit) return;
+          // What the notice's own fields say, by name: the name and URL
+          // fields carry none, so they are not among them.
+          const extras: Record<string, string> = {};
+          for (const [key, value] of new FormData(e.currentTarget).entries()) {
+            if (typeof value === "string") extras[key] = value;
+          }
+          submit(extras);
+        }}
+      >
+        <SidePanelHeader
+          icon={Building2}
+          titleId={titleId}
+          title="New organization"
+          onClose={onClose}
         >
-          <DialogHeader>
-            <DialogTitle>Create an organization</DialogTitle>
-          </DialogHeader>
-          <DialogBody>
-            <DialogDescription>
-              An organization holds projects and the people who work on them.
-              You will be its owner, and can rename it or change its URL later
-              in its settings.
-            </DialogDescription>
-            {notice}
-            <div className="grid gap-2">
-              <Label htmlFor="organization-name">Name</Label>
-              <Input
-                id="organization-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Acme"
-                maxLength={MAX_ORGANIZATION_NAME}
-                autoComplete="off"
-                required
-                aria-invalid={nameError ? true : undefined}
-                aria-describedby={nameError ? "organization-name-error" : undefined}
-              />
-              {nameError && (
-                <p id="organization-name-error" className="text-sm text-destructive" role="alert">
-                  {nameError}
-                </p>
-              )}
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="organization-url">URL</Label>
-              <div className="flex items-center gap-1">
-                <span className="shrink-0 text-sm text-muted-foreground">{host}/</span>
-                <Input
-                  id="organization-url"
-                  value={slug}
-                  onChange={(e) => setSlug(e.target.value)}
-                  placeholder="acme"
-                  maxLength={SLUG_MAX_LENGTH}
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  autoComplete="off"
-                  spellCheck={false}
-                  aria-invalid={urlError ? true : undefined}
-                  aria-describedby={urlError ? "organization-url-error" : "organization-url-hint"}
-                />
-              </div>
-              {urlError ? (
-                <p id="organization-url-error" className="text-sm text-destructive" role="alert">
-                  {urlError}
-                </p>
-              ) : (
-                <p id="organization-url-hint" className="text-sm text-muted-foreground">
-                  Optional. Left blank, it is made from the name, or is a
-                  placeholder until you choose one when the name has no Latin
-                  letters or digits.
-                </p>
-              )}
-            </div>
-            {refusal && !refusal.field && (
-              <p className="text-sm text-destructive" role="alert">
-                {refusal.message}
+          <p className="text-sm text-muted-foreground">
+            An organization holds projects and the people who work on them.
+          </p>
+        </SidePanelHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto px-3.5 py-2">
+          {notice}
+          <SidePanelRow label="Name" htmlFor="organization-name">
+            <Input
+              ref={field}
+              id="organization-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Acme"
+              maxLength={MAX_ORGANIZATION_NAME}
+              autoComplete="off"
+              required
+              aria-invalid={nameError ? true : undefined}
+              aria-describedby={nameError ? "organization-name-error" : "organization-name-hint"}
+              className="max-w-md"
+            />
+            {nameError ? (
+              <p id="organization-name-error" className="text-destructive" role="alert">
+                {nameError}
+              </p>
+            ) : (
+              <p id="organization-name-hint" className="text-muted-foreground">
+                What everyone in it sees. You can rename it later in its settings.
               </p>
             )}
-          </DialogBody>
-          <DialogFooter>
-            <Button type="submit" disabled={!canSubmit}>
-              {pending ? "Creating…" : "Create organization"}
-            </Button>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+          </SidePanelRow>
+          <SidePanelRow label="URL" htmlFor="organization-url">
+            <div className="flex max-w-md items-center gap-1">
+              <span className="shrink-0 text-muted-foreground">{host}/</span>
+              <Input
+                id="organization-url"
+                value={slug}
+                onChange={(e) => setSlug(e.target.value)}
+                placeholder="acme"
+                maxLength={SLUG_MAX_LENGTH}
+                autoCapitalize="none"
+                autoCorrect="off"
+                autoComplete="off"
+                spellCheck={false}
+                aria-invalid={urlError ? true : undefined}
+                aria-describedby={urlError ? "organization-url-error" : "organization-url-hint"}
+              />
+            </div>
+            {urlError ? (
+              <p id="organization-url-error" className="text-destructive" role="alert">
+                {urlError}
+              </p>
+            ) : (
+              <p id="organization-url-hint" className="text-muted-foreground">
+                Optional. Left blank, it is made from the name, or is a placeholder until you
+                choose one when the name has no Latin letters or digits. You can change it later
+                in its settings.
+              </p>
+            )}
+          </SidePanelRow>
+          <SidePanelRow label="Your role">
+            <span>Owner, with every right in it.</span>
+          </SidePanelRow>
+          {refusal && !refusal.field && (
+            <p className="py-2 text-sm text-destructive" role="alert">
+              {refusal.message}
+            </p>
+          )}
+        </div>
+        <SidePanelFooter>
+          <Button type="submit" disabled={!canSubmit}>
+            {pending ? "Creating…" : "Create organization"}
+          </Button>
+          <Button type="button" variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+        </SidePanelFooter>
+      </form>
+    </SidePanel>
   );
 }

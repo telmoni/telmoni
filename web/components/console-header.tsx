@@ -30,18 +30,11 @@ import { cn } from "@/lib/utils";
 // `md` the rail is a drawer, so the cell holds a hamburger there. The second
 // cell is where you stand; the third, the search and the account's buttons.
 export function ConsoleHeader({
-  host,
   organizationBadge,
-  createOrganizationNotice,
 }: {
-  /// The console's host, for the switcher's new organization's URL.
-  host: string;
   /// Drawn beside the organization's name in the switcher: a console built
   /// on this one puts the organization's plan there.
   organizationBadge?: React.ReactNode;
-  /// Drawn in the switcher's new-organization dialog: a console built on
-  /// this one says there what a new organization starts on.
-  createOrganizationNotice?: React.ReactNode;
 }) {
   const { collapsed, toggle } = useSidebar();
   const organization = useActiveOrganization();
@@ -103,7 +96,10 @@ export function ConsoleHeader({
           )}
         >
           <TelmoniMark className="size-6 shrink-0" />
-          <span className="truncate">{PRODUCT_NAME}</span>
+          {/* `pt-0.5`: the word has no descender, so at `leading-none` its
+              ink sits 1.5px above the mark's centre; 2px down, its baseline
+              lands on a whole pixel with its caps and ascenders centred. */}
+          <span className="truncate pt-0.5">{PRODUCT_NAME}</span>
         </Link>
         {collapsed ? (
           <button
@@ -136,11 +132,7 @@ export function ConsoleHeader({
           page's title does, 14px from the rail's rule — the rail's own inset
           (`console-shell.tsx`). */}
       <div className="flex min-w-0 flex-1 items-center gap-3.5 pl-1.5 pr-3.5">
-        <ResourceSelector
-          host={host}
-          organizationBadge={organizationBadge}
-          createOrganizationNotice={createOrganizationNotice}
-        />
+        <ResourceSelector organizationBadge={organizationBadge} />
       </div>
       <div className="flex shrink-0 items-center justify-end gap-3 pr-3.5">
         <SearchButton />

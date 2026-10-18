@@ -45,7 +45,7 @@ export function MobileNav({ signedIn }: { signedIn: boolean }) {
         ref={triggerRef}
         variant="ghost"
         size={null}
-        className="size-9"
+        className="size-9 text-muted-foreground hover:text-foreground"
         aria-label={open ? "Close menu" : "Open menu"}
         onClick={() => setOpen(!open)}
       >

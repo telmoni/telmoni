@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState, type RefObject } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Check, ChevronDown, Plus, Settings } from "lucide-react";
 
+import { type CreateKind, useConsoleUi } from "@/components/console-ui-context";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -15,8 +16,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { CreateOrganizationDialog } from "@/components/create-organization";
-import { CreateProjectDialog, useCanCreateProjects } from "@/components/create-project";
+import { useCanCreateProjects } from "@/components/create-project";
 import { resourceUrl, standingResource } from "@/lib/console-trail";
 import { organizationLabel } from "@/lib/identity";
 import { resolveActiveOrganization } from "@/lib/organization-label";
@@ -43,7 +43,7 @@ const TRIGGER = cn(
   "transition-none hover:bg-transparent data-[state=open]:bg-transparent",
 );
 const CHEVRON =
-  "size-4 shrink-0 opacity-50 transition-opacity group-hover:opacity-100 group-data-[state=open]:opacity-100";
+  "size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground group-data-[state=open]:text-foreground";
 
 // A 36px trigger centred in the 59px above the header's 1px rule ends 12.5px
 // short of the header's bottom edge, so a menu opens right under the rule,
@@ -116,7 +116,7 @@ function NewRow({ onSelect, children }: { onSelect: () => void; children: string
           onSelect();
         }}
       >
-        <Plus className="size-4 shrink-0 text-muted-foreground" />
+        <Plus />
         {children}
       </DropdownMenuItem>
     </>
@@ -129,26 +129,32 @@ function NewRow({ onSelect, children }: { onSelect: () => void; children: string
 // one, so a project is a click away from anywhere in it rather than a trip
 // to Projects. Each menu lists its own kind alone — the organizations the
 // person can stand in, the projects of the one they are in — with a gear to
-// each one's settings, and the one thing it creates at its foot.
+// each one's settings, and the one thing it creates at its foot, in a side
+// panel (`create-panels.tsx`).
 export function ResourceSelector({
-  host,
   organizationBadge,
-  createOrganizationNotice,
 }: {
-  /// The console's host, shown ahead of a new organization's URL.
-  host: string;
   /// Drawn beside the organization's name: a console built on this one puts
   /// the organization's plan there (`components/extension/organization-badge.tsx`).
   organizationBadge?: React.ReactNode;
-  /// Drawn in the new-organization dialog: a console built on this one says
-  /// there what a new organization starts on
-  /// (`components/extension/create-organization-notice.tsx`).
-  createOrganizationNotice?: React.ReactNode;
 }) {
   const [organizationsOpen, setOrganizationsOpen] = useState(false);
   const [projectsOpen, setProjectsOpen] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [newOrganizationOpen, setNewOrganizationOpen] = useState(false);
+  const organizationsTrigger = useRef<HTMLButtonElement>(null);
+  const projectsTrigger = useRef<HTMLButtonElement>(null);
+  const { openCreate } = useConsoleUi();
+  // A panel opened from a menu row keeps the focus the menu would hand back
+  // to its trigger as it shuts; the panel hands it there as it shuts itself.
+  const creatingFromMenu = useRef(false);
+  const create = (kind: CreateKind, trigger: RefObject<HTMLButtonElement | null>) => {
+    creatingFromMenu.current = true;
+    openCreate(kind, trigger.current);
+  };
+  const keepFocusForPanel = (e: Event) => {
+    if (!creatingFromMenu.current) return;
+    creatingFromMenu.current = false;
+    e.preventDefault();
+  };
 
   const organizations = useOrganizations();
   const projects = useProjects();
@@ -225,6 +231,7 @@ export function ResourceSelector({
       <DropdownMenu modal={false} open={organizationsOpen} onOpenChange={setOrganizationsOpen}>
         <DropdownMenuTrigger asChild>
           <Button
+            ref={organizationsTrigger}
             variant="ghost"
             size="default"
             // `px-2`, with the header cell's `pl-1.5`: the name starts where
@@ -237,7 +244,13 @@ export function ResourceSelector({
             <ChevronDown className={CHEVRON} />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-72 animate-none!" align="start" side="bottom" sideOffset={MENU_OFFSET}>
+        <DropdownMenuContent
+          className="w-72 animate-none!"
+          align="start"
+          side="bottom"
+          sideOffset={MENU_OFFSET}
+          onCloseAutoFocus={keepFocusForPanel}
+        >
           <DropdownMenuGroup>
             <DropdownMenuLabel className="px-2 py-1.5 text-xs font-normal text-muted-foreground">
               Organizations
@@ -249,13 +262,13 @@ export function ResourceSelector({
           {/* Offered to everyone signed in, whatever their roles: the new
               organization is theirs. With the `signup` flag off the act is
               gone, as a switched-off feature is from the rail, rather than a
-              row every use of which is refused; a dialog opened before the
+              row every use of which is refused; a panel opened before the
               switch still hears auth's refusal. */}
           {signupsOpen && (
             <NewRow
               onSelect={() => {
                 setOrganizationsOpen(false);
-                setNewOrganizationOpen(true);
+                create("organization", organizationsTrigger);
               }}
             >
               New organization
@@ -272,6 +285,7 @@ export function ResourceSelector({
           <DropdownMenu modal={false} open={projectsOpen} onOpenChange={setProjectsOpen}>
             <DropdownMenuTrigger asChild>
               <Button
+                ref={projectsTrigger}
                 variant="ghost"
                 size="default"
                 className={cn(
@@ -302,7 +316,13 @@ export function ResourceSelector({
                 <ChevronDown className={CHEVRON} />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-72 animate-none!" align="start" side="bottom" sideOffset={MENU_OFFSET}>
+            <DropdownMenuContent
+              className="w-72 animate-none!"
+              align="start"
+              side="bottom"
+              sideOffset={MENU_OFFSET}
+              onCloseAutoFocus={keepFocusForPanel}
+            >
               <DropdownMenuGroup>
                 <DropdownMenuLabel className="px-2 py-1.5 text-xs font-normal text-muted-foreground">
                   Projects
@@ -320,7 +340,7 @@ export function ResourceSelector({
                 <NewRow
                   onSelect={() => {
                     setProjectsOpen(false);
-                    setCreateOpen(true);
+                    create("project", projectsTrigger);
                   }}
                 >
                   New project
@@ -330,21 +350,6 @@ export function ResourceSelector({
           </DropdownMenu>
         </>
       )}
-
-      {canCreate && (
-        <CreateProjectDialog
-          key={`project-${createOpen}`}
-          open={createOpen}
-          onOpenChange={setCreateOpen}
-        />
-      )}
-      <CreateOrganizationDialog
-        key={`organization-${newOrganizationOpen}`}
-        open={newOrganizationOpen}
-        onOpenChange={setNewOrganizationOpen}
-        host={host}
-        notice={createOrganizationNotice}
-      />
     </div>
   );
 }

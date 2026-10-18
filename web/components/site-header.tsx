@@ -48,7 +48,8 @@ export function SiteHeader({ signedIn }: { signedIn: boolean }) {
             className="flex min-w-0 items-center gap-2 pl-1.5 text-[17px] leading-none font-bold tracking-tight hover:opacity-70"
           >
             <TelmoniMark className="size-6 shrink-0" />
-            <span className="truncate">{PRODUCT_NAME}</span>
+            {/* `pt-0.5` as the console header's word has, for the same reason. */}
+            <span className="truncate pt-0.5">{PRODUCT_NAME}</span>
           </Link>
         </div>
 

@@ -60,11 +60,9 @@ export async function createProjectAction(
   const ctx = await identityContext();
   if (!ctx) return { error: await unplacedOrganization() };
 
-  // ⚠ **The organization is the caller's to NAME and ours to CHECK.** The
-  // project used to land wherever the active-organization cookie pointed,
-  // which is wrong for somebody who administers more than one: the cookie
-  // follows the last tab that moved, and the dialog names the organization
-  // its own page stands in.
+  // ⚠ **The organization is the caller's to NAME and ours to CHECK**, never
+  // the active-organization cookie's, which follows the last tab that moved:
+  // the panel names the organization its own page stands in.
   //
   // The console names `x-organization-id`, so naming one the caller may not
   // act in would be asserting a claim on their behalf. Auth checks
@@ -134,17 +132,15 @@ const CreatedOrganizationSchema = z.object({
   name: z.string(),
 });
 
-/// The dialog's field a refusal belongs under, as the organization's Settings
-/// place them; none for one that is about neither.
+/// The panel's field a refusal belongs under; none for one about neither.
 export type CreateOrganizationField = "name" | "slug";
 
 export interface CreateOrganizationResult {
   error: string | null;
   field?: CreateOrganizationField;
   /// The new organization's Overview, or wherever a console built on this one
-  /// sends it (`lib/extension/created-organization.ts`), for the dialog to
-  /// open. Not a `redirect()`: the switcher's dialog lives in a layout the
-  /// move keeps, and would be left open over the page it moved to.
+  /// sends it (`lib/extension/created-organization.ts`), for the panel to
+  /// open: a `redirect()` from the layout's panel remounts the console shell.
   href?: string;
 }
 

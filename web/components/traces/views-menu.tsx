@@ -128,7 +128,7 @@ export function ViewsMenu({ organization, slug, projectId, query, ui, views, can
             <Badge variant="secondary" className="px-1.5 tabular-nums">
               {views?.length ?? 0}
             </Badge>
-            <ChevronDownIcon className="opacity-50" />
+            <ChevronDownIcon className="text-muted-foreground" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-72">

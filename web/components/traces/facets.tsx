@@ -152,6 +152,7 @@ function PanelButton({ shown }: { shown: boolean }) {
         <Button
           variant="ghost"
           size="icon"
+          className="text-muted-foreground hover:text-foreground"
           aria-label={label}
           aria-expanded={shown}
           onClick={() => setTracePrefs({ filters: !shown })}
@@ -205,7 +206,7 @@ function FacetSection({
         <CollapsibleTrigger asChild>
           <Button variant="ghost" size="sm" className="flex-1 justify-start px-1.5">
             <ChevronRightIcon
-              className={cn("transition-transform", open && "rotate-90")}
+              className={cn("text-muted-foreground transition-transform", open && "rotate-90")}
               aria-hidden="true"
             />
             {label}

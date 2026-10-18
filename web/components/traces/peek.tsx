@@ -7,11 +7,8 @@ import {
   useMemo,
   useRef,
   useState,
-  type ComponentProps,
-  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
-  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -21,16 +18,15 @@ import {
   Maximize2,
   Minimize2,
   SquareArrowOutUpRight,
-  XIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 
 import { useConsoleShell } from "@/components/console-shell";
 import { CopyButton } from "@/components/copy-button";
+import { PanelAction, SidePanel, SidePanelHeader } from "@/components/side-panel";
 import { TraceBody, TraceMeta } from "@/components/traces/trace-view";
 import { Button } from "@/components/ui/button";
-import { Kbd } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { NEXT_KEY, PREVIOUS_KEY } from "@/lib/keys";
 import {
@@ -53,13 +49,12 @@ import { setTracePrefs, useTracePrefs } from "@/lib/use-trace-prefs";
 import { cn } from "@/lib/utils";
 
 // A trace opened from the list without leaving it, as Langfuse's peek opens
-// one: a panel over the list's right side, inside the content area — under
-// the header, beside the rail, neither covered — that fills that area at a
-// press and goes back. The run it shows is the URL's `?peek=`, kept in the
-// browser's history (`lib/peek.ts`), so a link holds it and Back shuts it.
-// The list's filters, sorts and pages carry no `peek`, so they shut it as
-// they move the list; a new window keeps it, the window picker carrying the
-// whole query along.
+// one: the console's side panel (`side-panel.tsx`) over the list, which fills
+// the content area at a press and goes back. The run it shows is the URL's
+// `?peek=`, kept in the browser's history (`lib/peek.ts`), so a link holds it
+// and Back shuts it. The list's filters, sorts and pages carry no `peek`, so
+// they shut it as they move the list; a new window keeps it, the window
+// picker carrying the whole query along.
 
 /** How long a read of the spans may take before the panel says it failed. */
 const READ_TIMEOUT_MS = 15_000;
@@ -67,29 +62,6 @@ const READ_TIMEOUT_MS = 15_000;
 /** The run the peek holds open, from the URL; `null` while it is shut. */
 export function usePeekedRun(): string | null {
   return peekedRun(useSearchParams().get(PEEK_PARAM));
-}
-
-/** Whether the panel stands as wide as the content area it is in: on a
- *  phone, beside a list too narrow for its own width, or dragged all the
- *  way — measured, since each of those is the window's or the hand's. */
-function useCoversArea(panel: RefObject<HTMLDivElement | null>): boolean {
-  const [covers, setCovers] = useState(false);
-  useLayoutEffect(() => {
-    const element = panel.current;
-    const area = element?.parentElement;
-    if (!element || !area || typeof ResizeObserver === "undefined") return;
-    // An area not yet laid out measures nothing, and covers nothing either.
-    const measure = () => {
-      const whole = area.getBoundingClientRect().width;
-      setCovers(whole > 0 && element.getBoundingClientRect().width >= whole - 1);
-    };
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    observer.observe(area);
-    measure();
-    return () => observer.disconnect();
-  }, [panel]);
-  return covers;
 }
 
 async function readTrace(url: string, signal: AbortSignal): Promise<TraceRead<TraceDetail>> {
@@ -146,57 +118,10 @@ export function TracePeek(props: Props) {
   return createPortal(<PeekPanel {...props} run={run} />, element);
 }
 
-/** One of the panel's buttons: an icon, named for a screen reader and, under
- *  the pointer, in a tooltip with its letter key where it has one. At the
- *  end of the list a step is `unavailable` rather than disabled, so the focus
- *  stays on it. */
-function PanelAction({
-  label,
-  letterKey,
-  unavailable,
-  onClick,
-  children,
-  className,
-  ...props
-}: {
-  label: string;
-  letterKey?: string;
-  unavailable?: boolean;
-  children: ReactNode;
-} & Omit<ComponentProps<typeof Button>, "aria-label" | "aria-disabled">) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={label}
-          aria-disabled={unavailable || undefined}
-          onClick={unavailable ? undefined : onClick}
-          className={cn("aria-disabled:cursor-not-allowed aria-disabled:opacity-50", className)}
-          {...props}
-        >
-          {children}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>
-        {label}
-        {letterKey && (
-          <Kbd data-letter-key="" className="ml-1.5">
-            {letterKey.toUpperCase()}
-          </Kbd>
-        )}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
 function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: string }) {
   const titleId = useId();
   const panel = useRef<HTMLDivElement>(null);
-  const { setCovered } = useConsoleShell();
   const { peekFull, peekWidth } = useTracePrefs();
-  const coversArea = useCoversArea(panel);
   const [version, setVersion] = useState(0);
   const { read, stale } = useTraceRead(
     `/api/traces/${encodeURIComponent(run)}?project=${encodeURIComponent(projectId)}`,
@@ -227,20 +152,16 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
   });
   const close = () => closePeek(entry.current !== null);
 
-  // Over the list whole — at full size, or as wide as the area otherwise —
-  // the list is out of reach of the keyboard and of a screen reader too, as
-  // it is of the eye.
-  const covering = peekFull || coversArea;
-  useLayoutEffect(() => {
-    setCovered(covering);
-    return () => setCovered(false);
-  }, [covering, setCovered]);
-
-  // The run open as the panel shuts, for the focus to go back to its row.
+  // The run open as the panel shuts, for the focus to go back to its row, as
+  // the agent's window hands it back (`agent-panel.tsx`).
   const openRun = useRef(run);
   useEffect(() => {
     openRun.current = run;
   }, [run]);
+  const openRow = () =>
+    [...document.querySelectorAll<HTMLElement>("[data-peek-run]")].find(
+      (link) => link.dataset.peekRun === openRun.current,
+    );
 
   // A run still going is read again as its spans land.
   useEffect(() => {
@@ -264,27 +185,6 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
     };
     return offerPageSteps({ noun: "trace", next: step(1), previous: step(-1) });
   }, []);
-
-  // Focus on open, and back to the row of the run it was showing as it shuts
-  // — as the agent's window does (`agent-panel.tsx`) — but only from inside
-  // it: shut by a click on the list, a filter or a page, the focus is that
-  // click's. A layout effect, so the panel is still in the document when its
-  // cleanup asks where the focus is.
-  useLayoutEffect(() => {
-    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const element = panel.current;
-    element?.focus({ preventScroll: true });
-    return () => {
-      if (!element?.contains(document.activeElement)) return;
-      // The list may still be covered as the panel shuts at full size, and
-      // nothing covered takes the focus.
-      setCovered(false);
-      const row = [...document.querySelectorAll<HTMLElement>("[data-peek-run]")].find(
-        (link) => link.dataset.peekRun === openRun.current,
-      );
-      (row ?? before)?.focus({ preventScroll: true });
-    };
-  }, [setCovered]);
 
   // Another trace on show takes the place of the last, and with it whatever
   // in it had the focus: the panel takes it back, so Escape, `j` and `k`
@@ -324,41 +224,14 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
   };
   const width = dragged ?? peekWidth;
 
-  // Escape from inside shuts it. Only from inside: the panel does not shut
-  // the page off, so Escape on the list is the list's.
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented) return;
-      if (!panel.current?.contains(document.activeElement)) return;
-      e.preventDefault();
-      closePeek(entry.current !== null);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
-
   return (
-    <div
-      ref={panel}
-      role="dialog"
-      // Non-modal, and said so: the list beside it keeps its pointer and
-      // its keys, which the letter shortcuts read this to know
-      // (`MODAL_SELECTOR`, `lib/keys.ts`).
-      aria-modal="false"
-      aria-labelledby={titleId}
-      tabIndex={-1}
-      data-mode={peekFull ? "full" : "side"}
-      style={width === null ? undefined : ({ "--peek-width": `${width}px` } as CSSProperties)}
-      className={cn(
-        "absolute inset-y-0 right-0 z-30 flex flex-col overflow-hidden bg-background outline-none",
-        "animate-in duration-200 fade-in-0 slide-in-from-right-4",
-        peekFull
-          ? "left-0"
-          : cn(
-              "left-0 md:left-auto md:max-w-full md:border-l md:border-border md:shadow-drawer",
-              width === null ? "md:w-[max(40rem,70%)]" : "md:w-(--peek-width)",
-            ),
-      )}
+    <SidePanel
+      panel={panel}
+      titleId={titleId}
+      onClose={close}
+      full={peekFull}
+      width={width}
+      returnFocus={openRow}
     >
       {/* The edge to drag, on the panel's own left edge: a pointer's alone,
           as the agent window's edges are, Full size being the keyboard's way
@@ -380,20 +253,28 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
           )}
         />
       )}
-      <div className="grid shrink-0 gap-1.5 border-b border-border p-3.5">
-        <div className="flex min-h-9 min-w-0 items-center gap-2">
-          <ListTree className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <h2 id={titleId} className="min-w-0 truncate text-base font-medium">
-            {summary ? summary.root.agent : "Trace"}
-          </h2>
-          <code className="shrink-0 text-xs text-muted-foreground" title={shown}>
-            {shortId(shown)}
-          </code>
-          <CopyButton value={shown} label="the run's id" />
-          <div className="ml-auto flex shrink-0 items-center gap-0.5">
+      <SidePanelHeader
+        icon={ListTree}
+        titleId={titleId}
+        title={summary ? summary.root.agent : "Trace"}
+        beside={
+          <>
+            <code className="shrink-0 text-xs text-muted-foreground" title={shown}>
+              {shortId(shown)}
+            </code>
+            <CopyButton value={shown} label="the run's id" />
+          </>
+        }
+        actions={
+          <>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-muted-foreground hover:text-foreground"
+                  asChild
+                >
                   <Link href={traceHref(organization, slug, run)} aria-label="Open the trace's page">
                     <SquareArrowOutUpRight />
                   </Link>
@@ -426,13 +307,12 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
             >
               {peekFull ? <Minimize2 /> : <Maximize2 />}
             </PanelAction>
-            <PanelAction label="Close" onClick={close}>
-              <XIcon />
-            </PanelAction>
-          </div>
-        </div>
+          </>
+        }
+        onClose={close}
+      >
         {trace && <TraceMeta trace={trace} organization={organization} slug={slug} />}
-      </div>
+      </SidePanelHeader>
       <div
         aria-busy={read === null || stale}
         className={cn("flex min-h-0 flex-1 flex-col", stale && "opacity-60 transition-opacity")}
@@ -478,7 +358,7 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
           </Note>
         )}
       </div>
-    </div>
+    </SidePanel>
   );
 }
 

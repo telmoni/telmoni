@@ -210,7 +210,7 @@ function RefreshControl() {
         <DropdownMenuTrigger asChild>
           <Button variant="outline" className="-ml-px rounded-l-none" aria-label="Refresh every">
             {refreshLabel(refresh)}
-            <ChevronDownIcon className="opacity-50" />
+            <ChevronDownIcon className="text-muted-foreground" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
@@ -291,7 +291,7 @@ function ColumnsMenu() {
                 }}
               >
                 <ChevronRightIcon
-                  className={cn("text-muted-foreground transition-transform", open && "rotate-90")}
+                  className={cn("transition-transform", open && "rotate-90")}
                 />
                 {block.label}
                 <span className="font-normal text-muted-foreground tabular-nums">

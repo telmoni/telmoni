@@ -234,6 +234,7 @@ function SpansButton({
           ref={ref}
           variant="ghost"
           size="icon"
+          className="text-muted-foreground hover:text-foreground"
           aria-label={label}
           aria-expanded={shown}
           onClick={onClick}

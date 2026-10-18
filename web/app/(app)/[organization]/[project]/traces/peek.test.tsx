@@ -9,10 +9,11 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
 }));
 
-const setCovered = vi.fn();
+const uncover = vi.fn();
+const cover = vi.fn(() => uncover);
 let mockShell: HTMLElement | null = null;
 vi.mock("@/components/console-shell", () => ({
-  useConsoleShell: () => ({ element: mockShell, setCovered }),
+  useConsoleShell: () => ({ element: mockShell, cover }),
 }));
 
 import { TracePeek } from "@/components/traces/peek";
@@ -114,7 +115,7 @@ describe("TracePeek", () => {
     expect(await within(panel).findByRole("tree", { name: "Spans" })).toBeInTheDocument();
     expect(within(panel).getByRole("heading", { level: 2 })).toHaveTextContent("agent-a");
     expect(fetchMock).toHaveBeenCalledWith(`/api/traces/${RUN_A}?project=project_1`, expect.anything());
-    expect(setCovered).toHaveBeenLastCalledWith(false);
+    expect(cover).not.toHaveBeenCalled();
   });
 
   it("steps to the next run in place, and holds still at the list's start", async () => {
@@ -140,7 +141,8 @@ describe("TracePeek", () => {
     const panel = screen.getByRole("dialog");
     fireEvent.click(within(panel).getByRole("button", { name: "Full size" }));
     expect(panel).toHaveAttribute("data-mode", "full");
-    expect(setCovered).toHaveBeenLastCalledWith(true);
+    expect(cover).toHaveBeenCalledTimes(1);
+    expect(uncover).not.toHaveBeenCalled();
     expect(within(panel).getByRole("button", { name: "Exit full size" })).toBeInTheDocument();
   });
 

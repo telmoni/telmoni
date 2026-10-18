@@ -6,6 +6,7 @@ import { Suspense } from "react";
 import { ConsoleHeader } from "@/components/console-header";
 import { ConsoleShell } from "@/components/console-shell";
 import { ConsoleSidebar } from "@/components/console-sidebar";
+import { CreatePanels } from "@/components/create-panels";
 import { KeyboardShortcuts } from "@/components/keyboard-shortcuts";
 import { SkipLink } from "@/components/skip-link";
 import { NAV_COLLAPSED_COOKIE } from "@/lib/console-nav";
@@ -112,26 +113,33 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               <Suspense fallback={null}>
                 <ExtensionBanner />
               </Suspense>
-              {/* The console's host, ahead of a new organization's URL, as
-                  its Settings show it; the badge beside the organization's
-                  name, and what the new-organization dialog says, are slots,
-                  filled by a console built on this one. */}
+              {/* The badge beside the organization's name, and what New
+                  organization says, are slots, filled by a console built on
+                  this one; the console's host goes ahead of a new
+                  organization's URL, as its Settings show it. */}
               <ConsoleHeader
-                host={new URL(env.AUTH_URL).host}
                 organizationBadge={
                   <Suspense fallback={null}>
                     <ExtensionOrganizationBadge />
                   </Suspense>
                 }
-                createOrganizationNotice={
-                  <Suspense fallback={null}>
-                    <ExtensionCreateOrganizationNotice />
-                  </Suspense>
-                }
               />
               <div className="flex min-h-0 flex-1">
                 <ConsoleSidebar version={VERSION} />
-                <ConsoleShell>{children}</ConsoleShell>
+                <ConsoleShell
+                  panels={
+                    <CreatePanels
+                      host={new URL(env.AUTH_URL).host}
+                      notice={
+                        <Suspense fallback={null}>
+                          <ExtensionCreateOrganizationNotice />
+                        </Suspense>
+                      }
+                    />
+                  }
+                >
+                  {children}
+                </ConsoleShell>
               </div>
             </SidebarProvider>
           </PagePrimaryActionProvider>

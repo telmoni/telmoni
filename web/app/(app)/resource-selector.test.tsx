@@ -15,16 +15,16 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
 }));
 
-// The dialogs are the create flows' own concern; here they only have to be
-// offered, so each is a stub, and whether the caller may create is set per
-// test.
+// The panels are the create flows' own concern (`create-panels.test.tsx`);
+// here a menu only has to open one, and whether the caller may create is set
+// per test.
 let canCreate = true;
 vi.mock("@/components/create-project", () => ({
-  CreateProjectDialog: () => null,
   useCanCreateProjects: () => canCreate,
 }));
-vi.mock("@/components/create-organization", () => ({
-  CreateOrganizationDialog: ({ notice }: { notice?: React.ReactNode }) => <>{notice}</>,
+const openCreate = vi.fn();
+vi.mock("@/components/console-ui-context", () => ({
+  useConsoleUi: () => ({ openCreate }),
 }));
 
 function organization(slug: string, role: OrganizationEntry["role"]): OrganizationEntry {
@@ -45,7 +45,6 @@ const elsewhere: ProjectEverywhere = {
 function renderSelector(
   badge?: React.ReactNode,
   projects: Project[] = [project("p1", "Atlas"), project("p2", "Beacon")],
-  notice?: React.ReactNode,
 ) {
   return render(
     <StoreProvider
@@ -59,11 +58,7 @@ function renderSelector(
       projects={projects}
       projectsElsewhere={[elsewhere]}
     >
-      <ResourceSelector
-        host="console.test"
-        organizationBadge={badge}
-        createOrganizationNotice={notice}
-      />
+      <ResourceSelector organizationBadge={badge} />
     </StoreProvider>,
   );
 }
@@ -76,6 +71,7 @@ function open(trigger: HTMLElement): HTMLElement {
 beforeEach(() => {
   pathname = "/acme";
   canCreate = true;
+  openCreate.mockClear();
   window.localStorage.clear();
 });
 
@@ -121,11 +117,20 @@ describe("the switcher", () => {
     expect(within(trigger).getByTestId("plan")).toHaveTextContent("Hobby");
   });
 
-  // `components/extension/create-organization-notice.tsx`: what a console
-  // built on this one says a new organization starts on, in the dialog.
-  it("hands the new-organization dialog the notice it is handed", () => {
-    renderSelector(undefined, undefined, <p data-testid="notice">A new one starts on Pro.</p>);
-    expect(screen.getByTestId("notice")).toHaveTextContent("A new one starts on Pro.");
+  // The row a panel is opened from is gone once the menu shuts, so the panel
+  // hands the focus back to the menu's trigger.
+  it("opens New organization in its panel, handing it the menu's trigger", () => {
+    renderSelector();
+    const trigger = screen.getByRole("button", { name: "Select an organization" });
+    fireEvent.click(within(open(trigger)).getByRole("menuitem", { name: "New organization" }));
+    expect(openCreate).toHaveBeenCalledWith("organization", trigger);
+  });
+
+  it("opens New project in its panel, handing it the menu's trigger", () => {
+    renderSelector();
+    const trigger = screen.getByRole("button", { name: "Select a project" });
+    fireEvent.click(within(open(trigger)).getByRole("menuitem", { name: "New project" }));
+    expect(openCreate).toHaveBeenCalledWith("project", trigger);
   });
 
   it("lists every organization the person can stand in, the active one first, with its settings", () => {

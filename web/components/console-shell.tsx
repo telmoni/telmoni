@@ -16,29 +16,36 @@ import { AgentPanel } from "@/components/agent-panel";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 type ConsoleShellValue = {
-  /** The content area — under the header, beside the rail — for a panel of
-   *  the page's own to stand in over the page and cover neither: the trace
-   *  list's peek (`components/traces/peek.tsx`). It does not scroll with the
-   *  page, so the panel holds still as the list moves under it. `null` until
-   *  it is drawn. */
+  /** The content area — under the header, beside the rail — for a side panel
+   *  to stand in over the page and cover neither (`side-panel.tsx`). It does
+   *  not scroll with the page, so the panel holds still as the page moves
+   *  under it. `null` until it is drawn. */
   element: HTMLElement | null;
-  /** Says a panel covers the page whole, which takes the page out of reach of
-   *  the keyboard and of a screen reader (`inert`) until it says otherwise.
-   *  Set on the element at once rather than drawn, so a panel shutting can
-   *  hand the focus back to the page in the same moment. */
-  setCovered: (covered: boolean) => void;
+  /** Takes the page out of reach of the keyboard and of a screen reader
+   *  (`inert`) while a panel covers it whole, until the release it answers is
+   *  called: two may cover it at once, a new project over a trace. Set on the
+   *  element at once rather than drawn, so a panel shutting can hand the
+   *  focus back to the page in the same moment. */
+  cover: () => () => void;
 };
 
 const ConsoleShellContext = createContext<ConsoleShellValue>({
   element: null,
-  setCovered: () => {},
+  cover: () => () => {},
 });
 
 export function useConsoleShell(): ConsoleShellValue {
   return useContext(ConsoleShellContext);
 }
 
-export function ConsoleShell({ children }: { children: ReactNode }) {
+export function ConsoleShell({
+  panels,
+  children,
+}: {
+  /** The panels the console opens over any page (`create-panels.tsx`). */
+  panels?: ReactNode;
+  children: ReactNode;
+}) {
   const rootRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const mainRef = useRef<HTMLElement>(null);
@@ -47,10 +54,17 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
     shellRef.current = element;
     setShell(element);
   }, []);
-  const setCovered = useCallback((covered: boolean) => {
-    if (mainRef.current) mainRef.current.inert = covered;
+  const covers = useRef(new Set<symbol>());
+  const cover = useCallback(() => {
+    const mine = Symbol();
+    covers.current.add(mine);
+    if (mainRef.current) mainRef.current.inert = true;
+    return () => {
+      covers.current.delete(mine);
+      if (mainRef.current) mainRef.current.inert = covers.current.size > 0;
+    };
   }, []);
-  const value = useMemo(() => ({ element: shell, setCovered }), [shell, setCovered]);
+  const value = useMemo(() => ({ element: shell, cover }), [shell, cover]);
   const pathname = usePathname();
 
   // A new page opens at its top. Next's own scrolling on a navigation is the
@@ -117,6 +131,7 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
             </div>
           </ScrollArea>
         </div>
+        {panels}
         <AgentPanel />
       </div>
     </ConsoleShellContext.Provider>

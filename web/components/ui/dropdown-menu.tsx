@@ -95,7 +95,9 @@ function DropdownMenuItem({
         "data-inset:pl-8",
         "data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive dark:data-[variant=destructive]:focus:bg-destructive/20",
         "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4",
-        "data-[variant=destructive]:[&_svg]:text-destructive",
+        // Muted as the header's and the palette's icons are, unless coloured on purpose.
+        "[&_svg:not([class*='text-'])]:text-muted-foreground",
+        "data-[variant=destructive]:[&_svg]:text-destructive!",
         className
       )}
       {...props}
@@ -117,6 +119,7 @@ function DropdownMenuCheckboxItem({
         "focus:bg-accent/50 focus:text-accent-foreground",
         "data-disabled:cursor-not-allowed data-disabled:opacity-50",
         "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4",
+        "[&_svg:not([class*='text-'])]:text-muted-foreground",
         className
       )}
       checked={checked}
@@ -156,6 +159,7 @@ function DropdownMenuRadioItem({
         "focus:bg-accent/50 focus:text-accent-foreground",
         "data-disabled:cursor-not-allowed data-disabled:opacity-50",
         "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4",
+        "[&_svg:not([class*='text-'])]:text-muted-foreground",
         className
       )}
       {...props}
@@ -249,6 +253,7 @@ function DropdownMenuSubTrigger({
         "data-[state=open]:bg-accent data-[state=open]:text-accent-foreground",
         "data-inset:pl-8",
         "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4",
+        "[&_svg:not([class*='text-'])]:text-muted-foreground",
         className
       )}
       {...props}

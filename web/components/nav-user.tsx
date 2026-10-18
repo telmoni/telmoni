@@ -61,7 +61,8 @@ const CORNER_CHOICES = [
 }>;
 
 // `SegmentedSwitch`'s shape, built from Radix menu items instead of buttons;
-// its track classes are repeated on the two groups below.
+// its track classes are repeated on the two groups below. Each icon is
+// `text-inherit`, the segment's colour, which a menu row would mute.
 const SWITCH_SEGMENT = [
   "size-7 justify-center gap-0 p-0 pl-0 rounded-none",
   "[&>span:first-child]:hidden",
@@ -212,7 +213,7 @@ export function NavUser() {
                     onSelect={(e) => e.preventDefault()}
                     className={cn(SWITCH_SEGMENT)}
                   >
-                    <Icon className="size-3.5" />
+                    <Icon className="size-3.5 text-inherit" />
                   </DropdownMenuRadioItem>
                 ))}
               </DropdownMenuRadioGroup>
@@ -241,7 +242,7 @@ export function NavUser() {
                     onSelect={(e) => e.preventDefault()}
                     className={cn(SWITCH_SEGMENT)}
                   >
-                    <Icon className="size-3.5" />
+                    <Icon className="size-3.5 text-inherit" />
                   </DropdownMenuRadioItem>
                 ))}
               </DropdownMenuRadioGroup>
@@ -272,7 +273,7 @@ export function NavUser() {
               form.submit();
             }}
           >
-            <LogOut className="size-4 shrink-0 text-muted-foreground" />
+            <LogOut />
             Sign out
           </DropdownMenuItem>
         </DropdownMenuContent>
