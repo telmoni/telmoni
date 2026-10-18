@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::db::{self, NotificationsLane};
-use crate::{delivery, uninstall};
+use crate::{delivery, retention, uninstall};
 
 /// Most feed rows a read returns (newest first; a dropdown, not an export).
 const FEED_LIMIT: i64 = 50;
@@ -370,37 +370,111 @@ pub async fn purge_organization(
     organization_id: &OrganizationId,
 ) -> Result<u64, TelmoniError> {
     let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
-    let purged = db::purge_organization(&mut tx, organization_id).await?;
+    let purged = db::purge_organization_connections(&mut tx, organization_id).await?;
     let filed = uninstall::file(&mut tx, &purged.connections).await?;
     tx.commit().await?;
     uninstall::settle_soon(state, filed);
+    let rows = purged.rows + purge_feed(state, db::FeedOf::Organization(organization_id)).await?;
     tracing::info!(
         organization_id = %organization_id,
-        purged = purged.rows,
+        purged = rows,
         "notifications purge: the organization's feeds removed"
     );
-    Ok(purged.rows)
+    Ok(rows)
 }
 
 /// Everything held for one project, and an uninstall filed for each workspace
 /// its connectors reached: before a transfer, as the old owner's grants must not
-/// post the new owner's events, after a delete, and again by the sweep.
+/// post the new owner's events, after a delete, and again by the sweep. The
+/// connections go in a transaction of their own, committed before the feed.
 pub async fn purge_project(
     state: &Arc<AppState>,
     project_id: &ProjectId,
 ) -> Result<u64, TelmoniError> {
     let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
     db::wait_no_longer(&mut tx).await?;
-    let purged = db::purge_project(&mut tx, project_id).await?;
+    let purged = db::purge_project_connections(&mut tx, project_id).await?;
     let filed = uninstall::file(&mut tx, &purged.connections).await?;
+    tx.commit().await?;
+    uninstall::settle_soon(state, filed);
+    let rows = purged.rows + purge_feed(state, db::FeedOf::Project(project_id)).await?;
+    tracing::info!(
+        project_id = %project_id,
+        purged = rows,
+        "notifications purge: the project's rows removed"
+    );
+    Ok(rows)
+}
+
+/// Everything held for one project before it is handed to another organization,
+/// in one transaction — the feed in bounded statements, before the connections, the
+/// order an erasure and the retention sweep write them, and once more after, for a
+/// notice raised meanwhile — so a move refused leaves it as it was; the caller's
+/// budget bounds it, and the uninstalls filed are settled after the commit.
+pub async fn purge_project_for_move(
+    state: &Arc<AppState>,
+    project_id: &ProjectId,
+) -> Result<u64, TelmoniError> {
+    let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
+    db::wait_no_longer(&mut tx).await?;
+    let mut rows = 0;
+    loop {
+        let removed = db::purge_feed_chunk(
+            &mut tx,
+            db::FeedOf::Project(project_id),
+            retention::SWEEP_CHUNK,
+        )
+        .await?;
+        rows += removed;
+        if removed < feed_chunk() {
+            break;
+        }
+    }
+    let purged = db::purge_project_connections(&mut tx, project_id).await?;
+    let filed = uninstall::file(&mut tx, &purged.connections).await?;
+    rows += purged.rows;
+    // A notice raised while the feed went — a retirement's, a monitor's, a seat's
+    // emitted after auth's commit — goes last; one an erasure holds costs a wait the
+    // deadlock detector ends, and the move is tried again.
+    rows += db::purge_feed_chunk(
+        &mut tx,
+        db::FeedOf::Project(project_id),
+        retention::SWEEP_CHUNK,
+    )
+    .await?;
     tx.commit().await?;
     uninstall::settle_soon(state, filed);
     tracing::info!(
         project_id = %project_id,
-        purged = purged.rows,
-        "notifications purge: the project's rows removed"
+        purged = rows,
+        "notifications purge: the project's rows removed before its move"
     );
-    Ok(purged.rows)
+    Ok(rows)
+}
+
+/// A feed, a chunk a transaction, so no statement outgrows the role's five seconds
+/// and a purge cut short keeps what it did. One that outruns the retention sweep's
+/// rounds is an `Err`, for its caller to try again where it stopped.
+async fn purge_feed(state: &AppState, of: db::FeedOf<'_>) -> Result<u64, TelmoniError> {
+    let mut rows = 0;
+    for _ in 0..retention::SWEEP_MAX_ROUNDS {
+        let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
+        db::wait_no_longer(&mut tx).await?;
+        let removed = db::purge_feed_chunk(&mut tx, of, retention::SWEEP_CHUNK).await?;
+        tx.commit().await?;
+        rows += removed;
+        if removed < feed_chunk() {
+            return Ok(rows);
+        }
+    }
+    Err(TelmoniError::Internal(format!(
+        "the feed outran the purge's rounds after {rows} rows, kept; the next try goes on"
+    )))
+}
+
+/// The retention sweep's chunk, as the rows a statement answers are counted.
+fn feed_chunk() -> u64 {
+    u64::try_from(retention::SWEEP_CHUNK).unwrap_or(u64::MAX)
 }
 
 /// A person's account erasure: every notice that named them, on every feed

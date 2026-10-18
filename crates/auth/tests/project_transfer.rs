@@ -1521,7 +1521,7 @@ async fn the_connectors_are_purged_before_the_move_and_a_refused_purge_moves_not
     );
     assert_eq!(
         calls.calls(),
-        [SiblingCall::PurgeProject(h.project.clone())],
+        [SiblingCall::PurgeProjectForMove(h.project.clone())],
         "the purge was asked for the project, once"
     );
     assert_eq!(organization_of_project(&pool, &h.project).await, h.source);
@@ -1550,7 +1550,7 @@ async fn the_connectors_are_purged_before_the_move_and_a_refused_purge_moves_not
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
         calls.calls(),
-        [SiblingCall::PurgeProject(h.project.clone())],
+        [SiblingCall::PurgeProjectForMove(h.project.clone())],
         "the purge ran before the move"
     );
     assert_eq!(organization_of_project(&pool, &h.project).await, h.admins);
@@ -1596,7 +1596,7 @@ async fn the_settings_move_first_and_a_transfer_that_does_not_finish_settles_the
         project_id: h.project.clone(),
         organization_id: organization.to_owned(),
     };
-    let purged = SiblingCall::PurgeProject(h.project.clone());
+    let purged = SiblingCall::PurgeProjectForMove(h.project.clone());
     assert_eq!(
         offer(&pool, &h, OWNER, &h.source, ADMIN).await.0,
         StatusCode::OK

@@ -444,11 +444,18 @@ async fn an_organization_purge_clears_every_table_and_spares_every_other_organiz
     }
 
     let mut tx = maintenance_scope(&pool, NotificationsLane).await.unwrap();
-    let purged = db::purge_organization(&mut tx, &oid(ORGANIZATION))
+    let purged = db::purge_organization_connections(&mut tx, &oid(ORGANIZATION))
+        .await
+        .unwrap();
+    let feed = db::purge_feed_chunk(&mut tx, db::FeedOf::Organization(&oid(ORGANIZATION)), 5)
         .await
         .unwrap();
     tx.commit().await.unwrap();
-    assert_eq!(purged.rows, 1, "the organization's one feed row");
+    assert_eq!(
+        (purged.rows, feed),
+        (0, 1),
+        "the organization's one feed row"
+    );
 
     let gone: i64 =
         sqlx::query_scalar("SELECT count(*) FROM notifications.feed WHERE project_id = $1")

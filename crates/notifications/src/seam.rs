@@ -49,6 +49,10 @@ impl Notifications for Notifier {
         handler::purge_project(&self.0, project_id).await
     }
 
+    async fn purge_project_for_move(&self, project_id: &ProjectId) -> Result<u64, TelmoniError> {
+        handler::purge_project_for_move(&self.0, project_id).await
+    }
+
     async fn redact_person(&self, user_id: &UserId) -> Result<u64, TelmoniError> {
         handler::redact_person(&self.0, user_id).await
     }

@@ -58,6 +58,8 @@ pub enum SiblingCall {
     PurgeOrganization(String),
     /// `Notifications::purge_project`.
     PurgeProject(String),
+    /// `Notifications::purge_project_for_move`.
+    PurgeProjectForMove(String),
     /// `Notifications::redact_person`.
     RedactPerson(String),
     /// `Telemetry::purge_organization`.
@@ -194,7 +196,7 @@ impl RecordingNotifications {
         self
     }
 
-    /// Script the next `purge_project` answer.
+    /// Script the next `purge_project` or `purge_project_for_move` answer.
     pub fn on_purge_project(&self, answer: Result<u64, TelmoniError>) -> &Self {
         self.purge_project.push(answer);
         self
@@ -295,6 +297,14 @@ impl Notifications for RecordingNotifications {
 
     async fn purge_project(&self, project_id: &ProjectId) -> Result<u64, TelmoniError> {
         self.record(SiblingCall::PurgeProject(project_id.to_string()))
+            .await;
+        self.purge_project
+            .take()
+            .unwrap_or_else(|| self.default_answer())
+    }
+
+    async fn purge_project_for_move(&self, project_id: &ProjectId) -> Result<u64, TelmoniError> {
+        self.record(SiblingCall::PurgeProjectForMove(project_id.to_string()))
             .await;
         self.purge_project
             .take()

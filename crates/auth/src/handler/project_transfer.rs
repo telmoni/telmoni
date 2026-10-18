@@ -1262,7 +1262,14 @@ async fn move_purge_and_commit(
     )
     .await
     {
-        Ok(()) => crate::handler::deletion::purge_project_connectors(state, project_id).await,
+        Ok(()) => {
+            crate::handler::deletion::purge_project_connectors(
+                state,
+                project_id,
+                crate::handler::deletion::Teardown::ForMove,
+            )
+            .await
+        }
         Err(e) => Err(e),
     };
     if let Err(e) = ready {

@@ -899,6 +899,10 @@ impl Notifications for NoticeLog {
         Ok(u64::try_from(gone).unwrap_or(u64::MAX))
     }
 
+    async fn purge_project_for_move(&self, project_id: &ProjectId) -> Result<u64, TelmoniError> {
+        self.purge_project(project_id).await
+    }
+
     async fn redact_person(&self, _user_id: &UserId) -> Result<u64, TelmoniError> {
         Ok(0)
     }

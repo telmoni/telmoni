@@ -228,7 +228,13 @@ pub async fn delete_project(
 
     acting.tx.commit().await?;
 
-    if let Err(e) = super::deletion::purge_project_connectors(&state, &project_id).await {
+    if let Err(e) = super::deletion::purge_project_connectors(
+        &state,
+        &project_id,
+        super::deletion::Teardown::AfterDelete,
+    )
+    .await
+    {
         tracing::warn!(project_id = %project_id, error = %e, "the connectors' project purge failed after the delete");
     }
     if let Err(e) = super::deletion::purge_project_telemetry(&state, &project_id).await {

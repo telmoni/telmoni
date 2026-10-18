@@ -358,11 +358,16 @@ pub trait Notifications: Send + Sync {
         organization_id: &OrganizationId,
     ) -> Result<u64, TelmoniError>;
 
-    /// Everything held for one project: before it is handed to another
-    /// organization, and after it is deleted. Idempotent. One that fails
-    /// after a delete is retried by the module's hourly retention sweep, so
-    /// the caller only logs it.
+    /// Everything held for one project after it is deleted: its connections
+    /// first, then its feed in chunks, so a purge cut short keeps what it did.
+    /// Idempotent; one that fails is retried by the module's hourly retention
+    /// sweep, so the caller only logs it.
     async fn purge_project(&self, project_id: &ProjectId) -> Result<u64, TelmoniError>;
+
+    /// The same before the project is handed to another organization, in one
+    /// transaction, so a move refused leaves it as it was: the caller's budget
+    /// bounds it, and a move it does not fit is refused.
+    async fn purge_project_for_move(&self, project_id: &ProjectId) -> Result<u64, TelmoniError>;
 
     /// Every notice that named the person, rewritten to name a former
     /// member, on every feed and every delivery still holding the text.

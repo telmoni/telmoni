@@ -376,16 +376,16 @@ pub async fn try_retention_lock(
     .await
 }
 
-/// What a purge removed: how many rows, and its connections as the delete
-/// found them, for the uninstalls it files.
+/// What a purge's delete of connections removed: how many connection and handshake
+/// rows, and the connections as the delete found them, for the uninstalls it files.
 pub struct Purged {
     pub rows: u64,
     pub connections: Vec<SealedConnection>,
 }
 
-/// Hard-delete the organization's rows, every table in one lane, but the
-/// uninstalls it files: two lanes once left one table's rows behind.
-pub async fn purge_organization(
+/// Hard-delete the organization's connections and handshakes, but not the
+/// uninstalls it files; its feeds go after, chunk by chunk ([`purge_feed_chunk`]).
+pub async fn purge_organization_connections(
     tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
     organization_id: &OrganizationId,
 ) -> sqlx::Result<Purged> {
@@ -397,17 +397,41 @@ pub async fn purge_organization(
     .fetch_all(tx.conn())
     .await?;
     let mut rows = u64::try_from(connections.len()).unwrap_or(u64::MAX);
-    for sql in [
-        "DELETE FROM notifications.oauth_states WHERE organization_id = $1",
-        "DELETE FROM notifications.feed WHERE organization_id = $1",
-    ] {
-        rows += sqlx::query(sql)
-            .bind(organization_id)
-            .execute(tx.conn())
-            .await?
-            .rows_affected();
-    }
+    rows += sqlx::query("DELETE FROM notifications.oauth_states WHERE organization_id = $1")
+        .bind(organization_id)
+        .execute(tx.conn())
+        .await?
+        .rows_affected();
     Ok(Purged { rows, connections })
+}
+
+/// Whose feed a purge deletes.
+#[derive(Debug, Clone, Copy)]
+pub enum FeedOf<'a> {
+    Project(&'a ProjectId),
+    Organization(&'a OrganizationId),
+}
+
+/// Deletes up to `chunk` of the feed's rows in one bounded statement, as the retention
+/// windows go, so a feed of any size fits the role's five seconds a statement at a time.
+pub async fn purge_feed_chunk(
+    tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
+    of: FeedOf<'_>,
+    chunk: i64,
+) -> sqlx::Result<u64> {
+    let query = match of {
+        FeedOf::Project(project_id) => sqlx::query(
+            "DELETE FROM notifications.feed
+              WHERE id IN (SELECT id FROM notifications.feed WHERE project_id = $1 LIMIT $2)",
+        )
+        .bind(project_id),
+        FeedOf::Organization(organization_id) => sqlx::query(
+            "DELETE FROM notifications.feed
+              WHERE id IN (SELECT id FROM notifications.feed WHERE organization_id = $1 LIMIT $2)",
+        )
+        .bind(organization_id),
+    };
+    Ok(query.bind(chunk).execute(tx.conn()).await?.rows_affected())
 }
 
 /// A page of the projects this module's rows name, in id order after
@@ -504,9 +528,10 @@ pub async fn workspace_organizations(
     Ok(organizations)
 }
 
-/// Hard-delete one PROJECT's rows but its uninstalls, as a transfer or a delete
-/// leaves them; deliveries and their attempts go by the cascade.
-pub async fn purge_project(
+/// Hard-delete one PROJECT's connections and handshakes, as a transfer or a delete
+/// leaves them, but not its uninstalls; deliveries and their attempts go by the
+/// cascade, and the feed after, chunk by chunk ([`purge_feed_chunk`]).
+pub async fn purge_project_connections(
     tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
     project_id: &ProjectId,
 ) -> sqlx::Result<Purged> {
@@ -517,16 +542,11 @@ pub async fn purge_project(
     .fetch_all(tx.conn())
     .await?;
     let mut rows = u64::try_from(connections.len()).unwrap_or(u64::MAX);
-    for sql in [
-        "DELETE FROM notifications.oauth_states WHERE project_id = $1",
-        "DELETE FROM notifications.feed WHERE project_id = $1",
-    ] {
-        rows += sqlx::query(sql)
-            .bind(project_id)
-            .execute(tx.conn())
-            .await?
-            .rows_affected();
-    }
+    rows += sqlx::query("DELETE FROM notifications.oauth_states WHERE project_id = $1")
+        .bind(project_id)
+        .execute(tx.conn())
+        .await?
+        .rows_affected();
     Ok(Purged { rows, connections })
 }
 

@@ -266,7 +266,7 @@ sequenceDiagram
   A->>A: delete the row under the organization's lock, cascading, audited
 ```
 
-- **A project** goes at once, its notices and connectors, its spans and totals — marked deleted, gone from every read within moments as the store applies the mark, and off the disk by the night's `rotate` — and its telemetry settings, monitors and ping keys purged after the commit, the keys first — a purge cut short tried again by the module's own sweep until it lands, notifications' every hour and telemetry's every ten minutes, and an export in flight as the project goes marked deleted once its rows are in — and the agent's index catching up within the hour.
+- **A project** goes at once, its notices and connectors, its spans and totals — marked deleted, gone from every read within moments as the store applies the mark, and off the disk by the night's `rotate` — and its telemetry settings, monitors and ping keys purged after the commit, the keys first — notifications' purge its connectors first, in a transaction of their own, then its notices in chunks, so one cut short keeps what it did (before a move, one transaction instead, so a move refused leaves the project as it was), a purge cut short tried again by the module's own sweep until it lands, notifications' every hour and telemetry's every ten minutes, and an export in flight as the project goes marked deleted once its rows are in — and the agent's index catching up within the hour.
 - **A person** is erased across every module, the identity provider first, and the erasure stops if that fails.
 - **The audit log outlives what it describes**: its rows name ids, with no foreign key to cascade.
 

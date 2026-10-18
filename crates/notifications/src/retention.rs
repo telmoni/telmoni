@@ -24,13 +24,13 @@ const SWEEP_EVERY: Duration = Duration::from_secs(3600);
 /// still sweeps.
 const START_DELAY: Duration = Duration::from_secs(60);
 
-/// Rows deleted per statement per table.
-const SWEEP_CHUNK: i64 = 5_000;
+/// Rows deleted per statement per table, by the sweep and by the purges' feed deletes.
+pub(crate) const SWEEP_CHUNK: i64 = 5_000;
 
-/// How many chunks one sweep will take before waiting for the next hour. It
-/// only binds after a backlog, where stopping is right: an instance deleting
-/// for an hour is an instance not delivering.
-const SWEEP_MAX_ROUNDS: usize = 200;
+/// How many chunks one sweep, or one purge of a feed, will take before leaving
+/// the rest to the next: it only binds after a backlog, where stopping is right,
+/// since an instance deleting for an hour is an instance not delivering.
+pub(crate) const SWEEP_MAX_ROUNDS: usize = 200;
 
 /// Projects read, and asked of auth, at once.
 const PROJECTS_PAGE: i64 = 500;

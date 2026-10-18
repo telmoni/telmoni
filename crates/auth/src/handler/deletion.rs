@@ -175,6 +175,15 @@ const PROJECT_PURGE_BUDGET: std::time::Duration = std::time::Duration::from_secs
 /// under the console's ten seconds.
 const TELEMETRY_PROJECT_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// Why notifications tears a project down, which decides how.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Teardown {
+    /// After a delete: a purge cut short keeps its progress for the sweep.
+    AfterDelete,
+    /// Before a move: one transaction, so a move refused leaves the project as it was.
+    ForMove,
+}
+
 /// Notifications' teardown for one project — its connectors, their
 /// deliveries, its feed and any handshake in flight — before it is handed
 /// to another organization, whose events must never post into the old
@@ -185,16 +194,18 @@ const TELEMETRY_PROJECT_BUDGET: std::time::Duration = std::time::Duration::from_
 pub(crate) async fn purge_project_connectors(
     state: &AppState,
     project_id: &ProjectId,
+    teardown: Teardown,
 ) -> Result<(), TelmoniError> {
     let Some(notifications) = state.siblings.notifications.as_ref() else {
         return Ok(());
     };
-    match tokio::time::timeout(
-        PROJECT_PURGE_BUDGET,
-        notifications.purge_project(project_id),
-    )
-    .await
-    {
+    let purge = async {
+        match teardown {
+            Teardown::AfterDelete => notifications.purge_project(project_id).await,
+            Teardown::ForMove => notifications.purge_project_for_move(project_id).await,
+        }
+    };
+    match tokio::time::timeout(PROJECT_PURGE_BUDGET, purge).await {
         Ok(done) => done.map(|_| ()),
         Err(_) => Err(TelmoniError::Internal("the project purge timed out".into())),
     }

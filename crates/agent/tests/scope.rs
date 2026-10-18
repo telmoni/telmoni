@@ -92,6 +92,9 @@ impl Notifications for Absent {
     async fn purge_project(&self, _: &ProjectId) -> Result<u64, TelmoniError> {
         Ok(0)
     }
+    async fn purge_project_for_move(&self, _: &ProjectId) -> Result<u64, TelmoniError> {
+        Ok(0)
+    }
     async fn redact_person(&self, _: &UserId) -> Result<u64, TelmoniError> {
         Ok(0)
     }
