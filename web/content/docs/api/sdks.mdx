@@ -398,6 +398,111 @@ The [coding-agent plugins](/docs/api/coding-agents) are built on it.
 
 ---
 
+## A run across services
+
+An agent whose work spans more than one service — an orchestrator handing a
+task to a worker, a tool served over HTTP — is still one run. Before the
+request leaves, `inject` writes into its headers the W3C `traceparent` of the
+span current inside the run and the run's id and agent as the W3C `baggage`
+members `telmoni.run_id` and `telmoni.agent`, beside whatever members the
+headers hold already. In the service that answers, `extract` reads them back
+as the run continued there: the steps and calls it opens carry the caller's
+run and take the caller's span as their parent, so the trace shows the work
+where it was asked for, and the trace list shows one run, not one a service.
+
+<Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
+  <Tab value="Python">
+    ```python
+    # The orchestrator, inside a run.
+    with telmoni.step("delegate"):
+        headers = {"Content-Type": "application/json"}
+        telmoni.inject(headers)
+        requests.post("https://worker.internal/work", json=task, headers=headers)
+
+    # The worker.
+    @app.post("/work")
+    def work(request):
+        run = telmoni.extract(request.headers)
+        with telmoni.step("work", run=run):
+            ...
+    ```
+  </Tab>
+  <Tab value="TypeScript">
+    ```ts
+    // The orchestrator, inside a run.
+    await run.step('delegate', async (step) => {
+      const headers = new Headers({ 'content-type': 'application/json' });
+      telmoni.inject(headers, step);
+      await fetch('https://worker.internal/work', { method: 'POST', headers, body });
+    });
+
+    // The worker.
+    app.post('/work', async (req, res) => {
+      const run = telmoni.extract(req.headers);
+      await run?.step('work', async (step) => { /* ... */ });
+    });
+    ```
+  </Tab>
+  <Tab value="Go">
+    ```go
+    // The orchestrator, inside a run.
+    stepCtx, step := run.Step(ctx, "delegate")
+    req, _ := http.NewRequestWithContext(stepCtx, http.MethodPost, "https://worker.internal/work", body)
+    client.Inject(stepCtx, req.Header)
+    resp, err := httpClient.Do(req)
+    step.End()
+
+    // The worker.
+    func work(w http.ResponseWriter, r *http.Request) {
+    	ctx := client.Extract(r.Context(), r.Header)
+    	run := telmoni.RunFromContext(ctx)
+    	workCtx, step := run.Step(ctx, "work")
+    	defer step.End()
+    	// ...
+    }
+    ```
+  </Tab>
+  <Tab value="Rust">
+    ```rust
+    // The orchestrator, inside a run.
+    let step = run.step("delegate");
+    let mut headers: HashMap<String, String> = HashMap::new();
+    telmoni.inject_from(&step.context(), &mut headers);
+    // or, with the step attached or a future run with its context: telmoni.inject(&mut headers)
+    post("https://worker.internal/work", &headers, &task)?;
+    step.end();
+
+    // The worker.
+    let headers: HashMap<String, String> = request.headers_as_map();
+    if let Some(run) = telmoni.extract(&headers) {
+        let step = run.step("work");
+        // ...
+    }
+    ```
+
+    `inject` and `extract` take any `Carrier`: a type that is both an
+    OpenTelemetry `Injector` and `Extractor`, as `HashMap<String, String>`
+    is; wrap a request's own headers in one.
+  </Tab>
+</Tabs>
+
+In TypeScript, `inject` takes the handle to write from, or writes from the
+active context where your application runs OpenTelemetry's context manager;
+in Rust, `inject` reads the current context, which a handle's `attach()` or
+`FutureExt::with_context` sets, and `inject_from` takes a handle's `context()`.
+The worker never ends a run it continued: the orchestrator's own span does,
+and until it arrives the run is open with what the worker sent. Headers that
+name no run — no `traceparent`, no `telmoni.run_id`, a malformed one —
+continue nothing, and a step opened then is outside a run and sends nothing.
+A run sampled out hands nothing on, so no half of it reaches Telmoni. The
+headers carry the run's id and agent and nothing else; a service sending
+under another project's key records the spans as that project's own run, so a
+forged header reaches no other tenant. Telmoni's own helpers write and read
+the headers; no propagator is set globally, since your application's
+propagators are its own.
+
+---
+
 ## What a run sends
 
 A run is a span of its own, named `invoke_agent <agent>`, inside your current
