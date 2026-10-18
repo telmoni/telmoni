@@ -250,7 +250,8 @@ A job that keeps its own log, or a hook that runs once the work it reports is
 over, hands the finished run over whole, as data: its id, a UUID you give and
 keep with the log; its agent, user, session and tags; its start and end and
 how it ended; and its steps and calls, each with its own times. A step holds
-the calls made inside it.
+the calls made inside it. A record the export queue has no room for is refused
+whole, before anything is queued: flush, or wait, and record it again.
 
 <Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
   <Tab value="Python">
