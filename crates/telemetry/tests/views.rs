@@ -380,7 +380,8 @@ async fn a_layout_is_a_view_of_its_own_kind(pool: PgPool) {
             !problem["detail"]
                 .as_str()
                 .unwrap_or_default()
-                .contains("script")
+                .contains("script"),
+            "{body}: {problem}"
         );
     }
     let (status, body) = p
