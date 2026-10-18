@@ -83,11 +83,11 @@ export function TraceFacetsPanel({ organization, slug, query, ui, facets }: Prop
     return facets?.[filter].values.some((v) => v.value.toLowerCase().includes(needle)) ?? false;
   });
 
-  // As wide as the console's rail open (`--spacing-sidebar`), and that width
-  // whether the rail is open or closed.
+  // As wide as the console's rail rows ("the sidebar apps", `--spacing-sidebar-inner`),
+  // and that width whether the rail is open or closed.
   return (
     <aside
-      className="grid w-full shrink-0 content-start gap-2 md:w-sidebar"
+      className="grid w-full shrink-0 content-start gap-2 md:w-sidebar-inner"
       aria-label="Filters"
       aria-busy={pending}
       data-pending={pending ? "" : undefined}
