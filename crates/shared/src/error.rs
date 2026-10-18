@@ -161,21 +161,25 @@ impl TelmoniError {
     }
 
     /// Whether the database did not answer at all, rather than refusing a
-    /// statement: a loop over many items stops on this, since every item
-    /// after would wait the same out.
+    /// statement, so a loop over many items stops: the pool's and the socket's
+    /// errors, and a server going away — shutting down (`57P01`–`57P03`) or
+    /// dropping the connection (class `08`) — which it says once before those take over.
     #[must_use]
-    pub const fn is_database_unanswered(&self) -> bool {
-        matches!(
-            self,
+    pub fn is_database_unanswered(&self) -> bool {
+        match self {
             Self::Database(
                 sqlx::Error::PoolTimedOut
-                    | sqlx::Error::PoolClosed
-                    | sqlx::Error::WorkerCrashed
-                    | sqlx::Error::Io(_)
-                    | sqlx::Error::Tls(_)
-                    | sqlx::Error::Protocol(_)
-            )
-        )
+                | sqlx::Error::PoolClosed
+                | sqlx::Error::WorkerCrashed
+                | sqlx::Error::Io(_)
+                | sqlx::Error::Tls(_)
+                | sqlx::Error::Protocol(_),
+            ) => true,
+            Self::Database(sqlx::Error::Database(e)) => e.code().is_some_and(|code| {
+                code.starts_with("08") || matches!(&*code, "57P01" | "57P02" | "57P03")
+            }),
+            _ => false,
+        }
     }
 
     /// Render this error as an RFC 9457 problem-details payload.
@@ -709,6 +713,48 @@ mod tests {
         assert_eq!(pd.type_uri, "/errors/authz/insufficient-role");
         assert_eq!(pd.status, 403);
         assert_eq!(pd.detail.as_deref(), Some("required admin, have member"));
+    }
+
+    /// A server going away is unanswered; a refusal, a wait ended or a deadlock is not.
+    #[test]
+    fn a_server_going_away_is_unanswered_and_a_refusal_is_not() {
+        #[derive(Debug)]
+        struct Said(&'static str);
+        impl std::fmt::Display for Said {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(self.0)
+            }
+        }
+        impl std::error::Error for Said {}
+        impl sqlx::error::DatabaseError for Said {
+            fn message(&self) -> &str {
+                self.0
+            }
+            fn code(&self) -> Option<std::borrow::Cow<'_, str>> {
+                Some(std::borrow::Cow::Borrowed(self.0))
+            }
+            fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+                self
+            }
+            fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
+                self
+            }
+            fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
+                self
+            }
+            fn kind(&self) -> sqlx::error::ErrorKind {
+                sqlx::error::ErrorKind::Other
+            }
+        }
+        let said = |code| TelmoniError::Database(sqlx::Error::Database(Box::new(Said(code))));
+        for code in ["57P01", "57P02", "57P03", "08000", "08003", "08006"] {
+            assert!(said(code).is_database_unanswered(), "{code}");
+        }
+        for code in ["55P03", "57014", "40P01", "23505", "42501"] {
+            assert!(!said(code).is_database_unanswered(), "{code}");
+        }
+        assert!(TelmoniError::Database(sqlx::Error::PoolTimedOut).is_database_unanswered());
+        assert!(!TelmoniError::Database(sqlx::Error::RowNotFound).is_database_unanswered());
     }
 
     #[test]
