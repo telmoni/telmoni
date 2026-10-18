@@ -21,7 +21,12 @@ project's connectors and their delivery histories.
    the channel shows as **Connected**. Connecting raises a `connector_connected`
    notice, which the channel receives as its first message.
 
-Authorization handshakes must be completed within 10 minutes.
+Authorization handshakes must be completed within 10 minutes. An install
+Slack approved that Telmoni then refuses — the project moved to another
+organization, or your role changed, while you were at Slack — creates no
+connection: the app is uninstalled from the workspace again unless another
+connection on the platform uses it there, its bot token kept, sealed, until
+Slack has answered, a day at most, as after a disconnect.
 
 **Send test** on a connected channel posts one message, titled "Slack is
 connected", that reads "This is a test from Telmoni. Notices for this project
