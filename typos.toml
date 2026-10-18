@@ -15,6 +15,10 @@ extend-exclude = [
 extend-ignore-re = [
   # Hex IDs (commit shas, action pins, KMS keys) often trip the dictionary.
   "\\b[0-9a-f]{7,40}\\b",
+  # A W3C traceparent, which the SDKs' fixtures also send upper-cased.
+  "\\b[0-9a-fA-F]{2}-[0-9a-fA-F]{32}-[0-9a-fA-F]{16}-[0-9a-fA-F]{2}\\b",
+  # "café", percent-encoded in the SDKs' baggage fixture.
+  "caf%C3%A9",
   # Plural all-caps SQL keywords ("SELECTs", "INSERTs", "CHECKs", …): typos
   # splits the uppercase run and flags the truncated head (SELEC, CHEC, …).
   "\\b(SELECT|INSERT|UPDATE|DELETE|UNIQUE|CHECK)s\\b",
