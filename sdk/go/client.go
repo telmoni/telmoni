@@ -184,12 +184,16 @@ func (c *Client) Flush(ctx context.Context) error {
 	return c.provider.ForceFlush(ctx)
 }
 
-// Shutdown flushes, then stops the exporter's worker. Nothing is sent after
-// it. It waits for ctx, or 30 seconds when ctx has no deadline, and a batch
-// still retrying past that is left to the worker, which the process exit
-// takes with it.
+// Shutdown flushes, then stops the exporter's worker. Nothing ended after it
+// is sent, even when ctx is already done. It waits for ctx, or 30 seconds
+// when ctx has no deadline, and a batch still retrying past that is left to
+// the worker, which the process exit takes with it.
 func (c *Client) Shutdown(ctx context.Context) error {
-	return c.provider.Shutdown(ctx)
+	// Ours first: the provider's returns before reaching it when ctx is
+	// already done, and never runs twice. Its error can only be ctx's.
+	err := c.processor.Shutdown(ctx)
+	_ = c.provider.Shutdown(ctx)
+	return err
 }
 
 // String formats the client for %v and %s, with the API key redacted. fmt

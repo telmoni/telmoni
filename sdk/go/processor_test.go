@@ -72,6 +72,24 @@ func TestShutdownDrainsWhatIsQueued(t *testing.T) {
 	}
 }
 
+func TestAShutdownWhoseContextIsDoneStillStopsTheWorker(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	// As a deferred Shutdown under signal.NotifyContext finds it after Ctrl-C.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := h.client.Shutdown(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("shutting down: %v", err)
+	}
+	_, late := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	late.End()
+	if err := h.client.Flush(context.Background()); err != nil {
+		t.Errorf("a flush after shutdown: %v", err)
+	}
+	if got := len(h.transport.all()); got != 0 {
+		t.Errorf("%d exports after a shutdown, want none", got)
+	}
+}
+
 func TestABatchFillsAndGoesWithoutAFlush(t *testing.T) {
 	h := newHarness(t, testConfig(), nil, telmoni.WithQueue(2048, 3, time.Minute))
 	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
