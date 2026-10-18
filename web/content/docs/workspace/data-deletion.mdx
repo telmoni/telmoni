@@ -34,9 +34,11 @@ after typing the project's name
   did not answer, or by a ping still being answered that held the project
   past the purge's two seconds — is tried again every ten minutes until it
   lands, telemetry finding the project through the settings row the failure
-  left, its ping keys gone already; its connectors' purge — cut short by a
-  database that did not answer — is tried again every hour until it lands,
-  and an uninstall Slack did not answer is asked again every hour for a day.
+  left, its ping keys gone already; its connectors' purge — its connectors
+  first, then its feed in chunks, so one cut short by a database that did not
+  answer, or by a feed too large for the request's time, keeps what it did —
+  is tried again every hour until it lands, and an uninstall Slack did not
+  answer is asked again every hour for a day.
 
 ## Deleting an organization
 
