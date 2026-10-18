@@ -543,9 +543,10 @@ is the second lock, not the first.
 ### Sampling
 
 `sample_rate`, on the client or on one run, is the share of runs sent, between
-0 and 1. A run sampled out is dropped whole in the exporter, its start among
-it, never through the trace's sampled flag, so your application's own sampling
-is untouched and the volume Telmoni sees is a dial you hold.
+0 and 1. A run sampled out is dropped whole in the SDK, its start among it,
+never through the trace's sampled flag, so your application's own sampling
+is untouched and the volume Telmoni sees is a dial you hold. A step or call
+still open when its run ends is dropped too, however late it ends.
 
 ### Beside your own OpenTelemetry
 
