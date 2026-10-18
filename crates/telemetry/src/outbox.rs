@@ -424,11 +424,12 @@ async fn drain_batch(state: &Arc<AppState>) -> Result<Settled, TelmoniError> {
         db::delete_outbox(&mut tx, &landed).await?;
     }
     let mut handed_back: Vec<Uuid> = Vec::new();
+    let mut holds: Vec<(Uuid, i64)> = Vec::new();
     for row in held {
         match row.fault {
             Fault::Store => handed_back.push(row.id),
             Fault::Row => {
-                db::hold_outbox(&mut tx, row.id, retry_wait(row.attempts)).await?;
+                holds.push((row.id, retry_wait(row.attempts)));
                 if row.attempts >= MAX_ATTEMPTS {
                     tracing::error!(
                         outbox_id = %row.id,
@@ -440,6 +441,9 @@ async fn drain_batch(state: &Arc<AppState>) -> Result<Settled, TelmoniError> {
                 }
             }
         }
+    }
+    if !holds.is_empty() {
+        db::hold_outbox(&mut tx, &holds).await?;
     }
     if !handed_back.is_empty() {
         db::unlease_outbox(&mut tx, &handed_back).await?;
@@ -1069,7 +1073,7 @@ async fn land_notice(
                 subject_user_id: None,
                 title: &notice.title,
                 body: &notice.body,
-                metadata: notice.metadata.clone(),
+                metadata: notice.metadata,
                 dedup_key: Some(&notice.dedup_key),
             },
         )

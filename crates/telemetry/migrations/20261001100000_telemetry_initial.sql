@@ -188,6 +188,10 @@ CREATE TABLE telemetry.monitors (
 -- names, the agent what a run names, and each must find one monitor.
 CREATE UNIQUE INDEX monitors_project_slug_idx ON telemetry.monitors (project_id, slug);
 CREATE UNIQUE INDEX monitors_project_agent_idx ON telemetry.monitors (project_id, agent);
+-- The rule for every table here: one the organization's purge deletes by
+-- `organization_id` carries an index on it (this, `ping_keys`, `outbox`);
+-- one a cascade takes carries an index on the key the cascade follows
+-- (`open_runs`, by monitor).
 CREATE INDEX monitors_organization_idx ON telemetry.monitors (organization_id);
 -- The ticker's scan: the scheduled monitors by when their next run is due.
 CREATE INDEX monitors_due_idx ON telemetry.monitors (next_due_at) WHERE next_due_at IS NOT NULL;
@@ -329,7 +333,6 @@ CREATE TABLE telemetry.open_runs (
     stall_after_s   INTEGER,
     max_steps       INTEGER,
     max_cost_usd    DOUBLE PRECISION,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     -- A run's id is its own within its project, as `spans` keys the span
     -- by project: a `rid` a script derives from its own name — `uuidgen
     -- --sha1` on the job's name and the day, the stable UUID the manual
@@ -350,8 +353,10 @@ CREATE TABLE telemetry.open_runs (
     CONSTRAINT open_runs_max_cost_check CHECK (max_cost_usd IS NULL OR max_cost_usd > 0)
 );
 
--- A ping that names no run means its monitor's newest open one.
-CREATE INDEX open_runs_monitor_idx ON telemetry.open_runs (monitor_id, started_at DESC);
+-- A ping that names no run means its monitor's newest open one: the index's
+-- first row, the id breaking a tie, as `newest_open_run` orders them; the
+-- monitor's cascade follows it too.
+CREATE INDEX open_runs_monitor_idx ON telemetry.open_runs (monitor_id, started_at DESC, id);
 -- The ticker's scan for silence: the runs held to a stall timeout, by when
 -- they were last heard — every run under a monitor its first ping made has
 -- one, the lane's default, and one under a saved monitor its owner's or
@@ -416,8 +421,10 @@ CREATE TABLE telemetry.outbox (
     CONSTRAINT outbox_attempts_check CHECK (attempts >= 0)
 );
 
--- The purges find a project's rows; the loop takes rows in physical order.
+-- The purges find a project's rows and an organization's (the rule at
+-- `monitors_organization_idx`); the loop takes rows in physical order.
 CREATE INDEX outbox_project_idx ON telemetry.outbox (project_id);
+CREATE INDEX outbox_organization_idx ON telemetry.outbox (organization_id);
 
 ALTER TABLE telemetry.outbox ENABLE ROW LEVEL SECURITY;
 ALTER TABLE telemetry.outbox FORCE ROW LEVEL SECURITY;

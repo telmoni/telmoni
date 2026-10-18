@@ -75,7 +75,8 @@ pub use config::Config;
 /// Shared module state, handed to the seam and to every handler.
 pub struct AppState {
     /// Postgres pool, as the `telemetry` role: each project's settings, its
-    /// saved views and its monitors.
+    /// saved views, its monitors and ping keys, its runs still going, and the
+    /// outbox of what it hands on.
     pub db: PgPool,
     /// Loaded-once configuration.
     pub config: Config,

@@ -14,7 +14,7 @@ use std::sync::Arc;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -30,7 +30,7 @@ use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam;
 use telmoni_shared::types::{PING_KEY_PREFIX, mint_ping_key};
 use telmoni_shared::{
-    AuditAction, AuthError, OrganizationId, ProjectId, TelmoniError, TelmoniResourceKind,
+    AuditAction, AuthError, OrganizationId, ProjectId, Redacted, TelmoniError, TelmoniResourceKind,
 };
 
 use crate::AppState;
@@ -79,9 +79,17 @@ pub struct PingKeyList {
 /// A key as it is minted: the key itself, shown this once, and its row.
 #[derive(Debug, Serialize)]
 pub struct MintedPingKey {
-    pub key: String,
+    /// `Redacted`, so a log of the struct prints no key; the answer alone
+    /// spells it out (`exposed`).
+    #[serde(serialize_with = "exposed")]
+    pub key: Redacted,
     #[serde(flatten)]
     pub ping_key: PingKey,
+}
+
+/// The one deliberate write of a minted key: into the answer that shows it once.
+fn exposed<S: Serializer>(key: &Redacted, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(key.expose())
 }
 
 /// A key the project does not have.
@@ -89,9 +97,10 @@ fn not_found() -> TelmoniError {
     AuthError::NotFound("no ping key by that id in this project".into()).into()
 }
 
-/// `GET /internal/telemetry/ping-keys` — the project's keys, as its API keys
-/// are listed: what each shows of itself, when it was made, its last ping
-/// and when it was retired.
+/// `GET /internal/telemetry/ping-keys` — the project's keys: each by its
+/// prefix and first eight characters (`SHOWN`), since a ping key has no name
+/// to go by where an API key is listed by its name and shows nothing of
+/// itself; when it was made, its last ping and when it was retired.
 pub async fn list_ping_keys(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -157,14 +166,14 @@ async fn mint_key(
         ))
         .into());
     }
-    let key = mint_ping_key();
-    let shown: String = key.chars().take(SHOWN).collect();
+    let key = Redacted::from(mint_ping_key());
+    let shown: String = key.expose().chars().take(SHOWN).collect();
     let row = db::insert_ping_key(
         tx,
         project_id,
         organization_id,
         Uuid::new_v4(),
-        &sha256_hex(key.as_bytes()),
+        &sha256_hex(key.expose().as_bytes()),
         &shown,
     )
     .await?;

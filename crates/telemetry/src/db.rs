@@ -1034,7 +1034,8 @@ pub async fn resolve_ping_key(
 /// A live key `k` the rotation retires: `$1` seconds past its last ping (or
 /// its minting) with a newer live key standing, so crontab lines have had
 /// their week to move over.
-const STALE_KEY: &str = "coalesce(k.last_ping_at, k.created_at) < now() - make_interval(secs => $1)
+const STALE_KEY: &str =
+    "coalesce(k.last_ping_at, k.created_at) < now() - make_interval(secs => $1::bigint)
             AND EXISTS (SELECT 1 FROM telemetry.ping_keys n
                          WHERE n.project_id = k.project_id
                            AND n.retired_at IS NULL
@@ -1370,18 +1371,20 @@ pub async fn delete_outbox(
     )
 }
 
-/// A row that did not land, held for `secs` before the loop takes it again.
+/// Rows that did not land, each held for its own `secs` before the loop
+/// takes it again: one statement for the batch.
 pub async fn hold_outbox(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
-    id: Uuid,
-    secs: i64,
+    holds: &[(Uuid, i64)],
 ) -> sqlx::Result<()> {
+    let (ids, secs): (Vec<Uuid>, Vec<i64>) = holds.iter().copied().unzip();
     sqlx::query(
-        "UPDATE telemetry.outbox
-            SET lease_until = now() + make_interval(secs => $2::bigint)
-          WHERE id = $1",
+        "UPDATE telemetry.outbox o
+            SET lease_until = now() + make_interval(secs => h.secs)
+           FROM unnest($1::uuid[], $2::bigint[]) AS h(id, secs)
+          WHERE o.id = h.id",
     )
-    .bind(id)
+    .bind(ids)
     .bind(secs)
     .execute(tx.conn())
     .await?;
