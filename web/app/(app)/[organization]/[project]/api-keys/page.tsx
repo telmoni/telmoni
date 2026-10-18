@@ -15,7 +15,7 @@ import {
 } from "@/lib/server/data";
 import { SCOPE_LABEL } from "@/lib/api-key-scopes";
 import { projectPath } from "@/lib/slug";
-import { Role } from "@/lib/types/enums";
+import { administersProject } from "@/lib/project-role";
 
 import { KeysActions } from "./_manage";
 import { TokenRowActions } from "./_row-actions";
@@ -36,7 +36,7 @@ export default async function ApiKeysPage({
   const listing = await fetchTokens(project.id);
   if (listing.kind === "unavailable") return <ServiceUnavailable />;
 
-  const canManage = project.role === Role.Owner || project.role === Role.Admin;
+  const canManage = administersProject(project.role);
 
   if (listing.kind === "forbidden") {
     return (

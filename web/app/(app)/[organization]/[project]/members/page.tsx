@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { MemberCeilingNotice, atCeiling } from "@/components/member-ceiling";
 import { ownerContact } from "@/lib/identity";
+import { administersProject } from "@/lib/project-role";
 import { Role } from "@/lib/types/enums";
 import {
   activeOrganization,
@@ -46,7 +47,7 @@ export default async function MembersPage({
   }
 
   const isOwner = project.role === Role.Owner;
-  const canManage = isOwner || project.role === Role.Admin;
+  const canManage = administersProject(project.role);
   // A seat here counts against the owning organization's ceiling: at it, an
   // invitation would be refused, so the button goes and the deployment's
   // sentence stands in its place.

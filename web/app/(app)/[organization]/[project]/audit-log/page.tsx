@@ -8,7 +8,7 @@ import {
   getServerContext,
 } from "@/lib/server/data";
 import { projectPath } from "@/lib/slug";
-import { Role } from "@/lib/types/enums";
+import { administersProject } from "@/lib/project-role";
 
 import { AuditLog } from "../../../_audit-log";
 
@@ -27,9 +27,7 @@ export default async function AuditPage({
   if (!gate) return <ServiceUnavailable />;
   const overview = projectPath(organization, slug);
 
-  const canReadAudit =
-    project?.role === Role.Owner || project?.role === Role.Admin;
-  if (!project || !canReadAudit) {
+  if (!project || !administersProject(project.role)) {
     return (
       <AccessDenied
         what="this project's audit log"

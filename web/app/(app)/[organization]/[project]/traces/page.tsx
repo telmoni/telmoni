@@ -38,7 +38,7 @@ import {
   tracesHref,
   unfiltered,
 } from "@/lib/traces";
-import { Role } from "@/lib/types/enums";
+import { administersProject } from "@/lib/project-role";
 import { UTC_OFFSET_COOKIE, parseUtcOffset } from "@/lib/utc-offset";
 import { cn } from "@/lib/utils";
 
@@ -86,7 +86,7 @@ export default async function TracesPage({
   const { list } = access;
   const days = query.days ?? list.days;
   const filtered = activeFilters(query).length > 0;
-  const canSave = project.role === Role.Owner || project.role === Role.Admin;
+  const canSave = administersProject(project.role);
   const last = pageCount(list.total, list.limit);
   const lastPage = last > 1 ? last : undefined;
   // The rows this render drew, as one token: the table is keyed by it, and

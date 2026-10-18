@@ -5,6 +5,7 @@ import { SettingsRow } from "@/components/settings-row";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { Card } from "@/components/ui/card";
 import { fetchContentMode, fetchProjectBySlug, getServerContext } from "@/lib/server/data";
+import { administersProject } from "@/lib/project-role";
 import { Role } from "@/lib/types/enums";
 
 import { ContentModeForm } from "./_content-mode";
@@ -31,7 +32,7 @@ export default async function SettingsPage({
 
   // A project's Owner is its organization's: no seat makes anyone else one.
   const isOwner = project.role === Role.Owner;
-  const canEdit = isOwner || project.role === Role.Admin;
+  const canEdit = administersProject(project.role);
 
   return (
     <>

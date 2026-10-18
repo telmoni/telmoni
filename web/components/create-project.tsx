@@ -19,7 +19,7 @@ import { createProjectAction } from "@/app/(app)/actions";
 import { organizationLabel } from "@/lib/identity";
 import { projectPath } from "@/lib/slug";
 import { useActiveOrganization, useAddProject, useRoles } from "@/lib/store";
-import { Role } from "@/lib/types/enums";
+import { administersOrganization } from "@/lib/organization-role";
 
 const MAX_PROJECT_NAME = 100;
 
@@ -27,8 +27,7 @@ const MAX_PROJECT_NAME = 100;
 /// IN: every entry point's question, since the panel creates there and asks
 /// about no other.
 export function useCanCreateProjects(): boolean {
-  const role = useRoles().organization;
-  return role === Role.Owner || role === Role.Admin;
+  return administersOrganization(useRoles().organization);
 }
 
 /** New project, in the console's side panel (`create-panels.tsx`). */

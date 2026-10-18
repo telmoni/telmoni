@@ -24,7 +24,7 @@ import {
   getServerContext,
   type Connection,
 } from "@/lib/server/data";
-import { Role } from "@/lib/types/enums";
+import { administersProject } from "@/lib/project-role";
 
 import { DeliveriesButton } from "./_deliveries";
 import { ConnectionActions } from "./_manage";
@@ -76,7 +76,7 @@ export default async function ConnectorsPage({
   const projectId = project.id;
   const listing = await fetchConnectors(projectId);
 
-  const canManage = project.role === Role.Owner || project.role === Role.Admin;
+  const canManage = administersProject(project.role);
   const notice =
     connected && isProvider(connected)
       ? `${PROVIDER_LABEL[connected]} is connected. A first message is on its way to the channel.`
