@@ -888,7 +888,8 @@ pub async fn count_workspace_connections(
 /// `Debug` prints the token's length and nothing else.
 #[derive(FromRow)]
 pub struct Uninstall {
-    /// The deleted connection's id: the token's associated data.
+    /// The filing's id, the token's associated data: a deleted connection's own, or
+    /// one no connection row has for a refused install.
     pub id: Uuid,
     pub provider: Provider,
     pub external_workspace_id: String,
@@ -934,34 +935,102 @@ pub async fn file_uninstall<B: Binding>(
     let Some(token) = connection.token() else {
         return Ok(None);
     };
+    let filed = insert_uninstall(
+        tx,
+        &UninstallRow {
+            id: connection.id,
+            project_id: &connection.project_id,
+            organization_id: &connection.organization_id,
+            provider: connection.provider,
+            external_workspace_id: &connection.external_workspace_id,
+            key_version: connection.key_version,
+            wrapped_dek: &connection.wrapped_dek,
+            token: &token,
+            shard_key: connection.shard_key,
+        },
+    )
+    .await?;
+    Ok(Some(filed))
+}
+
+/// Files the uninstall an install refused after the vendor's exchange may need: the
+/// app is installed, its token sealed under `refused.id`, an id no connection row has.
+/// `None` for a provider not installed per workspace, or a grant holding no token.
+pub async fn file_uninstall_for<B: Binding>(
+    tx: &mut Scoped<'_, B>,
+    refused: &NewConnection<'_>,
+) -> sqlx::Result<Option<Uninstall>> {
+    let Some(token) = refused
+        .token
+        .filter(|_| refused.provider.installed_per_workspace())
+    else {
+        return Ok(None);
+    };
+    let filed = insert_uninstall(
+        tx,
+        &UninstallRow {
+            id: refused.id,
+            project_id: refused.project_id.as_str(),
+            organization_id: refused.organization_id.as_str(),
+            provider: refused.provider,
+            external_workspace_id: refused.external_workspace_id,
+            key_version: refused.key_version,
+            wrapped_dek: refused.wrapped_dek,
+            token,
+            shard_key: telmoni_shared::derive_shard_key(refused.organization_id),
+        },
+    )
+    .await?;
+    Ok(Some(filed))
+}
+
+/// What an uninstall is filed with, from a deleted row or a refused install.
+struct UninstallRow<'a> {
+    id: Uuid,
+    project_id: &'a str,
+    organization_id: &'a str,
+    provider: Provider,
+    external_workspace_id: &'a str,
+    key_version: i16,
+    wrapped_dek: &'a [u8],
+    token: &'a Sealed,
+    shard_key: Uuid,
+}
+
+/// The insert both filings make. No two share an id — a connection's delete files
+/// under its own, a refused install under one no row has — so each settles for itself.
+async fn insert_uninstall<B: Binding>(
+    tx: &mut Scoped<'_, B>,
+    row: &UninstallRow<'_>,
+) -> sqlx::Result<Uninstall> {
     sqlx::query(
         "INSERT INTO notifications.uninstalls
              (id, project_id, organization_id, provider, external_workspace_id, key_version,
               wrapped_dek, token_ciphertext, token_nonce, shard_key)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
     )
-    .bind(connection.id)
-    .bind(&connection.project_id)
-    .bind(&connection.organization_id)
-    .bind(connection.provider)
-    .bind(&connection.external_workspace_id)
-    .bind(connection.key_version)
-    .bind(&connection.wrapped_dek)
-    .bind(&token.ciphertext)
-    .bind(&token.nonce)
-    .bind(connection.shard_key)
+    .bind(row.id)
+    .bind(row.project_id)
+    .bind(row.organization_id)
+    .bind(row.provider)
+    .bind(row.external_workspace_id)
+    .bind(row.key_version)
+    .bind(row.wrapped_dek)
+    .bind(&row.token.ciphertext)
+    .bind(&row.token.nonce)
+    .bind(row.shard_key)
     .execute(tx.conn())
     .await?;
-    Ok(Some(Uninstall {
-        id: connection.id,
-        provider: connection.provider,
-        external_workspace_id: connection.external_workspace_id.clone(),
-        key_version: connection.key_version,
-        wrapped_dek: connection.wrapped_dek.clone(),
-        token_ciphertext: token.ciphertext,
-        token_nonce: token.nonce,
+    Ok(Uninstall {
+        id: row.id,
+        provider: row.provider,
+        external_workspace_id: row.external_workspace_id.to_owned(),
+        key_version: row.key_version,
+        wrapped_dek: row.wrapped_dek.to_vec(),
+        token_ciphertext: row.token.ciphertext.clone(),
+        token_nonce: row.token.nonce.clone(),
         attempts: 0,
-    }))
+    })
 }
 
 /// Removes a settled uninstall.

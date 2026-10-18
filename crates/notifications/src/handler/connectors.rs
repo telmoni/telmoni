@@ -20,14 +20,15 @@ use telmoni_shared::envelope::{KEK_VERSION, Kek, KekError, Sealed};
 use telmoni_shared::extract::{Json, correlation_id};
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::{
-    AuditAction, AuthError, NotificationKind, ParseEnumError, ProjectId, Redacted, TelmoniError,
-    TelmoniResourceKind, TenantError,
+    AuditAction, AuthError, NotificationKind, OrganizationId, ParseEnumError, ProjectId, Redacted,
+    TelmoniError, TelmoniResourceKind, TenantError, UserId,
 };
 use uuid::Uuid;
 
 use crate::AppState;
 use crate::connector::{
-    ConnectionStatus, Connector, DeliveryError, Event, Grant, Provider, Terminal, webhook,
+    ConnectionStatus, Connector, DeliveryError, Event, Grant, Installed, Provider, Terminal,
+    webhook,
 };
 use crate::db::{self, NotificationsLane};
 use crate::handler::{ProjectIdentity, authorize};
@@ -93,7 +94,7 @@ fn kek_for(state: &AppState) -> Result<&Kek, TelmoniError> {
 /// An install whose data key could not be wrapped: a 502 with a sentence and
 /// nothing inserted, rather than a grant stored under a key we could never open.
 fn kek_refused(e: &KekError) -> TelmoniError {
-    tracing::error!(error = %e, "the connector grant could not be sealed; the install is refused");
+    tracing::error!(error = %e, "the connector grant could not be sealed; nothing is stored");
     TelmoniError::Upstream(Box::new(telmoni_shared::error_schema::ProblemDetails {
         type_uri: "/errors/connectors/key-unavailable".into(),
         title: "the grant could not be sealed".into(),
@@ -272,37 +273,6 @@ pub async fn callback(
     let creds =
         seal_connection_credentials(&state, kek, id, &installed.url, installed.token.as_ref())
             .await?;
-
-    let mut tx = project_scope(&state.db, &identity.project_id)
-        .await?
-        .bind_organization(&identity.organization_id)
-        .await?;
-    // Held to the commit: an uninstall's count of the workspace waits for this row.
-    if provider.installed_per_workspace() {
-        db::lock_workspace(&mut tx, provider, &installed.workspace_id).await?;
-    }
-    super::hold_chain(
-        &state,
-        &mut tx,
-        &identity,
-        Verb::Create,
-        Resource::Connector,
-    )
-    .await?;
-    let now_existing = db::existing_connection_id(
-        &mut tx,
-        &identity.project_id,
-        provider,
-        &installed.workspace_id,
-        &installed.channel_id,
-    )
-    .await?;
-    if now_existing != existing {
-        return Err(AuthError::Conflict(
-            "this channel was connected by another request just now; refresh and try again".into(),
-        )
-        .into());
-    }
     let row = db::NewConnection {
         id,
         project_id: &identity.project_id,
@@ -320,10 +290,161 @@ pub async fn callback(
         event_kinds: None,
         installed_by: &identity.user_id,
     };
+    // A refusal past the exchange leaves the app installed with its token held by
+    // nobody: its uninstall is filed as a delete's is, for the settle to decide.
+    let (summary, notices) =
+        match connect_installed(&state, &identity, &row, existing, request_id).await {
+            Ok(connected) => connected,
+            Err(refused) => {
+                file_refused_install(
+                    &state,
+                    RefusedInstall {
+                        id,
+                        project_id: identity.project_id.clone(),
+                        organization_id: identity.organization_id.clone(),
+                        user_id: identity.user_id.clone(),
+                        provider,
+                        installed,
+                        creds,
+                        reconnect: existing.is_some(),
+                    },
+                );
+                return Err(refused);
+            }
+        };
+    tracing::info!(
+        connection_id = %summary.id,
+        project_id = %identity.project_id,
+        provider = %provider,
+        reconnect = existing.is_some(),
+        "connector connected"
+    );
+    delivery::spawn_first_attempts(&state, notices);
+    Ok((StatusCode::CREATED, Json(json!({ "connection": summary }))))
+}
+
+/// What a refused install leaves to file: the exchange's answer, and the
+/// credentials sealed for the row never written.
+struct RefusedInstall {
+    id: Uuid,
+    project_id: ProjectId,
+    organization_id: OrganizationId,
+    user_id: UserId,
+    provider: Provider,
+    installed: Installed,
+    creds: SealedCredentials,
+    reconnect: bool,
+}
+
+/// Files the uninstall a refused install's token may need, on a task of its own, so
+/// a caller that stops waiting loses nothing. A reconnect's token is sealed under its
+/// row's id, which the row's own delete files under too, so it is sealed again under
+/// an id of this filing's own; one the key service will not seal is dropped, logged.
+fn file_refused_install(state: &Arc<AppState>, refused: RefusedInstall) {
+    let state = Arc::clone(state);
+    tokio::spawn(async move {
+        let RefusedInstall {
+            id,
+            project_id,
+            organization_id,
+            user_id,
+            provider,
+            installed,
+            creds,
+            reconnect,
+        } = refused;
+        let resealed;
+        let (id, creds) = if reconnect {
+            let fresh = Uuid::now_v7();
+            let sealed = async {
+                let kek = kek_for(&state)?;
+                seal_connection_credentials(
+                    &state,
+                    kek,
+                    fresh,
+                    &installed.url,
+                    installed.token.as_ref(),
+                )
+                .await
+            }
+            .await;
+            match sealed {
+                Ok(sealed) => {
+                    resealed = sealed;
+                    (fresh, &resealed)
+                }
+                Err(e) => {
+                    tracing::error!(
+                        connection_id = %id,
+                        provider = %provider,
+                        error = %e,
+                        "a refused reconnect's token could not be sealed again; the app stays \
+                         installed in its workspace"
+                    );
+                    return;
+                }
+            }
+        } else {
+            (id, &creds)
+        };
+        let row = db::NewConnection {
+            id,
+            project_id: &project_id,
+            organization_id: &organization_id,
+            provider,
+            external_workspace_id: &installed.workspace_id,
+            external_workspace_name: installed.workspace_name.as_deref(),
+            channel_id: &installed.channel_id,
+            channel_name: &installed.channel_name,
+            target: &creds.target,
+            key_version: KEK_VERSION,
+            wrapped_dek: &creds.wrapped_dek,
+            token: creds.token.as_ref(),
+            scopes: &installed.scopes,
+            event_kinds: None,
+            installed_by: &user_id,
+        };
+        uninstall::file_refused(&state, &row).await;
+    });
+}
+
+/// The install's one transaction: the workspace's lock, auth's answer again under
+/// the chain lock, the row written or reconnected, its audit row and its notices.
+async fn connect_installed(
+    state: &AppState,
+    identity: &ProjectIdentity,
+    row: &db::NewConnection<'_>,
+    existing: Option<Uuid>,
+    request_id: Option<&str>,
+) -> Result<(db::ConnectionSummary, Vec<Uuid>), TelmoniError> {
+    let provider = row.provider;
+    let mut tx = project_scope(&state.db, &identity.project_id)
+        .await?
+        .bind_organization(&identity.organization_id)
+        .await?;
+    // Held to the commit: an uninstall's count of the workspace waits for this row.
+    if provider.installed_per_workspace() {
+        db::lock_workspace(&mut tx, provider, row.external_workspace_id).await?;
+    }
+    super::hold_chain(state, &mut tx, identity, Verb::Create, Resource::Connector).await?;
+    let now_existing = db::existing_connection_id(
+        &mut tx,
+        &identity.project_id,
+        provider,
+        row.external_workspace_id,
+        row.channel_id,
+    )
+    .await?;
+    if now_existing != existing {
+        return Err(AuthError::Conflict(
+            "this channel was connected by another request just now; refresh and try again".into(),
+        )
+        .into());
+    }
     let summary = if existing.is_some() {
-        db::reconnect_connection(&mut tx, &row).await?
+        db::reconnect_connection(&mut tx, row).await?
     } else {
-        db::insert_connection(&mut tx, &row).await?
+        db::insert_connection(&mut tx, row).await?
     };
     emit_audit(
         &mut tx,
@@ -339,8 +460,8 @@ pub async fn callback(
             user_agent: None,
             metadata: Some(json!({
                 "provider": provider.as_str(),
-                "workspace": installed.workspace_id,
-                "channel": installed.channel_name,
+                "workspace": row.external_workspace_id,
+                "channel": row.channel_name,
                 "reconnect": existing.is_some(),
             })),
         },
@@ -351,20 +472,12 @@ pub async fn callback(
         &identity.project_id,
         &identity.organization_id,
         provider,
-        installed.workspace_name.as_deref(),
-        &installed.channel_name,
+        row.external_workspace_name,
+        row.channel_name,
     )
     .await?;
     tx.commit().await?;
-    tracing::info!(
-        connection_id = %summary.id,
-        project_id = %identity.project_id,
-        provider = %provider,
-        reconnect = existing.is_some(),
-        "connector connected"
-    );
-    delivery::spawn_first_attempts(&state, notices);
-    Ok((StatusCode::CREATED, Json(json!({ "connection": summary }))))
+    Ok((summary, notices))
 }
 
 #[derive(Deserialize)]

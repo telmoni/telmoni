@@ -317,11 +317,12 @@ GRANT SELECT, DELETE ON notifications.oauth_states TO notifications_maintenance;
 -- ══════════════════════════════════════════════════════════════════════════════
 -- 5. UNINSTALLS
 -- ══════════════════════════════════════════════════════════════════════════════
--- A vendor app to uninstall from a workspace a deleted connection reached,
--- once no connection there uses it: filed with its sealed token in the
--- transaction that deletes the connection, settled after the commit, and by
--- the retention sweep where that did not finish. `id` is the connection's, the
--- token's associated data.
+-- A vendor app to uninstall from a workspace a deleted connection reached, or an
+-- install refused after the vendor's exchange, once no connection there uses it:
+-- filed with its sealed token in the transaction that deletes the connection, or
+-- one of the refusal's own, settled after the commit, and by the retention sweep
+-- where that did not finish. `id` is the filing's, the token's associated data: the
+-- deleted connection's, or one no connection row has, so no two filings share a row.
 CREATE TABLE notifications.uninstalls (
     id                    UUID        PRIMARY KEY,
     project_id            TEXT        NOT NULL,
@@ -350,7 +351,8 @@ CREATE POLICY maintenance_access ON notifications.uninstalls
     USING      (current_user = 'notifications_maintenance')
     WITH CHECK (current_user = 'notifications_maintenance');
 
--- A disconnect files its row in the project's scope; the purges file theirs in
--- the lane, which settles each, counting a failed try, and removes it.
+-- A disconnect files its row in the project's scope; the purges and a refused
+-- install file theirs in the lane, which settles each, counting a failed try, and
+-- removes it.
 GRANT SELECT, INSERT, DELETE ON notifications.uninstalls TO notifications_maintenance;
 GRANT UPDATE (attempts) ON notifications.uninstalls TO notifications_maintenance;

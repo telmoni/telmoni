@@ -3870,7 +3870,9 @@ async fn a_webhook_connected_across_its_projects_transfer_is_refused(pool: PgPoo
     assert_eq!(connects_filed(&pool).await, (0, 0));
 }
 
-/// A Slack install finished as its project's transfer commits is refused, nothing filed.
+/// A Slack install finished as its project's transfer commits is refused, no
+/// connection stored, and the app Slack installed is uninstalled again, its token
+/// held by nobody.
 #[sqlx::test]
 async fn a_slack_install_finished_across_its_projects_transfer_is_refused(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -3881,6 +3883,13 @@ async fn a_slack_install_finished_across_its_projects_transfer_is_refused(pool: 
             ResponseTemplate::new(200)
                 .set_body_json(slack_access_ok(&slack_hook_url(&mocks, "new"))),
         )
+        .mount(&mocks)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/apps.uninstall"))
+        .and(header_is("authorization", "Bearer xoxb-live-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "ok": true })))
+        .expect(1)
         .mount(&mocks)
         .await;
     let auth = people();
@@ -3901,6 +3910,16 @@ async fn a_slack_install_finished_across_its_projects_transfer_is_refused(pool: 
     let detail = json_body(resp).await["detail"].to_string();
     assert!(detail.contains("moved to another organization"), "{detail}");
     assert_eq!(connects_filed(&pool).await, (0, 0));
+    uninstalls_settled(&pool).await;
+    assert!(filed_uninstalls(&pool).await.is_empty());
+    let uninstalled = mocks
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.url.path() == "/api/apps.uninstall")
+        .count();
+    assert_eq!(uninstalled, 1, "the refused install's app is uninstalled");
 }
 
 /// A connect by an admin its project's transfer leaves without a seat is refused, nothing filed.

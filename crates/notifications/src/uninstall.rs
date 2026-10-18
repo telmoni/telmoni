@@ -1,9 +1,12 @@
 //! Uninstalling a vendor's app from a workspace once no connection there uses
 //! it. Slack's `apps.uninstall` ends every connection in the workspace, so the
 //! count that decides it is made under the workspace's lock, which an install
-//! takes too. A delete files the uninstall in its own transaction, so neither
-//! a crash nor a caller that stops waiting loses it: it is settled right after
-//! the commit, and the retention sweep settles what that left.
+//! takes too. A delete files the uninstall in its own transaction, so neither a
+//! crash nor a caller that stops waiting loses it; an install refused after its
+//! exchange files one on a task of its own, so only the process ending between the
+//! two can.
+//! Each is settled right after its commit, and the retention sweep settles what
+//! that left.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -67,6 +70,28 @@ pub(crate) fn settle_soon(state: &Arc<AppState>, filed: Vec<Uninstall>) {
             }
         }
     });
+}
+
+/// Files and settles the uninstall an install refused after the vendor's exchange
+/// may need, as a delete's: the app is installed, and its token held by nobody.
+pub(crate) async fn file_refused(state: &Arc<AppState>, refused: &db::NewConnection<'_>) {
+    let filed = async {
+        let mut tx = maintenance_scope(&state.db, NotificationsLane).await?;
+        let filed = db::file_uninstall_for(&mut tx, refused).await?;
+        tx.commit().await?;
+        Ok::<_, TelmoniError>(filed)
+    }
+    .await;
+    match filed {
+        Ok(filed) => settle_soon(state, filed.into_iter().collect()),
+        Err(e) => tracing::error!(
+            uninstall_id = %refused.id,
+            provider = %refused.provider,
+            error = %e,
+            "a refused install's uninstall could not be filed; the app stays installed in its \
+             workspace"
+        ),
+    }
 }
 
 /// What settling an uninstall came to.
