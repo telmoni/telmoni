@@ -27,6 +27,7 @@ use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, Role, SpanKind, SpanStatus};
 use telmoni_telemetry::router;
 use telmoni_telemetry::store::SpanRow;
+use telmoni_telemetry::traces::RUNS_MAX;
 
 const LANE: &str = "/internal/telemetry/traces";
 const OWNER: &str = "user_owner";
@@ -759,6 +760,20 @@ async fn a_download_is_the_lists_rows_as_csv_or_json(pool: PgPool) {
         [b, a].map(|r| r.to_string()),
         "the chosen runs, and none of another project's"
     );
+
+    let page: String = [a, b, c]
+        .into_iter()
+        .chain((3..RUNS_MAX).map(|_| Uuid::new_v4()))
+        .map(|run| format!("&run={run}"))
+        .collect();
+    let (status, _, body) = p.download(MEMBER, &format!("?format=json{page}")).await;
+    assert_eq!(status, StatusCode::OK, "a page's rows, chosen whole");
+    let whole: Value = serde_json::from_slice(&body).expect("JSON");
+    let mut ids = run_ids(&whole);
+    ids.sort();
+    let mut ours = [a, b, c].map(|r| r.to_string());
+    ours.sort();
+    assert_eq!(ids, ours);
 
     for query in ["?format=xlsx", "?run=not-a-run", "?page=2"] {
         let (status, _, _) = p.download(MEMBER, query).await;

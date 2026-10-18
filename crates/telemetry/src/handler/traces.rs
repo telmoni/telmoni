@@ -188,12 +188,7 @@ impl TraceQuery {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        if self.run.len() > RUNS_MAX {
-            return Err(TelmoniError::BadRequest(format!(
-                "a download names at most {RUNS_MAX} runs"
-            )));
-        }
-        let runs = values("run", &self.run, usize::MAX)?
+        let runs = values_up_to("run", &self.run, usize::MAX, RUNS_MAX)?
             .iter()
             .map(|given| {
                 given.parse::<Uuid>().map_err(|_| {
@@ -251,6 +246,17 @@ pub(crate) fn values(
     given: &[String],
     max: usize,
 ) -> Result<Vec<String>, TelmoniError> {
+    values_up_to(name, given, max, FILTER_VALUES_MAX)
+}
+
+/// A parameter's values as [`values`] reads them, `most` of them at most:
+/// the runs a download names are a page's rows, more than a filter admits.
+fn values_up_to(
+    name: &str,
+    given: &[String],
+    max: usize,
+    most: usize,
+) -> Result<Vec<String>, TelmoniError> {
     let mut kept: Vec<String> = Vec::new();
     for value in given {
         let value = value.trim();
@@ -264,9 +270,9 @@ pub(crate) fn values(
         }
         kept.push(value.to_owned());
     }
-    if kept.len() > FILTER_VALUES_MAX {
+    if kept.len() > most {
         return Err(TelmoniError::BadRequest(format!(
-            "{name} is given more than {FILTER_VALUES_MAX} values"
+            "{name} is given more than {most} values"
         )));
     }
     Ok(kept)
@@ -1113,11 +1119,15 @@ mod tests {
         }
     }
 
+    /// A download names up to a page's rows, more than a filter admits; one
+    /// more is refused.
     #[test]
     fn a_download_names_at_most_a_pages_runs() {
         let runs: Vec<(String, String)> = (0..=RUNS_MAX)
             .map(|_| ("run".to_owned(), Uuid::new_v4().to_string()))
             .collect();
+        let page = TraceQuery::read(runs[1..].to_vec(), Reading::Export).expect("read");
+        assert_eq!(page.filter().expect("a page's runs").runs.len(), RUNS_MAX);
         let query = TraceQuery::read(runs, Reading::Export).expect("read");
         assert_eq!(
             query
