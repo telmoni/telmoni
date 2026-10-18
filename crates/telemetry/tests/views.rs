@@ -384,8 +384,14 @@ async fn a_layout_is_a_view_of_its_own_kind(pool: PgPool) {
             "{body}: {problem}"
         );
     }
+    // Sent as a client sends it, percent-encoded: a raw `<` is no URI.
     let (status, body) = p
-        .send(p.request("GET", &format!("{LANE}?kind=page<script>"), MEMBER, None))
+        .send(p.request(
+            "GET",
+            &format!("{LANE}?kind=page%3Cscript%3E"),
+            MEMBER,
+            None,
+        ))
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert!(

@@ -1,6 +1,8 @@
 //! Extractors for HTTP handlers — typed request parts that fail with the
 //! crate's standard errors rather than axum's defaults, so a malformed payload
-//! is a named 400 instead of a 500 or a leaked internal type name.
+//! is a named 400 instead of a 500 or a leaked internal type name, and its
+//! detail a fixed sentence rather than serde's words, which quote the value
+//! the caller sent.
 
 use axum::{
     extract::{
@@ -16,7 +18,7 @@ use crate::error::TelmoniError;
 use crate::middleware::http::{REQUEST_ID_HEADER, is_request_id};
 
 /// Like [`axum::Json`], but a deserialize rejection becomes a
-/// [`TelmoniError::BadRequest`] naming the failure.
+/// [`TelmoniError::BadRequest`] naming the shape expected.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Json<T>(pub T);
 
@@ -63,23 +65,39 @@ where
 
 /// One conversion point so every extractor rejection renders the same 400 problem.
 fn reject(rejection: &impl RejectionText) -> TelmoniError {
-    TelmoniError::BadRequest(rejection.text())
+    TelmoniError::BadRequest(rejection.text().into())
 }
 
-/// The rejection's safe, client-facing body text, generic over both rejections.
+/// What a rejection says to the caller: a sentence fixed per kind, as the
+/// lanes' own refusals name a parameter and never its value.
 trait RejectionText {
-    fn text(&self) -> String;
+    fn text(&self) -> &'static str;
 }
 
 impl RejectionText for JsonRejection {
-    fn text(&self) -> String {
-        self.body_text()
+    fn text(&self) -> &'static str {
+        match self {
+            Self::JsonDataError(_) => {
+                "the JSON body does not have the fields this lane takes, or a field holds a value of the wrong kind"
+            }
+            Self::JsonSyntaxError(_) => "the body is not valid JSON",
+            Self::MissingJsonContentType(_) => "the body must be sent as application/json",
+            Self::BytesRejection(_) => {
+                "the body could not be read, or is larger than this lane takes"
+            }
+            _ => "the body was refused",
+        }
     }
 }
 
 impl RejectionText for QueryRejection {
-    fn text(&self) -> String {
-        self.body_text()
+    fn text(&self) -> &'static str {
+        match self {
+            Self::FailedToDeserializeQueryString(_) => {
+                "the query string does not have the parameters this lane takes, or one holds a value of the wrong kind"
+            }
+            _ => "the query string was refused",
+        }
     }
 }
 
@@ -107,18 +125,64 @@ mod tests {
         a: u32,
     }
 
+    /// A refusal names the shape expected and never the caller's text: an
+    /// unknown field's name, or a value that is no variant, stays out.
     #[tokio::test]
-    async fn json_unknown_field_is_a_400_problem() {
+    async fn json_unknown_field_is_a_400_problem_that_echoes_nothing() {
+        for body in [r#"{"a":1,"surprise":true}"#, r#"{"a":"surprise<script>"}"#] {
+            let req = HttpRequest::builder()
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .expect("build request");
+            let err = Json::<Dto>::from_request(req, &())
+                .await
+                .err()
+                .expect("the body is rejected");
+            let problem = err.to_problem_details();
+            assert_eq!(problem.status, 400);
+            assert_eq!(
+                problem.detail.as_deref(),
+                Some(
+                    "the JSON body does not have the fields this lane takes, or a field holds a value of the wrong kind"
+                ),
+                "{body}"
+            );
+        }
         let req = HttpRequest::builder()
             .method("POST")
             .header("content-type", "application/json")
-            .body(Body::from(r#"{"a":1,"surprise":true}"#))
+            .body(Body::from(r#"{"a":"#))
             .expect("build request");
         let err = Json::<Dto>::from_request(req, &())
             .await
             .err()
-            .expect("an unknown field is rejected");
-        assert_eq!(err.to_problem_details().status, 400);
+            .expect("a body that is no JSON is rejected");
+        assert_eq!(
+            err.to_problem_details().detail.as_deref(),
+            Some("the body is not valid JSON")
+        );
+    }
+
+    #[tokio::test]
+    async fn query_unknown_parameter_is_a_400_problem_that_echoes_nothing() {
+        let (mut parts, _) = HttpRequest::builder()
+            .uri("/?a=1&surprise=2")
+            .body(Body::empty())
+            .expect("build request")
+            .into_parts();
+        let err = Query::<Dto>::from_request_parts(&mut parts, &())
+            .await
+            .err()
+            .expect("an unknown parameter is rejected");
+        let problem = err.to_problem_details();
+        assert_eq!(problem.status, 400);
+        assert_eq!(
+            problem.detail.as_deref(),
+            Some(
+                "the query string does not have the parameters this lane takes, or one holds a value of the wrong kind"
+            )
+        );
     }
 
     #[tokio::test]
