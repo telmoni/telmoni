@@ -455,7 +455,7 @@ A deployment that needs more builds on the core rather than forking it, and the 
 - **Connections multiply with replicas:** each process opens one pool per module, of `SERVICE_POOL_MAX_CONNECTIONS` each, kept small on purpose (`crates/shared/src/db.rs`).
 - **What runs one at a time:** audit writes within one organization, each leader sweep, each indexer source, each retention chunk, `rotate` and `migrate`.
 - **What each process caps:** first delivery attempts, concurrent sends and export builds, each a named constant.
-- **What a trace's read may take:** 5,000 spans or 8,192 of their units, a KiB of text each, its order and its cut found on the light columns before any span is read whole (`traces.rs`).
+- **What each read of ClickHouse may take:** eight seconds and 512 MiB of the one node (`store.rs`), so a read too large fails alone, answered as the store being unavailable, rather than taking the memory every project's reads and writes share; the trace list reaches it at about a hundred thousand runs in its window. A trace stops at 5,000 spans or at 8,192 of their units, a KiB of text each, its order and its cut found on the light columns before any span is read whole (`traces.rs`).
 
 ## Where it goes next
 

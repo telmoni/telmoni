@@ -59,6 +59,12 @@ const INSERT_END_TIMEOUT: Duration = Duration::from_secs(30);
 /// short of that and the console hears why.
 const READ_MAX_EXECUTION_SECS: &str = "8";
 
+/// The most memory a read may take on the server: past it the read fails
+/// alone, as one past [`READ_MAX_EXECUTION_SECS`] does, rather than taking
+/// the memory every project's reads and writes share. 512 MiB lists some
+/// 170,000 runs.
+const READ_MAX_MEMORY_BYTES: &str = "536870912";
+
 /// The longest the client waits for a read: the console's own wait, past
 /// which no one is waiting for the answer. A server or a network that never
 /// answers is given up on too.
@@ -398,7 +404,8 @@ impl Store {
     /// A read of `projects`' rows alone: `sql`, a literal, sent as written,
     /// which names its projects in its own `WHERE` with [`PROJECTS_PARAM`];
     /// its other values bound by the server through [`Read::param`]. The
-    /// server stops it after eight seconds, and the client gives up at ten.
+    /// server stops it after eight seconds or at 512 MiB, and the client
+    /// gives up at ten.
     pub fn read(&self, projects: &Projects, sql: &'static str) -> Read {
         let refused = if !sql.contains(PROJECTS_PARAM) {
             Some("a read names its projects in its own WHERE, with {projects:Array(String)}")
@@ -413,6 +420,7 @@ impl Store {
                 .query_raw(sql)
                 .with_setting(PROJECTS_SETTING, projects.setting())
                 .with_setting("max_execution_time", READ_MAX_EXECUTION_SECS)
+                .with_setting("max_memory_usage", READ_MAX_MEMORY_BYTES)
                 .param("projects", projects.ids()),
             refused,
         }
@@ -421,7 +429,7 @@ impl Store {
 
 /// Whether `sql` has a `SETTINGS` clause of its own, which would win over
 /// the settings the store sets: the projects the policy reads, and the
-/// server's cap on the read's time.
+/// server's caps on the read's time and memory.
 fn carries_settings(sql: &str) -> bool {
     sql.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
         .any(|word| word.eq_ignore_ascii_case("settings"))
