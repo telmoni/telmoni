@@ -132,7 +132,7 @@ fn json_body(bytes: &[u8]) -> Value {
 }
 
 /// An export as our SDK sends one: a model call and its run, one content
-/// attribute among them, and a user id.
+/// attribute among them, and a user id, from `reporter` deployed to staging.
 fn export_json(span_names: &[&str]) -> Value {
     let spans: Vec<Value> = span_names
         .iter()
@@ -161,6 +161,8 @@ fn export_json(span_names: &[&str]) -> Value {
         "resourceSpans": [{
             "resource": { "attributes": [
                 { "key": "service.name", "value": { "stringValue": "reporter" } },
+                { "key": contract::ENVIRONMENT, "value": { "stringValue": "staging" } },
+                { "key": contract::RELEASE, "value": { "stringValue": "2026.10.18" } },
                 { "key": contract::DISTRO_NAME, "value": { "stringValue": contract::DISTRO } }
             ]},
             "scopeSpans": [{ "scope": { "name": contract::SCOPE }, "spans": spans }]
@@ -206,24 +208,35 @@ async fn an_export_is_kept_its_content_dropped_and_its_user_hashed(pool: PgPool)
         "the content itself is never echoed: {message}"
     );
 
-    let rows: Vec<(String, String, String, u64)> = ch
+    let rows: Vec<(String, String, String, u64, String, String, String)> = ch
         .store
         .read(
             &Projects::one(lane.project.clone()),
-            "SELECT name, kind, user_id, input_tokens FROM telemetry.spans \
+            "SELECT name, kind, user_id, input_tokens, environment, release, \
+             toJSONString(attributes) FROM telemetry.spans \
              WHERE project_id IN {projects:Array(String)} ORDER BY name",
         )
         .fetch_all()
         .await
         .expect("the rows");
     assert_eq!(rows.len(), 2, "{rows:?}");
-    for (name, kind, user_id, input_tokens) in &rows {
+    for (name, kind, user_id, input_tokens, environment, release, attributes) in &rows {
         assert!(name.starts_with("chat "), "{name}");
         assert_eq!(kind, "model_call");
         assert_eq!(*input_tokens, 1_200);
         assert_eq!(user_id.len(), 32, "16 bytes of HMAC in hex: {user_id}");
         assert!(user_id.bytes().all(|b| b.is_ascii_hexdigit()));
         assert_ne!(user_id, "acme-42", "never stored as sent");
+        // The deployment is two columns, read off the resource, and no
+        // attribute beside the service's name.
+        assert_eq!(
+            (environment.as_str(), release.as_str()),
+            ("staging", "2026.10.18")
+        );
+        assert_eq!(
+            attributes,
+            r#"{"service.name":"reporter","telemetry.distro.name":"telmoni"}"#
+        );
     }
     assert_eq!(rows[0].2, rows[1].2, "the same user hashes the same");
 

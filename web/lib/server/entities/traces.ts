@@ -46,6 +46,11 @@ export const TraceSchema = z.object({
   cache_write_input_tokens: z.number(),
   models: z.array(z.string()),
   tools: z.array(z.string()),
+  /** The deployments its spans were sent from, each once: one, unless the
+   *  run crossed services deployed apart. */
+  environments: z.array(z.string()),
+  /** The releases its spans were sent from, each once. */
+  releases: z.array(z.string()),
 });
 export type Trace = z.infer<typeof TraceSchema>;
 
@@ -78,6 +83,11 @@ const TraceFacetsSchema = z.object({
   status: FacetSchema,
   model: FacetSchema,
   tool: FacetSchema,
+  environment: FacetSchema,
+  release: FacetSchema,
+  /** Each tag as `key:value`. */
+  tag: FacetSchema,
+  prompt: FacetSchema,
 });
 export type TraceFacets = z.infer<typeof TraceFacetsSchema>;
 
@@ -111,6 +121,10 @@ export const ViewQuerySchema = z.strictObject({
   status: z.array(z.enum(SpanStatus)).optional(),
   model: z.array(z.string()).optional(),
   tool: z.array(z.string()).optional(),
+  environment: z.array(z.string()).optional(),
+  release: z.array(z.string()).optional(),
+  tag: z.array(z.string()).optional(),
+  prompt: z.array(z.string()).optional(),
   sort: z.enum(TraceSort).optional(),
   dir: z.enum(SortDirection).optional(),
   days: z.number().optional(),
@@ -193,6 +207,9 @@ const TraceSpanSchema = z.object({
   cache_write_input_tokens: z.number(),
   user_id: z.string(),
   session_id: z.string(),
+  /** The deployment its resource named, and its release; empty for none. */
+  environment: z.string(),
+  release: z.string(),
   tags: z.record(z.string(), z.string()),
   bound_stall_after_s: z.number().nullable(),
   bound_max_steps: z.number().nullable(),
@@ -222,6 +239,11 @@ export type TraceQuery = {
   status?: SpanStatus[];
   model?: string[];
   tool?: string[];
+  environment?: string[];
+  release?: string[];
+  /** Each `key:value`. */
+  tag?: string[];
+  prompt?: string[];
   sort?: TraceSort;
   dir?: SortDirection;
   days?: number;
@@ -239,6 +261,10 @@ function filtersOf(query: TraceQuery) {
     status: query.status,
     model: query.model,
     tool: query.tool,
+    environment: query.environment,
+    release: query.release,
+    tag: query.tag,
+    prompt: query.prompt,
     days: query.days,
   };
 }

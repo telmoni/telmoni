@@ -49,6 +49,8 @@ const TRACE = {
   cache_write_input_tokens: 50,
   models: ["claude-sonnet-5-5"],
   tools: ["search_docs"],
+  environments: ["production"],
+  releases: ["2026.10.18"],
 };
 const LIST = {
   traces: [TRACE],
@@ -70,6 +72,10 @@ const FACETS = {
   status: { values: [{ value: "ok", runs: 1 }], more: false },
   model: { values: [], more: false },
   tool: { values: [], more: false },
+  environment: { values: [{ value: "production", runs: 1 }], more: false },
+  release: { values: [], more: false },
+  tag: { values: [{ value: "team:search", runs: 1 }], more: false },
+  prompt: { values: [], more: false },
 };
 
 const HISTOGRAM = {
@@ -145,6 +151,8 @@ const SPAN = {
   cache_write_input_tokens: 0,
   user_id: "9f86d081884c7d659a2feaa0c55ad015",
   session_id: "conv-1",
+  environment: "production",
+  release: "2026.10.18",
   tags: { team: "search" },
   bound_stall_after_s: null,
   bound_max_steps: 40,

@@ -23,6 +23,10 @@ pub enum TraceColumn {
     User,
     /// The session the run belongs to.
     Session,
+    /// The deployments its spans were sent from.
+    Environment,
+    /// The releases its spans were sent from.
+    Release,
     /// How the run ended.
     Status,
     /// The class of the error it ended on, never its message.
@@ -58,13 +62,15 @@ pub enum TraceColumn {
 impl TraceColumn {
     /// Every column, in wire order: the list's own, left to right.
     #[must_use]
-    pub const fn all() -> [Self; 20] {
+    pub const fn all() -> [Self; 22] {
         [
             Self::Started,
             Self::Ended,
             Self::Agent,
             Self::User,
             Self::Session,
+            Self::Environment,
+            Self::Release,
             Self::Status,
             Self::ErrorType,
             Self::Steps,
@@ -92,6 +98,8 @@ impl TraceColumn {
             Self::Agent => "agent",
             Self::User => "user",
             Self::Session => "session",
+            Self::Environment => "environment",
+            Self::Release => "release",
             Self::Status => "status",
             Self::ErrorType => "error_type",
             Self::Steps => "steps",
@@ -131,7 +139,7 @@ impl FromStr for TraceColumn {
 mod tests {
     use super::*;
 
-    const ALL: [TraceColumn; 20] = TraceColumn::all();
+    const ALL: [TraceColumn; 22] = TraceColumn::all();
 
     /// `all()` is a hand-written array, so nothing but a `match` forces it to
     /// stay complete: a new variant fails to compile here until it is listed.
@@ -144,6 +152,8 @@ mod tests {
                 | TraceColumn::Agent
                 | TraceColumn::User
                 | TraceColumn::Session
+                | TraceColumn::Environment
+                | TraceColumn::Release
                 | TraceColumn::Status
                 | TraceColumn::ErrorType
                 | TraceColumn::Steps

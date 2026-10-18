@@ -121,6 +121,12 @@ class Exporter:
             _attribute("telemetry.sdk.name", "opentelemetry"),
             _attribute("telemetry.sdk.version", _sdk_version()),
         ]
+        # The deployment, where the configuration names one: never from
+        # OTEL_RESOURCE_ATTRIBUTES, which the application's exporters read.
+        if config.environment is not None:
+            self._resource.append(_attribute(contract.ENVIRONMENT, config.environment))
+        if config.release is not None:
+            self._resource.append(_attribute(contract.RELEASE, config.release))
 
     @property
     def content_mode(self) -> str | None:

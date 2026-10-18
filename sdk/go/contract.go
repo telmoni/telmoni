@@ -22,6 +22,10 @@ const (
 	attrCancelled       = "telmoni.cancelled"
 	// runStart is the span of no duration that opens a run, sent at once.
 	runStart = "telmoni.run.start"
+	// The deployment, on the resource: the configuration's Environment and
+	// Release.
+	attrEnvironment = "deployment.environment.name"
+	attrRelease     = "service.version"
 
 	attrOperation             = "gen_ai.operation.name"
 	attrAgentName             = "gen_ai.agent.name"

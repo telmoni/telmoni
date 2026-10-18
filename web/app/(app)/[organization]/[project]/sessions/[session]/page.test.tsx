@@ -99,6 +99,8 @@ const TRACE_A = {
   cache_write_input_tokens: 50,
   models: ["claude-sonnet-5-5"],
   tools: ["search_docs"],
+  environments: [],
+  releases: [],
   pinned: [],
 };
 const TRACE_B = {
@@ -202,6 +204,8 @@ function spans(run: string) {
     cache_write_input_tokens: 0,
     user_id: "",
     session_id: SESSION,
+    environment: "",
+    release: "",
     tags: {},
     bound_stall_after_s: null,
     bound_max_steps: null,

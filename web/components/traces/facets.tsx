@@ -28,6 +28,7 @@ import {
   TYPED_FILTERS,
   activeFilters,
   formatCount,
+  isTagPair,
   toggled,
   tracesHref,
   unfiltered,
@@ -246,7 +247,7 @@ function FacetSection({
           </ToggleGroup>
         )}
         {mode === "text" ? (
-          <TypedValue label={label} onAdd={onToggle} />
+          <TypedValue filter={filter} label={label} onAdd={onToggle} />
         ) : values.length === 0 ? (
           <p className="px-1.5 text-xs text-muted-foreground">
             No {label.toLowerCase()} among the window&rsquo;s runs.
@@ -286,16 +287,28 @@ function FacetSection({
   );
 }
 
-/** An id typed in, added to the filter as the list is narrowed to it. */
-function TypedValue({ label, onAdd }: { label: string; onAdd: (value: string) => void }) {
+/** An id typed in — or a tag, as `key:value` — added to the filter as the
+ *  list is narrowed to it. */
+function TypedValue({
+  filter,
+  label,
+  onAdd,
+}: {
+  filter: FilterKey;
+  label: string;
+  onAdd: (value: string) => void;
+}) {
   const [value, setValue] = useState("");
   const trimmed = value.trim();
+  const tag = filter === "tag";
+  const asked = tag ? "A tag, as key:value" : `A ${label.toLowerCase()}'s id`;
+  const taken = trimmed !== "" && (!tag || isTagPair(trimmed));
   return (
     <form
       className="flex gap-2"
       onSubmit={(event) => {
         event.preventDefault();
-        if (!trimmed) return;
+        if (!taken) return;
         onAdd(trimmed);
         setValue("");
       }}
@@ -303,13 +316,13 @@ function TypedValue({ label, onAdd }: { label: string; onAdd: (value: string) =>
       <Input
         value={value}
         onChange={(event) => setValue(event.target.value)}
-        placeholder={`A ${label.toLowerCase()}'s id`}
-        aria-label={`A ${label.toLowerCase()}'s id`}
+        placeholder={asked}
+        aria-label={asked}
         autoComplete="off"
         spellCheck={false}
         className="font-mono text-xs"
       />
-      <Button type="submit" variant="outline" disabled={!trimmed}>
+      <Button type="submit" variant="outline" disabled={!taken}>
         Add
       </Button>
     </form>

@@ -28,6 +28,8 @@ export function cellClass(column: ColumnSpec): string {
     case TraceColumn.Agent:
       return "whitespace-nowrap font-medium";
     case TraceColumn.ErrorType:
+    case TraceColumn.Environment:
+    case TraceColumn.Release:
       return "max-w-48 truncate text-xs";
     case TraceColumn.Models:
     case TraceColumn.Tools:
@@ -54,6 +56,10 @@ export function titleOf(column: ColumnSpec, trace: Trace): string | undefined {
       return trace.models.join(", ") || undefined;
     case TraceColumn.Tools:
       return trace.tools.join(", ") || undefined;
+    case TraceColumn.Environment:
+      return trace.environments.join(", ") || undefined;
+    case TraceColumn.Release:
+      return trace.releases.join(", ") || undefined;
     default:
       return undefined;
   }
@@ -128,6 +134,22 @@ export function cellOf(
           values={trace.tools}
           current={query.tool}
           href={narrowedTo ? (v) => narrowedTo("tool", v) : null}
+        />
+      );
+    case TraceColumn.Environment:
+      return (
+        <Values
+          values={trace.environments}
+          current={query.environment}
+          href={narrowedTo ? (v) => narrowedTo("environment", v) : null}
+        />
+      );
+    case TraceColumn.Release:
+      return (
+        <Values
+          values={trace.releases}
+          current={query.release}
+          href={narrowedTo ? (v) => narrowedTo("release", v) : null}
         />
       );
   }

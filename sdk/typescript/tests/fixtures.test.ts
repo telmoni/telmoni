@@ -50,6 +50,8 @@ interface Scenario {
     ];
   };
   capture_content: boolean;
+  environment: string;
+  release: string;
 }
 
 interface RunFixture {
@@ -167,7 +169,11 @@ async function perform(telmoni: Telmoni, scenario: Scenario, transport: FakeTran
 describe('run.json', () => {
   it('the run matches the golden export', async () => {
     const fixture = loadFixture<RunFixture>('run.json');
-    const { telmoni, transport } = harness({ captureContent: fixture.scenario.capture_content });
+    const { telmoni, transport } = harness({
+      captureContent: fixture.scenario.capture_content,
+      environment: fixture.scenario.environment,
+      release: fixture.scenario.release,
+    });
     try {
       await perform(telmoni, fixture.scenario, transport);
     } finally {

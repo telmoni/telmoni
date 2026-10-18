@@ -59,7 +59,11 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
         .expect("a port of this machine's");
     let endpoint = format!("http://{}", listener.local_addr().expect("an address"));
     tokio::spawn(axum::serve(listener, app.clone()).into_future());
-    let telmoni = Telmoni::new(Config::new(endpoint, None, Some(INGEST_KEY.to_owned())));
+    let telmoni = Telmoni::new(Config {
+        environment: Some("staging".to_owned()),
+        release: Some("2026.10.18".to_owned()),
+        ..Config::new(endpoint, None, Some(INGEST_KEY.to_owned()))
+    });
 
     let run_id = Uuid::new_v4();
     let session = Uuid::new_v4().to_string();
@@ -160,6 +164,11 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
     assert_eq!(first["input_tokens"], 900);
     assert_eq!(first["cache_read_input_tokens"], 600);
     assert_eq!(first["attributes"]["telemetry.distro.name"], "telmoni");
+    // The deployment the SDK's configuration named, read off its resource
+    // into two columns of every span, and never an attribute.
+    assert_eq!(first["environment"], "staging");
+    assert_eq!(first["release"], "2026.10.18");
+    assert_eq!(first["attributes"]["service.version"], Value::Null);
     assert_eq!(spans[2]["name"], "list_members");
     assert_eq!(spans[2]["status"], "ok");
 
@@ -192,4 +201,6 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
     assert_eq!(trace["ended"], true);
     assert_eq!(trace["user_id"], user);
     assert_eq!(trace["session_id"], session);
+    assert_eq!(trace["environments"], serde_json::json!(["staging"]));
+    assert_eq!(trace["releases"], serde_json::json!(["2026.10.18"]));
 }

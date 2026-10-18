@@ -45,7 +45,18 @@ export const MAX_PAGE = 1_000;
 
 /** The filters the list takes, each a list of values any of which admits a
  *  run, in the order the sidebar shows them. */
-export const FILTERS = ["agent", "status", "model", "tool", "user", "session"] as const;
+export const FILTERS = [
+  "agent",
+  "status",
+  "model",
+  "tool",
+  "user",
+  "session",
+  "environment",
+  "release",
+  "tag",
+  "prompt",
+] as const;
 export type FilterKey = (typeof FILTERS)[number];
 
 /** The word the page gives each filter. */
@@ -56,11 +67,15 @@ export const FILTER_LABEL: Record<FilterKey, string> = {
   tool: "Tool",
   user: "User",
   session: "Session",
+  environment: "Environment",
+  release: "Release",
+  tag: "Tag",
+  prompt: "Prompt",
 };
 
-/** The filters whose values are ids, too many to tick from a list alone: the
- *  sidebar offers them typed in as well. */
-export const TYPED_FILTERS: readonly FilterKey[] = ["user", "session"];
+/** The filters whose values are ids, or pairs, too many to tick from a list
+ *  alone: the sidebar offers them typed in as well, a tag as `key:value`. */
+export const TYPED_FILTERS: readonly FilterKey[] = ["user", "session", "tag"];
 
 /** The page's own state beside the list's query: never sent to the server. */
 export type TraceUi = {
@@ -94,12 +109,24 @@ export function parseTraceQuery(searchParams: SearchParams): TraceQuery {
     ),
     model: some(many(searchParams.model)),
     tool: some(many(searchParams.tool)),
+    environment: some(many(searchParams.environment)),
+    release: some(many(searchParams.release)),
+    tag: some(many(searchParams.tag).filter(isTagPair)),
+    prompt: some(many(searchParams.prompt)),
     sort: oneOf(searchParams.sort, TraceSort),
     dir: oneOf(searchParams.dir, SortDirection),
     days: whole(searchParams.days, MAX_DAYS),
     limit: rows !== undefined && (ROWS_PER_PAGE as readonly number[]).includes(rows) ? rows : undefined,
     page: page !== undefined && page > 1 ? page : undefined,
   });
+}
+
+/** Whether `value` is a tag as the filter takes one, `key:value` with a key
+ *  of 1 to 64 characters and a value up to 256, as ingest keeps a tag. */
+export function isTagPair(value: string): boolean {
+  const colon = value.indexOf(":");
+  if (colon < 1) return false;
+  return [...value.slice(0, colon)].length <= 64 && [...value.slice(colon + 1)].length <= 256;
 }
 
 /** The page's own state from its URL. */
@@ -228,6 +255,16 @@ export const TRACE_COLUMNS: readonly ColumnSpec[] = [
     sort: TraceSort.Session,
     first: SortDirection.Asc,
     hint: "The session the run belongs to, gen_ai.conversation.id.",
+  },
+  {
+    key: TraceColumn.Environment,
+    label: "Environment",
+    hint: "The deployment the run's spans were sent from, deployment.environment.name on their resource; each once where the run crossed services deployed apart.",
+  },
+  {
+    key: TraceColumn.Release,
+    label: "Release",
+    hint: "The version or commit the run's spans were sent from, service.version on their resource; each once where the run crossed services.",
   },
   {
     key: TraceColumn.Status,
@@ -467,6 +504,10 @@ export function downloadHref(
     status: query.status,
     model: query.model,
     tool: query.tool,
+    environment: query.environment,
+    release: query.release,
+    tag: query.tag,
+    prompt: query.prompt,
     sort: query.sort,
     dir: query.dir,
     days: query.days,
@@ -484,6 +525,10 @@ export function viewQueryOf(query: TraceQuery): ViewQuery {
     status: query.status,
     model: query.model,
     tool: query.tool,
+    environment: query.environment,
+    release: query.release,
+    tag: query.tag,
+    prompt: query.prompt,
     sort: query.sort,
     dir: query.dir,
     days: query.days,
@@ -501,6 +546,10 @@ export function queryOfView(view: ViewQuery): TraceQuery {
     status: view.status,
     model: view.model,
     tool: view.tool,
+    environment: view.environment,
+    release: view.release,
+    tag: view.tag,
+    prompt: view.prompt,
     sort: view.sort,
     dir: view.dir,
     days: view.days === undefined ? undefined : String(view.days),

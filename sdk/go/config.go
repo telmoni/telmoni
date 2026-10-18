@@ -37,18 +37,25 @@ type Config struct {
 	// every such run. Nothing is dropped by it: a run it does not sample is
 	// still sent, with the trace's sampled flag unset.
 	Sampler sdktrace.Sampler `json:"-"`
+	// Environment is the deployment this process runs in (production,
+	// staging), sent on every span's resource as deployment.environment.name;
+	// blank sends nothing.
+	Environment string `json:"environment,omitempty"`
+	// Release is the release this process runs (a version or a commit), sent
+	// on every span's resource as service.version; blank sends nothing.
+	Release string `json:"release,omitempty"`
 }
 
 // String formats the configuration for %v and %s, with the API key redacted.
 func (c Config) String() string {
-	return fmt.Sprintf("{Endpoint:%s OrganizationID:%s APIKey:%s CaptureContent:%t SampleRate:%g}",
-		c.Endpoint, c.OrganizationID, redacted(c.APIKey), c.CaptureContent, c.SampleRate)
+	return fmt.Sprintf("{Endpoint:%s OrganizationID:%s APIKey:%s CaptureContent:%t SampleRate:%g Environment:%s Release:%s}",
+		c.Endpoint, c.OrganizationID, redacted(c.APIKey), c.CaptureContent, c.SampleRate, c.Environment, c.Release)
 }
 
 // GoString formats the configuration for %#v, with the API key redacted.
 func (c Config) GoString() string {
-	return fmt.Sprintf("telmoni.Config{Endpoint:%q, OrganizationID:%q, APIKey:%q, CaptureContent:%t, SampleRate:%g}",
-		c.Endpoint, c.OrganizationID, redacted(c.APIKey), c.CaptureContent, c.SampleRate)
+	return fmt.Sprintf("telmoni.Config{Endpoint:%q, OrganizationID:%q, APIKey:%q, CaptureContent:%t, SampleRate:%g, Environment:%q, Release:%q}",
+		c.Endpoint, c.OrganizationID, redacted(c.APIKey), c.CaptureContent, c.SampleRate, c.Environment, c.Release)
 }
 
 func redacted(secret string) string {
@@ -68,6 +75,8 @@ func (c Config) normalized() Config {
 	}
 	c.OrganizationID = strings.TrimSpace(c.OrganizationID)
 	c.APIKey = strings.TrimSpace(c.APIKey)
+	c.Environment = strings.TrimSpace(c.Environment)
+	c.Release = strings.TrimSpace(c.Release)
 	if c.SampleRate == 0 {
 		c.SampleRate = 1
 	}
@@ -101,14 +110,17 @@ func DefaultConfig() Config {
 	return Config{Endpoint: DefaultEndpoint, SampleRate: 1}
 }
 
-// ConfigFromEnv reads TELMONI_ENDPOINT, TELMONI_API_KEY and TELMONI_ORG, a
-// blank value counting as unset. No OTEL_* variable is read: the SDK's tracer
-// provider is built part by part.
+// ConfigFromEnv reads TELMONI_ENDPOINT, TELMONI_API_KEY and TELMONI_ORG, and
+// TELMONI_ENVIRONMENT and TELMONI_RELEASE for the deployment, a blank value
+// counting as unset. No OTEL_* variable is read: the SDK's tracer provider is
+// built part by part.
 func ConfigFromEnv() Config {
 	return Config{
 		Endpoint:       os.Getenv("TELMONI_ENDPOINT"),
 		OrganizationID: os.Getenv("TELMONI_ORG"),
 		APIKey:         os.Getenv("TELMONI_API_KEY"),
+		Environment:    os.Getenv("TELMONI_ENVIRONMENT"),
+		Release:        os.Getenv("TELMONI_RELEASE"),
 	}.normalized()
 }
 

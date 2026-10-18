@@ -24,7 +24,11 @@ pub struct Context<'a> {
     pub received_at: DateTime<Utc>,
     /// The instrumentation scope the span was opened under.
     pub scope: &'a str,
-    /// The resource's attributes the inventory names ([`resource_attributes`]).
+    /// The deployment the resource names, and its release; each empty where
+    /// it names none ([`read_resource`]).
+    pub environment: &'a str,
+    pub release: &'a str,
+    /// The resource's attributes the inventory names.
     pub resource: &'a [(String, String)],
     /// What a `user_id` is stored as: the project's own hash of it, or
     /// itself where the project keeps it plain.
@@ -71,33 +75,55 @@ pub struct Dropped {
     pub reason: DropReason,
 }
 
-/// The attributes of a resource the inventory names, as `attributes` keeps
-/// them, under the caps a span's own are held to and a budget of their own
-/// together ([`contract::RESOURCE_ATTRIBUTES_BYTES_MAX`]). Any other is
-/// dropped without a word — an SDK's resource detectors add them, and
-/// nothing the sender does to a span lifts that — and so is one past a cap
-/// or the budget: the resource's list is copied onto every span of the
-/// export, so what it holds is paid for a thousand times over.
+/// What is read off a resource: the deployment's two columns, and the
+/// attributes the inventory keeps.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ResourceFields {
+    /// `deployment.environment.name`; empty where the resource names none.
+    pub environment: String,
+    /// `service.version`; empty where the resource names none.
+    pub release: String,
+    /// The attributes the inventory names, as `attributes` keeps them.
+    pub attributes: Vec<(String, String)>,
+}
+
+/// The deployment a resource names, and the attributes of it the inventory
+/// names, as `attributes` keeps them, under the caps a span's own are held
+/// to and a budget of their own together
+/// ([`contract::RESOURCE_ATTRIBUTES_BYTES_MAX`]). Any other is dropped
+/// without a word — an SDK's resource detectors add them, and nothing the
+/// sender does to a span lifts that — and so is one past a cap or the budget:
+/// the resource's list is copied onto every span of the export, so what it
+/// holds is paid for a thousand times over.
 #[must_use]
-pub fn resource_attributes(resource: Option<&Resource>) -> Vec<(String, String)> {
-    let mut kept = Vec::new();
+pub fn read_resource(resource: Option<&Resource>) -> ResourceFields {
+    let mut fields = ResourceFields::default();
     let mut bytes = 0usize;
     for kv in resource
         .map(|r| r.attributes.as_slice())
         .unwrap_or_default()
     {
-        if kept.len() >= ATTRIBUTES_MAX {
-            break;
+        let value = kv.value.as_ref().and_then(|v| v.value.as_ref());
+        match kv.key.as_str() {
+            contract::ENVIRONMENT => {
+                fields.environment = resource_text(value, contract::ENVIRONMENT_MAX);
+                continue;
+            }
+            contract::RELEASE => {
+                fields.release = resource_text(value, contract::RELEASE_MAX);
+                continue;
+            }
+            _ => {}
+        }
+        if fields.attributes.len() >= ATTRIBUTES_MAX {
+            continue;
         }
         if !contract::is_inventory_resource(&kv.key)
             || kv.key.chars().count() > contract::ATTRIBUTE_KEY_MAX
         {
             continue;
         }
-        if let Some(text) = kv
-            .value
-            .as_ref()
-            .and_then(|v| v.value.as_ref())
+        if let Some(text) = value
             .and_then(as_text)
             .filter(|text| text.chars().count() <= contract::ATTRIBUTE_VALUE_MAX)
         {
@@ -106,10 +132,19 @@ pub fn resource_attributes(resource: Option<&Resource>) -> Vec<(String, String)>
                 continue;
             }
             bytes = taken;
-            kept.push((kv.key.clone(), text));
+            fields.attributes.push((kv.key.clone(), text));
         }
     }
-    kept
+    fields
+}
+
+/// A deployment field as the resource names it: text under its cap, and
+/// empty for none, a value that is no text, or one past the cap.
+fn resource_text(value: Option<&Value>, max: usize) -> String {
+    value
+        .and_then(text)
+        .filter(|text| text.chars().count() <= max)
+        .unwrap_or_default()
 }
 
 /// The span as a row, `Ok(None)` for the span that opens a run and is never
@@ -227,6 +262,8 @@ pub fn map(
         cache_write_input_tokens: fields.cache_write_input_tokens.unwrap_or_default(),
         user_id,
         session_id: fields.session_id.unwrap_or_default(),
+        environment: context.environment.to_owned(),
+        release: context.release.to_owned(),
         tags: fields.tags,
         bound_stall_after_s: fields.bound_stall_after_s,
         bound_max_steps: fields.bound_max_steps,
@@ -251,6 +288,8 @@ pub fn units_of(row: &SpanRow) -> u32 {
         &row.provider,
         &row.user_id,
         &row.session_id,
+        &row.environment,
+        &row.release,
     ]
     .into_iter()
     .map(String::len)
@@ -680,6 +719,8 @@ mod tests {
             project_id: project,
             received_at: Utc::now(),
             scope: contract::SCOPE,
+            environment: "",
+            release: "",
             resource,
             store_user_id: store,
         }
@@ -1006,14 +1047,67 @@ mod tests {
             ],
             ..Resource::default()
         };
+        let read = read_resource(Some(&resource));
         assert_eq!(
-            resource_attributes(Some(&resource)),
+            read.attributes,
             [
                 ("service.name".to_owned(), "reporter".to_owned()),
                 ("telemetry.sdk.language".to_owned(), "python".to_owned()),
             ]
         );
-        assert!(resource_attributes(None).is_empty());
+        assert_eq!((read.environment.as_str(), read.release.as_str()), ("", ""));
+        assert_eq!(read_resource(None), ResourceFields::default());
+    }
+
+    /// The deployment is two columns on every span of the export, never an
+    /// attribute; past its cap, or as no text, it is read as none.
+    #[test]
+    fn the_resource_names_the_deployment_as_columns() {
+        let resource = Resource {
+            attributes: vec![
+                kv(contract::ENVIRONMENT, s("production")),
+                kv(contract::RELEASE, s("2026.10.18")),
+                kv("service.name", s("reporter")),
+            ],
+            ..Resource::default()
+        };
+        let read = read_resource(Some(&resource));
+        assert_eq!(read.environment, "production");
+        assert_eq!(read.release, "2026.10.18");
+        assert_eq!(
+            read.attributes,
+            [("service.name".to_owned(), "reporter".to_owned())]
+        );
+
+        let project = ProjectId::new();
+        let keep = |id: &str| id.to_owned();
+        let on_every_span = Context {
+            environment: &read.environment,
+            release: &read.release,
+            ..context(&project, &read.attributes, &keep)
+        };
+        let row = map(&call(), &on_every_span, &mut Vec::new())
+            .expect("kept")
+            .expect("a row");
+        assert_eq!(row.environment, "production");
+        assert_eq!(row.release, "2026.10.18");
+        assert!(
+            row.attributes
+                .iter()
+                .all(|(k, _)| k == "service.name" || k.starts_with("gen_ai."))
+        );
+
+        let past = Resource {
+            attributes: vec![
+                kv(contract::ENVIRONMENT, s(&"e".repeat(129))),
+                kv(contract::RELEASE, Value::IntValue(3)),
+            ],
+            ..Resource::default()
+        };
+        let read = read_resource(Some(&past));
+        assert_eq!(read.environment, "", "past its cap, none");
+        assert_eq!(read.release, "3", "a scalar reads as text");
+        assert!(read.attributes.is_empty());
     }
 
     /// Copied onto every span of the export, so held to a span's own caps.
@@ -1028,7 +1122,7 @@ mod tests {
             attributes,
             ..Resource::default()
         };
-        let kept = resource_attributes(Some(&resource));
+        let kept = read_resource(Some(&resource)).attributes;
         assert_eq!(kept.len(), ATTRIBUTES_MAX);
         assert!(
             kept.iter()
@@ -1045,7 +1139,8 @@ mod tests {
                 .collect(),
             ..Resource::default()
         };
-        let kept: Vec<String> = resource_attributes(Some(&heavy))
+        let kept: Vec<String> = read_resource(Some(&heavy))
+            .attributes
             .into_iter()
             .map(|(k, _)| k)
             .collect();

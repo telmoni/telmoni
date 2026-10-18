@@ -62,20 +62,29 @@ type exporter struct {
 }
 
 func newExporter(cfg Config, transport Transport, sleep func(time.Duration), logger *slog.Logger) *exporter {
+	resource := []keyValue{
+		stringAttribute(distroName, distro),
+		stringAttribute("telemetry.distro.version", Version),
+		stringAttribute("telemetry.sdk.language", "go"),
+		stringAttribute("telemetry.sdk.name", "opentelemetry"),
+		stringAttribute("telemetry.sdk.version", sdk.Version()),
+	}
+	// The deployment, where the configuration names one: never from
+	// OTEL_RESOURCE_ATTRIBUTES, which the application's exporters read.
+	if cfg.Environment != "" {
+		resource = append(resource, stringAttribute(attrEnvironment, cfg.Environment))
+	}
+	if cfg.Release != "" {
+		resource = append(resource, stringAttribute(attrRelease, cfg.Release))
+	}
 	return &exporter{
 		config:    cfg,
 		transport: transport,
 		sleep:     sleep,
 		logger:    logger,
 		url:       cfg.Endpoint + "/otlp/v1/traces",
-		resource: []keyValue{
-			stringAttribute(distroName, distro),
-			stringAttribute("telemetry.distro.version", Version),
-			stringAttribute("telemetry.sdk.language", "go"),
-			stringAttribute("telemetry.sdk.name", "opentelemetry"),
-			stringAttribute("telemetry.sdk.version", sdk.Version()),
-		},
-		warned: map[string]struct{}{},
+		resource:  resource,
+		warned:    map[string]struct{}{},
 	}
 }
 

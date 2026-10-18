@@ -35,7 +35,7 @@ fn a_trailing_slash_is_stripped() {
 }
 
 #[test]
-fn a_blank_endpoint_organization_or_key_reads_as_unset() {
+fn a_blank_endpoint_organization_key_environment_or_release_reads_as_unset() {
     let config = Config::new("  ", Some(" ".to_owned()), Some("\t".to_owned()));
     assert_eq!(config.endpoint, DEFAULT_ENDPOINT);
     assert_eq!(config.organization_id, None);
@@ -45,12 +45,25 @@ fn a_blank_endpoint_organization_or_key_reads_as_unset() {
         endpoint: " ".to_owned(),
         organization_id: Some(" org_1 ".to_owned()),
         api_key: Some("".to_owned()),
+        environment: Some(" ".to_owned()),
+        release: Some(String::new()),
         ..Config::default()
     });
     assert_eq!(telmoni.config().endpoint, DEFAULT_ENDPOINT);
     assert_eq!(telmoni.config().organization_id.as_deref(), Some("org_1"));
     assert_eq!(telmoni.config().api_key, None);
+    assert_eq!(telmoni.config().environment, None);
+    assert_eq!(telmoni.config().release, None);
     telmoni.shutdown();
+
+    let deployed = Telmoni::new(Config {
+        environment: Some(" staging ".to_owned()),
+        release: Some("2026.10.18".to_owned()),
+        ..Config::default()
+    });
+    assert_eq!(deployed.config().environment.as_deref(), Some("staging"));
+    assert_eq!(deployed.config().release.as_deref(), Some("2026.10.18"));
+    deployed.shutdown();
 }
 
 #[test]
@@ -90,20 +103,28 @@ fn the_defaults_send_every_run_and_no_content() {
 }
 
 #[test]
-fn from_env_reads_the_three_variables_and_no_other() -> Outcome {
+fn from_env_reads_the_five_variables_and_no_other() -> Outcome {
     if is_child() {
         let config = Config::from_env();
         assert_eq!(config.endpoint, DEFAULT_ENDPOINT);
         assert_eq!(config.api_key, None);
         assert_eq!(config.organization_id.as_deref(), Some("org_2"));
+        assert_eq!(config.environment.as_deref(), Some("staging"));
+        assert_eq!(config.release, None);
         return Ok(());
     }
     in_child(
-        "from_env_reads_the_three_variables_and_no_other",
+        "from_env_reads_the_five_variables_and_no_other",
         &[
             ("TELMONI_API_KEY", ""),
             ("TELMONI_ORG", "org_2"),
+            ("TELMONI_ENVIRONMENT", "staging"),
+            ("TELMONI_RELEASE", ""),
             ("OTEL_EXPORTER_OTLP_ENDPOINT", "https://elsewhere.example"),
+            (
+                "OTEL_RESOURCE_ATTRIBUTES",
+                "deployment.environment.name=leaked,service.version=leaked",
+            ),
         ],
         &["TELMONI_ENDPOINT"],
     )
@@ -116,6 +137,8 @@ fn from_env_normalizes_what_it_reads() -> Outcome {
         assert_eq!(config.endpoint, "https://api.telmoni.local");
         assert_eq!(config.api_key.as_deref(), Some("telmoni_k"));
         assert_eq!(config.organization_id.as_deref(), Some("org_3"));
+        assert_eq!(config.environment, None);
+        assert_eq!(config.release.as_deref(), Some("2026.10.18"));
         return Ok(());
     }
     in_child(
@@ -124,8 +147,9 @@ fn from_env_normalizes_what_it_reads() -> Outcome {
             ("TELMONI_ENDPOINT", "https://api.telmoni.local/"),
             ("TELMONI_API_KEY", " telmoni_k "),
             ("TELMONI_ORG", " org_3 "),
+            ("TELMONI_RELEASE", " 2026.10.18 "),
         ],
-        &[],
+        &["TELMONI_ENVIRONMENT"],
     )
 }
 

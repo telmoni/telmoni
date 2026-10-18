@@ -21,6 +21,10 @@ pub(crate) const SAMPLE_RATE: &str = "telmoni.sample_rate";
 pub(crate) const CANCELLED: &str = "telmoni.cancelled";
 /// The span of no duration that opens a run, sent at once.
 pub(crate) const RUN_START: &str = "telmoni.run.start";
+/// The deployment, on the resource: the configuration's `environment` and
+/// `release`.
+pub(crate) const ENVIRONMENT: &str = "deployment.environment.name";
+pub(crate) const RELEASE: &str = "service.version";
 
 // ── The conventions' ─────────────────────────────────────────────────────────
 

@@ -37,6 +37,18 @@ export interface Config {
    * own; without one, every run samples.
    */
   sampler?: Sampler | undefined;
+
+  /**
+   * The deployment this process runs in — `production`, `staging` — sent on
+   * every span as `deployment.environment.name`; nothing when unset.
+   */
+  environment?: string | undefined;
+
+  /**
+   * The release this process runs — a version or a commit — sent on every
+   * span as `service.version`; nothing when unset.
+   */
+  release?: string | undefined;
 }
 
 /** A client's configuration, every blank read as unset and every default filled. */
@@ -48,6 +60,8 @@ export interface ResolvedConfig {
   readonly captureContent: boolean;
   readonly sampleRate: number;
   readonly sampler: Sampler | undefined;
+  readonly environment: string | undefined;
+  readonly release: string | undefined;
 }
 
 /** What a monitor holds a run to; each optional. */

@@ -786,6 +786,26 @@ function SpanDetail({
                   </Field>
                 )}
                 {span.provider && <Field label="Provider">{span.provider}</Field>}
+                {span.environment && (
+                  <Field label="Environment">
+                    <Link
+                      href={tracesHref(organization, slug, { environment: [span.environment], days: reaching })}
+                      className="underline-offset-4 hover:underline"
+                    >
+                      {span.environment}
+                    </Link>
+                  </Field>
+                )}
+                {span.release && (
+                  <Field label="Release">
+                    <Link
+                      href={tracesHref(organization, slug, { release: [span.release], days: reaching })}
+                      className="underline-offset-4 hover:underline"
+                    >
+                      {span.release}
+                    </Link>
+                  </Field>
+                )}
                 {span.kind === SpanKind.ToolCall && (
                   <Field label="Tool">
                     <Link

@@ -209,12 +209,22 @@ fn span_at(
 }
 
 /// Three runs of ours — one whose run span has not arrived — and one of
-/// another project's, with one of each kind of span among them.
+/// another project's, with one of each kind of span among them; A sent from
+/// production, B from staging, C from no deployment named.
 struct Seeded {
     a: Uuid,
     b: Uuid,
     c: Uuid,
     d: Uuid,
+}
+
+/// `row` as sent from `environment` at `release`.
+fn deployed(row: SpanRow, environment: &str, release: &str) -> SpanRow {
+    SpanRow {
+        environment: environment.into(),
+        release: release.into(),
+        ..row
+    }
 }
 
 async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
@@ -230,101 +240,131 @@ async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
     let c_start = now - Duration::minutes(1);
     let rows = vec![
         // Run A: a report, one user's, four spans, its tool call failed.
-        SpanRow {
-            user_id: "user-a".into(),
-            session_id: "conv-1".into(),
-            tags: vec![("team".into(), "search".into())],
-            bound_max_steps: Some(40),
-            sample_rate: Some(1.0),
-            ..span_at(
-                &p.ours,
-                a,
-                SpanKind::Run,
-                "nightly-report",
-                a_start,
-                2_000,
-                1,
-            )
-        },
-        SpanRow {
-            parent_span_id: format!("{:016x}", 1),
-            user_id: "user-a".into(),
-            session_id: "conv-1".into(),
-            ..span_at(
-                &p.ours,
-                a,
-                SpanKind::Step,
-                "plan the reply",
-                a_start + Duration::milliseconds(10),
-                1_900,
-                2,
-            )
-        },
-        SpanRow {
-            parent_span_id: format!("{:016x}", 2),
-            model: "claude-sonnet-5-5".into(),
-            provider: "anthropic".into(),
-            input_tokens: 1_200,
-            output_tokens: 300,
-            cache_read_input_tokens: 100,
-            cache_write_input_tokens: 50,
-            user_id: "user-a".into(),
-            session_id: "conv-1".into(),
-            attributes: vec![("gen_ai.response.id".into(), "resp_01".into())],
-            ..span_at(
-                &p.ours,
-                a,
-                SpanKind::ModelCall,
-                "chat claude-sonnet-5-5",
-                a_start + Duration::milliseconds(20),
-                1_500,
-                3,
-            )
-        },
-        SpanRow {
-            parent_span_id: format!("{:016x}", 2),
-            status: SpanStatus::Error,
-            error_type: "TimeoutError".into(),
-            user_id: "user-a".into(),
-            session_id: "conv-1".into(),
-            ..span_at(
-                &p.ours,
-                a,
-                SpanKind::ToolCall,
-                "search_docs",
-                a_start + Duration::milliseconds(1_600),
-                200,
-                4,
-            )
-        },
-        // Run B: a support bot's, ended in error, a cheaper model.
-        SpanRow {
-            agent: "support-bot".into(),
-            status: SpanStatus::Error,
-            error_type: "RuntimeError".into(),
-            user_id: "user-b".into(),
-            session_id: "conv-2".into(),
-            ..span_at(&p.ours, b, SpanKind::Run, "support-bot", b_start, 500, 5)
-        },
-        SpanRow {
-            agent: "support-bot".into(),
-            parent_span_id: format!("{:016x}", 5),
-            model: "gpt-x".into(),
-            provider: "openai".into(),
-            input_tokens: 10,
-            output_tokens: 5,
-            user_id: "user-b".into(),
-            session_id: "conv-2".into(),
-            ..span_at(
-                &p.ours,
-                b,
-                SpanKind::ModelCall,
-                "chat gpt-x",
-                b_start + Duration::milliseconds(5),
-                400,
-                6,
-            )
-        },
+        deployed(
+            SpanRow {
+                user_id: "user-a".into(),
+                session_id: "conv-1".into(),
+                tags: vec![("team".into(), "search".into())],
+                bound_max_steps: Some(40),
+                sample_rate: Some(1.0),
+                ..span_at(
+                    &p.ours,
+                    a,
+                    SpanKind::Run,
+                    "nightly-report",
+                    a_start,
+                    2_000,
+                    1,
+                )
+            },
+            "production",
+            "2026.10.17",
+        ),
+        deployed(
+            SpanRow {
+                parent_span_id: format!("{:016x}", 1),
+                user_id: "user-a".into(),
+                session_id: "conv-1".into(),
+                ..span_at(
+                    &p.ours,
+                    a,
+                    SpanKind::Step,
+                    "plan the reply",
+                    a_start + Duration::milliseconds(10),
+                    1_900,
+                    2,
+                )
+            },
+            "production",
+            "2026.10.17",
+        ),
+        deployed(
+            SpanRow {
+                parent_span_id: format!("{:016x}", 2),
+                model: "claude-sonnet-5-5".into(),
+                provider: "anthropic".into(),
+                input_tokens: 1_200,
+                output_tokens: 300,
+                cache_read_input_tokens: 100,
+                cache_write_input_tokens: 50,
+                user_id: "user-a".into(),
+                session_id: "conv-1".into(),
+                attributes: vec![
+                    ("gen_ai.response.id".into(), "resp_01".into()),
+                    ("gen_ai.prompt.name".into(), "triage-v2".into()),
+                ],
+                ..span_at(
+                    &p.ours,
+                    a,
+                    SpanKind::ModelCall,
+                    "chat claude-sonnet-5-5",
+                    a_start + Duration::milliseconds(20),
+                    1_500,
+                    3,
+                )
+            },
+            "production",
+            "2026.10.17",
+        ),
+        deployed(
+            SpanRow {
+                parent_span_id: format!("{:016x}", 2),
+                status: SpanStatus::Error,
+                error_type: "TimeoutError".into(),
+                user_id: "user-a".into(),
+                session_id: "conv-1".into(),
+                ..span_at(
+                    &p.ours,
+                    a,
+                    SpanKind::ToolCall,
+                    "search_docs",
+                    a_start + Duration::milliseconds(1_600),
+                    200,
+                    4,
+                )
+            },
+            "production",
+            "2026.10.17",
+        ),
+        // Run B: a support bot's, ended in error, a cheaper model, from
+        // staging, its call tagged and prompted.
+        deployed(
+            SpanRow {
+                agent: "support-bot".into(),
+                status: SpanStatus::Error,
+                error_type: "RuntimeError".into(),
+                user_id: "user-b".into(),
+                session_id: "conv-2".into(),
+                ..span_at(&p.ours, b, SpanKind::Run, "support-bot", b_start, 500, 5)
+            },
+            "staging",
+            "2026.10.18",
+        ),
+        deployed(
+            SpanRow {
+                agent: "support-bot".into(),
+                parent_span_id: format!("{:016x}", 5),
+                model: "gpt-x".into(),
+                provider: "openai".into(),
+                input_tokens: 10,
+                output_tokens: 5,
+                user_id: "user-b".into(),
+                session_id: "conv-2".into(),
+                tags: vec![("team".into(), "support".into())],
+                attributes: vec![("gen_ai.prompt.name".into(), "triage-v2".into())],
+                ..span_at(
+                    &p.ours,
+                    b,
+                    SpanKind::ModelCall,
+                    "chat gpt-x",
+                    b_start + Duration::milliseconds(5),
+                    400,
+                    6,
+                )
+            },
+            "staging",
+            "2026.10.18",
+        ),
         // Run C: still running — its model call arrived, its run span has not.
         SpanRow {
             agent: "zeta".into(),
@@ -383,6 +423,8 @@ async fn the_list_sums_each_run_newest_first_and_names_only_the_projects_runs(po
     assert_eq!(report["cache_write_input_tokens"], 50);
     assert_eq!(report["models"], serde_json::json!(["claude-sonnet-5-5"]));
     assert_eq!(report["tools"], serde_json::json!(["search_docs"]));
+    assert_eq!(report["environments"], serde_json::json!(["production"]));
+    assert_eq!(report["releases"], serde_json::json!(["2026.10.17"]));
 
     let bot = trace(&list, b);
     assert_eq!(bot["status"], "error");
@@ -396,6 +438,8 @@ async fn the_list_sums_each_run_newest_first_and_names_only_the_projects_runs(po
     assert_eq!(running["status"], "ok");
     assert_eq!(running["agent"], "zeta");
     assert_eq!(running["user_id"], "");
+    assert_eq!(running["environments"], serde_json::json!([]));
+    assert_eq!(running["releases"], serde_json::json!([]));
 
     for user in [OWNER, ADMIN] {
         let (status, _) = p.send(p.request(user, &p.ours, LANE)).await;
@@ -427,6 +471,23 @@ async fn the_list_filters_by_any_column_and_sorts_by_any(pool: PgPool) {
     assert_eq!(ids(&p.list("?tool=search_docs").await), [a]);
     assert!(ids(&p.list("?agent=nobody").await).is_empty());
     assert_eq!(ids(&p.list("?model=gpt-x&status=error").await), [b]);
+    // The deployment, a tag and a prompt: a run carries each where any of
+    // its spans does, the tag as key:value.
+    assert_eq!(ids(&p.list("?environment=production").await), [a]);
+    assert_eq!(
+        ids(&p.list("?environment=staging&environment=production").await),
+        [b, a]
+    );
+    assert_eq!(ids(&p.list("?release=2026.10.18").await), [b]);
+    assert_eq!(ids(&p.list("?tag=team%3Asearch").await), [a]);
+    assert_eq!(ids(&p.list("?tag=team%3Asupport").await), [b]);
+    assert!(ids(&p.list("?tag=team%3A").await).is_empty());
+    assert_eq!(ids(&p.list("?prompt=triage-v2").await), [b, a]);
+    assert_eq!(
+        ids(&p.list("?prompt=triage-v2&environment=production").await),
+        [a]
+    );
+    assert!(ids(&p.list("?prompt=nobody").await).is_empty());
     // A filter given again admits a run matching any of its values; an empty
     // value, a form's untouched field, admits every run.
     assert_eq!(ids(&p.list("?agent=support-bot&agent=zeta").await), [c, b]);
@@ -524,6 +585,21 @@ async fn the_facets_count_each_value_under_every_other_filter(pool: PgPool) {
         values(&all, "session"),
         owned(&[("conv-1", 1), ("conv-2", 1)])
     );
+    assert_eq!(
+        values(&all, "environment"),
+        owned(&[("production", 1), ("staging", 1)]),
+        "a run from no deployment named is no value"
+    );
+    assert_eq!(
+        values(&all, "release"),
+        owned(&[("2026.10.17", 1), ("2026.10.18", 1)])
+    );
+    assert_eq!(
+        values(&all, "tag"),
+        owned(&[("team:search", 1), ("team:support", 1)]),
+        "a tag as key:value, wherever on the run it was"
+    );
+    assert_eq!(values(&all, "prompt"), owned(&[("triage-v2", 2)]));
     assert_eq!(all["agent"]["more"], false);
 
     let by_model = p.get(&format!("{lane}?model=gpt-x")).await;
@@ -539,6 +615,22 @@ async fn the_facets_count_each_value_under_every_other_filter(pool: PgPool) {
     assert_eq!(
         values(&by_model, "status"),
         owned(&[("error", 1), ("ok", 1)])
+    );
+    assert_eq!(values(&by_model, "environment"), owned(&[("staging", 1)]));
+
+    let by_environment = p.get(&format!("{lane}?environment=production")).await;
+    assert_eq!(
+        values(&by_environment, "agent"),
+        owned(&[("nightly-report", 1)])
+    );
+    assert_eq!(
+        values(&by_environment, "environment"),
+        owned(&[("production", 1), ("staging", 1)]),
+        "the ticked value first, and the filter not narrowing its own facet"
+    );
+    assert_eq!(
+        values(&by_environment, "prompt"),
+        owned(&[("triage-v2", 1)])
     );
 
     let ticked = p.get(&format!("{lane}?agent=zeta")).await;
@@ -629,12 +721,18 @@ async fn a_download_is_the_lists_rows_as_csv_or_json(pool: PgPool) {
         lines[0].starts_with("run_id,agent,user_id,session_id,ended,status,error_type,started_at")
     );
     assert!(
+        lines[0].ends_with(",models,tools,environments,releases"),
+        "{}",
+        lines[0]
+    );
+    assert!(
         lines[1].starts_with(&format!("{c},zeta,,,false,ok,")),
         "{}",
         lines[1]
     );
+    assert!(lines[1].ends_with(",gpt-x,,,"), "{}", lines[1]);
     assert!(
-        lines[3].ends_with(",claude-sonnet-5-5,search_docs"),
+        lines[3].ends_with(",claude-sonnet-5-5,search_docs,production,2026.10.17"),
         "{}",
         lines[3]
     );
@@ -701,13 +799,15 @@ async fn a_trace_is_its_runs_spans_in_order_and_another_projects_run_is_not_here
     assert_eq!(run["bound_max_steps"], 40);
     assert_eq!(run["sample_rate"], 1.0);
     assert_eq!(run["user_id"], "user-a");
+    assert_eq!(run["environment"], "production");
+    assert_eq!(run["release"], "2026.10.17");
     let call = &spans[2];
     assert_eq!(call["parent_span_id"], format!("{:016x}", 2));
     assert_eq!(call["model"], "claude-sonnet-5-5");
     assert_eq!(call["input_tokens"], 1_200);
     assert_eq!(
         call["attributes"],
-        serde_json::json!({ "gen_ai.response.id": "resp_01" })
+        serde_json::json!({ "gen_ai.response.id": "resp_01", "gen_ai.prompt.name": "triage-v2" })
     );
     let tool = &spans[3];
     assert_eq!(tool["status"], "error");
@@ -760,6 +860,8 @@ async fn a_query_a_parameter_does_not_take_is_a_400_that_echoes_nothing(pool: Pg
         "?page=0",
         "?page=1001",
         "?status=maybe%3Cscript%3E",
+        "?tag=untagged%3Cscript%3E",
+        "?tag=%3Anameless",
         "?sort=spend",
         "?sort=agent&sort=user",
         "?dir=sideways",
@@ -795,7 +897,10 @@ async fn a_query_a_parameter_does_not_take_is_a_400_that_echoes_nothing(pool: Pg
             .to_bytes();
         let body = String::from_utf8_lossy(&bytes);
         assert!(
-            !body.contains("script") && !body.contains("sideways") && !body.contains("spend"),
+            !body.contains("script")
+                && !body.contains("sideways")
+                && !body.contains("spend")
+                && !body.contains("nameless"),
             "{query} was echoed: {body}"
         );
     }

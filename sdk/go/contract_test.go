@@ -40,8 +40,8 @@ func TestATrailingSlashIsStripped(t *testing.T) {
 	}
 }
 
-func TestABlankEndpointOrganizationOrKeyReadsAsUnset(t *testing.T) {
-	cfg := mustNew(t, telmoni.Config{Endpoint: "  ", OrganizationID: " ", APIKey: "\t"}).Config()
+func TestABlankEndpointOrganizationKeyEnvironmentOrReleaseReadsAsUnset(t *testing.T) {
+	cfg := mustNew(t, telmoni.Config{Endpoint: "  ", OrganizationID: " ", APIKey: "\t", Environment: " ", Release: ""}).Config()
 	if cfg.Endpoint != telmoni.DefaultEndpoint {
 		t.Errorf("Endpoint = %q", cfg.Endpoint)
 	}
@@ -50,6 +50,13 @@ func TestABlankEndpointOrganizationOrKeyReadsAsUnset(t *testing.T) {
 	}
 	if cfg.APIKey != "" {
 		t.Errorf("APIKey = %q", cfg.APIKey)
+	}
+	if cfg.Environment != "" || cfg.Release != "" {
+		t.Errorf("Environment = %q, Release = %q", cfg.Environment, cfg.Release)
+	}
+	deployed := mustNew(t, telmoni.Config{Environment: " staging ", Release: "2026.10.18"}).Config()
+	if deployed.Environment != "staging" || deployed.Release != "2026.10.18" {
+		t.Errorf("Environment = %q, Release = %q", deployed.Environment, deployed.Release)
 	}
 }
 
@@ -93,11 +100,14 @@ func TestTheKeyIsNeverPrintedOrSerialized(t *testing.T) {
 	}
 }
 
-func TestFromEnvReadsTheThreeVariablesAndNoOther(t *testing.T) {
+func TestFromEnvReadsTheFiveVariablesAndNoOther(t *testing.T) {
 	t.Setenv("TELMONI_ENDPOINT", "")
 	t.Setenv("TELMONI_API_KEY", "")
 	t.Setenv("TELMONI_ORG", "org_2")
+	t.Setenv("TELMONI_ENVIRONMENT", "staging")
+	t.Setenv("TELMONI_RELEASE", "")
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://elsewhere.example")
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "deployment.environment.name=leaked,service.version=leaked")
 	cfg := telmoni.ConfigFromEnv()
 	if cfg.Endpoint != telmoni.DefaultEndpoint {
 		t.Errorf("Endpoint = %q", cfg.Endpoint)
@@ -108,15 +118,23 @@ func TestFromEnvReadsTheThreeVariablesAndNoOther(t *testing.T) {
 	if cfg.OrganizationID != "org_2" {
 		t.Errorf("OrganizationID = %q", cfg.OrganizationID)
 	}
+	if cfg.Environment != "staging" || cfg.Release != "" {
+		t.Errorf("Environment = %q, Release = %q", cfg.Environment, cfg.Release)
+	}
 
 	t.Setenv("TELMONI_ENDPOINT", " https://api.telmoni.local/ ")
 	t.Setenv("TELMONI_API_KEY", " telmoni_k ")
+	t.Setenv("TELMONI_ENVIRONMENT", "")
+	t.Setenv("TELMONI_RELEASE", " 2026.10.18 ")
 	cfg = telmoni.ConfigFromEnv()
 	if cfg.Endpoint != "https://api.telmoni.local" {
 		t.Errorf("Endpoint = %q", cfg.Endpoint)
 	}
 	if cfg.APIKey != "telmoni_k" {
 		t.Errorf("APIKey = %q", cfg.APIKey)
+	}
+	if cfg.Environment != "" || cfg.Release != "2026.10.18" {
+		t.Errorf("Environment = %q, Release = %q", cfg.Environment, cfg.Release)
 	}
 }
 

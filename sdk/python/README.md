@@ -116,14 +116,17 @@ is `on`.
 
 ## Configuration
 
-`Config(endpoint, organization_id, api_key, capture_content, sample_rate, sampler)`,
-or `Config.from_env()`, which reads `TELMONI_ENDPOINT` (default
-`https://api.telmoni.com`), `TELMONI_API_KEY` and `TELMONI_ORG`, a blank value
-counting as unset. `sample_rate` is the share of runs sent, dropped whole in
-the exporter and never through the trace's sampled flag. The key never appears
-in `repr`, `str` or `dataclasses.asdict`, and `pickle` refuses it. It travels
-over HTTPS only: a plain-HTTP endpoint is refused with a `ValueError` unless
-its host is this machine, and no redirect is followed.
+`Config(endpoint, organization_id, api_key, capture_content, sample_rate, sampler,
+environment, release)`, or `Config.from_env()`, which reads `TELMONI_ENDPOINT`
+(default `https://api.telmoni.com`), `TELMONI_API_KEY`, `TELMONI_ORG`,
+`TELMONI_ENVIRONMENT` and `TELMONI_RELEASE`, a blank value counting as unset.
+`environment` and `release` name the deployment every span is sent from, as
+the resource's `deployment.environment.name` and `service.version`.
+`sample_rate` is the share of runs sent, dropped whole in the exporter and
+never through the trace's sampled flag. The key never appears in `repr`,
+`str` or `dataclasses.asdict`, and `pickle` refuses it. It travels over HTTPS
+only: a plain-HTTP endpoint is refused with a `ValueError` unless its host is
+this machine, and no redirect is followed.
 
 The variables, the attributes each span carries, and the other SDKs are
 documented at [telmoni.com/docs/api/sdks](https://telmoni.com/docs/api/sdks).

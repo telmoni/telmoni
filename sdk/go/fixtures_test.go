@@ -49,7 +49,9 @@ type runFixture struct {
 				} `json:"tool_call"`
 			} `json:"inside"`
 		} `json:"run"`
-		CaptureContent bool `json:"capture_content"`
+		CaptureContent bool   `json:"capture_content"`
+		Environment    string `json:"environment"`
+		Release        string `json:"release"`
 	} `json:"scenario"`
 	Export map[string]any `json:"export"`
 }
@@ -269,7 +271,12 @@ func perform(t *testing.T, h *harness, fixture runFixture) {
 
 func TestTheRunMatchesTheGoldenExport(t *testing.T) {
 	fixture := loadRun(t)
-	h := newHarness(t, telmoni.Config{APIKey: testKey, CaptureContent: fixture.Scenario.CaptureContent}, nil)
+	h := newHarness(t, telmoni.Config{
+		APIKey:         testKey,
+		CaptureContent: fixture.Scenario.CaptureContent,
+		Environment:    fixture.Scenario.Environment,
+		Release:        fixture.Scenario.Release,
+	}, nil)
 	perform(t, h, fixture)
 	bodies := h.transport.bodies(t)
 	if len(bodies) < 2 {

@@ -11,6 +11,7 @@ import {
   currentSort,
   downloadHref,
   formatDuration,
+  isTagPair,
   nextSort,
   pageCount,
   parseTraceQuery,
@@ -49,6 +50,8 @@ function span(over: Partial<TraceSpan> & Pick<TraceSpan, "span_id" | "kind">): T
     cache_write_input_tokens: 0,
     user_id: "",
     session_id: "",
+    environment: "",
+    release: "",
     tags: {},
     bound_stall_after_s: null,
     bound_max_steps: null,
@@ -81,6 +84,10 @@ describe("the URL as the list's state", () => {
         status: ["error", "maybe", "cancelled"],
         model: "gpt-x",
         tool: "search_docs",
+        environment: ["production", "staging"],
+        release: "2026.10.18",
+        tag: ["team:search", "untagged", ":nameless", "a:b:c"],
+        prompt: "triage-v2",
         sort: "model_calls",
         dir: "desc",
         days: "30",
@@ -94,6 +101,10 @@ describe("the URL as the list's state", () => {
       status: ["error", "cancelled"],
       model: ["gpt-x"],
       tool: ["search_docs"],
+      environment: ["production", "staging"],
+      release: ["2026.10.18"],
+      tag: ["team:search", "a:b:c"],
+      prompt: ["triage-v2"],
       sort: "model_calls",
       dir: "desc",
       days: 30,
@@ -170,12 +181,33 @@ describe("the URL as the list's state", () => {
   });
 
   it("names the filters in force a value at a time, in the sidebar's order", () => {
-    expect(activeFilters({ status: ["error"], agent: ["bot", "zeta"], days: 30, sort: "user" })).toEqual([
+    expect(
+      activeFilters({
+        status: ["error"],
+        agent: ["bot", "zeta"],
+        tag: ["team:search"],
+        environment: ["production"],
+        days: 30,
+        sort: "user",
+      }),
+    ).toEqual([
       { filter: "agent", label: "Agent", value: "bot", text: "bot" },
       { filter: "agent", label: "Agent", value: "zeta", text: "zeta" },
       { filter: "status", label: "Status", value: "error", text: "Error" },
+      { filter: "environment", label: "Environment", value: "production", text: "production" },
+      { filter: "tag", label: "Tag", value: "team:search", text: "team:search" },
     ]);
     expect(activeFilters({})).toEqual([]);
+  });
+
+  it("takes a tag as key:value, the key 1 to 64 characters and the value up to 256", () => {
+    expect(isTagPair("team:search")).toBe(true);
+    expect(isTagPair("team:")).toBe(true);
+    expect(isTagPair("a:b:c")).toBe(true);
+    expect(isTagPair("untagged")).toBe(false);
+    expect(isTagPair(":nameless")).toBe(false);
+    expect(isTagPair(`${"k".repeat(65)}:v`)).toBe(false);
+    expect(isTagPair(`k:${"v".repeat(257)}`)).toBe(false);
   });
 
   it("offers every column the server names, and shows the list's first eight until a person picks", () => {
@@ -240,6 +272,9 @@ describe("the URL as the list's state", () => {
     expect(
       downloadHref("acme", "web", { agent: ["zeta"], sort: "tokens", page: 3, limit: 25 }, "csv"),
     ).toBe("/acme/web/traces/export?agent=zeta&sort=tokens&format=csv");
+    expect(
+      downloadHref("acme", "web", { environment: ["production"], tag: ["team:search"], prompt: ["p"] }, "csv"),
+    ).toBe("/acme/web/traces/export?environment=production&tag=team%3Asearch&prompt=p&format=csv");
     expect(downloadHref("acme", "web", {}, "json", ["r1", "r2"])).toBe(
       "/acme/web/traces/export?format=json&run=r1&run=r2",
     );
@@ -252,6 +287,13 @@ describe("a saved view", () => {
       agent: ["zeta"],
       sort: "tokens",
       limit: 25,
+    });
+    expect(
+      viewQueryOf({ environment: ["production"], release: ["1.2"], tag: ["team:a"], prompt: ["p"] }),
+    ).toEqual({ environment: ["production"], release: ["1.2"], tag: ["team:a"], prompt: ["p"] });
+    expect(queryOfView({ environment: ["staging"], tag: ["untagged", "team:a"] })).toEqual({
+      environment: ["staging"],
+      tag: ["team:a"],
     });
     expect(queryOfView(VIEW.query)).toEqual({
       agent: ["support-bot", "zeta"],

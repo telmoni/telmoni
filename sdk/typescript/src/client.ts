@@ -63,6 +63,8 @@ function resolve(config: Config | undefined): ResolvedConfig {
     captureContent: config?.captureContent ?? false,
     sampleRate,
     sampler: config?.sampler,
+    environment: unsetIfBlank(config?.environment),
+    release: unsetIfBlank(config?.release),
   };
   // Not enumerable: console.log, util.inspect and JSON.stringify skip it, so
   // a client or a configuration logged or serialized whole leaves the key out.
@@ -124,6 +126,7 @@ export class Telmoni {
    * - `TELMONI_ENDPOINT`
    * - `TELMONI_API_KEY`
    * - `TELMONI_ORG`
+   * - `TELMONI_ENVIRONMENT` and `TELMONI_RELEASE`, the deployment it names
    *
    * A blank value is unset, as the CLI reads them. No `OTEL_*` variable is
    * read: the SDK's tracer provider is built part by part.
@@ -135,6 +138,8 @@ export class Telmoni {
         endpoint: env?.['TELMONI_ENDPOINT'],
         apiKey: env?.['TELMONI_API_KEY'],
         organizationId: env?.['TELMONI_ORG'],
+        environment: env?.['TELMONI_ENVIRONMENT'],
+        release: env?.['TELMONI_RELEASE'],
       },
       hooks,
     );

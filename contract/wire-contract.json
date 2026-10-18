@@ -88,6 +88,8 @@
       "agent",
       "user",
       "session",
+      "environment",
+      "release",
       "status",
       "error_type",
       "steps",

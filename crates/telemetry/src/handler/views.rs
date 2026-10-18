@@ -78,6 +78,14 @@ pub struct ViewQuery {
     pub model: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tool: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub environment: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub release: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tag: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub prompt: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sort: Option<TraceSort>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -99,6 +107,10 @@ impl ViewQuery {
             status: self.status.iter().map(ToString::to_string).collect(),
             model: self.model,
             tool: self.tool,
+            environment: self.environment,
+            release: self.release,
+            tag: self.tag,
+            prompt: self.prompt,
             days: self.days.map(|days| days.to_string()),
             ..TraceQuery::default()
         };
@@ -113,6 +125,10 @@ impl ViewQuery {
             status: filter.statuses,
             model: filter.models,
             tool: filter.tools,
+            environment: filter.environments,
+            release: filter.releases,
+            tag: filter.tags,
+            prompt: filter.prompts,
             sort: self.sort,
             dir: self.dir,
             days: self.days,
@@ -553,6 +569,8 @@ mod tests {
             json!({
                 "agent": [" support-bot ", "support-bot", ""],
                 "status": ["error"],
+                "environment": ["production"],
+                "tag": [" team:search "],
                 "sort": "tokens",
                 "dir": "asc",
                 "days": 7,
@@ -569,6 +587,8 @@ mod tests {
             json!({
                 "agent": ["support-bot"],
                 "status": ["error"],
+                "environment": ["production"],
+                "tag": ["team:search"],
                 "sort": "tokens",
                 "dir": "asc",
                 "days": 7,
@@ -639,6 +659,7 @@ mod tests {
             ("Long", json!({ "days": 361 })),
             ("Big", json!({ "limit": 501 })),
             ("Agent", json!({ "agent": ["a".repeat(201)] })),
+            ("Tag", json!({ "tag": ["untagged<script>"] })),
             ("Spend", json!({ "spend<script>": ["high"] })),
             ("Depth", json!({ "depth": "calls" })),
         ] {

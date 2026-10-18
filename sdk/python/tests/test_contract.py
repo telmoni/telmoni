@@ -24,12 +24,20 @@ def test_a_trailing_slash_is_stripped() -> None:
     )
 
 
-def test_a_blank_endpoint_organization_or_key_reads_as_unset() -> None:
-    config = Config(endpoint="  ", organization_id=" ", api_key="\t")
+def test_a_blank_endpoint_organization_key_environment_or_release_reads_as_unset() -> (
+    None
+):
+    config = Config(
+        endpoint="  ", organization_id=" ", api_key="\t", environment=" ", release=""
+    )
     assert config.endpoint == DEFAULT_ENDPOINT
     assert config.organization_id is None
     assert config.api_key is None
     assert config.bearer() is None
+    assert config.environment is None
+    assert config.release is None
+    deployed = Config(environment=" staging ", release="2026.10.18")
+    assert (deployed.environment, deployed.release) == ("staging", "2026.10.18")
 
 
 def test_the_key_is_never_printed_or_serialized() -> None:
@@ -48,16 +56,29 @@ def test_the_key_is_never_printed_or_serialized() -> None:
     assert Config(api_key=Secret("telmoni_x")).bearer() == "telmoni_x"
 
 
-def test_from_env_reads_the_three_variables_and_no_other() -> None:
+def test_from_env_reads_the_five_variables_and_no_other() -> None:
     with mock.patch.dict(os.environ, clear=False):
         os.environ.pop("TELMONI_ENDPOINT", None)
         os.environ["TELMONI_API_KEY"] = ""
         os.environ["TELMONI_ORG"] = "org_2"
+        os.environ["TELMONI_ENVIRONMENT"] = "staging"
+        os.environ["TELMONI_RELEASE"] = ""
         os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://elsewhere.example"
+        os.environ["OTEL_RESOURCE_ATTRIBUTES"] = (
+            "deployment.environment.name=leaked,service.version=leaked"
+        )
         config = Config.from_env()
     assert config.endpoint == DEFAULT_ENDPOINT
     assert config.api_key is None
     assert config.organization_id == "org_2"
+    assert config.environment == "staging"
+    assert config.release is None
+    with mock.patch.dict(os.environ, clear=False):
+        os.environ.pop("TELMONI_ENVIRONMENT", None)
+        os.environ["TELMONI_RELEASE"] = " 2026.10.18 "
+        config = Config.from_env()
+    assert config.environment is None
+    assert config.release == "2026.10.18"
 
 
 def test_sample_rate_is_above_zero_and_up_to_one() -> None:

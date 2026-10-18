@@ -100,6 +100,11 @@ class Config:
     # The sampler whose root decision a run takes when it starts a trace of its
     # own; None reads it from the application's tracer provider, or samples.
     sampler: Sampler | None = field(default=None, repr=False)
+    # The deployment this process runs in (production, staging) and the
+    # release it runs (a version or a commit), sent on every span's resource
+    # as deployment.environment.name and service.version; nothing when unset.
+    environment: str | None = None
+    release: str | None = None
 
     def __post_init__(self) -> None:
         self._normalize()
@@ -118,6 +123,8 @@ class Config:
             self.api_key = Secret(key) if key is not None else None
         if not 0 < self.sample_rate <= 1:
             raise ValueError("sample_rate must be above 0 and up to 1")
+        self.environment = _unset_if_blank(self.environment)
+        self.release = _unset_if_blank(self.release)
 
     def bearer(self) -> str | None:
         """The key, for the one header that carries it."""
@@ -125,7 +132,8 @@ class Config:
 
     @classmethod
     def from_env(cls) -> Config:
-        """Read ``TELMONI_ENDPOINT``, ``TELMONI_API_KEY`` and ``TELMONI_ORG``.
+        """Read ``TELMONI_ENDPOINT``, ``TELMONI_API_KEY``, ``TELMONI_ORG``, and
+        ``TELMONI_ENVIRONMENT`` and ``TELMONI_RELEASE`` for the deployment.
 
         A blank value is unset, as the CLI reads them. No ``OTEL_*`` variable is
         read: the SDK's tracer provider is built part by part.
@@ -134,6 +142,8 @@ class Config:
             endpoint=os.getenv("TELMONI_ENDPOINT") or DEFAULT_ENDPOINT,
             api_key=os.getenv("TELMONI_API_KEY"),
             organization_id=os.getenv("TELMONI_ORG"),
+            environment=os.getenv("TELMONI_ENVIRONMENT"),
+            release=os.getenv("TELMONI_RELEASE"),
         )
 
 

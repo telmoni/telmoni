@@ -132,22 +132,25 @@ not a UUID or is the nil UUID (`Error::RunId`) or a span that ends before it sta
 
 ## Configuration
 
-`Config::from_env()` reads three variables, a blank value being unset:
+`Config::from_env()` reads five variables, a blank value being unset:
 
 | Variable | What |
 |---|---|
 | `TELMONI_ENDPOINT` | Where the platform is; `https://api.telmoni.com` unless set. |
 | `TELMONI_API_KEY` | The project's API key, with the `ingest` scope. |
 | `TELMONI_ORG` | The organization (`org_…`). |
+| `TELMONI_ENVIRONMENT` | The deployment this process runs in (`production`, `staging`), sent as `deployment.environment.name`. |
+| `TELMONI_RELEASE` | The release it runs (a version or a commit), sent as `service.version`. |
 
 Nothing in the SDK reads an `OTEL_*` variable. `Config` also holds
 `capture_content` (default `false`), `sample_rate` (default `1.0`; above 0 and
-up to 1, decided per run and never through the trace's sampled flag) and
+up to 1, decided per run and never through the trace's sampled flag),
 `sampler`, the OpenTelemetry sampler whose decision a run takes when it starts
-a trace of its own. The API key is never printed or serialized: `Debug` shows
-it redacted, and `Serialize` leaves it out. It travels over HTTPS only: with a
-plain-HTTP endpoint whose host is not this machine, nothing is sent and the
-first export warns once, and no redirect is followed.
+a trace of its own, and `environment` and `release`, the deployment the
+variables above name. The API key is never printed or serialized: `Debug`
+shows it redacted, and `Serialize` leaves it out. It travels over HTTPS only:
+with a plain-HTTP endpoint whose host is not this machine, nothing is sent and
+the first export warns once, and no redirect is followed.
 
 ## Content
 

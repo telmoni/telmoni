@@ -24,6 +24,9 @@ SAMPLE_RATE = "telmoni.sample_rate"
 CANCELLED = "telmoni.cancelled"
 RUN_START = "telmoni.run.start"
 """The span of no duration that opens a run, sent at once."""
+ENVIRONMENT = "deployment.environment.name"
+"""The deployment, on the resource: the client's ``environment`` and ``release``."""
+RELEASE = "service.version"
 
 # ── The conventions' ─────────────────────────────────────────────────────────
 

@@ -39,7 +39,7 @@ pub(crate) struct Exporter {
     sleep: Box<dyn Fn(Duration) + Send + Sync>,
     warner: Arc<Warner>,
     content_mode: Mutex<Option<String>>,
-    /// The five resource attributes, encoded once: the exporter's own list,
+    /// The resource's attributes, encoded once: the exporter's own list,
     /// whatever the provider's resource holds.
     resource: Vec<serde_json::Value>,
 }
@@ -60,7 +60,7 @@ impl Exporter {
             sleep,
             warner,
             content_mode: Mutex::new(None),
-            resource: resource(),
+            resource: resource(config),
         }
     }
 
@@ -328,18 +328,27 @@ fn problem_type(body: &[u8]) -> String {
         .to_owned()
 }
 
-/// The exporter's five resource attributes.
-fn resource() -> Vec<serde_json::Value> {
-    [
+/// The exporter's five resource attributes, and the deployment's two where
+/// the configuration names one: never from `OTEL_RESOURCE_ATTRIBUTES`, which
+/// the application's exporters read.
+fn resource(config: &Config) -> Vec<serde_json::Value> {
+    let mut attributes = vec![
         (contract::DISTRO_NAME, contract::DISTRO.to_owned()),
         ("telemetry.distro.version", VERSION.to_owned()),
         ("telemetry.sdk.language", "rust".to_owned()),
         ("telemetry.sdk.name", "opentelemetry".to_owned()),
         ("telemetry.sdk.version", sdk_version()),
-    ]
-    .into_iter()
-    .map(|(key, value)| attribute(key, &Value::from(value)))
-    .collect()
+    ];
+    if let Some(environment) = &config.environment {
+        attributes.push((contract::ENVIRONMENT, environment.clone()));
+    }
+    if let Some(release) = &config.release {
+        attributes.push((contract::RELEASE, release.clone()));
+    }
+    attributes
+        .into_iter()
+        .map(|(key, value)| attribute(key, &Value::from(value)))
+        .collect()
 }
 
 /// The OpenTelemetry SDK's version, as its own detector reports it.

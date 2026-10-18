@@ -283,6 +283,10 @@ pub struct SpanRow {
     pub user_id: String,
     /// The session it belongs to; empty when none was sent.
     pub session_id: String,
+    /// The deployment its resource named; empty when it named none.
+    pub environment: String,
+    /// The deployment's release; empty when the resource named none.
+    pub release: String,
     /// The application's own tags.
     pub tags: Vec<(String, String)>,
     /// A run's stall timeout, in seconds; `None` where it set none.

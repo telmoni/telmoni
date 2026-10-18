@@ -144,6 +144,10 @@ export class Exporter {
       attribute('telemetry.sdk.name', 'opentelemetry'),
       attribute('telemetry.sdk.version', sdkVersion()),
     ];
+    // The deployment, where the configuration names one: never from
+    // OTEL_RESOURCE_ATTRIBUTES, which the application's exporters read.
+    if (config.environment !== undefined) this.#resource.push(attribute(contract.ENVIRONMENT, config.environment));
+    if (config.release !== undefined) this.#resource.push(attribute(contract.RELEASE, config.release));
   }
 
   /** The project's mode, as the last answer named it; undefined before one. */

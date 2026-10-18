@@ -104,10 +104,24 @@ def perform(
 
 
 def test_the_run_matches_the_golden_export(
-    telmoni: Telmoni, transport: FakeTransport
+    transport: FakeTransport, sleeps: list[float]
 ) -> None:
     fixture = load_fixture("run.json")
-    perform(telmoni, fixture["scenario"], transport)
+    scenario = fixture["scenario"]
+    telmoni = Telmoni(
+        Config(
+            api_key="telmoni_test_key",
+            capture_content=scenario["capture_content"],
+            environment=scenario["environment"],
+            release=scenario["release"],
+        ),
+        transport=transport,
+        sleep=sleeps.append,
+    )
+    try:
+        perform(telmoni, scenario, transport)
+    finally:
+        telmoni.shutdown()
     bodies = transport.bodies()
     assert len(bodies) >= 2, "the run's start travels in an export of its own"
     gathered = copy.deepcopy(bodies[0])

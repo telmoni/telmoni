@@ -4,7 +4,7 @@ One contract across the four SDKs: what each must send for the same run, and wha
 
 ## `run.json`
 
-`scenario` is the run every suite performs; `export` is the OTLP/JSON body the SDK must have sent for it, in `ExportTraceServiceRequest`'s JSON encoding, after the normalization below. The SDK sends `telmoni.run.start` at once, in an export of its own, and the rest when the run ends, so a suite gathers every body its fake transport received and compares their spans together.
+`scenario` is the run every suite performs, and how the client is built for it: `capture_content`, and the `environment` and `release` the client names its deployment by, which the resource carries as `deployment.environment.name` and `service.version`; `export` is the OTLP/JSON body the SDK must have sent for it, in `ExportTraceServiceRequest`'s JSON encoding, after the normalization below. The SDK sends `telmoni.run.start` at once, in an export of its own, and the rest when the run ends, so a suite gathers every body its fake transport received and compares their spans together.
 
 Before comparing, a suite normalizes what it captured:
 

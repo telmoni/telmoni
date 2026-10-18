@@ -26,7 +26,10 @@ use telmoni_shared::{
 };
 
 use crate::AppState;
-use crate::contract::{MODEL_MAX, NAME_MAX, SESSION_ID_MAX, USER_ID_MAX};
+use crate::contract::{
+    ATTRIBUTE_VALUE_MAX, ENVIRONMENT_MAX, MODEL_MAX, NAME_MAX, RELEASE_MAX, SESSION_ID_MAX,
+    TAG_KEY_MAX, TAG_VALUE_MAX, USER_ID_MAX,
+};
 use crate::store::{self, Projects, SpanRow};
 use crate::traces::{
     self, Bar, DEFAULT_LIMIT, EXPORT_MAX, FACET_VALUES_MAX, FILTER_VALUES_MAX, FacetRow, MAX_DAYS,
@@ -65,6 +68,14 @@ pub struct TraceQuery {
     pub model: Vec<String>,
     /// Tools one of their calls ran.
     pub tool: Vec<String>,
+    /// The deployments their spans were sent from.
+    pub environment: Vec<String>,
+    /// The releases their spans were sent from.
+    pub release: Vec<String>,
+    /// Tags any of their spans carry, each `key:value`.
+    pub tag: Vec<String>,
+    /// Prompt names any of their spans carry.
+    pub prompt: Vec<String>,
     /// Runs by id: a download's chosen rows.
     pub run: Vec<String>,
     /// The column to sort by ([`TraceSort`]).
@@ -118,6 +129,22 @@ impl TraceQuery {
                 }
                 ("tool", _) => {
                     query.tool.push(value);
+                    continue;
+                }
+                ("environment", _) => {
+                    query.environment.push(value);
+                    continue;
+                }
+                ("release", _) => {
+                    query.release.push(value);
+                    continue;
+                }
+                ("tag", _) => {
+                    query.tag.push(value);
+                    continue;
+                }
+                ("prompt", _) => {
+                    query.prompt.push(value);
                     continue;
                 }
                 ("run", Export) => {
@@ -181,6 +208,10 @@ impl TraceQuery {
             statuses,
             models: values("model", &self.model, MODEL_MAX)?,
             tools: values("tool", &self.tool, NAME_MAX)?,
+            environments: values("environment", &self.environment, ENVIRONMENT_MAX)?,
+            releases: values("release", &self.release, RELEASE_MAX)?,
+            tags: tag_values(&self.tag)?,
+            prompts: values("prompt", &self.prompt, ATTRIBUTE_VALUE_MAX)?,
             runs,
             days: parse_days(self.days.as_deref().unwrap_or_default())?,
         })
@@ -239,6 +270,25 @@ pub(crate) fn values(
         )));
     }
     Ok(kept)
+}
+
+/// A tag filter's values, each `key:value` as ingest keeps a tag: the key 1
+/// to [`TAG_KEY_MAX`] characters, the value up to [`TAG_VALUE_MAX`].
+fn tag_values(given: &[String]) -> Result<Vec<String>, TelmoniError> {
+    let pairs = values("tag", given, TAG_KEY_MAX + 1 + TAG_VALUE_MAX)?;
+    for pair in &pairs {
+        let well_formed = pair.split_once(':').is_some_and(|(key, value)| {
+            (1..=TAG_KEY_MAX).contains(&key.chars().count())
+                && value.chars().count() <= TAG_VALUE_MAX
+        });
+        if !well_formed {
+            return Err(TelmoniError::BadRequest(format!(
+                "tag is key:value, the key 1 to {TAG_KEY_MAX} characters and the value up to \
+                 {TAG_VALUE_MAX}"
+            )));
+        }
+    }
+    Ok(pairs)
 }
 
 /// The way a column sorts when the URL names none: the newest, the longest
@@ -392,6 +442,11 @@ pub struct Trace {
     pub cache_write_input_tokens: u64,
     pub models: Vec<String>,
     pub tools: Vec<String>,
+    /// The deployments its spans were sent from, each once: one, unless the
+    /// run crossed services deployed apart.
+    pub environments: Vec<String>,
+    /// The releases its spans were sent from, each once.
+    pub releases: Vec<String>,
 }
 
 impl From<TraceRow> for Trace {
@@ -418,12 +473,14 @@ impl From<TraceRow> for Trace {
             cache_write_input_tokens: row.cache_write_input_tokens,
             models: row.models,
             tools: row.tools,
+            environments: row.environments,
+            releases: row.releases,
         }
     }
 }
 
 /// A download's header row: the list's fields, in its order.
-const CSV_HEADER: [&str; 21] = [
+const CSV_HEADER: [&str; 23] = [
     "run_id",
     "agent",
     "user_id",
@@ -445,12 +502,15 @@ const CSV_HEADER: [&str; 21] = [
     "cache_write_input_tokens",
     "models",
     "tools",
+    "environments",
+    "releases",
 ];
 
 impl Trace {
     /// The row a download writes for it, under [`CSV_HEADER`]: its times as
-    /// RFC 3339, and its models and tools each one cell, `; ` between them.
-    fn cells(&self) -> [String; 21] {
+    /// RFC 3339, and its models, tools, environments and releases each one
+    /// cell, `; ` between them.
+    fn cells(&self) -> [String; 23] {
         let time = |t: &DateTime<Utc>| t.to_rfc3339_opts(SecondsFormat::Micros, true);
         [
             self.run_id.to_string(),
@@ -474,6 +534,8 @@ impl Trace {
             self.cache_write_input_tokens.to_string(),
             self.models.join("; "),
             self.tools.join("; "),
+            self.environments.join("; "),
+            self.releases.join("; "),
         ]
     }
 }
@@ -490,6 +552,11 @@ pub struct TraceFacets {
     pub status: Facet,
     pub model: Facet,
     pub tool: Facet,
+    pub environment: Facet,
+    pub release: Facet,
+    /// Each tag as `key:value`.
+    pub tag: Facet,
+    pub prompt: Facet,
 }
 
 /// One filter's values: the ticked ones first, then the most runs, up to
@@ -523,6 +590,10 @@ impl TraceFacets {
                 "status" => &mut facets.status,
                 "model" => &mut facets.model,
                 "tool" => &mut facets.tool,
+                "environment" => &mut facets.environment,
+                "release" => &mut facets.release,
+                "tag" => &mut facets.tag,
+                "prompt" => &mut facets.prompt,
                 _ => continue,
             };
             if facet.values.len() == FACET_VALUES_MAX {
@@ -611,6 +682,8 @@ pub struct TraceSpan {
     pub cache_write_input_tokens: u64,
     pub user_id: String,
     pub session_id: String,
+    pub environment: String,
+    pub release: String,
     pub tags: BTreeMap<String, String>,
     pub bound_stall_after_s: Option<u32>,
     pub bound_max_steps: Option<u32>,
@@ -642,6 +715,8 @@ impl From<SpanRow> for TraceSpan {
             cache_write_input_tokens: row.cache_write_input_tokens,
             user_id: row.user_id,
             session_id: row.session_id,
+            environment: row.environment,
+            release: row.release,
             tags: row.tags.into_iter().collect(),
             bound_stall_after_s: row.bound_stall_after_s,
             bound_max_steps: row.bound_max_steps,
@@ -863,6 +938,11 @@ mod tests {
                 ("status", "cancelled"),
                 ("model", "claude-sonnet-5-5"),
                 ("tool", "search_docs"),
+                ("environment", "production"),
+                ("release", " 2026.10.18 "),
+                ("tag", "team:search"),
+                ("tag", "team:a:b"),
+                ("prompt", "triage-v2"),
                 ("sort", "user"),
                 ("days", "30"),
                 ("limit", "50"),
@@ -877,6 +957,14 @@ mod tests {
         assert_eq!(filter.statuses, [SpanStatus::Error, SpanStatus::Cancelled]);
         assert_eq!(filter.models, ["claude-sonnet-5-5"]);
         assert_eq!(filter.tools, ["search_docs"]);
+        assert_eq!(filter.environments, ["production"]);
+        assert_eq!(filter.releases, ["2026.10.18"]);
+        assert_eq!(
+            filter.tags,
+            ["team:search", "team:a:b"],
+            "a tag's value may hold a colon of its own"
+        );
+        assert_eq!(filter.prompts, ["triage-v2"]);
         assert!(filter.runs.is_empty());
         assert_eq!(filter.days, 30);
         assert_eq!(
@@ -983,12 +1071,30 @@ mod tests {
                 &[("session", &"s".repeat(SESSION_ID_MAX + 1))],
             )
             .and_then(|q| q.filter().map(|_| ())),
+            read(
+                Reading::List,
+                &[("environment", &"e".repeat(ENVIRONMENT_MAX + 1))],
+            )
+            .and_then(|q| q.filter().map(|_| ())),
+            read(Reading::List, &[("tag", "untagged<script>")])
+                .and_then(|q| q.filter().map(|_| ())),
+            read(Reading::List, &[("tag", ":nameless")]).and_then(|q| q.filter().map(|_| ())),
+            read(
+                Reading::List,
+                &[("tag", &format!("{}:v", "k".repeat(TAG_KEY_MAX + 1)))],
+            )
+            .and_then(|q| q.filter().map(|_| ())),
+            read(
+                Reading::List,
+                &[("tag", &format!("k:{}", "v".repeat(TAG_VALUE_MAX + 1)))],
+            )
+            .and_then(|q| q.filter().map(|_| ())),
             TraceQuery::read(too_many, Reading::List).and_then(|q| q.filter().map(|_| ())),
         ]
         .into_iter()
         .filter_map(Result::err)
         .collect();
-        assert_eq!(refusals.len(), 14, "every query above is refused");
+        assert_eq!(refusals.len(), 19, "every query above is refused");
         for refused in refusals {
             let problem = refused.to_problem_details();
             assert_eq!(problem.status, 400);
@@ -997,7 +1103,8 @@ mod tests {
                 !detail.contains("script")
                     && !detail.contains("sideways")
                     && !detail.contains("spend")
-                    && !detail.contains("nonsense"),
+                    && !detail.contains("nonsense")
+                    && !detail.contains("nameless"),
                 "the value was echoed: {detail}"
             );
         }
@@ -1074,6 +1181,8 @@ mod tests {
             cache_write_input_tokens: 0,
             models: vec!["a".into(), "b".into()],
             tools: vec![],
+            environments: vec!["production".into()],
+            releases: vec![],
         };
         let mut out = Vec::new();
         csv::row(&mut out, &trace.cells());
@@ -1082,7 +1191,7 @@ mod tests {
             "00000000-0000-0000-0000-000000000000,\"'=cmd\",,\"thread, 42\",true,error,RuntimeError,"
         ));
         assert!(line.contains("2026-10-11T12:30:00.000000Z,2026-10-11T12:30:01.500000Z,1500,"));
-        assert!(line.ends_with(",a; b,\r\n"));
+        assert!(line.ends_with(",a; b,,production,\r\n"));
         let json = serde_json::to_value(&trace).expect("JSON");
         let mut keys: Vec<&str> = json
             .as_object()

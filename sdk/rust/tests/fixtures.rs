@@ -12,7 +12,7 @@ use common::{
 };
 use serde_json::{Value, json};
 use telmoni_sdk::transport::TransportError;
-use telmoni_sdk::{Bounds, ModelCallOptions, Reply, RunOptions, ToolCallOptions, Usage};
+use telmoni_sdk::{Bounds, Config, ModelCallOptions, Reply, RunOptions, ToolCallOptions, Usage};
 
 /// The fixture's normalization, as its README sets it out.
 fn normalize(export: &Value) -> Result<Value, Failure> {
@@ -202,8 +202,16 @@ fn perform(harness: &Harness, scenario: &Value) -> Outcome {
 #[test]
 fn the_run_matches_the_golden_export() -> Outcome {
     let fixture = load_fixture("run.json")?;
-    let harness = Harness::new()?;
-    perform(&harness, field(&fixture, "scenario")?)?;
+    let scenario = field(&fixture, "scenario")?;
+    let harness = Harness::with(Config {
+        capture_content: field(scenario, "capture_content")?
+            .as_bool()
+            .ok_or("capture_content")?,
+        environment: Some(text(scenario, "environment")?.to_owned()),
+        release: Some(text(scenario, "release")?.to_owned()),
+        ..keyed()
+    })?;
+    perform(&harness, scenario)?;
 
     let bodies = harness.transport.bodies()?;
     assert!(

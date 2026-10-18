@@ -58,6 +58,8 @@ function detail(id: string) {
         cache_write_input_tokens: 0,
         models: ["claude-sonnet-5-5"],
         tools: ["search_docs"],
+        environments: [],
+        releases: [],
         pinned: [],
       },
     ],

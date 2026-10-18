@@ -28,11 +28,16 @@ describe('configuration', () => {
     expect(new Telmoni({ endpoint: 'https://api.telmoni.local/' }).config.endpoint).toBe('https://api.telmoni.local');
   });
 
-  it('reads a blank endpoint, organization or key as unset', () => {
-    const client = new Telmoni({ endpoint: '  ', organizationId: ' ', apiKey: '\t' });
+  it('reads a blank endpoint, organization, key, environment or release as unset', () => {
+    const client = new Telmoni({ endpoint: '  ', organizationId: ' ', apiKey: '\t', environment: ' ', release: '' });
     expect(client.config.endpoint).toBe(DEFAULT_ENDPOINT);
     expect(client.config.organizationId).toBeUndefined();
     expect(client.config.apiKey).toBeUndefined();
+    expect(client.config.environment).toBeUndefined();
+    expect(client.config.release).toBeUndefined();
+    const deployed = new Telmoni({ environment: ' staging ', release: '2026.10.18' });
+    expect(deployed.config.environment).toBe('staging');
+    expect(deployed.config.release).toBe('2026.10.18');
   });
 
   it('never prints or serializes the API key', () => {
@@ -49,25 +54,34 @@ describe('configuration', () => {
     expect(client.config.apiKey).toBe('telmoni_secret_key');
   });
 
-  it('reads the three variables from the environment and no other', () => {
+  it('reads the five variables from the environment and no other', () => {
     vi.stubEnv('TELMONI_ENDPOINT', undefined);
     vi.stubEnv('TELMONI_API_KEY', '');
     vi.stubEnv('TELMONI_ORG', 'org_2');
+    vi.stubEnv('TELMONI_ENVIRONMENT', 'staging');
+    vi.stubEnv('TELMONI_RELEASE', '');
     vi.stubEnv('OTEL_EXPORTER_OTLP_ENDPOINT', 'https://elsewhere.example');
+    vi.stubEnv('OTEL_RESOURCE_ATTRIBUTES', 'deployment.environment.name=leaked,service.version=leaked');
     const client = Telmoni.fromEnv();
     expect(client.config.endpoint).toBe(DEFAULT_ENDPOINT);
     expect(client.config.apiKey).toBeUndefined();
     expect(client.config.organizationId).toBe('org_2');
+    expect(client.config.environment).toBe('staging');
+    expect(client.config.release).toBeUndefined();
   });
 
-  it('takes the endpoint and key from the environment when set', () => {
+  it('takes the endpoint, key and release from the environment when set', () => {
     vi.stubEnv('TELMONI_ENDPOINT', 'https://api.telmoni.local/');
     vi.stubEnv('TELMONI_API_KEY', 'telmoni_env_key');
     vi.stubEnv('TELMONI_ORG', '');
+    vi.stubEnv('TELMONI_ENVIRONMENT', undefined);
+    vi.stubEnv('TELMONI_RELEASE', ' 2026.10.18 ');
     const client = Telmoni.fromEnv();
     expect(client.config.endpoint).toBe('https://api.telmoni.local');
     expect(client.config.apiKey).toBe('telmoni_env_key');
     expect(client.config.organizationId).toBeUndefined();
+    expect(client.config.environment).toBeUndefined();
+    expect(client.config.release).toBe('2026.10.18');
   });
 
   it('holds the sample rate above zero and up to one', () => {

@@ -132,14 +132,17 @@ const telmoni = new Telmoni({
   organizationId: 'org_…',
   captureContent: false, // the default
   sampleRate: 1, // the default: every run
+  environment: 'production', // the deployment, sent as deployment.environment.name
+  release: '2026.10.18', // its release, sent as service.version
 });
 ```
 
-`Telmoni.fromEnv()` reads `TELMONI_ENDPOINT`, `TELMONI_API_KEY` and
-`TELMONI_ORG`; a blank value is unset, and a blank endpoint falls back to the
-default. No `OTEL_*` variable is read. The key is never printed or serialized:
-`console.log`, `util.inspect` and `JSON.stringify` of the client or its
-configuration leave it out.
+`Telmoni.fromEnv()` reads `TELMONI_ENDPOINT`, `TELMONI_API_KEY`,
+`TELMONI_ORG`, `TELMONI_ENVIRONMENT` and `TELMONI_RELEASE`; a blank value is
+unset, and a blank endpoint falls back to the default. No `OTEL_*` variable
+is read. The key is never printed or serialized: `console.log`,
+`util.inspect` and `JSON.stringify` of the client or its configuration leave
+it out.
 
 ## Content
 

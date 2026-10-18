@@ -145,12 +145,15 @@ learns from the server's first answer, is `on`.
 ## Configuration
 
 `telmoni.Config{Endpoint, OrganizationID, APIKey, CaptureContent, SampleRate,
-Sampler}`, or `telmoni.ConfigFromEnv()`, which reads `TELMONI_ENDPOINT`
-(default `https://api.telmoni.com`), `TELMONI_API_KEY` and `TELMONI_ORG`, a
-blank value counting as unset. `SampleRate` is the share of runs sent (0 means
-1), dropped whole in the exporter and never through the trace's sampled flag;
-`Sampler` is the OpenTelemetry sampler whose decision a run takes when it
-starts a trace of its own. The key never appears in `%v`, `%+v`, `%#v` or
+Sampler, Environment, Release}`, or `telmoni.ConfigFromEnv()`, which reads
+`TELMONI_ENDPOINT` (default `https://api.telmoni.com`), `TELMONI_API_KEY`,
+`TELMONI_ORG`, `TELMONI_ENVIRONMENT` and `TELMONI_RELEASE`, a blank value
+counting as unset. `Environment` and `Release` name the deployment every span
+is sent from, as the resource's `deployment.environment.name` and
+`service.version`. `SampleRate` is the share of runs sent (0 means 1), dropped
+whole in the exporter and never through the trace's sampled flag; `Sampler`
+is the OpenTelemetry sampler whose decision a run takes when it starts a
+trace of its own. The key never appears in `%v`, `%+v`, `%#v` or
 `json.Marshal` of the configuration or the client. Options for tests:
 `telmoni.WithTransport`, `telmoni.WithSleep`, `telmoni.WithLogger`.
 

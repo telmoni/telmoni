@@ -26,13 +26,17 @@
         { "tool_call": { "name": "search", "fails_with": "TimeoutError" } }
       ]
     },
-    "capture_content": false
+    "capture_content": false,
+    "environment": "staging",
+    "release": "2026.10.18"
   },
   "export": {
     "resourceSpans": [
       {
         "resource": {
           "attributes": [
+            { "key": "deployment.environment.name", "value": { "stringValue": "staging" } },
+            { "key": "service.version", "value": { "stringValue": "2026.10.18" } },
             { "key": "telemetry.distro.name", "value": { "stringValue": "telmoni" } },
             { "key": "telemetry.distro.version", "value": { "stringValue": "<version>" } },
             { "key": "telemetry.sdk.language", "value": { "stringValue": "<language>" } },

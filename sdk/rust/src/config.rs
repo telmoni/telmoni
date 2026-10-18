@@ -42,6 +42,14 @@ pub struct Config {
     /// sent whatever the decision.
     #[serde(skip)]
     pub sampler: Option<Box<dyn ShouldSample>>,
+    /// The deployment this process runs in (`production`, `staging`;
+    /// `TELMONI_ENVIRONMENT`), sent on every span's resource as
+    /// `deployment.environment.name`; `None` sends nothing.
+    pub environment: Option<String>,
+    /// The release this process runs (a version or a commit;
+    /// `TELMONI_RELEASE`), sent on every span's resource as
+    /// `service.version`; `None` sends nothing.
+    pub release: Option<String>,
 }
 
 impl fmt::Debug for Config {
@@ -55,6 +63,8 @@ impl fmt::Debug for Config {
             capture_content,
             sample_rate,
             sampler,
+            environment,
+            release,
         } = self;
         f.debug_struct("Config")
             .field("endpoint", endpoint)
@@ -63,6 +73,8 @@ impl fmt::Debug for Config {
             .field("capture_content", capture_content)
             .field("sample_rate", sample_rate)
             .field("sampler", sampler)
+            .field("environment", environment)
+            .field("release", release)
             .finish()
     }
 }
@@ -76,6 +88,8 @@ impl Default for Config {
             capture_content: false,
             sample_rate: 1.0,
             sampler: None,
+            environment: None,
+            release: None,
         }
     }
 }
@@ -98,22 +112,27 @@ impl Config {
         .normalized()
     }
 
-    /// Reads `TELMONI_ENDPOINT`, `TELMONI_API_KEY` and `TELMONI_ORG`, a blank
-    /// value being unset, as the CLI reads them. No `OTEL_*` variable is read:
-    /// the SDK's tracer provider is built part by part.
+    /// Reads `TELMONI_ENDPOINT`, `TELMONI_API_KEY` and `TELMONI_ORG`, and
+    /// `TELMONI_ENVIRONMENT` and `TELMONI_RELEASE` for the deployment, a
+    /// blank value being unset, as the CLI reads them. No `OTEL_*` variable is
+    /// read: the SDK's tracer provider is built part by part.
     #[must_use]
     pub fn from_env() -> Self {
-        Self::new(
-            env_var("TELMONI_ENDPOINT").unwrap_or_default(),
-            env_var("TELMONI_ORG"),
-            env_var("TELMONI_API_KEY"),
-        )
+        Self {
+            environment: env_var("TELMONI_ENVIRONMENT"),
+            release: env_var("TELMONI_RELEASE"),
+            ..Self::new(
+                env_var("TELMONI_ENDPOINT").unwrap_or_default(),
+                env_var("TELMONI_ORG"),
+                env_var("TELMONI_API_KEY"),
+            )
+        }
     }
 
     /// The configuration as the client uses it: a blank endpoint is the
-    /// default, trailing slashes are gone, a blank organization or key is
-    /// unset. Applied again by the client, since a configuration built by hand
-    /// skips [`Config::new`].
+    /// default, trailing slashes are gone, a blank organization, key,
+    /// environment or release is unset. Applied again by the client, since a
+    /// configuration built by hand skips [`Config::new`].
     pub(crate) fn normalized(mut self) -> Self {
         self.endpoint = unset_if_blank(&self.endpoint).map_or_else(
             || DEFAULT_ENDPOINT.to_owned(),
@@ -121,6 +140,8 @@ impl Config {
         );
         self.organization_id = self.organization_id.as_deref().and_then(unset_if_blank);
         self.api_key = self.api_key.as_deref().and_then(unset_if_blank);
+        self.environment = self.environment.as_deref().and_then(unset_if_blank);
+        self.release = self.release.as_deref().and_then(unset_if_blank);
         self
     }
 }

@@ -47,6 +47,8 @@ function trace(run: string) {
         cache_write_input_tokens: 0,
         user_id: "",
         session_id: "",
+        environment: "",
+        release: "",
         tags: {},
         bound_stall_after_s: null,
         bound_max_steps: null,

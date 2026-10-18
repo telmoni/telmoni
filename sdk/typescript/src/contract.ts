@@ -23,6 +23,9 @@ export const SAMPLE_RATE = 'telmoni.sample_rate';
 export const CANCELLED = 'telmoni.cancelled';
 /** The span of no duration that opens a run, sent at once. */
 export const RUN_START = 'telmoni.run.start';
+/** The deployment, on the resource: the client's `environment` and `release`. */
+export const ENVIRONMENT = 'deployment.environment.name';
+export const RELEASE = 'service.version';
 
 // ── The conventions' ─────────────────────────────────────────────────────────
 

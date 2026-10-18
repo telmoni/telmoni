@@ -60,6 +60,10 @@ CREATE TABLE IF NOT EXISTS telemetry.spans
     cache_write_input_tokens UInt64,
     user_id                  String,
     session_id               String,
+    -- The deployment the span's resource named, and its release; empty
+    -- where it named none.
+    environment              LowCardinality(String),
+    release                  LowCardinality(String),
     tags                     Map(LowCardinality(String), String),
     -- A run's bounds and sample rate, NULL where it set none and on every
     -- other kind.
@@ -76,11 +80,11 @@ PARTITION BY toDate(received_at)
 ORDER BY (project_id, started_at);
 
 -- Each hour's totals, by project, agent, kind, model, provider, a tool call's
--- name and status: no user and no tag, so it outlives the spans, kept
--- thirteen months. `tool` is empty on every kind but a tool call, so the
--- names an application gives its steps never multiply the rows. Durations are a
--- t-digest in milliseconds, which merges across hours and keys and answers
--- any percentile.
+-- name, status and the deployment's environment and release: no user and no
+-- tag, so it outlives the spans, kept thirteen months. `tool` is empty on
+-- every kind but a tool call, so the names an application gives its steps
+-- never multiply the rows. Durations are a t-digest in milliseconds, which
+-- merges across hours and keys and answers any percentile.
 CREATE TABLE IF NOT EXISTS telemetry.spans_hourly
 (
     project_id               String,
@@ -91,6 +95,8 @@ CREATE TABLE IF NOT EXISTS telemetry.spans_hourly
     provider                 LowCardinality(String),
     tool                     LowCardinality(String),
     status                   LowCardinality(String),
+    environment              LowCardinality(String),
+    release                  LowCardinality(String),
     spans                    SimpleAggregateFunction(sum, UInt64),
     units                    SimpleAggregateFunction(sum, UInt64),
     input_tokens             SimpleAggregateFunction(sum, UInt64),
@@ -101,7 +107,7 @@ CREATE TABLE IF NOT EXISTS telemetry.spans_hourly
 )
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(hour)
-ORDER BY (project_id, hour, agent, kind, model, provider, tool, status);
+ORDER BY (project_id, hour, agent, kind, model, provider, tool, status, environment, release);
 
 -- ⚠ The one second table an insert into `spans` writes, in the same flush:
 -- a view that failed would fail the insert after its spans were written, so
@@ -121,6 +127,8 @@ AS SELECT
     provider,
     if(kind = 'tool_call', name, '') AS tool,
     status,
+    environment,
+    release,
     count() AS spans,
     sum(units) AS units,
     sum(input_tokens) AS input_tokens,
@@ -131,7 +139,7 @@ AS SELECT
         greatest(dateDiff('microsecond', started_at, ended_at), 0) / 1000
     ) AS duration_ms
 FROM telemetry.spans
-GROUP BY project_id, hour, agent, kind, model, provider, tool, status;
+GROUP BY project_id, hour, agent, kind, model, provider, tool, status, environment, release;
 
 -- ⚠ Tenancy: a read sees only the projects its query's setting
 -- `SQL_telmoni_projects` names, a JSON array the one query module sets on

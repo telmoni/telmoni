@@ -112,6 +112,8 @@ export const TraceColumn = {
   Agent:            "agent",
   User:             "user",
   Session:          "session",
+  Environment:      "environment",
+  Release:          "release",
   Status:           "status",
   ErrorType:        "error_type",
   Steps:            "steps",

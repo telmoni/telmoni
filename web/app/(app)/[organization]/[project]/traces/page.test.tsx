@@ -111,6 +111,8 @@ const TRACE_A = {
   cache_write_input_tokens: 50,
   models: ["claude-sonnet-5-5"],
   tools: ["search_docs"],
+  environments: ["production"],
+  releases: ["2026.10.18"],
 };
 const TRACE_B = {
   ...TRACE_A,
@@ -186,6 +188,10 @@ beforeEach(() => {
       },
       model: NONE,
       tool: NONE,
+      environment: { values: [{ value: "production", runs: 1 }], more: false },
+      release: NONE,
+      tag: NONE,
+      prompt: NONE,
     },
   };
   mockHistogram = {
@@ -246,7 +252,7 @@ describe("TracesPage", () => {
     // Columns past the first eight are offered, not shown; the count, as
     // Langfuse's, holds the trace's id, which always shows.
     expect(table.queryByRole("columnheader", { name: /Model calls/ })).toBeNull();
-    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("9/21");
+    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("9/23");
     // The window and the refresh stand on the title's row.
     const header = within(screen.getByTestId("page-header"));
     expect(header.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 7 days");

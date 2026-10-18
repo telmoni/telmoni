@@ -57,7 +57,7 @@ pub fn read(
 
     let mut batch = Batch::default();
     for resource_spans in &request.resource_spans {
-        let resource = span::resource_attributes(resource_spans.resource.as_ref());
+        let resource = span::read_resource(resource_spans.resource.as_ref());
         for scope_spans in &resource_spans.scope_spans {
             let context = Context {
                 project_id,
@@ -66,7 +66,9 @@ pub fn read(
                     .scope
                     .as_ref()
                     .map_or("", |scope| scope.name.as_str()),
-                resource: &resource,
+                environment: &resource.environment,
+                release: &resource.release,
+                resource: &resource.attributes,
                 store_user_id,
             };
             for one in &scope_spans.spans {
@@ -148,7 +150,11 @@ mod tests {
             resource_spans: vec![
                 ResourceSpans {
                     resource: Some(Resource {
-                        attributes: vec![kv("service.name", "reporter"), kv("host.name", "laptop")],
+                        attributes: vec![
+                            kv("service.name", "reporter"),
+                            kv("host.name", "laptop"),
+                            kv(contract::ENVIRONMENT, "staging"),
+                        ],
                         ..Resource::default()
                     }),
                     scope_spans: vec![
@@ -202,6 +208,12 @@ mod tests {
             batch.rows[0].attributes,
             [("service.name".to_owned(), "reporter".to_owned())],
             "the first resource's inventory rides on its spans; host.name does not"
+        );
+        assert!(
+            batch.rows[..3]
+                .iter()
+                .all(|row| row.environment == "staging" && row.release.is_empty()),
+            "the first resource's deployment is on each of its spans"
         );
         assert!(
             batch.rows[2].attributes.is_empty() || batch.rows[2].attributes[0].0 == "service.name"

@@ -67,6 +67,10 @@ pub const PROVIDER_MAX: usize = 128;
 pub const USER_ID_MAX: usize = 128;
 /// `session_id`, kept as sent.
 pub const SESSION_ID_MAX: usize = 200;
+/// `environment`, as sent; longer, the resource is read as naming none.
+pub const ENVIRONMENT_MAX: usize = 128;
+/// `release`, as sent; longer, the resource is read as naming none.
+pub const RELEASE_MAX: usize = 128;
 /// How many `tags` a span may carry.
 pub const TAGS_MAX: usize = 32;
 /// A tag's key, after `telmoni.tag.`.
@@ -237,12 +241,19 @@ pub const INVENTORY_SPAN: &[&str] = &[
     "server.address",
 ];
 
+/// The deployment a span was sent from, on its resource: our SDKs set it
+/// from their `environment` option or `TELMONI_ENVIRONMENT`.
+pub const ENVIRONMENT: &str = "deployment.environment.name";
+/// The deployment's release, on the resource: the SDKs' `release` option or
+/// `TELMONI_RELEASE`.
+pub const RELEASE: &str = "service.version";
+
+/// The resource attributes a column is read from: consumed, so neither is an
+/// attribute kept.
+pub const RESOURCE_FIELDS: &[&str] = &[ENVIRONMENT, RELEASE];
+
 /// The resource attributes kept in `attributes` under their own names.
-pub const INVENTORY_RESOURCE: &[&str] = &[
-    "service.name",
-    "service.version",
-    "deployment.environment.name",
-];
+pub const INVENTORY_RESOURCE: &[&str] = &["service.name"];
 
 /// The resource attributes kept by their prefix: what the SDK and the
 /// distribution say about themselves.
@@ -625,6 +636,20 @@ pub const INVENTORY: &[InventoryRow] = &[
         Needs::AnyMode,
         "up to 200 characters, kept as sent",
     ),
+    row(
+        ENVIRONMENT,
+        ReadOn::Resource,
+        "the column environment, on every span of the export",
+        Needs::AnyMode,
+        "up to 128 characters, as sent: production, staging; longer, read as none",
+    ),
+    row(
+        RELEASE,
+        ReadOn::Resource,
+        "the column release, on every span of the export",
+        Needs::AnyMode,
+        "up to 128 characters, as sent: a version or a commit; longer, read as none",
+    ),
     // The names the conventions replaced.
     row(
         "gen_ai.system",
@@ -741,20 +766,6 @@ pub const INVENTORY: &[InventoryRow] = &[
     ),
     row(
         "service.name",
-        ReadOn::Resource,
-        KEPT_ATTRIBUTE,
-        Needs::AnyMode,
-        RULE_ATTRIBUTE,
-    ),
-    row(
-        "service.version",
-        ReadOn::Resource,
-        KEPT_ATTRIBUTE,
-        Needs::AnyMode,
-        RULE_ATTRIBUTE,
-    ),
-    row(
-        "deployment.environment.name",
         ReadOn::Resource,
         KEPT_ATTRIBUTE,
         Needs::AnyMode,
@@ -905,8 +916,9 @@ mod tests {
     /// as something to keep or drop.
     #[test]
     fn the_lists_name_nothing_twice() {
-        let lists: [(&str, &[&str]); 4] = [
+        let lists: [(&str, &[&str]); 5] = [
             ("fields", FIELDS),
+            ("fields (resource)", RESOURCE_FIELDS),
             ("content", CONTENT),
             ("inventory (span)", INVENTORY_SPAN),
             ("inventory (resource)", INVENTORY_RESOURCE),
@@ -930,7 +942,7 @@ mod tests {
                 "{old} is both a field and a replaced name"
             );
         }
-        for name in INVENTORY_RESOURCE {
+        for name in INVENTORY_RESOURCE.iter().chain(RESOURCE_FIELDS) {
             assert!(
                 !INVENTORY_RESOURCE_PREFIXES
                     .iter()
@@ -974,6 +986,7 @@ mod tests {
         assert!(!is_content("user.id"), "an id names nobody by itself");
     }
 
+    /// The deployment's two names are columns, so neither is an attribute kept.
     #[test]
     fn the_resource_inventory_matches_by_name_and_by_prefix() {
         assert!(is_inventory_resource("service.name"));
@@ -981,6 +994,8 @@ mod tests {
         assert!(is_inventory_resource("telemetry.distro.version"));
         assert!(!is_inventory_resource("process.owner"));
         assert!(!is_inventory_resource("host.name"));
+        assert!(!is_inventory_resource(ENVIRONMENT));
+        assert!(!is_inventory_resource(RELEASE));
     }
 
     /// ⚠ The page's table and ingest's lists are held to each other: a name
@@ -991,6 +1006,7 @@ mod tests {
     fn the_inventory_names_every_attribute_ingest_reads_and_nothing_else() {
         let mut expected: Vec<String> = FIELDS
             .iter()
+            .chain(RESOURCE_FIELDS)
             .chain(CONTENT)
             .chain(INVENTORY_SPAN)
             .chain(INVENTORY_RESOURCE)
