@@ -57,7 +57,9 @@ Each of `run`, `step`, `model_call` and `tool_call` is a context manager, an
 `async with`, and a decorator. An exception that escapes one marks the span
 failed with the exception's class, never its message, and is raised again; a
 `KeyboardInterrupt` or `asyncio.CancelledError` marks it cancelled. `fail()`
-and `cancel()` do the same by hand.
+and `cancel()` do the same by hand. `run` raises `ValueError` for a blank agent
+name or a sample rate outside (0, 1]; a bound or a token count that is not a
+finite number, or a whole one past 64 bits, is left off with one warning.
 
 ## A run recorded after it ended
 

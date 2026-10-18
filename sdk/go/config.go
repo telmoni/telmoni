@@ -124,7 +124,8 @@ func ConfigFromEnv() Config {
 	}.normalized()
 }
 
-// Bounds is what a monitor holds a run to; a zero field is not sent.
+// Bounds is what a monitor holds a run to; a zero field is not sent, nor a
+// MaxCostUSD that is no finite number, which Run leaves off with one warning.
 type Bounds struct {
 	StallAfterS int
 	MaxSteps    int

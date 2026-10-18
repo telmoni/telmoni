@@ -47,6 +47,36 @@ describe('a model call', () => {
     expect(typed['gen_ai.usage.input_tokens']).toEqual({ intValue: '12' });
   });
 
+  it('sends a token count as an integer, and leaves off one that is no finite number', async () => {
+    const usage = { inputTokens: Number.NaN, outputTokens: 12.7, cacheReadInputTokens: Infinity, cacheWriteInputTokens: 2 ** 63 };
+    h.telmoni.run('bot', (run) => {
+      for (let i = 0; i < 2; i += 1) run.modelCall('m', (call) => call.answered({ usage }));
+      run.modelCall('m', (call) => call.answered({ usage: null as unknown as undefined }));
+    });
+    const at = Date.parse('2026-10-18T09:00:00.000Z');
+    h.telmoni.recordRun({
+      runId: '3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d',
+      agent: 'bot',
+      start: at,
+      end: at,
+      inside: [{ type: 'model_call', model: 'm', start: at, end: at, usage }],
+    });
+    expect(await h.telmoni.flush()).toBe(true);
+    const spans = h.transport.spans().filter((span) => span.name === 'chat m');
+    expect(spans, 'the calls sent, recorded ones too, and the batch').toHaveLength(4);
+    const counted = spans.filter((span) => span.attributes.some((a) => a.key.startsWith('gen_ai.usage.')));
+    expect(counted, 'the null usage counts nothing').toHaveLength(3);
+    for (const span of counted) {
+      const typed = Object.fromEntries(span.attributes.map((a) => [a.key, a.value]));
+      expect(typed['gen_ai.usage.output_tokens']).toEqual({ intValue: '12' });
+      expect(typed['gen_ai.usage.input_tokens']).toBeUndefined();
+      expect(typed['gen_ai.usage.cache_read.input_tokens']).toBeUndefined();
+      expect(typed['gen_ai.usage.cache_write.input_tokens']).toBeUndefined();
+    }
+    expect(h.warnings).toHaveLength(3);
+    expect(h.warnings.every((warning) => warning.includes('must be a finite number within 64 bits'))).toBe(true);
+  });
+
   it('takes a blank operation as chat', async () => {
     // As one left out is: sent blank, the span would be named ' m' and
     // ingest would read it as a step.

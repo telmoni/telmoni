@@ -149,7 +149,8 @@ class Config:
 
 @dataclass(frozen=True)
 class Bounds:
-    """What a monitor holds a run to; each optional."""
+    """What a monitor holds a run to; each optional, and one that is no finite
+    number, or a whole one past 64 bits, left off the run with one warning."""
 
     stall_after_s: int | None = None
     max_steps: int | None = None
@@ -158,11 +159,10 @@ class Bounds:
 
 @dataclass(frozen=True)
 class Usage:
-    """A model call's tokens, counted as the conventions count them.
-
-    Input tokens include the cache's reads and writes; output tokens include
-    reasoning. Where a provider reports parts apart, sum them first.
-    """
+    """A model call's tokens, as the conventions count them: input includes the
+    cache's reads and writes, output reasoning; sum parts reported apart. Each
+    goes as a whole number, one past 64 bits or no finite number left off the
+    call with one warning."""
 
     input_tokens: int | None = None
     output_tokens: int | None = None

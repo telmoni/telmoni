@@ -242,3 +242,29 @@ def test_a_run_needs_an_agent_and_a_valid_rate(telmoni: Telmoni) -> None:
     with pytest.raises(ValueError), telmoni.run("bot", sample_rate=0):
         pass
 
+
+def test_a_bound_json_cannot_carry_is_left_off_with_one_warning(
+    telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    for bounds in (
+        Bounds(max_cost_usd=float("inf"), max_steps=10),
+        Bounds(max_cost_usd=float("nan")),
+        Bounds(stall_after_s=2**63, max_steps="7"),  # type: ignore[arg-type]
+    ):
+        with telmoni.run("bot", bounds=bounds):
+            pass
+    assert telmoni.flush()
+    runs = [s for s in transport.spans() if s["name"] == "invoke_agent bot"]
+    assert len(runs) == 3, "every run sent, and the batch with them"
+    sent = [
+        {k: v for k, v in attributes_of(s).items() if k.startswith("telmoni.bound.")}
+        for s in runs
+    ]
+    assert sent == [
+        {"telmoni.bound.max_steps": 10},
+        {},
+        {"telmoni.bound.max_steps": 7},
+    ]
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert len(warnings) == 2, warnings
+    assert all("must be a finite number within 64 bits" in w for w in warnings)

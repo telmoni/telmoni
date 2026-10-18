@@ -195,13 +195,13 @@ export class Exporter {
         await this.#wait(answer.headers.get('Retry-After'), attempt);
         continue;
       }
-      this.#warnOnce(
+      this.warnOnce(
         `status:${answer.status}`,
         `telmoni: export refused with ${answer.status} ${problemType(text)}; the batch was dropped`,
       );
       return;
     }
-    this.#warnOnce(
+    this.warnOnce(
       `failed:${failure}`,
       `telmoni: export failed after ${ATTEMPTS} attempts (${failure}); the batch was dropped`,
     );
@@ -272,17 +272,17 @@ export class Exporter {
         let text = `telmoni: the server dropped ${attributeName} (${reason}`;
         if (rest) text += `; ${rest}`;
         text += `); ${remedy(attributeName, reason)}`;
-        this.#warnOnce(`dropped:${attributeName}:${reason}`, text);
+        this.warnOnce(`dropped:${attributeName}:${reason}`, text);
         continue;
       }
       const refused = REFUSED.exec(line);
       if (refused !== null) {
         const why = refused[2] ?? '';
-        this.#warnOnce(`refused:${why}`, `telmoni: the server refused a span: ${why}`);
+        this.warnOnce(`refused:${why}`, `telmoni: the server refused a span: ${why}`);
         continue;
       }
       if (line.startsWith('and ') || line === '') continue;
-      this.#warnOnce(`line:${line}`, `telmoni: the server said: ${line}`);
+      this.warnOnce(`line:${line}`, `telmoni: the server said: ${line}`);
     }
   }
 
@@ -296,7 +296,8 @@ export class Exporter {
     await this.#sleep(Math.min(Math.max(seconds, 0), RETRY_AFTER_MAX_S), this.#givenUp.signal);
   }
 
-  #warnOnce(key: string, text: string): void {
+  /** Warns `text` once per client under `key`, as every warning is. */
+  warnOnce(key: string, text: string): void {
     if (this.#warned.has(key)) return;
     // Bounded: a server naming ever-new attributes would otherwise grow it for
     // the life of the process; past the cap, warnings may repeat.

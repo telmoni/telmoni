@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"reflect"
 	"strings"
@@ -415,5 +416,32 @@ func TestABadRunRateFallsBackToTheClientsWithOneWarning(t *testing.T) {
 	warnings := h.logs.warnings()
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "SampleRate") {
 		t.Errorf("warnings = %q, want one about the rate", warnings)
+	}
+}
+
+func TestACostBoundThatIsNoFiniteNumberIsLeftOffWithOneWarning(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	for _, cost := range []float64{math.Inf(1), math.NaN()} {
+		_, run := h.client.Run(context.Background(), "bot",
+			telmoni.RunOptions{Bounds: &telmoni.Bounds{MaxSteps: 5, MaxCostUSD: cost}})
+		run.End()
+	}
+	h.flush()
+	runs := withPrefix(h.transport.spans(t), "invoke_agent ")
+	if len(runs) != 2 {
+		t.Fatalf("want both runs sent, got %v", names(runs))
+	}
+	for _, span := range runs {
+		attributes := attributesOf(t, span)
+		if _, sent := attributes["telmoni.bound.max_cost_usd"]; sent {
+			t.Errorf("a cost bound was sent: %v", attributes)
+		}
+		if got := attributes["telmoni.bound.max_steps"]; got != int64(5) {
+			t.Errorf("telmoni.bound.max_steps = %v, want the other bounds kept", got)
+		}
+	}
+	warnings := h.logs.warnings()
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "MaxCostUSD") {
+		t.Errorf("warnings = %q, want one about the cost bound", warnings)
 	}
 }

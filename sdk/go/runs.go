@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -174,8 +175,9 @@ func RunFromContext(ctx context.Context) *Run {
 //
 // A blank agent name opens no run: the handle returned does nothing, nothing
 // is sent, and the client warns once. A SampleRate outside (0, 1] is replaced
-// by the client's, with one warning. Neither panics: telemetry never takes
-// the agent down, where Python and TypeScript raise for the same mistakes.
+// by the client's, and a MaxCostUSD that is no finite number left off the
+// run, each with one warning. None panics: telemetry never takes the agent
+// down, where Python and TypeScript raise for a blank agent or a bad rate.
 func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (context.Context, *Run) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -191,6 +193,14 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 		} else {
 			c.exporter.warnOnce("run:rate", "telmoni: a run's SampleRate must be above 0 and up to 1; the client's is used")
 		}
+	}
+	bounds := opts.Bounds
+	// JSON carries no infinity or NaN, so the batch would be lost with it.
+	if bounds != nil && (math.IsNaN(bounds.MaxCostUSD) || math.IsInf(bounds.MaxCostUSD, 0)) {
+		c.exporter.warnOnce("run:cost", "telmoni: a run's MaxCostUSD must be a finite number; the run is sent without it")
+		finite := *bounds
+		finite.MaxCostUSD = 0
+		bounds = &finite
 	}
 	sampledOut := rate < 1 && c.random() >= rate
 	runID := newUUID()
@@ -209,7 +219,7 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 	if sampledOut {
 		inherited = append(inherited, attribute.Bool(attrSampledOut, true))
 	}
-	common := append(boundAttributes(opts.Bounds), attribute.Float64(attrSampleRate, rate))
+	common := append(boundAttributes(bounds), attribute.Float64(attrSampleRate, rate))
 	attrs := make([]attribute.KeyValue, 0, 2+len(inherited)+len(common)+len(opts.Tags))
 	attrs = append(attrs, attribute.String(attrOperation, runOperation), attribute.String(attrAgentName, agent))
 	attrs = append(attrs, inherited...)

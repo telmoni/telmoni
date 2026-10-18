@@ -120,7 +120,13 @@ export class Telmoni {
       idGenerator: ids,
       spanProcessors: [this.#processor],
     });
-    this.#opener = new Opener(this.#provider.getTracer(contract.SCOPE, VERSION), this.#processor, this.config, ids);
+    this.#opener = new Opener(
+      this.#provider.getTracer(contract.SCOPE, VERSION),
+      this.#processor,
+      this.config,
+      ids,
+      (key, text) => this.#exporter.warnOnce(key, text),
+    );
   }
 
   /**

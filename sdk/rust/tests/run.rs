@@ -358,6 +358,42 @@ fn a_run_needs_an_agent_and_a_valid_rate() -> Outcome {
 }
 
 #[test]
+fn a_cost_bound_that_is_no_finite_number_is_left_off_with_one_warning() -> Outcome {
+    let harness = Harness::new()?;
+    for usd in [f64::INFINITY, f64::NAN] {
+        let run = harness.telmoni.run(
+            "bot",
+            RunOptions {
+                bounds: Bounds {
+                    max_steps: Some(5),
+                    max_cost_usd: Some(usd),
+                    ..Bounds::default()
+                },
+                ..RunOptions::default()
+            },
+        )?;
+        run.end();
+    }
+    harness.flush()?;
+    let spans = harness.spans()?;
+    let runs = starting_with(&spans, "invoke_agent ");
+    assert_eq!(runs.len(), 2, "every run sent, and the batch with them");
+    for span in runs {
+        let attributes = attributes_of(span)?;
+        assert_eq!(attributes.get("telmoni.bound.max_cost_usd"), None);
+        assert_eq!(attributes.get("telmoni.bound.max_steps"), Some(&json!(5)));
+    }
+    let warnings = harness.warnings.all();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings
+            .iter()
+            .all(|w| w.contains("max_cost_usd must be a finite number"))
+    );
+    Ok(())
+}
+
+#[test]
 fn a_run_is_shared_across_threads() -> Outcome {
     fn send_and_sync<T: Send + Sync>() {}
     send_and_sync::<Telmoni>();

@@ -147,6 +147,25 @@ describe('a run', () => {
     expect(() => h.telmoni.run('bot', { sampleRate: 1.5 }, () => {})).toThrow(RangeError);
   });
 
+  it('leaves off a bound JSON cannot carry, with one warning', async () => {
+    for (const bounds of [
+      { maxCostUsd: Infinity, maxSteps: 10 },
+      { maxCostUsd: Number.NaN },
+      { stallAfterSeconds: 2 ** 63, maxSteps: '7' as unknown as number },
+    ]) {
+      h.telmoni.run('bot', { bounds }, () => {});
+    }
+    expect(await h.telmoni.flush()).toBe(true);
+    const runs = h.transport.spans().filter((span) => span.name === 'invoke_agent bot');
+    expect(runs, 'every run sent, and the batch with them').toHaveLength(3);
+    const sent = runs.map((span) =>
+      Object.fromEntries(Object.entries(attributesOf(span)).filter(([key]) => key.startsWith('telmoni.bound.'))),
+    );
+    expect(sent).toEqual([{ 'telmoni.bound.max_steps': 10 }, {}, { 'telmoni.bound.max_steps': 7 }]);
+    expect(h.warnings).toHaveLength(2);
+    expect(h.warnings.every((warning) => warning.includes('must be a finite number within 64 bits'))).toBe(true);
+  });
+
   it('is found from its context; without a context manager, from nothing else', () => {
     h.telmoni.run('bot', (run) => {
       expect(currentRun(run.context)).toBe(run);

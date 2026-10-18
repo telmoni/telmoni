@@ -11,6 +11,7 @@ from __future__ import annotations
 import http.client
 import json
 import logging
+import math
 import re
 import time
 import urllib.error
@@ -136,7 +137,10 @@ class Exporter:
     def export(self, spans: Sequence[ReadableSpan]) -> None:
         if not spans:
             return
-        body = json.dumps(self.encode(spans), separators=(",", ":")).encode()
+        # Python writes NaN and Infinity, which are no JSON: refused here, never sent.
+        body = json.dumps(
+            self.encode(spans), separators=(",", ":"), allow_nan=False
+        ).encode()
         headers = {
             "Content-Type": "application/json",
             "User-Agent": f"telmoni-python/{__version__}",
@@ -162,13 +166,13 @@ class Exporter:
                 failure = f"{answer.status} {_problem_type(answer.body)}"
                 self._wait(answer.header("Retry-After"), attempt)
                 continue
-            self._warn_once(
+            self.warn_once(
                 f"status:{answer.status}",
                 f"telmoni: export refused with {answer.status} "
                 f"{_problem_type(answer.body)}; the batch was dropped",
             )
             return
-        self._warn_once(
+        self.warn_once(
             f"failed:{failure}",
             f"telmoni: export failed after {ATTEMPTS} attempts ({failure}); "
             "the batch was dropped",
@@ -238,18 +242,18 @@ class Exporter:
                 if rest:
                     text += f"; {rest}"
                 text += f"); {_remedy(attribute, reason)}"
-                self._warn_once(f"dropped:{attribute}:{reason}", text)
+                self.warn_once(f"dropped:{attribute}:{reason}", text)
                 continue
             refused = _REFUSED.match(line)
             if refused:
                 why = refused.group(2)
-                self._warn_once(
+                self.warn_once(
                     f"refused:{why}", f"telmoni: the server refused a span: {why}"
                 )
                 continue
             if line.startswith("and ") or not line:
                 continue
-            self._warn_once(f"line:{line}", f"telmoni: the server said: {line}")
+            self.warn_once(f"line:{line}", f"telmoni: the server said: {line}")
 
     def _wait(self, retry_after: str | None, attempt: int) -> None:
         """Before the next attempt; nothing after the last."""
@@ -263,7 +267,8 @@ class Exporter:
                 pass
         self._sleep(min(max(seconds, 0.0), RETRY_AFTER_MAX_S))
 
-    def _warn_once(self, key: str, text: str) -> None:
+    def warn_once(self, key: str, text: str) -> None:
+        """Log ``text`` once per client under ``key``, as every warning is."""
         if key in self._warned:
             return
         # Bounded: a server naming ever-new attributes would otherwise grow it
@@ -305,7 +310,9 @@ def _attribute(key: str, value: object) -> dict[str, Any]:
     elif isinstance(value, int):
         encoded = {"intValue": str(value)}
     elif isinstance(value, float):
-        encoded = {"doubleValue": value}
+        # NaN or an infinity as null, as JavaScript and serde write one, which
+        # ingest reads as no value: the attribute lost, never the batch.
+        encoded = {"doubleValue": value if math.isfinite(value) else None}
     elif isinstance(value, str):
         encoded = {"stringValue": value}
     elif isinstance(value, (list, tuple)):

@@ -152,12 +152,19 @@ export class Run extends Parent {
 export class Step extends Parent {}
 
 export class ModelCall extends Handle {
+  readonly #warnOnce: WarnOnce;
+
+  constructor(span: Span, parent: Context, run: Run, warnOnce: WarnOnce) {
+    super(span, parent, run);
+    this.#warnOnce = warnOnce;
+  }
+
   /** What the model answered: its name, its tokens, and its messages. */
   answered(answer: ModelAnswer): void {
     if (answer.responseModel !== undefined) {
       this.span.setAttribute(contract.RESPONSE_MODEL, answer.responseModel);
     }
-    this.span.setAttributes(usageOf(answer.usage));
+    this.span.setAttributes(usageOf(answer.usage, this.#warnOnce));
     if (answer.outputMessages !== undefined) {
       this.span.setAttribute(contract.OUTPUT_MESSAGES, asJson(answer.outputMessages));
     }
@@ -207,25 +214,30 @@ export function split<O, F>(a: O | F, b: F | undefined): [O | undefined, F] {
   return [a as O, b];
 }
 
+/** The client's warning, once per key. */
+type WarnOnce = (key: string, text: string) => void;
+
 /** Builds the handles for one client; the client holds one. */
 export class Opener {
   readonly #tracer: Tracer;
   readonly #processor: Processor;
   readonly #config: ResolvedConfig;
   readonly #ids: Ids;
+  readonly #warnOnce: WarnOnce;
 
-  constructor(tracer: Tracer, processor: Processor, config: ResolvedConfig, ids: Ids) {
+  constructor(tracer: Tracer, processor: Processor, config: ResolvedConfig, ids: Ids, warnOnce: WarnOnce) {
     this.#tracer = tracer;
     this.#processor = processor;
     this.#config = config;
     this.#ids = ids;
+    this.#warnOnce = warnOnce;
   }
 
   run(agent: string, options: RunOptions): Run {
     if (agent.trim() === '') throw new TypeError("a run needs its agent's name");
     const rate = options.sampleRate ?? this.#config.sampleRate;
     if (!(rate > 0 && rate <= 1)) throw new RangeError('sampleRate must be above 0 and up to 1');
-    const bounds = boundsOf(options.bounds);
+    const bounds = boundsOf(options.bounds, this.#warnOnce);
     const sampledOut = rate < 1 && Math.random() >= rate;
     const runId = randomUUID();
     const inherited: Attributes = { [contract.RUN_ID]: runId, [contract.AGENT]: agent };
@@ -293,7 +305,7 @@ export class Opener {
       attributes[contract.SYSTEM_INSTRUCTIONS] = asJson(options.systemInstructions);
     }
     const span = this.#start(`${operation} ${model}`, parent, attributes, SpanKind.CLIENT);
-    return new ModelCall(span, parent, run);
+    return new ModelCall(span, parent, run, this.#warnOnce);
   }
 
   toolCall(run: Run, parent: Context, name: string, options: ToolCallOptions): ToolCall {
@@ -373,7 +385,7 @@ export class Opener {
           [contract.REQUEST_MODEL]: item.model,
         };
         if (item.provider) callAttributes[contract.PROVIDER] = item.provider;
-        Object.assign(callAttributes, usageOf(item.usage));
+        Object.assign(callAttributes, usageOf(item.usage, this.#warnOnce));
         close(open(`${operation} ${item.model}`, parent, callAttributes, SpanKind.CLIENT, item.start), item);
       } else {
         const callAttributes: Attributes = {
@@ -480,27 +492,63 @@ function close(span: Span, outcome: RecordOutcome & { end: RecordTime }): void {
   span.end(hrTimeOf(outcome.end));
 }
 
-function usageOf(usage: Usage | undefined): Attributes {
+/**
+ * The counts as integers, which alone ingest takes; one JSON's integers cannot
+ * carry would go as `intValue: "NaN"` and lose the batch, so it is left off,
+ * warned once.
+ */
+function usageOf(usage: Usage | undefined, warnOnce: WarnOnce): Attributes {
   const out: Attributes = {};
-  if (usage === undefined) return out;
+  if (!isSet(usage)) return out;
   for (const [key, value] of [
     [contract.INPUT_TOKENS, usage.inputTokens],
     [contract.OUTPUT_TOKENS, usage.outputTokens],
     [contract.CACHE_READ_INPUT_TOKENS, usage.cacheReadInputTokens],
     [contract.CACHE_WRITE_INPUT_TOKENS, usage.cacheWriteInputTokens],
   ] as const) {
-    if (value !== undefined) out[key] = Math.trunc(value);
+    if (!isSet(value)) continue;
+    const count = whole(value);
+    if (count === undefined) {
+      warnOnce(`usage:${key}`, `telmoni: ${key} must be a finite number within 64 bits; the call is sent without it`);
+    } else {
+      out[key] = count;
+    }
   }
   return out;
 }
 
-function boundsOf(bounds: Bounds | undefined): Attributes {
+/**
+ * What the run is held to; a bound JSON cannot carry is left off with one
+ * warning, so a computed one never stops the agent's call nor loses a batch.
+ */
+function boundsOf(bounds: Bounds | undefined, warnOnce: WarnOnce): Attributes {
   const out: Attributes = {};
-  if (bounds === undefined) return out;
-  if (isSet(bounds.stallAfterSeconds)) out[contract.BOUND_STALL_AFTER_S] = Math.trunc(bounds.stallAfterSeconds);
-  if (isSet(bounds.maxSteps)) out[contract.BOUND_MAX_STEPS] = Math.trunc(bounds.maxSteps);
-  if (isSet(bounds.maxCostUsd)) out[contract.BOUND_MAX_COST_USD] = bounds.maxCostUsd;
+  if (!isSet(bounds)) return out;
+  const keep = (name: string, key: string, number: number | undefined): void => {
+    if (number === undefined) {
+      warnOnce(`run:${name}`, `telmoni: a run's ${name} must be a finite number within 64 bits; the run is sent without it`);
+    } else {
+      out[key] = number;
+    }
+  };
+  if (isSet(bounds.stallAfterSeconds)) {
+    keep('stallAfterSeconds', contract.BOUND_STALL_AFTER_S, whole(bounds.stallAfterSeconds));
+  }
+  if (isSet(bounds.maxSteps)) keep('maxSteps', contract.BOUND_MAX_STEPS, whole(bounds.maxSteps));
+  if (isSet(bounds.maxCostUsd)) keep('maxCostUsd', contract.BOUND_MAX_COST_USD, finite(bounds.maxCostUsd));
   return out;
+}
+
+/** `value` truncated to a whole number JSON's 64-bit integers carry, or undefined. */
+function whole(value: unknown): number | undefined {
+  const number = Math.trunc(Number(value));
+  return Number.isFinite(number) && number >= -(2 ** 63) && number < 2 ** 63 ? number : undefined;
+}
+
+/** `value` as a finite number, or undefined. */
+function finite(value: unknown): number | undefined {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
 }
 
 /** The SDK's span carries its start; the api's type does not say so. */

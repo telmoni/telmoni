@@ -80,6 +80,7 @@ pub(crate) struct Inner {
     provider: SdkTracerProvider,
     pub(crate) processor: Processor,
     exporter: Arc<Exporter>,
+    pub(crate) warner: Arc<Warner>,
     pub(crate) random: Box<dyn Fn() -> f64 + Send + Sync>,
 }
 
@@ -120,7 +121,8 @@ impl Telmoni {
             hooks.sleep,
             Arc::clone(&warner),
         ));
-        let processor = Processor::start(Arc::clone(&exporter), hooks.batching, warner);
+        let processor =
+            Processor::start(Arc::clone(&exporter), hooks.batching, Arc::clone(&warner));
         let resource = Resource::builder_empty()
             .with_attributes([
                 KeyValue::new(contract::DISTRO_NAME, contract::DISTRO),
@@ -155,6 +157,7 @@ impl Telmoni {
                 provider,
                 processor,
                 exporter,
+                warner,
                 random: hooks.random,
             }),
         }
@@ -175,7 +178,9 @@ impl Telmoni {
 
     /// A run of `agent`, as a guard: the span `invoke_agent <agent>` in
     /// whatever trace is current, opened by `telmoni.run.start`, which is sent
-    /// at once. The span ends when the guard drops or on [`Run::end`].
+    /// at once. The span ends when the guard drops or on [`Run::end`]. A
+    /// `max_cost_usd` that is no finite number is left off the run, with one
+    /// warning, rather than stop the agent's call.
     ///
     /// # Errors
     ///

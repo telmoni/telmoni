@@ -62,6 +62,9 @@ fn main() -> Result<(), telmoni_sdk::Error> {
 ```
 
 Every handle is a guard: its span ends when it is dropped or on `end()`.
+`run` returns `Error::EmptyAgent` for a blank agent name and
+`Error::SampleRate` for a rate outside (0, 1]; a `max_cost_usd` that is not a
+finite number is left off the run with one warning.
 `fail("ErrorType")` marks a span failed with the error's type and no message;
 `cancel()` marks it cancelled by the agent. The `_with` methods take a closure
 and return its value — `telmoni.run_with(..)`, `run.step_with(..)`,

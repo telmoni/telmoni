@@ -14,6 +14,7 @@ import inspect
 import itertools
 import json
 import logging
+import math
 import random
 import uuid
 from collections.abc import Callable, Iterator, Mapping
@@ -64,8 +65,9 @@ def current_run(ctx: context.Context | None = None) -> Run | None:
 class Handle:
     """A span the SDK opened, until its ``_end``."""
 
-    def __init__(self, span: Span) -> None:
+    def __init__(self, span: Span, client: Telmoni) -> None:
         self._span = span
+        self._client = client
         self._token: Token[context.Context] | None = None
         self._ended = False
 
@@ -106,8 +108,7 @@ class Run(Handle):
         inherited: Mapping[str, str],
         sampled_out: bool = False,
     ) -> None:
-        super().__init__(span)
-        self._client = client
+        super().__init__(span, client)
         self.run_id = run_id
         self.agent = agent
         # Whether the sample rate kept this run out: nothing of it is sent,
@@ -162,7 +163,7 @@ class ModelCall(Handle):
         """What the model answered: its name, its tokens, and its messages."""
         if response_model is not None:
             self._span.set_attribute(contract.RESPONSE_MODEL, response_model)
-        self._span.set_attributes(_usage(usage))
+        self._span.set_attributes(_usage(usage, self._client.exporter.warn_once))
         if output_messages is not None:
             self._span.set_attribute(
                 contract.OUTPUT_MESSAGES, _as_json(output_messages)
@@ -273,7 +274,7 @@ class Opener:
         rate = self._client.config.sample_rate if sample_rate is None else sample_rate
         if not 0 < rate <= 1:
             raise ValueError("sample_rate must be above 0 and up to 1")
-        limits = _bounds(bounds)
+        limits = _bounds(bounds, self._client.exporter.warn_once)
         sampled_out = rate < 1 and random.random() >= rate
         run_id = str(uuid.uuid4())
         inherited: dict[str, str] = {contract.RUN_ID: run_id, contract.AGENT: agent}
@@ -474,7 +475,7 @@ class Opener:
                 }
                 if item.provider:
                     attributes[contract.PROVIDER] = item.provider
-                attributes.update(_usage(item.usage))
+                attributes.update(_usage(item.usage, self._client.exporter.warn_once))
                 name, kind = f"{operation} {item.model}", SpanKind.CLIENT
             else:
                 attributes = {
@@ -542,7 +543,7 @@ class Opener:
                 _RUN_KEY, run, trace.set_span_in_context(run._span, parent)
             )
         span = self._start(name, parent, attributes, kind)
-        opened = handle(span)
+        opened = handle(span, self._client)
         opened._attach(trace.set_span_in_context(span, parent))
         return opened
 
@@ -567,7 +568,11 @@ class Opener:
         )
 
 
-def _usage(usage: Usage | None) -> dict[str, int]:
+def _usage(
+    usage: Usage | None, warn_once: Callable[[str, str], None]
+) -> dict[str, int]:
+    """The counts as integers, which alone ingest takes; one JSON's integers
+    cannot carry is left off the call with one warning, not the batch lost."""
     if usage is None:
         return {}
     counts = (
@@ -576,7 +581,20 @@ def _usage(usage: Usage | None) -> dict[str, int]:
         (contract.CACHE_READ_INPUT_TOKENS, usage.cache_read_input_tokens),
         (contract.CACHE_WRITE_INPUT_TOKENS, usage.cache_write_input_tokens),
     )
-    return {key: value for key, value in counts if value is not None}
+    out: dict[str, int] = {}
+    for key, value in counts:
+        if value is None:
+            continue
+        count = _whole(value)
+        if count is None:
+            warn_once(
+                f"usage:{key}",
+                f"telmoni: {key} must be a finite number within 64 bits; "
+                "the call is sent without it",
+            )
+        else:
+            out[key] = count
+    return out
 
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -611,17 +629,56 @@ def _close(
     span.end(end_time=_nanos(item.end))
 
 
-def _bounds(bounds: Bounds | None) -> dict[str, Any]:
+def _bounds(
+    bounds: Bounds | None, warn_once: Callable[[str, str], None]
+) -> dict[str, Any]:
+    """What the run is held to; a bound JSON cannot carry is left off with one
+    warning, so a computed one never stops the agent's call nor loses a batch."""
     if bounds is None:
         return {}
     out: dict[str, Any] = {}
+
+    def keep(name: str, key: str, number: float | None) -> None:
+        if number is None:
+            warn_once(
+                f"run:{name}",
+                f"telmoni: a run's {name} must be a finite number within 64 bits; "
+                "the run is sent without it",
+            )
+        else:
+            out[key] = number
+
     if bounds.stall_after_s is not None:
-        out[contract.BOUND_STALL_AFTER_S] = int(bounds.stall_after_s)
+        keep(
+            "stall_after_s", contract.BOUND_STALL_AFTER_S, _whole(bounds.stall_after_s)
+        )
     if bounds.max_steps is not None:
-        out[contract.BOUND_MAX_STEPS] = int(bounds.max_steps)
+        keep("max_steps", contract.BOUND_MAX_STEPS, _whole(bounds.max_steps))
     if bounds.max_cost_usd is not None:
-        out[contract.BOUND_MAX_COST_USD] = float(bounds.max_cost_usd)
+        keep("max_cost_usd", contract.BOUND_MAX_COST_USD, _finite(bounds.max_cost_usd))
     return out
+
+
+_INT64 = range(-(2**63), 2**63)
+
+
+def _whole(value: float) -> int | None:
+    """`value` as a whole number within 64 bits, exact where given as one; None
+    for what JSON's integers cannot carry."""
+    try:
+        number = value if isinstance(value, int) else int(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if number in _INT64 else None
+
+
+def _finite(value: float) -> float | None:
+    """`value` as a finite float; None for NaN, an infinity or no number."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
 
 
 def _as_json(value: object) -> str:

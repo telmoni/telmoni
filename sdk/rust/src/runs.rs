@@ -35,8 +35,9 @@ pub(crate) struct RunInfo {
     pub(crate) sampled_out: bool,
 }
 
-/// What a monitor holds a run to; each optional. Integers are 64-bit, as the
-/// wire carries them.
+/// What a monitor holds a run to; each optional, the integers 64-bit as the
+/// wire carries them, and a `max_cost_usd` that is no finite number left off
+/// the run with one warning.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Bounds {
     /// How long the run may go without a span before it counts as stalled.
@@ -527,6 +528,16 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
     if !(rate > 0.0 && rate <= 1.0) {
         return Err(Error::SampleRate(rate));
     }
+    // JSON carries no infinity or NaN, and a computed one must not stop the
+    // agent's call: the run is sent without it.
+    let mut limits = options.bounds;
+    if limits.max_cost_usd.is_some_and(|usd| !usd.is_finite()) {
+        inner.warner.once(
+            "run:max_cost_usd".to_owned(),
+            "telmoni: a run's max_cost_usd must be a finite number; the run is sent without it",
+        );
+        limits.max_cost_usd = None;
+    }
 
     let sampled_out = rate < 1.0 && (inner.random)() >= rate;
     let run_id = Uuid::new_v4().to_string();
@@ -536,7 +547,7 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
     if sampled_out {
         inherited.push(KeyValue::new(contract::SAMPLED_OUT, true));
     }
-    let bounds = bound_attributes(&options.bounds);
+    let bounds = bound_attributes(&limits);
     let attributes = run_attributes(agent, &inherited, &bounds, rate, options.tags);
 
     let parent = Context::current();

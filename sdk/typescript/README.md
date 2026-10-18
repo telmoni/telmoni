@@ -61,7 +61,9 @@ thrown or rejected inside marks the span with the error's class name
 marks the span cancelled instead. `run.fail('RateLimit')` and `run.cancel()`
 mark a span by hand. Steps nest: `step.step(...)`, `step.modelCall(...)` and
 `step.toolCall(...)` open under the step; the same methods on `run` open under
-the run.
+the run. `run` throws a `TypeError` for a blank agent name and a `RangeError`
+for a sample rate outside (0, 1]; a bound or a token count that is not a
+finite number, or a whole one past 64 bits, is left off with one warning.
 
 `telmoni.wrap(agent, options, fn)` returns `fn` opening a run per call, with
 the run's handle as `fn`'s last argument:

@@ -76,10 +76,11 @@ its own type, since a stalled call is what a monitor is for.
 `FailWith("TimeoutError")` and `Cancel()` do the same by hand.
 
 The SDK never panics: a blank agent name opens a run that does nothing and
-warns once, and a run's `SampleRate` outside (0, 1] falls back to the client's
-with one warning. `New` returns an error for a client-wide `SampleRate` outside
-that range, and for a plain-HTTP endpoint whose host is not this machine;
-`RecordRun`, below, for a record it refuses.
+warns once, a run's `SampleRate` outside (0, 1] falls back to the client's
+with one warning, and a `MaxCostUSD` that is not a finite number is left off
+its run with one warning. `New` returns an error for a client-wide
+`SampleRate` outside that range, and for a plain-HTTP endpoint whose host is
+not this machine; `RecordRun`, below, for a record it refuses.
 
 ## A run recorded after it ended
 

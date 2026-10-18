@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import logging
+from datetime import datetime, timezone
+
+import pytest
+
 from conftest import FakeTransport, attributes_of, kept
-from telmoni import Config, Telmoni, Usage
+from telmoni import Config, ModelCallRecord, RunRecord, Telmoni, Usage
 from telmoni.exporter import Answer
 
 
@@ -35,6 +40,48 @@ def test_a_model_call_carries_the_conventions_names(
         "gen_ai.usage.output_tokens": 7,
         "gen_ai.usage.cache_read.input_tokens": 3,
     }
+
+
+def test_a_token_count_goes_as_an_integer_and_one_no_number_is_left_off(
+    telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    usage = Usage(
+        input_tokens=float("nan"),  # type: ignore[arg-type]
+        output_tokens=12.7,  # type: ignore[arg-type]
+        cache_read_input_tokens=float("inf"),  # type: ignore[arg-type]
+        cache_write_input_tokens=2**63,
+    )
+    with telmoni.run("bot"):
+        for _ in range(2):
+            with telmoni.model_call("m") as call:
+                call.answered(usage=usage)
+    at = datetime(2026, 10, 18, 9, tzinfo=timezone.utc)
+    telmoni.record_run(
+        RunRecord(
+            run_id="3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
+            agent="bot",
+            start=at,
+            end=at,
+            inside=[ModelCallRecord(model="m", start=at, end=at, usage=usage)],
+        )
+    )
+    assert telmoni.flush()
+    spans = [s for s in transport.spans() if s["name"] == "chat m"]
+    assert len(spans) == 3, "the calls sent, recorded ones too, and the batch"
+    for span in spans:
+        typed = {a["key"]: a["value"] for a in span["attributes"]}
+        assert typed["gen_ai.usage.output_tokens"] == {"intValue": "12"}
+        assert (
+            not {
+                "gen_ai.usage.input_tokens",
+                "gen_ai.usage.cache_read.input_tokens",
+                "gen_ai.usage.cache_write.input_tokens",
+            }
+            & typed.keys()
+        )
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert len(warnings) == 3, warnings
+    assert all("must be a finite number within 64 bits" in w for w in warnings)
 
 
 def test_a_blank_operation_is_chat(telmoni: Telmoni, transport: FakeTransport) -> None:
