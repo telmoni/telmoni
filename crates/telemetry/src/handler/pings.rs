@@ -532,12 +532,12 @@ fn checked_slug(given: &str) -> Result<&str, TelmoniError> {
     Ok(given)
 }
 
-/// Whether the request carried a body, which is dropped. A ping's body is
-/// content — kept by 4.1 on an `on` project, and by nothing until then — and
-/// is never parsed whatever its media type: a run's progress rides in the
-/// query alone, so no form field is ever read as one. It is read no further
-/// than its cap, so a log attached to a crontab's `curl` costs a bounded
-/// read, and one announced past the cap is not read at all.
+/// Whether the request carried a body, which is dropped: a ping's body is
+/// content, never parsed whatever its media type, and a run's progress rides
+/// in the query alone. It is read no further than its cap, and one announced
+/// past the cap not at all; what goes unread ends the connection once the
+/// answer is out — hyper closes it rather than read the rest as the next
+/// request — which `curl`, one connection a ping, never notices.
 async fn dropped(headers: &HeaderMap, body: Body) -> bool {
     let announced = headers
         .get(header::CONTENT_LENGTH)

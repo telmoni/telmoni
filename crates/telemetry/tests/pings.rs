@@ -18,6 +18,8 @@ use chrono::{DateTime, Utc};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use sqlx::PgPool;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -5159,4 +5161,116 @@ async fn the_ceiling_is_read_before_the_chain_lock(pool: PgPool) {
     p.ping_ok(&format!("/{key}/nightly-report")).await;
     assert_eq!(quick.asked(), [true, false]);
     assert_eq!(monitors_of(&pool, &p.project).await, 1);
+}
+
+/// A body left unread — announced past the cap, or chunked past it with more
+/// to come — ends the connection once the answer is out, so its rest is never
+/// read as the next request; one read whole keeps the connection.
+#[sqlx::test]
+async fn a_body_left_unread_ends_the_connection_and_one_read_whole_keeps_it(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a port");
+    let address = listener.local_addr().expect("its address");
+    let pings = p.pings.clone();
+    tokio::spawn(async move { axum::serve(listener, pings).await });
+    let post = |headers: &str, body: &[u8]| {
+        let mut request =
+            format!("POST /{key}/nightly-report HTTP/1.1\r\nhost: localhost\r\n{headers}\r\n\r\n")
+                .into_bytes();
+        request.extend_from_slice(body);
+        request
+    };
+    let bare =
+        format!("GET /{key}/nightly-report HTTP/1.1\r\nhost: localhost\r\n\r\n").into_bytes();
+    let dropped = Some(("HTTP/1.1 200 OK".to_owned(), "OK; body dropped".to_owned()));
+    let ok = Some(("HTTP/1.1 200 OK".to_owned(), "OK".to_owned()));
+
+    // Read whole, the connection carries the next ping.
+    let mut whole = TcpStream::connect(address).await.expect("a connection");
+    assert_eq!(
+        exchange(&mut whole, &post("content-length: 64", &[b'x'; 64])).await,
+        dropped
+    );
+    assert_eq!(
+        exchange(&mut whole, &bare).await,
+        ok,
+        "a body read whole keeps the connection"
+    );
+
+    // Announced past the cap, so not read at all: answered, then the
+    // connection ends.
+    let mut announced = TcpStream::connect(address).await.expect("a connection");
+    assert_eq!(
+        exchange(
+            &mut announced,
+            &post("content-length: 10485760", &vec![b'x'; 32 * 1024])
+        )
+        .await,
+        dropped
+    );
+    assert_eq!(
+        exchange(&mut announced, &bare).await,
+        None,
+        "a body left unread ends the connection"
+    );
+
+    // Chunked past the cap, its chunk still arriving: read to the cap, then
+    // the same. (A chunk whose rest is in hand already is finished cheaply,
+    // and the connection kept; nothing here depends on it.)
+    let mut chunked = TcpStream::connect(address).await.expect("a connection");
+    let mut body = format!("{:x}\r\n", 1024 * 1024).into_bytes();
+    body.extend_from_slice(&vec![b'x'; 150 * 1024]);
+    assert_eq!(
+        exchange(&mut chunked, &post("transfer-encoding: chunked", &body)).await,
+        dropped
+    );
+    assert_eq!(
+        exchange(&mut chunked, &bare).await,
+        None,
+        "a chunked body past the cap ends the connection"
+    );
+
+    assert_eq!(
+        finished_runs(&pool, &p.project).await.len(),
+        4,
+        "no byte of a body became a ping"
+    );
+}
+
+/// `request`, sent on `stream` as a crontab's `curl` sends one, and the
+/// answer's status line and body — or `None` when the connection ends before
+/// an answer comes.
+async fn exchange(stream: &mut TcpStream, request: &[u8]) -> Option<(String, String)> {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        stream.write_all(request).await.ok()?;
+        let mut answer = Vec::new();
+        let mut buffer = [0u8; 8192];
+        loop {
+            let read = stream
+                .read(&mut buffer)
+                .await
+                .ok()
+                .filter(|read| *read > 0)?;
+            answer.extend_from_slice(buffer.get(..read)?);
+            let Some(end) = answer.windows(4).position(|w| w == b"\r\n\r\n") else {
+                continue;
+            };
+            let head = String::from_utf8_lossy(answer.get(..end)?).into_owned();
+            let length: usize = head
+                .lines()
+                .find_map(|line| line.strip_prefix("content-length: "))
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0);
+            if answer.len() >= end + 4 + length {
+                let body = String::from_utf8_lossy(answer.get(end + 4..end + 4 + length)?);
+                return Some((head.lines().next()?.to_owned(), body.into_owned()));
+            }
+        }
+    })
+    .await
+    .expect("answered, or ended, within ten seconds")
 }
