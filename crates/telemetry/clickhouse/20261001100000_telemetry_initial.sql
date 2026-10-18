@@ -31,7 +31,10 @@ ORDER BY applied_at;
 --
 -- Partitioned by the day it ARRIVED, by the server's clock, so the nightly
 -- purge counts its retention from then and no client's clock decides when it
--- goes; ordered by project and start, the order every read narrows by.
+-- goes; ordered by project and start, the order every read narrows by. A
+-- trace is read by its run's id, which no key holds and no window bounds, so
+-- a bloom filter a granule lets that read skip every granule but the run's
+-- instead of its project's whole history.
 CREATE TABLE IF NOT EXISTS telemetry.spans
 (
     -- The server's own: the key's project, its clock at receipt, and what
@@ -73,7 +76,8 @@ CREATE TABLE IF NOT EXISTS telemetry.spans
     sample_rate              Nullable(Float64),
     -- The attributes the field inventory names, and any other whose value is
     -- a number or a boolean; an array is kept as its JSON.
-    attributes               Map(LowCardinality(String), String)
+    attributes               Map(LowCardinality(String), String),
+    INDEX run_id_idx run_id TYPE bloom_filter GRANULARITY 1
 )
 ENGINE = MergeTree
 PARTITION BY toDate(received_at)

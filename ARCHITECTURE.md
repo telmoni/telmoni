@@ -233,7 +233,7 @@ telemetry       project_settings (the content mode; the project's hashing key, s
                 outbox (a finished run on its way to spans, a notice on its way to the feed)
 
 ClickHouse, telemetry's database:
-spans           a row per finished span, partitioned by the day it arrived
+spans           a row per finished span, partitioned by the day it arrived, its run ids under a bloom filter for a trace's read
 spans_hourly    their totals by hour, partitioned by month, fed by a view
 migrations      the digest of the statements the store was made from
 ```

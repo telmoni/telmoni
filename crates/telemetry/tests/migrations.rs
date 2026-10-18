@@ -209,6 +209,8 @@ fn spans_has_a_column_for_every_field_of_the_row_and_no_other() {
     let columns: BTreeSet<String> = create[open + 1..close]
         .lines()
         .filter_map(|line| line.split_whitespace().next())
+        // A skip index is declared among the columns and is none.
+        .filter(|first| *first != "INDEX")
         .map(str::to_owned)
         .collect();
 
