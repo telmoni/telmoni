@@ -11,10 +11,13 @@ import { markProjectReadAction } from "./notice-actions";
 export function MarkProjectRead({
   projectId,
   unread,
+  before,
 }: {
   /// The project this page rendered; the action marks no other.
   projectId: string;
   unread: number;
+  /// The newest notice drawn, by its `created_at`; nothing newer is marked.
+  before: string;
 }) {
   const [pending, start] = useTransition();
 
@@ -27,7 +30,7 @@ export function MarkProjectRead({
       onClick={() =>
         start(async () => {
           try {
-            const { error } = await markProjectReadAction(projectId);
+            const { error } = await markProjectReadAction(projectId, before);
             if (error) toast.error(error);
           } catch (err) {
             unstable_rethrow(err);

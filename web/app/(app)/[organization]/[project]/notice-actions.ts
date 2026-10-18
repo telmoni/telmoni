@@ -7,18 +7,22 @@ import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
 import { sessionHeaders } from "@/lib/server/entities/identity-context";
 import { activeProjectForMutation } from "@/lib/server/identity";
+import { NOT_DRAWN, NewestDrawn } from "@/lib/server/newest-drawn";
 import { getServerSession } from "@/lib/server/session";
 
-/// Mark the project's feed read: every unread notice on it, for everybody on
-/// the project, as the service marks a feed — those that arrived after the
-/// page was drawn among them. The project is the one the overview rendered,
-/// by id, and the service answers whether the person is on it, so a stale
-/// page marks no project it is not showing.
-export async function markProjectReadAction(projectId: string): Promise<{
-  error: string | null;
-}> {
+/// Mark the project's feed read up to `before`, the newest notice the page
+/// drew: every unread notice to there, for everybody on the project, as the
+/// service marks a feed, and none that arrived since. The project is the one
+/// the overview rendered, by id, and the service answers whether the person
+/// is on it, so a stale page marks no project it is not showing.
+export async function markProjectReadAction(
+  projectId: string,
+  before: string,
+): Promise<{ error: string | null }> {
   const session = await getServerSession();
   if (!session) return { error: "Your session expired — sign in again." };
+  // Posted, like the id: a time the page could not have drawn asks nothing.
+  if (!NewestDrawn.safeParse(before).success) return { error: NOT_DRAWN };
 
   const limited = await rateLimit(sessionKey(session, "notifications:read"), {
     limit: 20,
@@ -31,7 +35,11 @@ export async function markProjectReadAction(projectId: string): Promise<{
 
   const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/notifications/read`, {
     method: "POST",
-    headers: sessionHeaders(session, resolved.organizationId, resolved.projectId),
+    headers: {
+      ...sessionHeaders(session, resolved.organizationId, resolved.projectId),
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ before }),
   });
   if (!res) {
     return {

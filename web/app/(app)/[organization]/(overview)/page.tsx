@@ -51,9 +51,15 @@ export default async function OrganizationOverviewPage() {
   // admin first — the organization cannot be left with nobody holding it.
   const canLeave = !isOwner;
 
+  // Mark read goes up to the newest notice drawn, the first of the feed.
+  const newest = notices?.items[0];
   const markRead =
-    notices && notices.unread > 0 ? (
-      <MarkOrganizationRead organizationId={organization.organizationId} unread={notices.unread} />
+    notices && newest && notices.unread > 0 ? (
+      <MarkOrganizationRead
+        organizationId={organization.organizationId}
+        unread={notices.unread}
+        before={newest.created_at}
+      />
     ) : null;
 
   return (

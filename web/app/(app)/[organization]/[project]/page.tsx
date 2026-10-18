@@ -34,13 +34,19 @@ export default async function OverviewPage({
   const project = await fetchProjectBySlug(slug);
   if (!project) return <ServiceUnavailable />;
   const notices = await fetchProjectNotifications(project.id);
+  // Mark read goes up to the newest notice drawn, the first of the feed.
+  const newest = notices?.items[0];
 
   return (
     <Overview
       title={project.name}
       action={
-        notices && notices.unread > 0 ? (
-          <MarkProjectRead projectId={project.id} unread={notices.unread} />
+        notices && newest && notices.unread > 0 ? (
+          <MarkProjectRead
+            projectId={project.id}
+            unread={notices.unread}
+            before={newest.created_at}
+          />
         ) : undefined
       }
       sections={

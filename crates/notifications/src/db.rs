@@ -269,16 +269,20 @@ pub async fn count_unread(
     .await
 }
 
-/// Mark every unread row read, with the same predicate as the list and count.
+/// Mark every unread row up to `before` read — what a page drew, its newest
+/// notice at `before`, and nothing that landed since — with the list's
+/// predicate.
 pub async fn mark_all_read(
     tx: &mut Scoped<'_, Project>,
     project_id: &ProjectId,
+    before: DateTime<Utc>,
 ) -> sqlx::Result<u64> {
     let done = sqlx::query(
         "UPDATE notifications.feed SET read_at = now()
-          WHERE project_id = $1 AND read_at IS NULL",
+          WHERE project_id = $1 AND read_at IS NULL AND created_at <= $2",
     )
     .bind(project_id)
+    .bind(before)
     .execute(tx.conn())
     .await?;
     Ok(done.rows_affected())
@@ -317,16 +321,20 @@ pub async fn count_organization_unread(
     .await
 }
 
-/// Mark the organization's unread rows read, with the list's predicate.
+/// Mark the organization's unread rows up to `before` read, as
+/// [`mark_all_read`] marks a project's.
 pub async fn mark_organization_read(
     tx: &mut Scoped<'_, Organization>,
     organization_id: &OrganizationId,
+    before: DateTime<Utc>,
 ) -> sqlx::Result<u64> {
     let done = sqlx::query(
         "UPDATE notifications.feed SET read_at = now()
-          WHERE project_id IS NULL AND organization_id = $1 AND read_at IS NULL",
+          WHERE project_id IS NULL AND organization_id = $1 AND read_at IS NULL
+            AND created_at <= $2",
     )
     .bind(organization_id)
+    .bind(before)
     .execute(tx.conn())
     .await?;
     Ok(done.rows_affected())

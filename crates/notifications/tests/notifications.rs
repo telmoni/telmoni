@@ -112,6 +112,17 @@ fn organization_req(m: &str, uri: &str, organization: &str, user: &str) -> Reque
         .unwrap()
 }
 
+/// What the console's `organizationHeaders` sends, with a JSON body.
+fn organization_post(uri: &str, organization: &str, user: &str, body: &str) -> Request<Body> {
+    Request::post(uri)
+        .header(header::AUTHORIZATION, bearer(user))
+        .header("x-service-secret", SECRET)
+        .header("x-organization-id", organization)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_owned()))
+        .unwrap()
+}
+
 /// Feed rows for the fixture organization, read past RLS on the raw pool.
 async fn feed_count(pool: &PgPool) -> i64 {
     sqlx::query_scalar("SELECT count(*) FROM notifications.feed WHERE project_id = $1")
@@ -124,6 +135,18 @@ async fn feed_count(pool: &PgPool) -> i64 {
 async fn json_body(resp: axum::response::Response) -> serde_json::Value {
     let bytes = resp.into_body().collect().await.expect("body").to_bytes();
     serde_json::from_slice(&bytes).expect("JSON body")
+}
+
+/// What the console posts to mark a feed read: up to the newest notice the
+/// page drew, the first of `feed`.
+fn mark_read_body(feed: &serde_json::Value) -> String {
+    let drawn = feed
+        .get("items")
+        .and_then(|items| items.get(0))
+        .and_then(|newest| newest.get("created_at"))
+        .and_then(serde_json::Value::as_str)
+        .expect("the newest notice drawn");
+    format!(r#"{{"before":"{drawn}"}}"#)
 }
 
 async fn feed_titles(st: &Arc<AppState>, req: Request<Body>) -> (Vec<String>, i64) {
@@ -299,6 +322,7 @@ async fn emit_writes_the_feed_and_read_is_project_scoped(pool: PgPool) {
     assert_eq!(body["items"].as_array().unwrap().len(), 1);
     assert_eq!(body["unread"], 1);
     assert_eq!(body["items"][0]["kind"], "member_added");
+    let drawn = mark_read_body(&body);
 
     let resp = app(state.clone())
         .oneshot(bff_req(
@@ -317,7 +341,7 @@ async fn emit_writes_the_feed_and_read_is_project_scoped(pool: PgPool) {
             "POST",
             "/internal/notifications/read",
             ORGANIZATION,
-            None,
+            Some(&drawn),
         ))
         .await
         .unwrap();
@@ -328,6 +352,69 @@ async fn emit_writes_the_feed_and_read_is_project_scoped(pool: PgPool) {
             .and_then(serde_json::Value::as_i64),
         Some(1)
     );
+}
+
+/// Mark read clears what the page drew, up to its newest notice, and not one
+/// that landed since, which stays unread for the next draw; without the
+/// bound the request is refused.
+#[sqlx::test]
+async fn mark_read_marks_what_the_page_drew_and_not_what_landed_since(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let auth = auth_stub();
+    let state = state(pool.clone(), &auth);
+    let emit = |title: &str| {
+        emit_req(
+            ORGANIZATION,
+            &format!(r#"{{"kind":"member_added","title":"{title}","body":"A seat taken."}}"#),
+        )
+    };
+    let page = || bff_req("GET", "/internal/notifications/feed", ORGANIZATION, None);
+    let resp = app(state.clone()).oneshot(emit("First")).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+    // Drawn a minute ago, so the next notice is plainly later.
+    sqlx::query("UPDATE notifications.feed SET created_at = created_at - interval '1 minute'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let drawn = mark_read_body(&json_body(app(state.clone()).oneshot(page()).await.unwrap()).await);
+    let resp = app(state.clone()).oneshot(emit("Second")).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+
+    let resp = app(state.clone())
+        .oneshot(bff_req(
+            "POST",
+            "/internal/notifications/read",
+            ORGANIZATION,
+            Some(&drawn),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(json_body(resp).await["marked"], 1);
+    let feed = json_body(app(state.clone()).oneshot(page()).await.unwrap()).await;
+    assert_eq!(feed["unread"], 1, "what landed since the draw stays unread");
+    assert_eq!(feed["items"][0]["title"], "Second");
+    assert!(feed["items"][0]["read_at"].is_null(), "{feed}");
+    assert!(feed["items"][1]["read_at"].is_string(), "{feed}");
+
+    let resp = app(state.clone())
+        .oneshot(bff_req(
+            "POST",
+            "/internal/notifications/read",
+            ORGANIZATION,
+            Some("{}"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        resp.headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        Some("application/problem+json")
+    );
+    let (_, unread) = feed_titles(&state, page()).await;
+    assert_eq!(unread, 1, "a refused mark marked something");
 }
 
 /// The deletion saga's organization purge, at the database layer.
@@ -460,13 +547,14 @@ async fn an_organization_level_notice_is_read_and_cleared_on_the_organizations_p
     let (titles, unread) = feed_titles(&state, page()).await;
     assert_eq!(titles, ["Action needed"]);
     assert_eq!(unread, 1);
+    let drawn = mark_read_body(&json_body(app(state.clone()).oneshot(page()).await.unwrap()).await);
 
     let resp = app(state.clone())
-        .oneshot(organization_req(
-            "POST",
+        .oneshot(organization_post(
             "/internal/notifications/read",
             ORGANIZATION,
             OWNER,
+            &drawn,
         ))
         .await
         .unwrap();

@@ -47,6 +47,8 @@ const fetchMock = vi.mocked(tryFetchWithTimeout);
 
 // The organization the overview rendered, and handed to the button.
 const ORGANIZATION = "org_acme";
+// The newest notice the page drew, as the server spells a `created_at`.
+const DRAWN = "2026-10-17T12:00:00.123456Z";
 
 function standingIn(organizationId: string) {
   vi.mocked(identityContext).mockResolvedValue({
@@ -69,23 +71,38 @@ describe("markOrganizationReadAction", () => {
   it("marks the feed of the organization the page rendered read", async () => {
     standingIn(ORGANIZATION);
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-    expect(await markOrganizationReadAction(ORGANIZATION)).toEqual({ error: null });
+    expect(await markOrganizationReadAction(ORGANIZATION, DRAWN)).toEqual({ error: null });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://auth.test/internal/notifications/read",
       expect.objectContaining({
         method: "POST",
-        headers: expect.objectContaining({ "x-organization-id": ORGANIZATION }),
+        headers: expect.objectContaining({
+          "x-organization-id": ORGANIZATION,
+          "content-type": "application/json",
+        }),
+        body: JSON.stringify({ before: DRAWN }),
       }),
     );
     // The overview is drawn again, its notices read.
     expect(refresh).toHaveBeenCalledOnce();
   });
 
+  // The time is posted too: one the page could not have drawn asks nothing.
+  it.each(["yesterday", "", "2026-10-17"])(
+    "refuses %j as the newest notice drawn, asking the server nothing",
+    async (before) => {
+      standingIn(ORGANIZATION);
+      const res = await markOrganizationReadAction(ORGANIZATION, before);
+      expect(res.error).toMatch(/what the page showed/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
   // The page said A; the request resolves B. Marking B's feed read from A's
   // overview would be wrong even for something this small.
   it("refuses, asking the server nothing, when the request resolves another organization", async () => {
     standingIn("org_elsewhere");
-    const res = await markOrganizationReadAction(ORGANIZATION);
+    const res = await markOrganizationReadAction(ORGANIZATION, DRAWN);
     expect(res.error).toMatch(/out of date/);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(refresh).not.toHaveBeenCalled();
@@ -98,7 +115,7 @@ describe("markOrganizationReadAction", () => {
     vi.mocked(getServerContext).mockResolvedValue({
       organizationNotFound: true,
     } as Awaited<ReturnType<typeof getServerContext>>);
-    const res = await markOrganizationReadAction(ORGANIZATION);
+    const res = await markOrganizationReadAction(ORGANIZATION, DRAWN);
     expect(res.error).toMatch(/URL was changed, or you're no longer in it/);
     expect(fetchMock).not.toHaveBeenCalled();
   });

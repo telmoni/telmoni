@@ -116,7 +116,7 @@ describe("OverviewPage", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Mark read (1)" }));
     });
-    expect(markProjectReadAction).toHaveBeenCalledExactlyOnceWith(PROJECT);
+    expect(markProjectReadAction).toHaveBeenCalledExactlyOnceWith(PROJECT, DISCOVERED.created_at);
   });
 
   it("offers no Mark read once everything on the feed is read", async () => {

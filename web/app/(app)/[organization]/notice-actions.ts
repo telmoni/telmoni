@@ -10,15 +10,20 @@ import {
   organizationHeaders,
 } from "@/lib/server/entities/identity-context";
 import { SWITCHED_ORGANIZATION, unplacedOrganization } from "@/lib/server/identity";
+import { NOT_DRAWN, NewestDrawn } from "@/lib/server/newest-drawn";
 import { getServerSession } from "@/lib/server/session";
 
-/// Mark the organization's own feed read: the organization the overview
-/// rendered, which the action refuses to mistake for another.
-export async function markOrganizationReadAction(organizationId: string): Promise<{
-  error: string | null;
-}> {
+/// Mark the organization's own feed read up to `before`, the newest notice
+/// the overview drew: the organization it rendered, which the action refuses
+/// to mistake for another, and nothing that landed since.
+export async function markOrganizationReadAction(
+  organizationId: string,
+  before: string,
+): Promise<{ error: string | null }> {
   const session = await getServerSession();
   if (!session) return { error: "Your session expired — sign in again." };
+  // Posted, like the id: a time the page could not have drawn asks nothing.
+  if (!NewestDrawn.safeParse(before).success) return { error: NOT_DRAWN };
 
   const limited = await rateLimit(sessionKey(session, "notifications:read"), {
     limit: 20,
@@ -30,10 +35,11 @@ export async function markOrganizationReadAction(organizationId: string): Promis
   if (!ctx) return { error: await unplacedOrganization() };
   if (ctx.organizationId !== organizationId) return { error: SWITCHED_ORGANIZATION };
 
-  const res = await tryFetchWithTimeout(
-    `${env.SERVER_URL}/internal/notifications/read`,
-    { method: "POST", headers: organizationHeaders(ctx) },
-  );
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/notifications/read`, {
+    method: "POST",
+    headers: { ...organizationHeaders(ctx), "content-type": "application/json" },
+    body: JSON.stringify({ before }),
+  });
   if (!res) {
     return {
       error: "Notifications are unavailable right now — try again shortly.",

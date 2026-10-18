@@ -11,10 +11,13 @@ import { markOrganizationReadAction } from "./notice-actions";
 export function MarkOrganizationRead({
   organizationId,
   unread,
+  before,
 }: {
   /// The organization this page rendered; the action refuses any other.
   organizationId: string;
   unread: number;
+  /// The newest notice drawn, by its `created_at`; nothing newer is marked.
+  before: string;
 }) {
   const [pending, start] = useTransition();
 
@@ -27,7 +30,7 @@ export function MarkOrganizationRead({
       onClick={() =>
         start(async () => {
           try {
-            const { error } = await markOrganizationReadAction(organizationId);
+            const { error } = await markOrganizationReadAction(organizationId, before);
             if (error) toast.error(error);
           } catch (err) {
             unstable_rethrow(err);

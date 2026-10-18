@@ -9,6 +9,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::{extract::State, http::HeaderMap, response::IntoResponse};
+use chrono::{DateTime, Utc};
+use serde::Deserialize;
 use serde_json::json;
 use telmoni_shared::acting::Acting;
 use telmoni_shared::db::tenant_session::{
@@ -328,23 +330,32 @@ pub async fn get_feed(
     Ok(Json(json!({ "items": items, "unread": unread })))
 }
 
-/// `POST /internal/notifications/read` — mark the feed read with the same
-/// predicate as the list and count; three readers over three sets would be a
-/// badge nothing can clear.
+/// What a mark-read asks: the feed read up to `before`, the newest notice the
+/// page drew, so one that landed since stays unread for the next draw.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MarkRead {
+    pub before: DateTime<Utc>,
+}
+
+/// `POST /internal/notifications/read` — mark the feed read up to `before`,
+/// with the same predicate as the list and count; three readers over three
+/// sets would be a badge nothing can clear.
 pub async fn mark_read(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
+    Json(MarkRead { before }): Json<MarkRead>,
 ) -> Result<impl IntoResponse, TelmoniError> {
     let marked = match feed_scope(&state, &headers).await? {
         FeedScope::Project(project_id) => {
             let mut tx = project_scope(&state.db, &project_id).await?;
-            let marked = db::mark_all_read(&mut tx, &project_id).await?;
+            let marked = db::mark_all_read(&mut tx, &project_id, before).await?;
             tx.commit().await?;
             marked
         }
         FeedScope::Organization(organization_id) => {
             let mut tx = organization_scope(&state.db, &organization_id).await?;
-            let marked = db::mark_organization_read(&mut tx, &organization_id).await?;
+            let marked = db::mark_organization_read(&mut tx, &organization_id, before).await?;
             tx.commit().await?;
             marked
         }
