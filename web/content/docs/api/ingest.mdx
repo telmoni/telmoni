@@ -140,7 +140,7 @@ status maps to:
 | `402` | `/errors/plan/limit-reached` | On the hosted service, the key's organization is paused ([One Hobby organization](https://telmoni.com/docs/workspace/billing#one-hobby-organization)): nothing is kept, and the message says what lifts it. A self-hosted server never answers it |
 | `403` | `/errors/authz/forbidden` | A key without the ingest scope |
 | `413` | `/errors/telemetry/batch-too-large` | More than 1 MiB once decompressed |
-| `429` | `/errors/tenant/rate-limited` | More than 600 exports a minute from one project; `Retry-After` says how long to wait |
+| `429` | `/errors/tenant/rate-limited` | More than 600 exports a minute from one project, or more than 1,200 requests a minute from one address (an IPv6 address by its /64), keyed or not; `Retry-After` says how long to wait |
 | `500` | `/errors/internal/unknown` | The store refused the rows as malformed, a fault on Telmoni's side that retrying does not mend |
 | `503` | `/errors/telemetry/store-unavailable` | The store did not take the rows, the key service that seals the project's hashing key did not answer, a copy of the export is being written, or the project's first export came while the project was being moved to another organization or deleted; retry after `Retry-After` |
 | `503` | `/errors/auth/identity-unavailable` | The key could not be checked just then, or, for a project's first export, nor could which organization holds the project; no `Retry-After` |
