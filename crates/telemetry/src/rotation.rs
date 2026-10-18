@@ -31,7 +31,8 @@ pub const REPLACED_AFTER_S: i64 = 7 * 24 * 60 * 60;
 /// How often a tick looks.
 const EVERY: Duration = Duration::from_secs(60);
 
-/// How long after boot the first tick runs: past the startup probes.
+/// How long after boot the first tick runs: a minute, past the readiness probe's
+/// first passes and the thirty seconds Kubernetes gives the replaced replica to drain.
 const START_DELAY: Duration = Duration::from_secs(60);
 
 /// The rotation, forever: the first tick after `START_DELAY`, then one

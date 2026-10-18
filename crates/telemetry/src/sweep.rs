@@ -18,7 +18,8 @@ use crate::seam;
 /// As often as auth's deletion sweep, which retries organizations' purges.
 const EVERY: Duration = Duration::from_secs(10 * 60);
 
-/// How long after boot the first pass runs: past the startup probes.
+/// How long after boot the first pass runs: a minute, past the readiness probe's
+/// first passes and the thirty seconds Kubernetes gives the replaced replica to drain.
 const START_DELAY: Duration = Duration::from_secs(60);
 
 /// Settings rows read, and asked of auth, at once.

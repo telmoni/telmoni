@@ -33,7 +33,8 @@ use crate::model::{not_now, rate_limited, unavailable};
 /// How often the loop looks for new rows.
 const EVERY: Duration = Duration::from_secs(60);
 
-/// How long after boot the first tick runs: past the startup probes.
+/// How long after boot the first tick runs: half a minute, past the readiness
+/// probe's first passes, so the replica serves before it spends a model call.
 const START_DELAY: Duration = Duration::from_secs(30);
 
 /// How often the docs corpus is fetched again.

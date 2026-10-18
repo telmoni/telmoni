@@ -581,7 +581,7 @@ where
 }
 
 /// `GET /health` — **readiness**: every module reaches its own tables, or
-/// the process is not ready. Wired to the startup and readiness probes.
+/// the process is not ready. The chart's readiness probe; `/livez` is its liveness.
 async fn health(
     axum::extract::State(app): axum::extract::State<Arc<App>>,
 ) -> (StatusCode, Json<serde_json::Value>) {

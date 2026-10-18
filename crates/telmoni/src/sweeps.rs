@@ -15,8 +15,9 @@ use telmoni_auth::AppState;
 
 use crate::cli::Sweep;
 
-/// How long after boot the first tick of each sweep runs: past the startup
-/// probes, and past the replica this one is replacing draining its own.
+/// How long after boot the first tick of each sweep runs: a minute, past the
+/// readiness probe's first passes and the thirty seconds Kubernetes gives the
+/// replaced replica to drain its own tick.
 const START_DELAY: Duration = Duration::from_secs(60);
 
 /// How often the deletion sweep runs: the retry net behind every inline
