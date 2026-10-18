@@ -20,27 +20,3 @@ export function asOrganizationRole(value: unknown): OrganizationRole | null {
       return null;
   }
 }
-
-export function canCreateProjects(role: OrganizationRole | null): boolean {
-  return role === OrganizationRole.Owner || role === OrganizationRole.Admin;
-}
-
-export function canDeleteProjects(role: OrganizationRole | null): boolean {
-  return role === OrganizationRole.Owner;
-}
-
-export function canManageOrganizationSettings(role: OrganizationRole | null): boolean {
-  return role === OrganizationRole.Owner || role === OrganizationRole.Admin;
-}
-
-export function canViewRolledUpAudit(role: OrganizationRole | null): boolean {
-  return role === OrganizationRole.Owner || role === OrganizationRole.Admin;
-}
-
-export function canManageOrganizationMembers(role: OrganizationRole | null): boolean {
-  return role === OrganizationRole.Owner || role === OrganizationRole.Admin;
-}
-
-export function canViewOrganizationMembers(role: OrganizationRole | null): boolean {
-  return role === OrganizationRole.Owner || role === OrganizationRole.Admin;
-}
