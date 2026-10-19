@@ -19,6 +19,20 @@ pub enum Error {
     /// A recorded span — the run's own, a step's or a call's — ended before
     /// it started.
     EndBeforeStart,
+    /// A recorded time fell at or before the Unix epoch, or 2^64 nanoseconds
+    /// or more after it, in 2554: ingest reads neither.
+    RecordedTime,
+    /// A recorded step's name or model call's model was empty, which ingest
+    /// refuses the span for.
+    EmptyName,
+    /// A recorded text held more characters than ingest takes there, which it
+    /// refuses the span for.
+    TooLong {
+        /// Which text, never the text itself: `"step's name"`, …
+        what: &'static str,
+        /// The most characters ingest takes there.
+        max: usize,
+    },
     /// The export queue had no room for the whole record, so nothing of it
     /// was queued: flush, or wait for the queue to drain, and record it
     /// again.
@@ -39,6 +53,15 @@ impl fmt::Display for Error {
                 f.write_str("a recorded run's id must be a UUID other than the nil UUID")
             }
             Self::EndBeforeStart => f.write_str("a recorded span cannot end before it starts"),
+            Self::RecordedTime => f.write_str(
+                "a recorded time must fall after the Unix epoch and less than 2^64 nanoseconds after it",
+            ),
+            Self::EmptyName => {
+                f.write_str("a recorded step's name or model call's model cannot be empty")
+            }
+            Self::TooLong { what, max } => {
+                write!(f, "a recorded {what} must be up to {max} characters")
+            }
             Self::QueueFull { spans } => write!(
                 f,
                 "the export queue has no room for the record's {spans} spans; flush or wait, then record it again"

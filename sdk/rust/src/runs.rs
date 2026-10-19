@@ -23,6 +23,7 @@ use crate::client::Inner;
 use crate::contract;
 use crate::error::Error;
 use crate::propagation::Continued;
+use crate::warnings::Warner;
 
 /// The run a context is inside, carried by every span opened under it: what
 /// `inject` reads off the current context.
@@ -35,9 +36,8 @@ pub(crate) struct RunInfo {
     pub(crate) sampled_out: bool,
 }
 
-/// What a monitor holds a run to; each optional, the integers 64-bit as the
-/// wire carries them, and a `max_cost_usd` that is no finite number left off
-/// the run with one warning.
+/// What a monitor holds a run to, each optional; a bound outside ingest's
+/// range is left off the run with one warning.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Bounds {
     /// How long the run may go without a span before it counts as stalled.
@@ -48,10 +48,9 @@ pub struct Bounds {
     pub max_cost_usd: Option<f64>,
 }
 
-/// A model call's tokens, counted as the conventions count them. Input tokens
-/// include the cache's reads and writes; output tokens include reasoning.
-/// Where a provider reports parts apart, sum them first. Integers are 64-bit,
-/// as the wire carries them.
+/// A model call's tokens as the conventions count them: input with the cache's
+/// reads and writes, output with reasoning; sum a provider's parts first. A
+/// negative count is left off the call with one warning.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Usage {
     /// Every input token.
@@ -293,9 +292,8 @@ macro_rules! handle_methods {
                 self.handle.finish();
             }
 
-            /// Marks the span failed: `error.type` set to `error_type`, the
-            /// exception's class or the error's name, and status `ERROR`. No
-            /// message: a message is content.
+            /// Marks the span failed: status `ERROR`, and `error_type` as its
+            /// `error.type`, none if empty. No message: a message is content.
             pub fn fail(&self, error_type: &str) {
                 self.handle.fail(error_type);
             }
@@ -497,10 +495,12 @@ impl ModelCall {
     /// What the model answered: its name, its tokens, and its messages.
     pub fn answered(&self, reply: Reply) {
         let span = self.handle.cx.span();
-        if let Some(model) = reply.response_model {
+        // Ingest refuses the call over an empty one.
+        if let Some(model) = reply.response_model.filter(|model| !model.is_empty()) {
             span.set_attribute(KeyValue::new(contract::RESPONSE_MODEL, model));
         }
         if let Some(usage) = reply.usage {
+            let usage = sendable_usage(usage, &self.handle.client.warner);
             span.set_attributes(usage_attributes(usage));
         }
         if let Some(messages) = reply.output_messages {
@@ -528,13 +528,30 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
     if !(rate > 0.0 && rate <= 1.0) {
         return Err(Error::SampleRate(rate));
     }
-    // JSON carries no infinity or NaN, and a computed one must not stop the
-    // agent's call: the run is sent without it.
+    // A bound out of range loses the run at ingest; an error would stop the agent.
     let mut limits = options.bounds;
-    if limits.max_cost_usd.is_some_and(|usd| !usd.is_finite()) {
+    for (name, bound) in [
+        ("stall_after_s", &mut limits.stall_after_s),
+        ("max_steps", &mut limits.max_steps),
+    ] {
+        if bound.is_some_and(|value| !(1..=i64::from(u32::MAX)).contains(&value)) {
+            inner.warner.once(
+                format!("run:{name}"),
+                &format!(
+                    "telmoni: a run's {name} must be a whole number from 1 to {}; the run is sent without it",
+                    u32::MAX
+                ),
+            );
+            *bound = None;
+        }
+    }
+    if limits
+        .max_cost_usd
+        .is_some_and(|usd| !(usd.is_finite() && usd > 0.0))
+    {
         inner.warner.once(
             "run:max_cost_usd".to_owned(),
-            "telmoni: a run's max_cost_usd must be a finite number; the run is sent without it",
+            "telmoni: a run's max_cost_usd must be a finite number above 0; the run is sent without it",
         );
         limits.max_cost_usd = None;
     }
@@ -548,7 +565,14 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
         inherited.push(KeyValue::new(contract::SAMPLED_OUT, true));
     }
     let bounds = bound_attributes(&limits);
-    let attributes = run_attributes(agent, &inherited, &bounds, rate, options.tags);
+    let attributes = run_attributes(
+        agent,
+        &inherited,
+        &bounds,
+        rate,
+        options.tags,
+        &inner.warner,
+    );
 
     let parent = Context::current();
     let start = SystemTime::now();
@@ -642,7 +666,8 @@ pub(crate) fn run_attributes(
     inherited: &[KeyValue],
     bounds: &[KeyValue],
     rate: f64,
-    tags: BTreeMap<String, String>,
+    mut tags: BTreeMap<String, String>,
+    warner: &Warner,
 ) -> Vec<KeyValue> {
     let mut attributes = vec![
         KeyValue::new(contract::OPERATION, contract::RUN_OPERATION),
@@ -651,7 +676,33 @@ pub(crate) fn run_attributes(
     attributes.extend_from_slice(inherited);
     attributes.extend_from_slice(bounds);
     attributes.push(KeyValue::new(contract::SAMPLE_RATE, rate));
-    for (key, value) in tags {
+    // Ingest drops these before it counts its 32, so they take no place there.
+    let given = tags.len();
+    tags.retain(|key, value| {
+        (1..=contract::TAG_KEY_MAX).contains(&key.chars().count())
+            && value.chars().count() <= contract::TAG_VALUE_MAX
+    });
+    if tags.len() < given {
+        warner.once(
+            "run:tag".to_owned(),
+            &format!(
+                "telmoni: a tag's key must be 1 to {} characters and its value up to {}; the tag is not sent",
+                contract::TAG_KEY_MAX,
+                contract::TAG_VALUE_MAX
+            ),
+        );
+    }
+    // Ingest keeps no more, and more could crowd out what the run's end sets.
+    if tags.len() > contract::TAGS_MAX {
+        warner.once(
+            "run:tags".to_owned(),
+            &format!(
+                "telmoni: a run carries up to {} tags, the most ingest keeps; the rest are not sent",
+                contract::TAGS_MAX
+            ),
+        );
+    }
+    for (key, value) in tags.into_iter().take(contract::TAGS_MAX) {
         attributes.push(KeyValue::new(
             format!("{}{key}", contract::TAG_PREFIX),
             value,
@@ -673,6 +724,16 @@ pub(crate) fn start_attributes(
     attributes
 }
 
+/// The operation a model call's span is named for: `chat` unless one not
+/// blank is given.
+pub(crate) fn model_operation(given: Option<&str>) -> &str {
+    // Sent blank, the span would be named ` <model>` and ingest would read it
+    // as a step.
+    given
+        .filter(|operation| !operation.trim().is_empty())
+        .unwrap_or(contract::MODEL_OPERATION_DEFAULT)
+}
+
 /// A model call's span name, `<operation> <model>`, and what it opens with
 /// besides what the run carries and any content.
 pub(crate) fn model_call_opening(
@@ -680,11 +741,7 @@ pub(crate) fn model_call_opening(
     operation: Option<String>,
     provider: Option<String>,
 ) -> (String, Vec<KeyValue>) {
-    // Sent blank, the span would be named ` <model>` and ingest would read it
-    // as a step.
-    let operation = operation
-        .filter(|operation| !operation.trim().is_empty())
-        .unwrap_or_else(|| contract::MODEL_OPERATION_DEFAULT.to_owned());
+    let operation = model_operation(operation.as_deref()).to_owned();
     let name = format!("{operation} {model}");
     let mut attributes = vec![
         KeyValue::new(contract::OPERATION, operation),
@@ -726,11 +783,41 @@ pub(crate) fn usage_attributes(usage: Usage) -> impl Iterator<Item = KeyValue> {
     .filter_map(|(key, count)| count.map(|count| KeyValue::new(key, count)))
 }
 
-/// Marks `span` failed: `error.type` set to `error_type`, and status `ERROR`
-/// with no description, since a description is a message and a message is
-/// content.
+/// `usage` without the counts ingest refuses the call for, the negative ones,
+/// each warned of once.
+pub(crate) fn sendable_usage(usage: Usage, warner: &Warner) -> Usage {
+    let kept = |name: &str, count: Option<i64>| {
+        if count.is_some_and(|count| count < 0) {
+            warner.once(
+                format!("usage:{name}"),
+                &format!(
+                    "telmoni: {name} must be a whole number from 0 within 64 bits; the call is sent without it"
+                ),
+            );
+            return None;
+        }
+        count
+    };
+    Usage {
+        input_tokens: kept(contract::INPUT_TOKENS, usage.input_tokens),
+        output_tokens: kept(contract::OUTPUT_TOKENS, usage.output_tokens),
+        cache_read_input_tokens: kept(
+            contract::CACHE_READ_INPUT_TOKENS,
+            usage.cache_read_input_tokens,
+        ),
+        cache_write_input_tokens: kept(
+            contract::CACHE_WRITE_INPUT_TOKENS,
+            usage.cache_write_input_tokens,
+        ),
+    }
+}
+
+/// Marks `span` failed: `error.type`, unless empty, which ingest would refuse
+/// the span for, and status `ERROR` with no description, which is content.
 pub(crate) fn mark_failed(span: &SpanRef<'_>, error_type: String) {
-    span.set_attribute(KeyValue::new(contract::ERROR_TYPE, error_type));
+    if !error_type.is_empty() {
+        span.set_attribute(KeyValue::new(contract::ERROR_TYPE, error_type));
+    }
     span.set_status(Status::error(""));
 }
 

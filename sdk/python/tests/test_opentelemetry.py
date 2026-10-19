@@ -9,7 +9,8 @@ from collections.abc import Sequence
 from typing import Any
 from unittest import mock
 
-from opentelemetry import context, trace
+from opentelemetry import context, metrics, trace
+from opentelemetry.metrics import Meter, NoOpMeterProvider
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
@@ -141,6 +142,32 @@ def test_otel_variables_change_nothing_of_ours(transport: FakeTransport) -> None
         "telemetry.sdk.name",
         "telemetry.sdk.version",
     }
+
+
+def test_our_span_metrics_never_reach_the_applications_meter(
+    transport: FakeTransport,
+) -> None:
+    """Turned on by an ``OTEL_*`` variable, they go to a meter of our own."""
+    asked: list[str] = []
+
+    class Counting(NoOpMeterProvider):
+        def get_meter(self, name: str, *args: Any, **kwargs: Any) -> Meter:
+            asked.append(name)
+            return super().get_meter(name, *args, **kwargs)
+
+    env = {"OTEL_PYTHON_SDK_INTERNAL_METRICS_ENABLED": "true"}
+    with (
+        mock.patch.dict(os.environ, env),
+        mock.patch.object(metrics, "get_meter_provider", Counting),
+    ):
+        client = Telmoni(Config(api_key="k"), transport=transport)
+        try:
+            with client.run("bot"):
+                pass
+            assert client.flush()
+        finally:
+            client.shutdown()
+    assert asked == []
 
 
 def test_the_run_is_found_from_the_context_in_another_thread(

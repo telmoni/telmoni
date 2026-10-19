@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, MutableMapping
 
 from opentelemetry import trace
+from opentelemetry.metrics import NoOpMeterProvider
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import SpanLimits, TracerProvider
 from opentelemetry.trace import Tracer
@@ -30,9 +31,8 @@ from .sampler import RecordingSampler
 class Telmoni:
     """The client: a tracer provider of its own, and the runs it records.
 
-    The provider is built part by part — resource, sampler, limits, processor —
-    so no ``OTEL_*`` variable reaches it, and an application's own OpenTelemetry
-    is neither replaced, sent to Telmoni, nor changed.
+    Built part by part, its meter a no-op, so no ``OTEL_*`` variable changes
+    what it sends, and the application's own OpenTelemetry stays as it was.
     """
 
     def __init__(
@@ -60,6 +60,8 @@ class Telmoni:
             resource=resource,
             shutdown_on_exit=True,
             id_generator=Ids(),
+            # Else an OTEL_* variable sends its span metrics to the application.
+            meter_provider=NoOpMeterProvider(),
             span_limits=SpanLimits(
                 max_attributes=128,
                 max_events=0,
@@ -143,15 +145,8 @@ class Telmoni:
         return Scope(lambda: self._opener.tool_call(name, run, arguments=arguments))
 
     def record_run(self, record: RunRecord) -> None:
-        """Send a run that has already ended, from its record, as the live
-        calls would have sent it: for a job that keeps its own log, or a hook
-        that runs after the turn it reports. The same record sent again is the
-        same bytes, which ingest answers once.
-
-        Raises ``ValueError``, sending nothing, for a blank agent, a run id
-        that is not a UUID, a time without its timezone, or a span that ends
-        before it starts.
-        """
+        """Send a run that has already ended, as the live calls would have; a
+        field of the wrong type or value raises, sending nothing."""
         self._opener.record(record)
 
     def inject(self, headers: MutableMapping[str, str]) -> None:

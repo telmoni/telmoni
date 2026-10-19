@@ -10,7 +10,6 @@ recorded run travels in exports of its own.
 
 from __future__ import annotations
 
-import logging
 import os
 import threading
 import time
@@ -22,9 +21,7 @@ from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
 
 from . import contract
-from .exporter import Exporter
-
-logger = logging.getLogger("telmoni")
+from .exporter import Exporter, warn
 
 MAX_QUEUE_SIZE = 2048
 MAX_BATCH_SIZE = 512
@@ -100,14 +97,10 @@ class Processor(SpanProcessor):
 
     @contextmanager
     def hold(self, trace_id: int, need: int) -> Iterator[None]:
-        """Stage the spans of the record in ``trace_id`` as they end, and queue
-        them whole when the block ends, to travel in exports of their own: the
-        same record sent again is the same bytes, whatever else ends meanwhile.
-        One record at a time, its room kept for it; refused, holding nothing,
-        when the queue has none for its ``need`` spans. A block that raises
-        queues nothing. The block runs nothing of the application's but the
-        root sampler, a record's warnings given before it, since a handler of
-        theirs may record a run."""
+        """Stage the spans of the record in ``trace_id``, queued whole as the
+        block ends, in exports of their own; refused, holding nothing, without
+        room for ``need``. A record warns before it: a handler recording a run
+        would wait on the block."""
         with self._recording:
             with self._lock:
                 if len(self._queue) + need > self._max_queue_size:
@@ -203,7 +196,7 @@ class Processor(SpanProcessor):
                 self._urgent = False
                 self._exporting = bool(batch)
             if dropped:
-                logger.warning(
+                warn(
                     "telmoni: the export queue was full; %d spans were dropped", dropped
                 )
             if batch:
@@ -228,7 +221,7 @@ class Processor(SpanProcessor):
             self._exporter.export(batch)
         except Exception as error:  # noqa: BLE001 - never reaches the agent
             # The class alone: a message or a traceback could quote a span.
-            logger.warning(
+            warn(
                 "telmoni: an export failed (%s); the batch was dropped",
                 type(error).__name__,
             )

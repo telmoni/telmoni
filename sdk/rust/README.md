@@ -63,13 +63,21 @@ fn main() -> Result<(), telmoni_sdk::Error> {
 
 Every handle is a guard: its span ends when it is dropped or on `end()`.
 `run` returns `Error::EmptyAgent` for a blank agent name and
-`Error::SampleRate` for a rate outside (0, 1]; a `max_cost_usd` that is not a
-finite number is left off the run with one warning.
-`fail("ErrorType")` marks a span failed with the error's type and no message;
-`cancel()` marks it cancelled by the agent. The `_with` methods take a closure
-and return its value — `telmoni.run_with(..)`, `run.step_with(..)`,
-`model_call_with`, `tool_call_with` — and their `try_` forms mark an `Err` on
-the span with the error type's name before returning it unchanged:
+`Error::SampleRate` for a rate outside (0, 1]. A bound ingest would refuse the
+run over — a `stall_after_s` or `max_steps` outside 1 to 4294967295, a
+`max_cost_usd` that is not a finite number above 0 — is left off the run with
+one warning, and a negative token count off its call; a run sends its first 32
+tags by key, the most ingest keeps, and warns once of the rest. A tag whose key
+is not 1 to 64 characters or whose value is over 256 is left off with one
+warning first and takes no place among them. Text past ingest's caps, below,
+and a step or model named nothing still go as given, and ingest refuses the
+span they are on, or the whole run for its agent, user or session.
+`fail("ErrorType")` marks a span failed with the error's type, none if empty,
+and no message; `cancel()` marks it cancelled by the agent. The `_with`
+methods take a closure and return its value — `telmoni.run_with(..)`,
+`run.step_with(..)`, `model_call_with`, `tool_call_with` — and their `try_`
+forms mark an `Err` on the span with the error type's name before returning it
+unchanged:
 
 ```rust
 let answer: Result<String, MyError> = telmoni.try_run_with("support-bot", RunOptions::default(), |run| {
@@ -129,11 +137,16 @@ content rules and sample rate, in a trace of its own named by the run's id,
 whatever trace is current. Each span's id is derived from the run's id and the
 span's place in the record, so the same record sent again is the same bytes,
 which ingest answers once: give a run the same id each time you send it. A
-record holds no content. A blank agent (`Error::EmptyAgent`), a run id that is
-not a UUID or is the nil UUID (`Error::RunId`) or a span that ends before it starts
-(`Error::EndBeforeStart`) is returned as an error, and nothing is sent. A record
-the export queue has no room for is `Error::QueueFull`, nothing of it queued:
-flush, or wait, and record it again.
+record holds no content, and its tags and token counts go as a live run's do.
+A blank agent (`Error::EmptyAgent`), a run id that is not a UUID or is the nil
+UUID (`Error::RunId`), an empty step name or model (`Error::EmptyName`), text
+past ingest's caps (`Error::TooLong`: names, the agent, models, providers and
+error types 128 characters, the user 128, the session 200, and a model call's
+operation and model 127 together), a time at or before the Unix epoch or 2^64
+nanoseconds or more after it, in July 2554 (`Error::RecordedTime`), or a span
+that ends before it starts (`Error::EndBeforeStart`) is returned as an error,
+and nothing is sent. A record the export queue has no room for is
+`Error::QueueFull`, nothing of it queued: flush, or wait, and record it again.
 
 ## Configuration
 

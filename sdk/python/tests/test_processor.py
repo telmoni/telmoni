@@ -42,6 +42,41 @@ def test_the_queue_is_bounded_and_drops_are_counted_once(
     )
 
 
+def test_a_warning_whose_handler_raises_never_ends_the_worker(
+    transport: FakeTransport,
+) -> None:
+    """Its own warnings guarded as the agent's are, the next flush still sends."""
+
+    class Raising(logging.Handler):
+        def handle(self, record: logging.LogRecord) -> bool:
+            raise RuntimeError("the handler's own")
+
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    client.processor.shutdown()
+    exporter = Exporter(client.config, transport=transport)
+    processor = Processor(
+        exporter, max_queue_size=2, max_batch_size=100, schedule_delay_s=60
+    )
+    client.processor = processor
+    client._provider._active_span_processor._span_processors = (processor,)
+    handler = Raising()
+    logging.getLogger("telmoni").addHandler(handler)
+    try:
+        with client.run("bot"):
+            for n in range(5):
+                with client.step(f"s{n}"):
+                    pass
+        assert client.flush(timeout_s=5)
+        with client.run("later"):
+            pass
+        assert client.flush(timeout_s=5)
+    finally:
+        logging.getLogger("telmoni").removeHandler(handler)
+        processor.shutdown()
+        client.shutdown()
+    assert "invoke_agent later" in {s["name"] for s in transport.spans()}
+
+
 def test_shutdown_drains_what_is_queued(transport: FakeTransport) -> None:
     client = Telmoni(Config(api_key="k"), transport=transport)
     with client.run("bot"):

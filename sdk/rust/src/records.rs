@@ -10,7 +10,7 @@
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use opentelemetry::trace::{SpanKind, TraceContextExt as _, TraceId, Tracer as _};
 use opentelemetry::{Context, KeyValue};
@@ -255,7 +255,7 @@ impl From<ToolCallRecord> for CallRecord {
 
 /// Sends `record` for the client, as
 /// [`Telmoni::record_run`](crate::Telmoni::record_run) says.
-pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
+pub(crate) fn send(inner: &Inner, mut record: RunRecord) -> Result<(), Error> {
     if record.agent.trim().is_empty() {
         return Err(Error::EmptyAgent);
     }
@@ -266,14 +266,18 @@ pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
     }
     // Checked whole before anything is queued, so a record refused sends
     // nothing rather than half a run.
-    if ends_early(&record) {
-        return Err(Error::EndBeforeStart);
-    }
+    check(&record)?;
     let rate = inner.config.sample_rate;
     if !(rate > 0.0 && rate <= 1.0) {
         return Err(Error::SampleRate(rate));
     }
     let need = spans_in(&record);
+    // Before the hold: a sink is the application's, and may record a run of its own.
+    for call in model_calls(&mut record.inside) {
+        call.usage = call
+            .usage
+            .map(|usage| runs::sendable_usage(usage, &inner.warner));
+    }
 
     let RunRecord {
         agent,
@@ -289,7 +293,7 @@ pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
     } = record;
     let run_id = run_uuid.to_string();
     let inherited = runs::inherited(&run_id, &agent, user_id, session_id);
-    let attributes = runs::run_attributes(&agent, &inherited, &[], rate, tags);
+    let attributes = runs::run_attributes(&agent, &inherited, &[], rate, tags, &inner.warner);
     // Sampled out, no span is built: none of a record's ends after it, and
     // the same record sent again draws again.
     if rate < 1.0 && (inner.random)() >= rate {
@@ -364,24 +368,192 @@ fn spans_in(record: &RunRecord) -> usize {
         .sum::<usize>()
 }
 
-/// Whether any span of `record` — the run's own, a step's or a call's — ends
-/// before it starts.
-fn ends_early(record: &RunRecord) -> bool {
-    record.end < record.start
-        || record.inside.iter().any(|item| match item {
-            RecordItem::Step(step) => {
-                step.end < step.start || step.calls.iter().any(call_ends_early)
-            }
-            RecordItem::ModelCall(call) => call.end < call.start,
-            RecordItem::ToolCall(call) => call.end < call.start,
-        })
+/// Refuses `record` for a span named nothing or holding text past ingest's
+/// cap, at a time ingest cannot read, or ending before it starts.
+fn check(record: &RunRecord) -> Result<(), Error> {
+    let spans = spans_of(record);
+    for span in &spans {
+        if span.name == Some("") {
+            return Err(Error::EmptyName);
+        }
+        if let Some(&(what, _, max)) = span.texts.iter().find(|&&(_, chars, max)| chars > max) {
+            return Err(Error::TooLong { what, max });
+        }
+    }
+    if !spans
+        .iter()
+        .all(|span| readable(span.start) && readable(span.end))
+    {
+        return Err(Error::RecordedTime);
+    }
+    if spans.iter().any(|span| span.end < span.start) {
+        return Err(Error::EndBeforeStart);
+    }
+    Ok(())
 }
 
-fn call_ends_early(call: &CallRecord) -> bool {
-    match call {
-        CallRecord::Model(call) => call.end < call.start,
-        CallRecord::Tool(call) => call.end < call.start,
+/// Each span of `record` but `telmoni.run.start`, as [`check`] reads it.
+fn spans_of(record: &RunRecord) -> Vec<Checked<'_>> {
+    let mut spans = vec![Checked::run(record)];
+    for item in &record.inside {
+        match item {
+            RecordItem::Step(step) => {
+                spans.push(Checked::step(step));
+                spans.extend(step.calls.iter().map(Checked::call));
+            }
+            RecordItem::ModelCall(call) => spans.push(Checked::model_call(call)),
+            RecordItem::ToolCall(call) => spans.push(Checked::tool_call(call)),
+        }
     }
+    spans
+}
+
+/// A span of a record, as [`check`] reads it.
+struct Checked<'a> {
+    /// The name ingest refuses empty; none for a tool's, since ingest reads
+    /// an empty one as unset.
+    name: Option<&'a str>,
+    /// Each text ingest caps: what it is, its characters and its cap.
+    texts: Vec<(&'static str, usize, usize)>,
+    start: SystemTime,
+    end: SystemTime,
+}
+
+impl<'a> Checked<'a> {
+    fn run(record: &'a RunRecord) -> Self {
+        Self {
+            name: Some(&record.agent),
+            texts: vec![
+                (
+                    "run's agent",
+                    chars(Some(&record.agent)),
+                    contract::NAME_MAX,
+                ),
+                (
+                    "run's user_id",
+                    chars(record.user_id.as_deref()),
+                    contract::USER_ID_MAX,
+                ),
+                (
+                    "run's session_id",
+                    chars(record.session_id.as_deref()),
+                    contract::SESSION_ID_MAX,
+                ),
+                (
+                    "run's error_type",
+                    chars(record.error_type.as_deref()),
+                    contract::ERROR_TYPE_MAX,
+                ),
+            ],
+            start: record.start,
+            end: record.end,
+        }
+    }
+
+    fn step(step: &'a StepRecord) -> Self {
+        Self {
+            name: Some(&step.name),
+            texts: vec![
+                ("step's name", chars(Some(&step.name)), contract::NAME_MAX),
+                (
+                    "step's error_type",
+                    chars(step.error_type.as_deref()),
+                    contract::ERROR_TYPE_MAX,
+                ),
+            ],
+            start: step.start,
+            end: step.end,
+        }
+    }
+
+    fn call(call: &'a CallRecord) -> Self {
+        match call {
+            CallRecord::Model(call) => Self::model_call(call),
+            CallRecord::Tool(call) => Self::tool_call(call),
+        }
+    }
+
+    fn model_call(call: &'a ModelCallRecord) -> Self {
+        let operation = runs::model_operation(call.operation.as_deref());
+        Self {
+            name: Some(&call.model),
+            texts: vec![
+                (
+                    "model call's model",
+                    chars(Some(&call.model)),
+                    contract::MODEL_MAX,
+                ),
+                (
+                    "model call's provider",
+                    chars(call.provider.as_deref()),
+                    contract::PROVIDER_MAX,
+                ),
+                (
+                    "model call's error_type",
+                    chars(call.error_type.as_deref()),
+                    contract::ERROR_TYPE_MAX,
+                ),
+                // The span is `<operation> <model>`: the space takes one of the 128.
+                (
+                    "model call's operation and model",
+                    chars(Some(operation)) + chars(Some(&call.model)),
+                    contract::NAME_MAX - 1,
+                ),
+            ],
+            start: call.start,
+            end: call.end,
+        }
+    }
+
+    fn tool_call(call: &'a ToolCallRecord) -> Self {
+        Self {
+            name: None,
+            texts: vec![
+                (
+                    "tool call's name",
+                    chars(Some(&call.name)),
+                    contract::NAME_MAX,
+                ),
+                (
+                    "tool call's error_type",
+                    chars(call.error_type.as_deref()),
+                    contract::ERROR_TYPE_MAX,
+                ),
+            ],
+            start: call.start,
+            end: call.end,
+        }
+    }
+}
+
+/// The characters in `text`, as ingest counts them; none when unset.
+fn chars(text: Option<&str>) -> usize {
+    text.map_or(0, |text| text.chars().count())
+}
+
+/// Whether ingest reads `time`: nanoseconds since the epoch, above 0 and
+/// within 64 bits.
+fn readable(time: SystemTime) -> bool {
+    time.duration_since(UNIX_EPOCH)
+        .is_ok_and(|since| u64::try_from(since.as_nanos()).is_ok_and(|nanos| nanos > 0))
+}
+
+/// Every model call `inside` holds, a step's among them.
+fn model_calls(inside: &mut [RecordItem]) -> Vec<&mut ModelCallRecord> {
+    let mut calls = Vec::new();
+    for item in inside {
+        match item {
+            RecordItem::Step(step) => {
+                calls.extend(step.calls.iter_mut().filter_map(|call| match call {
+                    CallRecord::Model(call) => Some(call),
+                    CallRecord::Tool(_) => None,
+                }));
+            }
+            RecordItem::ModelCall(call) => calls.push(call),
+            RecordItem::ToolCall(_) => {}
+        }
+    }
+    calls
 }
 
 /// Opens a record's spans in the record's order, each with the id its place

@@ -3,10 +3,11 @@ package telmoni
 import (
 	"context"
 	"errors"
-	"maps"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -96,26 +97,30 @@ func (ToolCallRecord) callRecord()  {}
 
 var errNotAnItem = errors.New("telmoni: a recorded item must be a StepRecord, a ModelCallRecord or a ToolCallRecord")
 
+// errNoName refuses a step's name or a model call's model only when exactly
+// empty: ingest takes a name of spaces as given.
+var errNoName = errors.New("telmoni: a recorded step's name or model call's model cannot be empty")
+
 // ErrQueueFull is returned by RecordRun when the export queue has no room for
 // the whole record, so nothing of it was queued: flush, or wait for the queue
 // to drain, and record it again.
 var ErrQueueFull = errors.New("telmoni: the export queue has no room for the record; flush or wait, then record it again")
 
-// RecordRun sends a run that has already ended, from its record, as the live
-// calls would have sent it: for a job that keeps its own log, or a hook that
-// runs once the turn it reports is over. It goes through the same exporter,
-// content rules and sample rate, in a trace of its own named by the run's id,
-// whatever span ctx carries. Each span's id is derived from the run's id and
-// the span's place in the record, and the spans are queued whole once built,
-// the run's start first and the run's own last, to travel in exports of
-// their own, so the same record sent again is the same bytes, whatever else
-// is sent meanwhile, and ingest answers it once. A record holds no content.
+// RecordRun sends a run that has ended as the live calls would have sent it:
+// for a job that keeps its own log, or a hook run after the turn it reports.
+// It goes through the same exporter, content rules and sample rate, in a
+// trace of its own named by the run's id, whatever span ctx carries. Each
+// span's id is derived from the run's id and the span's place in the record,
+// and the spans are queued whole once built, to travel in exports of their
+// own, so the same record sent again is the same bytes, whatever else is
+// sent meanwhile, and ingest answers it once. A record holds no content.
 //
-// It returns an error, and sends nothing, for a blank agent, a run id that is
-// not a UUID, a zero time, a nil item, or a span that ends before it starts,
-// and ErrQueueFull when the export queue has no room for the whole record. A
-// record is handed over whole, so it is refused whole, where a live run's
-// mistakes are warned of and the run goes on.
+// It returns an error, sending nothing, for a blank agent, a run id that is
+// not a UUID, text past ingest's caps, a time at or before the Unix epoch or
+// 2^64 nanoseconds or more after it, an empty step or model, a nil item or a
+// span that ends before it starts, and ErrQueueFull when the queue has no
+// room for it. A record is handed over whole, so it is refused whole, where
+// a live run's mistakes are warned of.
 func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 	if strings.TrimSpace(record.Agent) == "" {
 		return errors.New("telmoni: a run needs its agent's name")
@@ -149,15 +154,17 @@ func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 		inherited = append(inherited, attribute.String(attrSessionID, record.SessionID))
 	}
 	sampleRate := attribute.Float64(attrSampleRate, rate)
-	attrs := make([]attribute.KeyValue, 0, 3+len(inherited)+len(record.Tags))
+	// By key: a map ranges in a new order each time, and the same record must
+	// be the same bytes.
+	tags := c.tagAttributes(record.Tags)
+	attrs := make([]attribute.KeyValue, 0, 3+len(inherited)+len(tags))
 	attrs = append(attrs, attribute.String(attrOperation, runOperation), attribute.String(attrAgentName, record.Agent))
 	attrs = append(attrs, inherited...)
 	attrs = append(attrs, sampleRate)
-	// By key: a map ranges in a new order each time, and the same record must
-	// be the same bytes.
-	for _, key := range slices.Sorted(maps.Keys(record.Tags)) {
-		attrs = append(attrs, attribute.String(tagPrefix+key, record.Tags[key]))
-	}
+	attrs = append(attrs, tags...)
+	// Warned of before the hold, as the tags are: a logger that records a run
+	// would wait on it for good.
+	c.warnUsage(record)
 	// Sampled out, no span is built: none of a record's ends after it, and
 	// the same record sent again draws again.
 	if rate < 1 && c.random() >= rate {
@@ -231,7 +238,8 @@ func (r *recorder) call(parent context.Context, call CallRecord) {
 		if call.Provider != "" {
 			attrs = append(attrs, attribute.String(attrProvider, call.Provider))
 		}
-		attrs = append(attrs, usageAttributes(call.Usage)...)
+		// No warning under the hold: RecordRun gave it before.
+		attrs = append(attrs, usageAttributes(call.Usage, nil)...)
 		span := r.open(parent, operation+" "+call.Model, trace.SpanKindClient, attrs, call.Start)
 		endRecorded(span, call.End, call.ErrorType, call.Cancelled)
 	case ToolCallRecord:
@@ -281,13 +289,13 @@ func itemValue(item RecordItem) RecordItem {
 }
 
 func checkRecord(record RunRecord) error {
-	if err := checkTimes(record.Start, record.End); err != nil {
+	if err := checkRun(record); err != nil {
 		return err
 	}
 	for _, item := range record.Inside {
 		switch item := itemValue(item).(type) {
 		case StepRecord:
-			if err := checkTimes(item.Start, item.End); err != nil {
+			if err := checkStep(item); err != nil {
 				return err
 			}
 			for _, call := range item.Calls {
@@ -319,14 +327,91 @@ func recordSpans(record RunRecord) int {
 	return n
 }
 
+// warnUsage warns of each token count the record's calls leave off.
+func (c *Client) warnUsage(record RunRecord) {
+	for _, item := range record.Inside {
+		var calls []CallRecord
+		switch item := itemValue(item).(type) {
+		case StepRecord:
+			calls = item.Calls
+		case CallRecord:
+			calls = []CallRecord{item}
+		}
+		for _, call := range calls {
+			if call, ok := itemValue(call).(ModelCallRecord); ok {
+				usageAttributes(call.Usage, c.warnCount)
+			}
+		}
+	}
+}
+
+func checkRun(record RunRecord) error {
+	err := checkCaps("run", []capped{
+		{"Agent", record.Agent, 128},
+		{"UserID", record.UserID, 128},
+		{"SessionID", record.SessionID, 200},
+		{"ErrorType", record.ErrorType, 128},
+	})
+	if err != nil {
+		return err
+	}
+	return checkTimes(record.Start, record.End)
+}
+
+func checkStep(step StepRecord) error {
+	if step.Name == "" {
+		return errNoName
+	}
+	if err := checkCaps("step", []capped{{"Name", step.Name, 128}, {"ErrorType", step.ErrorType, 128}}); err != nil {
+		return err
+	}
+	return checkTimes(step.Start, step.End)
+}
+
 func checkCall(call CallRecord) error {
 	switch call := itemValue(call).(type) {
 	case ModelCallRecord:
+		if call.Model == "" {
+			return errNoName
+		}
+		err := checkCaps("model call", []capped{
+			{"Model", call.Model, 128},
+			{"Provider", call.Provider, 128},
+			{"ErrorType", call.ErrorType, 128},
+		})
+		if err != nil {
+			return err
+		}
+		// Its span is named "<operation> <model>", which ingest caps at 128.
+		if utf8.RuneCountInString(modelOperation(call.Operation))+utf8.RuneCountInString(call.Model) > 127 {
+			return errors.New("telmoni: a recorded model call's operation and model must be up to 127 characters together")
+		}
 		return checkTimes(call.Start, call.End)
 	case ToolCallRecord:
+		// A tool's empty name ingest reads as none, keeping the call.
+		if err := checkCaps("tool call", []capped{{"Name", call.Name, 128}, {"ErrorType", call.ErrorType, 128}}); err != nil {
+			return err
+		}
 		return checkTimes(call.Start, call.End)
 	}
 	return errNotAnItem
+}
+
+// capped is a recorded field by its Go name, and ingest's cap on it.
+type capped struct {
+	field, value string
+	max          int
+}
+
+// checkCaps refuses the first field past its cap, counting characters as
+// ingest does: JSON sends each invalid byte as one U+FFFD.
+func checkCaps(kind string, fields []capped) error {
+	for _, f := range fields {
+		if utf8.RuneCountInString(f.value) > f.max {
+			return fmt.Errorf("telmoni: a recorded %s's %s must be up to %d characters", kind, f.field, f.max)
+		}
+	}
+	return nil
 }
 
 // checkTimes compares the times as they are sent, in Unix nanoseconds: a time
@@ -336,7 +421,12 @@ func checkTimes(start, end time.Time) error {
 	if start.IsZero() || end.IsZero() {
 		return errors.New("telmoni: a recorded time cannot be zero")
 	}
-	if end.UnixNano() < start.UnixNano() {
+	from, fromOK := unixNanos(start)
+	to, toOK := unixNanos(end)
+	if !fromOK || !toOK {
+		return errors.New("telmoni: a recorded time must fall after the Unix epoch and less than 2^64 nanoseconds after it")
+	}
+	if to < from {
 		return errors.New("telmoni: a recorded span cannot end before it starts")
 	}
 	return nil

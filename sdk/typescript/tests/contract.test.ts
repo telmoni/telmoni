@@ -3,9 +3,11 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { inspect } from 'node:util';
 
+import { SpanKind, SpanStatusCode } from '@opentelemetry/api';
+import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ANSWER_MAX, fetchTransport } from '../src/exporter';
+import { ANSWER_MAX, Exporter, fetchTransport } from '../src/exporter';
 import { DEFAULT_ENDPOINT, Telmoni, VERSION, type Config } from '../src/index';
 
 afterEach(() => vi.unstubAllEnvs());
@@ -159,5 +161,30 @@ describe('the transport', () => {
       server.closeAllConnections();
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+});
+
+describe('a span time', () => {
+  it('goes as 0 outside 64 bits of nanoseconds, so ingest refuses that span rather than the whole export', () => {
+    const config = new Telmoni({ apiKey: 'k' }).config;
+    const exporter = new Exporter(config, {
+      transport: () => Promise.reject(new Error('never sent')),
+      sleep: () => Promise.resolve(),
+      warn: () => {},
+    });
+    const span = (startTime: [number, number]): ReadableSpan =>
+      ({
+        name: 's',
+        kind: SpanKind.INTERNAL,
+        spanContext: () => ({ traceId: `${'0'.repeat(31)}1`, spanId: `${'0'.repeat(15)}1`, traceFlags: 1 }),
+        parentSpanContext: undefined,
+        startTime,
+        endTime: startTime,
+        attributes: {},
+        status: { code: SpanStatusCode.UNSET },
+      }) as unknown as ReadableSpan;
+    const encoded = exporter.encode([span([18_446_744_073, 709_551_615]), span([18_446_744_073, 709_551_616]), span([-1, 0])]);
+    const sent = encoded.resourceSpans[0]!.scopeSpans[0]!.spans.map((each) => each.startTimeUnixNano);
+    expect(sent).toEqual(['18446744073709551615', '0', '0']);
   });
 });

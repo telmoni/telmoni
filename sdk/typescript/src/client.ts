@@ -190,15 +190,8 @@ export class Telmoni {
   }
 
   /**
-   * Send a run that has already ended, from its record, as the live calls
-   * would have sent it: for a job that keeps its own log, or a hook that runs
-   * after the turn it reports. The same record sent again is the same bytes,
-   * which ingest answers once.
-   *
-   * Throws, sending nothing, a `TypeError` for a blank agent, a run id that
-   * is not a UUID, a time that is neither a `Date` nor a finite number, or an
-   * item of no known `type`; a `RangeError` for a span that ends before it
-   * starts.
+   * Send a run that has already ended, as the live calls would have; a record
+   * ingest would refuse, or the queue has no room for, throws, sending nothing.
    */
   recordRun(record: RunRecord): void {
     this.#opener.record(record);

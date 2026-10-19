@@ -14,6 +14,12 @@ pub(crate) const RUN_ID: &str = "telmoni.run_id";
 pub(crate) const AGENT: &str = "telmoni.agent";
 pub(crate) const USER_ID: &str = "user.id";
 pub(crate) const TAG_PREFIX: &str = "telmoni.tag.";
+/// The most tags a span carries: ingest's `TAGS_MAX`.
+pub(crate) const TAGS_MAX: usize = 32;
+/// The most characters a tag's key holds: ingest's `TAG_KEY_MAX`.
+pub(crate) const TAG_KEY_MAX: usize = 64;
+/// The most characters a tag's value holds: ingest's `TAG_VALUE_MAX`.
+pub(crate) const TAG_VALUE_MAX: usize = 256;
 pub(crate) const BOUND_STALL_AFTER_S: &str = "telmoni.bound.stall_after_s";
 pub(crate) const BOUND_MAX_STEPS: &str = "telmoni.bound.max_steps";
 pub(crate) const BOUND_MAX_COST_USD: &str = "telmoni.bound.max_cost_usd";
@@ -83,3 +89,18 @@ pub(crate) const TOOL_OPERATION: &str = "execute_tool";
 
 /// The answer's header naming the project's content mode: off, on or sealed.
 pub(crate) const CONTENT_MODE_HEADER: &str = "Telmoni-Content-Mode";
+
+// ── Ingest's caps, in characters ─────────────────────────────────────────────
+
+/// A span's name, an agent's and a tool's among them: ingest's `NAME_MAX`.
+pub(crate) const NAME_MAX: usize = 128;
+/// `error.type`: ingest's `ERROR_TYPE_MAX`.
+pub(crate) const ERROR_TYPE_MAX: usize = 128;
+/// `gen_ai.request.model`: ingest's `MODEL_MAX`.
+pub(crate) const MODEL_MAX: usize = 128;
+/// `gen_ai.provider.name`: ingest's `PROVIDER_MAX`.
+pub(crate) const PROVIDER_MAX: usize = 128;
+/// `user.id`, before ingest hashes it: ingest's `USER_ID_MAX`.
+pub(crate) const USER_ID_MAX: usize = 128;
+/// `gen_ai.conversation.id`: ingest's `SESSION_ID_MAX`.
+pub(crate) const SESSION_ID_MAX: usize = 200;

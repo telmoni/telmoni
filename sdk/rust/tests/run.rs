@@ -3,7 +3,7 @@
 
 mod common;
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::fmt;
 use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex};
@@ -12,7 +12,7 @@ use common::{
     FakeTransport, Harness, Outcome, Sleeps, Warnings, attributes_of, hooks, is_uuid_v4, keyed,
     lock, name_of, named, only, run_span, starting_with, tags,
 };
-use serde_json::json;
+use serde_json::{Value, json};
 use telmoni_sdk::{Bounds, Config, Error, ModelCall, Run, RunOptions, Step, Telmoni, ToolCall};
 
 /// An application's error, with the SDK's own among its causes so
@@ -184,6 +184,24 @@ fn fail_and_cancel_mark_the_run() -> Outcome {
         Some(&json!(true))
     );
     assert!(cancelled.get("status").is_none(), "neither ok nor an error");
+    Ok(())
+}
+
+/// Failed with an empty type, a run is failed with none, since ingest
+/// refuses a span whose `error.type` is empty, and the run with it.
+#[test]
+fn a_fail_with_an_empty_type_fails_the_run_with_none() -> Outcome {
+    let harness = Harness::new()?;
+    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let id = run.run_id().to_owned();
+    run.fail("");
+    run.end();
+    harness.flush()?;
+
+    let spans = harness.spans()?;
+    let failed = run_span(&spans, &id)?;
+    assert_eq!(attributes_of(failed)?.get("error.type"), None);
+    assert_eq!(failed.get("status"), Some(&json!({ "code": 2 })));
     Ok(())
 }
 
@@ -390,6 +408,245 @@ fn a_cost_bound_that_is_no_finite_number_is_left_off_with_one_warning() -> Outco
             .iter()
             .all(|w| w.contains("max_cost_usd must be a finite number"))
     );
+    Ok(())
+}
+
+/// A bound ingest would refuse the run over is left off with one warning per bound.
+#[test]
+fn a_bound_outside_ingests_range_is_left_off_with_one_warning() -> Outcome {
+    let harness = Harness::new()?;
+    let refused = [
+        Bounds {
+            stall_after_s: Some(0),
+            max_steps: Some(-1),
+            max_cost_usd: Some(0.0),
+        },
+        Bounds {
+            stall_after_s: Some(i64::from(u32::MAX) + 1),
+            max_steps: Some(i64::MAX),
+            max_cost_usd: Some(-0.0),
+        },
+        Bounds {
+            stall_after_s: Some(i64::MIN),
+            max_steps: Some(0),
+            max_cost_usd: Some(-2.5),
+        },
+    ];
+    for bounds in refused {
+        let run = harness.telmoni.run(
+            "bot",
+            RunOptions {
+                bounds,
+                ..RunOptions::default()
+            },
+        )?;
+        run.end();
+    }
+    let kept = harness.telmoni.run(
+        "bot",
+        RunOptions {
+            bounds: Bounds {
+                stall_after_s: Some(1),
+                max_steps: Some(i64::from(u32::MAX)),
+                max_cost_usd: Some(f64::MIN_POSITIVE),
+            },
+            ..RunOptions::default()
+        },
+    )?;
+    let kept_id = kept.run_id().to_owned();
+    kept.end();
+    harness.flush()?;
+
+    let spans = harness.spans()?;
+    assert_eq!(spans.len(), 8, "every run sent, with its start");
+    for span in &spans {
+        let attributes = attributes_of(span)?;
+        if attributes.get("telmoni.run_id") == Some(&json!(kept_id)) {
+            assert_eq!(
+                attributes.get("telmoni.bound.stall_after_s"),
+                Some(&json!(1))
+            );
+            assert_eq!(
+                attributes.get("telmoni.bound.max_steps"),
+                Some(&json!(4_294_967_295_i64))
+            );
+            assert!(
+                attributes
+                    .get("telmoni.bound.max_cost_usd")
+                    .and_then(Value::as_f64)
+                    .is_some_and(|usd| usd > 0.0)
+            );
+            continue;
+        }
+        let bounds: Vec<&String> = attributes
+            .as_object()
+            .ok_or("attributes")?
+            .keys()
+            .filter(|key| key.starts_with("telmoni.bound."))
+            .collect();
+        assert!(bounds.is_empty(), "{bounds:?}");
+    }
+    assert_eq!(
+        harness.warnings.all(),
+        [
+            "telmoni: a run's stall_after_s must be a whole number from 1 to 4294967295; the run is sent without it",
+            "telmoni: a run's max_steps must be a whole number from 1 to 4294967295; the run is sent without it",
+            "telmoni: a run's max_cost_usd must be a finite number above 0; the run is sent without it",
+        ]
+    );
+    Ok(())
+}
+
+/// Only a run's first 32 tags by key are sent, warned of once, so what its end sets still fits.
+#[test]
+fn a_run_sends_its_first_32_tags_and_warns_once_of_the_rest() -> Outcome {
+    let harness = Harness::new()?;
+    let many: BTreeMap<String, String> =
+        (0..200).map(|n| (format!("k{n}"), n.to_string())).collect();
+    let mut run_ids = Vec::new();
+    for _ in 0..2 {
+        let run = harness.telmoni.run(
+            "bot",
+            RunOptions {
+                tags: many.clone(),
+                ..RunOptions::default()
+            },
+        )?;
+        run.fail("Overrun");
+        run.cancel();
+        run_ids.push(run.run_id().to_owned());
+        run.end();
+    }
+    let exact = Harness::new()?;
+    let run = exact.telmoni.run(
+        "bot",
+        RunOptions {
+            tags: many.clone().into_iter().take(32).collect(),
+            ..RunOptions::default()
+        },
+    )?;
+    let exact_id = run.run_id().to_owned();
+    run.end();
+    harness.flush()?;
+    exact.flush()?;
+
+    let tags_of = |span: &Value| -> Result<BTreeSet<String>, common::Failure> {
+        Ok(attributes_of(span)?
+            .as_object()
+            .ok_or("attributes")?
+            .keys()
+            .filter(|key| key.starts_with("telmoni.tag."))
+            .cloned()
+            .collect())
+    };
+    let first: BTreeSet<String> = many
+        .keys()
+        .take(32)
+        .map(|key| format!("telmoni.tag.{key}"))
+        .collect();
+    let spans = harness.spans()?;
+    for run_id in &run_ids {
+        let span = run_span(&spans, run_id)?;
+        let attributes = attributes_of(span)?;
+        assert_eq!(attributes.get("error.type"), Some(&json!("Overrun")));
+        assert_eq!(tags_of(span)?, first);
+        assert_eq!(attributes.get("telmoni.cancelled"), Some(&json!(true)));
+    }
+    assert_eq!(
+        harness.warnings.all(),
+        ["telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent"]
+    );
+    assert_eq!(tags_of(run_span(&exact.spans()?, &exact_id)?)?, first);
+    assert!(
+        exact.warnings.all().is_empty(),
+        "{:?}",
+        exact.warnings.all()
+    );
+    Ok(())
+}
+
+/// A tag ingest would drop is left off with one warning and takes no place among the 32.
+#[test]
+fn a_tag_ingest_would_drop_takes_no_place_among_the_32() -> Outcome {
+    let harness = Harness::new()?;
+    // Two of the 32 at ingest's caps, one of them in two-byte characters.
+    let mut kept: BTreeMap<String, String> = (0..30)
+        .map(|n| (format!("k{n:02}"), n.to_string()))
+        .collect();
+    kept.insert("x".repeat(64), String::new());
+    kept.insert("é".repeat(64), "é".repeat(256));
+    let mut given = kept.clone();
+    given.insert(String::new(), "v".to_owned());
+    given.insert("k15a".to_owned(), "v".repeat(257));
+    given.insert("y".repeat(65), "v".to_owned());
+    let mut run_ids = Vec::new();
+    for _ in 0..2 {
+        let run = harness.telmoni.run(
+            "bot",
+            RunOptions {
+                tags: given.clone(),
+                ..RunOptions::default()
+            },
+        )?;
+        run_ids.push(run.run_id().to_owned());
+        run.end();
+    }
+    harness.flush()?;
+
+    let expected: BTreeMap<String, Value> = kept
+        .into_iter()
+        .map(|(key, value)| (key, json!(value)))
+        .collect();
+    let spans = harness.spans()?;
+    for run_id in &run_ids {
+        let sent: BTreeMap<String, Value> = attributes_of(run_span(&spans, run_id)?)?
+            .as_object()
+            .ok_or("attributes")?
+            .iter()
+            .filter_map(|(key, value)| {
+                Some((key.strip_prefix("telmoni.tag.")?.to_owned(), value.clone()))
+            })
+            .collect();
+        assert_eq!(sent, expected);
+    }
+    assert_eq!(
+        harness.warnings.all(),
+        [
+            "telmoni: a tag's key must be 1 to 64 characters and its value up to 256; the tag is not sent"
+        ]
+    );
+    Ok(())
+}
+
+/// A warning sink that panics never reaches the agent's call: the run and its step still go.
+#[test]
+fn a_warning_sink_that_panics_never_reaches_the_agent() -> Outcome {
+    let transport = FakeTransport::new([])?;
+    let warnings = Warnings::default();
+    let sleeps = Sleeps::default();
+    let mut hooks = hooks(&transport, &warnings, &sleeps);
+    hooks.warn = Box::new(|text| std::panic::panic_any(text.to_owned()));
+    let telmoni = Telmoni::with_hooks(keyed(), hooks);
+    let run = telmoni.run(
+        "bot",
+        RunOptions {
+            tags: (0..40).map(|n| (format!("k{n}"), n.to_string())).collect(),
+            bounds: Bounds {
+                max_cost_usd: Some(f64::NAN),
+                ..Bounds::default()
+            },
+            ..RunOptions::default()
+        },
+    )?;
+    let run_id = run.run_id().to_owned();
+    run.step("s").end();
+    run.end();
+    assert!(telmoni.flush());
+    telmoni.shutdown();
+
+    let spans = transport.spans()?;
+    assert_eq!(name_of(run_span(&spans, &run_id)?), "invoke_agent bot");
+    assert!(named(&spans, "s").is_ok(), "the step was not sent");
     Ok(())
 }
 

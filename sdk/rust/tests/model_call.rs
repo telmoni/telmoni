@@ -3,8 +3,8 @@
 
 mod common;
 
-use common::{Harness, Outcome, attributes_of, keyed, only, starting_with};
-use serde_json::json;
+use common::{Failure, Harness, Outcome, attributes_of, keyed, only, starting_with};
+use serde_json::{Map, Value, json};
 use telmoni_sdk::transport::Answer;
 use telmoni_sdk::{Config, Content, ModelCallOptions, Reply, RunOptions, Usage};
 
@@ -62,6 +62,71 @@ fn a_model_call_carries_the_conventions_names() -> Outcome {
     Ok(())
 }
 
+/// A negative token count is left off its call, with one warning per count.
+#[test]
+fn a_negative_token_count_is_left_off_with_one_warning() -> Outcome {
+    let harness = Harness::new()?;
+    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    for usage in [
+        Usage {
+            input_tokens: Some(-1),
+            output_tokens: Some(0),
+            cache_read_input_tokens: Some(i64::MIN),
+            cache_write_input_tokens: Some(i64::MAX),
+        },
+        Usage {
+            input_tokens: Some(-5),
+            output_tokens: Some(-1),
+            cache_read_input_tokens: Some(0),
+            cache_write_input_tokens: Some(-1),
+        },
+    ] {
+        let call = run.model_call("m", ModelCallOptions::default());
+        call.answered(Reply {
+            usage: Some(usage),
+            ..Reply::default()
+        });
+        call.end();
+    }
+    run.end();
+    harness.flush()?;
+
+    let spans = harness.spans()?;
+    let sent = starting_with(&spans, "chat m")
+        .into_iter()
+        .map(|call| {
+            let counts: Map<String, Value> = attributes_of(call)?
+                .as_object()
+                .ok_or("attributes")?
+                .iter()
+                .filter(|(key, _)| key.starts_with("gen_ai.usage."))
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect();
+            Ok(Value::Object(counts))
+        })
+        .collect::<Result<Vec<_>, Failure>>()?;
+    assert_eq!(
+        sent,
+        [
+            json!({
+                "gen_ai.usage.output_tokens": 0,
+                "gen_ai.usage.cache_write.input_tokens": i64::MAX,
+            }),
+            json!({ "gen_ai.usage.cache_read.input_tokens": 0 }),
+        ]
+    );
+    assert_eq!(
+        harness.warnings.all(),
+        [
+            "telmoni: gen_ai.usage.input_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
+            "telmoni: gen_ai.usage.cache_read.input_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
+            "telmoni: gen_ai.usage.output_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
+            "telmoni: gen_ai.usage.cache_write.input_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
+        ]
+    );
+    Ok(())
+}
+
 /// A blank operation is `chat`, as one left out is: sent blank, the span would
 /// be named ` m` and ingest would read it as a step.
 #[test]
@@ -90,6 +155,35 @@ fn a_blank_operation_is_chat() -> Outcome {
             Some(&json!("chat"))
         );
     }
+    Ok(())
+}
+
+/// An empty response model or provider is left off: ingest refuses the call over either.
+#[test]
+fn an_empty_response_model_or_provider_is_left_off() -> Outcome {
+    let harness = Harness::new()?;
+    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let call = run.model_call(
+        "m",
+        ModelCallOptions {
+            provider: Some(String::new()),
+            ..ModelCallOptions::default()
+        },
+    );
+    call.answered(Reply {
+        response_model: Some(String::new()),
+        ..Reply::default()
+    });
+    call.end();
+    run.end();
+    harness.flush()?;
+
+    let spans = harness.spans()?;
+    let calls = starting_with(&spans, "chat m");
+    assert_eq!(calls.len(), 1, "{spans:?}");
+    let attributes = attributes_of(calls[0])?;
+    assert_eq!(attributes.get("gen_ai.response.model"), None);
+    assert_eq!(attributes.get("gen_ai.provider.name"), None);
     Ok(())
 }
 

@@ -47,10 +47,13 @@ describe('a model call', () => {
     expect(typed['gen_ai.usage.input_tokens']).toEqual({ intValue: '12' });
   });
 
-  it('sends a token count as an integer, and leaves off one that is no finite number', async () => {
+  it('sends a token count as a whole number from 0, and leaves off another', async () => {
     const usage = { inputTokens: Number.NaN, outputTokens: 12.7, cacheReadInputTokens: Infinity, cacheWriteInputTokens: 2 ** 63 };
+    // Ingest refuses the call over a count below zero, or one no number.
+    const refused = { inputTokens: -1, outputTokens: 12, cacheReadInputTokens: true as unknown as number, cacheWriteInputTokens: -5 };
     h.telmoni.run('bot', (run) => {
-      for (let i = 0; i < 2; i += 1) run.modelCall('m', (call) => call.answered({ usage }));
+      run.modelCall('m', (call) => call.answered({ usage }));
+      run.modelCall('m', (call) => call.answered({ usage: refused }));
       run.modelCall('m', (call) => call.answered({ usage: null as unknown as undefined }));
     });
     const at = Date.parse('2026-10-18T09:00:00.000Z');
@@ -74,18 +77,59 @@ describe('a model call', () => {
       expect(typed['gen_ai.usage.cache_write.input_tokens']).toBeUndefined();
     }
     expect(h.warnings).toHaveLength(3);
-    expect(h.warnings.every((warning) => warning.includes('must be a finite number within 64 bits'))).toBe(true);
+    expect(h.warnings.every((warning) => warning.includes('must be a whole number from 0 within 64 bits'))).toBe(true);
+  });
+
+  it("reads a count of a bigint, a boxed number or a decimal numeral's text, never hex or blank as Number does", async () => {
+    const usage = {
+      inputTokens: ' 12.7 ' as unknown as number,
+      outputTokens: '0x10' as unknown as number,
+      cacheReadInputTokens: '' as unknown as number,
+      cacheWriteInputTokens: 5n as unknown as number,
+    };
+    h.telmoni.run('bot', (run) => {
+      run.modelCall('m', {}, (call) => call.answered({ usage }));
+      run.modelCall('n', {}, (call) => call.answered({ usage: { inputTokens: Object(7) as number } }));
+    });
+    expect(await h.telmoni.flush()).toBe(true);
+    const span = one(h.transport.spans().filter((each) => each.name === 'chat m'));
+    const typed = Object.fromEntries(span.attributes.map((a) => [a.key, a.value]));
+    expect(typed['gen_ai.usage.input_tokens']).toEqual({ intValue: '12' });
+    expect(typed['gen_ai.usage.output_tokens']).toBeUndefined();
+    expect(typed['gen_ai.usage.cache_read.input_tokens']).toBeUndefined();
+    expect(typed['gen_ai.usage.cache_write.input_tokens']).toEqual({ intValue: '5' });
+    const boxed = one(h.transport.spans().filter((each) => each.name === 'chat n'));
+    expect(attributesOf(boxed)['gen_ai.usage.input_tokens']).toBe(7);
+    expect(h.warnings).toHaveLength(2);
+  });
+
+  it('sends a provider or response model as its text, and an empty one not at all', async () => {
+    // Ingest refuses the call over an empty one, or over an array.
+    h.telmoni.run('bot', (run) => {
+      run.modelCall('m', { provider: ['open', 'ai'] as unknown as string }, (call) => call.answered({ responseModel: '' }));
+      run.modelCall('m', { provider: '' }, (call) => call.answered({ responseModel: 5 as unknown as string }));
+    });
+    expect(await h.telmoni.flush()).toBe(true);
+    const [first, second] = calls(h.transport).map(attributesOf);
+    expect(first!['gen_ai.provider.name']).toBe('open,ai');
+    expect(first!['gen_ai.response.model']).toBeUndefined();
+    expect(second!['gen_ai.provider.name']).toBeUndefined();
+    expect(second!['gen_ai.response.model']).toBe('5');
+    expect(h.warnings).toEqual([
+      'telmoni: a provider that is no string is sent as its text',
+      'telmoni: a response model that is no string is sent as its text',
+    ]);
   });
 
   it('takes a blank operation as chat', async () => {
     // As one left out is: sent blank, the span would be named ' m' and
-    // ingest would read it as a step.
+    // ingest would read it as a step. One that is no string is none either.
     h.telmoni.run('bot', (run) => {
-      for (const operation of ['', '  ']) run.modelCall('m', { operation }, () => {});
+      for (const operation of ['', '  ', 5 as unknown as string]) run.modelCall('m', { operation }, () => {});
     });
     expect(await h.telmoni.flush()).toBe(true);
     const spans = h.transport.spans().filter((span) => span.name === 'chat m');
-    expect(spans, h.transport.spans().map((span) => span.name).join(', ')).toHaveLength(2);
+    expect(spans, h.transport.spans().map((span) => span.name).join(', ')).toHaveLength(3);
     for (const span of spans) expect(attributesOf(span)['gen_ai.operation.name']).toBe('chat');
   });
 

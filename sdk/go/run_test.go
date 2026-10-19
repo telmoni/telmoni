@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"maps"
 	"math"
 	"net"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -177,6 +181,25 @@ func TestFailWithAndCancelMarkTheRun(t *testing.T) {
 		default:
 			t.Errorf("a run span of an unknown run: %v", attributes["telmoni.run_id"])
 		}
+	}
+}
+
+// Ingest refuses a span over an empty error.type: here, the run.
+func TestFailWithAnEmptyTypeFailsTheRunWithNone(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	run.FailWith("")
+	run.End()
+	h.flush()
+	spans := withPrefix(h.transport.spans(t), "invoke_agent ")
+	if len(spans) != 1 {
+		t.Fatalf("%d runs sent, want 1", len(spans))
+	}
+	if _, has := attributesOf(t, spans[0])["error.type"]; has {
+		t.Error("the run has an empty error.type")
+	}
+	if !reflect.DeepEqual(spans[0]["status"], map[string]any{"code": float64(2)}) {
+		t.Errorf("status = %v, want {code: 2}", spans[0]["status"])
 	}
 }
 
@@ -443,5 +466,155 @@ func TestACostBoundThatIsNoFiniteNumberIsLeftOffWithOneWarning(t *testing.T) {
 	warnings := h.logs.warnings()
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "MaxCostUSD") {
 		t.Errorf("warnings = %q, want one about the cost bound", warnings)
+	}
+}
+
+// A bound ingest refuses is left off the run and its start with one warning.
+func TestABoundIngestWouldRefuseIsLeftOffWithOneWarning(t *testing.T) {
+	if strconv.IntSize < 64 {
+		t.Skip("an int of 32 bits never passes 4294967295")
+	}
+	var top int64 = math.MaxUint32
+	h := newHarness(t, testConfig(), nil)
+	open := func(agent string, bounds telmoni.Bounds) {
+		_, run := h.client.Run(context.Background(), agent, telmoni.RunOptions{Bounds: &bounds})
+		run.End()
+	}
+	open("unset", telmoni.Bounds{})
+	open("edges", telmoni.Bounds{StallAfterS: 1, MaxSteps: int(top), MaxCostUSD: math.SmallestNonzeroFloat64})
+	if warnings := h.logs.warnings(); len(warnings) != 0 {
+		t.Errorf("warnings = %q, want none for a zero bound or one at ingest's edges", warnings)
+	}
+	open("refused", telmoni.Bounds{StallAfterS: -1, MaxSteps: int(top + 1), MaxCostUSD: -0.5})
+	open("refused", telmoni.Bounds{StallAfterS: int(top + 1), MaxSteps: -1, MaxCostUSD: math.Inf(-1)})
+	h.flush()
+	want := map[any]map[string]any{
+		"unset":   {},
+		"refused": {},
+		"edges": {
+			"telmoni.bound.stall_after_s": int64(1),
+			"telmoni.bound.max_steps":     top,
+			"telmoni.bound.max_cost_usd":  math.SmallestNonzeroFloat64,
+		},
+	}
+	spans := h.transport.spans(t)
+	if len(spans) != 8 {
+		t.Fatalf("spans sent: %v, want four runs and their starts", sortedNames(spans))
+	}
+	for _, span := range spans {
+		attributes := attributesOf(t, span)
+		agent := attributes["telmoni.agent"]
+		if got := attributesUnder(attributes, "telmoni.bound."); !reflect.DeepEqual(got, want[agent]) {
+			t.Errorf("%v of the %v run carries the bounds %v, want %v", span["name"], agent, got, want[agent])
+		}
+	}
+	wantWarnings := []string{
+		"telmoni: a run's StallAfterS must be a whole number from 1 to 4294967295; the run is sent without it",
+		"telmoni: a run's MaxSteps must be a whole number from 1 to 4294967295; the run is sent without it",
+		"telmoni: a run's MaxCostUSD must be a finite number above 0; the run is sent without it",
+	}
+	if warnings := h.logs.warnings(); !reflect.DeepEqual(warnings, wantWarnings) {
+		t.Errorf("warnings = %q\nwant one for each bound: %q", warnings, wantWarnings)
+	}
+}
+
+// A run sends its first 32 tags by key with one warning, the marks it ends
+// with kept.
+func TestARunSendsItsFirst32TagsByKeyWithOneWarning(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	_, all := h.client.Run(context.Background(), "thirty-two", telmoni.RunOptions{Tags: numberedTags(32)})
+	all.End()
+	if warnings := h.logs.warnings(); len(warnings) != 0 {
+		t.Errorf("warnings = %q, want none for 32 tags", warnings)
+	}
+	_, failed := h.client.Run(context.Background(), "bot", telmoni.RunOptions{Tags: numberedTags(130)})
+	failed.FailWith("RateLimit")
+	failed.End()
+	_, stopped := h.client.Run(context.Background(), "stopped", telmoni.RunOptions{Tags: numberedTags(130)})
+	stopped.Cancel()
+	stopped.End()
+	h.flush()
+	runs := withPrefix(h.transport.spans(t), "invoke_agent ")
+	if len(runs) != 3 {
+		t.Fatalf("want three runs, got %v", names(runs))
+	}
+	want := slices.Sorted(maps.Keys(numberedTags(32)))
+	for _, span := range runs {
+		attributes := attributesOf(t, span)
+		if got := tagsOf(attributes); !reflect.DeepEqual(got, want) {
+			t.Errorf("%v sent the tags %v\nwant the first 32 by key: %v", span["name"], got, want)
+		}
+		if span["name"] == "invoke_agent bot" && attributes["error.type"] != "RateLimit" {
+			t.Errorf("error.type = %v, want the mark the run ended with", attributes["error.type"])
+		}
+		if span["name"] == "invoke_agent stopped" && attributes["telmoni.cancelled"] != true {
+			t.Errorf("telmoni.cancelled = %v, want the mark the run ended with", attributes["telmoni.cancelled"])
+		}
+	}
+	wantWarnings := []string{"telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent"}
+	if warnings := h.logs.warnings(); !reflect.DeepEqual(warnings, wantWarnings) {
+		t.Errorf("warnings = %q, want %q", warnings, wantWarnings)
+	}
+}
+
+// A tag ingest drops is left off with one warning, taking none of the 32.
+func TestATagIngestDropsIsLeftOffWithOneWarningTakingNoneOfThe32(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	// At the caps in characters, two bytes each: kept.
+	edge, value := strings.Repeat("é", 64), strings.Repeat("é", 256)
+	tags := numberedTags(31)
+	tags[edge] = value
+	maps.Copy(tags, droppedTags())
+	for range 2 {
+		_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{Tags: tags})
+		run.End()
+	}
+	_, many := h.client.Run(context.Background(), "many", telmoni.RunOptions{Tags: numberedTags(40)})
+	many.End()
+	h.flush()
+	runs := withPrefix(h.transport.spans(t), "invoke_agent bot")
+	if len(runs) != 2 {
+		t.Fatalf("want two runs, got %v", names(runs))
+	}
+	want := append(slices.Sorted(maps.Keys(numberedTags(31))), edge)
+	for _, span := range runs {
+		attributes := attributesOf(t, span)
+		if got := tagsOf(attributes); !reflect.DeepEqual(got, want) {
+			t.Errorf("tags sent: %q\nwant the 32 ingest keeps: %q", got, want)
+		}
+		if attributes["telmoni.tag."+edge] != value {
+			t.Error("the tag at the caps is not sent as given")
+		}
+	}
+	wantWarnings := []string{
+		"telmoni: a tag's key must be 1 to 64 characters and its value up to 256; the tag is not sent",
+		"telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent",
+	}
+	if warnings := h.logs.warnings(); !reflect.DeepEqual(warnings, wantWarnings) {
+		t.Errorf("warnings = %q\nwant one for the tags dropped, then one past the 32: %q", warnings, wantWarnings)
+	}
+}
+
+// A logger that panics on a warning never reaches the agent's call.
+func TestALoggerThatPanicsOnAWarningNeverReachesTheAgentsCall(t *testing.T) {
+	h := newHarness(t, testConfig(), nil, telmoni.WithLogger(slog.New(panicking{})))
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("the logger's panic reached the agent's call: %v", r)
+		}
+	}()
+	// Three warnings on this call: a cost left off, a tag dropped, and the
+	// tags past the 32.
+	tags := numberedTags(40)
+	tags[""] = "v"
+	bounds := &telmoni.Bounds{MaxCostUSD: math.NaN()}
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{Tags: tags, Bounds: bounds})
+	_, step := run.Step(ctx, "s")
+	step.End()
+	run.End()
+	h.flush()
+	want := []string{"invoke_agent bot", "s", "telmoni.run.start"}
+	if got := sortedNames(h.transport.spans(t)); !reflect.DeepEqual(got, want) {
+		t.Errorf("spans sent: %v, want %v", got, want)
 	}
 }

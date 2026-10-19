@@ -62,8 +62,18 @@ marks the span cancelled instead. `run.fail('RateLimit')` and `run.cancel()`
 mark a span by hand. Steps nest: `step.step(...)`, `step.modelCall(...)` and
 `step.toolCall(...)` open under the step; the same methods on `run` open under
 the run. `run` throws a `TypeError` for a blank agent name and a `RangeError`
-for a sample rate outside (0, 1]; a bound or a token count that is not a
-finite number, or a whole one past 64 bits, is left off with one warning.
+for a sample rate outside (0, 1]. A bound or a token count is read from a
+number, a bigint or a decimal numeral's text, a stall's, steps' or count's
+fraction cut, and of what ingest would refuse, these are left off with one
+warning: a bound outside 1 to 4294967295, a cost not above 0, a token count
+below 0 or past 64 bits, a tag whose key is not 1 to 64 characters or whose
+value is past 256, and the tags past the first 32 kept, the most ingest keeps;
+an empty user, session, provider or response model is left off as unset. A
+name, model, provider, user, session or response model that is no string goes
+as its text with one warning, as does a tag that is no string, finite number
+or boolean. Text past ingest's caps, below, and a step or model named nothing
+still go as given, and ingest refuses the span they are on, or the whole run
+for its agent, user or session.
 
 `telmoni.wrap(agent, options, fn)` returns `fn` opening a run per call, with
 the run's handle as `fn`'s last argument:
@@ -120,11 +130,19 @@ named by the run's id, whatever context is active. Each span's id is derived
 from the run's id and the span's place in the record, so the same record sent
 again is the same bytes, which ingest answers once: give a run the same id each
 time you send it. A record holds no content. A blank agent, a run id that is
-not a UUID or is the nil UUID, a time that is not one or an item of no known
-`type` throws a
-`TypeError`, and a span that ends before it starts a `RangeError`; either
-sends nothing. A record the export queue has no room for throws
-`QueueFullError`, nothing of it queued: flush, or wait, and record it again.
+neither a hyphenated UUID nor 32 hex digits, or is the nil UUID, or an empty
+step's name or model throws a `TypeError`, as does a field of the wrong type —
+a time that is not one, an item of no known `type`, `inside` or `calls` that is
+no array, in the order it ran, tags or a usage that is no object (an array or a
+`Map`, say) — save a token count, read as a whole number where it can be and
+else left off with one warning. A time outside what ingest reads (after the
+Unix epoch, and less than 2^64 nanoseconds after it, in July 2554), text longer
+than ingest keeps (a name, the agent, a model, a provider, a user or an error
+type past 128 characters, a session past 200, or a model call's operation and
+model past 127 together, counted in characters, not UTF-16's units), or a span
+that ends before it starts throws a `RangeError`. Either sends nothing. A
+record the export queue has no room for throws `QueueFullError`, nothing of it
+queued: flush, or wait, and record it again.
 
 ## Configuration
 

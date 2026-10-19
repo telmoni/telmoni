@@ -373,8 +373,9 @@ fn kind(kind: &SpanKind) -> u8 {
 /// Nanoseconds since the epoch, as the decimal string OTLP's JSON wants for a
 /// 64-bit integer.
 fn nanos(time: std::time::SystemTime) -> String {
+    // 0 out of range, for ingest to refuse that span rather than the export.
     time.duration_since(UNIX_EPOCH)
-        .map_or(0, |since| since.as_nanos())
+        .map_or(0, |since| u64::try_from(since.as_nanos()).unwrap_or(0))
         .to_string()
 }
 
@@ -413,5 +414,18 @@ fn array_values(array: &Array) -> Vec<serde_json::Value> {
             .map(|text| json!({ "stringValue": text.as_str() }))
             .collect(),
         other => vec![json!({ "stringValue": format!("{other:?}") })],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 2^64 ns after the epoch is written 0, a nanosecond less as its digits.
+    #[test]
+    fn a_time_past_64_bits_of_nanoseconds_is_written_as_0() {
+        let last = UNIX_EPOCH + Duration::from_nanos(u64::MAX);
+        assert_eq!(nanos(last), "18446744073709551615");
+        assert_eq!(nanos(last + Duration::from_nanos(1)), "0");
     }
 }

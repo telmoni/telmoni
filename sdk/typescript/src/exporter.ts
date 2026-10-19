@@ -28,6 +28,7 @@ export const WARNED_MAX = 1024;
 /** Where a dropped content field's warning sends the reader. */
 const CONTENT_DOCS = 'https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door';
 
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
 const DROPPED = /^span (\S+) dropped (\S+): (\w+)(?:; (.*))?$/;
 const REFUSED = /^span (\S+) refused: (.*)$/;
 
@@ -191,7 +192,10 @@ export class Exporter {
 
   async export(spans: readonly ReadableSpan[]): Promise<void> {
     if (spans.length === 0) return;
-    const body = JSON.stringify(this.encode(spans));
+    // A lone surrogate is no text ingest reads, and would lose the batch.
+    const body = JSON.stringify(this.encode(spans), (_key, value: unknown) =>
+      typeof value === 'string' ? value.replace(LONE_SURROGATE, '\ufffd') : value,
+    );
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'User-Agent': `telmoni-typescript/${VERSION}`,
@@ -328,7 +332,11 @@ export class Exporter {
     // the life of the process; past the cap, warnings may repeat.
     if (this.#warned.size >= WARNED_MAX) this.#warned.clear();
     this.#warned.add(key);
-    this.#warn(text);
+    try {
+      this.#warn(text);
+    } catch {
+      // Nowhere left to say so, and never into the agent's own call.
+    }
   }
 }
 
@@ -373,9 +381,14 @@ function isUnset(time: HrTime): boolean {
   return time[0] === 0 && time[1] === 0;
 }
 
-/** `[seconds, nanoseconds]` as one count of nanoseconds, past what a number holds. */
+/**
+ * `[seconds, nanoseconds]` as one count of nanoseconds, past what a number
+ * holds; 0 outside 64 bits, a clock set wrong, so ingest refuses that span
+ * rather than the whole export.
+ */
 function nanos(time: HrTime): string {
-  return (BigInt(Math.trunc(time[0])) * 1_000_000_000n + BigInt(Math.trunc(time[1]))).toString();
+  const count = BigInt(Math.trunc(time[0])) * 1_000_000_000n + BigInt(Math.trunc(time[1]));
+  return count >= 0n && count < 2n ** 64n ? count.toString() : '0';
 }
 
 /** One OTLP `KeyValue`: 64-bit integers travel as decimal strings. */

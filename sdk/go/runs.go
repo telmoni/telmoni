@@ -7,10 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
+	"slices"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -95,13 +98,16 @@ func (h *handle) Fail(err error) {
 	h.FailWith(errorTypeName(err))
 }
 
-// FailWith marks the span failed with errorType as its error.type, and
-// status ERROR with no message.
+// FailWith marks the span failed with errorType as its error.type, none if
+// empty, and status ERROR with no message.
 func (h *handle) FailWith(errorType string) {
 	if h == nil || h.span == nil {
 		return
 	}
-	h.span.SetAttributes(attribute.String(attrErrorType, errorType))
+	// Ingest refuses the span over an empty one, and with a run's, the run.
+	if errorType != "" {
+		h.span.SetAttributes(attribute.String(attrErrorType, errorType))
+	}
 	h.span.SetStatus(codes.Error, "")
 }
 
@@ -143,6 +149,7 @@ type Step struct {
 // ModelCall is a call to a model inside a run.
 type ModelCall struct {
 	handle
+	client *Client
 }
 
 // ToolCall is a call to a tool inside a run.
@@ -173,10 +180,10 @@ func RunFromContext(ctx context.Context) *Run {
 // application opens with it nest under the run. End it with run.End, usually
 // deferred.
 //
-// A blank agent name opens no run: the handle returned does nothing, nothing
-// is sent, and the client warns once. A SampleRate outside (0, 1] is replaced
-// by the client's, and a MaxCostUSD that is no finite number left off the
-// run, each with one warning. None panics: telemetry never takes the agent
+// A blank agent name opens no run: its handle does nothing, and the client
+// warns once. A SampleRate outside (0, 1] falls back to the client's, and a
+// bound ingest refuses or a tag it drops or past the 32nd by key is left
+// off, each with one warning. None panics: telemetry never takes the agent
 // down, where Python and TypeScript raise for a blank agent or a bad rate.
 func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (context.Context, *Run) {
 	if ctx == nil {
@@ -193,14 +200,6 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 		} else {
 			c.exporter.warnOnce("run:rate", "telmoni: a run's SampleRate must be above 0 and up to 1; the client's is used")
 		}
-	}
-	bounds := opts.Bounds
-	// JSON carries no infinity or NaN, so the batch would be lost with it.
-	if bounds != nil && (math.IsNaN(bounds.MaxCostUSD) || math.IsInf(bounds.MaxCostUSD, 0)) {
-		c.exporter.warnOnce("run:cost", "telmoni: a run's MaxCostUSD must be a finite number; the run is sent without it")
-		finite := *bounds
-		finite.MaxCostUSD = 0
-		bounds = &finite
 	}
 	sampledOut := rate < 1 && c.random() >= rate
 	runID := newUUID()
@@ -219,14 +218,13 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 	if sampledOut {
 		inherited = append(inherited, attribute.Bool(attrSampledOut, true))
 	}
-	common := append(boundAttributes(bounds), attribute.Float64(attrSampleRate, rate))
-	attrs := make([]attribute.KeyValue, 0, 2+len(inherited)+len(common)+len(opts.Tags))
+	common := append(c.boundAttributes(opts.Bounds), attribute.Float64(attrSampleRate, rate))
+	tags := c.tagAttributes(opts.Tags)
+	attrs := make([]attribute.KeyValue, 0, 2+len(inherited)+len(common)+len(tags))
 	attrs = append(attrs, attribute.String(attrOperation, runOperation), attribute.String(attrAgentName, agent))
 	attrs = append(attrs, inherited...)
 	attrs = append(attrs, common...)
-	for key, value := range opts.Tags {
-		attrs = append(attrs, attribute.String(tagPrefix+key, value))
-	}
+	attrs = append(attrs, tags...)
 	start := time.Now()
 	ctx, span := c.tracer.Start(ctx, runOperation+" "+agent,
 		trace.WithSpanKind(trace.SpanKindInternal),
@@ -285,8 +283,8 @@ func (r *Run) Fail(err error) {
 	r.handle.Fail(err)
 }
 
-// FailWith marks the run failed with errorType as its error.type, and status
-// ERROR with no message.
+// FailWith marks the run failed with errorType as its error.type, none if
+// empty, and status ERROR with no message.
 func (r *Run) FailWith(errorType string) {
 	if r == nil {
 		return
@@ -334,7 +332,7 @@ func (r *Run) ModelCall(ctx context.Context, model string, opts ModelCallOptions
 		attrs = append(attrs, attribute.String(attrSystemInstructions, asJSON(opts.SystemInstructions)))
 	}
 	ctx, span := r.child(ctx, operation+" "+model, trace.SpanKindClient, attrs)
-	return ctx, &ModelCall{handle: handle{span: span}}
+	return ctx, &ModelCall{handle: handle{span: span}, client: r.client}
 }
 
 // ToolCall opens a call to the tool named name under the span in ctx;
@@ -380,7 +378,7 @@ func (m *ModelCall) Answered(a Answer) {
 	if a.ResponseModel != "" {
 		attrs = append(attrs, attribute.String(attrResponseModel, a.ResponseModel))
 	}
-	attrs = append(attrs, usageAttributes(a.Usage)...)
+	attrs = append(attrs, usageAttributes(a.Usage, m.client.warnCount)...)
 	if a.OutputMessages != nil {
 		attrs = append(attrs, attribute.String(attrOutputMessages, asJSON(a.OutputMessages)))
 	}
@@ -407,31 +405,83 @@ func modelOperation(operation string) string {
 	return operation
 }
 
-func usageAttributes(u *Usage) []attribute.KeyValue {
+// usageAttributes is a call's token counts but any below zero, for which
+// ingest would refuse the call; warn, when given, is told each one's name.
+func usageAttributes(u *Usage, warn func(name string)) []attribute.KeyValue {
 	if u == nil {
 		return nil
 	}
-	return []attribute.KeyValue{
-		attribute.Int(attrInputTokens, u.InputTokens),
-		attribute.Int(attrOutputTokens, u.OutputTokens),
-		attribute.Int(attrCacheReadInputTokens, u.CacheReadInputTokens),
-		attribute.Int(attrCacheWriteInputTokens, u.CacheWriteInputTokens),
+	var out []attribute.KeyValue
+	for _, count := range []struct {
+		name  string
+		value int
+	}{
+		{attrInputTokens, u.InputTokens},
+		{attrOutputTokens, u.OutputTokens},
+		{attrCacheReadInputTokens, u.CacheReadInputTokens},
+		{attrCacheWriteInputTokens, u.CacheWriteInputTokens},
+	} {
+		if count.value >= 0 {
+			out = append(out, attribute.Int(count.name, count.value))
+		} else if warn != nil {
+			warn(count.name)
+		}
 	}
+	return out
 }
 
-func boundAttributes(b *Bounds) []attribute.KeyValue {
+func (c *Client) warnCount(name string) {
+	c.exporter.warnOnce("usage:"+name, "telmoni: "+name+" must be a whole number from 0 within 64 bits; the call is sent without it")
+}
+
+// boundAttributes is the bounds a run is sent with, a zero one unset; one
+// ingest would refuse the run for is left off with one warning.
+func (c *Client) boundAttributes(b *Bounds) []attribute.KeyValue {
 	if b == nil {
 		return nil
 	}
 	var out []attribute.KeyValue
-	if b.StallAfterS != 0 {
-		out = append(out, attribute.Int(attrBoundStallAfter, b.StallAfterS))
+	for _, bound := range []struct {
+		name, key string
+		value     int
+	}{
+		{"StallAfterS", attrBoundStallAfter, b.StallAfterS},
+		{"MaxSteps", attrBoundMaxSteps, b.MaxSteps},
+	} {
+		if bound.value < 0 || int64(bound.value) > math.MaxUint32 {
+			c.exporter.warnOnce("run:"+bound.name, "telmoni: a run's "+bound.name+" must be a whole number from 1 to 4294967295; the run is sent without it")
+		} else if bound.value != 0 {
+			out = append(out, attribute.Int(bound.key, bound.value))
+		}
 	}
-	if b.MaxSteps != 0 {
-		out = append(out, attribute.Int(attrBoundMaxSteps, b.MaxSteps))
+	// JSON carries no infinity or NaN, so the batch would be lost with it.
+	if cost := b.MaxCostUSD; cost < 0 || math.IsNaN(cost) || math.IsInf(cost, 0) {
+		c.exporter.warnOnce("run:cost", "telmoni: a run's MaxCostUSD must be a finite number above 0; the run is sent without it")
+	} else if cost != 0 {
+		out = append(out, attribute.Float64(attrBoundMaxCostUSD, cost))
 	}
-	if b.MaxCostUSD != 0 {
-		out = append(out, attribute.Float64(attrBoundMaxCostUSD, b.MaxCostUSD))
+	return out
+}
+
+// tagAttributes is a run's first 32 tags by key within ingest's caps; more
+// would crowd the marks a run ends with out of the span's 128 attributes.
+func (c *Client) tagAttributes(tags map[string]string) []attribute.KeyValue {
+	var keys []string
+	for _, key := range slices.Sorted(maps.Keys(tags)) {
+		// Ingest drops it before counting, so it takes no place among the 32.
+		if key == "" || utf8.RuneCountInString(key) > tagKeyMax || utf8.RuneCountInString(tags[key]) > tagValueMax {
+			c.exporter.warnOnce("run:tag", "telmoni: a tag's key must be 1 to 64 characters and its value up to 256; the tag is not sent")
+			continue
+		}
+		keys = append(keys, key)
+	}
+	if len(keys) > tagsMax {
+		c.exporter.warnOnce("run:tags", "telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent")
+		keys = keys[:tagsMax]
+	}
+	out := make([]attribute.KeyValue, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, attribute.String(tagPrefix+key, tags[key]))
 	}
 	return out
 }

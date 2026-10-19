@@ -3,6 +3,7 @@ package telmoni_test
 import (
 	"context"
 	"errors"
+	"math"
 	"net"
 	"reflect"
 	"strings"
@@ -80,6 +81,43 @@ func TestAnswerWithoutUsageOrModelSetsNeither(t *testing.T) {
 	}
 	if got := attributesOf(t, calls(t, h)[0]); !reflect.DeepEqual(got, want) {
 		t.Errorf("attributes\n got: %v\nwant: %v", got, want)
+	}
+}
+
+// A token count below zero is left off its call, with one warning per count.
+func TestATokenCountBelowZeroIsLeftOffItsCallWithOneWarning(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	for range 2 {
+		_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{})
+		call.Answered(telmoni.Answer{Usage: &telmoni.Usage{InputTokens: -1, OutputTokens: 7, CacheReadInputTokens: math.MinInt}})
+		call.End()
+	}
+	run.End()
+	h.flush()
+	spans := calls(t, h)
+	if len(spans) != 2 {
+		t.Fatalf("want two model calls, got %v", sortedNames(h.transport.spans(t)))
+	}
+	want := map[string]any{
+		"telmoni.run_id":                        run.ID(),
+		"telmoni.agent":                         "bot",
+		"gen_ai.operation.name":                 "chat",
+		"gen_ai.request.model":                  "m",
+		"gen_ai.usage.output_tokens":            int64(7),
+		"gen_ai.usage.cache_write.input_tokens": int64(0),
+	}
+	for _, span := range spans {
+		if got := attributesOf(t, span); !reflect.DeepEqual(got, want) {
+			t.Errorf("attributes\n got: %v\nwant: %v", got, want)
+		}
+	}
+	wantWarnings := []string{
+		"telmoni: gen_ai.usage.input_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
+		"telmoni: gen_ai.usage.cache_read.input_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
+	}
+	if warnings := h.logs.warnings(); !reflect.DeepEqual(warnings, wantWarnings) {
+		t.Errorf("warnings = %q\nwant one for each count: %q", warnings, wantWarnings)
 	}
 }
 

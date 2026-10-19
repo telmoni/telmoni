@@ -5,12 +5,12 @@ mod common;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use common::{
-    Failure, FakeTransport, Harness, Outcome, Sleeps, Warnings, attributes_of, field, hooks, int,
-    keyed, load_fixture, lock, name_of, run_span, spans_of, text,
+    Collected, Failure, FakeTransport, Harness, Outcome, Sleeps, Warnings, attributes_of, field,
+    hooks, int, keyed, load_fixture, lock, name_of, run_span, spans_of, text,
 };
 use opentelemetry::trace::{Link, SpanKind, TraceContextExt as _, TraceId};
 use opentelemetry::{Context, KeyValue};
@@ -476,6 +476,464 @@ fn a_record_refused_sends_nothing() -> Outcome {
     ));
     misconfigured.flush()?;
     assert_eq!(misconfigured.transport.count(), 0);
+    Ok(())
+}
+
+/// A record with a time ingest cannot read, the run's, a step's or a call's, is refused whole.
+#[test]
+fn a_record_timed_where_ingest_cannot_read_is_refused() -> Outcome {
+    assert_eq!(
+        Error::RecordedTime.to_string(),
+        "a recorded time must fall after the Unix epoch and less than 2^64 nanoseconds after it"
+    );
+    let harness = Harness::new()?;
+    let golden = the_record()?;
+    let at = golden.start;
+    let epoch = UNIX_EPOCH;
+    let before = epoch.checked_sub(Duration::from_secs(1)).ok_or("1969")?;
+    let last = epoch
+        .checked_add(Duration::from_nanos(u64::MAX))
+        .ok_or("2554")?;
+    let past = last.checked_add(Duration::from_nanos(1)).ok_or("2554")?;
+    let refused = [
+        RunRecord {
+            start: epoch,
+            ..golden.clone()
+        },
+        RunRecord {
+            end: past,
+            ..golden.clone()
+        },
+        RunRecord {
+            inside: vec![StepRecord::new("s", before, at).into()],
+            ..golden.clone()
+        },
+        RunRecord {
+            inside: vec![
+                StepRecord {
+                    calls: vec![ToolCallRecord::new("t", at, past).into()],
+                    ..StepRecord::new("s", at, at)
+                }
+                .into(),
+            ],
+            ..golden.clone()
+        },
+        RunRecord {
+            inside: vec![ModelCallRecord::new("m", epoch, at).into()],
+            ..golden.clone()
+        },
+    ];
+    for record in refused {
+        assert_eq!(harness.telmoni.record_run(record), Err(Error::RecordedTime));
+    }
+    harness.flush()?;
+    assert_eq!(harness.transport.count(), 0, "nothing of a refused record");
+
+    let first = epoch.checked_add(Duration::from_nanos(1)).ok_or("1970")?;
+    harness.telmoni.record_run(RunRecord {
+        start: first,
+        end: last,
+        inside: Vec::new(),
+        ..golden.clone()
+    })?;
+    harness.flush()?;
+    let spans = harness.spans()?;
+    let run = run_span(&spans, &golden.run_id)?;
+    assert_eq!(text(run, "startTimeUnixNano")?, "1");
+    assert_eq!(text(run, "endTimeUnixNano")?, u64::MAX.to_string());
+    Ok(())
+}
+
+/// A record with an empty step name or model is refused whole; a blank one, or a tool's empty name, is sent.
+#[test]
+fn a_record_with_an_empty_name_is_refused() -> Outcome {
+    assert_eq!(
+        Error::EmptyName.to_string(),
+        "a recorded step's name or model call's model cannot be empty"
+    );
+    let harness = Harness::new()?;
+    let golden = the_record()?;
+    let at = golden.start;
+    let step = |name: &str, calls: Vec<CallRecord>| -> RecordItem {
+        StepRecord {
+            calls,
+            ..StepRecord::new(name, at, at)
+        }
+        .into()
+    };
+    let refused = [
+        step("", Vec::new()),
+        ModelCallRecord::new("", at, at).into(),
+        step("s", vec![ModelCallRecord::new("", at, at).into()]),
+    ];
+    for item in refused {
+        let record = RunRecord {
+            inside: vec![item],
+            ..golden.clone()
+        };
+        assert_eq!(harness.telmoni.record_run(record), Err(Error::EmptyName));
+    }
+    harness.flush()?;
+    assert_eq!(harness.transport.count(), 0, "nothing of a refused record");
+
+    // A tool's empty name ingest reads as none, keeping the call.
+    harness.telmoni.record_run(RunRecord {
+        inside: vec![step(
+            " ",
+            vec![
+                ToolCallRecord::new(" ", at, at).into(),
+                ToolCallRecord::new("", at, at).into(),
+                ModelCallRecord::new(" ", at, at).into(),
+            ],
+        )],
+        ..golden
+    })?;
+    harness.flush()?;
+    let names: BTreeSet<String> = harness
+        .spans()?
+        .iter()
+        .map(|span| name_of(span).to_owned())
+        .collect();
+    for blank in [" ", "execute_tool  ", "execute_tool ", "chat  "] {
+        assert!(names.contains(blank), "{blank:?} in {names:?}");
+    }
+    Ok(())
+}
+
+/// What a refusal names, its cap, and a record holding that text at the length given.
+type Capped<'a> = (&'static str, usize, &'a dyn Fn(usize) -> RunRecord);
+
+/// Each text a record holds is sent at ingest's cap and refused one past it, counted in characters.
+#[test]
+fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
+    assert_eq!(
+        Error::TooLong {
+            what: "run's agent",
+            max: 128
+        }
+        .to_string(),
+        "a recorded run's agent must be up to 128 characters"
+    );
+    let harness = Harness::new()?;
+    let golden = RunRecord {
+        inside: Vec::new(),
+        ..the_record()?
+    };
+    let at = golden.start;
+    // Two bytes each, so a cap counted in bytes would refuse every text at it.
+    let text = |n: usize| "é".repeat(n);
+    let inside = |item: RecordItem| RunRecord {
+        inside: vec![item],
+        ..golden.clone()
+    };
+    let in_step = |call: CallRecord| {
+        inside(
+            StepRecord {
+                calls: vec![call],
+                ..StepRecord::new("s", at, at)
+            }
+            .into(),
+        )
+    };
+    let model = |n: usize| ModelCallRecord::new(text(n), at, at);
+    let tool = |n: usize| ToolCallRecord::new(text(n), at, at);
+    let cases: [Capped<'_>; 13] = [
+        ("run's agent", 128, &|n| RunRecord {
+            agent: text(n),
+            ..golden.clone()
+        }),
+        ("run's user_id", 128, &|n| RunRecord {
+            user_id: Some(text(n)),
+            ..golden.clone()
+        }),
+        ("run's session_id", 200, &|n| RunRecord {
+            session_id: Some(text(n)),
+            ..golden.clone()
+        }),
+        ("run's error_type", 128, &|n| RunRecord {
+            error_type: Some(text(n)),
+            ..golden.clone()
+        }),
+        ("step's name", 128, &|n| {
+            inside(StepRecord::new(text(n), at, at).into())
+        }),
+        ("step's error_type", 128, &|n| {
+            inside(
+                StepRecord {
+                    error_type: Some(text(n)),
+                    ..StepRecord::new("s", at, at)
+                }
+                .into(),
+            )
+        }),
+        ("model call's provider", 128, &|n| {
+            in_step(
+                ModelCallRecord {
+                    provider: Some(text(n)),
+                    ..model(1)
+                }
+                .into(),
+            )
+        }),
+        ("model call's error_type", 128, &|n| {
+            inside(
+                ModelCallRecord {
+                    error_type: Some(text(n)),
+                    ..model(1)
+                }
+                .into(),
+            )
+        }),
+        // The operation is `chat` unless given, a blank one too.
+        ("model call's operation and model", 127, &|n| {
+            inside(model(n - 4).into())
+        }),
+        ("model call's operation and model", 127, &|n| {
+            in_step(
+                ModelCallRecord {
+                    operation: Some(" ".to_owned()),
+                    ..model(n - 4)
+                }
+                .into(),
+            )
+        }),
+        ("model call's operation and model", 127, &|n| {
+            inside(
+                ModelCallRecord {
+                    operation: Some(text(27)),
+                    ..model(n - 27)
+                }
+                .into(),
+            )
+        }),
+        ("tool call's name", 128, &|n| inside(tool(n).into())),
+        ("tool call's error_type", 128, &|n| {
+            in_step(
+                ToolCallRecord {
+                    error_type: Some(text(n)),
+                    ..tool(1)
+                }
+                .into(),
+            )
+        }),
+    ];
+    for &(what, max, record) in &cases {
+        harness.telmoni.record_run(record(max))?;
+        assert_eq!(
+            harness.telmoni.record_run(record(max + 1)),
+            Err(Error::TooLong { what, max }),
+            "{what}"
+        );
+    }
+    // A model at its own cap is still past the span name's, with `chat` before it.
+    assert_eq!(
+        harness.telmoni.record_run(inside(model(129).into())),
+        Err(Error::TooLong {
+            what: "model call's model",
+            max: 128
+        })
+    );
+    assert_eq!(
+        harness.telmoni.record_run(inside(model(128).into())),
+        Err(Error::TooLong {
+            what: "model call's operation and model",
+            max: 127
+        })
+    );
+    harness.flush()?;
+    let runs = harness
+        .spans()?
+        .iter()
+        .filter(|span| name_of(span).starts_with("invoke_agent "))
+        .count();
+    assert_eq!(runs, cases.len(), "each record at its cap, and no other");
+    Ok(())
+}
+
+/// Tags past the first 32 by key and negative token counts are left off a record, each warned once.
+#[test]
+fn a_record_leaves_off_tags_past_32_and_negative_counts() -> Outcome {
+    let harness = Harness::new()?;
+    let golden = the_record()?;
+    let at = golden.start;
+    let tags: BTreeMap<String, String> =
+        (0..40).map(|n| (format!("k{n}"), n.to_string())).collect();
+    let negative = Usage {
+        input_tokens: Some(-1),
+        output_tokens: Some(5),
+        ..Usage::default()
+    };
+    let record = RunRecord {
+        tags: tags.clone(),
+        inside: vec![
+            ModelCallRecord {
+                usage: Some(negative),
+                ..ModelCallRecord::new("m", at, at)
+            }
+            .into(),
+            StepRecord {
+                calls: vec![
+                    ModelCallRecord {
+                        usage: Some(Usage {
+                            cache_write_input_tokens: Some(-3),
+                            ..negative
+                        }),
+                        ..ModelCallRecord::new("m", at, at)
+                    }
+                    .into(),
+                ],
+                ..StepRecord::new("s", at, at)
+            }
+            .into(),
+        ],
+        ..golden
+    };
+    harness.telmoni.record_run(record.clone())?;
+    harness.telmoni.record_run(record.clone())?;
+    harness.flush()?;
+
+    let spans = harness.spans()?;
+    let sent: BTreeSet<String> = attributes_of(run_span(&spans, &record.run_id)?)?
+        .as_object()
+        .ok_or("attributes")?
+        .keys()
+        .filter(|key| key.starts_with("telmoni.tag."))
+        .cloned()
+        .collect();
+    let first: BTreeSet<String> = tags
+        .keys()
+        .take(32)
+        .map(|key| format!("telmoni.tag.{key}"))
+        .collect();
+    assert_eq!(sent, first);
+    let calls: Vec<&Value> = spans
+        .iter()
+        .filter(|span| name_of(span) == "chat m")
+        .collect();
+    assert_eq!(calls.len(), 4, "two calls in each of two sends");
+    for call in calls {
+        let attributes = attributes_of(call)?;
+        assert_eq!(attributes.get("gen_ai.usage.input_tokens"), None);
+        assert_eq!(
+            attributes.get("gen_ai.usage.cache_write.input_tokens"),
+            None
+        );
+        assert_eq!(
+            attributes.get("gen_ai.usage.output_tokens"),
+            Some(&json!(5))
+        );
+    }
+    let mut warned = harness.warnings.all();
+    warned.sort();
+    let mut expected = [
+        "telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent",
+        "telmoni: gen_ai.usage.input_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
+        "telmoni: gen_ai.usage.cache_write.input_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
+    ];
+    expected.sort_unstable();
+    assert_eq!(warned, expected);
+    Ok(())
+}
+
+/// A recorded tag ingest would drop is left off with one warning and takes no place among the 32.
+#[test]
+fn a_record_leaves_off_a_tag_ingest_would_drop_before_its_32() -> Outcome {
+    let harness = Harness::new()?;
+    let kept: BTreeMap<String, String> = (0..32)
+        .map(|n| (format!("k{n:02}"), "é".repeat(256)))
+        .collect();
+    let mut tags = kept.clone();
+    tags.insert(String::new(), "v".to_owned());
+    tags.insert("k00a".to_owned(), "v".repeat(257));
+    tags.insert("k".repeat(65), "v".to_owned());
+    let record = RunRecord {
+        tags,
+        ..the_record()?
+    };
+    harness.telmoni.record_run(record.clone())?;
+    harness.flush()?;
+
+    let spans = harness.spans()?;
+    let sent: BTreeMap<String, Value> = attributes_of(run_span(&spans, &record.run_id)?)?
+        .as_object()
+        .ok_or("attributes")?
+        .iter()
+        .filter_map(|(key, value)| {
+            Some((key.strip_prefix("telmoni.tag.")?.to_owned(), value.clone()))
+        })
+        .collect();
+    let expected: BTreeMap<String, Value> = kept
+        .into_iter()
+        .map(|(key, value)| (key, json!(value)))
+        .collect();
+    assert_eq!(sent, expected);
+    assert_eq!(
+        harness.warnings.all(),
+        [
+            "telmoni: a tag's key must be 1 to 64 characters and its value up to 256; the tag is not sent"
+        ]
+    );
+    Ok(())
+}
+
+/// A record's warnings come before its hold, so a warning sink can record a run itself.
+#[test]
+fn a_records_warnings_come_before_its_hold() -> Outcome {
+    let transport = FakeTransport::new([])?;
+    let warnings = Warnings::default();
+    let sleeps = Sleeps::default();
+    let mut hooks = hooks(&transport, &warnings, &sleeps);
+    // A warning records a run on another thread, which a hold taken would stall.
+    let client: Arc<Mutex<Option<Telmoni>>> = Arc::default();
+    let through = Collected::<bool>::default();
+    let (shared, noted, warned) = (Arc::clone(&client), through.clone(), warnings.clone());
+    let probe = the_record()?;
+    hooks.warn = Box::new(move |text| {
+        warned.push(text.to_owned());
+        let Some(telmoni) = lock(&shared).clone() else {
+            return;
+        };
+        let probe = probe.clone();
+        let (done, finished) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = done.send(telmoni.record_run(probe));
+        });
+        noted.push(finished.recv_timeout(Duration::from_secs(5)).is_ok());
+    });
+    let telmoni = Telmoni::with_hooks(keyed(), hooks);
+    *lock(&client) = Some(telmoni.clone());
+    let golden = the_record()?;
+    let at = golden.start;
+    let mut tags: BTreeMap<String, String> =
+        (0..33).map(|n| (format!("k{n}"), String::new())).collect();
+    tags.insert(String::new(), String::new());
+    let record = RunRecord {
+        run_id: "0f8fad5b-d9cb-469f-a165-70867728950e".to_owned(),
+        tags,
+        inside: vec![
+            ModelCallRecord {
+                usage: Some(Usage {
+                    input_tokens: Some(-1),
+                    ..Usage::default()
+                }),
+                ..ModelCallRecord::new("m", at, at)
+            }
+            .into(),
+        ],
+        ..golden
+    };
+    let recorded = telmoni.record_run(record);
+    *lock(&client) = None;
+    recorded?;
+    assert!(telmoni.flush());
+    telmoni.shutdown();
+
+    assert_eq!(warnings.all().len(), 3, "{:?}", warnings.all());
+    assert_eq!(
+        through.all(),
+        [true, true, true],
+        "a warning was given while the record was held"
+    );
     Ok(())
 }
 

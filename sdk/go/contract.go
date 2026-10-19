@@ -63,6 +63,15 @@ const (
 	contentModeHeader = "Telmoni-Content-Mode"
 )
 
+const (
+	// tagsMax is the most tags ingest keeps a span, contract.rs's TAGS_MAX.
+	tagsMax = 32
+	// tagKeyMax is a tag key's most characters, contract.rs's TAG_KEY_MAX.
+	tagKeyMax = 64
+	// tagValueMax is a tag value's most characters, contract.rs's TAG_VALUE_MAX.
+	tagValueMax = 256
+)
+
 // content is what the exporter takes off a span unless the code asked and the
 // project allows.
 var content = map[string]bool{

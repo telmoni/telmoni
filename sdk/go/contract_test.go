@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	telmoni "github.com/telmoni/telmoni/sdk/go"
 )
@@ -27,6 +28,28 @@ func TestTheDefaultEndpointIsTheMachineHost(t *testing.T) {
 	}
 	if cfg.SampleRate != 1 {
 		t.Errorf("the default SampleRate = %g, want 1", cfg.SampleRate)
+	}
+}
+
+// A span's time outside 64 bits of nanoseconds goes as 0, so ingest refuses
+// that span rather than the whole export.
+func TestASpanTimeOutsideWhatIngestReadsGoesAs0(t *testing.T) {
+	last := time.Unix(1<<64/1_000_000_000, 1<<64%1_000_000_000-1)
+	for _, c := range []struct {
+		at   time.Time
+		want string
+	}{
+		{time.Unix(0, 1), "1"},
+		{time.Date(2300, 1, 1, 0, 0, 0, 0, time.UTC), "10413792000000000000"},
+		{last, "18446744073709551615"},
+		{last.Add(time.Nanosecond), "0"},
+		{time.Unix(0, 0), "0"},
+		{time.Unix(-1, 0), "0"},
+		{time.Time{}, "0"},
+	} {
+		if got := telmoni.Nanos(c.at); got != c.want {
+			t.Errorf("a span's time of %v is sent as %s, want %s", c.at, got, c.want)
+		}
 	}
 }
 

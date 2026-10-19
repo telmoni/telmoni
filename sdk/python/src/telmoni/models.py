@@ -149,8 +149,8 @@ class Config:
 
 @dataclass(frozen=True)
 class Bounds:
-    """What a monitor holds a run to; each optional, and one that is no finite
-    number, or a whole one past 64 bits, left off the run with one warning."""
+    """What a monitor holds a run to; each optional, a stall's or steps'
+    fraction cut, and one ingest would refuse left off with one warning."""
 
     stall_after_s: int | None = None
     max_steps: int | None = None
@@ -161,8 +161,8 @@ class Bounds:
 class Usage:
     """A model call's tokens, as the conventions count them: input includes the
     cache's reads and writes, output reasoning; sum parts reported apart. Each
-    goes as a whole number, one past 64 bits or no finite number left off the
-    call with one warning."""
+    goes as a whole number, a fraction cut, one below 0 or past 64 bits left
+    off the call with one warning."""
 
     input_tokens: int | None = None
     output_tokens: int | None = None

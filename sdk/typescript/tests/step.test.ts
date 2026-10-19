@@ -94,3 +94,35 @@ describe('a step', () => {
     expect(BigInt(spans['second']!.startTimeUnixNano) >= BigInt(first.startTimeUnixNano)).toBe(true);
   });
 });
+
+describe('a name of no string', () => {
+  it('goes as its text with one warning, and keeps the batch, every run in it', async () => {
+    h.telmoni.run('other', (run) => run.step('fine', () => {}));
+    h.telmoni.run(42 as unknown as string, (run) => {
+      run.step(7 as unknown as string, () => {});
+      run.modelCall(5 as unknown as string, () => {});
+      run.toolCall({ name: 'search' } as unknown as string, () => {});
+    });
+    expect(await h.telmoni.flush()).toBe(true);
+    expect(h.transport.spans().map((span) => span.name).sort()).toEqual([
+      '7',
+      'chat 5',
+      'execute_tool [object Object]',
+      'fine',
+      'invoke_agent 42',
+      'invoke_agent other',
+      'telmoni.run.start',
+      'telmoni.run.start',
+    ]);
+    expect(h.warnings).toHaveLength(4);
+    expect(h.warnings.every((warning) => warning.includes('is sent as its text'))).toBe(true);
+  });
+
+  it('goes with the replacement character for a lone surrogate, which ingest would refuse with the request', async () => {
+    for (const name of ['a\ud800b', 'c\udc80d', 'e\ud83d\ude00f']) h.telmoni.run('bot', (run) => run.step(name, () => {}));
+    expect(await h.telmoni.flush()).toBe(true);
+    const names = h.transport.spans().map((span) => span.name);
+    expect(names).toEqual(expect.arrayContaining(['a\ufffdb', 'c\ufffdd', 'e\ud83d\ude00f']));
+    for (const request of h.transport.requests) expect(request.body).not.toMatch(/\\ud[89a-f]/i);
+  });
+});

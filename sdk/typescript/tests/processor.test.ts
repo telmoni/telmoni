@@ -22,6 +22,29 @@ describe('the processor', () => {
     expect(h.warnings[0]).toContain('5 spans');
   });
 
+  it('keeps going past a warning whose hook throws, the next flush still sending', async () => {
+    const h = harness(
+      {},
+      {
+        warn: () => {
+          throw new Error("the hook's own");
+        },
+        processor: { maxQueueSize: 2, maxBatchSize: 100, scheduleDelaySeconds: 60 },
+      },
+    );
+    try {
+      h.telmoni.run('bot', (run) => {
+        for (let n = 0; n < 5; n++) run.step(`s${n}`, () => {});
+      });
+      expect(await h.telmoni.flush()).toBe(true);
+      h.telmoni.run('later', () => {});
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    expect(h.transport.spans().map((span) => span.name)).toContain('invoke_agent later');
+  });
+
   it('shutdown drains what is queued', async () => {
     const h = harness();
     h.telmoni.run('bot', () => {});

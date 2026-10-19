@@ -47,6 +47,7 @@ WARNED_MAX = 1024
 CONTENT_DOCS = "https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door"
 """Where a dropped content field's warning sends the reader."""
 
+_SURROGATE = re.compile("[\ud800-\udfff]")
 _DROPPED = re.compile(r"^span (\S+) dropped (\S+): (\w+)(?:; (.*))?$")
 _REFUSED = re.compile(r"^span (\S+) refused: (.*)$")
 
@@ -255,9 +256,14 @@ class Exporter:
         if not spans:
             return
         # Python writes NaN and Infinity, which are no JSON: refused here, never sent.
-        body = json.dumps(
-            self.encode(spans), separators=(",", ":"), allow_nan=False
-        ).encode()
+        text = json.dumps(
+            self.encode(spans),
+            separators=(",", ":"),
+            allow_nan=False,
+            ensure_ascii=False,
+        )
+        # A lone surrogate is no text ingest reads, and would lose the batch.
+        body = _SURROGATE.sub("\ufffd", text).encode()
         headers = {
             "Content-Type": "application/json",
             "User-Agent": f"telmoni-python/{__version__}",
@@ -323,8 +329,8 @@ class Exporter:
             "spanId": format(span.context.span_id, "016x"),
             "name": span.name,
             "kind": _KINDS.get(span.kind, 1),
-            "startTimeUnixNano": str(span.start_time or 0),
-            "endTimeUnixNano": str(span.end_time or span.start_time or 0),
+            "startTimeUnixNano": _nanos(span.start_time),
+            "endTimeUnixNano": _nanos(span.end_time or span.start_time),
             "attributes": attributes,
         }
         if span.parent is not None and span.parent.is_valid:
@@ -393,7 +399,14 @@ class Exporter:
         if len(self._warned) >= WARNED_MAX:
             self._warned.clear()
         self._warned.add(key)
-        logger.warning(text)
+        warn(text)
+
+
+def warn(text: str, *args: object) -> None:
+    """Log a warning; a handler or filter that raises must not raise into the
+    agent's own call, nor end the worker."""
+    with contextlib.suppress(Exception):
+        logger.warning(text, *args)
 
 
 def _remedy(attribute: str, reason: str) -> str:
@@ -419,13 +432,20 @@ def _problem_type(body: bytes) -> str:
     return message.split(":", 1)[0] if message.startswith("/errors/") else ""
 
 
+def _nanos(at: int | None) -> str:
+    """A span's time as OTLP writes it; 0 for one outside 64 bits, a clock
+    set wrong, so ingest refuses that span rather than the whole export."""
+    return str(at) if at is not None and 0 <= at < 2**64 else "0"
+
+
 def _attribute(key: str, value: object) -> dict[str, Any]:
     """One OTLP ``KeyValue``: 64-bit integers travel as decimal strings."""
     encoded: dict[str, Any]
     if isinstance(value, bool):
         encoded = {"boolValue": value}
     elif isinstance(value, int):
-        encoded = {"intValue": str(value)}
+        # An `(int, Enum)`'s own `str()` is its name, which ingest's parser refuses.
+        encoded = {"intValue": str(int(value))}
     elif isinstance(value, float):
         # NaN or an infinity as null, as JavaScript and serde write one, which
         # ingest reads as no value: the attribute lost, never the batch.

@@ -6,7 +6,7 @@ import { SamplingDecision, type Sampler, type SamplingResult } from '@openteleme
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { QueueFullError } from '../src/index';
-import type { CallRecord, ModelCallRecord, RunRecord, StepRecord, ToolCallRecord } from '../src/index';
+import type { CallRecord, ModelCallRecord, RunRecord, StepRecord, ToolCallRecord, Usage } from '../src/index';
 import { type ExportBody, type Harness, type JsonAttribute, attributesOf, harness, loadFixture } from './helpers';
 
 const VERSIONED = new Set(['telemetry.sdk.version', 'telemetry.distro.version']);
@@ -141,6 +141,11 @@ class Hooked implements Sampler {
   toString(): string {
     return 'Hooked';
   }
+}
+
+/** Its items as an iterator, which a first read spends. */
+function* once<T>(...items: T[]): Generator<T> {
+  yield* items;
 }
 
 function traceOf(record: RunRecord): string {
@@ -361,13 +366,21 @@ describe('a recorded run', () => {
   });
 
   it('sends nothing when an item of its throws as it is read, part-way through', async () => {
-    const h = harness();
+    const sampler = new Hooked();
+    let asked = 0;
+    sampler.hook = () => {
+      asked += 1;
+    };
+    const h = harness({ sampler });
     const golden = theRecord();
     const call = { type: 'tool_call', start: golden.start, end: golden.start } as ToolCallRecord;
-    // Read only as the build opens the call, once the run's start has ended.
+    let reads = 0;
+    // Its second read, the build's, throws.
     Object.defineProperty(call, 'name', {
       get(): string {
-        throw new Error('the name could not be read');
+        reads += 1;
+        if (reads > 1) throw new Error('the name could not be read');
+        return 't';
       },
     });
     try {
@@ -376,6 +389,7 @@ describe('a recorded run', () => {
     } finally {
       await h.telmoni.shutdown();
     }
+    expect(asked, 'the run had opened').toBe(1);
     expect(h.transport.requests).toEqual([]);
   });
 
@@ -420,6 +434,18 @@ describe('a recorded run', () => {
     const run = asNumbers.transport.spans().find((span) => span.name === 'invoke_agent bot')!;
     expect([run.startTimeUnixNano, run.endTimeUnixNano]).toEqual(['1000000000', '2500000000']);
     expect(asNumbers.transport.requests.map((r) => r.body)).toEqual(asDates.transport.requests.map((r) => r.body));
+  });
+
+  it('sends one ending at the last millisecond ingest reads, in July 2554', async () => {
+    const h = harness();
+    try {
+      h.telmoni.recordRun({ runId: theRecord().runId, agent: 'bot', start: 1000, end: 18_446_744_073_709 });
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    const run = h.transport.spans().find((span) => span.name === 'invoke_agent bot')!;
+    expect(run.endTimeUnixNano).toBe('18446744073709000000');
   });
 
   it('takes a trace of its own and leaves the live run where it was', async () => {
@@ -471,12 +497,55 @@ describe('a recorded run', () => {
   });
 
   const start = Date.parse('2026-10-12T09:00:00.000Z');
-  it.each<[string, Partial<RunRecord>, ErrorConstructor, RegExp]>([
+  const step: StepRecord = { type: 'step', name: 's', start, end: start };
+  const tool: ToolCallRecord = { type: 'tool_call', name: 't', start, end: start };
+  it.each<[string, Partial<RunRecord> | ((record: RunRecord) => RunRecord), ErrorConstructor, RegExp]>([
     ['a blank agent', { agent: ' ' }, TypeError, /agent's name/],
     ['a run id that is not a UUID', { runId: 'run-1' }, TypeError, /must be a UUID/],
     ['a run id with some of its hyphens', { runId: '3d6f8a1c5b2e-4f7a-9c0d-8e1f2a3b4c5d' }, TypeError, /must be a UUID/],
     ['the nil UUID', { runId: '00000000-0000-0000-0000-000000000000' }, TypeError, /nil UUID/],
     ['a time that is not one', { start: Number.NaN }, TypeError, /Date or milliseconds/],
+    ['a time before the epoch', { start: -1 }, RangeError, /after the Unix epoch/],
+    ['a time at the epoch itself', { start: 0 }, RangeError, /after the Unix epoch/],
+    ['a time past 2554', { end: Date.parse('2600-01-01T00:00:00.000Z') }, RangeError, /2\^64 nanoseconds/],
+    ['a time a millisecond past 2^64 nanoseconds', { end: 18_446_744_073_710 }, RangeError, /2\^64 nanoseconds/],
+    ["a run's agent past 128 characters", { agent: 'a'.repeat(129) }, RangeError, /run's agent must be up to 128 characters/],
+    ["a run's user past 128 characters", { userId: 'u'.repeat(129) }, RangeError, /run's userId must be up to 128/],
+    ["a run's session past 200 characters", { sessionId: 's'.repeat(201) }, RangeError, /run's sessionId must be up to 200/],
+    ["a run's error type past 128 characters", { errorType: 'E'.repeat(129) }, RangeError, /run's errorType must be up to 128/],
+    ["a step's name past 128 characters", { inside: [{ ...step, name: 'n'.repeat(129) }] }, RangeError, /step's name must be up to 128/],
+    [
+      "a tool call's name past 128 characters, in a step",
+      { inside: [{ ...step, calls: [{ ...tool, name: 't'.repeat(129) }] }] },
+      RangeError,
+      /tool call's name must be up to 128/,
+    ],
+    [
+      "a model call's model past 128 characters",
+      { inside: [{ type: 'model_call', model: 'm'.repeat(129), start, end: start }] },
+      RangeError,
+      /model call's model must be up to 128/,
+    ],
+    [
+      "a model call's operation and model past 127 characters together",
+      { inside: [{ type: 'model_call', model: 'm'.repeat(124), start, end: start }] },
+      RangeError,
+      /operation and model must be up to 127/,
+    ],
+    [
+      "a model call's provider past 128 characters",
+      { inside: [{ type: 'model_call', model: 'm', provider: 'p'.repeat(129), start, end: start }] },
+      RangeError,
+      /model call's provider must be up to 128/,
+    ],
+    ["a tool call's error type past 128 characters", { inside: [{ ...tool, errorType: 'E'.repeat(129) }] }, RangeError, /tool call's errorType must be up to 128/],
+    ["a step's name that is empty", { inside: [{ ...step, name: '' }] }, TypeError, /step's name cannot be empty/],
+    [
+      "a model call's model that is empty",
+      { inside: [{ type: 'model_call', model: '', start, end: start }] },
+      TypeError,
+      /model call's model cannot be empty/,
+    ],
     ['a run that ends before it starts', { end: start - 1000 }, RangeError, /end before it starts/],
     [
       'a call that ends before it starts',
@@ -500,15 +569,241 @@ describe('a recorded run', () => {
       TypeError,
       /type must be/,
     ],
-  ])('is refused, sending nothing, for %s', async (_what, change, kind, message) => {
-    const h = harness();
+    ['an item that is null', { inside: [null as unknown as StepRecord] }, TypeError, /item's type must be/],
+    ['a user id that is no string', { userId: 42 as unknown as string }, TypeError, /userId must be a string/],
+    ['a session id that is no string', { sessionId: 7 as unknown as string }, TypeError, /sessionId must be a string/],
+    ['tags that are a string', { tags: 'ab' as unknown as Record<string, string> }, TypeError, /an object of strings/],
+    ['tags boxed as a string', { tags: Object('ab') as Record<string, string> }, TypeError, /an object of strings/],
+    ['tags that are an array', { tags: ['ab'] as unknown as Record<string, string> }, TypeError, /an object of strings/],
+    ['tags that are a Map', { tags: new Map([['team', 'x']]) as unknown as Record<string, string> }, TypeError, /an object/],
+    ['a tag that is no string', { tags: { team: 1 } as unknown as Record<string, string> }, TypeError, /of strings/],
+    ['an error type that is no string', { errorType: {} as unknown as string }, TypeError, /errorType must be/],
+    ['cancelled that is no boolean', { cancelled: 'false' as unknown as boolean }, TypeError, /be a boolean/],
+    ["a step's name that is no string", { inside: [{ ...step, name: 5 as unknown as string }] }, TypeError, /name must/],
+    [
+      "a model call's model that is no string",
+      { inside: [{ type: 'model_call', model: null as unknown as string, start, end: start }] },
+      TypeError,
+      /model call's model must be a string/,
+    ],
+    [
+      "a model call's provider that is no string",
+      { inside: [{ type: 'model_call', model: 'm', start, end: start, provider: 5 as unknown as string }] },
+      TypeError,
+      /provider must be a string/,
+    ],
+    [
+      "a model call's operation that is no string",
+      { inside: [{ type: 'model_call', model: 'm', start, end: start, operation: 5 as unknown as string }] },
+      TypeError,
+      /operation must be a string/,
+    ],
+    [
+      "a model call's usage that is no object",
+      { inside: [{ type: 'model_call', model: 'm', start, end: start, usage: 5 as unknown as Usage }] },
+      TypeError,
+      /usage must be an object/,
+    ],
+    [
+      "a model call's usage that is an array",
+      { inside: [{ type: 'model_call', model: 'm', start, end: start, usage: [1, 2] as unknown as Usage }] },
+      TypeError,
+      /usage must be an object/,
+    ],
+    [
+      'items that change between reads, refused for those it holds first',
+      (record) =>
+        Object.defineProperty({ ...record }, 'inside', {
+          get: ((reads) => () => (reads++ === 0 ? [{ ...step, name: 5 }] : [tool]))(0),
+        }),
+      TypeError,
+      /step's name must be a string/,
+    ],
+    [
+      "a tool call's name in a step that is no string",
+      { inside: [{ ...step, calls: [{ ...tool, name: null as unknown as string }] }] },
+      TypeError,
+      /tool call's name must be a string/,
+    ],
+    [
+      'a step inside a step',
+      { inside: [{ type: 'step', name: 's', start, end: start, calls: [{ ...step } as unknown as CallRecord] }] },
+      TypeError,
+      /call's type must be/,
+    ],
+    ['inside that is an iterator', { inside: once(tool) as unknown as CallRecord[] }, TypeError, /inside must be an array/],
+    [
+      "a step's calls that are an iterator",
+      { inside: [{ ...step, calls: once(tool) as unknown as CallRecord[] }] },
+      TypeError,
+      /calls must be an array/,
+    ],
+  ])('is refused, opening and sending nothing, for %s', async (_what, change, kind, message) => {
+    // The record's own span asks the root sampler as it opens.
+    const sampler = new Hooked();
+    let asked = 0;
+    sampler.hook = () => {
+      asked += 1;
+    };
+    const h = harness({ sampler });
+    // Made anew for each try, since a getter may count its reads.
+    const make = (): RunRecord => (typeof change === 'function' ? change(theRecord()) : { ...theRecord(), ...change });
     try {
-      expect(() => h.telmoni.recordRun({ ...theRecord(), ...change })).toThrow(kind);
-      expect(() => h.telmoni.recordRun({ ...theRecord(), ...change })).toThrow(message);
+      expect(() => h.telmoni.recordRun(make())).toThrow(kind);
+      expect(() => h.telmoni.recordRun(make())).toThrow(message);
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
     }
     expect(h.transport.requests).toEqual([]);
+    expect(asked).toBe(0);
+  });
+
+  /** Its calls built afresh on each read, as a getter over rows builds them. */
+  function rebuilt(): ModelCallRecord[] {
+    return [1, 2, 3].map((n) => ({
+      type: 'model_call',
+      model: `m${n}`,
+      start,
+      end: start,
+      usage: { inputTokens: n },
+    }));
+  }
+
+  // A getter, since a spread would read it into a plain array.
+  it.each<[string, (record: RunRecord) => RunRecord]>([
+    ['inside', (record) => Object.defineProperty({ ...record }, 'inside', { get: rebuilt })],
+    ["a step's calls", (record) => ({ ...record, inside: [Object.defineProperty({ ...step }, 'calls', { get: rebuilt })] })],
+  ])('is read once, each call with its own tokens, when %s is built on each read', async (_what, build) => {
+    const h = harness();
+    try {
+      h.telmoni.recordRun(build(theRecord()));
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    const tokens = h.transport
+      .spans()
+      .filter((span) => span.name.startsWith('chat'))
+      .map((span) => [span.name, attributesOf(span)['gen_ai.usage.input_tokens']]);
+    expect(tokens).toEqual([
+      ['chat m1', 1],
+      ['chat m2', 2],
+      ['chat m3', 3],
+    ]);
+  });
+
+  it('sends the tags it checked, read before the items whose getter changes them', async () => {
+    const tags: Record<string, string> = { team: 'x' };
+    const record = Object.defineProperty({ ...theRecord(), tags }, 'inside', {
+      get: () => {
+        tags['rows'] = '1';
+        return [tool];
+      },
+    });
+    const h = harness();
+    try {
+      h.telmoni.recordRun(record);
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    const run = h.transport.spans().find((span) => span.name === 'invoke_agent claude-code')!;
+    const sent = Object.entries(attributesOf(run)).filter(([key]) => key.startsWith('telmoni.tag.'));
+    expect(sent).toEqual([['telmoni.tag.team', 'x']]);
+  });
+
+  it("takes tags of a class of the caller's own, its fields as the tags", async () => {
+    class Labels {
+      [key: string]: string;
+      constructor() {
+        this['team'] = 'x';
+      }
+    }
+    const h = harness();
+    try {
+      h.telmoni.recordRun({ ...theRecord(), tags: new Labels() });
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    const run = h.transport.spans().find((span) => span.name === 'invoke_agent claude-code')!;
+    expect(attributesOf(run)['telmoni.tag.team']).toBe('x');
+  });
+
+  it('sends a tool call with an empty name, which ingest reads as none', async () => {
+    const h = harness();
+    try {
+      h.telmoni.recordRun({ ...theRecord(), inside: [{ ...tool, name: '' }] });
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    expect(h.transport.spans().map((span) => span.name)).toContain('execute_tool ');
+  });
+
+  it("takes a usage of a class of the caller's own, its counts read as fields", async () => {
+    class Counted {
+      get inputTokens(): number {
+        return 9;
+      }
+    }
+    const h = harness();
+    try {
+      h.telmoni.recordRun({ ...theRecord(), inside: [{ type: 'model_call', model: 'm', start, end: start, usage: new Counted() }] });
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    const call = h.transport.spans().find((span) => span.name === 'chat m')!;
+    expect(attributesOf(call)['gen_ai.usage.input_tokens']).toBe(9);
+  });
+
+  it("sends a record at ingest's text caps whole, counted in characters rather than UTF-16's units", async () => {
+    const start = Date.parse('2026-10-12T09:00:00.000Z');
+    // Two of UTF-16's units each.
+    const smile = String.fromCodePoint(0x1f600);
+    const h = harness();
+    try {
+      h.telmoni.recordRun({
+        ...theRecord(),
+        agent: smile.repeat(128),
+        userId: 'u'.repeat(128),
+        sessionId: '\ud83d\ude00'.repeat(200),
+        inside: [
+          {
+            type: 'step',
+            name: 'n'.repeat(128),
+            start,
+            end: start,
+            calls: [{ type: 'tool_call', name: 't'.repeat(128), errorType: 'E'.repeat(128), start, end: start }],
+          },
+          { type: 'model_call', model: smile.repeat(123), provider: 'p'.repeat(128), start, end: start },
+        ],
+      });
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    const names = h.transport.spans().map((span) => span.name);
+    expect(names).toEqual(expect.arrayContaining(['n'.repeat(128), `chat ${smile.repeat(123)}`, `execute_tool ${'t'.repeat(128)}`]));
+  });
+
+  it('sends its first 32 tags and its own attributes, its error and its cancelling among them', async () => {
+    const tags = Object.fromEntries(Array.from({ length: 130 }, (_, n) => [`t${String(n).padStart(3, '0')}`, 'v']));
+    const h = harness();
+    try {
+      h.telmoni.recordRun({ ...theRecord(), tags, errorType: 'Boom', cancelled: true });
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    const run = h.transport.spans().find((span) => span.name === 'invoke_agent claude-code')!;
+    const attributes = attributesOf(run);
+    const sent = Object.keys(attributes).filter((key) => key.startsWith('telmoni.tag.'));
+    expect(sent).toEqual(Array.from({ length: 32 }, (_, n) => `telmoni.tag.t${String(n).padStart(3, '0')}`));
+    expect(attributes['error.type']).toBe('Boom');
+    expect(attributes['telmoni.cancelled']).toBe(true);
+    expect(h.warnings).toEqual(['telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent']);
   });
 });

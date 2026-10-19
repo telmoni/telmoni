@@ -16,6 +16,18 @@ export const RUN_ID = 'telmoni.run_id';
 export const AGENT = 'telmoni.agent';
 export const USER_ID = 'user.id';
 export const TAG_PREFIX = 'telmoni.tag.';
+/** The most tags a run carries: ingest keeps no more (its `TAGS_MAX`). */
+export const TAGS_MAX = 32;
+/** A tag's longest key and value, in characters: ingest drops a tag past either. */
+export const TAG_KEY_MAX = 64;
+export const TAG_VALUE_MAX = 256;
+/** Ingest's longest text of each, in characters: it refuses a span past one. */
+export const NAME_MAX = 128;
+export const ERROR_TYPE_MAX = 128;
+export const MODEL_MAX = 128;
+export const PROVIDER_MAX = 128;
+export const USER_ID_MAX = 128;
+export const SESSION_ID_MAX = 200;
 export const BOUND_STALL_AFTER_S = 'telmoni.bound.stall_after_s';
 export const BOUND_MAX_STEPS = 'telmoni.bound.max_steps';
 export const BOUND_MAX_COST_USD = 'telmoni.bound.max_cost_usd';

@@ -9,8 +9,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"maps"
 	"reflect"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -339,6 +343,7 @@ func TestTheSampleRateDropsARecordWhole(t *testing.T) {
 }
 
 func TestARecordRefusedReturnsAnErrorAndSendsNothing(t *testing.T) {
+	const outOfRange = "telmoni: a recorded time must fall after the Unix epoch and less than 2^64 nanoseconds after it"
 	start := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
 	backwards := telmoni.StepRecord{
 		Name:  "s",
@@ -363,6 +368,64 @@ func TestARecordRefusedReturnsAnErrorAndSendsNothing(t *testing.T) {
 		{"a call that ends before it starts, last in the record", func(r *telmoni.RunRecord) {
 			r.Inside = append(r.Inside, backwards)
 		}, "end before it starts"},
+		{"a start at the Unix epoch", func(r *telmoni.RunRecord) { r.Start = time.Unix(0, 0) }, outOfRange},
+		{"a step that starts before 1970", func(r *telmoni.RunRecord) {
+			r.Inside = append(r.Inside, telmoni.StepRecord{Name: "s", Start: time.Date(1969, 12, 31, 23, 59, 59, 0, time.UTC), End: start})
+		}, outOfRange},
+		{"a call that ends 2^64 nanoseconds past the epoch", func(r *telmoni.RunRecord) {
+			r.Inside = append(r.Inside, telmoni.ToolCallRecord{Name: "t", Start: start, End: time.Date(2554, 7, 21, 23, 34, 33, 709551616, time.UTC)})
+		}, outOfRange},
+		{"a run that ends in 3000", func(r *telmoni.RunRecord) { r.End = time.Date(3000, 1, 1, 0, 0, 0, 0, time.UTC) }, outOfRange},
+		{"a step with no name", func(r *telmoni.RunRecord) {
+			r.Inside = append(r.Inside, telmoni.StepRecord{Start: start, End: start})
+		}, "cannot be empty"},
+		{"a model call with no model, in a step", func(r *telmoni.RunRecord) {
+			r.Inside = append(r.Inside, telmoni.StepRecord{Name: "s", Start: start, End: start, Calls: []telmoni.CallRecord{
+				telmoni.ModelCallRecord{Start: start, End: start},
+			}})
+		}, "cannot be empty"},
+		{"a model call with no model", func(r *telmoni.RunRecord) {
+			r.Inside = append(r.Inside, telmoni.ModelCallRecord{Start: start, End: start})
+		}, "cannot be empty"},
+		{"an agent of 129 characters", func(r *telmoni.RunRecord) { r.Agent = strings.Repeat("a", 129) },
+			"telmoni: a recorded run's Agent must be up to 128 characters"},
+		{"a user of 129 characters", func(r *telmoni.RunRecord) { r.UserID = strings.Repeat("u", 129) },
+			"telmoni: a recorded run's UserID must be up to 128 characters"},
+		{"a session of 201 characters", func(r *telmoni.RunRecord) { r.SessionID = strings.Repeat("s", 201) },
+			"telmoni: a recorded run's SessionID must be up to 200 characters"},
+		{"a run's error type of 129 characters", func(r *telmoni.RunRecord) { r.ErrorType = strings.Repeat("e", 129) },
+			"telmoni: a recorded run's ErrorType must be up to 128 characters"},
+		{"a step's name of 129 characters", func(r *telmoni.RunRecord) {
+			r.Inside = append(r.Inside, telmoni.StepRecord{Name: strings.Repeat("s", 129), Start: start, End: start})
+		}, "telmoni: a recorded step's Name must be up to 128 characters"},
+		{"a step's error type of 129 characters", func(r *telmoni.RunRecord) {
+			r.Inside = append(r.Inside, telmoni.StepRecord{Name: "s", ErrorType: strings.Repeat("e", 129), Start: start, End: start})
+		}, "telmoni: a recorded step's ErrorType must be up to 128 characters"},
+		{"a model of 129 characters", func(r *telmoni.RunRecord) {
+			r.Inside = append(r.Inside, telmoni.ModelCallRecord{Model: strings.Repeat("m", 129), Start: start, End: start})
+		}, "telmoni: a recorded model call's Model must be up to 128 characters"},
+		{"a provider of 129 characters", func(r *telmoni.RunRecord) {
+			r.Inside = append(r.Inside, telmoni.ModelCallRecord{Model: "m", Provider: strings.Repeat("p", 129), Start: start, End: start})
+		}, "telmoni: a recorded model call's Provider must be up to 128 characters"},
+		{"a model call's error type of 129 characters", func(r *telmoni.RunRecord) {
+			r.Inside = append(r.Inside, telmoni.ModelCallRecord{Model: "m", ErrorType: strings.Repeat("e", 129), Start: start, End: start})
+		}, "telmoni: a recorded model call's ErrorType must be up to 128 characters"},
+		{"chat and a model of 128 characters together", func(r *telmoni.RunRecord) {
+			r.Inside = append(r.Inside, telmoni.ModelCallRecord{Model: strings.Repeat("m", 124), Start: start, End: start})
+		}, "telmoni: a recorded model call's operation and model must be up to 127 characters together"},
+		{"an operation and model of 128 characters together, in a step", func(r *telmoni.RunRecord) {
+			r.Inside = append(r.Inside, telmoni.StepRecord{Name: "s", Start: start, End: start, Calls: []telmoni.CallRecord{
+				telmoni.ModelCallRecord{Operation: "generate_content", Model: strings.Repeat("é", 112), Start: start, End: start},
+			}})
+		}, "telmoni: a recorded model call's operation and model must be up to 127 characters together"},
+		{"a tool's name of 129 characters", func(r *telmoni.RunRecord) {
+			r.Inside = append(r.Inside, telmoni.ToolCallRecord{Name: strings.Repeat("t", 129), Start: start, End: start})
+		}, "telmoni: a recorded tool call's Name must be up to 128 characters"},
+		{"a tool call's error type of 129 characters, in a step", func(r *telmoni.RunRecord) {
+			r.Inside = append(r.Inside, telmoni.StepRecord{Name: "s", Start: start, End: start, Calls: []telmoni.CallRecord{
+				telmoni.ToolCallRecord{Name: "t", ErrorType: strings.Repeat("e", 129), Start: start, End: start},
+			}})
+		}, "telmoni: a recorded tool call's ErrorType must be up to 128 characters"},
 		{"a nil item", func(r *telmoni.RunRecord) { r.Inside = append(r.Inside, nil) }, "a recorded item must be"},
 		{"a nil pointer to a call", func(r *telmoni.RunRecord) {
 			r.Inside = append(r.Inside, telmoni.StepRecord{
@@ -386,6 +449,78 @@ func TestARecordRefusedReturnsAnErrorAndSendsNothing(t *testing.T) {
 				t.Errorf("a record refused sent %d exports", sent)
 			}
 		})
+	}
+}
+
+// Ingest's first and last times, names of spaces, and a tool's empty name,
+// which ingest reads as none, are sent as given.
+func TestARecordAtTheEdgesOfWhatIngestReadsIsSentAsGiven(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	first, last := time.Unix(0, 1), time.Date(2554, 7, 21, 23, 34, 33, 709551615, time.UTC)
+	record := theRecord(t)
+	record.Start, record.End = first, last
+	record.Inside = []telmoni.RecordItem{telmoni.StepRecord{Name: " ", Start: first, End: last, Calls: []telmoni.CallRecord{
+		telmoni.ToolCallRecord{Name: " ", Start: first, End: last},
+		telmoni.ToolCallRecord{Start: first, End: last},
+		telmoni.ModelCallRecord{Model: " ", Start: first, End: last},
+	}}}
+	recordRun(t, h, record)
+	spans := h.transport.spans(t)
+	want := []string{" ", "chat  ", "execute_tool ", "execute_tool  ", "invoke_agent claude-code", "telmoni.run.start"}
+	if got := sortedNames(spans); !reflect.DeepEqual(got, want) {
+		t.Fatalf("spans sent: %q, want %q", got, want)
+	}
+	for _, span := range spans {
+		end := "18446744073709551615"
+		if span["name"] == "telmoni.run.start" {
+			end = "1"
+		}
+		if span["startTimeUnixNano"] != "1" || span["endTimeUnixNano"] != end {
+			t.Errorf("%q runs from %v to %v, want from 1 to %s", span["name"], span["startTimeUnixNano"], span["endTimeUnixNano"], end)
+		}
+	}
+}
+
+// Text at ingest's caps, counted in characters, is sent as given.
+func TestARecordAtIngestsCapsIsSentAsGiven(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	// Two bytes a character: counted in bytes, each would be past its cap.
+	wide := func(n int) string { return strings.Repeat("é", n) }
+	record := theRecord(t)
+	start := record.Start
+	record.Agent, record.UserID, record.SessionID, record.ErrorType = wide(128), wide(128), wide(200), wide(128)
+	record.Inside = []telmoni.RecordItem{
+		telmoni.StepRecord{Name: wide(128), ErrorType: wide(128), Start: start, End: start, Calls: []telmoni.CallRecord{
+			telmoni.ToolCallRecord{Name: wide(128), ErrorType: wide(128), Start: start, End: start},
+		}},
+		telmoni.ModelCallRecord{Model: wide(123), Provider: wide(128), ErrorType: wide(128), Start: start, End: start},
+		telmoni.ModelCallRecord{Operation: "generate_content", Model: wide(111), Start: start, End: start},
+	}
+	recordRun(t, h, record)
+	spans := h.transport.spans(t)
+	if len(spans) != 6 {
+		t.Fatalf("sent %d spans, want the record's 6", len(spans))
+	}
+	for name, want := range map[string]map[string]any{
+		"invoke_agent " + wide(128):     {"telmoni.agent": wide(128), "user.id": wide(128), "gen_ai.conversation.id": wide(200), "error.type": wide(128)},
+		wide(128):                       {"error.type": wide(128)},
+		"execute_tool " + wide(128):     {"gen_ai.tool.name": wide(128), "error.type": wide(128)},
+		"chat " + wide(123):             {"gen_ai.request.model": wide(123), "gen_ai.provider.name": wide(128), "error.type": wide(128)},
+		"generate_content " + wide(111): {"gen_ai.request.model": wide(111)},
+	} {
+		span := byName(spans)[name]
+		if span == nil {
+			t.Fatalf("a span of %d characters was not sent", len([]rune(name)))
+		}
+		attributes := attributesOf(t, span)
+		for key, value := range want {
+			if attributes[key] != value {
+				t.Errorf("%s of a span of %d characters is not as given", key, len([]rune(name)))
+			}
+		}
+	}
+	if warnings := h.logs.warnings(); len(warnings) != 0 {
+		t.Errorf("warnings = %q, want none", warnings)
 	}
 }
 
@@ -721,5 +856,130 @@ func TestASpanEndingWhileARecordIsBuiltTravelsApart(t *testing.T) {
 				t.Fatalf("export %d is in traces %v, want one", i, traces)
 			}
 		}
+	}
+}
+
+// recordingLogger keeps each warning, recording a run of its own as it logs
+// the first, as a handler sending the application's logs to Telmoni might.
+type recordingLogger struct {
+	logSink
+	client *telmoni.Client
+	once   sync.Once
+	err    error
+}
+
+func (l *recordingLogger) Handle(ctx context.Context, r slog.Record) error {
+	l.once.Do(func() {
+		at := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
+		l.err = l.client.RecordRun(ctx, telmoni.RunRecord{RunID: "0191a3b4-3333-4aaa-8bbb-000000000003", Agent: "logged", Start: at, End: at})
+	})
+	return l.logSink.Handle(ctx, r)
+}
+
+func (l *recordingLogger) WithAttrs([]slog.Attr) slog.Handler { return l }
+func (l *recordingLogger) WithGroup(string) slog.Handler      { return l }
+
+// recordWarnedOf records record through a client whose logger records a run
+// as it warns, failing the test should a warning wait on the record's hold.
+func recordWarnedOf(t *testing.T, record telmoni.RunRecord) (*harness, *recordingLogger) {
+	t.Helper()
+	logs := &recordingLogger{}
+	h := newHarness(t, testConfig(), nil, telmoni.WithLogger(slog.New(logs)))
+	logs.client = h.client
+	done := make(chan error, 1)
+	go func() { done <- h.client.RecordRun(context.Background(), record) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RecordRun: %v", err)
+		}
+	case <-time.After(waitTimeout):
+		t.Fatal("RecordRun waits on its own hold: a warning was logged under it")
+	}
+	h.flush()
+	if spans := h.transport.spans(t); logs.err != nil || byName(spans)["invoke_agent logged"] == nil {
+		t.Fatalf("the logger's own record (%v) is not among the spans sent: %v", logs.err, sortedNames(spans))
+	}
+	return h, logs
+}
+
+// A record sends its first 32 tags by key, warned of before its hold.
+func TestARecordSendsItsFirst32TagsByKeyWarnedOfBeforeItsHold(t *testing.T) {
+	record := theRecord(t)
+	record.Tags = numberedTags(130)
+	h, logs := recordWarnedOf(t, record)
+	run := byName(h.transport.spans(t))["invoke_agent claude-code"]
+	if run == nil {
+		t.Fatalf("spans sent: %v", sortedNames(h.transport.spans(t)))
+	}
+	attributes := attributesOf(t, run)
+	if got, want := tagsOf(attributes), slices.Sorted(maps.Keys(numberedTags(32))); !reflect.DeepEqual(got, want) {
+		t.Errorf("tags sent: %v\nwant the first 32 by key: %v", got, want)
+	}
+	if attributes["telmoni.cancelled"] != true {
+		t.Errorf("telmoni.cancelled = %v, want the mark the run ended with", attributes["telmoni.cancelled"])
+	}
+	want := []string{"telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent"}
+	if warnings := logs.warnings(); !reflect.DeepEqual(warnings, want) {
+		t.Errorf("warnings = %q, want %q", warnings, want)
+	}
+}
+
+// A tag ingest drops takes none of a record's 32, warned of before its hold.
+func TestATagIngestDropsTakesNoneOfARecords32WarnedOfBeforeItsHold(t *testing.T) {
+	record := theRecord(t)
+	record.Tags = numberedTags(32)
+	maps.Copy(record.Tags, droppedTags())
+	h, logs := recordWarnedOf(t, record)
+	run := byName(h.transport.spans(t))["invoke_agent claude-code"]
+	if run == nil {
+		t.Fatalf("spans sent: %v", sortedNames(h.transport.spans(t)))
+	}
+	if got, want := tagsOf(attributesOf(t, run)), slices.Sorted(maps.Keys(numberedTags(32))); !reflect.DeepEqual(got, want) {
+		t.Errorf("tags sent: %q\nwant all 32 ingest keeps: %q", got, want)
+	}
+	want := []string{"telmoni: a tag's key must be 1 to 64 characters and its value up to 256; the tag is not sent"}
+	if warnings := logs.warnings(); !reflect.DeepEqual(warnings, want) {
+		t.Errorf("warnings = %q, want %q", warnings, want)
+	}
+}
+
+// A record's count below zero is left off its call, warned of before the hold.
+func TestARecordedTokenCountBelowZeroIsLeftOffWarnedOfBeforeItsHold(t *testing.T) {
+	record := theRecord(t)
+	start := record.Start
+	record.Inside = []telmoni.RecordItem{
+		telmoni.ModelCallRecord{Model: "alone", Start: start, End: start, Usage: &telmoni.Usage{InputTokens: 5, CacheWriteInputTokens: -2}},
+		telmoni.StepRecord{Name: "s", Start: start, End: start, Calls: []telmoni.CallRecord{
+			&telmoni.ModelCallRecord{Model: "in a step", Start: start, End: start, Usage: &telmoni.Usage{OutputTokens: -1}},
+		}},
+	}
+	h, logs := recordWarnedOf(t, record)
+	spans := byName(h.transport.spans(t))
+	for name, want := range map[string]map[string]any{
+		"chat alone": {
+			"gen_ai.usage.input_tokens":            int64(5),
+			"gen_ai.usage.output_tokens":           int64(0),
+			"gen_ai.usage.cache_read.input_tokens": int64(0),
+		},
+		"chat in a step": {
+			"gen_ai.usage.input_tokens":             int64(0),
+			"gen_ai.usage.cache_read.input_tokens":  int64(0),
+			"gen_ai.usage.cache_write.input_tokens": int64(0),
+		},
+	} {
+		if spans[name] == nil {
+			t.Fatalf("spans sent: %v", sortedNames(h.transport.spans(t)))
+		}
+		if got := attributesUnder(attributesOf(t, spans[name]), "gen_ai.usage."); !reflect.DeepEqual(got, want) {
+			t.Errorf("%s carries the counts %v, want %v", name, got, want)
+		}
+	}
+	want := []string{
+		"telmoni: gen_ai.usage.cache_write.input_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
+		"telmoni: gen_ai.usage.output_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
+	}
+	if warnings := logs.warnings(); !reflect.DeepEqual(warnings, want) {
+		t.Errorf("warnings = %q\nwant one for each count: %q", warnings, want)
 	}
 }

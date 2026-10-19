@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -206,6 +208,45 @@ func attributesOf(t *testing.T, span map[string]any) map[string]any {
 			out[key] = v
 		}
 	}
+	return out
+}
+
+// attributesUnder is the attributes whose keys start with prefix.
+func attributesUnder(attributes map[string]any, prefix string) map[string]any {
+	out := map[string]any{}
+	for key, value := range attributes {
+		if strings.HasPrefix(key, prefix) {
+			out[key] = value
+		}
+	}
+	return out
+}
+
+// numberedTags is n tags keyed k000, k001 and on, so their order by key is
+// their number's.
+func numberedTags(n int) map[string]string {
+	tags := map[string]string{}
+	for i := range n {
+		tags[fmt.Sprintf("k%03d", i)] = "v"
+	}
+	return tags
+}
+
+// droppedTags is a tag of each kind ingest drops, each sorting before k000 so
+// it would crowd a numbered tag out of the 32.
+func droppedTags() map[string]string {
+	return map[string]string{"": "v", strings.Repeat("a", 65): "v", "b": strings.Repeat("v", 257)}
+}
+
+// tagsOf is the keys of the tags a span carries, in order.
+func tagsOf(attributes map[string]any) []string {
+	var out []string
+	for key := range attributes {
+		if tag, ok := strings.CutPrefix(key, "telmoni.tag."); ok {
+			out = append(out, tag)
+		}
+	}
+	slices.Sort(out)
 	return out
 }
 

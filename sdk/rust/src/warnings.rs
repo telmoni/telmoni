@@ -3,6 +3,7 @@
 //! platform answering the same thing on every export is heard once.
 
 use std::collections::HashSet;
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::Mutex;
 
 /// How many distinct warnings are remembered before the set starts over.
@@ -36,12 +37,17 @@ impl Warner {
             warned.insert(key)
         };
         if fresh {
-            (self.sink)(text);
+            self.give(text);
         }
     }
 
     /// `text`, every time: for a count, which is never the same warning twice.
     pub(crate) fn warn(&self, text: &str) {
-        (self.sink)(text);
+        self.give(text);
+    }
+
+    fn give(&self, text: &str) {
+        // The sink is the application's: a panic in it must not reach the agent.
+        let _ = panic::catch_unwind(AssertUnwindSafe(|| (self.sink)(text)));
     }
 }

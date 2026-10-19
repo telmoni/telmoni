@@ -65,7 +65,8 @@ export class Handle {
 
   /** Mark it failed, with the error's class and never its message. */
   fail(errorType: string): void {
-    this.span.setAttribute(contract.ERROR_TYPE, errorType);
+    // Ingest refuses the span over an empty one, and with a run's, the run.
+    if (errorType) this.span.setAttribute(contract.ERROR_TYPE, errorType);
     this.span.setStatus({ code: SpanStatusCode.ERROR });
   }
 
@@ -161,9 +162,8 @@ export class ModelCall extends Handle {
 
   /** What the model answered: its name, its tokens, and its messages. */
   answered(answer: ModelAnswer): void {
-    if (answer.responseModel !== undefined) {
-      this.span.setAttribute(contract.RESPONSE_MODEL, answer.responseModel);
-    }
+    const model = filled(answer.responseModel, 'response model', this.#warnOnce);
+    if (model !== undefined) this.span.setAttribute(contract.RESPONSE_MODEL, model);
     this.span.setAttributes(usageOf(answer.usage, this.#warnOnce));
     if (answer.outputMessages !== undefined) {
       this.span.setAttribute(contract.OUTPUT_MESSAGES, asJson(answer.outputMessages));
@@ -233,16 +233,22 @@ export class Opener {
     this.#warnOnce = warnOnce;
   }
 
-  run(agent: string, options: RunOptions): Run {
-    if (agent.trim() === '') throw new TypeError("a run needs its agent's name");
+  run(given: string, options: RunOptions): Run {
+    const named: unknown = given;
+    if (!isSet(named) || textOf(named).trim() === '') {
+      throw new TypeError("a run needs its agent's name");
+    }
+    const agent = asText(named, "run's agent", this.#warnOnce);
     const rate = options.sampleRate ?? this.#config.sampleRate;
     if (!(rate > 0 && rate <= 1)) throw new RangeError('sampleRate must be above 0 and up to 1');
     const bounds = boundsOf(options.bounds, this.#warnOnce);
     const sampledOut = rate < 1 && Math.random() >= rate;
     const runId = randomUUID();
     const inherited: Attributes = { [contract.RUN_ID]: runId, [contract.AGENT]: agent };
-    if (options.userId) inherited[contract.USER_ID] = options.userId;
-    if (options.sessionId) inherited[contract.SESSION_ID] = options.sessionId;
+    const user = filled(options.userId, 'user id', this.#warnOnce);
+    if (user !== undefined) inherited[contract.USER_ID] = user;
+    const session = filled(options.sessionId, 'session id', this.#warnOnce);
+    if (session !== undefined) inherited[contract.SESSION_ID] = session;
     // On every span of the run from its start, for the processor to drop: a
     // sampler's drop would clear the flag the application's spans inherit.
     if (sampledOut) inherited[contract.SAMPLED_OUT] = true;
@@ -252,10 +258,8 @@ export class Opener {
       ...inherited,
       ...bounds,
       [contract.SAMPLE_RATE]: rate,
+      ...tagsOf(Object.entries(options.tags ?? {}), this.#warnOnce),
     };
-    for (const [key, value] of Object.entries(options.tags ?? {})) {
-      attributes[`${contract.TAG_PREFIX}${key}`] = value;
-    }
     const parent = context.active();
     const span = this.#start(`invoke_agent ${agent}`, parent, attributes, SpanKind.INTERNAL);
     const run = new Run(this, span, parent, runId, agent, inherited, sampledOut);
@@ -283,11 +287,12 @@ export class Opener {
   }
 
   step(run: Run, parent: Context, name: string): Step {
-    const span = this.#start(name, parent, run.inherited, SpanKind.INTERNAL);
+    const span = this.#start(asText(name, "step's name", this.#warnOnce), parent, run.inherited, SpanKind.INTERNAL);
     return new Step(this, span, parent, run);
   }
 
-  modelCall(run: Run, parent: Context, model: string, options: ModelCallOptions): ModelCall {
+  modelCall(run: Run, parent: Context, given: string, options: ModelCallOptions): ModelCall {
+    const model = asText(given, 'model', this.#warnOnce);
     // Sent blank, the span would be named ` <model>` and ingest would read it
     // as a step.
     const operation =
@@ -297,7 +302,8 @@ export class Opener {
       [contract.OPERATION]: operation,
       [contract.REQUEST_MODEL]: model,
     };
-    if (options.provider) attributes[contract.PROVIDER] = options.provider;
+    const provider = filled(options.provider, 'provider', this.#warnOnce);
+    if (provider !== undefined) attributes[contract.PROVIDER] = provider;
     if (isSet(options.inputMessages)) {
       attributes[contract.INPUT_MESSAGES] = asJson(options.inputMessages);
     }
@@ -308,7 +314,8 @@ export class Opener {
     return new ModelCall(span, parent, run, this.#warnOnce);
   }
 
-  toolCall(run: Run, parent: Context, name: string, options: ToolCallOptions): ToolCall {
+  toolCall(run: Run, parent: Context, given: string, options: ToolCallOptions): ToolCall {
+    const name = asText(given, "tool's name", this.#warnOnce);
     const attributes: Attributes = {
       ...run.inherited,
       [contract.OPERATION]: contract.TOOL_OPERATION,
@@ -333,16 +340,32 @@ export class Opener {
    * the whole record.
    */
   record(record: RunRecord): void {
-    if (typeof record.agent !== 'string' || record.agent.trim() === '') {
+    const agent: unknown = record.agent;
+    if (typeof agent !== 'string' || agent.trim() === '') {
       throw new TypeError("a run needs its agent's name");
+    }
+    if ([...agent].length > contract.NAME_MAX) {
+      throw new RangeError(`a recorded run's agent must be up to ${contract.NAME_MAX} characters`);
     }
     const runHex = uuidHex(record.runId);
     // Checked whole before anything is queued, so a record refused sends
     // nothing rather than half a run.
-    for (const item of walk(record)) {
-      if (later(hrTimeOf(item.start), hrTimeOf(item.end))) {
-        throw new RangeError('a recorded span cannot end before it starts');
+    check(record, 'run');
+    // Read before the items, whose getters may change them.
+    const tags = record.tags ?? {};
+    const tagged = isObject(tags) ? Object.entries(tags) : undefined;
+    if (tagged === undefined || tagged.some(([, value]) => typeof value !== 'string')) {
+      throw new TypeError("a recorded run's tags must be an object of strings");
+    }
+    const items = read(record);
+    for (const each of [record, ...items.flatMap(([item, calls]) => [item, ...calls])]) {
+      const [start, end] = [hrTimeOf(each.start), hrTimeOf(each.end)];
+      // Ingest reads a time as nanoseconds from the epoch in 64 bits, and
+      // refuses the export over one that is not.
+      if (!readable(start) || !readable(end)) {
+        throw new RangeError('a recorded time must fall after the Unix epoch and less than 2^64 nanoseconds after it');
       }
+      if (later(start, end)) throw new RangeError('a recorded span cannot end before it starts');
     }
     const rate = this.#config.sampleRate;
     const runId = [
@@ -361,17 +384,15 @@ export class Opener {
       ...inherited,
       [contract.SAMPLE_RATE]: rate,
     };
-    for (const [key, value] of Object.entries(record.tags ?? {})) {
-      attributes[`${contract.TAG_PREFIX}${key}`] = value;
-    }
+    Object.assign(attributes, tagsOf(tagged, this.#warnOnce));
     // Sampled out, no span is built: none of a record's ends after it, and
     // the same record sent again draws again.
     if (rate < 1 && Math.random() >= rate) return;
     // Worked out before the record is built: a count that warns calls the
     // `warn` hook, which may record a run of its own.
     const usages = new Map<CallRecord, Attributes>();
-    for (const item of record.inside ?? []) {
-      for (const each of item.type === 'step' ? (item.calls ?? []) : [item]) {
+    for (const [item, calls] of items) {
+      for (const each of item.type === 'step' ? calls : [item]) {
         if (each.type === 'model_call') usages.set(each, usageOf(each.usage, this.#warnOnce));
       }
     }
@@ -402,18 +423,18 @@ export class Opener {
     };
     // Queued whole or not at all: a record that outgrows the queue's room
     // would lose its tail, the run's own span first.
-    this.#processor.record(runHex, spansIn(record), () => {
+    this.#processor.record(runHex, spansIn(items), () => {
       const span = open(`invoke_agent ${record.agent}`, ROOT_CONTEXT, attributes, SpanKind.INTERNAL, record.start);
       const ctx = trace.setSpan(ROOT_CONTEXT, span);
       const at = hrTimeOf(record.start);
       open(contract.RUN_START, ctx, { ...inherited, [contract.SAMPLE_RATE]: rate }, SpanKind.INTERNAL, record.start).end(
         at,
       );
-      for (const item of record.inside ?? []) {
+      for (const [item, calls] of items) {
         if (item.type === 'step') {
           const step = open(item.name, ctx, inherited, SpanKind.INTERNAL, item.start);
           const inner = trace.setSpan(ctx, step);
-          for (const each of item.calls ?? []) call(each, inner);
+          for (const each of calls) call(each, inner);
           close(step, item);
         } else {
           call(item, ctx);
@@ -461,34 +482,113 @@ function later(a: HrTime, b: HrTime): boolean {
   return a[0] > b[0] || (a[0] === b[0] && a[1] > b[1]);
 }
 
-type Recorded = RunRecord | StepRecord | CallRecord;
+type Item = StepRecord | CallRecord;
 
 /** How many spans a record queues: the run and its start, then each step and each call. */
-function spansIn(record: RunRecord): number {
-  let spans = 2;
-  for (const item of record.inside ?? []) {
-    spans += 1;
-    if (item.type === 'step') spans += (item.calls ?? []).length;
-  }
-  return spans;
+function spansIn(items: ReadonlyArray<readonly [Item, readonly CallRecord[]]>): number {
+  return items.reduce((spans, [, calls]) => spans + 1 + calls.length, 2);
 }
 
-function* walk(record: RunRecord): Generator<Recorded> {
-  yield record;
-  for (const item of record.inside ?? []) {
-    if (item.type !== 'step' && item.type !== 'model_call' && item.type !== 'tool_call') {
+/** The record's items, each step with its calls, read once and checked, so the items checked are the items built. */
+function read(record: RunRecord): Array<[Item, readonly CallRecord[]]> {
+  const inside = record.inside ?? [];
+  // Cast: narrowing the name itself by `Array.isArray` makes its items `any`.
+  if (!Array.isArray(inside as unknown)) {
+    throw new TypeError("a recorded run's inside must be an array, in the order it ran");
+  }
+  const items: Array<[Item, readonly CallRecord[]]> = [];
+  for (const item of inside) {
+    if (item?.type === 'model_call' || item?.type === 'tool_call') {
+      check(item, item.type);
+      items.push([item, []]);
+      continue;
+    }
+    if (item?.type !== 'step') {
       throw new TypeError("a recorded item's type must be 'step', 'model_call' or 'tool_call'");
     }
-    yield item;
-    if (item.type === 'step') {
-      for (const each of item.calls ?? []) {
-        if (each.type !== 'model_call' && each.type !== 'tool_call') {
-          throw new TypeError("a step's recorded call's type must be 'model_call' or 'tool_call'");
-        }
-        yield each;
+    check(item, 'step');
+    const given = item.calls ?? [];
+    if (!Array.isArray(given as unknown)) {
+      throw new TypeError("a recorded step's calls must be an array, in the order they ran");
+    }
+    const calls = [...given];
+    for (const each of calls) {
+      if (each?.type !== 'model_call' && each?.type !== 'tool_call') {
+        throw new TypeError("a step's recorded call's type must be 'model_call' or 'tool_call'");
       }
+      check(each, each.type);
+    }
+    items.push([item, calls]);
+  }
+  return items;
+}
+
+type Field = readonly [name: string, type: 'string' | 'boolean' | 'object', optional: boolean];
+
+/**
+ * Each recorded field's type, `null` or `undefined` too where optional:
+ * OpenTelemetry would warn of another mid-build, or send it wrong.
+ */
+const FIELDS: Record<'run' | Item['type'], readonly Field[]> = {
+  run: [
+    ['userId', 'string', true],
+    ['sessionId', 'string', true],
+  ],
+  step: [['name', 'string', false]],
+  model_call: [
+    ['model', 'string', false],
+    ['provider', 'string', true],
+    ['operation', 'string', true],
+    ['usage', 'object', true],
+  ],
+  tool_call: [['name', 'string', false]],
+};
+const OUTCOME: readonly Field[] = [
+  ['errorType', 'string', true],
+  ['cancelled', 'boolean', true],
+];
+
+/** The longest each recorded text may be, in characters, as ingest caps it. */
+const CAPS: Record<keyof typeof FIELDS, Readonly<Record<string, number>>> = {
+  run: { userId: contract.USER_ID_MAX, sessionId: contract.SESSION_ID_MAX },
+  step: { name: contract.NAME_MAX },
+  model_call: { model: contract.MODEL_MAX, provider: contract.PROVIDER_MAX },
+  tool_call: { name: contract.NAME_MAX },
+};
+
+function check(item: RunRecord | Item, kind: keyof typeof FIELDS): void {
+  const what = kind.replace('_', ' ');
+  const caps: Readonly<Record<string, number>> = { ...CAPS[kind], errorType: contract.ERROR_TYPE_MAX };
+  const read: Record<string, unknown> = {};
+  for (const [field, type, optional] of [...FIELDS[kind], ...OUTCOME]) {
+    const value: unknown = (item as unknown as Record<string, unknown>)[field];
+    read[field] = value;
+    if (optional && (value === undefined || value === null)) continue;
+    if (!(type === 'object' ? isObject(value) : typeof value === type)) {
+      const article = type === 'object' ? 'an' : 'a';
+      throw new TypeError(`a recorded ${what}'s ${field} must be ${article} ${type}`);
+    }
+    // Ingest refuses a step or a model named nothing; a tool's it reads as none.
+    if (value === '' && ((kind === 'step' && field === 'name') || field === 'model')) {
+      throw new TypeError(`a recorded ${what}'s ${field} cannot be empty`);
+    }
+    const most = caps[field];
+    if (most !== undefined && typeof value === 'string' && [...value].length > most) {
+      throw new RangeError(`a recorded ${what}'s ${field} must be up to ${most} characters`);
     }
   }
+  // Its span is named `<operation> <model>`, a name ingest caps too.
+  if (kind === 'model_call') {
+    const operation = typeof read.operation === 'string' && read.operation.trim() !== '' ? read.operation : 'chat';
+    if ([...operation].length + [...String(read.model)].length > contract.NAME_MAX - 1) {
+      throw new RangeError("a recorded model call's operation and model must be up to 127 characters together");
+    }
+  }
+}
+
+/** A literal or a class's instance: an array, a `Map` or a boxed primitive is of `typeof` object too. */
+function isObject(value: unknown): value is object {
+  return Object.prototype.toString.call(value) === '[object Object]';
 }
 
 function close(span: Span, outcome: RecordOutcome & { end: RecordTime }): void {
@@ -515,9 +615,12 @@ function usageOf(usage: Usage | undefined, warnOnce: WarnOnce): Attributes {
     [contract.CACHE_WRITE_INPUT_TOKENS, usage.cacheWriteInputTokens],
   ] as const) {
     if (!isSet(value)) continue;
-    const count = whole(value);
+    const count = whole(value, 0, 2 ** 63);
     if (count === undefined) {
-      warnOnce(`usage:${key}`, `telmoni: ${key} must be a finite number within 64 bits; the call is sent without it`);
+      warnOnce(
+        `usage:${key}`,
+        `telmoni: ${key} must be a whole number from 0 within 64 bits; the call is sent without it`,
+      );
     } else {
       out[key] = count;
     }
@@ -526,37 +629,135 @@ function usageOf(usage: Usage | undefined, warnOnce: WarnOnce): Attributes {
 }
 
 /**
- * What the run is held to; a bound JSON cannot carry is left off with one
- * warning, so a computed one never stops the agent's call nor loses a batch.
+ * What the run is held to; a bound ingest would refuse the run for is left
+ * off with one warning, so a computed one never costs the run.
  */
 function boundsOf(bounds: Bounds | undefined, warnOnce: WarnOnce): Attributes {
   const out: Attributes = {};
   if (!isSet(bounds)) return out;
-  const keep = (name: string, key: string, number: number | undefined): void => {
+  const keep = (name: string, key: string, number: number | undefined, allowed: string): void => {
     if (number === undefined) {
-      warnOnce(`run:${name}`, `telmoni: a run's ${name} must be a finite number within 64 bits; the run is sent without it`);
+      warnOnce(`run:${name}`, `telmoni: a run's ${name} must be ${allowed}; the run is sent without it`);
     } else {
       out[key] = number;
     }
   };
+  const fits = 'a whole number from 1 to 4294967295';
   if (isSet(bounds.stallAfterSeconds)) {
-    keep('stallAfterSeconds', contract.BOUND_STALL_AFTER_S, whole(bounds.stallAfterSeconds));
+    keep('stallAfterSeconds', contract.BOUND_STALL_AFTER_S, whole(bounds.stallAfterSeconds, 1, 2 ** 32), fits);
   }
-  if (isSet(bounds.maxSteps)) keep('maxSteps', contract.BOUND_MAX_STEPS, whole(bounds.maxSteps));
-  if (isSet(bounds.maxCostUsd)) keep('maxCostUsd', contract.BOUND_MAX_COST_USD, finite(bounds.maxCostUsd));
+  if (isSet(bounds.maxSteps)) keep('maxSteps', contract.BOUND_MAX_STEPS, whole(bounds.maxSteps, 1, 2 ** 32), fits);
+  if (isSet(bounds.maxCostUsd)) {
+    const cost = finite(bounds.maxCostUsd);
+    const above = cost !== undefined && cost > 0 ? cost : undefined;
+    keep('maxCostUsd', contract.BOUND_MAX_COST_USD, above, 'a finite number above 0');
+  }
   return out;
 }
 
-/** `value` truncated to a whole number JSON's 64-bit integers carry, or undefined. */
-function whole(value: unknown): number | undefined {
-  const number = Math.trunc(Number(value));
-  return Number.isFinite(number) && number >= -(2 ** 63) && number < 2 ** 63 ? number : undefined;
+/** `value` truncated to a whole number from `least` and below `end`, as ingest takes one, or undefined. */
+function whole(value: unknown, least: number, end: number): number | undefined {
+  const number = Math.trunc(numberOf(value));
+  return Number.isFinite(number) && number >= least && number < end ? number : undefined;
 }
 
 /** `value` as a finite number, or undefined. */
 function finite(value: unknown): number | undefined {
-  const number = Number(value);
+  const number = numberOf(value);
   return Number.isFinite(number) ? number : undefined;
+}
+
+const DECIMAL = /^\s*[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?\s*$/i;
+
+/**
+ * A number, a bigint or a decimal numeral's text: `Number` would make 1 of
+ * `true`, 0 of `''` and 16 of `'0x10'`, which Python's SDK leaves off.
+ */
+function numberOf(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'bigint' || value instanceof Number) return Number(value);
+  return typeof value === 'string' && DECIMAL.test(value) ? Number(value) : Number.NaN;
+}
+
+/**
+ * A run's tags as its span's attributes: the first `TAGS_MAX` of those
+ * ingest keeps, since past them they would crowd out the run's own.
+ */
+function tagsOf(given: ReadonlyArray<readonly [string, unknown]>, warnOnce: WarnOnce): Attributes {
+  const kept: Attributes = {};
+  let count = 0;
+  for (const [key, value] of given) {
+    if (!isSet(value)) continue;
+    const sent = tagValue(value);
+    const length = [...key].length;
+    // Ingest drops it before counting, so it takes no place among the 32.
+    if (length === 0 || length > contract.TAG_KEY_MAX || shown(sent) > contract.TAG_VALUE_MAX) {
+      warnOnce(
+        'run:tag',
+        "telmoni: a tag's key must be 1 to 64 characters and its value up to 256; the tag is not sent",
+      );
+    } else if (count === contract.TAGS_MAX) {
+      warnOnce('run:tags', 'telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent');
+    } else {
+      kept[`${contract.TAG_PREFIX}${key}`] = typeof sent === 'string' ? asText(value, 'tag', warnOnce) : sent;
+      count += 1;
+    }
+  }
+  return kept;
+}
+
+/**
+ * A tag's value: a boolean or a finite number as it is, which ingest writes
+ * as its own text, and anything else as its `String()`.
+ */
+function tagValue(value: unknown): string | number | boolean {
+  if (typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) return value;
+  return textOf(value);
+}
+
+/**
+ * The characters of ingest's text for a tag's value: a number's as Rust
+ * writes it, every digit and no exponent, so 1e300 takes 301.
+ */
+function shown(value: string | number | boolean): number {
+  if (typeof value !== 'number') return [...String(value)].length;
+  const [mantissa, exponent] = Math.abs(value).toExponential().split('e') as [string, string];
+  const digits = mantissa.replace('.', '').length;
+  const point = Number(exponent) + 1;
+  const length = point >= digits ? point : point > 0 ? digits + 1 : 2 - point + digits;
+  return length + (value < 0 ? 1 : 0);
+}
+
+/**
+ * `value` as text: one that is no string goes as its `String()` with one
+ * warning, where a span named by it would lose its batch at ingest.
+ */
+function asText(value: unknown, what: string, warnOnce: WarnOnce): string {
+  if (typeof value === 'string') return value;
+  warnOnce(`text:${what}`, `telmoni: a ${what} that is no string is sent as its text`);
+  return textOf(value);
+}
+
+/** `String(value)`, or its type where that throws, as a null-prototype object's does. */
+function textOf(value: unknown): string {
+  try {
+    return String(value);
+  } catch {
+    return typeof value;
+  }
+}
+
+/** `value` as `asText` reads it, or undefined where unset or empty, which ingest refuses. */
+function filled(value: unknown, what: string, warnOnce: WarnOnce): string | undefined {
+  const text = isSet(value) ? asText(value, what, warnOnce) : '';
+  return text === '' ? undefined : text;
+}
+
+/** Whether ingest reads `time`: after the epoch, and within 64 bits of nanoseconds, in 2554. */
+function readable([seconds, nanos]: HrTime): boolean {
+  const after = seconds > 0 || (seconds === 0 && nanos > 0);
+  const within = seconds < 18_446_744_073 || (seconds === 18_446_744_073 && nanos < 709_551_616);
+  return after && within;
 }
 
 /** The SDK's span carries its start; the api's type does not say so. */

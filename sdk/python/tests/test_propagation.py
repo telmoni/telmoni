@@ -173,9 +173,17 @@ def test_a_baggage_value_is_encoded_as_the_grammar_asks_and_read_back() -> None:
     assert decode_baggage_value(encode_baggage_value(value)) == value
     assert decode_baggage_value("a%2") == "a%2"
     assert decode_baggage_value("a%zz") == "a%zz"
+    assert decode_baggage_value("a%0\n") == "a%0\n"
     assert decode_baggage_value("%c3%A9") == "é"
     plain = "plain-bot_1.0~!#$&'()*+/:<=>?@[]^`{|}"
     assert encode_baggage_value(plain) == plain
+
+
+def test_a_baggage_value_with_a_lone_surrogate_goes_with_the_replacement_character() -> (
+    None
+):
+    """Encoded strictly, it would raise into the agent's call that injects it."""
+    assert encode_baggage_value("bot\udcff") == "bot%EF%BF%BD"
 
 
 def test_a_traceparent_is_parsed_as_the_grammar_asks() -> None:

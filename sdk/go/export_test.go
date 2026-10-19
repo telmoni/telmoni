@@ -6,9 +6,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// The hooks the tests reach for: the random source the sample rate is drawn
-// against, the queue's numbers and a record's hold for the processor's own
-// tests, and the W3C grammar's helpers for the propagation's.
+// The hooks the tests reach for: the sample rate's random source, the queue's
+// numbers, a record's hold, the W3C grammar's helpers and a time as sent.
 var (
 	WithRandom         = withRandom
 	WithQueue          = withQueue
@@ -16,6 +15,7 @@ var (
 	EncodeBaggageValue = encodeBaggageValue
 	DecodeBaggageValue = decodeBaggageValue
 	ParseTraceparent   = parseTraceparent
+	Nanos              = nanos
 )
 
 // holdOne ends one span in the trace of runID under a record's hold, then

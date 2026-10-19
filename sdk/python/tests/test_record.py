@@ -9,8 +9,9 @@ import logging
 import sys
 import threading
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
@@ -477,16 +478,162 @@ def test_the_sample_rate_drops_a_record_whole(transport: FakeTransport) -> None:
 
 
 START = at("2026-10-12T09:00:00.000Z")
+RUN = RunRecord(run_id=str(uuid.UUID(int=1)), agent="a", start=START, end=START)
+STEP = StepRecord(name="s", start=START, end=START)
+TOOL = ToolCallRecord(name="t", start=START, end=START)
+MODEL = ModelCallRecord(model="m", start=START, end=START)
+
+
+class Shifting(Sequence[StepRecord | ModelCallRecord | ToolCallRecord]):
+    """Its first items on its first read and others after, as rows changing
+    beneath a view would."""
+
+    def __init__(self, *reads: list[StepRecord | ModelCallRecord | ToolCallRecord]):
+        self.reads = list(reads)
+
+    def __iter__(self) -> Iterator[StepRecord | ModelCallRecord | ToolCallRecord]:
+        return iter(self.reads.pop(0) if len(self.reads) > 1 else self.reads[0])
+
+    def __len__(self) -> int:
+        return len(self.reads[0])
+
+    def __getitem__(self, index: int) -> StepRecord | ModelCallRecord | ToolCallRecord:  # type: ignore[override]
+        return self.reads[0][index]
 
 
 @pytest.mark.parametrize(
-    ("change", "message"),
+    ("change", "kind", "message"),
     [
-        ({"agent": " "}, "agent's name"),
-        ({"run_id": "run-1"}, "must be a UUID"),
-        ({"run_id": "00000000-0000-0000-0000-000000000000"}, "nil UUID"),
-        ({"start": datetime(2026, 10, 12, 9)}, "needs its timezone"),
-        ({"end": START - timedelta(seconds=1)}, "end before it starts"),
+        (lambda record: None, TypeError, "must be a RunRecord"),
+        (lambda record: SimpleNamespace(**vars(record)), TypeError, "a RunRecord"),
+        (
+            lambda record: dataclasses.replace(
+                record,
+                inside=Shifting([dataclasses.replace(STEP, name=5)], [TOOL]),  # type: ignore[arg-type]
+            ),
+            TypeError,
+            "step's name must be str",
+        ),
+        ({"agent": " "}, ValueError, "agent's name"),
+        ({"agent": None}, TypeError, "run's agent must be str"),
+        ({"run_id": "run-1"}, ValueError, "must be a UUID"),
+        ({"run_id": uuid.UUID(int=1)}, TypeError, "run_id must be str"),
+        ({"run_id": "3d6f_a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d"}, ValueError, "a UUID"),
+        ({"run_id": "{3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d"}, ValueError, "a UUID"),
+        ({"run_id": "00000000-0000-0000-0000-000000000000"}, ValueError, "nil UUID"),
+        ({"user_id": 42}, TypeError, "run's user_id must be str or None"),
+        ({"session_id": 7}, TypeError, "session_id must be str or None"),
+        ({"tags": ["team"]}, TypeError, "tags must be Mapping or None"),
+        ({"tags": {"team": 1}}, TypeError, "tags must map str to str"),
+        ({"error_type": ValueError}, TypeError, "error_type must be str or None"),
+        ({"cancelled": "false"}, TypeError, "cancelled must be bool"),
+        (
+            {"inside": [dataclasses.replace(STEP, name=5)]},  # type: ignore[arg-type]
+            TypeError,
+            "name must be str",
+        ),
+        (
+            {"inside": [dataclasses.replace(MODEL, model=None)]},  # type: ignore[arg-type]
+            TypeError,
+            "model call's model must be str",
+        ),
+        (
+            {"inside": [dataclasses.replace(MODEL, provider=5)]},  # type: ignore[arg-type]
+            TypeError,
+            "provider must be str or None",
+        ),
+        (
+            {"inside": [dataclasses.replace(MODEL, operation=5)]},  # type: ignore[arg-type]
+            TypeError,
+            "operation must be str or None",
+        ),
+        (
+            {"inside": [dataclasses.replace(MODEL, usage={"input_tokens": 1})]},  # type: ignore[arg-type]
+            TypeError,
+            "usage must be Usage or None",
+        ),
+        (
+            {
+                "inside": [
+                    dataclasses.replace(
+                        STEP,
+                        calls=[dataclasses.replace(TOOL, name=None)],  # type: ignore[arg-type]
+                    )
+                ]
+            },
+            TypeError,
+            "tool call's name must be str",
+        ),
+        ({"start": datetime(2026, 10, 12, 9)}, ValueError, "needs its timezone"),
+        ({"start": at("1969-12-31T23:59:59Z")}, ValueError, "after the Unix epoch"),
+        ({"start": at("1970-01-01T00:00:00Z")}, ValueError, "after the Unix epoch"),
+        ({"end": at("2600-01-01T00:00:00Z")}, ValueError, r"2\^64 nanoseconds"),
+        (
+            {"inside": [dataclasses.replace(STEP, name="")]},
+            ValueError,
+            "step's name cannot be empty",
+        ),
+        (
+            {"inside": [dataclasses.replace(MODEL, model="")]},
+            ValueError,
+            "model call's model cannot be empty",
+        ),
+        ({"agent": "a" * 129}, ValueError, "run's agent must be up to 128 characters"),
+        ({"user_id": "u" * 129}, ValueError, "run's user_id must be up to 128"),
+        ({"session_id": "s" * 201}, ValueError, "run's session_id must be up to 200"),
+        ({"error_type": "E" * 129}, ValueError, "run's error_type must be up to 128"),
+        (
+            {"inside": [dataclasses.replace(STEP, name="n" * 129)]},
+            ValueError,
+            "step's name must be up to 128",
+        ),
+        (
+            {
+                "inside": [
+                    dataclasses.replace(
+                        STEP, calls=[dataclasses.replace(TOOL, name="t" * 129)]
+                    )
+                ]
+            },
+            ValueError,
+            "tool call's name must be up to 128",
+        ),
+        (
+            {"inside": [dataclasses.replace(MODEL, model="m" * 129)]},
+            ValueError,
+            "model call's model must be up to 128",
+        ),
+        (
+            {"inside": [dataclasses.replace(MODEL, model="m" * 124)]},
+            ValueError,
+            "operation and model must be up to 127",
+        ),
+        (
+            {"inside": [dataclasses.replace(MODEL, provider="p" * 129)]},
+            ValueError,
+            "model call's provider must be up to 128",
+        ),
+        (
+            {"inside": [dataclasses.replace(TOOL, error_type="E" * 129)]},
+            ValueError,
+            "tool call's error_type must be up to 128",
+        ),
+        ({"start": "2026-10-12T09:00:00Z"}, TypeError, "must be a datetime"),
+        ({"end": START - timedelta(seconds=1)}, ValueError, "end before it starts"),
+        ({"inside": [RUN]}, TypeError, "item must be"),
+        ({"inside": [None]}, TypeError, "item must be"),
+        (
+            {"inside": [dataclasses.replace(STEP, calls=[STEP])]},  # type: ignore[list-item]
+            TypeError,
+            "call must",
+        ),
+        ({"inside": iter([TOOL])}, TypeError, "inside must be a sequence"),
+        ({"inside": {TOOL}}, TypeError, "inside must be a sequence"),
+        (
+            {"inside": [dataclasses.replace(STEP, calls=iter([TOOL]))]},  # type: ignore[arg-type]
+            TypeError,
+            "calls must be a sequence",
+        ),
         (
             {
                 "inside": [
@@ -502,21 +649,35 @@ START = at("2026-10-12T09:00:00.000Z")
                     )
                 ]
             },
+            ValueError,
             "end before it starts",
         ),
     ],
 )
-def test_a_record_refused_sends_nothing(
-    telmoni: Telmoni,
+def test_a_record_refused_opens_and_sends_nothing(
     transport: FakeTransport,
-    change: dict[str, Any],
+    change: dict[str, Any] | Callable[[RunRecord], Any],
+    kind: type[Exception],
     message: str,
 ) -> None:
-    record = dataclasses.replace(the_record(), **change)
-    with pytest.raises(ValueError, match=message):
-        telmoni.record_run(record)
-    assert telmoni.flush()
+    """Refused before its own span opens, which would ask the root sampler."""
+    sampler = Hooked()
+    asked: list[None] = []
+    sampler.hook = lambda: asked.append(None)
+    client = Telmoni(Config(api_key="k", sampler=sampler), transport=transport)
+    record = (
+        change(the_record())
+        if callable(change)
+        else dataclasses.replace(the_record(), **change)
+    )
+    try:
+        with pytest.raises(kind, match=message):
+            client.record_run(record)
+        assert client.flush()
+    finally:
+        client.shutdown()
     assert transport.requests == []
+    assert asked == []
 
 
 def test_a_record_the_queue_has_no_room_for_is_refused_whole(
@@ -553,3 +714,134 @@ def test_a_record_the_queue_has_no_room_for_is_refused_whole(
         client.shutdown()
     names = [s["name"] for s in transport.spans()]
     assert names.count("execute_tool t") == 2 and len(names) == 8, names
+
+
+@pytest.mark.parametrize(
+    "run_id",
+    ["3D6F8A1C-5B2E-4F7A-9C0D-8E1F2A3B4C5D", "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d"],
+)
+def test_a_run_id_in_capitals_or_without_hyphens_is_sent_written_out(
+    telmoni: Telmoni, transport: FakeTransport, run_id: str
+) -> None:
+    telmoni.record_run(dataclasses.replace(the_record(), run_id=run_id))
+    assert telmoni.flush()
+    sent = {attributes_of(span)["telmoni.run_id"] for span in transport.spans()}
+    assert sent == {"3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d"}
+
+
+def test_a_model_call_with_no_operation_is_a_chat(
+    telmoni: Telmoni, transport: FakeTransport
+) -> None:
+    """As the live call takes it."""
+    call = dataclasses.replace(MODEL, operation=None)  # type: ignore[arg-type]
+    telmoni.record_run(dataclasses.replace(RUN, inside=[call]))
+    assert telmoni.flush()
+    assert "chat m" in [span["name"] for span in transport.spans()]
+
+
+def test_a_tool_call_with_an_empty_name_is_sent(
+    telmoni: Telmoni, transport: FakeTransport
+) -> None:
+    """Ingest reads a tool's empty name as none, keeping the call."""
+    telmoni.record_run(
+        dataclasses.replace(RUN, inside=[dataclasses.replace(TOOL, name="")])
+    )
+    assert telmoni.flush()
+    assert "execute_tool " in [span["name"] for span in transport.spans()]
+
+
+def test_a_record_at_ingests_text_caps_is_sent_whole(
+    telmoni: Telmoni, transport: FakeTransport
+) -> None:
+    """Counted in characters, as ingest counts them, never in UTF-8's bytes."""
+    tool = dataclasses.replace(TOOL, name="t" * 128, error_type="E" * 128)
+    record = dataclasses.replace(
+        RUN,
+        agent="\u00e9" * 128,
+        user_id="u" * 128,
+        session_id="s" * 200,
+        inside=[
+            dataclasses.replace(STEP, name="n" * 128, calls=[tool]),
+            dataclasses.replace(MODEL, model="m" * 123, provider="p" * 128),
+        ],
+    )
+    telmoni.record_run(record)
+    assert telmoni.flush()
+    names = {span["name"] for span in transport.spans()}
+    assert {"n" * 128, "chat " + "m" * 123, "execute_tool " + "t" * 128} <= names
+
+
+def test_a_record_sends_its_first_32_tags_and_its_own_attributes(
+    telmoni: Telmoni, transport: FakeTransport
+) -> None:
+    """Past the span's room, its tags would crowd out its id and how it ended."""
+    tags = {f"t{n:03}": "v" for n in range(130)}
+    record = dataclasses.replace(
+        the_record(), tags=tags, error_type="Boom", cancelled=True
+    )
+    telmoni.record_run(record)
+    assert telmoni.flush()
+    run = next(s for s in transport.spans() if s["name"] == "invoke_agent claude-code")
+    attributes = attributes_of(run)
+    sent = [k for k in attributes if k.startswith("telmoni.tag.")]
+    assert sent == [f"telmoni.tag.t{n:03}" for n in range(32)]
+    assert attributes["telmoni.run_id"] == record.run_id
+    assert attributes["error.type"] == "Boom"
+    assert attributes["telmoni.cancelled"] is True
+
+
+def test_a_runs_tags_are_those_checked(
+    telmoni: Telmoni, transport: FakeTransport
+) -> None:
+    """Read before its items, though reading those changes them."""
+    tags = {"team": "x"}
+
+    class Noting(Sequence[ToolCallRecord]):
+        def __len__(self) -> int:
+            return 1
+
+        def __getitem__(self, index: int) -> ToolCallRecord:  # type: ignore[override]
+            if index:
+                raise IndexError(index)
+            tags["rows"] = object()  # type: ignore[assignment]
+            return TOOL
+
+    telmoni.record_run(dataclasses.replace(RUN, tags=tags, inside=Noting()))
+    assert telmoni.flush()
+    run = next(s for s in transport.spans() if s["name"] == "invoke_agent a")
+    sent = {k: v for k, v in attributes_of(run).items() if k.startswith("telmoni.tag.")}
+    assert sent == {"telmoni.tag.team": "x"}
+
+
+class Rebuilt(Sequence[ModelCallRecord]):
+    """Its calls built afresh on each read, as a view over rows builds them."""
+
+    def __init__(self, tokens: list[int]) -> None:
+        self.tokens = tokens
+
+    def __len__(self) -> int:
+        return len(self.tokens)
+
+    def __getitem__(self, index: int) -> ModelCallRecord:  # type: ignore[override]
+        usage = Usage(input_tokens=self.tokens[index])
+        return dataclasses.replace(MODEL, model=f"m{index}", usage=usage)
+
+
+@pytest.mark.parametrize(
+    "inside",
+    [Rebuilt([1, 2, 3]), [dataclasses.replace(STEP, calls=Rebuilt([1, 2, 3]))]],
+)
+def test_a_record_is_read_once(
+    telmoni: Telmoni,
+    transport: FakeTransport,
+    inside: Sequence[StepRecord | ModelCallRecord],
+) -> None:
+    """Each call's tokens on its own span, however its items are built."""
+    telmoni.record_run(dataclasses.replace(RUN, inside=inside))
+    assert telmoni.flush()
+    tokens = {
+        span["name"]: attributes_of(span)["gen_ai.usage.input_tokens"]
+        for span in transport.spans()
+        if span["name"].startswith("chat")
+    }
+    assert tokens == {"chat m0": 1, "chat m1": 2, "chat m2": 3}

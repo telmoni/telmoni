@@ -19,6 +19,7 @@ _UUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
 )
 _HEX = re.compile(r"^[0-9a-f]+$")
+_SURROGATE = re.compile("[\ud800-\udfff]")
 
 
 @dataclass(frozen=True)
@@ -62,7 +63,7 @@ def read_headers(headers: Mapping[str, str]) -> Continued | None:
     members = _baggage_members(_get_header(headers, contract.BAGGAGE) or "")
     run_id = members.get(contract.RUN_ID)
     agent = members.get(contract.AGENT)
-    if run_id is None or not _UUID.match(run_id) or not agent:
+    if run_id is None or not _UUID.fullmatch(run_id) or not agent:
         return None
     return Continued(span_context, run_id.lower(), agent)
 
@@ -114,7 +115,7 @@ def _is_ours(member: str) -> bool:
 
 
 def _is_hex(text: str, length: int) -> bool:
-    return len(text) == length and _HEX.match(text) is not None
+    return len(text) == length and _HEX.fullmatch(text) is not None
 
 
 def encode_baggage_value(value: str) -> str:
@@ -122,7 +123,8 @@ def encode_baggage_value(value: str) -> str:
     allows as it is, and every other byte of the UTF-8 percent-encoded, so a
     space, a comma or a name in another script travels whole."""
     out = []
-    for byte in value.encode("utf-8"):
+    # A lone surrogate has no UTF-8: the replacement character, as exported.
+    for byte in _SURROGATE.sub("\ufffd", value).encode("utf-8"):
         out.append(chr(byte) if _allowed_in_baggage(byte) else f"%{byte:02X}")
     return "".join(out)
 
@@ -134,7 +136,7 @@ def decode_baggage_value(value: str) -> str:
     i = 0
     while i < len(value):
         pair = value[i + 1 : i + 3]
-        if value[i] == "%" and len(pair) == 2 and _HEX.match(pair.lower()):
+        if value[i] == "%" and len(pair) == 2 and _HEX.fullmatch(pair.lower()):
             out.append(int(pair, 16))
             i += 3
         else:

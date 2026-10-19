@@ -42,17 +42,26 @@ def test_a_model_call_carries_the_conventions_names(
     }
 
 
-def test_a_token_count_goes_as_an_integer_and_one_no_number_is_left_off(
+def test_a_token_count_goes_as_a_whole_number_from_0_and_another_is_left_off(
     telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
 ) -> None:
-    usage = Usage(
-        input_tokens=float("nan"),  # type: ignore[arg-type]
-        output_tokens=12.7,  # type: ignore[arg-type]
-        cache_read_input_tokens=float("inf"),  # type: ignore[arg-type]
-        cache_write_input_tokens=2**63,
+    usages = (
+        Usage(
+            input_tokens=float("nan"),  # type: ignore[arg-type]
+            output_tokens=12.7,  # type: ignore[arg-type]
+            cache_read_input_tokens=float("inf"),  # type: ignore[arg-type]
+            cache_write_input_tokens=2**63,
+        ),
+        # Ingest refuses the call over a count below zero, or one no integer.
+        Usage(
+            input_tokens=-1,
+            output_tokens=12,
+            cache_read_input_tokens=True,
+            cache_write_input_tokens=-5,
+        ),
     )
     with telmoni.run("bot"):
-        for _ in range(2):
+        for usage in usages:
             with telmoni.model_call("m") as call:
                 call.answered(usage=usage)
     at = datetime(2026, 10, 18, 9, tzinfo=timezone.utc)
@@ -62,12 +71,15 @@ def test_a_token_count_goes_as_an_integer_and_one_no_number_is_left_off(
             agent="bot",
             start=at,
             end=at,
-            inside=[ModelCallRecord(model="m", start=at, end=at, usage=usage)],
+            inside=[
+                ModelCallRecord(model="m", start=at, end=at, usage=usage)
+                for usage in usages
+            ],
         )
     )
     assert telmoni.flush()
     spans = [s for s in transport.spans() if s["name"] == "chat m"]
-    assert len(spans) == 3, "the calls sent, recorded ones too, and the batch"
+    assert len(spans) == 4, "the calls sent, recorded ones too, and the batch"
     for span in spans:
         typed = {a["key"]: a["value"] for a in span["attributes"]}
         assert typed["gen_ai.usage.output_tokens"] == {"intValue": "12"}
@@ -81,21 +93,48 @@ def test_a_token_count_goes_as_an_integer_and_one_no_number_is_left_off(
         )
     warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
     assert len(warnings) == 3, warnings
-    assert all("must be a finite number within 64 bits" in w for w in warnings)
+    assert all("must be a whole number from 0 within 64 bits" in w for w in warnings)
 
 
 def test_a_blank_operation_is_chat(telmoni: Telmoni, transport: FakeTransport) -> None:
     # As one left out is: sent blank, the span would be named " m" and ingest
-    # would read it as a step.
+    # would read it as a step. One that is no string is no operation either.
     with telmoni.run("bot") as run:
         with telmoni.model_call("m", operation=""):
             pass
         with run.model_call("m", operation="  "):
             pass
+        with run.model_call("m", operation=5):  # type: ignore[arg-type]
+            pass
     assert telmoni.flush()
     spans = [s for s in transport.spans() if s["name"] == "chat m"]
-    assert len(spans) == 2, [s["name"] for s in transport.spans()]
+    assert len(spans) == 3, [s["name"] for s in transport.spans()]
     assert all(attributes_of(s)["gen_ai.operation.name"] == "chat" for s in spans)
+
+
+def test_a_provider_or_response_model_goes_as_text_and_an_empty_one_not_at_all(
+    telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Ingest refuses the call over an empty one, or over a tuple."""
+    with telmoni.run("bot"):
+        with telmoni.model_call(
+            "m",
+            provider=("open", "ai"),  # type: ignore[arg-type]
+        ) as call:
+            call.answered(response_model="")
+        with telmoni.model_call("m", provider="") as call:
+            call.answered(response_model=5)  # type: ignore[arg-type]
+    assert telmoni.flush()
+    first, second = (attributes_of(span) for span in calls(transport))
+    assert first["gen_ai.provider.name"] == "('open', 'ai')"
+    assert "gen_ai.response.model" not in first
+    assert "gen_ai.provider.name" not in second
+    assert second["gen_ai.response.model"] == "5"
+    texts = {r.getMessage() for r in caplog.records if "as its text" in r.getMessage()}
+    assert texts == {
+        "telmoni: a provider that is no string is sent as its text",
+        "telmoni: a response model that is no string is sent as its text",
+    }
 
 
 def test_content_is_taken_off_before_it_leaves(

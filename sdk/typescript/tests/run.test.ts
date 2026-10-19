@@ -122,6 +122,14 @@ describe('a run', () => {
     expect(cancelled.status).toBeUndefined();
   });
 
+  it('is failed with no type for an empty one, which ingest refuses the run over', async () => {
+    h.telmoni.run('bot', (run) => run.fail(''));
+    expect(await h.telmoni.flush()).toBe(true);
+    const [failed] = runsIn(h.transport);
+    expect(attributesOf(failed!)['error.type']).toBeUndefined();
+    expect(failed!.status).toEqual({ code: 2 });
+  });
+
   it('is cancelled by an AbortError, not failed', async () => {
     const aborted = new DOMException('stopped', 'AbortError');
     await expect(
@@ -143,27 +151,140 @@ describe('a run', () => {
 
   it('needs an agent and a valid rate', () => {
     expect(() => h.telmoni.run(' ', () => {})).toThrow(TypeError);
+    expect(() => h.telmoni.run(null as unknown as string, () => {})).toThrow("a run needs its agent's name");
+    // Its text is blank: `String([])` is `''`.
+    expect(() => h.telmoni.run([] as unknown as string, () => {})).toThrow("a run needs its agent's name");
     expect(() => h.telmoni.run('bot', { sampleRate: 0 }, () => {})).toThrow(RangeError);
     expect(() => h.telmoni.run('bot', { sampleRate: 1.5 }, () => {})).toThrow(RangeError);
   });
 
-  it('leaves off a bound JSON cannot carry, with one warning', async () => {
+  it('sends its first 32 tags, warned once of the rest, so none crowds out its own', async () => {
+    const tags = Object.fromEntries(Array.from({ length: 40 }, (_, n) => [`t${String(n).padStart(2, '0')}`, 'v']));
+    for (let i = 0; i < 2; i += 1) h.telmoni.run('bot', { tags }, () => {});
+    expect(await h.telmoni.flush()).toBe(true);
+    for (const run of h.transport.spans().filter((span) => span.name === 'invoke_agent bot')) {
+      const sent = Object.keys(attributesOf(run)).filter((key) => key.startsWith('telmoni.tag.'));
+      expect(sent).toEqual(Array.from({ length: 32 }, (_, n) => `telmoni.tag.t${String(n).padStart(2, '0')}`));
+    }
+    expect(h.warnings).toEqual(['telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent']);
+  });
+
+  it('sends a tag of a number as it is, another as its text or its type where that throws, and leaves an unset one off', async () => {
+    const tags = {
+      team: null,
+      n: 3,
+      on: true,
+      ratio: 2.5,
+      odd: Number.NaN,
+      kind: { a: 1 },
+      bare: Object.create(null) as unknown,
+    } as unknown as Record<string, string>;
+    h.telmoni.run('bot', { tags }, () => {});
+    expect(await h.telmoni.flush()).toBe(true);
+    const run = h.transport.spans().find((span) => span.name === 'invoke_agent bot')!;
+    const typed = Object.fromEntries(run.attributes.map((a) => [a.key, a.value]));
+    expect(typed['telmoni.tag.n']).toEqual({ intValue: '3' });
+    expect(typed['telmoni.tag.on']).toEqual({ boolValue: true });
+    expect(typed['telmoni.tag.ratio']).toEqual({ doubleValue: 2.5 });
+    expect(typed['telmoni.tag.odd']).toEqual({ stringValue: 'NaN' });
+    expect(typed['telmoni.tag.kind']).toEqual({ stringValue: '[object Object]' });
+    expect(typed['telmoni.tag.bare']).toEqual({ stringValue: 'object' });
+    expect(typed['telmoni.tag.team']).toBeUndefined();
+    expect(h.warnings.filter((warning) => warning.includes('is sent as its text'))).toHaveLength(1);
+  });
+
+  it('leaves off a tag ingest would drop, which takes no place among the 32', async () => {
+    const tags: Record<string, string> = { '': 'empty', ['k'.repeat(65)]: 'long', v: 'x'.repeat(257) };
+    for (let n = 0; n < 31; n += 1) tags[`t${String(n).padStart(2, '0')}`] = '1';
+    tags['\ud83d\ude00'.repeat(64)] = '\ud83d\ude01'.repeat(256);
+    // Past the 32nd, a tag ingest drops is still warned of as dropped.
+    tags['w'] = 'y'.repeat(257);
+    h.telmoni.run('bot', { tags }, () => {});
+    expect(await h.telmoni.flush()).toBe(true);
+    const run = h.transport.spans().find((span) => span.name === 'invoke_agent bot')!;
+    const sent = Object.keys(attributesOf(run)).filter((key) => key.startsWith('telmoni.tag.'));
+    const kept = Array.from({ length: 31 }, (_, n) => `telmoni.tag.t${String(n).padStart(2, '0')}`);
+    expect(new Set(sent)).toEqual(new Set([...kept, `telmoni.tag.${'\ud83d\ude00'.repeat(64)}`]));
+    expect(h.warnings).toEqual(["telmoni: a tag's key must be 1 to 64 characters and its value up to 256; the tag is not sent"]);
+  });
+
+  it('leaves off a tag of a number ingest writes past 256 characters, which takes no place either', async () => {
+    // Ingest writes every digit and never an exponent: 1e256 in 257 of them.
+    const tags: Record<string, unknown> = { at: 1e255, small: 1.5e-253, past: 1e256, below: -1e255, tiny: 1e-255 };
+    for (let n = 0; n < 30; n += 1) tags[`t${String(n).padStart(2, '0')}`] = '1';
+    h.telmoni.run('bot', { tags: tags as Record<string, string> }, () => {});
+    expect(await h.telmoni.flush()).toBe(true);
+    const run = h.transport.spans().find((span) => span.name === 'invoke_agent bot')!;
+    const sent = Object.keys(attributesOf(run)).filter((key) => key.startsWith('telmoni.tag.'));
+    const kept = Array.from({ length: 30 }, (_, n) => `telmoni.tag.t${String(n).padStart(2, '0')}`);
+    expect(new Set(sent)).toEqual(new Set(['telmoni.tag.at', 'telmoni.tag.small', ...kept]));
+    expect(h.warnings).toEqual(["telmoni: a tag's key must be 1 to 64 characters and its value up to 256; the tag is not sent"]);
+  });
+
+  it('sends a user or session that is no string as its text', async () => {
+    h.telmoni.run('bot', { userId: [7, 8] as unknown as string, sessionId: 42 as unknown as string }, () => {});
+    expect(await h.telmoni.flush()).toBe(true);
+    const typed = Object.fromEntries(one(runsIn(h.transport)).attributes.map((a) => [a.key, a.value]));
+    expect(typed['user.id']).toEqual({ stringValue: '7,8' });
+    expect(typed['gen_ai.conversation.id']).toEqual({ stringValue: '42' });
+    expect(h.warnings).toEqual([
+      'telmoni: a user id that is no string is sent as its text',
+      'telmoni: a session id that is no string is sent as its text',
+    ]);
+  });
+
+  it("keeps a warning whose hook throws out of the agent's call", async () => {
+    const t = harness(
+      {},
+      {
+        warn: () => {
+          throw new Error("the hook's own");
+        },
+      },
+    );
+    const tags = Object.fromEntries(Array.from({ length: 40 }, (_, n) => [`t${n}`, 'v']));
+    try {
+      expect(t.telmoni.run('bot', { tags }, (run) => run.step(7 as unknown as string, () => 'ran'))).toBe('ran');
+      expect(await t.telmoni.flush()).toBe(true);
+    } finally {
+      await t.telmoni.shutdown();
+    }
+    expect(t.transport.spans().map((span) => span.name)).toEqual(expect.arrayContaining(['invoke_agent bot', '7']));
+  });
+
+  it('leaves off a bound ingest would refuse the run for, with one warning', async () => {
     for (const bounds of [
       { maxCostUsd: Infinity, maxSteps: 10 },
       { maxCostUsd: Number.NaN },
       { stallAfterSeconds: 2 ** 63, maxSteps: '7' as unknown as number },
+      { stallAfterSeconds: 2 ** 32, maxSteps: 0, maxCostUsd: 0 },
+      { stallAfterSeconds: 2 ** 32 - 1, maxSteps: -1, maxCostUsd: -1 },
+      { maxSteps: true as unknown as number },
+      { maxCostUsd: true as unknown as number },
     ]) {
       h.telmoni.run('bot', { bounds }, () => {});
     }
     expect(await h.telmoni.flush()).toBe(true);
     const runs = h.transport.spans().filter((span) => span.name === 'invoke_agent bot');
-    expect(runs, 'every run sent, and the batch with them').toHaveLength(3);
+    expect(runs, 'every run sent, and the batch with them').toHaveLength(7);
     const sent = runs.map((span) =>
       Object.fromEntries(Object.entries(attributesOf(span)).filter(([key]) => key.startsWith('telmoni.bound.'))),
     );
-    expect(sent).toEqual([{ 'telmoni.bound.max_steps': 10 }, {}, { 'telmoni.bound.max_steps': 7 }]);
-    expect(h.warnings).toHaveLength(2);
-    expect(h.warnings.every((warning) => warning.includes('must be a finite number within 64 bits'))).toBe(true);
+    expect(sent).toEqual([
+      { 'telmoni.bound.max_steps': 10 },
+      {},
+      { 'telmoni.bound.max_steps': 7 },
+      {},
+      { 'telmoni.bound.stall_after_s': 2 ** 32 - 1 },
+      {},
+      {},
+    ]);
+    const whole = 'must be a whole number from 1 to 4294967295; the run is sent without it';
+    expect([...h.warnings].sort()).toEqual([
+      "telmoni: a run's maxCostUsd must be a finite number above 0; the run is sent without it",
+      `telmoni: a run's maxSteps ${whole}`,
+      `telmoni: a run's stallAfterSeconds ${whole}`,
+    ]);
   });
 
   it('is found from its context; without a context manager, from nothing else', () => {

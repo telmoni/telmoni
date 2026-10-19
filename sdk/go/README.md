@@ -76,11 +76,18 @@ its own type, since a stalled call is what a monitor is for.
 `FailWith("TimeoutError")` and `Cancel()` do the same by hand.
 
 The SDK never panics: a blank agent name opens a run that does nothing and
-warns once, a run's `SampleRate` outside (0, 1] falls back to the client's
-with one warning, and a `MaxCostUSD` that is not a finite number is left off
-its run with one warning. `New` returns an error for a client-wide
-`SampleRate` outside that range, and for a plain-HTTP endpoint whose host is
-not this machine; `RecordRun`, below, for a record it refuses.
+warns once, a run's `SampleRate` outside (0, 1] falls back to the client's with
+one warning, and of what ingest would refuse or drop, these are left off with
+one warning: a `StallAfterS` or `MaxSteps` below 0 or past 4294967295, or a
+`MaxCostUSD` below 0 or not finite, off its run (a zero bound is unset), a
+token count below zero off its call, and a tag whose key is not 1 to 64
+characters or whose value is over 256, which takes no place among a run's 32.
+A run sends its first 32 tags by key, the most ingest keeps, and warns once of
+the rest. Text past ingest's caps, below, and a step or model named nothing
+still go as given, and ingest refuses the span they are on, or the whole run
+for its agent, user or session. `New` returns an error for a client-wide
+`SampleRate` outside (0, 1], and for a plain-HTTP endpoint whose host is not
+this machine; `RecordRun`, below, for a record it refuses.
 
 ## A run recorded after it ended
 
@@ -128,13 +135,17 @@ It is sent as the live calls would have sent it, through the same exporter,
 content rules and sample rate, in a trace of its own named by the run's id,
 whatever span `ctx` carries. Each span's id is derived from the run's id and
 the span's place in the record, so the same record sent again is the same
-bytes, which ingest answers once: give a run the same id each time you send
-it. A record holds no content. A blank agent, a run id that is not a UUID or
-is the nil UUID, a zero time, a nil item or a span that ends before it starts
-returns an error,
-and nothing is sent: a record is handed over whole, so it is refused whole. One
-the export queue has no room for is `ErrQueueFull`, nothing of it queued:
-flush, or wait, and record it again.
+bytes, which ingest answers once: give a run the same id each time you send it.
+A record holds no content; a tag or token count a live run would leave off is
+left off with one warning. A blank agent, a run id that is not a UUID or is the
+nil UUID, text past ingest's caps (names, the agent, the model and provider and
+error types 128 characters, the user 128, the session 200, a model call's
+operation and model 127 together), a step with an empty name or a model call
+with an empty model, a nil item, a span that ends before it starts, or a time
+that is zero, at or before the Unix epoch, or 2^64 nanoseconds or more after
+it, in July 2554, returns an error, and nothing is sent: a record is handed
+over whole, so it is refused whole. One the export queue has no room for is
+`ErrQueueFull`, nothing of it queued: flush, or wait, and record it again.
 
 ## Content
 

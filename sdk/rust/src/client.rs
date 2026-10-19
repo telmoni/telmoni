@@ -177,10 +177,9 @@ impl Telmoni {
     }
 
     /// A run of `agent`, as a guard: the span `invoke_agent <agent>` in
-    /// whatever trace is current, opened by `telmoni.run.start`, which is sent
-    /// at once. The span ends when the guard drops or on [`Run::end`]. A
-    /// `max_cost_usd` that is no finite number is left off the run, with one
-    /// warning, rather than stop the agent's call.
+    /// whatever trace is current, opened by `telmoni.run.start`, sent at once,
+    /// and ended when the guard drops or on [`Run::end`]. A bound or tag out of
+    /// range, or a tag past the first 32 by key, is left off with one warning.
     ///
     /// # Errors
     ///
@@ -281,11 +280,10 @@ impl Telmoni {
     ///
     /// # Errors
     ///
-    /// [`Error::EmptyAgent`] for a blank agent; [`Error::RunId`] for a run id
-    /// that is not a UUID; [`Error::EndBeforeStart`] for a span — the run's
-    /// own, a step's or a call's — that ends before it starts;
-    /// [`Error::SampleRate`] for a configured rate not above 0 and up to 1.
-    /// A record refused sends nothing.
+    /// [`Error::EmptyAgent`], [`Error::RunId`], [`Error::EmptyName`],
+    /// [`Error::TooLong`], [`Error::RecordedTime`] or [`Error::EndBeforeStart`]
+    /// for a record ingest would refuse, as each says; [`Error::SampleRate`]
+    /// for a configured rate outside (0, 1]. A record refused sends nothing.
     pub fn record_run(&self, record: RunRecord) -> Result<(), Error> {
         records::send(&self.inner, record)
     }

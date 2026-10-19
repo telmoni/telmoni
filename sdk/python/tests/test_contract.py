@@ -11,7 +11,10 @@ from typing import Any
 from unittest import mock
 
 import pytest
+from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.trace import SpanContext
 
+from conftest import FakeTransport
 from telmoni import DEFAULT_ENDPOINT, Config, Secret, Telmoni, __version__, exporter
 from telmoni.exporter import _urllib_transport
 
@@ -209,6 +212,30 @@ def test_the_transport_makes_one_tls_context_through_the_hook_urllib_reads(
             _urllib_transport(answering + "/short", {}, b"{}")
     exporter._tls.cache_clear()
     assert len(made) == 1
+
+
+def test_a_span_time_past_what_ingest_reads_goes_as_0() -> None:
+    """So ingest refuses that span alone, where as is it would refuse the export."""
+    transport = FakeTransport()
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    context = SpanContext(trace_id=1, span_id=1, is_remote=False)
+    times = [(2**64 - 1, 2**64 - 1), (2**64, -1)]
+    try:
+        client.exporter.export(
+            [
+                ReadableSpan(
+                    name=f"s{n}", context=context, start_time=start, end_time=end
+                )
+                for n, (start, end) in enumerate(times)
+            ]
+        )
+    finally:
+        client.shutdown()
+    sent = {
+        s["name"]: (s["startTimeUnixNano"], s["endTimeUnixNano"])
+        for s in transport.spans()
+    }
+    assert sent == {"s0": (str(2**64 - 1), str(2**64 - 1)), "s1": ("0", "0")}
 
 
 def test_plain_http_is_refused_except_to_this_machine() -> None:

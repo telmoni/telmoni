@@ -13,13 +13,13 @@ import functools
 import inspect
 import itertools
 import json
-import logging
 import math
 import random
 import uuid
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextvars import Token
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from opentelemetry import context, trace
@@ -34,6 +34,7 @@ from opentelemetry.trace import (
 )
 
 from . import contract, ids
+from .exporter import warn
 from .models import (
     Bounds,
     CallRecord,
@@ -46,8 +47,6 @@ from .models import (
 
 if TYPE_CHECKING:
     from .client import Telmoni
-
-logger = logging.getLogger("telmoni")
 
 _RUN_KEY = context.create_key("telmoni.run")
 
@@ -77,7 +76,9 @@ class Handle:
 
     def fail(self, error_type: str) -> None:
         """Mark it failed, with the error's class and never its message."""
-        self._span.set_attribute(contract.ERROR_TYPE, error_type)
+        # Ingest refuses the span over an empty one, and with a run's, the run.
+        if error_type:
+            self._span.set_attribute(contract.ERROR_TYPE, error_type)
         self._span.set_status(Status(StatusCode.ERROR))
 
     def cancel(self) -> None:
@@ -161,9 +162,13 @@ class ModelCall(Handle):
         output_messages: object | None = None,
     ) -> None:
         """What the model answered: its name, its tokens, and its messages."""
-        if response_model is not None:
-            self._span.set_attribute(contract.RESPONSE_MODEL, response_model)
-        self._span.set_attributes(_usage(usage, self._client.exporter.warn_once))
+        warn_once = self._client.exporter.warn_once
+        # Ingest refuses the call over an empty one.
+        if response_model is not None and (
+            model := _text(response_model, "response model", warn_once)
+        ):
+            self._span.set_attribute(contract.RESPONSE_MODEL, model)
+        self._span.set_attributes(_usage(usage, warn_once))
         if output_messages is not None:
             self._span.set_attribute(
                 contract.OUTPUT_MESSAGES, _as_json(output_messages)
@@ -269,28 +274,29 @@ class Opener:
         bounds: Bounds | None,
         sample_rate: float | None,
     ) -> Run:
-        if not agent.strip():
+        warn_once = self._client.exporter.warn_once
+        given: object = agent
+        if given is None or not _str(given).strip():
             raise ValueError("a run needs its agent's name")
+        agent = _text(given, "run's agent", warn_once)
         rate = self._client.config.sample_rate if sample_rate is None else sample_rate
         if not 0 < rate <= 1:
             raise ValueError("sample_rate must be above 0 and up to 1")
-        limits = _bounds(bounds, self._client.exporter.warn_once)
+        limits = _bounds(bounds, warn_once)
         sampled_out = rate < 1 and random.random() >= rate
         run_id = str(uuid.uuid4())
         inherited: dict[str, str] = {contract.RUN_ID: run_id, contract.AGENT: agent}
-        if user_id:
-            inherited[contract.USER_ID] = user_id
-        if session_id:
-            inherited[contract.SESSION_ID] = session_id
+        if user_id is not None and (user := _text(user_id, "user id", warn_once)):
+            inherited[contract.USER_ID] = user
+        if session_id is not None and (
+            session := _text(session_id, "session id", warn_once)
+        ):
+            inherited[contract.SESSION_ID] = session
         # On every span of the run from its start, for the processor to drop:
         # a sampler's drop would clear the flag the application's spans inherit.
         if sampled_out:
             inherited[contract.SAMPLED_OUT] = "true"
-        # Tags first: past the span's attribute limit the oldest is dropped,
-        # which must be a tag rather than the run's id or its mark.
-        attributes: dict[str, Any] = {
-            f"{contract.TAG_PREFIX}{key}": value for key, value in (tags or {}).items()
-        }
+        attributes = _tags(tags, warn_once)
         attributes.update(
             {
                 contract.OPERATION: "invoke_agent",
@@ -347,6 +353,7 @@ class Opener:
         run = run or self._outside("step")
         if run is None:
             return None
+        name = _text(name, "step's name", self._client.exporter.warn_once)
         return self._child(run, Step, name, run.inherited, SpanKind.INTERNAL)
 
     def model_call(
@@ -362,17 +369,20 @@ class Opener:
         run = run or self._outside("model_call")
         if run is None:
             return None
+        model = _text(model, "model", self._client.exporter.warn_once)
         # Sent blank, the span would be named " <model>" and ingest would read
-        # it as a step.
-        if not (operation and operation.strip()):
+        # it as a step; one that is no string is no operation either.
+        if not (isinstance(operation, str) and operation.strip()):
             operation = "chat"
         attributes: dict[str, Any] = {
             **run.inherited,
             contract.OPERATION: operation,
             contract.REQUEST_MODEL: model,
         }
-        if provider:
-            attributes[contract.PROVIDER] = provider
+        if provider is not None and (
+            named := _text(provider, "provider", self._client.exporter.warn_once)
+        ):
+            attributes[contract.PROVIDER] = named
         if input_messages is not None:
             attributes[contract.INPUT_MESSAGES] = _as_json(input_messages)
         if system_instructions is not None:
@@ -387,6 +397,7 @@ class Opener:
         run = run or self._outside("tool_call")
         if run is None:
             return None
+        name = _text(name, "tool's name", self._client.exporter.warn_once)
         attributes: dict[str, Any] = {
             **run.inherited,
             contract.OPERATION: contract.TOOL_OPERATION,
@@ -409,21 +420,40 @@ class Opener:
         Raises ``QueueFullError``, sending nothing, when the export queue has
         no room for the whole record.
         """
+        # Checked whole before anything opens, so a refused record sends nothing.
+        if not isinstance(record, RunRecord):
+            raise TypeError("a recorded run must be a RunRecord")
+        _check(record)
+        # Read before the items, whose reading runs the caller's code.
+        tags = dict((record.tags or {}).items())
+        if not all(isinstance(text, str) for pair in tags.items() for text in pair):
+            raise TypeError("a recorded run's tags must map str to str")
         if not record.agent.strip():
             raise ValueError("a run needs its agent's name")
         try:
             run_uuid = uuid.UUID(record.run_id)
-        except (TypeError, ValueError):
+        except ValueError:
             raise ValueError("a recorded run's id must be a UUID") from None
+        # uuid also takes int()'s signs, underscores and spaces: another id.
+        if record.run_id.lower() not in (str(run_uuid), run_uuid.hex):
+            raise ValueError("a recorded run's id must be a UUID")
         # The run's id is its trace's, and a trace id of zeros is no trace at all.
         if run_uuid.int == 0:
             raise ValueError(
                 "a recorded run's id must be a UUID other than the nil UUID"
             )
-        # Checked whole before anything is queued, so a record refused sends
-        # nothing rather than half a run.
-        for item in _walk(record):
-            if _nanos(item.end) < _nanos(item.start):
+        items = _read(record)
+        spans = [record, *(each for item, calls in items for each in (item, *calls))]
+        for each in spans:
+            start, end = _nanos(each.start), _nanos(each.end)
+            # Ingest reads a time as nanoseconds from the epoch in 64 bits, and
+            # refuses the export over one that is not.
+            if not (0 < start < _NANOS_END and 0 < end < _NANOS_END):
+                raise ValueError(
+                    "a recorded time must fall after the Unix epoch and less than "
+                    "2^64 nanoseconds after it"
+                )
+            if end < start:
                 raise ValueError("a recorded span cannot end before it starts")
         rate = self._client.config.sample_rate
         run_id = str(run_uuid)
@@ -435,30 +465,28 @@ class Opener:
             inherited[contract.USER_ID] = record.user_id
         if record.session_id:
             inherited[contract.SESSION_ID] = record.session_id
-        attributes: dict[str, Any] = {
-            contract.OPERATION: "invoke_agent",
-            contract.AGENT_NAME: record.agent,
-            **inherited,
-            contract.SAMPLE_RATE: float(rate),
-        }
-        for key, value in (record.tags or {}).items():
-            attributes[f"{contract.TAG_PREFIX}{key}"] = value
+        attributes = _tags(tags, self._client.exporter.warn_once)
+        attributes.update(
+            {
+                contract.OPERATION: "invoke_agent",
+                contract.AGENT_NAME: record.agent,
+                **inherited,
+                contract.SAMPLE_RATE: float(rate),
+            }
+        )
         # Sampled out, no span is built: none of a record's ends after it, and
         # the same record sent again draws again.
         if rate < 1 and random.random() >= rate:
             return
         # Queued whole or not at all: a record that outgrows the queue's room
         # would lose its tail, the run's own span first.
-        need = 2 + sum(
-            1 + (len(item.calls) if isinstance(item, StepRecord) else 0)
-            for item in record.inside
-        )
+        need = 2 + sum(1 + len(calls) for _item, calls in items)
         # Worked out before the hold: a count that warns runs the application's
         # logging handlers, which may record a run of their own.
         usages = {
-            id(item): _usage(item.usage, self._client.exporter.warn_once)
-            for item in _walk(record)
-            if isinstance(item, ModelCallRecord)
+            id(each): _usage(each.usage, self._client.exporter.warn_once)
+            for each in spans
+            if isinstance(each, ModelCallRecord)
         }
         places = itertools.count()
 
@@ -475,7 +503,9 @@ class Opener:
 
         def call(item: CallRecord, parent: context.Context) -> None:
             if isinstance(item, ModelCallRecord):
-                operation = item.operation if item.operation.strip() else "chat"
+                operation = item.operation
+                if not (operation and operation.strip()):
+                    operation = "chat"
                 attributes: dict[str, Any] = {
                     **inherited,
                     contract.OPERATION: operation,
@@ -512,13 +542,13 @@ class Opener:
                 record.start,
             )
             opener.end(end_time=_nanos(record.start))
-            for item in record.inside:
+            for item, calls in items:
                 if isinstance(item, StepRecord):
                     step = open_span(
                         item.name, ctx, inherited, SpanKind.INTERNAL, item.start
                     )
                     inner = trace.set_span_in_context(step, ctx)
-                    for each in item.calls:
+                    for each in calls:
                         call(each, inner)
                     _close(step, item)
                 else:
@@ -529,7 +559,7 @@ class Opener:
         run = current_run()
         if run is None and not self._warned_outside:
             self._warned_outside = True
-            logger.warning(
+            warn(
                 "telmoni: %s opened outside a run; nothing is sent outside a run", what
             )
         return run
@@ -579,8 +609,8 @@ class Opener:
 def _usage(
     usage: Usage | None, warn_once: Callable[[str, str], None]
 ) -> dict[str, int]:
-    """The counts as integers, which alone ingest takes; one JSON's integers
-    cannot carry is left off the call with one warning, not the batch lost."""
+    """The counts as whole numbers from 0, which alone ingest takes; another
+    is left off the call with one warning, not the call refused."""
     if usage is None:
         return {}
     counts = (
@@ -593,11 +623,11 @@ def _usage(
     for key, value in counts:
         if value is None:
             continue
-        count = _whole(value)
+        count = _whole(value, _COUNT)
         if count is None:
             warn_once(
                 f"usage:{key}",
-                f"telmoni: {key} must be a finite number within 64 bits; "
+                f"telmoni: {key} must be a whole number from 0 within 64 bits; "
                 "the call is sent without it",
             )
         else:
@@ -605,25 +635,215 @@ def _usage(
     return out
 
 
+def _tags(
+    tags: Mapping[str, str] | None, warn_once: Callable[[str, str], None]
+) -> dict[str, Any]:
+    """A run's tags as its span's attributes: the first `TAGS_MAX` of those
+    ingest keeps, since past them they would crowd out the run's own."""
+    kept: dict[str, Any] = {}
+    for key, value in (tags or {}).items():
+        if value is None:
+            continue
+        name, sent = f"{key}", _tag_value(value)
+        # Ingest drops it before counting, so it takes no place among the 32.
+        if not 0 < len(name) <= contract.TAG_KEY_MAX or (
+            _shown(sent) > contract.TAG_VALUE_MAX
+        ):
+            warn_once(
+                "run:tag",
+                "telmoni: a tag's key must be 1 to 64 characters and its value "
+                "up to 256; the tag is not sent",
+            )
+        elif len(kept) == contract.TAGS_MAX:
+            warn_once(
+                "run:tags",
+                "telmoni: a run carries up to 32 tags, the most ingest keeps; "
+                "the rest are not sent",
+            )
+        elif isinstance(sent, str):
+            kept[f"{contract.TAG_PREFIX}{name}"] = _text(value, "tag", warn_once)
+        else:
+            kept[f"{contract.TAG_PREFIX}{name}"] = sent
+    return kept
+
+
+def _tag_value(value: object) -> Any:
+    """A tag's value: a bool, a 64-bit int or a finite float as it is, which
+    ingest writes as its own text, and anything else as Python's."""
+    if isinstance(value, bool) or (
+        isinstance(value, int) and -(2**63) <= value < 2**63
+    ):
+        return value
+    if isinstance(value, float) and math.isfinite(value):
+        return value
+    return _str(value)
+
+
+def _shown(value: str | float) -> int:
+    """The characters of ingest's text for a tag's value: a float's as Rust
+    writes it, every digit and no exponent, so 1e300 takes 301."""
+    if isinstance(value, str):
+        return len(value)
+    if not isinstance(value, float):
+        return len(str(value if isinstance(value, bool) else int(value)))
+    sign, digits, exponent = Decimal(repr(value)).normalize().as_tuple()
+    point = len(digits) + int(exponent)
+    if int(exponent) >= 0:
+        return sign + point
+    return sign + (len(digits) + 1 if point > 0 else 2 - point + len(digits))
+
+
+def _text(value: object, what: str, warn_once: Callable[[str, str], None]) -> str:
+    """`value` as text: one that is no string, an `Enum`'s member say, goes as
+    its `str()` with one warning, where a span named by it would lose its batch."""
+    if isinstance(value, str):
+        return value
+    warn_once(
+        f"text:{what}", f"telmoni: a {what} that is no string is sent as its text"
+    )
+    return _str(value)
+
+
+def _str(value: object) -> str:
+    """`str(value)`, or its class's name where its own `__str__` raises."""
+    try:
+        return str(value)
+    except Exception:  # noqa: BLE001 - never into the agent's call
+        return type(value).__name__
+
+
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+# One past the last nanosecond ingest reads, in 64 bits: in 2554.
+_NANOS_END = 2**64
 
 
 def _nanos(at: datetime) -> int:
     """A recorded time as OpenTelemetry's nanoseconds, in whole microseconds,
     as a datetime holds it."""
+    if not isinstance(at, datetime):
+        raise TypeError("a recorded time must be a datetime")
     if at.tzinfo is None or at.utcoffset() is None:
         raise ValueError("a recorded time needs its timezone")
     return (at - _EPOCH) // timedelta(microseconds=1) * 1000
 
 
-def _walk(
+def _read(
     record: RunRecord,
-) -> Iterator[RunRecord | StepRecord | ModelCallRecord | ToolCallRecord]:
-    yield record
-    for item in record.inside:
-        yield item
-        if isinstance(item, StepRecord):
-            yield from item.calls
+) -> list[tuple[StepRecord | CallRecord, tuple[CallRecord, ...]]]:
+    """The record's items, each step with its calls, read once and checked, so
+    the items checked are the items built; a set, in no order, is refused."""
+    inside = record.inside
+    if not isinstance(inside, Sequence):
+        raise TypeError(
+            "a recorded run's inside must be a sequence, in the order it ran"
+        )
+    items: list[tuple[StepRecord | CallRecord, tuple[CallRecord, ...]]] = []
+    for item in inside:
+        if isinstance(item, (ModelCallRecord, ToolCallRecord)):
+            _check(item)
+            items.append((item, ()))
+            continue
+        if not isinstance(item, StepRecord):
+            raise TypeError(
+                "a recorded item must be a StepRecord, a ModelCallRecord "
+                "or a ToolCallRecord"
+            )
+        _check(item)
+        given = item.calls
+        if not isinstance(given, Sequence):
+            raise TypeError(
+                "a recorded step's calls must be a sequence, in the order they ran"
+            )
+        calls = tuple(given)
+        for each in calls:
+            if not isinstance(each, (ModelCallRecord, ToolCallRecord)):
+                raise TypeError(
+                    "a step's recorded call must be a ModelCallRecord "
+                    "or a ToolCallRecord"
+                )
+            _check(each)
+        items.append((item, calls))
+    return items
+
+
+_NONE = type(None)
+_TEXT: tuple[type, ...] = (str,)
+_UNSET_OR_TEXT: tuple[type, ...] = (str, _NONE)
+# What each recorded field may hold: OpenTelemetry would warn of anything else
+# inside the hold, where a handler may record a run, or send it wrong.
+_FIELDS: dict[type, tuple[str, dict[str, tuple[type, ...]]]] = {
+    RunRecord: (
+        "run",
+        {
+            "run_id": _TEXT,
+            "agent": _TEXT,
+            "user_id": _UNSET_OR_TEXT,
+            "session_id": _UNSET_OR_TEXT,
+            "tags": (Mapping, _NONE),
+        },
+    ),
+    StepRecord: ("step", {"name": _TEXT}),
+    ModelCallRecord: (
+        "model call",
+        {
+            "model": _TEXT,
+            "provider": _UNSET_OR_TEXT,
+            "operation": _UNSET_OR_TEXT,
+            "usage": (Usage, _NONE),
+        },
+    ),
+    ToolCallRecord: ("tool call", {"name": _TEXT}),
+}
+
+
+# The longest each recorded text may be, in characters, as ingest caps it.
+_CAPS: dict[type, dict[str, int]] = {
+    RunRecord: {
+        "agent": contract.NAME_MAX,
+        "user_id": contract.USER_ID_MAX,
+        "session_id": contract.SESSION_ID_MAX,
+    },
+    StepRecord: {"name": contract.NAME_MAX},
+    ModelCallRecord: {"model": contract.MODEL_MAX, "provider": contract.PROVIDER_MAX},
+    ToolCallRecord: {"name": contract.NAME_MAX},
+}
+
+
+def _check(item: RunRecord | StepRecord | CallRecord) -> None:
+    what, fields = next(
+        entry for kind, entry in _FIELDS.items() if isinstance(item, kind)
+    )
+    for field, kinds in {
+        **fields,
+        "error_type": _UNSET_OR_TEXT,
+        "cancelled": (bool,),
+    }.items():
+        if not isinstance(getattr(item, field), kinds):
+            names = " or ".join(
+                "None" if kind is _NONE else kind.__name__ for kind in kinds
+            )
+            raise TypeError(f"a recorded {what}'s {field} must be {names}")
+    # Ingest refuses a step or a model named nothing; a tool's it reads as none.
+    named = "model" if isinstance(item, ModelCallRecord) else "name"
+    if isinstance(item, (StepRecord, ModelCallRecord)) and getattr(item, named) == "":
+        raise ValueError(f"a recorded {what}'s {named} cannot be empty")
+    caps = next(caps for kind, caps in _CAPS.items() if isinstance(item, kind))
+    for field, most in {**caps, "error_type": contract.ERROR_TYPE_MAX}.items():
+        text = getattr(item, field)
+        if text and len(text) > most:
+            raise ValueError(
+                f"a recorded {what}'s {field} must be up to {most} characters"
+            )
+    # Its span is named `<operation> <model>`, a name ingest caps too.
+    if isinstance(item, ModelCallRecord):
+        operation = (
+            item.operation if item.operation and item.operation.strip() else "chat"
+        )
+        if len(operation) + len(item.model) > contract.NAME_MAX - 1:
+            raise ValueError(
+                "a recorded model call's operation and model must be up to 127 "
+                "characters together"
+            )
 
 
 def _close(
@@ -640,48 +860,62 @@ def _close(
 def _bounds(
     bounds: Bounds | None, warn_once: Callable[[str, str], None]
 ) -> dict[str, Any]:
-    """What the run is held to; a bound JSON cannot carry is left off with one
-    warning, so a computed one never stops the agent's call nor loses a batch."""
+    """What the run is held to; a bound ingest would refuse the run for is
+    left off with one warning, so a computed one never costs the run."""
     if bounds is None:
         return {}
     out: dict[str, Any] = {}
 
-    def keep(name: str, key: str, number: float | None) -> None:
+    def keep(name: str, key: str, number: float | None, allowed: str) -> None:
         if number is None:
             warn_once(
                 f"run:{name}",
-                f"telmoni: a run's {name} must be a finite number within 64 bits; "
-                "the run is sent without it",
+                f"telmoni: a run's {name} must be {allowed}; the run is sent without it",
             )
         else:
             out[key] = number
 
+    whole = "a whole number from 1 to 4294967295"
     if bounds.stall_after_s is not None:
-        keep(
-            "stall_after_s", contract.BOUND_STALL_AFTER_S, _whole(bounds.stall_after_s)
-        )
+        stall = _whole(bounds.stall_after_s, _BOUND)
+        keep("stall_after_s", contract.BOUND_STALL_AFTER_S, stall, whole)
     if bounds.max_steps is not None:
-        keep("max_steps", contract.BOUND_MAX_STEPS, _whole(bounds.max_steps))
+        steps = _whole(bounds.max_steps, _BOUND)
+        keep("max_steps", contract.BOUND_MAX_STEPS, steps, whole)
     if bounds.max_cost_usd is not None:
-        keep("max_cost_usd", contract.BOUND_MAX_COST_USD, _finite(bounds.max_cost_usd))
+        cost = _finite(bounds.max_cost_usd)
+        positive = cost if cost is not None and cost > 0 else None
+        keep(
+            "max_cost_usd",
+            contract.BOUND_MAX_COST_USD,
+            positive,
+            "a finite number above 0",
+        )
     return out
 
 
-_INT64 = range(-(2**63), 2**63)
+# What ingest takes: a token count from 0, a bound from 1 that fits 32 bits.
+_COUNT = range(2**63)
+_BOUND = range(1, 2**32)
 
 
-def _whole(value: float) -> int | None:
-    """`value` as a whole number within 64 bits, exact where given as one; None
-    for what JSON's integers cannot carry."""
+def _whole(value: float, allowed: range) -> int | None:
+    """`value` as a whole number in `allowed`, exact where given as one; None
+    for anything else, a `bool` among them, though Python counts it an int."""
+    if isinstance(value, bool):
+        return None
     try:
-        number = value if isinstance(value, int) else int(float(value))
+        number = int(value) if isinstance(value, int) else int(float(value))
     except (TypeError, ValueError, OverflowError):
         return None
-    return number if number in _INT64 else None
+    return number if number in allowed else None
 
 
 def _finite(value: float) -> float | None:
-    """`value` as a finite float; None for NaN, an infinity or no number."""
+    """`value` as a finite float; None for NaN, an infinity, a `bool` or no
+    number."""
+    if isinstance(value, bool):
+        return None
     try:
         number = float(value)
     except (TypeError, ValueError, OverflowError):

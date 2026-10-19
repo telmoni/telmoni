@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import enum
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
@@ -102,3 +103,48 @@ def test_the_step_decorator(telmoni: Telmoni, transport: FakeTransport) -> None:
         assert plan(1) == 2
     assert telmoni.flush()
     assert "plan" in by_name(transport)
+
+
+class Kind(enum.Enum):
+    PLAN = "plan"
+
+
+def test_a_name_of_no_string_goes_as_its_text_and_keeps_the_batch(
+    telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Sent as given, it would fail the export's JSON and lose every run's spans."""
+    with telmoni.run("other"), telmoni.step("fine"):
+        pass
+    with telmoni.run(Kind.PLAN) as run:  # type: ignore[arg-type]
+        with run.step(Kind.PLAN):  # type: ignore[arg-type]
+            pass
+        with run.model_call(5):  # type: ignore[arg-type]
+            pass
+        with run.tool_call(Kind.PLAN):  # type: ignore[arg-type]
+            pass
+    assert telmoni.flush()
+    names = sorted(span["name"] for span in transport.spans())
+    assert names == [
+        "Kind.PLAN",
+        "chat 5",
+        "execute_tool Kind.PLAN",
+        "fine",
+        "invoke_agent Kind.PLAN",
+        "invoke_agent other",
+        "telmoni.run.start",
+        "telmoni.run.start",
+    ]
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert len(warnings) == 4 and all("is sent as its text" in w for w in warnings)
+
+
+def test_a_name_with_a_lone_surrogate_goes_with_the_replacement_character(
+    telmoni: Telmoni, transport: FakeTransport
+) -> None:
+    """Escaped into the JSON, ingest would refuse the request and the batch."""
+    for name in ("a\ud800b", "c\udc80d", "e\U0001f600f"):
+        with telmoni.run("bot"), telmoni.step(name):
+            pass
+    assert telmoni.flush()
+    names = {span["name"] for span in transport.spans()}
+    assert {"a\ufffdb", "c\ufffdd", "e\U0001f600f"} <= names

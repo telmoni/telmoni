@@ -58,8 +58,18 @@ Each of `run`, `step`, `model_call` and `tool_call` is a context manager, an
 failed with the exception's class, never its message, and is raised again; a
 `KeyboardInterrupt` or `asyncio.CancelledError` marks it cancelled. `fail()`
 and `cancel()` do the same by hand. `run` raises `ValueError` for a blank agent
-name or a sample rate outside (0, 1]; a bound or a token count that is not a
-finite number, or a whole one past 64 bits, is left off with one warning.
+name or a sample rate outside (0, 1]. A bound or a token count is read from a
+number or its text, a stall's, steps' or count's fraction cut, and of what
+ingest would refuse, these are left off with one warning: a bound outside 1 to
+4294967295, a cost not above 0, a token count below 0 or past 64 bits, a tag
+whose key is not 1 to 64 characters or whose value is past 256, and the tags
+past the first 32 kept, the most ingest keeps; an empty user, session,
+provider or response model is left off as unset. A name, model, provider,
+user, session or response model that is no string goes as its text with one
+warning, as does a tag that is no string, finite number or bool. Text past
+ingest's caps, below, and a step or model named nothing still go as given,
+and ingest refuses the span they are on, or the whole run for its agent, user
+or session.
 
 ## A run recorded after it ended
 
@@ -103,11 +113,19 @@ content rules and sample rate, in a trace of its own named by the run's id,
 whatever trace is current. Each span's id is derived from the run's id and the
 span's place in the record, so the same record sent again is the same bytes,
 which ingest answers once: give a run the same id each time you send it. A
-record holds no content. A blank agent, a run id that is not a UUID or is the
-nil UUID, a time without its timezone or a span that ends before it starts
-raises `ValueError` and sends nothing. A record the export queue has no room
-for raises `QueueFullError`, nothing of it queued: flush, or wait, and record
-it again.
+record holds no content. A blank agent, a run id that is neither a hyphenated
+UUID nor 32 hex digits, or is the nil UUID, a time without its timezone or
+outside what ingest reads (after the Unix epoch, and less than 2^64 nanoseconds
+after it, in July 2554), an empty step's name or model, text longer than
+ingest keeps (a name, the agent, a model, a provider, a user or an error type
+past 128 characters, a session past 200, or a model call's operation and model
+past 127 together), or a span that ends before it starts raises `ValueError`. A
+field of the wrong type raises `TypeError` — a time that is no `datetime`, an
+item of another class, `inside` or `calls` that is no sequence (a list or a
+tuple, in the order it ran) — save a token count, read as a whole number where
+it can be and else left off with one warning, and an `operation` of `None`, a
+chat. Either sends nothing. A record the export queue has no room for raises
+`QueueFullError`, nothing of it queued: flush, or wait, and record it again.
 
 ## Content
 

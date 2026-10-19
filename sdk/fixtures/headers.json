@@ -92,6 +92,14 @@
       "run": null
     },
     {
+      "name": "a run id with a line feed after it, percent-encoded",
+      "headers": {
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "baggage": "telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01%0A,telmoni.agent=bot"
+      },
+      "run": null
+    },
+    {
       "name": "no agent",
       "headers": {
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",

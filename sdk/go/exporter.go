@@ -250,7 +250,8 @@ func (e *exporter) warnOnce(key, text string) {
 	}
 	e.mu.Unlock()
 	if !seen {
-		e.logger.Warn(text)
+		// Recovered: a panicking handler must not reach the agent's own call.
+		func() { defer func() { _ = recover() }(); e.logger.Warn(text) }()
 	}
 }
 
@@ -394,10 +395,25 @@ func encodeSpan(span sdktrace.ReadOnlySpan, keepContent bool) otlpSpan {
 // nanos is OTLP's JSON spelling of a time: its Unix nanoseconds, in decimal,
 // as a string.
 func nanos(t time.Time) string {
-	if t.IsZero() {
-		return "0"
+	// 0 out of range, for ingest to refuse that span rather than the export.
+	n, _ := unixNanos(t)
+	return strconv.FormatUint(n, 10)
+}
+
+// The span times ingest reads: after the Unix epoch, which it takes for no
+// time, and before 2^64 nanoseconds past it, in 2554.
+var (
+	unixEpoch = time.Unix(0, 0)
+	unixEnd   = time.Unix(1<<64/1_000_000_000, 1<<64%1_000_000_000)
+)
+
+// unixNanos is t's nanoseconds since the Unix epoch as OTLP's unsigned field
+// carries them, to 2554, where UnixNano overflows in 2262; false out of range.
+func unixNanos(t time.Time) (uint64, bool) {
+	if !t.After(unixEpoch) || !t.Before(unixEnd) {
+		return 0, false
 	}
-	return strconv.FormatInt(t.UnixNano(), 10)
+	return uint64(t.Unix())*1e9 + uint64(t.Nanosecond()), true
 }
 
 func stringAttribute(key, value string) keyValue {
