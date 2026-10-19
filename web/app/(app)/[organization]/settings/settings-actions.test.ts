@@ -104,7 +104,7 @@ describe("renameOrganizationAction", () => {
       error: null,
     });
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://auth.test/internal/organization",
+      "http://auth.test/internal/v1/organization",
       expect.objectContaining({
         method: "PATCH",
         headers: expect.objectContaining({
@@ -189,7 +189,7 @@ describe("changeOrganizationUrlAction", () => {
       "REDIRECT:/acme/settings (replace)",
     );
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://auth.test/internal/organization",
+      "http://auth.test/internal/v1/organization",
       expect.objectContaining({
         method: "PATCH",
         headers: expect.objectContaining({

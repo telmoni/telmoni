@@ -1,4 +1,4 @@
-//! `PATCH /internal/organization` — who may name an organization, and what
+//! `PATCH /internal/v1/organization` — who may name an organization, and what
 //! names and URLs it takes.
 #![expect(
     clippy::unwrap_used,
@@ -70,7 +70,7 @@ async fn sign_in(pool: &PgPool, user: &str, email: &str) -> String {
             as_person(
                 Request::builder()
                     .method("POST")
-                    .uri("/me")
+                    .uri("/internal/v1/me")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("content-type", "application/json"),
                 pool,
@@ -115,7 +115,7 @@ async fn stored_name(pool: &PgPool, organization: &str) -> String {
         .expect("read the organization back")
 }
 
-/// `PATCH /internal/organization` as `caller`, with `body` as the console
+/// `PATCH /internal/v1/organization` as `caller`, with `body` as the console
 /// would send it: a name, a slug, or both.
 async fn update(
     pool: &PgPool,
@@ -128,7 +128,7 @@ async fn update(
             as_person(
                 Request::builder()
                     .method("PATCH")
-                    .uri("/internal/organization")
+                    .uri("/internal/v1/organization")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("x-organization-id", organization)
                     .header("content-type", "application/json"),

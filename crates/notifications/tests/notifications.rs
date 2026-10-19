@@ -81,7 +81,7 @@ fn req_as(m: &str, uri: &str, organization: &str, user: &str, body: Option<&str>
 }
 
 fn emit_req(organization: &str, body: &str) -> Request<Body> {
-    Request::post("/internal/notifications/emit")
+    Request::post("/internal/v1/notifications/emit")
         .header("x-service-secret", SECRET)
         .header("x-project-id", project_of(organization))
         .header("x-organization-id", organization)
@@ -92,7 +92,7 @@ fn emit_req(organization: &str, body: &str) -> Request<Body> {
 
 /// What an organization alert's emitter sends: the organization and NO project.
 fn organization_emit_req(organization: &str, body: &str) -> Request<Body> {
-    Request::post("/internal/notifications/emit")
+    Request::post("/internal/v1/notifications/emit")
         .header("x-service-secret", SECRET)
         .header("x-organization-id", organization)
         .header(header::CONTENT_TYPE, "application/json")
@@ -231,7 +231,7 @@ async fn an_emit_with_no_organization_is_refused(pool: PgPool) {
     let state = state(pool, &auth);
     let resp = app(state)
         .oneshot(
-            Request::post("/internal/notifications/emit")
+            Request::post("/internal/v1/notifications/emit")
                 .header("x-service-secret", SECRET)
                 .header("x-project-id", project_of(ORGANIZATION))
                 .header(header::CONTENT_TYPE, "application/json")
@@ -257,7 +257,7 @@ async fn a_request_with_no_bearer_is_refused_even_with_a_valid_service_secret(po
 
     let req = Request::builder()
         .method("GET")
-        .uri("/internal/notifications/feed")
+        .uri("/internal/v1/notifications/feed")
         .header("x-service-secret", SECRET)
         .header("x-organization-id", ORGANIZATION)
         .header("x-project-id", project_of(ORGANIZATION))
@@ -312,7 +312,7 @@ async fn emit_writes_the_feed_and_read_is_project_scoped(pool: PgPool) {
     let resp = app(state.clone())
         .oneshot(bff_req(
             "GET",
-            "/internal/notifications/feed",
+            "/internal/v1/notifications/feed",
             ORGANIZATION,
             None,
         ))
@@ -327,7 +327,7 @@ async fn emit_writes_the_feed_and_read_is_project_scoped(pool: PgPool) {
     let resp = app(state.clone())
         .oneshot(bff_req(
             "GET",
-            "/internal/notifications/feed",
+            "/internal/v1/notifications/feed",
             OTHER_ORGANIZATION,
             None,
         ))
@@ -339,7 +339,7 @@ async fn emit_writes_the_feed_and_read_is_project_scoped(pool: PgPool) {
     let resp = app(state.clone())
         .oneshot(bff_req(
             "POST",
-            "/internal/notifications/read",
+            "/internal/v1/notifications/read",
             ORGANIZATION,
             Some(&drawn),
         ))
@@ -368,7 +368,7 @@ async fn mark_read_marks_what_the_page_drew_and_not_what_landed_since(pool: PgPo
             &format!(r#"{{"kind":"member_added","title":"{title}","body":"A seat taken."}}"#),
         )
     };
-    let page = || bff_req("GET", "/internal/notifications/feed", ORGANIZATION, None);
+    let page = || bff_req("GET", "/internal/v1/notifications/feed", ORGANIZATION, None);
     let resp = app(state.clone()).oneshot(emit("First")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::ACCEPTED);
     // Drawn a minute ago, so the next notice is plainly later.
@@ -383,7 +383,7 @@ async fn mark_read_marks_what_the_page_drew_and_not_what_landed_since(pool: PgPo
     let resp = app(state.clone())
         .oneshot(bff_req(
             "POST",
-            "/internal/notifications/read",
+            "/internal/v1/notifications/read",
             ORGANIZATION,
             Some(&drawn),
         ))
@@ -400,7 +400,7 @@ async fn mark_read_marks_what_the_page_drew_and_not_what_landed_since(pool: PgPo
     let resp = app(state.clone())
         .oneshot(bff_req(
             "POST",
-            "/internal/notifications/read",
+            "/internal/v1/notifications/read",
             ORGANIZATION,
             Some("{}"),
         ))
@@ -497,7 +497,7 @@ async fn active_notification_kinds_emit_and_land_on_the_feed(pool: PgPool) {
     let resp = app(state.clone())
         .oneshot(bff_req(
             "GET",
-            "/internal/notifications/feed",
+            "/internal/v1/notifications/feed",
             ORGANIZATION,
             None,
         ))
@@ -524,7 +524,12 @@ async fn an_organization_alert_is_accepted_in_the_shape_its_emitter_sends(pool: 
 
     let (titles, _) = feed_titles(
         &state,
-        organization_req("GET", "/internal/notifications/feed", ORGANIZATION, OWNER),
+        organization_req(
+            "GET",
+            "/internal/v1/notifications/feed",
+            ORGANIZATION,
+            OWNER,
+        ),
     )
     .await;
     assert_eq!(
@@ -550,7 +555,14 @@ async fn an_organization_level_notice_is_read_and_cleared_on_the_organizations_p
         .unwrap();
     assert_eq!(resp.status(), StatusCode::ACCEPTED);
 
-    let page = || organization_req("GET", "/internal/notifications/feed", ORGANIZATION, OWNER);
+    let page = || {
+        organization_req(
+            "GET",
+            "/internal/v1/notifications/feed",
+            ORGANIZATION,
+            OWNER,
+        )
+    };
     let (titles, unread) = feed_titles(&state, page()).await;
     assert_eq!(titles, ["Action needed"]);
     assert_eq!(unread, 1);
@@ -558,7 +570,7 @@ async fn an_organization_level_notice_is_read_and_cleared_on_the_organizations_p
 
     let resp = app(state.clone())
         .oneshot(organization_post(
-            "/internal/notifications/read",
+            "/internal/v1/notifications/read",
             ORGANIZATION,
             OWNER,
             &drawn,
@@ -598,14 +610,19 @@ async fn a_projects_notice_and_the_organizations_are_two_feeds(pool: PgPool) {
 
     let (project, _) = feed_titles(
         &state,
-        bff_req("GET", "/internal/notifications/feed", ORGANIZATION, None),
+        bff_req("GET", "/internal/v1/notifications/feed", ORGANIZATION, None),
     )
     .await;
     assert_eq!(project, ["in the project"]);
 
     let (organization, _) = feed_titles(
         &state,
-        organization_req("GET", "/internal/notifications/feed", ORGANIZATION, OWNER),
+        organization_req(
+            "GET",
+            "/internal/v1/notifications/feed",
+            ORGANIZATION,
+            OWNER,
+        ),
     )
     .await;
     assert_eq!(organization, ["for the organization"]);
@@ -621,7 +638,7 @@ async fn the_organizations_feed_is_closed_to_a_seated_member(pool: PgPool) {
     let resp = app(state)
         .oneshot(organization_req(
             "GET",
-            "/internal/notifications/feed",
+            "/internal/v1/notifications/feed",
             ORGANIZATION,
             USER,
         ))
@@ -652,7 +669,7 @@ async fn a_viewer_reads_the_projects_feed_and_is_refused_the_organizations(pool:
         &state,
         req_as(
             "GET",
-            "/internal/notifications/feed",
+            "/internal/v1/notifications/feed",
             ORGANIZATION,
             USER,
             None,
@@ -665,7 +682,7 @@ async fn a_viewer_reads_the_projects_feed_and_is_refused_the_organizations(pool:
     let resp = app(state)
         .oneshot(organization_req(
             "GET",
-            "/internal/notifications/feed",
+            "/internal/v1/notifications/feed",
             ORGANIZATION,
             USER,
         ))
@@ -710,7 +727,7 @@ async fn the_retention_sweep_executes_and_removes_rows_past_the_window(pool: PgP
     let resp = app(state.clone())
         .oneshot(bff_req(
             "GET",
-            "/internal/notifications/feed",
+            "/internal/v1/notifications/feed",
             ORGANIZATION,
             None,
         ))
@@ -871,7 +888,7 @@ async fn one_organizations_notices_never_appear_on_another_organization(pool: Pg
     ] {
         let resp = app(st.clone())
             .oneshot(
-                Request::post("/internal/notifications/emit")
+                Request::post("/internal/v1/notifications/emit")
                     .header("x-service-secret", SECRET)
                     .header("x-project-id", project_of(organization))
                     .header("x-organization-id", organization)
@@ -888,7 +905,7 @@ async fn one_organizations_notices_never_appear_on_another_organization(pool: Pg
 
     let (first, _) = feed_titles(
         &st,
-        bff_req("GET", "/internal/notifications/feed", ORGANIZATION, None),
+        bff_req("GET", "/internal/v1/notifications/feed", ORGANIZATION, None),
     )
     .await;
     assert_eq!(first, ["api is down"]);
@@ -925,7 +942,7 @@ async fn the_purge_auth_calls_removes_every_trace_of_the_organization(pool: PgPo
     let resp = app(state(pool.clone(), &auth))
         .oneshot(
             Request::post(format!(
-                "/internal/notifications/organizations/{organization}/purge"
+                "/internal/v1/notifications/organizations/{organization}/purge"
             ))
             .header("x-service-secret", SECRET)
             .body(Body::empty())
@@ -992,7 +1009,7 @@ async fn erasing_a_person_rewrites_every_notice_that_named_them(pool: PgPool) {
 
     let redact = || {
         app(state.clone()).oneshot(
-            Request::post("/internal/notifications/people/user_leaver/redact")
+            Request::post("/internal/v1/notifications/people/user_leaver/redact")
                 .header("x-service-secret", SECRET)
                 .body(Body::empty())
                 .unwrap(),
@@ -1006,7 +1023,7 @@ async fn erasing_a_person_rewrites_every_notice_that_named_them(pool: PgPool) {
         let resp = app(state.clone())
             .oneshot(bff_req(
                 "GET",
-                "/internal/notifications/feed",
+                "/internal/v1/notifications/feed",
                 organization,
                 None,
             ))
@@ -1039,7 +1056,7 @@ async fn erasing_a_person_rewrites_every_notice_that_named_them(pool: PgPool) {
     let resp = app(state.clone())
         .oneshot(bff_req(
             "GET",
-            "/internal/notifications/feed",
+            "/internal/v1/notifications/feed",
             ORGANIZATION,
             None,
         ))
@@ -1088,7 +1105,7 @@ async fn a_notice_the_redaction_cannot_rewrite_fails_it(pool: PgPool) {
 
     let resp = app(state.clone())
         .oneshot(
-            Request::post("/internal/notifications/people/user_leaver/redact")
+            Request::post("/internal/v1/notifications/people/user_leaver/redact")
                 .header("x-service-secret", SECRET)
                 .body(Body::empty())
                 .unwrap(),
@@ -1147,7 +1164,7 @@ async fn the_project_purge_auth_calls_removes_the_projects_rows_and_spares_its_s
     let resp = app(state(pool.clone(), &auth))
         .oneshot(
             Request::post(format!(
-                "/internal/notifications/projects/{}/purge",
+                "/internal/v1/notifications/projects/{}/purge",
                 pid(ORGANIZATION)
             ))
             .header("x-service-secret", SECRET)

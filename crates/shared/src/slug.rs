@@ -7,7 +7,7 @@
 //! auth derives it whenever the name is set — creation, a rename, a move into
 //! another organization — so a rename moves the URL. An organization's is
 //! derived once, from its first name, and is a setting of its own after that
-//! (`PATCH /internal/organization`), so only a URL change moves it. Ids key
+//! (`PATCH /internal/v1/organization`), so only a URL change moves it. Ids key
 //! lanes, headers, cookies and foreign keys; every link a person is shown —
 //! an index entry's URL and a citation included — is spelled with slugs, and
 //! dies when the slug moves, as a Vercel link does. The console redirects an

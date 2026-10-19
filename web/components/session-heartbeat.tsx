@@ -60,7 +60,7 @@ export function SessionHeartbeat({ expiresAt: initialExpiresAt }: SessionHeartbe
       const cutoff = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
       let unanswered = false;
       try {
-        const res = await fetch("/api/auth/heartbeat", {
+        const res = await fetch("/api/v1/auth/heartbeat", {
           method: "POST",
           headers: {
             "content-type": "application/json",

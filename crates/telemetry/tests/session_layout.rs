@@ -23,8 +23,8 @@ use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, Role};
 use telmoni_telemetry::router;
 
-const LANE: &str = "/internal/telemetry/session-layout";
-const VIEWS: &str = "/internal/telemetry/views";
+const LANE: &str = "/internal/v1/telemetry/session-layout";
+const VIEWS: &str = "/internal/v1/telemetry/views";
 const OWNER: &str = "user_owner";
 const ADMIN: &str = "user_admin";
 const MEMBER: &str = "user_member";

@@ -1,4 +1,4 @@
-//! Handing an organization over — `/internal/organization/owner-transfer`.
+//! Handing an organization over — `/internal/v1/organization/owner-transfer`.
 //!
 //! The owner offers the organization to one of its ADMINS; the admin accepts or
 //! declines; the owner can withdraw it. On accept the old owner becomes an
@@ -51,7 +51,7 @@ use crate::{
     model::AuditKind,
 };
 
-/// Body of `POST /internal/organization/owner-transfer`.
+/// Body of `POST /internal/v1/organization/owner-transfer`.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OfferRequest {
@@ -216,7 +216,7 @@ async fn offerable(
     }
 }
 
-/// `POST /internal/organization/owner-transfer` — the owner offers the
+/// `POST /internal/v1/organization/owner-transfer` — the owner offers the
 /// organization to an admin. Withdraws any offer already out, because there is
 /// only ever one, and mails the admin who held it.
 ///
@@ -356,7 +356,7 @@ pub async fn offer(
     ))
 }
 
-/// `DELETE /internal/organization/owner-transfer` — the owner withdraws the
+/// `DELETE /internal/v1/organization/owner-transfer` — the owner withdraws the
 /// offer, and the admin who held it is mailed.
 pub async fn cancel(
     State(state): State<Arc<AppState>>,
@@ -424,7 +424,7 @@ pub async fn cancel(
     })))
 }
 
-/// `POST /internal/organization/owner-transfer/decline` — the admin holding
+/// `POST /internal/v1/organization/owner-transfer/decline` — the admin holding
 /// the offer turns it down, and the owner is mailed.
 pub async fn decline(
     State(state): State<Arc<AppState>>,
@@ -478,7 +478,7 @@ pub async fn decline(
     Ok(Json(json!({ "ownerOrganizationId": organization })))
 }
 
-/// `POST /internal/organization/owner-transfer/accept` — the admin holding a
+/// `POST /internal/v1/organization/owner-transfer/accept` — the admin holding a
 /// live offer becomes the owner, and the owner becomes an admin and is mailed:
 /// what only the owner decides is the new owner's now.
 ///

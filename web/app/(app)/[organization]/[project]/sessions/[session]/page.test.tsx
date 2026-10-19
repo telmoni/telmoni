@@ -256,7 +256,7 @@ beforeEach(() => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) =>
-      Response.json(spans(decodeURIComponent(url.split("/api/traces/")[1]!.split("?")[0]!))),
+      Response.json(spans(decodeURIComponent(url.split("/api/v1/traces/")[1]!.split("?")[0]!))),
     ),
   );
 });
@@ -333,7 +333,7 @@ describe("SessionPage", () => {
     expect(within(table).getByRole("button", { name: "Open the trace" })).toBeInTheDocument();
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(vi.mocked(fetch).mock.calls[0]![0]).toBe(
-      `/api/traces/${RUN_B}?project=project_7bQx2mNv9BcK4dLp`,
+      `/api/v1/traces/${RUN_B}?project=project_7bQx2mNv9BcK4dLp`,
     );
     const tree = await within(table).findByRole("list", { name: "Spans" });
     const rows = within(tree).getAllByRole("listitem");

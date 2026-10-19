@@ -47,7 +47,7 @@ export async function requestOrganizationDeletionCodeAction(
   }
 
   const res = await tryFetchWithTimeout(
-    `${env.SERVER_URL}/internal/organization/deletion-code`,
+    `${env.SERVER_URL}/internal/v1/organization/deletion-code`,
     { method: "POST", headers: organizationHeaders(ctx) },
   );
   if (!res) return { error: UNREACHABLE };
@@ -92,7 +92,7 @@ export async function deleteOrganizationAction(
   const others =
     roster.kind === "ok" ? roster.members.filter((m) => m.member_id !== ctx.userId) : [];
 
-  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/organization`, {
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/organization`, {
     method: "DELETE",
     headers: { ...organizationHeaders(ctx), "content-type": "application/json" },
     body: JSON.stringify({ code }),

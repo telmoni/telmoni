@@ -26,7 +26,7 @@ fn provider(state: &AppState) -> Result<&PasswordProvider, TelmoniError> {
         .ok_or_else(|| AuthError::NotFound("this deployment's login form is off".into()).into())
 }
 
-/// `POST /internal/auth/password/sign-up`.
+/// `POST /internal/v1/auth/password/sign-up`.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SignUpRequest {
@@ -38,7 +38,7 @@ pub struct SignUpRequest {
     pub family_name: Option<String>,
 }
 
-/// `POST /internal/auth/password/sign-in`.
+/// `POST /internal/v1/auth/password/sign-in`.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SignInRequest {
@@ -46,7 +46,7 @@ pub struct SignInRequest {
     pub password: Redacted,
 }
 
-/// `POST /internal/auth/password/sign-in` answer, and a sign-up's when the
+/// `POST /internal/v1/auth/password/sign-in` answer, and a sign-up's when the
 /// account is usable at once: the one-time code the console's callback
 /// spends at the exchange lane.
 #[derive(Serialize)]
@@ -63,7 +63,7 @@ impl std::fmt::Debug for SignInResponse {
     }
 }
 
-/// `POST /internal/auth/password/verify`: the two halves of the link.
+/// `POST /internal/v1/auth/password/verify`: the two halves of the link.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct VerifyEmailRequest {
@@ -71,14 +71,14 @@ pub struct VerifyEmailRequest {
     pub token: Redacted,
 }
 
-/// `POST /internal/auth/password/forgot`.
+/// `POST /internal/v1/auth/password/forgot`.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ForgotPasswordRequest {
     pub email: String,
 }
 
-/// `POST /internal/auth/password/reset`: the link's two halves and the new
+/// `POST /internal/v1/auth/password/reset`: the link's two halves and the new
 /// password.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -88,7 +88,7 @@ pub struct ResetPasswordRequest {
     pub password: Redacted,
 }
 
-/// `POST /internal/auth/password/sign-up` — create an account. 202 with the
+/// `POST /internal/v1/auth/password/sign-up` — create an account. 202 with the
 /// address to be confirmed from its mail, or 200 with the code that opens
 /// the session when the deployment asks for no confirmation.
 pub async fn sign_up(
@@ -109,7 +109,7 @@ pub async fn sign_up(
     })
 }
 
-/// `POST /internal/auth/password/sign-in` — check the password and answer
+/// `POST /internal/v1/auth/password/sign-in` — check the password and answer
 /// the code. A wrong password and an unknown address are the same 401.
 pub async fn sign_in(
     State(state): State<Arc<AppState>>,
@@ -121,7 +121,7 @@ pub async fn sign_in(
     Ok(Json(SignInResponse { code }))
 }
 
-/// `POST /internal/auth/password/verify` — spend the verification link.
+/// `POST /internal/v1/auth/password/verify` — spend the verification link.
 pub async fn verify_email(
     State(state): State<Arc<AppState>>,
     Json(req): Json<VerifyEmailRequest>,
@@ -133,7 +133,7 @@ pub async fn verify_email(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `POST /internal/auth/password/forgot` — mail a reset link if the address
+/// `POST /internal/v1/auth/password/forgot` — mail a reset link if the address
 /// has an account, and say nothing either way.
 pub async fn forgot_password(
     State(state): State<Arc<AppState>>,
@@ -143,7 +143,7 @@ pub async fn forgot_password(
     Ok((StatusCode::ACCEPTED, Json(json!({ "sent": true }))))
 }
 
-/// `POST /internal/auth/password/reset` — spend the reset link and set the
+/// `POST /internal/v1/auth/password/reset` — spend the reset link and set the
 /// password; every session ends.
 pub async fn reset_password(
     State(state): State<Arc<AppState>>,

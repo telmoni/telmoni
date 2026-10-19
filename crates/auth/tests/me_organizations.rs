@@ -91,9 +91,9 @@ async fn call(
     (status, json_body(resp).await)
 }
 
-/// `POST /me` as `user`, asking to act in `requested` when given.
+/// `POST /internal/v1/me` as `user`, asking to act in `requested` when given.
 async fn me(pool: &PgPool, user: &str, requested: Option<&str>) -> (StatusCode, Value) {
-    call(pool, "POST", "/me", user, requested, None).await
+    call(pool, "POST", "/internal/v1/me", user, requested, None).await
 }
 
 /// Sign somebody in for the first time; answers the id of the organization
@@ -111,7 +111,7 @@ async fn create_project(pool: &PgPool, owner: &str, organization: &str, name: &s
     let (status, body) = call(
         pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         owner,
         Some(organization),
         Some(json!({ "name": name })),
@@ -126,7 +126,7 @@ async fn join(pool: &PgPool, organization: &str, owner: &str, user: &str) {
     let (status, body) = call(
         pool,
         "POST",
-        "/internal/organization/invites",
+        "/internal/v1/organization/invites",
         owner,
         Some(organization),
         Some(json!({ "email": format!("{user}@example.test"), "role": "member" })),
@@ -137,7 +137,7 @@ async fn join(pool: &PgPool, organization: &str, owner: &str, user: &str) {
     let (status, body) = call(
         pool,
         "POST",
-        &format!("/internal/me/invites/{invite}/accept"),
+        &format!("/internal/v1/me/invites/{invite}/accept"),
         user,
         None,
         None,
@@ -291,12 +291,12 @@ async fn the_console_names_the_organization_by_its_slug(pool: PgPool) {
     }
 }
 
-/// `POST /me` as `user` with the console's `x-organization-slug`, and the
-/// CLI's `x-organization-id` beside it when given.
+/// `POST /internal/v1/me` as `user` with the console's `x-organization-slug`,
+/// and the CLI's `x-organization-id` beside it when given.
 async fn me_by_slug(pool: &PgPool, user: &str, slug: &str, id: Option<&str>) -> Value {
     let mut req = Request::builder()
         .method("POST")
-        .uri("/me")
+        .uri("/internal/v1/me")
         .header("x-service-secret", SERVICE_SECRET)
         .header("content-type", "application/json")
         .header("x-organization-slug", slug);
@@ -333,12 +333,12 @@ async fn set_pending_deletion(pool: &PgPool, organization: &str, pending: bool) 
         .unwrap();
 }
 
-/// `PUT /internal/me/default-organization` as `user`.
+/// `PUT /internal/v1/me/default-organization` as `user`.
 async fn choose_default(pool: &PgPool, user: &str, organization: &str) -> (StatusCode, Value) {
     call(
         pool,
         "PUT",
-        "/internal/me/default-organization",
+        "/internal/v1/me/default-organization",
         user,
         None,
         Some(json!({ "organizationId": organization })),
@@ -413,7 +413,7 @@ async fn the_default_goes_with_the_seat_it_was_chosen_on(pool: PgPool) {
     let (status, body) = call(
         &pool,
         "DELETE",
-        "/internal/organization/members/user_me_mover",
+        "/internal/v1/organization/members/user_me_mover",
         "user_me_mover",
         Some(&other),
         None,
@@ -439,7 +439,7 @@ async fn the_default_goes_with_the_seat_it_was_chosen_on(pool: PgPool) {
     let (status, body) = call(
         &pool,
         "DELETE",
-        "/internal/organization/members/user_me_mover",
+        "/internal/v1/organization/members/user_me_mover",
         "user_me_mover_host",
         Some(&other),
         None,
@@ -594,7 +594,7 @@ async fn somebody_who_has_left_everything_gets_a_fresh_organization(pool: PgPool
     let (status, body) = call(
         &pool,
         "DELETE",
-        "/internal/organization/members/user_me_leaver",
+        "/internal/v1/organization/members/user_me_leaver",
         "user_me_leaver",
         Some(&other),
         None,
@@ -646,7 +646,7 @@ async fn somebody_removed_from_their_last_organization_gets_a_fresh_one(pool: Pg
     let (status, body) = call(
         &pool,
         "DELETE",
-        "/internal/organization/members/user_me_removed",
+        "/internal/v1/organization/members/user_me_removed",
         "user_me_remover",
         Some(&other),
         None,
@@ -720,7 +720,7 @@ async fn somebody_in_no_organization_signs_in_to_their_account_while_sign_ups_ar
     let (status, body) = call(
         &pool,
         "POST",
-        "/internal/organization/invites",
+        "/internal/v1/organization/invites",
         "user_me_inviter",
         Some(&theirs),
         Some(json!({ "email": "user_me_invitee@example.test", "role": "member" })),
@@ -742,7 +742,7 @@ async fn somebody_in_no_organization_signs_in_to_their_account_while_sign_ups_ar
     let (status, body) = call(
         &pool,
         "POST",
-        &format!("/internal/me/invites/{invite}/accept"),
+        &format!("/internal/v1/me/invites/{invite}/accept"),
         "user_me_invitee",
         None,
         None,
@@ -784,7 +784,7 @@ async fn a_person_event_is_refused_on_an_organization_the_person_is_not_in(pool:
     let (status, body) = call(
         &pool,
         "PUT",
-        "/internal/me/analytics",
+        "/internal/v1/me/analytics",
         "user_me_consent",
         Some(&foreign),
         Some(json!({ "opt_in": true })),
@@ -797,7 +797,7 @@ async fn a_person_event_is_refused_on_an_organization_the_person_is_not_in(pool:
     let (status, body) = call(
         &pool,
         "PUT",
-        "/internal/me/analytics",
+        "/internal/v1/me/analytics",
         "user_me_consent",
         Some(&own),
         Some(json!({ "opt_in": true })),
@@ -846,7 +846,7 @@ async fn somebody_in_no_organization_manages_their_account_without_naming_one(po
     let (status, body) = call(
         &pool,
         "PUT",
-        "/internal/me/analytics",
+        "/internal/v1/me/analytics",
         "user_me_alone",
         None,
         Some(json!({ "opt_in": true })),
@@ -857,7 +857,7 @@ async fn somebody_in_no_organization_manages_their_account_without_naming_one(po
     let (status, body) = call(
         &pool,
         "GET",
-        "/internal/auth/sessions",
+        "/internal/v1/auth/sessions",
         "user_me_alone",
         None,
         None,
@@ -875,7 +875,7 @@ async fn somebody_in_no_organization_manages_their_account_without_naming_one(po
     let (status, body) = call(
         &pool,
         "POST",
-        &format!("/internal/auth/sessions/{session}/revoke"),
+        &format!("/internal/v1/auth/sessions/{session}/revoke"),
         "user_me_alone",
         None,
         None,
@@ -903,7 +903,7 @@ async fn somebody_in_no_organization_manages_their_account_without_naming_one(po
     let (status, body) = call(
         &pool,
         "PUT",
-        "/internal/me/analytics",
+        "/internal/v1/me/analytics",
         "user_me_member",
         None,
         Some(json!({ "opt_in": true })),
@@ -913,7 +913,7 @@ async fn somebody_in_no_organization_manages_their_account_without_naming_one(po
     let (status, body) = call(
         &pool,
         "PUT",
-        "/internal/me/analytics",
+        "/internal/v1/me/analytics",
         "user_me_member",
         Some(&theirs),
         Some(json!({ "opt_in": true })),
@@ -960,7 +960,7 @@ async fn an_accept_waits_on_the_persons_lock_and_is_refused_once_their_deletion_
     let (status, body) = call(
         &pool,
         "POST",
-        "/internal/organization/invites",
+        "/internal/v1/organization/invites",
         "user_me_inviter",
         Some(&theirs),
         Some(json!({ "email": "user_me_invitee@example.test", "role": "member" })),
@@ -969,7 +969,7 @@ async fn an_accept_waits_on_the_persons_lock_and_is_refused_once_their_deletion_
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let invite = body["id"].as_str().unwrap().to_owned();
 
-    // Stands in for a self-service lane or `DELETE /internal/me`, either of
+    // Stands in for a self-service lane or `DELETE /internal/v1/me`, either of
     // which holds the person's lock for its whole transaction.
     let mut holder = pool.begin().await.unwrap();
     telmoni_auth::db::locks::lock_person(&mut holder, &UserId::try_new("user_me_invitee").unwrap())
@@ -981,7 +981,7 @@ async fn an_accept_waits_on_the_persons_lock_and_is_refused_once_their_deletion_
             call(
                 &pool,
                 "POST",
-                &format!("/internal/me/invites/{invite}/accept"),
+                &format!("/internal/v1/me/invites/{invite}/accept"),
                 "user_me_invitee",
                 None,
                 None,

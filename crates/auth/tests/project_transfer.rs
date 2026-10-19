@@ -183,7 +183,7 @@ async fn call(
 /// they were provisioned with.
 async fn sign_in(pool: &PgPool, user: &str) -> String {
     seed_identity(pool, user, &format!("{user}@example.test")).await;
-    let (status, body) = call(pool, "POST", "/me", user, None, None).await;
+    let (status, body) = call(pool, "POST", "/internal/v1/me", user, None, None).await;
     assert_eq!(status, StatusCode::OK, "sign-in failed for {user}: {body}");
     body["activeOrganizationId"]
         .as_str()
@@ -197,7 +197,7 @@ async fn create_project(pool: &PgPool, caller: &str, organization: &str, name: &
     let (status, body) = call(
         pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         caller,
         Some(organization),
         Some(json!({ "name": name })),
@@ -221,7 +221,7 @@ async fn rename(pool: &PgPool, organization: &str, project: &str, name: &str) {
     let (status, body) = call(
         pool,
         "PATCH",
-        &format!("/internal/projects/{project}"),
+        &format!("/internal/v1/projects/{project}"),
         OWNER,
         Some(organization),
         Some(json!({ "name": name })),
@@ -248,7 +248,7 @@ async fn seat_by(
     let (status, body) = call(
         pool,
         "POST",
-        &format!("/internal/projects/{project}/invites"),
+        &format!("/internal/v1/projects/{project}/invites"),
         inviter,
         Some(organization),
         Some(json!({ "email": format!("{user}@example.test"), "role": role })),
@@ -265,7 +265,7 @@ async fn seat_by(
     let (status, body) = call(
         pool,
         "POST",
-        "/internal/invites/accept",
+        "/internal/v1/invites/accept",
         user,
         None,
         Some(json!({ "token": secret })),
@@ -314,7 +314,7 @@ async fn offer(
     call(
         pool,
         "POST",
-        &format!("/internal/projects/{}/transfer", h.project),
+        &format!("/internal/v1/projects/{}/transfer", h.project),
         caller,
         Some(organization),
         Some(json!({ "memberId": to })),
@@ -332,7 +332,7 @@ async fn accept(
     call(
         pool,
         "POST",
-        &format!("/internal/projects/{}/transfer/accept", h.project),
+        &format!("/internal/v1/projects/{}/transfer/accept", h.project),
         caller,
         Some(organization),
         body,
@@ -349,7 +349,7 @@ async fn decline(
     call(
         pool,
         "POST",
-        &format!("/internal/projects/{}/transfer/decline", h.project),
+        &format!("/internal/v1/projects/{}/transfer/decline", h.project),
         caller,
         Some(organization),
         None,
@@ -366,7 +366,7 @@ async fn cancel(
     call(
         pool,
         "DELETE",
-        &format!("/internal/projects/{}/transfer", h.project),
+        &format!("/internal/v1/projects/{}/transfer", h.project),
         caller,
         Some(organization),
         None,
@@ -518,7 +518,7 @@ async fn accepting_moves_the_project_with_its_keys_and_seats_and_both_chains_rec
         app(pool.clone()),
         &pool,
         "POST",
-        "/internal/tokens",
+        "/internal/v1/tokens",
         OWNER,
         Some(&h.source),
         Some(&h.project),
@@ -640,7 +640,7 @@ async fn accepting_moves_the_project_with_its_keys_and_seats_and_both_chains_rec
     let (status, body) = call(
         &pool,
         "GET",
-        &format!("/internal/projects/{}/members", h.project),
+        &format!("/internal/v1/projects/{}/members", h.project),
         ADMIN,
         Some(&h.admins),
         None,
@@ -668,7 +668,7 @@ async fn accepting_moves_the_project_with_its_keys_and_seats_and_both_chains_rec
     let (_, body) = call(
         &pool,
         "GET",
-        "/internal/projects",
+        "/internal/v1/projects",
         ADMIN,
         Some(&h.admins),
         None,
@@ -684,7 +684,7 @@ async fn accepting_moves_the_project_with_its_keys_and_seats_and_both_chains_rec
     let (_, body) = call(
         &pool,
         "GET",
-        "/internal/projects",
+        "/internal/v1/projects",
         OWNER,
         Some(&h.admins),
         None,
@@ -700,7 +700,7 @@ async fn accepting_moves_the_project_with_its_keys_and_seats_and_both_chains_rec
     let (_, body) = call(
         &pool,
         "GET",
-        "/internal/projects",
+        "/internal/v1/projects",
         OWNER,
         Some(&h.source),
         None,
@@ -714,7 +714,7 @@ async fn accepting_moves_the_project_with_its_keys_and_seats_and_both_chains_rec
             .all(|p| p["id"] != h.project),
         "the project is still listed where it left: {body}"
     );
-    let (_, body) = call(&pool, "POST", "/me", OWNER, None, None).await;
+    let (_, body) = call(&pool, "POST", "/internal/v1/me", OWNER, None, None).await;
     let seats: Vec<(String, String, String)> = body["memberships"]
         .as_array()
         .unwrap()
@@ -734,7 +734,7 @@ async fn accepting_moves_the_project_with_its_keys_and_seats_and_both_chains_rec
     );
     // A seat holder reaches the project where it went, too: `/me` lists a
     // seat only in an organization the person is in.
-    let (_, body) = call(&pool, "POST", "/me", MEMBER, None, None).await;
+    let (_, body) = call(&pool, "POST", "/internal/v1/me", MEMBER, None, None).await;
     let seats: Vec<(String, String, String)> = body["memberships"]
         .as_array()
         .unwrap()
@@ -840,7 +840,7 @@ async fn a_name_already_taken_in_the_destination_lands_numbered(pool: PgPool) {
     let (status, created) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         ADMIN,
         Some(&h.admins),
         Some(json!({ "name": "PAYMENTS 2" })),
@@ -893,7 +893,7 @@ async fn land(pool: &PgPool, h: &Handover, name: &str, held: &[&str]) -> Value {
         let (status, created) = call(
             pool,
             "POST",
-            "/internal/projects",
+            "/internal/v1/projects",
             ADMIN,
             Some(&h.admins),
             Some(json!({ "name": project })),
@@ -937,7 +937,7 @@ async fn demoting_or_removing_the_recipient_ends_the_offer(pool: PgPool) {
         StatusCode::OK
     );
 
-    let role_path = format!("/internal/projects/{}/members/{ADMIN}/role", h.project);
+    let role_path = format!("/internal/v1/projects/{}/members/{ADMIN}/role", h.project);
     let (status, body) = call(
         &pool,
         "PUT",
@@ -976,7 +976,7 @@ async fn demoting_or_removing_the_recipient_ends_the_offer(pool: PgPool) {
     let (status, _) = call(
         &pool,
         "DELETE",
-        &format!("/internal/projects/{}/members/{ADMIN}", h.project),
+        &format!("/internal/v1/projects/{}/members/{ADMIN}", h.project),
         OWNER,
         Some(&h.source),
         None,
@@ -1011,7 +1011,7 @@ async fn an_offer_older_than_seven_days_is_dead(pool: PgPool) {
     let (_, body) = call(
         &pool,
         "GET",
-        &format!("/internal/projects/{}/members", h.project),
+        &format!("/internal/v1/projects/{}/members", h.project),
         OWNER,
         Some(&h.source),
         None,
@@ -1138,7 +1138,7 @@ async fn every_step_is_mailed_to_the_other_side(pool: PgPool) {
     let h = staffed_project(&pool).await;
     let outbox = Outbox::default();
     let mailing = || app_mailing(pool.clone(), Arc::new(outbox.clone()));
-    let transfer = format!("/internal/projects/{}/transfer", h.project);
+    let transfer = format!("/internal/v1/projects/{}/transfer", h.project);
 
     let (status, body) = send(
         mailing(),
@@ -1300,7 +1300,7 @@ async fn an_accept_queued_behind_the_acceptors_account_deletion_is_refused(pool:
         StatusCode::OK
     );
 
-    // Stands in for `DELETE /internal/me`, which holds the person's lock for
+    // Stands in for `DELETE /internal/v1/me`, which holds the person's lock for
     // its whole transaction and marks them pending inside it.
     let mut deletion = pool.begin().await.unwrap();
     telmoni_auth::db::locks::lock_person(&mut deletion, &UserId::try_new(ADMIN).unwrap())
@@ -1313,7 +1313,7 @@ async fn an_accept_queued_behind_the_acceptors_account_deletion_is_refused(pool:
             call(
                 &pool,
                 "POST",
-                &format!("/internal/projects/{project}/transfer/accept"),
+                &format!("/internal/v1/projects/{project}/transfer/accept"),
                 ADMIN,
                 Some(&admins),
                 None,
@@ -1349,7 +1349,7 @@ async fn me_lists_the_offer_to_its_holder_and_to_nobody_else(pool: PgPool) {
         StatusCode::OK
     );
 
-    let (status, body) = call(&pool, "POST", "/me", ADMIN, None, None).await;
+    let (status, body) = call(&pool, "POST", "/internal/v1/me", ADMIN, None, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let offers = body["projectOffers"].as_array().unwrap();
     assert_eq!(offers.len(), 1, "{body}");
@@ -1360,7 +1360,7 @@ async fn me_lists_the_offer_to_its_holder_and_to_nobody_else(pool: PgPool) {
     assert!(offers[0]["expiresAt"].is_string(), "{body}");
 
     for who in [OWNER, MEMBER] {
-        let (_, body) = call(&pool, "POST", "/me", who, None, None).await;
+        let (_, body) = call(&pool, "POST", "/internal/v1/me", who, None, None).await;
         assert_eq!(
             body["projectOffers"].as_array().unwrap().len(),
             0,
@@ -1372,7 +1372,7 @@ async fn me_lists_the_offer_to_its_holder_and_to_nobody_else(pool: PgPool) {
         accept(&pool, &h, ADMIN, &h.admins, None).await.0,
         StatusCode::OK
     );
-    let (_, body) = call(&pool, "POST", "/me", ADMIN, None, None).await;
+    let (_, body) = call(&pool, "POST", "/internal/v1/me", ADMIN, None, None).await;
     assert_eq!(body["projectOffers"].as_array().unwrap().len(), 0, "{body}");
 }
 
@@ -1395,7 +1395,7 @@ async fn accept_racing_a_removal_leaves_the_project_in_exactly_one_place(pool: P
             call(
                 &pool,
                 "POST",
-                &format!("/internal/projects/{project}/transfer/accept"),
+                &format!("/internal/v1/projects/{project}/transfer/accept"),
                 ADMIN,
                 Some(&admins),
                 None,
@@ -1411,7 +1411,7 @@ async fn accept_racing_a_removal_leaves_the_project_in_exactly_one_place(pool: P
             call(
                 &pool,
                 "DELETE",
-                &format!("/internal/projects/{project}/members/{ADMIN}"),
+                &format!("/internal/v1/projects/{project}/members/{ADMIN}"),
                 OWNER,
                 Some(&source),
                 None,
@@ -1458,7 +1458,7 @@ async fn a_stranger_is_refused_without_queueing_on_the_organizations_lock(pool: 
     )
     .await
     .unwrap();
-    let transfer = format!("/internal/projects/{}/transfer", h.project);
+    let transfer = format!("/internal/v1/projects/{}/transfer", h.project);
     for (method, path, body) in [
         ("POST", transfer.clone(), Some(json!({ "memberId": ADMIN }))),
         ("DELETE", transfer.clone(), None),
@@ -1495,7 +1495,7 @@ async fn the_connectors_are_purged_before_the_move_and_a_refused_purge_moves_not
             None,
         )
     };
-    let accept_path = format!("/internal/projects/{}/transfer/accept", h.project);
+    let accept_path = format!("/internal/v1/projects/{}/transfer/accept", h.project);
     assert_eq!(
         offer(&pool, &h, OWNER, &h.source, ADMIN).await.0,
         StatusCode::OK
@@ -1591,7 +1591,7 @@ async fn the_settings_move_first_and_a_transfer_that_does_not_finish_settles_the
             Some(telemetry.clone()),
         )
     };
-    let accept_path = format!("/internal/projects/{}/transfer/accept", h.project);
+    let accept_path = format!("/internal/v1/projects/{}/transfer/accept", h.project);
     let moved_to = |organization: &str| SiblingCall::TelemetryMove {
         project_id: h.project.clone(),
         organization_id: organization.to_owned(),
@@ -1707,7 +1707,7 @@ async fn the_accept_holds_the_source_chain_while_the_settings_move(pool: PgPool)
         ),
         &pool,
         "POST",
-        &format!("/internal/projects/{}/transfer/accept", h.project),
+        &format!("/internal/v1/projects/{}/transfer/accept", h.project),
         ADMIN,
         Some(&h.admins),
         None,
@@ -1748,7 +1748,7 @@ async fn every_move_of_the_settings_holds_the_project_alone(pool: PgPool) {
         offer(&pool, &h, OWNER, &h.source, ADMIN).await.0,
         StatusCode::OK
     );
-    let accept_path = format!("/internal/projects/{}/transfer/accept", h.project);
+    let accept_path = format!("/internal/v1/projects/{}/transfer/accept", h.project);
 
     telemetry.failing_moves(1);
     let (status, body) = send(
@@ -1781,7 +1781,7 @@ async fn every_move_of_the_settings_holds_the_project_alone(pool: PgPool) {
         with_telemetry(),
         &pool,
         "POST",
-        &format!("/internal/projects/{}/move", h.project),
+        &format!("/internal/v1/projects/{}/move", h.project),
         ADMIN,
         Some(&h.admins),
         None,
@@ -1821,7 +1821,7 @@ async fn a_transfer_waits_for_the_pings_in_flight_before_it_takes_a_chain_lock(p
 
     let accept = tokio::spawn({
         let (pool, admins) = (pool.clone(), h.admins.clone());
-        let path = format!("/internal/projects/{}/transfer/accept", h.project);
+        let path = format!("/internal/v1/projects/{}/transfer/accept", h.project);
         async move { call(&pool, "POST", &path, ADMIN, Some(&admins), None).await }
     });
     until_a_request_waits_on_a_lock(&pool).await;
@@ -1959,7 +1959,7 @@ async fn a_move_over_its_budget_refuses_the_transfer_and_is_settled(pool: PgPool
         ),
         &pool,
         "POST",
-        &format!("/internal/projects/{}/transfer/accept", h.project),
+        &format!("/internal/v1/projects/{}/transfer/accept", h.project),
         ADMIN,
         Some(&h.admins),
         None,
@@ -1987,7 +1987,7 @@ async fn found(pool: &PgPool, caller: &str, name: &str) -> String {
     let (status, body) = call(
         pool,
         "POST",
-        "/internal/organizations",
+        "/internal/v1/organizations",
         caller,
         None,
         Some(json!({ "name": name })),
@@ -2011,7 +2011,7 @@ async fn move_into(
     call(
         pool,
         "POST",
-        &format!("/internal/projects/{}/move", h.project),
+        &format!("/internal/v1/projects/{}/move", h.project),
         caller,
         Some(organization),
         Some(json!({ "organizationId": destination })),
@@ -2029,7 +2029,7 @@ async fn the_owner_moves_a_project_into_another_of_their_organizations(pool: PgP
         app(pool.clone()),
         &pool,
         "POST",
-        "/internal/tokens",
+        "/internal/v1/tokens",
         OWNER,
         Some(&h.source),
         Some(&h.project),
@@ -2194,7 +2194,7 @@ async fn an_accept_takes_both_chains_by_id(pool: PgPool) {
             call(
                 &pool,
                 "POST",
-                &format!("/internal/projects/{project}/transfer/accept"),
+                &format!("/internal/v1/projects/{project}/transfer/accept"),
                 taker,
                 Some(&destination),
                 None,
@@ -2247,7 +2247,7 @@ async fn an_owners_move_takes_both_chains_by_id(pool: PgPool) {
             call(
                 &pool,
                 "POST",
-                &format!("/internal/projects/{project}/move"),
+                &format!("/internal/v1/projects/{project}/move"),
                 OWNER,
                 Some(&source),
                 Some(json!({ "organizationId": destination })),
@@ -2310,7 +2310,7 @@ fn admins_accept(pool: &PgPool, h: &Handover) -> tokio::task::JoinHandle<(Status
         call(
             &pool,
             "POST",
-            &format!("/internal/projects/{project}/transfer/accept"),
+            &format!("/internal/v1/projects/{project}/transfer/accept"),
             ADMIN,
             Some(&admins),
             None,
@@ -2377,7 +2377,7 @@ async fn a_role_changed_as_its_project_is_accepted_is_refused(pool: PgPool) {
             call(
                 &pool,
                 "PUT",
-                &format!("/internal/projects/{project}/members/{MEMBER}/role"),
+                &format!("/internal/v1/projects/{project}/members/{MEMBER}/role"),
                 OWNER,
                 Some(&source),
                 Some(json!({ "role": "admin" })),
@@ -2405,7 +2405,7 @@ async fn a_seat_removed_as_its_project_is_accepted_is_refused(pool: PgPool) {
             call(
                 &pool,
                 "DELETE",
-                &format!("/internal/projects/{project}/members/{MEMBER}"),
+                &format!("/internal/v1/projects/{project}/members/{MEMBER}"),
                 OWNER,
                 Some(&source),
                 None,
@@ -2430,7 +2430,7 @@ async fn a_seat_left_as_its_project_is_accepted_is_refused(pool: PgPool) {
             call(
                 &pool,
                 "DELETE",
-                &format!("/internal/memberships/{project}"),
+                &format!("/internal/v1/memberships/{project}"),
                 MEMBER,
                 None,
                 None,
@@ -2455,7 +2455,7 @@ async fn a_project_deleted_as_it_is_accepted_is_refused(pool: PgPool) {
             call(
                 &pool,
                 "DELETE",
-                &format!("/internal/projects/{project}"),
+                &format!("/internal/v1/projects/{project}"),
                 OWNER,
                 Some(&source),
                 None,
@@ -2502,7 +2502,7 @@ async fn queued_role_change(
             call(
                 &pool,
                 "PUT",
-                &format!("/internal/projects/{project}/members/{MEMBER}/role"),
+                &format!("/internal/v1/projects/{project}/members/{MEMBER}/role"),
                 ADMIN,
                 Some(&source),
                 Some(json!({ "role": "admin" })),
@@ -2651,7 +2651,7 @@ async fn a_decline_by_a_member_removed_as_it_waits_learns_nothing_of_a_move(pool
             call(
                 &pool,
                 "POST",
-                &format!("/internal/projects/{project}/transfer/decline"),
+                &format!("/internal/v1/projects/{project}/transfer/decline"),
                 MEMBER,
                 Some(&source),
                 None,
@@ -2682,7 +2682,7 @@ async fn a_leave_whose_seat_goes_as_it_waits_learns_nothing_of_a_move(pool: PgPo
             call(
                 &pool,
                 "DELETE",
-                &format!("/internal/memberships/{project}"),
+                &format!("/internal/v1/memberships/{project}"),
                 MEMBER,
                 None,
                 None,
@@ -2716,19 +2716,19 @@ async fn a_stranger_is_refused_by_the_seat_lanes_without_queueing(pool: PgPool) 
     for (method, path, body, refused) in [
         (
             "PUT",
-            format!("/internal/projects/{}/members/{MEMBER}/role", h.project),
+            format!("/internal/v1/projects/{}/members/{MEMBER}/role", h.project),
             Some(json!({ "role": "admin" })),
             StatusCode::FORBIDDEN,
         ),
         (
             "DELETE",
-            format!("/internal/projects/{}/members/{MEMBER}", h.project),
+            format!("/internal/v1/projects/{}/members/{MEMBER}", h.project),
             None,
             StatusCode::FORBIDDEN,
         ),
         (
             "DELETE",
-            format!("/internal/memberships/{}", h.project),
+            format!("/internal/v1/memberships/{}", h.project),
             None,
             StatusCode::NOT_FOUND,
         ),
@@ -2773,7 +2773,7 @@ async fn a_seat_lane_kept_waiting_for_its_organization_is_a_conflict(pool: PgPoo
         call(
             &pool,
             "PUT",
-            &format!("/internal/projects/{}/members/{MEMBER}/role", h.project),
+            &format!("/internal/v1/projects/{}/members/{MEMBER}/role", h.project),
             OWNER,
             Some(&h.source),
             Some(json!({ "role": "admin" })),
@@ -2831,7 +2831,7 @@ async fn promote_member(pool: &PgPool, h: &Handover) {
     let (status, body) = call(
         pool,
         "PUT",
-        &format!("/internal/projects/{}/members/{MEMBER}/role", h.project),
+        &format!("/internal/v1/projects/{}/members/{MEMBER}/role", h.project),
         OWNER,
         Some(&h.source),
         Some(json!({ "role": "admin" })),
@@ -2860,7 +2860,7 @@ async fn an_offer_sent_as_its_project_is_accepted_is_refused(pool: PgPool) {
             call(
                 &pool,
                 "POST",
-                &format!("/internal/projects/{project}/transfer"),
+                &format!("/internal/v1/projects/{project}/transfer"),
                 OWNER,
                 Some(&source),
                 Some(json!({ "memberId": MEMBER })),
@@ -2941,7 +2941,7 @@ async fn a_withdrawal_sent_as_its_project_is_accepted_is_refused(pool: PgPool) {
             call(
                 &pool,
                 "DELETE",
-                &format!("/internal/projects/{project}/transfer"),
+                &format!("/internal/v1/projects/{project}/transfer"),
                 OWNER,
                 Some(&source),
                 None,
@@ -2970,7 +2970,7 @@ async fn a_decline_sent_as_its_project_is_accepted_is_refused(pool: PgPool) {
             call(
                 &pool,
                 "POST",
-                &format!("/internal/projects/{project}/transfer/decline"),
+                &format!("/internal/v1/projects/{project}/transfer/decline"),
                 MEMBER,
                 Some(&source),
                 None,
@@ -3026,7 +3026,7 @@ async fn mint_key(pool: &PgPool, h: &Handover) -> String {
         app(pool.clone()),
         pool,
         "POST",
-        "/internal/tokens",
+        "/internal/v1/tokens",
         OWNER,
         Some(&h.source),
         Some(&h.project),
@@ -3065,7 +3065,7 @@ async fn invite_to(pool: &PgPool, h: &Handover, user: &str) -> (String, String) 
     let (status, body) = call(
         pool,
         "POST",
-        &format!("/internal/projects/{}/invites", h.project),
+        &format!("/internal/v1/projects/{}/invites", h.project),
         OWNER,
         Some(&h.source),
         Some(json!({ "email": format!("{user}@example.test"), "role": "member" })),
@@ -3129,7 +3129,7 @@ async fn a_key_minted_as_its_project_is_accepted_is_refused(pool: PgPool) {
                 app(pool.clone()),
                 &pool,
                 "POST",
-                "/internal/tokens",
+                "/internal/v1/tokens",
                 OWNER,
                 Some(&source),
                 Some(&project),
@@ -3156,7 +3156,7 @@ async fn a_key_rotated_as_its_project_is_accepted_is_refused(pool: PgPool) {
                 app(pool.clone()),
                 &pool,
                 "POST",
-                &format!("/internal/tokens/{key}/rotate"),
+                &format!("/internal/v1/tokens/{key}/rotate"),
                 OWNER,
                 Some(&source),
                 Some(&project),
@@ -3183,7 +3183,7 @@ async fn a_key_revoked_as_its_project_is_accepted_is_refused(pool: PgPool) {
                 app(pool.clone()),
                 &pool,
                 "DELETE",
-                &format!("/internal/tokens/{key}"),
+                &format!("/internal/v1/tokens/{key}"),
                 OWNER,
                 Some(&source),
                 Some(&project),
@@ -3208,7 +3208,7 @@ async fn an_invitation_sent_as_its_project_is_accepted_is_refused(pool: PgPool) 
             call(
                 &pool,
                 "POST",
-                &format!("/internal/projects/{project}/invites"),
+                &format!("/internal/v1/projects/{project}/invites"),
                 OWNER,
                 Some(&source),
                 Some(json!({ "email": format!("{INVITEE}@example.test"), "role": "member" })),
@@ -3236,7 +3236,7 @@ async fn an_invitation_withdrawn_as_its_project_is_accepted_is_refused(pool: PgP
             call(
                 &pool,
                 "DELETE",
-                &format!("/internal/projects/{project}/invites/{invitation}"),
+                &format!("/internal/v1/projects/{project}/invites/{invitation}"),
                 OWNER,
                 Some(&source),
                 None,
@@ -3271,7 +3271,7 @@ async fn an_invitation_accepted_by_its_link_as_its_project_is_accepted_is_refuse
             call(
                 &pool,
                 "POST",
-                "/internal/invites/accept",
+                "/internal/v1/invites/accept",
                 INVITEE,
                 None,
                 Some(json!({ "token": secret })),
@@ -3296,7 +3296,7 @@ async fn an_invitation_accepted_in_the_console_as_its_project_is_accepted_is_ref
             call(
                 &pool,
                 "POST",
-                &format!("/internal/me/invites/{invitation}/accept"),
+                &format!("/internal/v1/me/invites/{invitation}/accept"),
                 INVITEE,
                 None,
                 None,
@@ -3321,7 +3321,7 @@ async fn an_invitation_declined_as_its_project_is_accepted_is_refused(pool: PgPo
             call(
                 &pool,
                 "POST",
-                &format!("/internal/me/invites/{invitation}/decline"),
+                &format!("/internal/v1/me/invites/{invitation}/decline"),
                 INVITEE,
                 None,
                 None,
@@ -3348,28 +3348,28 @@ async fn a_key_or_invitation_lane_kept_waiting_for_its_organization_is_a_conflic
     let lanes = vec![
         (
             "POST",
-            "/internal/tokens".to_owned(),
+            "/internal/v1/tokens".to_owned(),
             OWNER,
             Some(h.source.as_str()),
             Some(json!({ "name": "ci", "created_by": OWNER, "scopes": ["read"] })),
         ),
         (
             "POST",
-            format!("/internal/projects/{}/invites", h.project),
+            format!("/internal/v1/projects/{}/invites", h.project),
             OWNER,
             Some(h.source.as_str()),
             Some(json!({ "email": "user_handover_newcomer@example.test", "role": "member" })),
         ),
         (
             "POST",
-            "/internal/invites/accept".to_owned(),
+            "/internal/v1/invites/accept".to_owned(),
             INVITEE,
             None,
             Some(json!({ "token": secret })),
         ),
         (
             "POST",
-            format!("/internal/me/invites/{invitation}/decline"),
+            format!("/internal/v1/me/invites/{invitation}/decline"),
             INVITEE,
             None,
             None,
@@ -3419,50 +3419,50 @@ async fn a_stranger_is_refused_by_the_key_and_invitation_lanes_without_queueing(
     for (method, path, body, refused) in [
         (
             "POST",
-            "/internal/tokens".to_owned(),
+            "/internal/v1/tokens".to_owned(),
             Some(json!({ "name": "ci", "created_by": stranger, "scopes": ["read"] })),
             StatusCode::FORBIDDEN,
         ),
         (
             "POST",
-            format!("/internal/tokens/{key}/rotate"),
+            format!("/internal/v1/tokens/{key}/rotate"),
             None,
             StatusCode::FORBIDDEN,
         ),
         (
             "DELETE",
-            format!("/internal/tokens/{key}"),
+            format!("/internal/v1/tokens/{key}"),
             None,
             StatusCode::FORBIDDEN,
         ),
         (
             "POST",
-            format!("/internal/projects/{}/invites", h.project),
+            format!("/internal/v1/projects/{}/invites", h.project),
             Some(json!({ "email": "user_handover_newcomer@example.test", "role": "member" })),
             StatusCode::FORBIDDEN,
         ),
         (
             "DELETE",
-            format!("/internal/projects/{}/invites/{invitation}", h.project),
+            format!("/internal/v1/projects/{}/invites/{invitation}", h.project),
             None,
             StatusCode::FORBIDDEN,
         ),
         // A real link, addressed to somebody else: refused under the person's lock alone.
         (
             "POST",
-            "/internal/invites/accept".to_owned(),
+            "/internal/v1/invites/accept".to_owned(),
             Some(json!({ "token": secret })),
             StatusCode::FORBIDDEN,
         ),
         (
             "POST",
-            format!("/internal/me/invites/{invitation}/accept"),
+            format!("/internal/v1/me/invites/{invitation}/accept"),
             None,
             StatusCode::NOT_FOUND,
         ),
         (
             "POST",
-            format!("/internal/me/invites/{invitation}/decline"),
+            format!("/internal/v1/me/invites/{invitation}/decline"),
             None,
             StatusCode::NOT_FOUND,
         ),

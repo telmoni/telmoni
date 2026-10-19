@@ -265,7 +265,7 @@ describe("createOrganizationAction", () => {
     const r = await createOrganizationAction("  Acme  ", "");
     expect(r).toEqual({ error: null, href: "/acme" });
     const [url, init] = sent()!;
-    expect(url).toBe("http://auth.test/internal/organizations");
+    expect(url).toBe("http://auth.test/internal/v1/organizations");
     expect(init.method).toBe("POST");
     expect(init.headers.authorization).toBe("Bearer at_me");
     expect(init.headers["content-type"]).toBe("application/json");

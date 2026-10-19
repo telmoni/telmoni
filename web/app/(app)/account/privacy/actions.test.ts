@@ -93,7 +93,7 @@ describe("requestAccountDeletionCodeAction", () => {
     const res = await requestAccountDeletionCodeAction();
     expect(res).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://auth.test/internal/me/deletion-code",
+      "http://auth.test/internal/v1/me/deletion-code",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
@@ -143,7 +143,7 @@ describe("deleteAccountAction", () => {
     const res = await deleteAccountAction("123456");
     expect(res).toEqual({ ok: true, deleted: true });
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://auth.test/internal/me",
+      "http://auth.test/internal/v1/me",
       expect.objectContaining({
         method: "DELETE",
         headers: expect.objectContaining({
@@ -264,7 +264,7 @@ describe("revokeSessionAction", () => {
 
     expect(res).toEqual({ error: null });
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://auth.test/internal/auth/sessions/sess_abc/revoke",
+      "http://auth.test/internal/v1/auth/sessions/sess_abc/revoke",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
@@ -283,7 +283,7 @@ describe("revokeSessionAction", () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
     await revokeSessionAction("sess/../other");
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://auth.test/internal/auth/sessions/sess%2F..%2Fother/revoke",
+      "http://auth.test/internal/v1/auth/sessions/sess%2F..%2Fother/revoke",
       expect.anything(),
     );
   });
@@ -346,7 +346,7 @@ describe("setAnalyticsPreferenceAction", () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
     expect(await setAnalyticsPreferenceAction(true)).toEqual({ error: null });
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://auth.test/internal/me/analytics",
+      "http://auth.test/internal/v1/me/analytics",
       expect.objectContaining({
         method: "PUT",
         headers: expect.objectContaining({

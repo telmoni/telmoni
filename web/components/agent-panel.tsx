@@ -321,7 +321,7 @@ export function AgentPanel() {
       // (a stop, a reset, another project) can still have a dispatch in flight.
       const current = () => turnRef.current === turn;
       try {
-        const response = await fetch("/api/agent/turns", {
+        const response = await fetch("/api/v1/agent/turns", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

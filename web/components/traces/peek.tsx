@@ -114,7 +114,7 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
   const { full, width, toggleFull, edge } = usePanelWidth(panel);
   const [version, setVersion] = useState(0);
   const { read, stale } = useTraceRead(
-    `/api/traces/${encodeURIComponent(run)}?project=${encodeURIComponent(projectId)}`,
+    `/api/v1/traces/${encodeURIComponent(run)}?project=${encodeURIComponent(projectId)}`,
     version,
   );
   const pathname = usePathname();

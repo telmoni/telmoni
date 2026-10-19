@@ -50,7 +50,7 @@ describe("which paths the console may be sent back to", () => {
   // An id is redirected to its slug, and the trail records where that lands.
   it("refuses a path that names no organization", () => {
     expect(isReturnablePath("/")).toBe(false);
-    expect(isReturnablePath("/api/events")).toBe(false);
+    expect(isReturnablePath("/api/v1/events")).toBe(false);
     expect(isReturnablePath("/org_7bQx2mNv9BcK4dLp/project_7bQx2mNv9BcK4dLp")).toBe(false);
   });
 

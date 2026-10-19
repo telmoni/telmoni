@@ -68,11 +68,11 @@ async fn json_body(resp: axum::response::Response) -> Value {
     serde_json::from_slice(&bytes).expect("JSON body")
 }
 
-/// `POST /me` with `authorization` as given, or absent.
+/// `POST /internal/v1/me` with `authorization` as given, or absent.
 async fn me(pool: &PgPool, authorization: Option<&str>, body: Value) -> (StatusCode, Value) {
     let mut req = Request::builder()
         .method("POST")
-        .uri("/me")
+        .uri("/internal/v1/me")
         .header("x-service-secret", SERVICE_SECRET)
         .header("content-type", "application/json");
     if let Some(authorization) = authorization {
@@ -98,79 +98,82 @@ fn active_organization(me: &Value) -> String {
 /// Every route in the router's `person` group and `/me`. A route added to
 /// the group belongs here too.
 const PERSON_ROUTES: &[(&str, &str)] = &[
-    ("GET", "/internal/auth/sessions"),
-    ("POST", "/internal/auth/sessions/{id}/revoke"),
-    ("GET", "/internal/projects"),
-    ("POST", "/internal/projects"),
-    ("GET", "/internal/projects/everywhere"),
-    ("PATCH", "/internal/projects/{project_id}"),
-    ("DELETE", "/internal/projects/{project_id}"),
-    ("GET", "/internal/projects/{project_id}/members"),
+    ("GET", "/internal/v1/auth/sessions"),
+    ("POST", "/internal/v1/auth/sessions/{id}/revoke"),
+    ("GET", "/internal/v1/projects"),
+    ("POST", "/internal/v1/projects"),
+    ("GET", "/internal/v1/projects/everywhere"),
+    ("PATCH", "/internal/v1/projects/{project_id}"),
+    ("DELETE", "/internal/v1/projects/{project_id}"),
+    ("GET", "/internal/v1/projects/{project_id}/members"),
     (
         "PUT",
-        "/internal/projects/{project_id}/members/{member_id}/role",
+        "/internal/v1/projects/{project_id}/members/{member_id}/role",
     ),
     (
         "DELETE",
-        "/internal/projects/{project_id}/members/{member_id}",
+        "/internal/v1/projects/{project_id}/members/{member_id}",
     ),
-    ("POST", "/internal/projects/{project_id}/transfer"),
-    ("DELETE", "/internal/projects/{project_id}/transfer"),
-    ("POST", "/internal/projects/{project_id}/transfer/accept"),
-    ("POST", "/internal/projects/{project_id}/transfer/decline"),
-    ("POST", "/internal/projects/{project_id}/move"),
-    ("POST", "/internal/organizations"),
-    ("DELETE", "/internal/organization"),
-    ("POST", "/internal/organization/deletion-code"),
-    ("PATCH", "/internal/organization"),
-    ("POST", "/internal/organization/owner-transfer"),
-    ("DELETE", "/internal/organization/owner-transfer"),
-    ("POST", "/internal/organization/owner-transfer/accept"),
-    ("POST", "/internal/organization/owner-transfer/decline"),
-    ("GET", "/internal/organization/export"),
-    ("GET", "/internal/organization/members"),
-    ("PUT", "/internal/organization/members/{member_id}/role"),
-    ("DELETE", "/internal/organization/members/{member_id}"),
-    ("GET", "/internal/organization/invites"),
-    ("POST", "/internal/organization/invites"),
-    ("DELETE", "/internal/organization/invites/{invite_id}"),
-    ("GET", "/internal/projects/{project_id}/invites"),
-    ("POST", "/internal/projects/{project_id}/invites"),
+    ("POST", "/internal/v1/projects/{project_id}/transfer"),
+    ("DELETE", "/internal/v1/projects/{project_id}/transfer"),
+    ("POST", "/internal/v1/projects/{project_id}/transfer/accept"),
+    (
+        "POST",
+        "/internal/v1/projects/{project_id}/transfer/decline",
+    ),
+    ("POST", "/internal/v1/projects/{project_id}/move"),
+    ("POST", "/internal/v1/organizations"),
+    ("DELETE", "/internal/v1/organization"),
+    ("POST", "/internal/v1/organization/deletion-code"),
+    ("PATCH", "/internal/v1/organization"),
+    ("POST", "/internal/v1/organization/owner-transfer"),
+    ("DELETE", "/internal/v1/organization/owner-transfer"),
+    ("POST", "/internal/v1/organization/owner-transfer/accept"),
+    ("POST", "/internal/v1/organization/owner-transfer/decline"),
+    ("GET", "/internal/v1/organization/export"),
+    ("GET", "/internal/v1/organization/members"),
+    ("PUT", "/internal/v1/organization/members/{member_id}/role"),
+    ("DELETE", "/internal/v1/organization/members/{member_id}"),
+    ("GET", "/internal/v1/organization/invites"),
+    ("POST", "/internal/v1/organization/invites"),
+    ("DELETE", "/internal/v1/organization/invites/{invite_id}"),
+    ("GET", "/internal/v1/projects/{project_id}/invites"),
+    ("POST", "/internal/v1/projects/{project_id}/invites"),
     (
         "DELETE",
-        "/internal/projects/{project_id}/invites/{invite_id}",
+        "/internal/v1/projects/{project_id}/invites/{invite_id}",
     ),
-    ("POST", "/internal/invites/accept"),
-    ("DELETE", "/internal/me"),
-    ("POST", "/internal/me/deletion-code"),
-    ("POST", "/internal/me/password-reset"),
-    ("POST", "/internal/me/email-change"),
-    ("POST", "/internal/me/email-change/confirm"),
-    ("PUT", "/internal/me/analytics"),
-    ("PUT", "/internal/me/default-organization"),
-    ("GET", "/internal/me/invites"),
-    ("POST", "/internal/me/invites/{invite_id}/accept"),
-    ("POST", "/internal/me/invites/{invite_id}/decline"),
-    ("DELETE", "/internal/memberships/{project_id}"),
-    ("POST", "/internal/tokens"),
-    ("GET", "/internal/tokens"),
-    ("DELETE", "/internal/tokens/{token_id}"),
-    ("POST", "/internal/tokens/{token_id}/rotate"),
-    ("GET", "/internal/audit/projects/{project_id}"),
-    ("GET", "/internal/audit/organizations/{organization_id}"),
+    ("POST", "/internal/v1/invites/accept"),
+    ("DELETE", "/internal/v1/me"),
+    ("POST", "/internal/v1/me/deletion-code"),
+    ("POST", "/internal/v1/me/password-reset"),
+    ("POST", "/internal/v1/me/email-change"),
+    ("POST", "/internal/v1/me/email-change/confirm"),
+    ("PUT", "/internal/v1/me/analytics"),
+    ("PUT", "/internal/v1/me/default-organization"),
+    ("GET", "/internal/v1/me/invites"),
+    ("POST", "/internal/v1/me/invites/{invite_id}/accept"),
+    ("POST", "/internal/v1/me/invites/{invite_id}/decline"),
+    ("DELETE", "/internal/v1/memberships/{project_id}"),
+    ("POST", "/internal/v1/tokens"),
+    ("GET", "/internal/v1/tokens"),
+    ("DELETE", "/internal/v1/tokens/{token_id}"),
+    ("POST", "/internal/v1/tokens/{token_id}/rotate"),
+    ("GET", "/internal/v1/audit/projects/{project_id}"),
+    ("GET", "/internal/v1/audit/organizations/{organization_id}"),
     (
         "GET",
-        "/internal/audit/organizations/{organization_id}/exports",
+        "/internal/v1/audit/organizations/{organization_id}/exports",
     ),
     (
         "POST",
-        "/internal/audit/organizations/{organization_id}/exports",
+        "/internal/v1/audit/organizations/{organization_id}/exports",
     ),
     (
         "GET",
-        "/internal/audit/organizations/{organization_id}/exports/{export_id}",
+        "/internal/v1/audit/organizations/{organization_id}/exports/{export_id}",
     ),
-    ("POST", "/me"),
+    ("POST", "/internal/v1/me"),
 ];
 
 /// A route pattern with every parameter filled in from the caller's own
@@ -206,7 +209,7 @@ async fn every_person_lane_refuses_a_request_with_no_bearer(pool: PgPool) {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/internal/projects")
+                .uri("/internal/v1/projects")
                 .header("x-service-secret", SERVICE_SECRET)
                 .header("x-organization-id", &organization)
                 .header(
@@ -367,7 +370,7 @@ async fn the_bearer_names_the_person_and_the_header_only_the_context(pool: PgPoo
             as_person(
                 Request::builder()
                     .method("GET")
-                    .uri("/internal/organization/members")
+                    .uri("/internal/v1/organization/members")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("x-organization-id", &organizations[0]),
                 &pool,
@@ -397,7 +400,7 @@ async fn only_a_bearer_auth_minted_and_still_holds_resolves(pool: PgPool) {
     assert_eq!(status, StatusCode::OK, "{body}");
     let resp = app(pool.clone())
         .oneshot(
-            Request::post("/internal/auth/logout")
+            Request::post("/internal/v1/auth/logout")
                 .header("x-service-secret", SERVICE_SECRET)
                 .header("content-type", "application/json")
                 .body(Body::from(
@@ -426,7 +429,8 @@ async fn only_a_bearer_auth_minted_and_still_holds_resolves(pool: PgPool) {
 async fn the_test_door_opens_only_when_asked_and_mints_a_real_session(pool: PgPool) {
     apply_audit_migrations(&pool).await;
     let request = |secret: Option<&str>| {
-        let mut builder = Request::post("/test/session").header("content-type", "application/json");
+        let mut builder =
+            Request::post("/internal/v1/test/session").header("content-type", "application/json");
         if let Some(secret) = secret {
             builder = builder.header("x-service-secret", secret);
         }

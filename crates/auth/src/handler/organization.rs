@@ -47,7 +47,7 @@ use telmoni_shared::{AuthzError, slug};
 /// whole in a rail row rather than an ellipsis.
 use crate::db::organizations::MAX_ORGANIZATION_NAME;
 
-/// `POST /internal/organization/deletion-code` — mail the owner the code that
+/// `POST /internal/v1/organization/deletion-code` — mail the owner the code that
 /// authorizes deleting the organization in `x-organization-id`, and only that
 /// one: the code is bound to it.
 pub async fn request_organization_deletion_code(
@@ -104,7 +104,7 @@ pub async fn request_organization_deletion_code(
     Ok((StatusCode::ACCEPTED, Json(json!({ "sent": true }))))
 }
 
-/// `DELETE /internal/organization` — the owner deletes the organization in
+/// `DELETE /internal/v1/organization` — the owner deletes the organization in
 /// `x-organization-id`, gated by the emailed code minted for it. It is marked
 /// `pending_deletion` in one transaction — from which nothing acts in it and
 /// none of its keys validates — then the purge hook runs inline, and the
@@ -212,7 +212,7 @@ pub async fn delete_organization(
     Ok(crate::handler::deletion::deletion_response(&state, &organization, erase_after).await)
 }
 
-/// Body of `POST /internal/organizations`.
+/// Body of `POST /internal/v1/organizations`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreateOrganizationRequest {
@@ -223,7 +223,7 @@ pub struct CreateOrganizationRequest {
     pub slug: Option<String>,
 }
 
-/// `POST /internal/organizations` — the caller founds another organization,
+/// `POST /internal/v1/organizations` — the caller founds another organization,
 /// as its owner. It names no existing organization, so it reads no
 /// `x-organization-id`. Nothing caps how many a person makes or owns; the
 /// global `signup` flag closes it, as it closes provisioning, and a closed one
@@ -449,7 +449,7 @@ pub(crate) enum NewUrl {
 pub(crate) enum Founding {
     /// By `/me`, for a person in no organization.
     Provisioned,
-    /// By its founder's asking (`POST /internal/organizations`).
+    /// By its founder's asking (`POST /internal/v1/organizations`).
     OnRequest,
 }
 
@@ -561,7 +561,7 @@ pub(crate) async fn found_organization(
     })
 }
 
-/// Body of `PATCH /internal/organization`: the name, the slug, or both.
+/// Body of `PATCH /internal/v1/organization`: the name, the slug, or both.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateOrganizationRequest {
@@ -571,7 +571,7 @@ pub struct UpdateOrganizationRequest {
     pub slug: Option<String>,
 }
 
-/// `PATCH /internal/organization` — what the organization is called, and the
+/// `PATCH /internal/v1/organization` — what the organization is called, and the
 /// slug its paths begin with, as two settings. A name moves no slug, so a
 /// rename leaves every link to the organization's pages standing; the slug
 /// moves only when asked to, and the answer carries both so the console can

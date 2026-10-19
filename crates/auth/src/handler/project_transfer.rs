@@ -1,4 +1,4 @@
-//! Handing a project over — `/internal/projects/{project_id}/transfer`.
+//! Handing a project over — `/internal/v1/projects/{project_id}/transfer`.
 //!
 //! A project's owner is its organization's owner, so handing a project over
 //! means moving it into an organization the new owner owns. The owner offers
@@ -27,7 +27,7 @@
 //! demoting them ends it with no bookkeeping of its own.
 //!
 //! The owner of two organizations moves a project between them without an
-//! offer — `/internal/projects/{project_id}/move` — the accept's own steps with
+//! offer — `/internal/v1/projects/{project_id}/move` — the accept's own steps with
 //! nobody to ask and nothing changing hands.
 //!
 //! ⚠ **Offer, withdraw and decline take the owning organization's lock and refuse a project
@@ -68,7 +68,7 @@ use crate::{
     model::AuditKind,
 };
 
-/// Body of `POST /internal/projects/{project_id}/transfer`.
+/// Body of `POST /internal/v1/projects/{project_id}/transfer`.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OfferRequest {
@@ -77,7 +77,7 @@ pub struct OfferRequest {
     pub member_id: String,
 }
 
-/// Body of `POST /internal/projects/{project_id}/transfer/accept`.
+/// Body of `POST /internal/v1/projects/{project_id}/transfer/accept`.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AcceptRequest {
@@ -220,7 +220,7 @@ async fn notify_project_offer(
     }
 }
 
-/// `POST /internal/projects/{project_id}/transfer` — the owner offers the
+/// `POST /internal/v1/projects/{project_id}/transfer` — the owner offers the
 /// project to one of its admins. Withdraws any offer already out, because
 /// there is only ever one, and mails the admin who held it.
 ///
@@ -342,7 +342,7 @@ pub async fn offer(
     ))
 }
 
-/// `DELETE /internal/projects/{project_id}/transfer` — the owner withdraws
+/// `DELETE /internal/v1/projects/{project_id}/transfer` — the owner withdraws
 /// the offer, and the admin who held it is mailed.
 pub async fn cancel(
     State(state): State<Arc<AppState>>,
@@ -409,7 +409,7 @@ pub async fn cancel(
     })))
 }
 
-/// `POST /internal/projects/{project_id}/transfer/decline` — the admin
+/// `POST /internal/v1/projects/{project_id}/transfer/decline` — the admin
 /// holding the offer turns it down, and the owner is mailed.
 pub async fn decline(
     State(state): State<Arc<AppState>>,
@@ -745,7 +745,7 @@ async fn lock_project_for_move(
     Err(AuthError::Conflict("the project is busy — try again in a moment".into()).into())
 }
 
-/// `POST /internal/projects/{project_id}/transfer/accept` — the admin holding
+/// `POST /internal/v1/projects/{project_id}/transfer/accept` — the admin holding
 /// a live offer takes the project into an organization they own. The
 /// previous owner keeps a seat on it, as an admin, and is mailed.
 ///
@@ -987,7 +987,7 @@ pub async fn accept(
     })))
 }
 
-/// Body of `POST /internal/projects/{project_id}/move`.
+/// Body of `POST /internal/v1/projects/{project_id}/move`.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MoveRequest {
@@ -995,7 +995,7 @@ pub struct MoveRequest {
     pub organization_id: String,
 }
 
-/// `POST /internal/projects/{project_id}/move` — the owner of two
+/// `POST /internal/v1/projects/{project_id}/move` — the owner of two
 /// organizations moves a project from one into the other, as an accept would
 /// hand it over but with nobody to ask: its API keys follow, its telemetry
 /// moves with it, its connectors are purged, its seats stay on it and their

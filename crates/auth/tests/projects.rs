@@ -1,4 +1,4 @@
-//! `POST /internal/projects` — creating a project, and who may.
+//! `POST /internal/v1/projects` — creating a project, and who may.
 #![allow(
     clippy::indexing_slicing,
     reason = "a panicking helper is a failing test"
@@ -78,7 +78,7 @@ async fn sign_in(pool: &PgPool, user: &str, email: &str) -> String {
             as_person(
                 Request::builder()
                     .method("POST")
-                    .uri("/me")
+                    .uri("/internal/v1/me")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("content-type", "application/json"),
                 pool,
@@ -99,7 +99,7 @@ async fn sign_in(pool: &PgPool, user: &str, email: &str) -> String {
     let (status, body) = call(
         pool,
         "PATCH",
-        "/internal/organization",
+        "/internal/v1/organization",
         user,
         &organization,
         Some(json!({ "name": "Acme" })),
@@ -175,12 +175,12 @@ async fn call_project(
     (status, json_body(resp).await)
 }
 
-/// Names of the projects `GET /internal/projects` returns for this caller.
+/// Names of the projects `GET /internal/v1/projects` returns for this caller.
 async fn project_names(pool: &PgPool, caller: &str, organization: &str) -> Vec<String> {
     let (status, body) = call(
         pool,
         "GET",
-        "/internal/projects",
+        "/internal/v1/projects",
         caller,
         organization,
         None,
@@ -200,7 +200,7 @@ async fn join_organization(pool: &PgPool, owner: &str, joiner: &str, email: &str
     let (status, invite) = call(
         pool,
         "POST",
-        "/internal/organization/invites",
+        "/internal/v1/organization/invites",
         owner,
         &organization_of(pool, owner).await,
         Some(json!({ "email": email, "role": role })),
@@ -218,7 +218,7 @@ async fn join_organization(pool: &PgPool, owner: &str, joiner: &str, email: &str
     let (status, _) = call(
         pool,
         "POST",
-        "/internal/invites/accept",
+        "/internal/v1/invites/accept",
         joiner,
         &organization_of(pool, joiner).await,
         Some(json!({ "token": token })),
@@ -241,7 +241,7 @@ async fn an_owner_creates_a_project_and_it_lists(pool: PgPool) {
     let (status, created) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         owner,
         &organization,
         Some(json!({ "name": "  Platform  " })),
@@ -278,7 +278,7 @@ async fn an_organization_admin_creates_a_project(pool: PgPool) {
     let (status, created) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         admin,
         &organization,
         Some(json!({ "name": "Growth" })),
@@ -310,7 +310,7 @@ async fn an_organization_admin_can_act_on_the_project_they_created(pool: PgPool)
     let (status, created) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         admin,
         &organization,
         Some(json!({ "name": "Growth" })),
@@ -322,7 +322,7 @@ async fn an_organization_admin_can_act_on_the_project_they_created(pool: PgPool)
     let (status, _) = call_project(
         &pool,
         "GET",
-        "/internal/tokens",
+        "/internal/v1/tokens",
         admin,
         &organization,
         &project_id,
@@ -350,7 +350,7 @@ async fn an_organization_member_cannot_create_a_project(pool: PgPool) {
     let (status, _) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         member,
         &organization,
         Some(json!({ "name": "Shadow" })),
@@ -378,7 +378,7 @@ async fn a_stranger_cannot_create_a_project_in_an_organization(pool: PgPool) {
     let (status, _) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         stranger,
         &organization,
         Some(json!({ "name": "Trespass" })),
@@ -399,7 +399,7 @@ async fn a_name_that_is_blank_or_too_long_is_refused(pool: PgPool) {
         let (status, _) = call(
             &pool,
             "POST",
-            "/internal/projects",
+            "/internal/v1/projects",
             owner,
             &organization,
             Some(json!({ "name": name })),
@@ -411,7 +411,7 @@ async fn a_name_that_is_blank_or_too_long_is_refused(pool: PgPool) {
     let (status, _) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         owner,
         &organization,
         Some(json!({ "name": "x".repeat(101) })),
@@ -422,7 +422,7 @@ async fn a_name_that_is_blank_or_too_long_is_refused(pool: PgPool) {
     let (status, _) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         owner,
         &organization,
         Some(json!({ "name": "é".repeat(100) })),
@@ -442,7 +442,7 @@ async fn creating_a_project_writes_an_audit_row(pool: PgPool) {
     let (status, created) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         owner,
         &organization,
         Some(json!({ "name": "Audited" })),
@@ -478,7 +478,7 @@ async fn delete_project(
     call(
         pool,
         "DELETE",
-        &format!("/internal/projects/{project_id}"),
+        &format!("/internal/v1/projects/{project_id}"),
         caller,
         organization,
         None,
@@ -497,7 +497,7 @@ async fn deleting_a_project_takes_its_keys_and_its_seats(pool: PgPool) {
     let (status, created) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         "user_del_owner",
         &organization,
         Some(json!({ "name": "Doomed" })),
@@ -579,7 +579,7 @@ async fn deleting_a_project_purges_its_connectors_and_its_telemetry(pool: PgPool
         let (status, created) = call(
             &pool,
             "POST",
-            "/internal/projects",
+            "/internal/v1/projects",
             "user_del_purge",
             &organization,
             Some(json!({ "name": format!("Doomed {failing}") })),
@@ -595,7 +595,7 @@ async fn deleting_a_project_purges_its_connectors_and_its_telemetry(pool: PgPool
         let req = as_person(
             Request::builder()
                 .method("DELETE")
-                .uri(format!("/internal/projects/{project_id}"))
+                .uri(format!("/internal/v1/projects/{project_id}"))
                 .header("x-service-secret", SERVICE_SECRET)
                 .header("x-organization-id", &organization),
             &pool,
@@ -633,7 +633,7 @@ async fn a_deleted_projects_history_stays_on_the_organizations_chain(pool: PgPoo
     let (status, created) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         "user_del_audit",
         &organization,
         Some(json!({ "name": "Shortlived" })),
@@ -694,7 +694,7 @@ async fn only_the_organization_owner_deletes_a_project(pool: PgPool) {
     let (status, created) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         "user_del_gate_owner",
         &organization,
         Some(json!({ "name": "Guarded" })),
@@ -735,7 +735,7 @@ async fn deleting_the_only_project_leaves_the_organization_empty(pool: PgPool) {
     let (status, created) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         "user_del_last",
         &organization,
         Some(json!({ "name": "Platform" })),
@@ -779,7 +779,7 @@ async fn rename(pool: &PgPool, owner: &str, project_id: &str, name: &str) -> (St
     call(
         pool,
         "PATCH",
-        &format!("/internal/projects/{project_id}"),
+        &format!("/internal/v1/projects/{project_id}"),
         owner,
         &organization_of(pool, owner).await,
         Some(json!({ "name": name })),
@@ -799,7 +799,7 @@ async fn a_name_already_taken_in_the_organization_is_a_409(pool: PgPool) {
     let (status, _) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         owner,
         &organization,
         Some(json!({ "name": "Platform" })),
@@ -811,7 +811,7 @@ async fn a_name_already_taken_in_the_organization_is_a_409(pool: PgPool) {
         let (status, body) = call(
             &pool,
             "POST",
-            "/internal/projects",
+            "/internal/v1/projects",
             owner,
             &organization,
             Some(json!({ "name": dup })),
@@ -830,7 +830,7 @@ async fn a_name_already_taken_in_the_organization_is_a_409(pool: PgPool) {
     let (status, _) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         other,
         &others,
         Some(json!({ "name": "Platform" })),
@@ -860,7 +860,7 @@ async fn the_slug_follows_the_name_within_the_organization(pool: PgPool) {
             let (status, body) = call(
                 &pool,
                 "POST",
-                "/internal/projects",
+                "/internal/v1/projects",
                 caller,
                 &organization,
                 Some(json!({ "name": name })),
@@ -889,7 +889,7 @@ async fn the_slug_follows_the_name_within_the_organization(pool: PgPool) {
     let (_, listed) = call(
         &pool,
         "GET",
-        "/internal/projects",
+        "/internal/v1/projects",
         owner,
         &organization,
         None,
@@ -923,7 +923,7 @@ async fn renaming_into_a_taken_name_is_a_409(pool: PgPool) {
     let (status, platform) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         owner,
         &organization,
         Some(json!({ "name": "Platform" })),
@@ -933,7 +933,7 @@ async fn renaming_into_a_taken_name_is_a_409(pool: PgPool) {
     let (status, growth) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         owner,
         &organization,
         Some(json!({ "name": "Growth" })),
@@ -968,7 +968,7 @@ async fn the_rename_limit_is_the_create_limit_and_counts_characters(pool: PgPool
     let (status, created) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         owner,
         &organization,
         Some(json!({ "name": "Renamed later" })),
@@ -990,12 +990,12 @@ async fn the_rename_limit_is_the_create_limit_and_counts_characters(pool: PgPool
     }
 }
 
-/// `GET /internal/projects/everywhere` for `caller`, as rows in served order.
+/// `GET /internal/v1/projects/everywhere` for `caller`, as rows in served order.
 async fn everywhere(pool: &PgPool, caller: &str) -> Vec<(String, String, String)> {
     let (status, body) = call(
         pool,
         "GET",
-        "/internal/projects/everywhere",
+        "/internal/v1/projects/everywhere",
         caller,
         &organization_of(pool, caller).await,
         None,
@@ -1035,7 +1035,7 @@ async fn seat_on_project(
     let (status, invite) = call(
         pool,
         "POST",
-        &format!("/internal/projects/{project_id}/invites"),
+        &format!("/internal/v1/projects/{project_id}/invites"),
         owner,
         &organization_of(pool, owner).await,
         Some(json!({ "email": email, "role": role })),
@@ -1052,7 +1052,7 @@ async fn seat_on_project(
     let (status, _) = call(
         pool,
         "POST",
-        "/internal/invites/accept",
+        "/internal/v1/invites/accept",
         invitee,
         &organization_of(pool, invitee).await,
         Some(json!({ "token": token })),
@@ -1090,7 +1090,7 @@ async fn the_everywhere_list_spans_organizations_with_each_persons_reach(pool: P
     let (status, platform) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         alex,
         &alex_org,
         Some(json!({ "name": "Platform" })),
@@ -1101,7 +1101,7 @@ async fn the_everywhere_list_spans_organizations_with_each_persons_reach(pool: P
     let (status, _) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         alex,
         &alex_org,
         Some(json!({ "name": "Growth" })),
@@ -1131,7 +1131,7 @@ async fn the_everywhere_list_spans_organizations_with_each_persons_reach(pool: P
         let (status, body) = call(
             &pool,
             "PATCH",
-            "/internal/organization",
+            "/internal/v1/organization",
             who,
             organization,
             Some(json!({ "name": organization_name })),
@@ -1141,7 +1141,7 @@ async fn the_everywhere_list_spans_organizations_with_each_persons_reach(pool: P
         let (status, body) = call(
             &pool,
             "POST",
-            "/internal/projects",
+            "/internal/v1/projects",
             who,
             organization,
             Some(json!({ "name": project })),
@@ -1193,7 +1193,7 @@ async fn every_everywhere_row_names_its_organization(pool: PgPool) {
     let (status, created) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         owner,
         &organization,
         Some(json!({ "name": "Platform" })),
@@ -1204,7 +1204,7 @@ async fn every_everywhere_row_names_its_organization(pool: PgPool) {
     let (status, body) = call(
         &pool,
         "GET",
-        "/internal/projects/everywhere",
+        "/internal/v1/projects/everywhere",
         owner,
         &organization,
         None,
@@ -1239,7 +1239,7 @@ async fn the_everywhere_read_is_gated_on_the_caller_and_nothing_else(pool: PgPoo
     let (status, created) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         dee,
         &dee_org,
         Some(json!({ "name": "Platform" })),
@@ -1249,7 +1249,7 @@ async fn the_everywhere_read_is_gated_on_the_caller_and_nothing_else(pool: PgPoo
     let (status, _) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         alex,
         &alex_org,
         Some(json!({ "name": "Private" })),
@@ -1262,7 +1262,7 @@ async fn the_everywhere_read_is_gated_on_the_caller_and_nothing_else(pool: PgPoo
             as_person(
                 Request::builder()
                     .method("GET")
-                    .uri("/internal/projects/everywhere")
+                    .uri("/internal/v1/projects/everywhere")
                     .header("x-organization-id", &alex_org),
                 &pool,
                 alex,
@@ -1279,7 +1279,7 @@ async fn the_everywhere_read_is_gated_on_the_caller_and_nothing_else(pool: PgPoo
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/internal/projects/everywhere")
+                .uri("/internal/v1/projects/everywhere")
                 .header("x-service-secret", SERVICE_SECRET)
                 .body(Body::empty())
                 .unwrap(),
@@ -1295,7 +1295,7 @@ async fn the_everywhere_read_is_gated_on_the_caller_and_nothing_else(pool: PgPoo
     let (status, body) = call(
         &pool,
         "GET",
-        "/internal/projects/everywhere",
+        "/internal/v1/projects/everywhere",
         dee,
         &alex_org,
         None,
@@ -1341,7 +1341,7 @@ async fn every_everywhere_row_is_also_in_its_organizations_own_list(pool: PgPool
     let (status, platform) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         alex,
         &alex_org,
         Some(json!({ "name": "Platform" })),
@@ -1392,7 +1392,7 @@ async fn switchable_organizations(pool: &PgPool, caller: &str, email: &str) -> V
             as_person(
                 Request::builder()
                     .method("POST")
-                    .uri("/me")
+                    .uri("/internal/v1/me")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("content-type", "application/json"),
                 pool,
@@ -1427,7 +1427,7 @@ async fn switch_to(pool: &PgPool, caller: &str, organization: &str) -> String {
             as_person(
                 Request::builder()
                     .method("POST")
-                    .uri("/me")
+                    .uri("/internal/v1/me")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("x-organization-id", organization)
                     .header("content-type", "application/json"),
@@ -1469,7 +1469,7 @@ async fn every_organization_the_switcher_offers_is_one_me_will_switch_to(pool: P
     let (status, platform) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         alex,
         &alex_org,
         Some(json!({ "name": "Platform" })),
@@ -1524,7 +1524,7 @@ async fn a_member_seat_does_not_lower_an_organization_admin(pool: PgPool) {
     let (status, created) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         owner,
         &organization,
         Some(json!({ "name": "Platform" })),
@@ -1553,7 +1553,7 @@ async fn a_member_seat_does_not_lower_an_organization_admin(pool: PgPool) {
     )
     .await;
 
-    let audit = format!("/internal/audit/projects/{project_id}");
+    let audit = format!("/internal/v1/audit/projects/{project_id}");
     let (status, _) = call_project(
         &pool,
         "GET",
@@ -1588,7 +1588,7 @@ async fn a_member_seat_does_not_lower_an_organization_admin(pool: PgPool) {
     let (status, listed) = call(
         &pool,
         "GET",
-        "/internal/projects",
+        "/internal/v1/projects",
         admin,
         &organization,
         None,

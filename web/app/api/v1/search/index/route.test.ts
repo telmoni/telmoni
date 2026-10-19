@@ -1,0 +1,110 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/server/session", () => ({ getServerSession: vi.fn() }));
+vi.mock("@/lib/api/rate-limit", () => ({
+  rateLimit: vi.fn(async () => null),
+  sessionKey: vi.fn(() => "k"),
+}));
+vi.mock("@/lib/server/data", () => ({
+  activeOrganization: vi.fn(),
+  fetchMembers: vi.fn(),
+  fetchProject: vi.fn(),
+  fetchTokens: vi.fn(),
+  getServerContext: vi.fn(),
+}));
+
+import { NextRequest } from "next/server";
+
+import { rateLimit } from "@/lib/api/rate-limit";
+import {
+  activeOrganization,
+  fetchMembers,
+  fetchProject,
+  fetchTokens,
+  getServerContext,
+} from "@/lib/server/data";
+import { getServerSession } from "@/lib/server/session";
+
+import { GET } from "./route";
+
+const PROJECT = "project_7bQx2mNv9BcK4dLp";
+
+function get(project: string | null = PROJECT) {
+  const query = project === null ? "" : `?project=${encodeURIComponent(project)}`;
+  return GET(new NextRequest(`http://localhost:3000/api/v1/search/index${query}`));
+}
+
+describe("GET /api/v1/search/index", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getServerSession).mockResolvedValue({ accessToken: "at_1" } as never);
+    vi.mocked(rateLimit).mockResolvedValue(null as never);
+    vi.mocked(fetchProject).mockResolvedValue({ id: PROJECT, slug: "web" } as never);
+    vi.mocked(getServerContext).mockResolvedValue({} as never);
+    vi.mocked(activeOrganization).mockReturnValue({ slug: "acme" } as never);
+    vi.mocked(fetchTokens).mockResolvedValue({
+      kind: "ok",
+      tokens: [{ id: "tok_1", name: "Deploy" }],
+    } as never);
+    vi.mocked(fetchMembers).mockResolvedValue({
+      kind: "ok",
+      members: [{ member_id: "user_1", email: "ada@example.test", display_name: "Ada" }],
+    } as never);
+  });
+
+  it("indexes the project's keys and members, each leading to its page, for this session alone", async () => {
+    const res = await get();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    expect(await res.json()).toEqual({
+      keys: {
+        items: [{ id: "key:tok_1", kind: "key", label: "Deploy", hint: "API key", href: "/acme/web/api-keys" }],
+        forbidden: false,
+        unavailable: false,
+      },
+      members: {
+        items: [
+          { id: "member:user_1", kind: "member", label: "ada@example.test", hint: "Ada", href: "/acme/web/members" },
+        ],
+        forbidden: false,
+        unavailable: false,
+      },
+    });
+  });
+
+  it("says which sections the reader may not see, and which could not be read", async () => {
+    vi.mocked(fetchTokens).mockResolvedValue({ kind: "forbidden" } as never);
+    vi.mocked(fetchMembers).mockResolvedValue({ kind: "unavailable" } as never);
+    const body = await (await get()).json();
+    expect(body.keys).toEqual({ items: [], forbidden: true, unavailable: false });
+    expect(body.members).toEqual({ items: [], forbidden: false, unavailable: true });
+  });
+
+  it("refuses a session that has ended", async () => {
+    vi.mocked(getServerSession).mockResolvedValue(null as never);
+    const res = await get();
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "Your session expired — sign in again." });
+    expect(fetchTokens).not.toHaveBeenCalled();
+  });
+
+  it("refuses past the limit, reading nothing", async () => {
+    vi.mocked(rateLimit).mockResolvedValue(30 as never);
+    const res = await get();
+    expect(res.status).toBe(429);
+    expect(fetchProject).not.toHaveBeenCalled();
+  });
+
+  it("refuses anything but a project id, and a project the session cannot place", async () => {
+    for (const project of [null, "", "../members", "project_short"]) {
+      expect((await get(project)).status).toBe(404);
+    }
+    expect(fetchProject).not.toHaveBeenCalled();
+
+    vi.mocked(fetchProject).mockResolvedValue(null as never);
+    const res = await get();
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Unknown project." });
+    expect(fetchTokens).not.toHaveBeenCalled();
+  });
+});

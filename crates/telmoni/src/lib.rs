@@ -117,7 +117,7 @@ pub struct App {
     pub telemetry: Arc<telmoni_telemetry::AppState>,
     /// The agent, when the deployment has one.
     pub agent: Option<Arc<telmoni_agent::AppState>>,
-    /// The machine door, in front of `/v1` and `/cli`.
+    /// The machine door, in front of `/v1`, `/cli/v1`, `/ping/v1` and `/otlp`.
     door: Arc<door::Door>,
     secrets: ServiceSecrets,
     /// The deployment's own modules, in the order they were mounted.
@@ -362,7 +362,7 @@ impl App {
             .with_state(self.clone());
         let log_level = Router::new()
             .route(
-                "/internal/log-level",
+                "/internal/v1/log-level",
                 get(telmoni_shared::logging::get_level)
                     .put(telmoni_shared::logging::put_level)
                     .delete(telmoni_shared::logging::reset_level),
@@ -371,12 +371,11 @@ impl App {
                 self.secrets.clone(),
                 require_service_secret,
             ));
-        // The machine lanes, on the one `/v1`, the one `/cli`, the one
-        // `/ping` and the one `/otlp`, behind the door: every module's `/v1`
-        // lanes nest here as they come, auth's today, each module gating its
-        // own with the key check; the ping lane's gate is the key in its
-        // path, and ingest's its key check, its per-project limit the lane's
-        // own.
+        // The machine lanes behind the door, each named, then versioned: the
+        // read API at `/v1`, the CLI's at `/cli/v1`, pings at `/ping/v1`, and
+        // ingest at `/otlp`, whose `/v1/traces` is OTLP's own. Each lane
+        // gates its own, by key, bearer, device code or the key in a ping's
+        // path. The probes are the platform's, and carry no version.
         let core = Router::new()
             .merge(probes)
             .merge(log_level)
@@ -386,11 +385,11 @@ impl App {
                 self.door.v1(telmoni_auth::v1_router(self.auth.clone())),
             )
             .nest(
-                "/cli",
+                "/cli/v1",
                 self.door.cli(telmoni_auth::cli_router(self.auth.clone())),
             )
             .nest(
-                "/ping",
+                "/ping/v1",
                 self.door
                     .ping(telmoni_telemetry::ping_router(self.telemetry.clone())),
             )
@@ -408,10 +407,8 @@ impl App {
         self.modules
             .iter()
             .fold(core, |router, module| router.merge(module.router()))
-            // A path no lane serves is the server's own problem document,
-            // as a lane's is for a path under it: a router nested at `/ping`
-            // takes `/ping` and whatever has a character after the slash,
-            // so `/ping/` itself falls through to here.
+            // A path no lane serves is the server's own problem document, as
+            // a lane's is under it; `/ping/v1/` itself falls through to here.
             .fallback(not_found)
             .layer(telmoni_shared::middleware::http::trace_layer())
             .layer(telmoni_shared::middleware::http::request_id_layers())

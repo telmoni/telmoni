@@ -16,7 +16,7 @@ pub struct Config {
     /// Postgres URL (`NOTIFICATIONS_DATABASE_URL`) — the feed + delivery
     /// queue, opened as this module's own role.
     pub database_url: String,
-    /// Primary service secret for `x-service-secret` (gates `/internal/*`).
+    /// Primary service secret for `x-service-secret` (gates `/internal/v1/*`).
     pub service_secret: Redacted,
     /// Optional rotation secondary, accepted during a rotation window.
     pub service_secret_next: Option<Redacted>,

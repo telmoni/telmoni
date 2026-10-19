@@ -1,4 +1,4 @@
-//! `GET /internal/telemetry/users` — the users page, under `Resource::Trace`,
+//! `GET /internal/v1/telemetry/users` — the users page, under `Resource::Trace`,
 //! which every role on a project holds: every end user the project's
 //! runs were for in a window of days, as stored, with what those runs came
 //! to, sorted as the URL says. Reads the spans of the project `x-project-id`
@@ -134,7 +134,7 @@ impl From<UserRow> for User {
     }
 }
 
-/// `GET /internal/telemetry/users` — the project's users in the window,
+/// `GET /internal/v1/telemetry/users` — the project's users in the window,
 /// sorted as the query says, up to its limit, and whether the window held
 /// more.
 pub async fn list_users(

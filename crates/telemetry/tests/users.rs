@@ -21,7 +21,7 @@ use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, Role};
 use telmoni_telemetry::router;
 
-const LANE: &str = "/internal/telemetry/users";
+const LANE: &str = "/internal/v1/telemetry/users";
 const MEMBER: &str = "user_member";
 const STRANGER: &str = "user_stranger";
 

@@ -100,7 +100,7 @@ describe("requestPasswordResetAction", () => {
     expect(await requestPasswordResetAction()).toEqual({ error: null });
 
     const [url, init] = vi.mocked(tryFetchWithTimeout).mock.calls[0]!;
-    expect(url).toBe("http://auth.test/internal/me/password-reset");
+    expect(url).toBe("http://auth.test/internal/v1/me/password-reset");
     expect(init).toEqual(
       expect.objectContaining({
         method: "POST",
@@ -130,7 +130,7 @@ describe("requestPasswordResetAction", () => {
 
     await requestPasswordResetAction();
     expect(vi.mocked(tryFetchWithTimeout).mock.calls[0]![0]).toBe(
-      "http://auth.test/internal/me/password-reset",
+      "http://auth.test/internal/v1/me/password-reset",
     );
   });
 
@@ -201,7 +201,7 @@ describe("requestEmailChangeAction", () => {
     });
 
     const [url, init] = vi.mocked(tryFetchWithTimeout).mock.calls[0]!;
-    expect(url).toBe("http://auth.test/internal/me/email-change");
+    expect(url).toBe("http://auth.test/internal/v1/me/email-change");
     expect(init).toEqual(
       expect.objectContaining({
         method: "POST",
@@ -242,7 +242,7 @@ describe("requestEmailChangeAction", () => {
 
     await requestEmailChangeAction("new@example.test");
     expect(vi.mocked(tryFetchWithTimeout).mock.calls[0]![0]).toBe(
-      "http://auth.test/internal/me/email-change",
+      "http://auth.test/internal/v1/me/email-change",
     );
   });
 
@@ -367,7 +367,7 @@ describe("confirmEmailChangeAction", () => {
     });
 
     const [url, init] = vi.mocked(tryFetchWithTimeout).mock.calls[0]!;
-    expect(url).toBe("http://auth.test/internal/me/email-change/confirm");
+    expect(url).toBe("http://auth.test/internal/v1/me/email-change/confirm");
     expect(init).toEqual(
       expect.objectContaining({
         method: "POST",
@@ -497,7 +497,7 @@ describe("setDefaultOrganizationAction", () => {
     expect(await setDefaultOrganizationAction("org_2")).toEqual({ error: null });
 
     const [url, init] = vi.mocked(tryFetchWithTimeout).mock.calls[0]!;
-    expect(url).toBe("http://auth.test/internal/me/default-organization");
+    expect(url).toBe("http://auth.test/internal/v1/me/default-organization");
     expect(init).toEqual(
       expect.objectContaining({
         method: "PUT",

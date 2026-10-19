@@ -73,7 +73,7 @@ describe("markOrganizationReadAction", () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
     expect(await markOrganizationReadAction(ORGANIZATION, DRAWN)).toEqual({ error: null });
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://auth.test/internal/notifications/read",
+      "http://auth.test/internal/v1/notifications/read",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({

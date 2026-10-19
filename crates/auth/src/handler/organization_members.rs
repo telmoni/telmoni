@@ -58,7 +58,7 @@ fn ensure_grantable(role: OrganizationRole) -> Result<OrganizationRole, TelmoniE
     }
 }
 
-/// `GET /internal/organization/members` — list all organization members.
+/// `GET /internal/v1/organization/members` — list all organization members.
 pub async fn list_organization_members(
     State(state): State<Arc<AppState>>,
     principal: Principal,
@@ -86,7 +86,7 @@ pub async fn list_organization_members(
     Ok(Json(json!({ "members": rows, "ceiling": ceiling })))
 }
 
-/// `PUT /internal/organization/members/{member_id}/role` — update a member's role.
+/// `PUT /internal/v1/organization/members/{member_id}/role` — update a member's role.
 pub async fn update_organization_member_role(
     State(state): State<Arc<AppState>>,
     Path(member_id): Path<String>,
@@ -151,7 +151,7 @@ pub async fn update_organization_member_role(
     Ok(StatusCode::OK)
 }
 
-/// `DELETE /internal/organization/members/{member_id}` — remove an organization member.
+/// `DELETE /internal/v1/organization/members/{member_id}` — remove an organization member.
 pub async fn remove_organization_member(
     State(state): State<Arc<AppState>>,
     Path(member_id): Path<String>,
@@ -260,7 +260,7 @@ pub async fn remove_organization_member(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `GET /internal/organization/invites` — list live organization invitations.
+/// `GET /internal/v1/organization/invites` — list live organization invitations.
 pub async fn list_organization_invites(
     State(state): State<Arc<AppState>>,
     principal: Principal,
@@ -286,7 +286,7 @@ pub async fn list_organization_invites(
     Ok(Json(json!({ "invites": rows })))
 }
 
-/// `POST /internal/organization/invites` — invite a person to the organization.
+/// `POST /internal/v1/organization/invites` — invite a person to the organization.
 pub async fn create_organization_invite(
     State(state): State<Arc<AppState>>,
     principal: Principal,
@@ -416,7 +416,7 @@ pub async fn create_organization_invite(
     ))
 }
 
-/// `DELETE /internal/organization/invites/{invite_id}` — revoke an organization invitation.
+/// `DELETE /internal/v1/organization/invites/{invite_id}` — revoke an organization invitation.
 pub async fn revoke_organization_invite(
     State(state): State<Arc<AppState>>,
     Path(invite_id): Path<Uuid>,

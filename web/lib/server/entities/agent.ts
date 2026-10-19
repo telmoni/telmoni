@@ -66,7 +66,7 @@ export async function agentStatus(projectId: string): Promise<AgentStatus> {
   const headers = await agentHeaders(projectId);
   if (!headers) return "unavailable";
   try {
-    const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/agent/status`, { headers });
+    const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/agent/status`, { headers });
     if (!res.ok) {
       logger.warn({ fetcher: "agentStatus", status: res.status }, "entities: upstream refused");
       return "unavailable";
@@ -92,7 +92,7 @@ export async function listAgentConversations(
   const headers = await agentHeaders(projectId);
   if (!headers) return null;
   try {
-    const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/agent/conversations`, {
+    const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/agent/conversations`, {
       headers,
     });
     if (!res.ok) {
@@ -135,7 +135,7 @@ export async function openAgentConversation(
   if (!headers) return { kind: "unavailable" };
   try {
     const res = await fetchWithTimeout(
-      `${env.SERVER_URL}/internal/agent/conversations/${encodeURIComponent(id)}`,
+      `${env.SERVER_URL}/internal/v1/agent/conversations/${encodeURIComponent(id)}`,
       { headers },
     );
     if (res.status === 404) return { kind: "not-found" };
@@ -178,7 +178,7 @@ export async function deleteAgentConversation(projectId: string, id: string): Pr
   if (!headers) return false;
   try {
     const res = await fetchWithTimeout(
-      `${env.SERVER_URL}/internal/agent/conversations/${encodeURIComponent(id)}`,
+      `${env.SERVER_URL}/internal/v1/agent/conversations/${encodeURIComponent(id)}`,
       { method: "DELETE", headers },
     );
     // Already gone is what the person asked for.

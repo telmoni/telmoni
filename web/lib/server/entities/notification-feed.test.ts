@@ -52,7 +52,7 @@ describe("fetchProjectNotifications", () => {
   it("reads the project's own feed, naming the project", async () => {
     expect(await fetchProjectNotifications(PROJECT)).toEqual(FEED);
     const [url, init] = fetchWithTimeout.mock.calls[0];
-    expect(url).toBe("http://server/internal/notifications/feed");
+    expect(url).toBe("http://server/internal/v1/notifications/feed");
     expect(init.headers).toMatchObject({ "x-project-id": PROJECT });
   });
 
@@ -81,7 +81,7 @@ describe("fetchNotifications", () => {
   it("reads the organization's own feed, naming no project", async () => {
     expect(await fetchNotifications()).toEqual(FEED);
     const [url, init] = fetchWithTimeout.mock.calls[0];
-    expect(url).toBe("http://server/internal/notifications/feed");
+    expect(url).toBe("http://server/internal/v1/notifications/feed");
     expect(init.headers).not.toHaveProperty("x-project-id");
     expect(fetchProject).not.toHaveBeenCalled();
   });

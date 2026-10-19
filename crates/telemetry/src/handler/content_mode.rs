@@ -1,4 +1,4 @@
-//! A project's content mode: `GET /internal/telemetry/content-mode`, which
+//! A project's content mode: `GET /internal/v1/telemetry/content-mode`, which
 //! every role on the project reads, and `PUT`, which its organization's owner
 //! alone may send, since what a project keeps changes what its organization
 //! is liable for. The project is the one `x-project-id` names.
@@ -65,7 +65,7 @@ struct Switched {
     refiled_from: Option<OrganizationId>,
 }
 
-/// `GET /internal/telemetry/content-mode` — the project's mode.
+/// `GET /internal/v1/telemetry/content-mode` — the project's mode.
 pub async fn get_content_mode(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -80,7 +80,7 @@ pub async fn get_content_mode(
     Ok(Json(ContentModeSetting::of(content_mode)))
 }
 
-/// `PUT /internal/telemetry/content-mode` — switch the project to one of the
+/// `PUT /internal/v1/telemetry/content-mode` — switch the project to one of the
 /// [`OFFERED`] modes. Written under the project and its organization both,
 /// which the row's policy requires of a write, by an upsert that files the
 /// row under that organization, which heals a row a transfer's failed

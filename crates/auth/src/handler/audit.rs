@@ -1,4 +1,4 @@
-//! `/internal/audit/…` — the console's two audit lists, and the
+//! `/internal/v1/audit/…` — the console's two audit lists, and the
 //! organization's chain to take away, as exports built in the background
 //! ([`crate::audit_export`]). The nightly walk of every chain is
 //! [`crate::sweep::audit_verify`].
@@ -49,7 +49,7 @@ pub struct ListParams {
     limit: Option<i64>,
 }
 
-/// `GET /internal/audit/projects/{project_id}` — the events written inside one
+/// `GET /internal/v1/audit/projects/{project_id}` — the events written inside one
 /// project, newest first. A project has no chain of its own, so this reads the
 /// ORGANIZATION's rows bearing that project.
 pub async fn list_project_audit(
@@ -95,7 +95,7 @@ pub async fn list_project_audit(
     Ok(page(events, limit))
 }
 
-/// `GET /internal/audit/organizations/{organization_id}` — the organization's
+/// `GET /internal/v1/audit/organizations/{organization_id}` — the organization's
 /// whole chain, newest first. **Owners and Admins**: it is the
 /// record of the whole collaboration.
 pub async fn list_organization_audit(
@@ -204,7 +204,7 @@ async fn refuse_unless_exporter(
     Ok(())
 }
 
-/// `POST /internal/audit/organizations/{organization_id}/exports` — queue an
+/// `POST /internal/v1/audit/organizations/{organization_id}/exports` — queue an
 /// export of the organization's chain and start building it: 202 with the
 /// export as the list shows it. The file holds the stretch of the chain the
 /// range touches, oldest first, each row with every field its hash covers and
@@ -268,7 +268,7 @@ pub async fn start_audit_export(
     Ok((StatusCode::ACCEPTED, Json(entry)))
 }
 
-/// `GET /internal/audit/organizations/{organization_id}/exports` — the
+/// `GET /internal/v1/audit/organizations/{organization_id}/exports` — the
 /// caller's latest exports in the organization, newest first, without their
 /// files: what the console's bell and export dialog show.
 pub async fn list_audit_exports(
@@ -290,7 +290,7 @@ pub async fn list_audit_exports(
     Ok(Json(json!({ "exports": exports })))
 }
 
-/// `GET /internal/audit/organizations/{organization_id}/exports/{export_id}`
+/// `GET /internal/v1/audit/organizations/{organization_id}/exports/{export_id}`
 /// — a finished file, in the format it was built in: for the person who
 /// asked for it alone, while they still hold the role, and while it is kept.
 /// The first download is noted, so the bell stops offering it.

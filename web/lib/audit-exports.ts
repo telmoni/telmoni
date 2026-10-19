@@ -1,4 +1,3 @@
-import { organizationPath } from "@/lib/slug";
 import { AUDIT_EXPORT_MAX_ROWS, type AuditExport } from "@/lib/types/audit-export";
 
 /// The ranges the export dialog offers: the last week, month or quarter up to
@@ -97,12 +96,13 @@ export function failureText(entry: Pick<AuditExport, "failure">): string {
     : "The audit log export failed. Try again.";
 }
 
-/// Where the export dialog starts one and the bell reads the list.
+/// Where the export dialog starts one and the bell reads the list: under the
+/// organization's slug, which the proxy reads as a page's (`lib/proxy/organization.ts`).
 export function exportsHref(organizationSlug: string): string {
-  return organizationPath(organizationSlug, "/audit-log/exports");
+  return `/api/v1/organizations/${organizationSlug}/audit-log/exports`;
 }
 
 /// Where a finished file downloads from.
 export function exportHref(organizationSlug: string, id: string): string {
-  return organizationPath(organizationSlug, `/audit-log/exports/${encodeURIComponent(id)}`);
+  return `${exportsHref(organizationSlug)}/${encodeURIComponent(id)}`;
 }

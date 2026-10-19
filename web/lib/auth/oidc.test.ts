@@ -108,7 +108,7 @@ describe("refreshTokens", () => {
       kind: "granted",
       tokens: { accessToken: "at_new", sessionId: "ses_1" },
     });
-    expect(sent().url).toBe("http://auth.test/internal/auth/refresh");
+    expect(sent().url).toBe("http://auth.test/internal/v1/auth/refresh");
     expect(sent().body).toEqual({ refresh_token: "rt_old", session_row_id: "sess_1" });
     expect(sent().headers["x-service-secret"]).toBe("s3cret");
   });
@@ -174,7 +174,7 @@ describe("revokeSession", () => {
     fetchWithTimeout.mockResolvedValue(new Response(null, { status: 204 }));
     await revokeSession("sid_1");
     const [url, init] = fetchWithTimeout.mock.calls[0]!;
-    expect(url).toBe("http://auth.test/internal/auth/logout");
+    expect(url).toBe("http://auth.test/internal/v1/auth/logout");
     expect(JSON.parse(init.body)).toEqual({ session_id: "sid_1" });
   });
 });
@@ -204,7 +204,7 @@ describe("exchangeCode", () => {
     expect(result.idToken).toBe("id.token.x");
     expect(result.sessionId).toBe("ses_1");
     const [url, init] = fetchWithTimeout.mock.calls[0]!;
-    expect(url).toBe("http://auth.test/internal/auth/exchange");
+    expect(url).toBe("http://auth.test/internal/v1/auth/exchange");
     expect(JSON.parse(init.body)).toEqual({ code: "c0de", provider: "external" });
 
     fetchWithTimeout.mockResolvedValue(signedIn());
@@ -227,7 +227,7 @@ describe("getSignInConfig", () => {
       external: { name: "Okta" },
     });
     const [url, init] = fetchWithTimeout.mock.calls[0]!;
-    expect(url).toBe("http://auth.test/internal/auth/config");
+    expect(url).toBe("http://auth.test/internal/v1/auth/config");
     expect(init.method).toBe("GET");
   });
 

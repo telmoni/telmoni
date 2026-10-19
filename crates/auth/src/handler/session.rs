@@ -32,7 +32,7 @@ pub enum SignInProvider {
     External,
 }
 
-/// `POST /internal/auth/start` request. `state` is the CSRF token the BFF
+/// `POST /internal/v1/auth/start` request. `state` is the CSRF token the BFF
 /// sealed into its PKCE cookie, echoed so the callback can be cross-checked.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -54,7 +54,7 @@ pub struct StartRequest {
     pub provider: Option<SignInProvider>,
 }
 
-/// `POST /internal/auth/start` response.
+/// `POST /internal/v1/auth/start` response.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartResponse {
@@ -62,7 +62,7 @@ pub struct StartResponse {
     pub authorize_url: String,
 }
 
-/// `POST /internal/auth/exchange` request — the `?code=...` the sign-in
+/// `POST /internal/v1/auth/exchange` request — the `?code=...` the sign-in
 /// redirected back to the BFF's callback with.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -84,7 +84,7 @@ impl std::fmt::Debug for ExchangeRequest {
     }
 }
 
-/// `POST /cli/auth/device` response — what the CLI shows the
+/// `POST /cli/v1/auth/device` response — what the CLI shows the
 /// person and what it polls with (RFC 8628 § 3.2).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -115,7 +115,7 @@ impl std::fmt::Debug for DeviceStartResponse {
     }
 }
 
-/// `POST /cli/auth/device/poll` request.
+/// `POST /cli/v1/auth/device/poll` request.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DevicePollRequest {
@@ -131,14 +131,14 @@ impl std::fmt::Debug for DevicePollRequest {
     }
 }
 
-/// `POST /internal/auth/device/{approve,deny}`: the code the device shows.
+/// `POST /internal/v1/auth/device/{approve,deny}`: the code the device shows.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DeviceDecisionRequest {
     pub user_code: String,
 }
 
-/// `POST /cli/auth/device/poll` answer while nothing has been granted:
+/// `POST /cli/v1/auth/device/poll` answer while nothing has been granted:
 /// a 202 carrying the RFC's own word for why.
 #[derive(Debug, Serialize)]
 struct DevicePending {
@@ -156,7 +156,7 @@ enum PendingStatus {
     SlowDown,
 }
 
-/// `POST /internal/auth/refresh` request.
+/// `POST /internal/v1/auth/refresh` request.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RefreshRequest {
@@ -177,7 +177,7 @@ impl std::fmt::Debug for RefreshRequest {
     }
 }
 
-/// `POST /internal/auth/logout` request — the session to end.
+/// `POST /internal/v1/auth/logout` request — the session to end.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LogoutRequest {
@@ -185,7 +185,7 @@ pub struct LogoutRequest {
     pub session_id: String,
 }
 
-/// `POST /internal/auth/logout-url` request — mint the external provider's
+/// `POST /internal/v1/auth/logout-url` request — mint the external provider's
 /// **browser** logout URL, for a session that began there.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -212,7 +212,7 @@ impl std::fmt::Debug for LogoutUrlRequest {
     }
 }
 
-/// `POST /internal/auth/logout-url` response.
+/// `POST /internal/v1/auth/logout-url` response.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogoutUrlResponse {
@@ -220,7 +220,7 @@ pub struct LogoutUrlResponse {
     pub logout_url: String,
 }
 
-/// `GET /internal/auth/config` — what the console's sign-in pages show.
+/// `GET /internal/v1/auth/config` — what the console's sign-in pages show.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignInConfig {
@@ -321,7 +321,7 @@ fn no_external() -> TelmoniError {
     AuthError::NotFound("this deployment has no external identity provider".into()).into()
 }
 
-/// `GET /internal/auth/config` — what the sign-in pages offer.
+/// `GET /internal/v1/auth/config` — what the sign-in pages offer.
 pub async fn config(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     Json(SignInConfig {
         password_sign_in: state.password.is_some(),
@@ -333,7 +333,7 @@ pub async fn config(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     })
 }
 
-/// `POST /internal/auth/start` — where the browser goes to sign in: the
+/// `POST /internal/v1/auth/start` — where the browser goes to sign in: the
 /// console's own page while the login form is on, the external provider's
 /// page when it is off or when asked for by name.
 pub async fn start(
@@ -370,7 +370,7 @@ pub async fn start(
     Ok(Json(StartResponse { authorize_url: url }))
 }
 
-/// `POST /cli/auth/device` — begin a device authorization for a
+/// `POST /cli/v1/auth/device` — begin a device authorization for a
 /// client with no browser of its own. The person approves it on the
 /// console's device page from any browser on any machine, which is what
 /// lets the CLI sign in over SSH or in a container.
@@ -388,7 +388,7 @@ pub async fn device_start(
     }))
 }
 
-/// `POST /cli/auth/device/poll` — one poll of the device-code grant,
+/// `POST /cli/v1/auth/device/poll` — one poll of the device-code grant,
 /// as a public client. Granted is a 200 with the same `AuthnResult` the
 /// console's exchange answers. Not yet is a 202 saying
 /// `authorization_pending` or `slow_down`; refused is a 403; lapsed is a 400.
@@ -426,7 +426,7 @@ pub async fn device_poll(
     }
 }
 
-/// `POST /internal/auth/device/approve` — the signed-in person approves the
+/// `POST /internal/v1/auth/device/approve` — the signed-in person approves the
 /// device showing the code; its next poll is granted a session as them.
 pub async fn approve_device(
     State(state): State<Arc<AppState>>,
@@ -440,7 +440,7 @@ pub async fn approve_device(
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
-/// `POST /internal/auth/device/deny` — the signed-in person refuses it.
+/// `POST /internal/v1/auth/device/deny` — the signed-in person refuses it.
 pub async fn deny_device(
     State(state): State<Arc<AppState>>,
     principal: Principal,
@@ -453,7 +453,7 @@ pub async fn deny_device(
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
-/// `POST /internal/auth/exchange` — trade the authorization code for an
+/// `POST /internal/v1/auth/exchange` — trade the authorization code for an
 /// authenticated identity and the session's tokens.
 pub async fn exchange(
     State(state): State<Arc<AppState>>,
@@ -530,7 +530,7 @@ async fn exchange_once(
     }
 }
 
-/// `POST /internal/auth/refresh` — spend a refresh token for the next pair.
+/// `POST /internal/v1/auth/refresh` — spend a refresh token for the next pair.
 pub async fn refresh(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RefreshRequest>,
@@ -540,7 +540,7 @@ pub async fn refresh(
         .map(Json)
 }
 
-/// The refresh behind the console's lane and the CLI's (`/cli/auth/refresh`),
+/// The refresh behind the console's lane and the CLI's (`/cli/v1/auth/refresh`),
 /// which differ in their spelling alone.
 pub(crate) async fn refresh_session(
     state: &AppState,
@@ -574,7 +574,7 @@ pub(crate) async fn refresh_session(
     Ok(AuthnResult::from(tokens))
 }
 
-/// `POST /internal/auth/logout` — end the session: its row, which refuses
+/// `POST /internal/v1/auth/logout` — end the session: its row, which refuses
 /// any bearer of it still out, and its tokens, so none resolves and nothing
 /// can mint another.
 pub async fn logout(
@@ -591,7 +591,7 @@ pub async fn logout(
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
-/// `POST /internal/auth/logout-url` — where the browser goes to finish the
+/// `POST /internal/v1/auth/logout-url` — where the browser goes to finish the
 /// sign-out: the external provider's logout page for a session that began
 /// there, else straight back. Ends nothing itself; `logout` does.
 pub async fn logout_url(

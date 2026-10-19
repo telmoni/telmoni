@@ -1,4 +1,4 @@
-//! `POST /internal/me/email-change` and its `/confirm` — the one lane that
+//! `POST /internal/v1/me/email-change` and its `/confirm` — the one lane that
 //! moves `auth.identities.email` on a person's say-so. Two codes, one per
 //! inbox, and the pair is the whole design.
 #![expect(
@@ -112,7 +112,7 @@ async fn seed(pool: &PgPool, user: &str, email: &str) {
 async fn me(pool: &PgPool, user: &str, organization: Option<&str>) -> Value {
     let mut builder = Request::builder()
         .method("POST")
-        .uri("/me")
+        .uri("/internal/v1/me")
         .header("x-service-secret", SERVICE_SECRET)
         .header("content-type", "application/json");
     if let Some(organization) = organization {
@@ -167,7 +167,7 @@ async fn open_naming(
 ) -> Request<Body> {
     let mut builder = Request::builder()
         .method("POST")
-        .uri("/internal/me/email-change")
+        .uri("/internal/v1/me/email-change")
         .header("x-service-secret", SERVICE_SECRET)
         .header("content-type", "application/json");
     if let Some(organization) = organization {
@@ -193,7 +193,7 @@ async fn confirm(
     as_person(
         Request::builder()
             .method("POST")
-            .uri("/internal/me/email-change/confirm")
+            .uri("/internal/v1/me/email-change/confirm")
             .header("x-service-secret", SERVICE_SECRET)
             .header("x-organization-id", organization)
             .header("content-type", "application/json"),
@@ -550,7 +550,7 @@ async fn a_bearer_auth_never_minted_never_reaches_the_provider(pool: PgPool) {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/internal/me/email-change")
+                .uri("/internal/v1/me/email-change")
                 .header("x-service-secret", SERVICE_SECRET)
                 .header("content-type", "application/json")
                 .header("authorization", "Bearer never_minted_here")

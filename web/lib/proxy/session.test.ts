@@ -241,7 +241,7 @@ describe("the proxy's session cookie", () => {
     expect(page.headers.get("location")).toContain("/auth/login?returnTo=%2Facme%2Fweb%2Ftraces");
     expect(page.cookies.get("telmoni_session")?.value).toBe("");
 
-    const read = await send("/api/events", { expiresAt: Date.now() - 1_000, refreshToken: "rt_b" });
+    const read = await send("/api/v1/events", { expiresAt: Date.now() - 1_000, refreshToken: "rt_b" });
     expect(read.status).toBe(401);
     expect(read.cookies.get("telmoni_session")?.value).toBe("");
   });

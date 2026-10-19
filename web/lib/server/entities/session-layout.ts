@@ -22,7 +22,7 @@ export const fetchSessionLayout = cache(
     const ctx = await identityContext();
     if (!ctx) return null;
     try {
-      const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/telemetry/session-layout`, {
+      const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry/session-layout`, {
         headers: projectHeaders(ctx, projectId),
         cache: "no-store",
       });

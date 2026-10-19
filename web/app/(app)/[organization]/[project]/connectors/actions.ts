@@ -43,7 +43,7 @@ export async function disconnectConnectorAction(
   const gate = await admitConnectorsCall("connectors:disconnect", 10, projectId, connectionId);
   if (gate.error !== undefined) return { error: gate.error };
   const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/connectors/${encodeURIComponent(connectionId)}`,
+    `${gate.base}/internal/v1/connectors/${encodeURIComponent(connectionId)}`,
     { method: "DELETE", headers: gate.headers },
   );
   if (!res) return { error: CONNECTORS_UNAVAILABLE };
@@ -65,7 +65,7 @@ export async function sendTestMessageAction(
   const gate = await admitConnectorsCall("connectors:test", 10, projectId, connectionId);
   if (gate.error !== undefined) return { error: gate.error };
   const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/connectors/${encodeURIComponent(connectionId)}/test`,
+    `${gate.base}/internal/v1/connectors/${encodeURIComponent(connectionId)}/test`,
     { method: "POST", headers: gate.headers },
     SEND_WAIT_MS,
   );
@@ -123,7 +123,7 @@ export async function createWebhookConnectorAction(
   if (trimmed.length > 2048) return { error: "That URL is too long." };
   const checked = checkKinds(eventKinds);
   if (checked.error !== undefined) return { error: checked.error };
-  const res = await tryFetchWithTimeout(`${gate.base}/internal/connectors/webhook`, {
+  const res = await tryFetchWithTimeout(`${gate.base}/internal/v1/connectors/webhook`, {
     method: "POST",
     headers: { ...gate.headers, "content-type": "application/json" },
     body: JSON.stringify({ url: trimmed, event_kinds: checked.kinds }),
@@ -147,7 +147,7 @@ export async function updateWebhookEventsAction(
   const checked = checkKinds(eventKinds);
   if (checked.error !== undefined) return { error: checked.error };
   const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/connectors/${encodeURIComponent(connectionId)}/events`,
+    `${gate.base}/internal/v1/connectors/${encodeURIComponent(connectionId)}/events`,
     {
       method: "PUT",
       headers: { ...gate.headers, "content-type": "application/json" },
@@ -183,7 +183,7 @@ export async function rotateWebhookSecretAction(
     return { error: "Choose how long the current secret keeps working, from 0 to 24 hours." };
   }
   const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/connectors/${encodeURIComponent(connectionId)}/rotate`,
+    `${gate.base}/internal/v1/connectors/${encodeURIComponent(connectionId)}/rotate`,
     {
       method: "POST",
       headers: { ...gate.headers, "content-type": "application/json" },
@@ -215,7 +215,7 @@ export async function redeliverAction(
     return { error: "Invalid delivery." };
   }
   const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/connectors/${encodeURIComponent(connectionId)}/deliveries/${encodeURIComponent(deliveryId)}/redeliver`,
+    `${gate.base}/internal/v1/connectors/${encodeURIComponent(connectionId)}/deliveries/${encodeURIComponent(deliveryId)}/redeliver`,
     { method: "POST", headers: gate.headers },
     SEND_WAIT_MS,
   );

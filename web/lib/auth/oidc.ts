@@ -59,7 +59,7 @@ export async function getAuthorizeUrl(
   opts: { signUp?: boolean; loginHint?: string; provider?: SignInProvider } = {},
 ): Promise<string> {
   const res = await fetchWithTimeout(
-    `${env.SERVER_URL}/internal/auth/start`,
+    `${env.SERVER_URL}/internal/v1/auth/start`,
     {
       method: "POST",
       headers: serviceHeaders(),
@@ -84,7 +84,7 @@ export async function exchangeCode(
   provider?: SignInProvider,
 ): Promise<AuthnResult> {
   const res = await fetchWithTimeout(
-    `${env.SERVER_URL}/internal/auth/exchange`,
+    `${env.SERVER_URL}/internal/v1/auth/exchange`,
     {
       method: "POST",
       headers: serviceHeaders(),
@@ -99,7 +99,7 @@ export async function exchangeCode(
 // take as the form alone: the action behind it answers for auth being down.
 export async function getSignInConfig(): Promise<SignInConfig | null> {
   try {
-    const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/auth/config`, {
+    const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/auth/config`, {
       method: "GET",
       headers: serviceHeaders(),
     });
@@ -119,7 +119,7 @@ export async function getSignInConfig(): Promise<SignInConfig | null> {
 // access token, and its refresh tokens.
 export async function revokeSession(sessionId: string): Promise<void> {
   try {
-    await fetchWithTimeout(`${env.SERVER_URL}/internal/auth/logout`, {
+    await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/auth/logout`, {
       method: "POST",
       headers: serviceHeaders(),
       body: JSON.stringify({ session_id: sessionId }),
@@ -149,7 +149,7 @@ export async function getLogoutUrl(
 ): Promise<string | null> {
   try {
     const res = await fetchWithTimeout(
-      `${env.SERVER_URL}/internal/auth/logout-url`,
+      `${env.SERVER_URL}/internal/v1/auth/logout-url`,
       {
         method: "POST",
         headers: serviceHeaders(),
@@ -188,7 +188,7 @@ export async function refreshTokens(
 ): Promise<RefreshAnswer> {
   try {
     const res = await fetchWithTimeout(
-      `${env.SERVER_URL}/internal/auth/refresh`,
+      `${env.SERVER_URL}/internal/v1/auth/refresh`,
       {
         method: "POST",
         headers: serviceHeaders(),

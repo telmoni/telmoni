@@ -91,6 +91,13 @@ describe("RealtimeListener - membership:removed edge cases", () => {
     ];
   });
 
+  it("listens on the console's versioned events lane", () => {
+    mockPathname = "/acme/web";
+    render(<RealtimeListener />);
+
+    expect(MockEventSource.instances[0].url).toBe("/api/v1/events");
+  });
+
   it("ejects the user to /console when removed from their active project subpath", () => {
     mockPathname = "/acme/web/members";
     render(<RealtimeListener />);

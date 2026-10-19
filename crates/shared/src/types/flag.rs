@@ -30,7 +30,7 @@ pub enum Flag {
     /// an existing member keeps their access.
     Members,
     /// Making a NEW organization: provisioning one at first sign-in, and
-    /// creating one on request (`POST /internal/organizations`), which off
+    /// creating one on request (`POST /internal/v1/organizations`), which off
     /// refuses. An existing one signs in regardless, and so does a person with
     /// none: they get their account alone — invitations and deletion — rather
     /// than a refusal. **Global only**: there is no organization yet to

@@ -21,7 +21,7 @@ use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, Role};
 use telmoni_telemetry::contract::{CONVENTIONS_COMMIT, INVENTORY};
 use telmoni_telemetry::router;
 
-const LANE: &str = "/internal/telemetry/field-inventory";
+const LANE: &str = "/internal/v1/telemetry/field-inventory";
 
 /// The first cell of every row of every table on the page, backticks off:
 /// the attribute each row documents.

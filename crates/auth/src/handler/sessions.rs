@@ -1,4 +1,4 @@
-//! `GET /internal/auth/sessions` and `…/{id}/revoke` — the Active sessions
+//! `GET /internal/v1/auth/sessions` and `…/{id}/revoke` — the Active sessions
 //! surface. Rows are written by `/me` (find-or-create on the bearer's `sid`)
 //! and touched by the refresh lane; this module only lists and ends them.
 //!
@@ -28,7 +28,7 @@ use super::{
     acting_person_in, emit_audit, log_act_outside_every_organization, recording_organization_of,
 };
 
-/// `GET /internal/auth/sessions` — the caller's live sessions, newest first.
+/// `GET /internal/v1/auth/sessions` — the caller's live sessions, newest first.
 pub async fn list(
     State(state): State<Arc<AppState>>,
     principal: Principal,
@@ -40,7 +40,7 @@ pub async fn list(
     Ok(Json(json!({ "sessions": sessions })))
 }
 
-/// `POST /internal/auth/sessions/{id}/revoke` — end one of the caller's own
+/// `POST /internal/v1/auth/sessions/{id}/revoke` — end one of the caller's own
 /// sessions.
 pub async fn revoke(
     State(state): State<Arc<AppState>>,

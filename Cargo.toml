@@ -93,7 +93,7 @@ tracing = "0.1"
 # The subscriber, and the reason the services are not silent. `env-filter`
 # carries the per-target directives (`telmoni_auth::handler::tokens=debug`),
 # `json` is the shape a log collector parses, and the `reload` layer is what
-# lets `PUT /internal/log-level` change verbosity on a running pod without a
+# lets `PUT /internal/v1/log-level` change verbosity on a running pod without a
 # restart. See `crates/shared/src/logging.rs`.
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
 reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls", "multipart"], default-features = false }

@@ -13,8 +13,23 @@ describe("namedOrganization", () => {
     expect(namedOrganization("/acme/settings")).toBe("acme");
   });
 
-  // Account, `/console` and every route handler: the cookie stands in.
-  it.each(["/", "/account/settings", "/console", "/api/events", "/connect/slack/start", "/plans"])(
+  it("reads it off a route handler for one organization, as off its pages", () => {
+    expect(namedOrganization("/api/v1/organizations/acme/audit-log/exports")).toBe("acme");
+    expect(namedOrganization("/api/v1/organizations/acme/audit-log/exports/42")).toBe("acme");
+    expect(namedOrganization("/api/v1/organizations/Acme/audit-log/exports")).toBeNull();
+  });
+
+  // Account, `/console` and every other route handler: the cookie stands in.
+  it.each([
+    "/",
+    "/account/settings",
+    "/console",
+    "/api/v1/events",
+    "/api/v1/organizations",
+    "/api/v1/organizations/",
+    "/connect/slack/start",
+    "/plans",
+  ])(
     "names none on %s",
     (pathname) => {
       expect(namedOrganization(pathname)).toBeNull();
@@ -85,6 +100,20 @@ describe("the proxy and the organization a request acts in", () => {
   it("hands the server the organization the path names", async () => {
     const res = await visit("/acme/web/api-keys");
     expect(res.headers.get(forwarded("x-telmoni-organization"))).toBe("acme");
+  });
+
+  it("hands on the organization a route handler for one names, over a client's copy", async () => {
+    const res = await visit("/api/v1/organizations/acme/audit-log/exports", {
+      headers: { "x-telmoni-organization": "globex" },
+    });
+    expect(res.headers.get(forwarded("x-telmoni-organization"))).toBe("acme");
+  });
+
+  it("answers a signed-out call to one with a 401, not the sign-in page", async () => {
+    const res = await run(
+      new NextRequest("http://localhost:3000/api/v1/organizations/acme/audit-log/exports"),
+    );
+    expect(res.status).toBe(401);
   });
 
   it("hands on the path and query, for a layout to redirect from", async () => {

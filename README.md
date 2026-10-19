@@ -129,7 +129,7 @@ Configuration comes only from the environment ([every setting](https://telmoni.c
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/assets/how-it-works-dark.svg">
-  <img src=".github/assets/how-it-works-light.svg" alt="The SDKs in your agents send spans to /otlp/v1/traces and the CLI and scripts call /cli and /v1 on the telmoni binary, which runs auth, telemetry, notifications and the console agent; people use the Next.js console, which calls the binary; the binary keeps its data in PostgreSQL, ClickHouse and Redis, and sends notifications to Slack and webhooks.">
+  <img src=".github/assets/how-it-works-light.svg" alt="The SDKs in your agents send spans to /otlp/v1/traces and the CLI and scripts call /cli/v1 and /v1 on the telmoni binary, which runs auth, telemetry, notifications and the console agent; people use the Next.js console, which calls the binary; the binary keeps its data in PostgreSQL, ClickHouse and Redis, and sends notifications to Slack and webhooks.">
 </picture>
 
 The `telmoni` binary runs every module (auth, notifications, telemetry and the console agent) in one process. Each module keeps its own Postgres schema under its own role, behind forced row-level security, and the spans and their hourly totals live in ClickHouse. The console is a thin proxy, so every rule lives in Rust. [ARCHITECTURE.md](ARCHITECTURE.md) explains how it's built, and why.
@@ -159,7 +159,7 @@ crates/
   auth/           sign-in, organizations and projects, members, invitations, API keys
   notifications/  the feed, the Slack and webhook connectors, delivery
   agent/          the console agent: models, embeddings, the index and its hybrid search, read-only tools
-  telemetry/      ingest at /otlp/v1/traces and the ping lane at /ping, each project's settings,
+  telemetry/      ingest at /otlp/v1/traces and the ping lane at /ping/v1, each project's settings,
                   monitors, ping keys and open runs, the outbox, the spans and their hourly totals
                   in ClickHouse, its ClickHouse file and nightly purge, ClickHouse's configuration
                   and local users

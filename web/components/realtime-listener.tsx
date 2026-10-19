@@ -127,7 +127,7 @@ export function RealtimeListener({ liveHoldMs = LIVE_HOLD_MS }: { liveHoldMs?: n
         esRef.current.close();
       }
 
-      const es = new EventSource("/api/events");
+      const es = new EventSource("/api/v1/events");
       esRef.current = es;
 
       es.addEventListener("open", () => {

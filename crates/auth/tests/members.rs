@@ -123,7 +123,7 @@ async fn sign_in(pool: &PgPool, user: &str) -> Value {
             as_person(
                 Request::builder()
                     .method("POST")
-                    .uri("/me")
+                    .uri("/internal/v1/me")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("content-type", "application/json"),
                 pool,
@@ -141,7 +141,7 @@ async fn sign_in(pool: &PgPool, user: &str) -> Value {
         let (status, body) = call(
             pool,
             "PATCH",
-            "/internal/organization",
+            "/internal/v1/organization",
             user,
             Some(json!({ "name": "Acme" })),
         )
@@ -154,7 +154,7 @@ async fn sign_in(pool: &PgPool, user: &str) -> Value {
         let (status, body) = call(
             pool,
             "POST",
-            "/internal/projects",
+            "/internal/v1/projects",
             user,
             Some(json!({ "name": "Platform" })),
         )
@@ -228,7 +228,7 @@ async fn invite(pool: &PgPool, owner: &str, email: &str, role: &str) -> (StatusC
         pool,
         "POST",
         &format!(
-            "/internal/projects/{}/invites",
+            "/internal/v1/projects/{}/invites",
             project_of(pool, owner).await
         ),
         owner,
@@ -242,7 +242,7 @@ async fn accept(pool: &PgPool, caller: &str, secret: &str) -> (StatusCode, Value
     call(
         pool,
         "POST",
-        "/internal/invites/accept",
+        "/internal/v1/invites/accept",
         caller,
         Some(json!({ "token": secret })),
     )
@@ -283,7 +283,7 @@ async fn an_invitation_accepted_seats_a_member_and_both_sides_see_it(pool: PgPoo
         &pool,
         "GET",
         &format!(
-            "/internal/projects/{}/members",
+            "/internal/v1/projects/{}/members",
             project_of(&pool, &owner).await
         ),
         &owner,
@@ -306,7 +306,7 @@ async fn an_invitation_accepted_seats_a_member_and_both_sides_see_it(pool: PgPoo
         &pool,
         "GET",
         &format!(
-            "/internal/projects/{}/invites",
+            "/internal/v1/projects/{}/invites",
             project_of(&pool, &owner).await
         ),
         &owner,
@@ -342,7 +342,7 @@ async fn an_invitation_accepted_seats_a_member_and_both_sides_see_it(pool: PgPoo
         &pool,
         "DELETE",
         &format!(
-            "/internal/projects/{}/members/{member}",
+            "/internal/v1/projects/{}/members/{member}",
             project_of(&pool, &owner).await
         ),
         &owner,
@@ -379,7 +379,7 @@ async fn an_address_with_an_organization_is_answered_exactly_like_one_without(po
         &pool,
         "GET",
         &format!(
-            "/internal/projects/{}/invites",
+            "/internal/v1/projects/{}/invites",
             project_of(&pool, owner).await
         ),
         owner,
@@ -411,7 +411,7 @@ async fn the_link_is_returned_at_create_and_never_again(pool: PgPool) {
         &pool,
         "GET",
         &format!(
-            "/internal/projects/{}/invites",
+            "/internal/v1/projects/{}/invites",
             project_of(&pool, owner).await
         ),
         owner,
@@ -486,7 +486,7 @@ async fn a_spent_a_revoked_and_a_fictional_link_answer_identically(pool: PgPool)
         &pool,
         "DELETE",
         &format!(
-            "/internal/projects/{}/invites/{id}",
+            "/internal/v1/projects/{}/invites/{id}",
             project_of(&pool, owner).await
         ),
         owner,
@@ -503,7 +503,7 @@ async fn a_spent_a_revoked_and_a_fictional_link_answer_identically(pool: PgPool)
         let (status, body) = call(
             &pool,
             "POST",
-            "/internal/invites/look",
+            "/internal/v1/invites/look",
             "user_other",
             Some(json!({ "token": secret })),
         )
@@ -546,7 +546,7 @@ async fn re_inviting_an_address_kills_the_link_it_replaces(pool: PgPool) {
         &pool,
         "GET",
         &format!(
-            "/internal/projects/{}/members",
+            "/internal/v1/projects/{}/members",
             project_of(&pool, owner).await
         ),
         owner,
@@ -598,7 +598,7 @@ async fn a_malformed_address_is_refused_before_anything_is_written(pool: PgPool)
         &pool,
         "GET",
         &format!(
-            "/internal/projects/{}/invites",
+            "/internal/v1/projects/{}/invites",
             project_of(&pool, "user_owner").await
         ),
         "user_owner",
@@ -617,7 +617,7 @@ async fn an_owner_changes_a_role(pool: PgPool) {
         &pool,
         "PUT",
         &format!(
-            "/internal/projects/{}/members/{member}/role",
+            "/internal/v1/projects/{}/members/{member}/role",
             project_of(&pool, &owner).await
         ),
         &owner,
@@ -638,7 +638,10 @@ async fn a_member_leaves_and_the_owners_chain_records_it(pool: PgPool) {
     let (status, _) = call(
         &pool,
         "DELETE",
-        &format!("/internal/memberships/{}", project_of(&pool, &owner).await),
+        &format!(
+            "/internal/v1/memberships/{}",
+            project_of(&pool, &owner).await
+        ),
         &member,
         None,
     )
@@ -684,7 +687,7 @@ async fn an_owner_cannot_leave_their_own_project(pool: PgPool) {
     let (status, _) = call(
         &pool,
         "DELETE",
-        &format!("/internal/memberships/{project}"),
+        &format!("/internal/v1/memberships/{project}"),
         "user_owner",
         None,
     )
@@ -703,7 +706,7 @@ async fn a_member_may_not_manage_the_project_they_were_let_into(pool: PgPool) {
         let (status, _) = call(
             &pool,
             "GET",
-            &format!("/internal/projects/{project}/{surface}"),
+            &format!("/internal/v1/projects/{project}/{surface}"),
             &member,
             None,
         )
@@ -714,7 +717,7 @@ async fn a_member_may_not_manage_the_project_they_were_let_into(pool: PgPool) {
     let (status, _) = call(
         &pool,
         "POST",
-        &format!("/internal/projects/{project}/invites"),
+        &format!("/internal/v1/projects/{project}/invites"),
         &member,
         Some(json!({ "email": address_of("user_third"), "role": "member" })),
     )
@@ -724,7 +727,7 @@ async fn a_member_may_not_manage_the_project_they_were_let_into(pool: PgPool) {
     let (status, _) = call(
         &pool,
         "DELETE",
-        &format!("/internal/projects/{project}/members/{member}"),
+        &format!("/internal/v1/projects/{project}/members/{member}"),
         &member,
         None,
     )
@@ -744,7 +747,7 @@ async fn an_admin_seat_invites_and_removes(pool: PgPool) {
     let (status, offer) = call(
         &pool,
         "POST",
-        &format!("/internal/projects/{project}/invites"),
+        &format!("/internal/v1/projects/{project}/invites"),
         &admin,
         Some(json!({ "email": address_of(third), "role": "member" })),
     )
@@ -757,7 +760,7 @@ async fn an_admin_seat_invites_and_removes(pool: PgPool) {
     let (status, _) = call(
         &pool,
         "DELETE",
-        &format!("/internal/projects/{project}/members/{third}"),
+        &format!("/internal/v1/projects/{project}/members/{third}"),
         &admin,
         None,
     )
@@ -776,7 +779,7 @@ async fn a_stranger_reaches_nothing(pool: PgPool) {
             &pool,
             "GET",
             &format!(
-                "/internal/projects/{}/{surface}",
+                "/internal/v1/projects/{}/{surface}",
                 project_of(&pool, &owner).await
             ),
             "user_stranger",
@@ -799,7 +802,7 @@ async fn a_validated_token_carries_the_organizations_it_may_act_on(pool: PgPool)
     let (status, minted) = call_in(
         &pool,
         "POST",
-        "/internal/tokens",
+        "/internal/v1/tokens",
         &member,
         Some(&own_project),
         Some(json!({ "name": "ci", "created_by": member, "scopes": ["read"] })),
@@ -812,7 +815,7 @@ async fn a_validated_token_carries_the_organizations_it_may_act_on(pool: PgPool)
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/internal/tokens/validate")
+                .uri("/internal/v1/tokens/validate")
                 .header("x-service-secret", SERVICE_SECRET)
                 .header("content-type", "application/json")
                 .body(Body::from(json!({ "token": token }).to_string()))
@@ -841,7 +844,7 @@ async fn a_validated_token_carries_the_organizations_it_may_act_on(pool: PgPool)
     let (status, minted) = call_in(
         &pool,
         "POST",
-        "/internal/tokens",
+        "/internal/v1/tokens",
         &owner,
         Some(&project_of(&pool, &owner).await),
         Some(json!({ "name": "ci", "created_by": owner, "scopes": ["read"] })),
@@ -852,7 +855,7 @@ async fn a_validated_token_carries_the_organizations_it_may_act_on(pool: PgPool)
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/internal/tokens/validate")
+                .uri("/internal/v1/tokens/validate")
                 .header("x-service-secret", SERVICE_SECRET)
                 .header("content-type", "application/json")
                 .body(Body::from(
@@ -900,7 +903,7 @@ async fn every_membership_change_is_audited_on_the_owners_chain(pool: PgPool) {
         &pool,
         "PUT",
         &format!(
-            "/internal/projects/{}/members/{member}/role",
+            "/internal/v1/projects/{}/members/{member}/role",
             project_of(&pool, &owner).await
         ),
         &owner,
@@ -911,7 +914,7 @@ async fn every_membership_change_is_audited_on_the_owners_chain(pool: PgPool) {
         &pool,
         "DELETE",
         &format!(
-            "/internal/projects/{}/members/{member}",
+            "/internal/v1/projects/{}/members/{member}",
             project_of(&pool, &owner).await
         ),
         &owner,
@@ -997,7 +1000,7 @@ async fn an_invitation_mails_the_address_the_owner_typed(pool: PgPool) {
             as_person(
                 Request::builder()
                     .method("POST")
-                    .uri("/me")
+                    .uri("/internal/v1/me")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("content-type", "application/json"),
                 &pool,
@@ -1025,7 +1028,7 @@ async fn an_invitation_mails_the_address_the_owner_typed(pool: PgPool) {
     let (status, body) = call(
         &pool,
         "PATCH",
-        "/internal/organization",
+        "/internal/v1/organization",
         "user_owner",
         Some(json!({ "name": "Acme" })),
     )
@@ -1034,7 +1037,7 @@ async fn an_invitation_mails_the_address_the_owner_typed(pool: PgPool) {
     let (status, body) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         "user_owner",
         Some(json!({ "name": "Platform" })),
     )
@@ -1048,7 +1051,7 @@ async fn an_invitation_mails_the_address_the_owner_typed(pool: PgPool) {
                 Request::builder()
                     .method("POST")
                     .uri(format!(
-                        "/internal/projects/{}/invites",
+                        "/internal/v1/projects/{}/invites",
                         project_of(&pool, "user_owner").await
                     ))
                     .header("x-service-secret", SERVICE_SECRET)
@@ -1142,7 +1145,7 @@ async fn incoming_invites_are_listed_and_can_be_accepted_in_app(pool: PgPool) {
     let (status, invite_res) = call(
         &pool,
         "POST",
-        &format!("/internal/projects/{project}/invites"),
+        &format!("/internal/v1/projects/{project}/invites"),
         owner,
         Some(json!({ "email": format!("{invitee}@example.test"), "role": "admin" })),
     )
@@ -1159,7 +1162,7 @@ async fn incoming_invites_are_listed_and_can_be_accepted_in_app(pool: PgPool) {
     assert_eq!(me_invites[0]["scope"], "project");
     assert_eq!(me_invites[0]["role"], "admin");
 
-    let (status, list_body) = call(&pool, "GET", "/internal/me/invites", invitee, None).await;
+    let (status, list_body) = call(&pool, "GET", "/internal/v1/me/invites", invitee, None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         list_body["invites"]
@@ -1172,7 +1175,7 @@ async fn incoming_invites_are_listed_and_can_be_accepted_in_app(pool: PgPool) {
     let (status, accepted) = call(
         &pool,
         "POST",
-        &format!("/internal/me/invites/{invite_id}/accept"),
+        &format!("/internal/v1/me/invites/{invite_id}/accept"),
         invitee,
         None,
     )
@@ -1188,7 +1191,8 @@ async fn incoming_invites_are_listed_and_can_be_accepted_in_app(pool: PgPool) {
         organization_of(&pool, owner).await
     );
 
-    let (status, list_after_body) = call(&pool, "GET", "/internal/me/invites", invitee, None).await;
+    let (status, list_after_body) =
+        call(&pool, "GET", "/internal/v1/me/invites", invitee, None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(
         list_after_body["invites"]
@@ -1200,7 +1204,7 @@ async fn incoming_invites_are_listed_and_can_be_accepted_in_app(pool: PgPool) {
     let (status, members_body) = call(
         &pool,
         "GET",
-        &format!("/internal/projects/{project}/members"),
+        &format!("/internal/v1/projects/{project}/members"),
         owner,
         None,
     )
@@ -1224,7 +1228,7 @@ async fn incoming_invites_can_be_declined_in_app(pool: PgPool) {
     let (status, invite_res) = call(
         &pool,
         "POST",
-        &format!("/internal/projects/{project}/invites"),
+        &format!("/internal/v1/projects/{project}/invites"),
         owner,
         Some(json!({ "email": format!("{invitee}@example.test"), "role": "member" })),
     )
@@ -1235,7 +1239,7 @@ async fn incoming_invites_can_be_declined_in_app(pool: PgPool) {
     let (status, declined) = call(
         &pool,
         "POST",
-        &format!("/internal/me/invites/{invite_id}/decline"),
+        &format!("/internal/v1/me/invites/{invite_id}/decline"),
         invitee,
         None,
     )
@@ -1248,7 +1252,7 @@ async fn incoming_invites_can_be_declined_in_app(pool: PgPool) {
         organization_of(&pool, owner).await
     );
 
-    let (status, list_body) = call(&pool, "GET", "/internal/me/invites", invitee, None).await;
+    let (status, list_body) = call(&pool, "GET", "/internal/v1/me/invites", invitee, None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(
         list_body["invites"]
@@ -1260,7 +1264,7 @@ async fn incoming_invites_can_be_declined_in_app(pool: PgPool) {
     let (status, owner_invites_body) = call(
         &pool,
         "GET",
-        &format!("/internal/projects/{project}/invites"),
+        &format!("/internal/v1/projects/{project}/invites"),
         owner,
         None,
     )
@@ -1284,7 +1288,7 @@ async fn project_members_list_includes_project_owner(pool: PgPool) {
         &pool,
         "GET",
         &format!(
-            "/internal/projects/{}/members",
+            "/internal/v1/projects/{}/members",
             project_of(&pool, owner).await
         ),
         owner,
@@ -1309,7 +1313,7 @@ async fn cannot_modify_or_remove_project_owner_from_members(pool: PgPool) {
     let (status, _) = call(
         &pool,
         "PUT",
-        &format!("/internal/projects/{project}/members/{owner}/role"),
+        &format!("/internal/v1/projects/{project}/members/{owner}/role"),
         owner,
         Some(json!({ "role": "admin" })),
     )
@@ -1319,7 +1323,7 @@ async fn cannot_modify_or_remove_project_owner_from_members(pool: PgPool) {
     let (status, _) = call(
         &pool,
         "DELETE",
-        &format!("/internal/projects/{project}/members/{owner}"),
+        &format!("/internal/v1/projects/{project}/members/{owner}"),
         owner,
         None,
     )
@@ -1347,7 +1351,7 @@ async fn a_seat_changed_as_its_holder_is_removed_goes_in_turn(pool: PgPool) {
             call(
                 &pool,
                 "DELETE",
-                &format!("/internal/organization/members/{third}"),
+                &format!("/internal/v1/organization/members/{third}"),
                 &owner,
                 None,
             )
@@ -1361,7 +1365,7 @@ async fn a_seat_changed_as_its_holder_is_removed_goes_in_turn(pool: PgPool) {
             call(
                 &pool,
                 "PUT",
-                &format!("/internal/projects/{project}/members/{third}/role"),
+                &format!("/internal/v1/projects/{project}/members/{third}/role"),
                 &admin,
                 Some(json!({ "role": "admin" })),
             )
@@ -1391,7 +1395,7 @@ async fn a_project_deleted_as_a_holder_is_removed_goes_in_turn(pool: PgPool) {
             call(
                 &pool,
                 "DELETE",
-                &format!("/internal/organization/members/{member}"),
+                &format!("/internal/v1/organization/members/{member}"),
                 &owner,
                 None,
             )
@@ -1405,7 +1409,7 @@ async fn a_project_deleted_as_a_holder_is_removed_goes_in_turn(pool: PgPool) {
             call(
                 &pool,
                 "DELETE",
-                &format!("/internal/projects/{project}"),
+                &format!("/internal/v1/projects/{project}"),
                 &owner,
                 None,
             )
@@ -1431,7 +1435,10 @@ async fn leaving_a_project_that_is_not_there_answers_as_one_without_a_seat(pool:
     let theirs = call(
         &pool,
         "DELETE",
-        &format!("/internal/memberships/{}", project_of(&pool, &owner).await),
+        &format!(
+            "/internal/v1/memberships/{}",
+            project_of(&pool, &owner).await
+        ),
         stranger,
         None,
     )
@@ -1439,7 +1446,7 @@ async fn leaving_a_project_that_is_not_there_answers_as_one_without_a_seat(pool:
     let nowhere = call(
         &pool,
         "DELETE",
-        "/internal/memberships/project_gone",
+        "/internal/v1/memberships/project_gone",
         stranger,
         None,
     )

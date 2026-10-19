@@ -1,4 +1,4 @@
-//! The console's lanes under `/internal/agent`, each opening with who is
+//! The console's lanes under `/internal/v1/agent`, each opening with who is
 //! asking and from which project.
 //!
 //! A turn answers as server-sent events: `text` as the model writes,
@@ -82,7 +82,7 @@ fn not_found() -> TelmoniError {
     AuthError::NotFound("no such conversation".into()).into()
 }
 
-/// `GET /internal/agent/status`.
+/// `GET /internal/v1/agent/status`.
 pub async fn status(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -98,7 +98,7 @@ pub struct TurnRequest {
     message: String,
 }
 
-/// `POST /internal/agent/turns`.
+/// `POST /internal/v1/agent/turns`.
 pub async fn post_turn(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -518,7 +518,7 @@ async fn save_answer(
     Ok(Saved { id, withheld })
 }
 
-/// `GET /internal/agent/conversations` — the person's own, asked from this
+/// `GET /internal/v1/agent/conversations` — the person's own, asked from this
 /// project, newest first.
 pub async fn list_conversations(
     State(state): State<Arc<AppState>>,
@@ -532,7 +532,7 @@ pub async fn list_conversations(
     Ok(Json(json!({ "conversations": conversations })))
 }
 
-/// `GET /internal/agent/conversations/{id}`.
+/// `GET /internal/v1/agent/conversations/{id}`.
 pub async fn get_conversation(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -555,7 +555,7 @@ pub async fn get_conversation(
     })))
 }
 
-/// `DELETE /internal/agent/conversations/{id}` — the conversation, its
+/// `DELETE /internal/v1/agent/conversations/{id}` — the conversation, its
 /// messages, and what it left in the index.
 pub async fn delete_conversation(
     State(state): State<Arc<AppState>>,

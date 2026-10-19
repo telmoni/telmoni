@@ -198,7 +198,7 @@ async fn call_in_project(
 /// provisioned with.
 async fn sign_in(pool: &PgPool, user: &str) -> String {
     seed_identity(pool, user, &format!("{user}@example.test")).await;
-    let (status, body) = call(pool, "POST", "/me", user, None, None).await;
+    let (status, body) = call(pool, "POST", "/internal/v1/me", user, None, None).await;
     assert_eq!(status, StatusCode::OK, "sign-in failed for {user}: {body}");
     body["activeOrganizationId"]
         .as_str()
@@ -212,7 +212,7 @@ async fn join(pool: &PgPool, organization: &str, user: &str, role: &str) {
     let (status, body) = call(
         pool,
         "POST",
-        "/internal/organization/invites",
+        "/internal/v1/organization/invites",
         OWNER,
         Some(organization),
         Some(json!({ "email": format!("{user}@example.test"), "role": role })),
@@ -223,7 +223,7 @@ async fn join(pool: &PgPool, organization: &str, user: &str, role: &str) {
     let (status, body) = call(
         pool,
         "POST",
-        &format!("/internal/me/invites/{invite}/accept"),
+        &format!("/internal/v1/me/invites/{invite}/accept"),
         user,
         None,
         None,
@@ -238,7 +238,7 @@ async fn create_project(pool: &PgPool, organization: &str, name: &str) -> String
     let (status, body) = call(
         pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         OWNER,
         Some(organization),
         Some(json!({ "name": name })),
@@ -253,7 +253,7 @@ async fn name(pool: &PgPool, organization: &str, name: &str) {
     let (status, body) = call(
         pool,
         "PATCH",
-        "/internal/organization",
+        "/internal/v1/organization",
         OWNER,
         Some(organization),
         Some(json!({ "name": name })),
@@ -298,7 +298,7 @@ async fn offer(pool: &PgPool, organization: &str, caller: &str, to: &str) -> (St
     call(
         pool,
         "POST",
-        "/internal/organization/owner-transfer",
+        "/internal/v1/organization/owner-transfer",
         caller,
         Some(organization),
         Some(json!({ "memberId": to })),
@@ -310,7 +310,7 @@ async fn accept(pool: &PgPool, organization: &str, caller: &str) -> (StatusCode,
     call(
         pool,
         "POST",
-        "/internal/organization/owner-transfer/accept",
+        "/internal/v1/organization/owner-transfer/accept",
         caller,
         Some(organization),
         None,
@@ -391,7 +391,7 @@ async fn answer(
         pool,
         outbox,
         "POST",
-        &format!("/internal/organization/owner-transfer/{verb}"),
+        &format!("/internal/v1/organization/owner-transfer/{verb}"),
         caller,
         organization,
         None,
@@ -481,7 +481,7 @@ impl MailSender for Refusing {
 #[sqlx::test]
 async fn a_mail_the_provider_refuses_undoes_nothing(pool: PgPool) {
     let organization = organization_with_staff(&pool).await;
-    let transfer = "/internal/organization/owner-transfer";
+    let transfer = "/internal/v1/organization/owner-transfer";
     let refusing = || app_mailing(pool.clone(), Arc::new(Refusing));
 
     for (method, uri, caller) in [
@@ -592,7 +592,7 @@ async fn a_withdrawn_or_replaced_offer_is_mailed_to_the_admin_who_held_it(pool: 
     sign_in(&pool, second).await;
     join(&pool, &organization, second, "admin").await;
     let outbox = Outbox::default();
-    let transfer = "/internal/organization/owner-transfer";
+    let transfer = "/internal/v1/organization/owner-transfer";
     assert_eq!(
         offer(&pool, &organization, OWNER, ADMIN).await.0,
         StatusCode::OK
@@ -716,7 +716,7 @@ async fn accepting_swaps_the_two_roles_and_both_steps_are_audited(pool: PgPool) 
     let (status, body) = call(
         &pool,
         "GET",
-        "/internal/organization/members",
+        "/internal/v1/organization/members",
         ADMIN,
         Some(&organization),
         None,
@@ -738,7 +738,7 @@ async fn a_declined_or_withdrawn_offer_cannot_be_accepted(pool: PgPool) {
     let (status, body) = call(
         &pool,
         "POST",
-        "/internal/organization/owner-transfer/decline",
+        "/internal/v1/organization/owner-transfer/decline",
         ADMIN,
         Some(&organization),
         None,
@@ -757,7 +757,7 @@ async fn a_declined_or_withdrawn_offer_cannot_be_accepted(pool: PgPool) {
     let (status, body) = call(
         &pool,
         "DELETE",
-        "/internal/organization/owner-transfer",
+        "/internal/v1/organization/owner-transfer",
         ADMIN,
         Some(&organization),
         None,
@@ -771,7 +771,7 @@ async fn a_declined_or_withdrawn_offer_cannot_be_accepted(pool: PgPool) {
     let (status, body) = call(
         &pool,
         "DELETE",
-        "/internal/organization/owner-transfer",
+        "/internal/v1/organization/owner-transfer",
         OWNER,
         Some(&organization),
         None,
@@ -811,7 +811,7 @@ async fn demoting_or_removing_the_recipient_ends_the_offer(pool: PgPool) {
     let (status, body) = call(
         &pool,
         "PUT",
-        &format!("/internal/organization/members/{ADMIN}/role"),
+        &format!("/internal/v1/organization/members/{ADMIN}/role"),
         OWNER,
         Some(&organization),
         Some(json!({ "role": "member" })),
@@ -826,7 +826,7 @@ async fn demoting_or_removing_the_recipient_ends_the_offer(pool: PgPool) {
     let (status, body) = call(
         &pool,
         "PUT",
-        &format!("/internal/organization/members/{ADMIN}/role"),
+        &format!("/internal/v1/organization/members/{ADMIN}/role"),
         OWNER,
         Some(&organization),
         Some(json!({ "role": "admin" })),
@@ -846,7 +846,7 @@ async fn demoting_or_removing_the_recipient_ends_the_offer(pool: PgPool) {
     let (status, _) = call(
         &pool,
         "DELETE",
-        &format!("/internal/organization/members/{ADMIN}"),
+        &format!("/internal/v1/organization/members/{ADMIN}"),
         OWNER,
         Some(&organization),
         None,
@@ -896,7 +896,7 @@ async fn an_offer_older_than_seven_days_is_dead(pool: PgPool) {
     let (_, body) = call(
         &pool,
         "GET",
-        "/internal/organization/members",
+        "/internal/v1/organization/members",
         OWNER,
         Some(&organization),
         None,
@@ -920,7 +920,7 @@ async fn an_offer_older_than_seven_days_is_dead(pool: PgPool) {
     let (status, body) = call(
         &pool,
         "POST",
-        "/internal/organization/owner-transfer/decline",
+        "/internal/v1/organization/owner-transfer/decline",
         ADMIN,
         Some(&organization),
         None,
@@ -983,7 +983,7 @@ async fn the_owner_cannot_leave_be_removed_demoted_or_reseated_by_an_invite(pool
     let (status, body) = call(
         &pool,
         "DELETE",
-        &format!("/internal/organization/members/{OWNER}"),
+        &format!("/internal/v1/organization/members/{OWNER}"),
         OWNER,
         Some(&organization),
         None,
@@ -994,7 +994,7 @@ async fn the_owner_cannot_leave_be_removed_demoted_or_reseated_by_an_invite(pool
     let (status, body) = call(
         &pool,
         "PUT",
-        &format!("/internal/organization/members/{OWNER}/role"),
+        &format!("/internal/v1/organization/members/{OWNER}/role"),
         OWNER,
         Some(&organization),
         Some(json!({ "role": "admin" })),
@@ -1009,7 +1009,7 @@ async fn the_owner_cannot_leave_be_removed_demoted_or_reseated_by_an_invite(pool
     let (status, body) = call(
         &pool,
         "PUT",
-        &format!("/internal/organization/members/{ADMIN}/role"),
+        &format!("/internal/v1/organization/members/{ADMIN}/role"),
         OWNER,
         Some(&organization),
         Some(json!({ "role": "owner" })),
@@ -1024,7 +1024,7 @@ async fn the_owner_cannot_leave_be_removed_demoted_or_reseated_by_an_invite(pool
     let (status, body) = call(
         &pool,
         "POST",
-        "/internal/organization/invites",
+        "/internal/v1/organization/invites",
         OWNER,
         Some(&organization),
         Some(json!({ "email": format!("{OWNER}@example.test"), "role": "member" })),
@@ -1054,7 +1054,7 @@ async fn the_owner_cannot_leave_be_removed_demoted_or_reseated_by_an_invite(pool
     let (status, body) = call(
         &pool,
         "POST",
-        &format!("/internal/me/invites/{invite}/accept"),
+        &format!("/internal/v1/me/invites/{invite}/accept"),
         OWNER,
         None,
         None,
@@ -1081,7 +1081,7 @@ async fn the_old_owner_stays_as_an_admin_and_may_then_leave(pool: PgPool) {
     let (status, body) = call(
         &pool,
         "DELETE",
-        &format!("/internal/organization/members/{OWNER}"),
+        &format!("/internal/v1/organization/members/{OWNER}"),
         OWNER,
         Some(&organization),
         None,
@@ -1091,7 +1091,7 @@ async fn the_old_owner_stays_as_an_admin_and_may_then_leave(pool: PgPool) {
     assert_eq!(role_of(&pool, &organization, OWNER).await, None);
 
     // Left with nothing, their next sign-in gives them an organization again.
-    let (status, body) = call(&pool, "POST", "/me", OWNER, None, None).await;
+    let (status, body) = call(&pool, "POST", "/internal/v1/me", OWNER, None, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let fresh = body["activeOrganizationId"].as_str().unwrap();
     assert_ne!(fresh, organization);
@@ -1108,7 +1108,7 @@ async fn the_old_owner_stays_as_an_admin_and_may_then_leave(pool: PgPool) {
 #[sqlx::test]
 async fn a_transfer_moves_one_owner_row_and_mints_no_organization(pool: PgPool) {
     let organization = organization_with_staff(&pool).await;
-    let (status, body) = call(&pool, "POST", "/me", ADMIN, None, None).await;
+    let (status, body) = call(&pool, "POST", "/internal/v1/me", ADMIN, None, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let admins_own = body["activeOrganizationId"].as_str().unwrap().to_owned();
     assert_ne!(admins_own, organization, "{body}");
@@ -1142,7 +1142,7 @@ async fn a_transfer_moves_one_owner_row_and_mints_no_organization(pool: PgPool) 
         held
     };
 
-    let (status, body) = call(&pool, "POST", "/me", ADMIN, None, None).await;
+    let (status, body) = call(&pool, "POST", "/internal/v1/me", ADMIN, None, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["firstLogin"], false, "{body}");
     let mut both = vec![
@@ -1153,7 +1153,7 @@ async fn a_transfer_moves_one_owner_row_and_mints_no_organization(pool: PgPool) 
     assert_eq!(held(&body), both, "{body}");
     assert_eq!(body["activeOrganizationId"], admins_own, "{body}");
 
-    let (status, body) = call(&pool, "POST", "/me", OWNER, None, None).await;
+    let (status, body) = call(&pool, "POST", "/internal/v1/me", OWNER, None, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["firstLogin"], false, "{body}");
     assert_eq!(
@@ -1222,7 +1222,7 @@ async fn accept_racing_a_removal_leaves_exactly_one_owner(pool: PgPool) {
             call(
                 &pool,
                 "DELETE",
-                &format!("/internal/organization/members/{ADMIN}"),
+                &format!("/internal/v1/organization/members/{ADMIN}"),
                 OWNER,
                 Some(&organization),
                 None,
@@ -1270,7 +1270,7 @@ async fn an_accept_queued_behind_the_acceptors_account_deletion_is_refused(pool:
         StatusCode::OK
     );
 
-    // Stands in for `DELETE /internal/me`, which holds the person's lock for
+    // Stands in for `DELETE /internal/v1/me`, which holds the person's lock for
     // its whole transaction and marks them pending inside it.
     let mut deletion = pool.begin().await.unwrap();
     telmoni_auth::db::locks::lock_person(&mut deletion, &UserId::try_new(ADMIN).unwrap())
@@ -1355,7 +1355,7 @@ async fn a_key_rotated_after_a_transfer_is_recorded_as_the_new_owners(pool: PgPo
     let (status, minted) = call_in_project(
         &pool,
         "POST",
-        "/internal/tokens",
+        "/internal/v1/tokens",
         OWNER,
         &organization,
         &project,
@@ -1373,7 +1373,7 @@ async fn a_key_rotated_after_a_transfer_is_recorded_as_the_new_owners(pool: PgPo
     let (status, rotated) = call_in_project(
         &pool,
         "POST",
-        &format!("/internal/tokens/{old}/rotate"),
+        &format!("/internal/v1/tokens/{old}/rotate"),
         ADMIN,
         &organization,
         &project,
@@ -1412,9 +1412,12 @@ async fn a_stranger_is_refused_without_queueing_on_the_organizations_lock(pool: 
     for (method, path) in [
         (
             "POST",
-            "/internal/organization/owner-transfer/accept".to_owned(),
+            "/internal/v1/organization/owner-transfer/accept".to_owned(),
         ),
-        ("DELETE", format!("/internal/organization/members/{ADMIN}")),
+        (
+            "DELETE",
+            format!("/internal/v1/organization/members/{ADMIN}"),
+        ),
     ] {
         let answered = tokio::time::timeout(
             std::time::Duration::from_secs(5),

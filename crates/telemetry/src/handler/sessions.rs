@@ -1,8 +1,8 @@
 //! The console's session lanes, under `Resource::Trace`, which every role on
-//! a project holds: `GET /internal/telemetry/sessions`, the page — every
+//! a project holds: `GET /internal/v1/telemetry/sessions`, the page — every
 //! session the project's runs belonged to in a window of days, with the end
 //! user it was with and what its runs came to, sorted as the URL says — and
-//! `GET /internal/telemetry/sessions/{session_id}`, one session's traces
+//! `GET /internal/v1/telemetry/sessions/{session_id}`, one session's traces
 //! in the order they ran, each with the spans a layout pinned by name
 //! (`?pinned=`): a replay in metadata, never a message, since content is
 //! not metadata. Each reads the spans of the project `x-project-id` names
@@ -275,7 +275,7 @@ impl From<PinnedRow> for PinnedSpan {
     }
 }
 
-/// `GET /internal/telemetry/sessions` — the project's sessions in the window,
+/// `GET /internal/v1/telemetry/sessions` — the project's sessions in the window,
 /// sorted as the query says, up to its limit, and whether the window held
 /// more.
 pub async fn list_sessions(
@@ -312,7 +312,7 @@ pub async fn list_sessions(
     }))
 }
 
-/// `GET /internal/telemetry/sessions/{session_id}` — one session's traces in
+/// `GET /internal/v1/telemetry/sessions/{session_id}` — one session's traces in
 /// the window, earliest first, each with the spans `pinned` names under it;
 /// `404` for a session the project's runs in the window did not belong to,
 /// which is also what another project's session id gets.

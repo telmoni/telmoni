@@ -33,7 +33,7 @@ export async function markProjectReadAction(
   const resolved = await activeProjectForMutation(projectId);
   if (resolved.error !== null) return { error: resolved.error };
 
-  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/notifications/read`, {
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/notifications/read`, {
     method: "POST",
     headers: {
       ...sessionHeaders(session, resolved.organizationId, resolved.projectId),

@@ -93,7 +93,7 @@ function usePinnedSpans(
     for (const name of pinned) params.append("pinned", name);
     // The route's answer is the session as the server checked it; a shape
     // this build cannot read is left as nothing pinned.
-    void fetch(`/api/sessions/${encodeURIComponent(sessionId)}?${params}`, {
+    void fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}?${params}`, {
       signal: controller.signal,
       cache: "no-store",
       headers: { accept: "application/json" },
@@ -325,7 +325,7 @@ function OpenedTrace({
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), READ_TIMEOUT_MS);
     let current = true;
-    const url = `/api/traces/${encodeURIComponent(run)}?project=${encodeURIComponent(projectId)}`;
+    const url = `/api/v1/traces/${encodeURIComponent(run)}?project=${encodeURIComponent(projectId)}`;
     void fetch(url, { signal: controller.signal, cache: "no-store", headers: { accept: "application/json" } })
       .then(async (res): Promise<Read> => {
         if (res.status === 401) return { kind: "signed-out" };

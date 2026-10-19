@@ -169,7 +169,7 @@ describe("SessionsPage", () => {
     render(await SessionsPage({ params: PARAMS, searchParams: Promise.resolve({ days: "30" }) }));
     const panel = screen.getByRole("dialog");
     expect(panel).toHaveAttribute("aria-modal", "false");
-    expect(fetchMock).toHaveBeenCalledWith("/api/sessions/conv-1?project=project_7bQx2mNv9BcK4dLp&days=30", expect.anything());
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/sessions/conv-1?project=project_7bQx2mNv9BcK4dLp&days=30", expect.anything());
     expect(await screen.findByText("No session with this id in this project's window.")).toBeInTheDocument();
     vi.unstubAllGlobals();
   });

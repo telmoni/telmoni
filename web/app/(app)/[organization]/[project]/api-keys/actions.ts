@@ -80,7 +80,7 @@ export async function mintTokenAction(projectId: string, input: unknown): Promis
   if (resolved.error !== null) return { status: "error", error: resolved.error };
   const expires_in_seconds = TTL_OPTIONS[ttl];
 
-  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/tokens`, {
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/tokens`, {
     method: "POST",
     headers: {
       ...sessionHeaders(session, resolved.organizationId, resolved.projectId),
@@ -135,7 +135,7 @@ export async function rotateTokenAction(
   const resolved = await activeProjectForMutation(projectId);
   if (resolved.error !== null) return { status: "error", error: resolved.error };
   const res = await tryFetchWithTimeout(
-    `${env.SERVER_URL}/internal/tokens/${encodeURIComponent(tokenId)}/rotate`,
+    `${env.SERVER_URL}/internal/v1/tokens/${encodeURIComponent(tokenId)}/rotate`,
     {
       method: "POST",
       headers: {
@@ -179,7 +179,7 @@ export async function revokeTokenAction(
   const resolved = await activeProjectForMutation(projectId);
   if (resolved.error !== null) return { error: resolved.error };
   const res = await tryFetchWithTimeout(
-    `${env.SERVER_URL}/internal/tokens/${encodeURIComponent(tokenId)}`,
+    `${env.SERVER_URL}/internal/v1/tokens/${encodeURIComponent(tokenId)}`,
     {
       method: "DELETE",
       headers: sessionHeaders(session, resolved.organizationId, resolved.projectId),

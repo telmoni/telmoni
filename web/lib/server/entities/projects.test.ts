@@ -84,7 +84,7 @@ describe("fetchProjectAnywhere", () => {
       organizationId: "org_home",
       organizationSlug: "acme",
     });
-    expect(fetchWithTimeout.mock.calls[0]?.[0]).toBe("http://auth/internal/projects/everywhere");
+    expect(fetchWithTimeout.mock.calls[0]?.[0]).toBe("http://auth/internal/v1/projects/everywhere");
   });
 
   it("answers nothing for a project the person cannot open, or a slug", async () => {

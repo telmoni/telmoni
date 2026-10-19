@@ -116,7 +116,7 @@ describe("GET /auth/callback and a closed sign-up", () => {
       string,
       { headers: Record<string, string>; body: string },
     ];
-    expect(url).toBe("http://server:8082/me");
+    expect(url).toBe("http://server:8082/internal/v1/me");
     expect(init.headers).toEqual(
       expect.objectContaining({ authorization: "Bearer at", "x-service-secret": "s3cret" }),
     );

@@ -1,5 +1,5 @@
 //! The console's trace lanes, under `Resource::Trace`, which every role on a
-//! project holds: `GET /internal/telemetry/traces`, the list — a page of rows,
+//! project holds: `GET /internal/v1/telemetry/traces`, the list — a page of rows,
 //! a row per run in a window of days, filtered and sorted as the URL says,
 //! and how many rows there are; `/traces/facets`, each filter's values and
 //! how many runs carry each; `/traces/histogram`, the runs by when they
@@ -745,7 +745,7 @@ async fn readable(state: &AppState, headers: &HeaderMap) -> Result<Projects, Tel
     Ok(Projects::one(project_id))
 }
 
-/// `GET /internal/telemetry/traces` — a page of the project's traces in the
+/// `GET /internal/v1/telemetry/traces` — a page of the project's traces in the
 /// window, filtered and sorted as the query says, and how many the filter
 /// admits: two reads at once, since a page past the last has no row to
 /// carry the count.
@@ -779,7 +779,7 @@ pub async fn list_traces(
     }))
 }
 
-/// `GET /internal/telemetry/traces/facets` — each filter's values among the
+/// `GET /internal/v1/telemetry/traces/facets` — each filter's values among the
 /// project's traces in the window, and how many runs carry each under every
 /// other filter.
 pub async fn get_facets(
@@ -795,7 +795,7 @@ pub async fn get_facets(
     Ok(Json(TraceFacets::of(filter.days, rows)))
 }
 
-/// `GET /internal/telemetry/traces/histogram` — the project's traces the
+/// `GET /internal/v1/telemetry/traces/histogram` — the project's traces the
 /// filter admits, by the bar they started in, the bars starting on the
 /// reader's clock.
 pub async fn get_histogram(
@@ -826,7 +826,7 @@ pub async fn get_histogram(
     }))
 }
 
-/// `GET /internal/telemetry/traces/export` — the project's traces the filter
+/// `GET /internal/v1/telemetry/traces/export` — the project's traces the filter
 /// admits, sorted as asked, as a file: up to [`EXPORT_MAX`] of them, or the
 /// runs `run` names alone.
 pub async fn export_traces(
@@ -861,7 +861,7 @@ pub async fn export_traces(
     })
 }
 
-/// `GET /internal/telemetry/traces/{run_id}` — one trace's spans, the run's
+/// `GET /internal/v1/telemetry/traces/{run_id}` — one trace's spans, the run's
 /// own among them, in the order they started; `404` for a run the project
 /// does not hold, which is also what another project's run id gets.
 pub async fn get_trace(

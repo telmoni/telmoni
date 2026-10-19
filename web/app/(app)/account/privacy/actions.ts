@@ -35,7 +35,7 @@ export async function requestAccountDeletionCodeAction(): Promise<{
   });
   if (limited) return { error: "Too many requests. Try again in an hour." };
 
-  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/me/deletion-code`, {
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/me/deletion-code`, {
     method: "POST",
     headers: personHeaders(session),
   });
@@ -65,7 +65,7 @@ export async function deleteAccountAction(
   });
   if (limited) return { error: "Too many attempts. Try again in an hour." };
 
-  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/me`, {
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/me`, {
     method: "DELETE",
     headers: { ...personHeaders(session), "content-type": "application/json" },
     body: JSON.stringify({ code }),
@@ -112,7 +112,7 @@ export async function revokeSessionAction(
   if (!headers) return { error: UNRESOLVED };
 
   const res = await tryFetchWithTimeout(
-    `${env.SERVER_URL}/internal/auth/sessions/${encodeURIComponent(
+    `${env.SERVER_URL}/internal/v1/auth/sessions/${encodeURIComponent(
       sessionId,
     )}/revoke`,
     {
@@ -145,7 +145,7 @@ export async function setAnalyticsPreferenceAction(
   const headers = await accountHeaders();
   if (!headers) return { error: UNRESOLVED };
 
-  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/me/analytics`, {
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/me/analytics`, {
     method: "PUT",
     headers: {
       ...headers,

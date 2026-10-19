@@ -130,7 +130,7 @@ describe("requestOrganizationDeletionCodeAction", () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 202 }));
     expect(await requestOrganizationDeletionCodeAction(ORGANIZATION)).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://auth.test/internal/organization/deletion-code",
+      "http://auth.test/internal/v1/organization/deletion-code",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
@@ -243,7 +243,7 @@ describe("deleteOrganizationAction", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://auth.test/internal/organization",
+      "http://auth.test/internal/v1/organization",
       expect.objectContaining({
         method: "DELETE",
         headers: expect.objectContaining({

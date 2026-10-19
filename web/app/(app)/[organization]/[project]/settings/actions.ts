@@ -65,7 +65,7 @@ export async function updateProjectNameAction(
   const organization = gate ? activeOrganization(gate)?.slug : undefined;
 
   const res = await tryFetchWithTimeout(
-    `${env.SERVER_URL}/internal/projects/${encodeURIComponent(projectId)}`,
+    `${env.SERVER_URL}/internal/v1/projects/${encodeURIComponent(projectId)}`,
     {
       method: "PATCH",
       headers: {
@@ -134,7 +134,7 @@ export async function updateContentModeAction(
   const ctx = await identityContext();
   if (!ctx) return { error: await unplacedOrganization() };
 
-  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/telemetry/content-mode`, {
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry/content-mode`, {
     method: "PUT",
     headers: {
       ...projectHeaders(ctx, projectId),
@@ -169,7 +169,7 @@ export async function deleteProjectAction(projectId: string): Promise<ActionResu
   if (!ctx) return { error: await unplacedOrganization() };
 
   const res = await tryFetchWithTimeout(
-    `${env.SERVER_URL}/internal/projects/${encodeURIComponent(projectId)}`,
+    `${env.SERVER_URL}/internal/v1/projects/${encodeURIComponent(projectId)}`,
     {
       method: "DELETE",
       headers: projectHeaders(ctx, projectId),

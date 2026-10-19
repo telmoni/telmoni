@@ -1,6 +1,6 @@
 //! A project's saved views, under [`Resource::View`]: views of its trace
 //! list (`kind` = `list`) and layouts of a session's page and a trace's
-//! (`layout`). `GET /internal/telemetry/views?kind=`, which every role on
+//! (`layout`). `GET /internal/v1/telemetry/views?kind=`, which every role on
 //! the project reads, and `POST`, `PUT /views/{id}` and `DELETE /views/{id}`,
 //! which its owners and admins send. A view is a name, a query checked as
 //! its page would read it — the list's filters and sort, or a layout's
@@ -402,7 +402,7 @@ fn name_taken(kind: ViewKind) -> impl Fn(sqlx::Error) -> TelmoniError {
     }
 }
 
-/// `GET /internal/telemetry/views` — the project's views of one kind, by
+/// `GET /internal/v1/telemetry/views` — the project's views of one kind, by
 /// name: the list's unless `kind` says `layout`.
 pub async fn list_views(
     State(state): State<Arc<AppState>>,
@@ -422,7 +422,7 @@ pub async fn list_views(
     }))
 }
 
-/// `POST /internal/telemetry/views` — a new view of the project. Written
+/// `POST /internal/v1/telemetry/views` — a new view of the project. Written
 /// under the organization's chain lock, as a content mode is: the project's
 /// settings row is made with it where the project has none — the row the
 /// organization's purge finds the project's views by — and must be filed
@@ -481,7 +481,7 @@ async fn save(
         .map_err(name_taken(view.kind))
 }
 
-/// `PUT /internal/telemetry/views/{id}` — one of the project's views, saved
+/// `PUT /internal/v1/telemetry/views/{id}` — one of the project's views, saved
 /// over: its name, its query and its columns; never its kind, which the body
 /// names so the query is checked as that kind's page reads it. Its project's
 /// settings row is there already, made when it was first saved.
@@ -513,7 +513,7 @@ pub async fn update_view(
     Ok(Json(View::from(row)))
 }
 
-/// `DELETE /internal/telemetry/views/{id}` — one of the project's views,
+/// `DELETE /internal/v1/telemetry/views/{id}` — one of the project's views,
 /// gone; a layout the project opened in by default takes the default with
 /// it, and the project opens in the default layout again (the key on
 /// `project_settings.session_view_id`).

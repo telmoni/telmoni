@@ -145,7 +145,7 @@ describe("SessionPeek", () => {
     expect(document.activeElement).toBe(panel);
     expect(within(panel).getByRole("heading", { level: 2 })).toHaveTextContent(B);
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/sessions/chat%2F42%20b?project=project_1&days=30",
+      "/api/v1/sessions/chat%2F42%20b?project=project_1&days=30",
       expect.anything(),
     );
     const table = await within(panel).findByRole("table");

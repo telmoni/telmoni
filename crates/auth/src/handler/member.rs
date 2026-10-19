@@ -66,7 +66,7 @@ async fn is_organization_owner<'a>(
     Ok((acting, role == Some(OrganizationRole::Owner), name))
 }
 
-/// `GET /internal/projects/{project_id}/members` — the roster.
+/// `GET /internal/v1/projects/{project_id}/members` — the roster.
 pub async fn list_members(
     State(state): State<Arc<AppState>>,
     Path(project_id): Path<String>,
@@ -99,7 +99,7 @@ pub async fn list_members(
     Ok(Json(json!({ "members": rows, "ceiling": ceiling })))
 }
 
-/// `PUT /internal/projects/{project_id}/members/{member_id}/role`.
+/// `PUT /internal/v1/projects/{project_id}/members/{member_id}/role`.
 pub async fn update_role(
     State(state): State<Arc<AppState>>,
     Path((project_id, member_id)): Path<(String, String)>,
@@ -148,7 +148,7 @@ pub async fn update_role(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `DELETE /internal/projects/{project_id}/members/{member_id}` — the owner
+/// `DELETE /internal/v1/projects/{project_id}/members/{member_id}` — the owner
 /// or an admin removes somebody.
 pub async fn remove_member(
     State(state): State<Arc<AppState>>,
@@ -200,7 +200,7 @@ pub async fn remove_member(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `DELETE /internal/memberships/{project_id}` — the member gives up their
+/// `DELETE /internal/v1/memberships/{project_id}` — the member gives up their
 /// seat. Maintenance lane: the seat is a row they may only read.
 pub async fn leave(
     State(state): State<Arc<AppState>>,

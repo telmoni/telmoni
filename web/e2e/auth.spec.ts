@@ -3,12 +3,12 @@ import type { SessionData } from "@/lib/auth/session";
 import { expectProjectOverview, landOnProject } from "./helpers";
 
 async function injectSession(page: Page, data: Partial<SessionData>) {
-  const res = await page.request.post("/api/test/session", { data });
+  const res = await page.request.post("/api/v1/test/session", { data });
   expect(res.ok()).toBeTruthy();
 }
 
 async function clearSession(page: Page) {
-  const res = await page.request.delete("/api/test/session");
+  const res = await page.request.delete("/api/v1/test/session");
   expect(res.ok()).toBeTruthy();
 }
 

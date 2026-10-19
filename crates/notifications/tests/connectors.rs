@@ -307,7 +307,7 @@ async fn vendor_requests(mocks: &MockServer) -> Vec<wiremock::Request> {
 }
 
 fn emit_req(organization: &str, project: bool, body: &str) -> Request<Body> {
-    let mut b = Request::post("/internal/notifications/emit")
+    let mut b = Request::post("/internal/v1/notifications/emit")
         .header("x-service-secret", SECRET)
         .header("x-organization-id", organization)
         .header(header::CONTENT_TYPE, "application/json");
@@ -593,7 +593,11 @@ async fn authorize_mints_a_state_and_stores_only_its_hash(pool: PgPool) {
     let st = state(pool.clone(), &mocks, None);
 
     let resp = app(&st)
-        .oneshot(owner("POST", "/internal/connectors/slack/authorize", None))
+        .oneshot(owner(
+            "POST",
+            "/internal/v1/connectors/slack/authorize",
+            None,
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -634,7 +638,7 @@ async fn a_member_cannot_start_a_handshake(pool: PgPool) {
     let resp = app(&st)
         .oneshot(req_as(
             "POST",
-            "/internal/connectors/slack/authorize",
+            "/internal/v1/connectors/slack/authorize",
             ORGANIZATION,
             MEMBER,
             None,
@@ -665,13 +669,17 @@ async fn an_unconfigured_provider_is_refused_and_listed_as_disabled(pool: PgPool
     let st = state_with(pool.clone(), &mocks, None, webhook_only);
 
     let resp = app(&st)
-        .oneshot(owner("POST", "/internal/connectors/slack/authorize", None))
+        .oneshot(owner(
+            "POST",
+            "/internal/v1/connectors/slack/authorize",
+            None,
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 
     let resp = app(&st)
-        .oneshot(owner("GET", "/internal/connectors", None))
+        .oneshot(owner("GET", "/internal/v1/connectors", None))
         .await
         .unwrap();
     let body = json_body(resp).await;
@@ -687,7 +695,11 @@ async fn authorize_under_the_flag_off_is_the_feature_off_problem(pool: PgPool) {
     let st = state(pool.clone(), &mocks, Some(Flags::ConnectorsOff));
 
     let resp = app(&st)
-        .oneshot(owner("POST", "/internal/connectors/slack/authorize", None))
+        .oneshot(owner(
+            "POST",
+            "/internal/v1/connectors/slack/authorize",
+            None,
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
@@ -708,7 +720,11 @@ async fn authorize_with_the_flag_read_broken_is_refused_not_admitted(pool: PgPoo
     let mocks = MockServer::start().await;
     let st = state(pool.clone(), &mocks, Some(Flags::Unreadable));
     let resp = app(&st)
-        .oneshot(owner("POST", "/internal/connectors/slack/authorize", None))
+        .oneshot(owner(
+            "POST",
+            "/internal/v1/connectors/slack/authorize",
+            None,
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
@@ -746,7 +762,11 @@ async fn the_slack_callback_stores_the_sealed_grant_and_audits_it(pool: PgPool) 
     let st = state(pool.clone(), &mocks, None);
 
     let resp = app(&st)
-        .oneshot(owner("POST", "/internal/connectors/slack/authorize", None))
+        .oneshot(owner(
+            "POST",
+            "/internal/v1/connectors/slack/authorize",
+            None,
+        ))
         .await
         .unwrap();
     let raw_state = json_body(resp).await["state"].as_str().unwrap().to_owned();
@@ -754,7 +774,7 @@ async fn the_slack_callback_stores_the_sealed_grant_and_audits_it(pool: PgPool) 
     let resp = app(&st)
         .oneshot(owner(
             "POST",
-            "/internal/connectors/slack/callback",
+            "/internal/v1/connectors/slack/callback",
             Some(&format!(r#"{{"code":"c0de","state":"{raw_state}"}}"#)),
         ))
         .await
@@ -839,7 +859,7 @@ async fn the_slack_callback_stores_the_sealed_grant_and_audits_it(pool: PgPool) 
     let resp = app(&st)
         .oneshot(owner(
             "POST",
-            "/internal/connectors/slack/callback",
+            "/internal/v1/connectors/slack/callback",
             Some(&format!(r#"{{"code":"c0de","state":"{raw_state}"}}"#)),
         ))
         .await
@@ -861,7 +881,7 @@ async fn a_callback_with_a_state_that_is_not_the_callers_is_refused_before_the_v
     let resp = app(&st)
         .oneshot(owner(
             "POST",
-            "/internal/connectors/slack/callback",
+            "/internal/v1/connectors/slack/callback",
             Some(r#"{"code":"c0de","state":"nobody-minted-this"}"#),
         ))
         .await
@@ -886,7 +906,7 @@ async fn a_callback_with_a_state_that_is_not_the_callers_is_refused_before_the_v
     let resp = app(&st)
         .oneshot(owner(
             "POST",
-            "/internal/connectors/slack/callback",
+            "/internal/v1/connectors/slack/callback",
             Some(r#"{"code":"c0de","state":"theirs"}"#),
         ))
         .await
@@ -913,7 +933,7 @@ async fn a_callback_with_a_state_that_is_not_the_callers_is_refused_before_the_v
     let resp = app(&st)
         .oneshot(owner(
             "POST",
-            "/internal/connectors/slack/callback",
+            "/internal/v1/connectors/slack/callback",
             Some(r#"{"code":"c0de","state":"other-project"}"#),
         ))
         .await
@@ -938,7 +958,7 @@ async fn a_callback_with_a_state_that_is_not_the_callers_is_refused_before_the_v
     let resp = app(&st)
         .oneshot(owner(
             "POST",
-            "/internal/connectors/slack/callback",
+            "/internal/v1/connectors/slack/callback",
             Some(r#"{"code":"c0de","state":"stale"}"#),
         ))
         .await
@@ -991,14 +1011,18 @@ async fn a_callback_on_an_errored_rows_key_reconnects_it_in_place(pool: PgPool) 
     let st = state(pool.clone(), &mocks, None);
 
     let resp = app(&st)
-        .oneshot(owner("POST", "/internal/connectors/slack/authorize", None))
+        .oneshot(owner(
+            "POST",
+            "/internal/v1/connectors/slack/authorize",
+            None,
+        ))
         .await
         .unwrap();
     let raw_state = json_body(resp).await["state"].as_str().unwrap().to_owned();
     let resp = app(&st)
         .oneshot(owner(
             "POST",
-            "/internal/connectors/slack/callback",
+            "/internal/v1/connectors/slack/callback",
             Some(&format!(r#"{{"code":"c0de","state":"{raw_state}"}}"#)),
         ))
         .await
@@ -1044,7 +1068,7 @@ async fn the_list_names_the_channel_and_never_the_grant(pool: PgPool) {
         let resp = app(&st)
             .oneshot(req_as(
                 "GET",
-                "/internal/connectors",
+                "/internal/v1/connectors",
                 ORGANIZATION,
                 user,
                 None,
@@ -1067,7 +1091,7 @@ async fn the_list_names_the_channel_and_never_the_grant(pool: PgPool) {
     let resp = app(&st)
         .oneshot(req_as(
             "GET",
-            "/internal/connectors",
+            "/internal/v1/connectors",
             OTHER_ORGANIZATION,
             OTHER_OWNER,
             None,
@@ -1447,14 +1471,18 @@ async fn an_install_whose_kek_will_not_wrap_is_refused_with_nothing_stored(pool:
     );
 
     let resp = app(&st)
-        .oneshot(owner("POST", "/internal/connectors/slack/authorize", None))
+        .oneshot(owner(
+            "POST",
+            "/internal/v1/connectors/slack/authorize",
+            None,
+        ))
         .await
         .unwrap();
     let raw_state = json_body(resp).await["state"].as_str().unwrap().to_owned();
     let resp = app(&st)
         .oneshot(owner(
             "POST",
-            "/internal/connectors/slack/callback",
+            "/internal/v1/connectors/slack/callback",
             Some(&format!(r#"{{"code":"c0de","state":"{raw_state}"}}"#)),
         ))
         .await
@@ -1603,7 +1631,7 @@ fn sign(ts: &str, body: &str) -> String {
 fn slack_event(body: &str, ts: i64, signature: Option<&str>) -> Request<Body> {
     let ts = ts.to_string();
     let signature = signature.map_or_else(|| sign(&ts, body), ToOwned::to_owned);
-    Request::post("/webhooks/slack")
+    Request::post("/webhooks/v1/slack")
         .header("x-slack-request-timestamp", ts)
         .header("x-slack-signature", signature)
         .header(header::CONTENT_TYPE, "application/json")
@@ -1652,7 +1680,7 @@ async fn an_unverified_event_is_refused_and_changes_nothing(pool: PgPool) {
     let resp = app(&st).oneshot(stale).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "six minutes old");
 
-    let unsigned = Request::post("/webhooks/slack")
+    let unsigned = Request::post("/webhooks/v1/slack")
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(body.clone()))
         .unwrap();
@@ -1833,7 +1861,7 @@ async fn a_slack_disconnect_uninstalls_only_when_it_was_the_last(pool: PgPool) {
     let resp = app(&st)
         .oneshot(owner(
             "DELETE",
-            &format!("/internal/connectors/{first}"),
+            &format!("/internal/v1/connectors/{first}"),
             None,
         ))
         .await
@@ -1857,7 +1885,7 @@ async fn a_slack_disconnect_uninstalls_only_when_it_was_the_last(pool: PgPool) {
     let resp = app(&st)
         .oneshot(owner(
             "DELETE",
-            &format!("/internal/connectors/{second}"),
+            &format!("/internal/v1/connectors/{second}"),
             None,
         ))
         .await
@@ -1906,7 +1934,7 @@ async fn another_organizations_connection_cannot_be_disconnected(pool: PgPool) {
     let resp = app(&st)
         .oneshot(owner(
             "DELETE",
-            &format!("/internal/connectors/{theirs}"),
+            &format!("/internal/v1/connectors/{theirs}"),
             None,
         ))
         .await
@@ -1940,7 +1968,7 @@ async fn a_member_cannot_disconnect(pool: PgPool) {
     let resp = app(&st)
         .oneshot(req_as(
             "DELETE",
-            &format!("/internal/connectors/{connection}"),
+            &format!("/internal/v1/connectors/{connection}"),
             ORGANIZATION,
             MEMBER,
             None,
@@ -2001,7 +2029,7 @@ async fn a_test_send_reports_the_vendors_answer_and_retires_on_a_dead_install(po
     let resp = app(&st)
         .oneshot(req_as(
             "POST",
-            &format!("/internal/connectors/{connection}/test"),
+            &format!("/internal/v1/connectors/{connection}/test"),
             ORGANIZATION,
             MEMBER,
             None,
@@ -2017,7 +2045,7 @@ async fn a_test_send_reports_the_vendors_answer_and_retires_on_a_dead_install(po
     let resp = app(&st)
         .oneshot(owner(
             "POST",
-            &format!("/internal/connectors/{connection}/test"),
+            &format!("/internal/v1/connectors/{connection}/test"),
             None,
         ))
         .await
@@ -2038,7 +2066,7 @@ async fn a_test_send_reports_the_vendors_answer_and_retires_on_a_dead_install(po
     let resp = app(&st)
         .oneshot(owner(
             "POST",
-            &format!("/internal/connectors/{connection}/test"),
+            &format!("/internal/v1/connectors/{connection}/test"),
             None,
         ))
         .await
@@ -2053,7 +2081,7 @@ async fn a_test_send_reports_the_vendors_answer_and_retires_on_a_dead_install(po
     let resp = app(&st)
         .oneshot(owner(
             "POST",
-            &format!("/internal/connectors/{connection}/test"),
+            &format!("/internal/v1/connectors/{connection}/test"),
             None,
         ))
         .await
@@ -2125,7 +2153,7 @@ async fn the_purge_tears_down_the_grants_and_removes_every_row(pool: PgPool) {
     let resp = app(&st)
         .oneshot(
             Request::post(format!(
-                "/internal/notifications/organizations/{ORGANIZATION}/purge"
+                "/internal/v1/notifications/organizations/{ORGANIZATION}/purge"
             ))
             .header("x-service-secret", SECRET)
             .body(Body::empty())
@@ -2762,7 +2790,7 @@ async fn a_disconnect_and_a_purge_of_one_workspace_leave_the_app_uninstalled(poo
     .await;
     let disconnect = tokio::spawn(app(&st).oneshot(owner(
         "DELETE",
-        &format!("/internal/connectors/{mine}"),
+        &format!("/internal/v1/connectors/{mine}"),
         None,
     )));
     eventually("the disconnect is done or waits", || async {
@@ -2815,7 +2843,11 @@ async fn an_install_landing_as_a_purge_decides_keeps_the_app_installed(pool: PgP
     mount_uninstall(&mocks, Duration::ZERO).await;
     let st = state(pool.clone(), &mocks, None);
     let resp = app(&st)
-        .oneshot(owner("POST", "/internal/connectors/slack/authorize", None))
+        .oneshot(owner(
+            "POST",
+            "/internal/v1/connectors/slack/authorize",
+            None,
+        ))
         .await
         .unwrap();
     let raw_state = json_body(resp).await["state"].as_str().unwrap().to_owned();
@@ -2829,7 +2861,7 @@ async fn an_install_landing_as_a_purge_decides_keeps_the_app_installed(pool: PgP
         .unwrap();
     let install = tokio::spawn(app(&st).oneshot(owner(
         "POST",
-        "/internal/connectors/slack/callback",
+        "/internal/v1/connectors/slack/callback",
         Some(&format!(r#"{{"code":"c0de","state":"{raw_state}"}}"#)),
     )));
     eventually("the install waits on the audit chain", || async {
@@ -3180,7 +3212,7 @@ async fn a_revoked_connection_neither_keeps_the_app_nor_lends_its_token(pool: Pg
     let resp = app(&st)
         .oneshot(req_as(
             "DELETE",
-            &format!("/internal/connectors/{live}"),
+            &format!("/internal/v1/connectors/{live}"),
             OTHER_ORGANIZATION,
             OTHER_OWNER,
             None,
@@ -3410,7 +3442,7 @@ async fn a_disconnect_beside_a_transfer_waits_before_its_row(pool: PgPool) {
     .await;
     let st = state(pool.clone(), &mocks, None);
 
-    let lane = owner("DELETE", &format!("/internal/connectors/{hook}"), None);
+    let lane = owner("DELETE", &format!("/internal/v1/connectors/{hook}"), None);
     let resp = beside_a_transfer(&st, &pool, lane).await;
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
@@ -3431,7 +3463,7 @@ async fn a_rotation_beside_a_transfer_waits_before_its_row(pool: PgPool) {
 
     let lane = owner(
         "POST",
-        &format!("/internal/connectors/{hook}/rotate"),
+        &format!("/internal/v1/connectors/{hook}/rotate"),
         Some(r#"{"keep_previous_for_hours":0}"#),
     );
     let resp = beside_a_transfer(&st, &pool, lane).await;
@@ -3456,7 +3488,7 @@ async fn an_events_change_beside_a_transfer_waits_before_its_row(pool: PgPool) {
 
     let lane = owner(
         "PUT",
-        &format!("/internal/connectors/{hook}/events"),
+        &format!("/internal/v1/connectors/{hook}/events"),
         Some(r#"{"event_kinds":["member_added"]}"#),
     );
     let resp = beside_a_transfer(&st, &pool, lane).await;
@@ -3489,14 +3521,18 @@ async fn a_reconnect_beside_a_transfer_waits_before_its_row(pool: PgPool) {
     mount_uninstall(&mocks, Duration::ZERO).await;
     let st = state(pool.clone(), &mocks, None);
     let resp = app(&st)
-        .oneshot(owner("POST", "/internal/connectors/slack/authorize", None))
+        .oneshot(owner(
+            "POST",
+            "/internal/v1/connectors/slack/authorize",
+            None,
+        ))
         .await
         .unwrap();
     let raw_state = json_body(resp).await["state"].as_str().unwrap().to_owned();
 
     let lane = owner(
         "POST",
-        "/internal/connectors/slack/callback",
+        "/internal/v1/connectors/slack/callback",
         Some(&format!(r#"{{"code":"c0de","state":"{raw_state}"}}"#)),
     );
     let resp = beside_a_transfer(&st, &pool, lane).await;
@@ -3529,7 +3565,7 @@ async fn a_resends_outcome_beside_a_transfer_waits_before_its_rows(pool: PgPool)
 
     let lane = owner(
         "POST",
-        &format!("/internal/connectors/{hook}/deliveries/{delivery}/redeliver"),
+        &format!("/internal/v1/connectors/{hook}/deliveries/{delivery}/redeliver"),
         None,
     );
     let resp = beside_a_transfer(&st, &pool, lane).await;
@@ -3713,7 +3749,11 @@ async fn a_disconnect_and_a_connect_in_one_project_go_in_turn(pool: PgPool) {
         .await;
     let st = state(pool.clone(), &mocks, None);
     let resp = app(&st)
-        .oneshot(owner("POST", "/internal/connectors/slack/authorize", None))
+        .oneshot(owner(
+            "POST",
+            "/internal/v1/connectors/slack/authorize",
+            None,
+        ))
         .await
         .unwrap();
     let raw_state = json_body(resp).await["state"].as_str().unwrap().to_owned();
@@ -3721,7 +3761,7 @@ async fn a_disconnect_and_a_connect_in_one_project_go_in_turn(pool: PgPool) {
     let held = transferring(&pool, ORGANIZATION).await;
     let connect = tokio::spawn(app(&st).oneshot(owner(
         "POST",
-        "/internal/connectors/slack/callback",
+        "/internal/v1/connectors/slack/callback",
         Some(&format!(r#"{{"code":"c0de","state":"{raw_state}"}}"#)),
     )));
     eventually("the connect waits for the chain", || async {
@@ -3730,7 +3770,7 @@ async fn a_disconnect_and_a_connect_in_one_project_go_in_turn(pool: PgPool) {
     .await;
     let disconnect = tokio::spawn(app(&st).oneshot(owner(
         "DELETE",
-        &format!("/internal/connectors/{hook}"),
+        &format!("/internal/v1/connectors/{hook}"),
         None,
     )));
     eventually("the disconnect waits behind it", || async {
@@ -3768,7 +3808,7 @@ async fn a_lane_kept_from_its_chain_is_answered_conflict(pool: PgPool) {
         Duration::from_secs(10),
         app(&st).oneshot(owner(
             "DELETE",
-            &format!("/internal/connectors/{hook}"),
+            &format!("/internal/v1/connectors/{hook}"),
             None,
         )),
     )
@@ -3792,7 +3832,7 @@ async fn a_connect_kept_from_its_chain_is_answered_conflict(pool: PgPool) {
         Duration::from_secs(10),
         app(&st).oneshot(owner(
             "POST",
-            "/internal/connectors/webhook",
+            "/internal/v1/connectors/webhook",
             Some(r#"{"url":"https://hooks.example.invalid/telmoni/events"}"#),
         )),
     )
@@ -3860,7 +3900,7 @@ async fn a_webhook_connected_across_its_projects_transfer_is_refused(pool: PgPoo
 
     let lane = owner(
         "POST",
-        "/internal/connectors/webhook",
+        "/internal/v1/connectors/webhook",
         Some(r#"{"url":"https://hooks.example.invalid/telmoni/events"}"#),
     );
     let resp = across_a_transfer(&st, &pool, &auth, lane).await;
@@ -3895,14 +3935,18 @@ async fn a_slack_install_finished_across_its_projects_transfer_is_refused(pool: 
     let auth = people();
     let st = state_asking(pool.clone(), &mocks, auth.clone());
     let resp = app(&st)
-        .oneshot(owner("POST", "/internal/connectors/slack/authorize", None))
+        .oneshot(owner(
+            "POST",
+            "/internal/v1/connectors/slack/authorize",
+            None,
+        ))
         .await
         .unwrap();
     let raw_state = json_body(resp).await["state"].as_str().unwrap().to_owned();
 
     let lane = owner(
         "POST",
-        "/internal/connectors/slack/callback",
+        "/internal/v1/connectors/slack/callback",
         Some(&format!(r#"{{"code":"c0de","state":"{raw_state}"}}"#)),
     );
     let resp = across_a_transfer(&st, &pool, &auth, lane).await;
@@ -3934,7 +3978,7 @@ async fn a_connect_by_an_admin_a_transfer_leaves_behind_is_refused(pool: PgPool)
 
     let lane = req_as(
         "POST",
-        "/internal/connectors/webhook",
+        "/internal/v1/connectors/webhook",
         ORGANIZATION,
         "user_admin",
         Some(r#"{"url":"https://hooks.example.invalid/telmoni/events"}"#),
@@ -3961,7 +4005,7 @@ async fn a_connect_by_an_admin_demoted_as_it_waits_is_refused(pool: PgPool) {
     let held = holding_chain(&pool, &oid(ORGANIZATION)).await;
     let connect = tokio::spawn(app(&st).oneshot(req_as(
         "POST",
-        "/internal/connectors/webhook",
+        "/internal/v1/connectors/webhook",
         ORGANIZATION,
         "user_admin",
         Some(r#"{"url":"https://hooks.example.invalid/telmoni/events"}"#),
@@ -3996,7 +4040,7 @@ async fn a_connect_auth_does_not_answer_again_in_time_is_refused(pool: PgPool) {
         Duration::from_secs(10),
         app(&st).oneshot(owner(
             "POST",
-            "/internal/connectors/webhook",
+            "/internal/v1/connectors/webhook",
             Some(r#"{"url":"https://hooks.example.invalid/telmoni/events"}"#),
         )),
     )
@@ -4020,7 +4064,7 @@ async fn a_webhook_is_connected_by_url_and_its_secret_is_answered_once(pool: PgP
     let resp = app(&st)
         .oneshot(req_as(
             "POST",
-            "/internal/connectors/webhook",
+            "/internal/v1/connectors/webhook",
             ORGANIZATION,
             MEMBER,
             Some(body),
@@ -4030,7 +4074,7 @@ async fn a_webhook_is_connected_by_url_and_its_secret_is_answered_once(pool: PgP
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 
     let resp = app(&st)
-        .oneshot(owner("POST", "/internal/connectors/webhook", Some(body)))
+        .oneshot(owner("POST", "/internal/v1/connectors/webhook", Some(body)))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
@@ -4088,7 +4132,7 @@ async fn a_webhook_is_connected_by_url_and_its_secret_is_answered_once(pool: PgP
     assert_eq!(scopes, webhook::SCHEME);
 
     let resp = app(&st)
-        .oneshot(owner("GET", "/internal/connectors", None))
+        .oneshot(owner("GET", "/internal/v1/connectors", None))
         .await
         .unwrap();
     let listing = json_body(resp).await;
@@ -4117,14 +4161,14 @@ async fn a_webhook_is_connected_by_url_and_its_secret_is_answered_once(pool: PgP
     );
 
     let resp = app(&st)
-        .oneshot(owner("POST", "/internal/connectors/webhook", Some(body)))
+        .oneshot(owner("POST", "/internal/v1/connectors/webhook", Some(body)))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CONFLICT);
     let resp = app(&st)
         .oneshot(req_as(
             "POST",
-            "/internal/connectors/webhook",
+            "/internal/v1/connectors/webhook",
             OTHER_ORGANIZATION,
             OTHER_OWNER,
             Some(body),
@@ -4135,7 +4179,7 @@ async fn a_webhook_is_connected_by_url_and_its_secret_is_answered_once(pool: PgP
     let resp = app(&st)
         .oneshot(owner(
             "POST",
-            "/internal/connectors/webhook/authorize",
+            "/internal/v1/connectors/webhook/authorize",
             None,
         ))
         .await
@@ -4185,7 +4229,7 @@ async fn a_webhook_registration_is_https_only_and_never_a_private_or_local_host(
         let resp = app(&st)
             .oneshot(owner(
                 "POST",
-                "/internal/connectors/webhook",
+                "/internal/v1/connectors/webhook",
                 Some(&serde_json::json!({ "url": url }).to_string()),
             ))
             .await
@@ -4277,7 +4321,7 @@ async fn a_webhook_delivery_is_signed_over_the_bytes_it_sends_and_names_its_deli
     let resp = app(&st)
         .oneshot(owner(
             "POST",
-            &format!("/internal/connectors/{connection}/test"),
+            &format!("/internal/v1/connectors/{connection}/test"),
             None,
         ))
         .await
@@ -4638,7 +4682,7 @@ async fn a_rotated_secret_signs_the_next_delivery_and_revives_an_errored_webhook
     )
     .await;
     let st = state(pool.clone(), &mocks, None);
-    let rotate = |connection: Uuid| format!("/internal/connectors/{connection}/rotate");
+    let rotate = |connection: Uuid| format!("/internal/v1/connectors/{connection}/rotate");
     let hard_cut = Some(r#"{"keep_previous_for_hours":0}"#);
 
     let resp = app(&st)
@@ -4796,14 +4840,14 @@ async fn a_deployment_without_the_webhook_lists_it_disabled_and_refuses_it(pool:
     };
     let st = state_with(pool.clone(), &mocks, None, no_webhook);
     let resp = app(&st)
-        .oneshot(owner("GET", "/internal/connectors", None))
+        .oneshot(owner("GET", "/internal/v1/connectors", None))
         .await
         .unwrap();
     assert_eq!(json_body(resp).await["enabled"]["webhook"], false);
     let resp = app(&st)
         .oneshot(owner(
             "POST",
-            "/internal/connectors/webhook",
+            "/internal/v1/connectors/webhook",
             Some(r#"{"url":"https://hooks.example.invalid/x"}"#),
         ))
         .await
@@ -4958,7 +5002,7 @@ async fn a_webhook_receives_only_the_events_it_chose(pool: PgPool) {
     )
     .await;
     let st = state(pool.clone(), &mocks, None);
-    let events = |connection: Uuid| format!("/internal/connectors/{connection}/events");
+    let events = |connection: Uuid| format!("/internal/v1/connectors/{connection}/events");
     let choose =
         Some(r#"{"event_kinds":["connector_disconnected","member_added","member_added"]}"#);
 
@@ -5080,7 +5124,7 @@ async fn a_webhook_receives_only_the_events_it_chose(pool: PgPool) {
     let resp = app(&st)
         .oneshot(owner(
             "POST",
-            "/internal/connectors/webhook",
+            "/internal/v1/connectors/webhook",
             Some(r#"{"url":"https://hooks.example.invalid/chosen","event_kinds":[]}"#),
         ))
         .await
@@ -5089,7 +5133,7 @@ async fn a_webhook_receives_only_the_events_it_chose(pool: PgPool) {
     let resp = app(&st)
         .oneshot(owner(
             "POST",
-            "/internal/connectors/webhook",
+            "/internal/v1/connectors/webhook",
             Some(
                 r#"{"url":"https://hooks.example.invalid/chosen","event_kinds":["organization_alert"]}"#,
             ),
@@ -5147,7 +5191,7 @@ async fn every_send_is_logged_and_the_log_pages_newest_first(pool: PgPool) {
         .await;
     let st = state(pool.clone(), &mocks, None);
     let log = |connection: Uuid, query: &str| {
-        format!("/internal/connectors/{connection}/deliveries{query}")
+        format!("/internal/v1/connectors/{connection}/deliveries{query}")
     };
 
     let first = seed_delivery(&pool, ORGANIZATION, connection).await;
@@ -5265,7 +5309,7 @@ async fn a_delivery_is_resent_by_hand_with_its_own_id_and_logged_as_manual(pool:
     let id = seed_delivery(&pool, ORGANIZATION, connection).await;
     assert_eq!(delivery::tick_once(&st).await.unwrap(), 1);
     let resend = |delivery: Uuid| {
-        format!("/internal/connectors/{connection}/deliveries/{delivery}/redeliver")
+        format!("/internal/v1/connectors/{connection}/deliveries/{delivery}/redeliver")
     };
 
     let resp = app(&st)
@@ -5466,7 +5510,7 @@ async fn a_delivery_is_resent_by_hand_with_its_own_id_and_logged_as_manual(pool:
     let resp = app(&st)
         .oneshot(owner(
             "POST",
-            &format!("/internal/connectors/{slack}/deliveries/{chat}/redeliver"),
+            &format!("/internal/v1/connectors/{slack}/deliveries/{chat}/redeliver"),
             None,
         ))
         .await
@@ -5499,7 +5543,7 @@ async fn a_rotation_with_an_overlap_signs_with_both_secrets_until_it_ends(pool: 
         .mount(&mocks)
         .await;
     let st = state(pool.clone(), &mocks, None);
-    let rotate = format!("/internal/connectors/{connection}/rotate");
+    let rotate = format!("/internal/v1/connectors/{connection}/rotate");
     let signature_of = |req: &wiremock::Request| {
         req.headers
             .get("telmoni-signature")

@@ -10,7 +10,7 @@ const LIST_CARD = ["overflow-hidden", "p-0", "gap-0"];
 type TestUser = { userId: string; email: string; firstName: string; lastName: string };
 
 async function injectSession(page: Page, data: Partial<SessionData>) {
-  const res = await page.request.post("/api/test/session", { data });
+  const res = await page.request.post("/api/v1/test/session", { data });
   expect(res.ok()).toBeTruthy();
 }
 
@@ -28,7 +28,7 @@ function testUser(project: string): TestUser {
 // from here is the same person the browser is. The door records the identity
 // it is given, so it is given the browser's.
 async function bearerFor(request: APIRequestContext, user: TestUser): Promise<string> {
-  const res = await request.post(`${SERVER}/test/session`, {
+  const res = await request.post(`${SERVER}/internal/v1/test/session`, {
     headers: { "x-service-secret": SERVICE_SECRET },
     data: user,
   });
@@ -55,7 +55,7 @@ function internalHeaders(
 // sees, and the seed revokes every row it lists, so the probe is one of them.
 async function organizationOf(request: APIRequestContext, user: TestUser): Promise<string> {
   const bearer = await bearerFor(request, user);
-  const res = await request.post(`${SERVER}/me`, {
+  const res = await request.post(`${SERVER}/internal/v1/me`, {
     headers: { authorization: `Bearer ${bearer}`, "x-service-secret": SERVICE_SECRET },
     data: {},
   });
@@ -74,27 +74,27 @@ async function seed(request: APIRequestContext, user: TestUser, projectSlug: str
   const bearer = await bearerFor(request, user);
   const own = internalHeaders(bearer, organizationId);
   // The page's path names the project by slug; its lanes key on the id.
-  const listing = await request.get(`${SERVER}/internal/projects`, { headers: own });
+  const listing = await request.get(`${SERVER}/internal/v1/projects`, { headers: own });
   expect(listing.ok(), await listing.text()).toBeTruthy();
   const { projects } = (await listing.json()) as { projects: { id: string; slug: string }[] };
   const projectId = projects.find((p) => p.slug === projectSlug)?.id;
   expect(projectId, `no project goes by ${projectSlug}`).toMatch(/^project_[A-Za-z0-9]{16}$/);
   const project = internalHeaders(bearer, organizationId, projectId);
 
-  const tokens = await request.get(`${SERVER}/internal/tokens`, { headers: project });
+  const tokens = await request.get(`${SERVER}/internal/v1/tokens`, { headers: project });
   expect(tokens.ok(), await tokens.text()).toBeTruthy();
   for (const t of (await tokens.json()) as { id: string }[]) {
-    expect((await request.delete(`${SERVER}/internal/tokens/${t.id}`, { headers: project })).ok()).toBeTruthy();
+    expect((await request.delete(`${SERVER}/internal/v1/tokens/${t.id}`, { headers: project })).ok()).toBeTruthy();
   }
-  const sessions = await request.get(`${SERVER}/internal/auth/sessions`, { headers: own });
+  const sessions = await request.get(`${SERVER}/internal/v1/auth/sessions`, { headers: own });
   expect(sessions.ok(), await sessions.text()).toBeTruthy();
   for (const s of ((await sessions.json()) as { sessions: { id: string }[] }).sessions) {
     expect(
-      (await request.post(`${SERVER}/internal/auth/sessions/${s.id}/revoke`, { headers: own })).ok(),
+      (await request.post(`${SERVER}/internal/v1/auth/sessions/${s.id}/revoke`, { headers: own })).ok(),
     ).toBeTruthy();
   }
 
-  const minted = await request.post(`${SERVER}/internal/tokens`, {
+  const minted = await request.post(`${SERVER}/internal/v1/tokens`, {
     headers: project,
     data: { name: "e2e layout key", created_by: user.userId },
   });

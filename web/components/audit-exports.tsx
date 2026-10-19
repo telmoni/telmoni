@@ -49,8 +49,8 @@ const downloading = new Set<string>();
 
 const ListSchema = z.object({ exports: z.array(AuditExportSchema) });
 
-/// Whether a response is the sign-in redirect the proxy answers a request
-/// with no session: never followed, since followed it is the sign-in page.
+/// Whether a response says the session has ended: the proxy's 401, or a
+/// redirect to sign in, never followed, since followed it is the sign-in page.
 function signedOut(res: Response): boolean {
   return res.type === "opaqueredirect" || res.status === 401;
 }

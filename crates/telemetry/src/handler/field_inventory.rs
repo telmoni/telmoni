@@ -1,5 +1,5 @@
 //! The field inventory as the console reads it: `GET
-//! /internal/telemetry/field-inventory`, every attribute ingest reads and
+//! /internal/v1/telemetry/field-inventory`, every attribute ingest reads and
 //! what becomes of each ([`crate::contract::INVENTORY`]). The same list for
 //! every project, read by every role on one, served from the code so the
 //! console's copy cannot say anything the docs page and ingest do not.
@@ -26,7 +26,7 @@ pub struct FieldInventory {
     pub rows: &'static [InventoryRow],
 }
 
-/// `GET /internal/telemetry/field-inventory` — the inventory, to anyone on
+/// `GET /internal/v1/telemetry/field-inventory` — the inventory, to anyone on
 /// the project `x-project-id` names.
 pub async fn get_field_inventory(
     State(state): State<Arc<AppState>>,

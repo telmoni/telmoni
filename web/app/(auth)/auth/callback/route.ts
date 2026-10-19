@@ -138,7 +138,7 @@ export async function GET(request: NextRequest) {
   // while sign-ups are closed is answered with no organization, and the session
   // is sealed like any other; the (app) layout gives them their account.
   try {
-    const probe = await fetchWithTimeout(`${env.SERVER_URL}/me`, {
+    const probe = await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/me`, {
       method: "POST",
       headers: {
         authorization: `Bearer ${sessionData.accessToken}`,

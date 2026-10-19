@@ -70,10 +70,10 @@ async fn json_body(resp: axum::response::Response) -> Value {
     serde_json::from_slice(&bytes).expect("JSON body")
 }
 
-/// `POST /me` for `user`, under a bearer of session `sid` (one of its own
-/// when `None`); provisions on first call. Answers the organization `/me`
-/// made them active in — on a first sign-in, the one it provisioned — and the
-/// whole `/me` body.
+/// `POST /internal/v1/me` for `user`, under a bearer of session `sid` (one of
+/// its own when `None`); provisions on first call. Answers the organization
+/// `/me` made them active in — on a first sign-in, the one it provisioned —
+/// and the whole `/me` body.
 async fn sign_in(app: &Router, pool: &PgPool, user: &str, sid: Option<&str>) -> (String, Value) {
     // What the exchange would have recorded.
     seed_identity(pool, user, &format!("{user}@example.test")).await;
@@ -84,7 +84,7 @@ async fn sign_in(app: &Router, pool: &PgPool, user: &str, sid: Option<&str>) -> 
     let resp = app
         .clone()
         .oneshot(
-            Request::post("/me")
+            Request::post("/internal/v1/me")
                 .header("x-service-secret", SERVICE_SECRET)
                 .header("content-type", "application/json")
                 .header("authorization", format!("Bearer {bearer}"))
@@ -109,7 +109,7 @@ async fn create_project(app: &Router, pool: &PgPool, owner: &str, organization: 
         .clone()
         .oneshot(
             as_person(
-                Request::post("/internal/projects")
+                Request::post("/internal/v1/projects")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("x-organization-id", organization)
                     .header("content-type", "application/json"),
@@ -175,7 +175,7 @@ async fn seat(
         .clone()
         .oneshot(
             as_person(
-                Request::post(format!("/internal/projects/{project}/invites"))
+                Request::post(format!("/internal/v1/projects/{project}/invites"))
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("x-organization-id", organization)
                     .header("content-type", "application/json"),
@@ -197,7 +197,7 @@ async fn seat(
         .clone()
         .oneshot(
             as_person(
-                Request::post("/internal/invites/accept")
+                Request::post("/internal/v1/invites/accept")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("content-type", "application/json"),
                 pool,
@@ -313,7 +313,7 @@ async fn the_seam_is_a_person_lane(pool: PgPool) {
 async fn refresh_with(app: &Router, refresh_token: &str, row: &Value) -> axum::response::Response {
     app.clone()
         .oneshot(
-            Request::post("/internal/auth/refresh")
+            Request::post("/internal/v1/auth/refresh")
                 .header("x-service-secret", SERVICE_SECRET)
                 .header("content-type", "application/json")
                 .body(Body::from(
@@ -325,12 +325,12 @@ async fn refresh_with(app: &Router, refresh_token: &str, row: &Value) -> axum::r
         .unwrap()
 }
 
-/// `POST /me` under a bearer the issuer minted.
+/// `POST /internal/v1/me` under a bearer the issuer minted.
 async fn me_under(app: &Router, bearer: &str) -> (StatusCode, Value) {
     let resp = app
         .clone()
         .oneshot(
-            Request::post("/me")
+            Request::post("/internal/v1/me")
                 .header("x-service-secret", SERVICE_SECRET)
                 .header("content-type", "application/json")
                 .header("authorization", format!("Bearer {bearer}"))
@@ -354,7 +354,7 @@ async fn refresh_touches_the_row_and_a_sign_out_ends_it(pool: PgPool) {
     let resp = app
         .clone()
         .oneshot(
-            Request::post("/internal/auth/exchange")
+            Request::post("/internal/v1/auth/exchange")
                 .header("x-service-secret", SERVICE_SECRET)
                 .header("content-type", "application/json")
                 .body(Body::from(
@@ -407,7 +407,7 @@ async fn refresh_touches_the_row_and_a_sign_out_ends_it(pool: PgPool) {
     let resp = app
         .clone()
         .oneshot(
-            Request::post("/internal/auth/logout")
+            Request::post("/internal/v1/auth/logout")
                 .header("x-service-secret", SERVICE_SECRET)
                 .header("content-type", "application/json")
                 .body(Body::from(json!({ "session_id": sid }).to_string()))
@@ -450,7 +450,7 @@ async fn logout_revokes_the_row_and_asks_nothing_of_the_provider(pool: PgPool) {
     let resp = app
         .clone()
         .oneshot(
-            Request::post("/internal/auth/logout")
+            Request::post("/internal/v1/auth/logout")
                 .header("x-service-secret", SERVICE_SECRET)
                 .header("content-type", "application/json")
                 .body(Body::from(

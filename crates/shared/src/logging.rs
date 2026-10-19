@@ -16,7 +16,7 @@
 //! directive does not parse.
 //!
 //! ⚠ **A raise always expires.** [`set_filter`] swaps the filter live
-//! (`PUT /internal/log-level`, `make log-level`) and reverts after a capped
+//! (`PUT /internal/v1/log-level`, `make log-level`) and reverts after a capped
 //! TTL, because the failure mode of a debug session is someone forgetting it.
 //! A verbosity that should outlive an incident is a reviewed `LOG_LEVEL` change.
 
@@ -47,7 +47,7 @@ type Handle = reload::Handle<EnvFilter, Registry>;
 static RELOAD: OnceLock<Handle> = OnceLock::new();
 /// What the process booted with — the level a raise reverts TO.
 static BOOT: OnceLock<String> = OnceLock::new();
-/// What is in force now. Read by `GET /internal/log-level`.
+/// What is in force now. Read by `GET /internal/v1/log-level`.
 static CURRENT: Mutex<String> = Mutex::new(String::new());
 /// Bumped on every change, so a pending revert that has been superseded by a
 /// newer raise does nothing instead of stamping on it.
@@ -334,7 +334,7 @@ pub fn revert() {
     }
 }
 
-/// `GET /internal/log-level` — what this process is logging, and for how long.
+/// `GET /internal/v1/log-level` — what this process is logging, and for how long.
 #[expect(
     clippy::unused_async,
     reason = "an axum handler must be async even when its body is not; the lint does not fire on the services' own handlers only because they are passed as values in the same crate"
@@ -349,7 +349,7 @@ pub async fn get_level() -> axum::Json<serde_json::Value> {
     }))
 }
 
-/// The body of `PUT /internal/log-level`.
+/// The body of `PUT /internal/v1/log-level`.
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SetLevelRequest {
@@ -362,7 +362,7 @@ pub struct SetLevelRequest {
     pub ttl_secs: Option<u64>,
 }
 
-/// `PUT /internal/log-level` — raise (or lower) verbosity on a running pod.
+/// `PUT /internal/v1/log-level` — raise (or lower) verbosity on a running pod.
 #[expect(
     clippy::unused_async,
     reason = "an axum handler must be async even when its body is not; the lint does not fire on the services' own handlers only because they are passed as values in the same crate"
@@ -379,7 +379,7 @@ pub async fn put_level(
     })))
 }
 
-/// `DELETE /internal/log-level` — drop back to the boot directive now, rather
+/// `DELETE /internal/v1/log-level` — drop back to the boot directive now, rather
 /// than waiting out the TTL.
 #[expect(
     clippy::unused_async,

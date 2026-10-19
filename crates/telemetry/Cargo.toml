@@ -17,7 +17,7 @@ telmoni-shared = { path = "../shared" }
 
 anyhow      = { workspace = true }
 async-trait = { workspace = true }
-# The console's lanes under `/internal/telemetry`.
+# The console's lanes under `/internal/v1/telemetry`.
 axum        = { workspace = true }
 chrono      = { workspace = true }
 # A monitor's schedule: its zone by name, and its cron line's next due time.

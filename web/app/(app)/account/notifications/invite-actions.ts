@@ -62,7 +62,7 @@ export async function acceptIncomingInviteAction(
   // The person's own lane, sent in no organization: an invitation is how
   // somebody in none gets into one.
   const res = await tryFetchWithTimeout(
-    `${env.SERVER_URL}/internal/me/invites/${encodeURIComponent(inviteId)}/accept`,
+    `${env.SERVER_URL}/internal/v1/me/invites/${encodeURIComponent(inviteId)}/accept`,
     {
       method: "POST",
       headers: personHeaders(session),
@@ -99,7 +99,7 @@ export async function declineIncomingInviteAction(
   if (limited) return { error: "Too many requests — slow down a moment." };
 
   const res = await tryFetchWithTimeout(
-    `${env.SERVER_URL}/internal/me/invites/${encodeURIComponent(inviteId)}/decline`,
+    `${env.SERVER_URL}/internal/v1/me/invites/${encodeURIComponent(inviteId)}/decline`,
     {
       method: "POST",
       headers: personHeaders(session),

@@ -36,7 +36,7 @@ async function answerOffer(
   if (limited) return { error: "Too many requests — slow down a moment." };
 
   const res = await tryFetchWithTimeout(
-    `${env.SERVER_URL}/internal/organization/owner-transfer/${verb}`,
+    `${env.SERVER_URL}/internal/v1/organization/owner-transfer/${verb}`,
     { method: "POST", headers: sessionHeaders(session, organizationId) },
   );
   if (!res) {
@@ -102,7 +102,7 @@ async function answerProjectOffer(
   if (limited) return { error: "Too many requests — slow down a moment." };
 
   const res = await tryFetchWithTimeout(
-    `${env.SERVER_URL}/internal/projects/${encodeURIComponent(projectId)}/transfer/${verb}`,
+    `${env.SERVER_URL}/internal/v1/projects/${encodeURIComponent(projectId)}/transfer/${verb}`,
     {
       method: "POST",
       headers: { ...personHeaders(session), "content-type": "application/json" },

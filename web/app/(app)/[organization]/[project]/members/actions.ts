@@ -50,7 +50,7 @@ export async function inviteMemberAction(
   if (!trimmed) return { error: "Enter the email address of the person to invite." };
 
   const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/projects/${encodeURIComponent(gate.projectId)}/invites`,
+    `${gate.base}/internal/v1/projects/${encodeURIComponent(gate.projectId)}/invites`,
     {
       method: "POST",
       headers: { ...gate.headers, "content-type": "application/json" },
@@ -108,7 +108,7 @@ export async function revokeInviteAction(
   const gate = await open("members:invite-revoke", 30, projectId);
   if ("error" in gate) return gate;
   const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/projects/${encodeURIComponent(gate.projectId)}/invites/${encodeURIComponent(inviteId)}`,
+    `${gate.base}/internal/v1/projects/${encodeURIComponent(gate.projectId)}/invites/${encodeURIComponent(inviteId)}`,
     { method: "DELETE", headers: gate.headers },
   );
   const ans = await answer(res);
@@ -142,7 +142,7 @@ export async function updateMemberRoleAction(
   const changed =
     roster.kind === "ok" ? roster.members.find((m) => m.member_id === memberId) : undefined;
   const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/projects/${encodeURIComponent(gate.projectId)}/members/${encodeURIComponent(memberId)}/role`,
+    `${gate.base}/internal/v1/projects/${encodeURIComponent(gate.projectId)}/members/${encodeURIComponent(memberId)}/role`,
     {
       method: "PUT",
       headers: { ...gate.headers, "content-type": "application/json" },
@@ -174,7 +174,7 @@ export async function removeMemberAction(
   const removed =
     roster.kind === "ok" ? roster.members.find((m) => m.member_id === memberId) : undefined;
   const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/projects/${encodeURIComponent(gate.projectId)}/members/${encodeURIComponent(memberId)}`,
+    `${gate.base}/internal/v1/projects/${encodeURIComponent(gate.projectId)}/members/${encodeURIComponent(memberId)}`,
     { method: "DELETE", headers: gate.headers },
   );
   if (!res?.ok) return answer(res);
@@ -197,7 +197,7 @@ export async function offerProjectAction(
   const gate = await open("members:transfer", 10, projectId);
   if ("error" in gate) return gate;
   const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/projects/${encodeURIComponent(gate.projectId)}/transfer`,
+    `${gate.base}/internal/v1/projects/${encodeURIComponent(gate.projectId)}/transfer`,
     {
       method: "POST",
       headers: { ...gate.headers, "content-type": "application/json" },
@@ -216,7 +216,7 @@ export async function cancelProjectOfferAction(projectId: string): Promise<Actio
   const gate = await open("members:transfer", 10, projectId);
   if ("error" in gate) return gate;
   const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/projects/${encodeURIComponent(gate.projectId)}/transfer`,
+    `${gate.base}/internal/v1/projects/${encodeURIComponent(gate.projectId)}/transfer`,
     { method: "DELETE", headers: gate.headers },
   );
   if (!res?.ok) return answer(res);
@@ -252,7 +252,7 @@ export async function leaveProjectAction(
   const gate = await open("members:leave", 20, projectId);
   if ("error" in gate) return gate;
   const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/memberships/${encodeURIComponent(projectId)}`,
+    `${gate.base}/internal/v1/memberships/${encodeURIComponent(projectId)}`,
     { method: "DELETE", headers: gate.headers },
   );
   if (!res?.ok) return answer(res);

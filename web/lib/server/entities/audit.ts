@@ -41,7 +41,7 @@ export const fetchAuditEvents = cache(
     const ctx = await identityContext();
     if (!ctx) return { kind: "unavailable" };
     return listAudit(
-      `${env.SERVER_URL}/internal/audit/projects/${encodeURIComponent(
+      `${env.SERVER_URL}/internal/v1/audit/projects/${encodeURIComponent(
         projectId,
       )}?limit=${limit}`,
       projectHeaders(ctx, projectId),
@@ -54,7 +54,7 @@ export const fetchOrganizationAudit = cache(
     const ctx = await identityContext();
     if (!ctx) return { kind: "unavailable" };
     return listAudit(
-      `${env.SERVER_URL}/internal/audit/organizations/${encodeURIComponent(
+      `${env.SERVER_URL}/internal/v1/audit/organizations/${encodeURIComponent(
         ctx.organizationId,
       )}?limit=${limit}`,
       organizationHeaders(ctx),
@@ -90,7 +90,7 @@ export type AuditExportFile =
 const FILE_TIMEOUT_MS = 60_000;
 
 function exportsUrl(organizationId: string, id?: string): string {
-  const base = `${env.SERVER_URL}/internal/audit/organizations/${encodeURIComponent(
+  const base = `${env.SERVER_URL}/internal/v1/audit/organizations/${encodeURIComponent(
     organizationId,
   )}/exports`;
   return id ? `${base}/${encodeURIComponent(id)}` : base;

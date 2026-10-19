@@ -70,7 +70,7 @@ export async function GET(
   if (!ctx || !project) return done({ error: "project" });
 
   const res = await tryFetchWithTimeout(
-    `${base}/internal/connectors/${provider}/callback`,
+    `${base}/internal/v1/connectors/${provider}/callback`,
     {
       method: "POST",
       headers: {

@@ -86,7 +86,7 @@ async fn create_project(pool: &PgPool, organization: &str, name: &str) -> String
             as_person(
                 Request::builder()
                     .method("POST")
-                    .uri("/internal/projects")
+                    .uri("/internal/v1/projects")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("x-organization-id", organization)
                     .header("content-type", "application/json"),
@@ -120,7 +120,7 @@ async fn token_with(pool: &PgPool, scopes: &[&str]) -> Fixture {
             as_person(
                 Request::builder()
                     .method("POST")
-                    .uri("/me")
+                    .uri("/internal/v1/me")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("content-type", "application/json"),
                 pool,
@@ -150,7 +150,7 @@ async fn token_with(pool: &PgPool, scopes: &[&str]) -> Fixture {
             as_person(
                 Request::builder()
                     .method("POST")
-                    .uri("/internal/tokens")
+                    .uri("/internal/v1/tokens")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("x-organization-id", &organization)
                     .header("x-project-id", &project)
@@ -334,7 +334,7 @@ async fn a_revoked_token_is_401(pool: PgPool) {
             as_person(
                 Request::builder()
                     .method("DELETE")
-                    .uri(format!("/internal/tokens/{}", fixture.id))
+                    .uri(format!("/internal/v1/tokens/{}", fixture.id))
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("x-organization-id", &fixture.organization)
                     .header("x-project-id", &fixture.project),
@@ -430,7 +430,7 @@ async fn a_token_route_without_the_project_header_is_refused(pool: PgPool) {
             as_person(
                 Request::builder()
                     .method("GET")
-                    .uri("/internal/tokens")
+                    .uri("/internal/v1/tokens")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("x-organization-id", &fixture.organization),
                 &pool,

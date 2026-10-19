@@ -437,7 +437,7 @@ describe("consolePlace", () => {
       "/",
       "",
       "/console",
-      "/api/events",
+      "/api/v1/events",
       "/auth/login",
       "/invite/abc",
       // An id is redirected to its slug before anything is drawn for it.

@@ -1,4 +1,4 @@
-//! `/internal/connectors` — the OAuth handshake, the webhook connect, its
+//! `/internal/v1/connectors` — the OAuth handshake, the webhook connect, its
 //! rotation and its choice of events, the list, the disconnect, the test send,
 //! and the delivery log with its resend. Every lane acts for a
 //! PERSON under `Resource::Connector`: a connection is a credential like a
@@ -131,7 +131,7 @@ fn mint_state() -> Result<String, TelmoniError> {
     Ok(hex::encode(bytes))
 }
 
-/// `POST /internal/connectors/{provider}/authorize` — start a handshake.
+/// `POST /internal/v1/connectors/{provider}/authorize` — start a handshake.
 pub async fn authorize_connector(
     State(state): State<Arc<AppState>>,
     Path(provider): Path<String>,
@@ -239,7 +239,7 @@ async fn consume_verified_oauth_state(
     Ok(())
 }
 
-/// `POST /internal/connectors/{provider}/callback` — finish a handshake.
+/// `POST /internal/v1/connectors/{provider}/callback` — finish a handshake.
 pub async fn callback(
     State(state): State<Arc<AppState>>,
     Path(provider): Path<String>,
@@ -526,7 +526,7 @@ fn event_kinds_column(
     ))
 }
 
-/// `POST /internal/connectors/webhook` — connect a customer's own endpoint.
+/// `POST /internal/v1/connectors/webhook` — connect a customer's own endpoint.
 pub async fn create_webhook(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -670,7 +670,7 @@ pub struct RotateRequest {
     pub keep_previous_for_hours: u8,
 }
 
-/// `POST /internal/connectors/{id}/rotate` — a new signing secret for a
+/// `POST /internal/v1/connectors/{id}/rotate` — a new signing secret for a
 /// webhook, answered once. With an overlap, every delivery until it ends is
 /// signed with both secrets, so a team deploying the receiver's new secret
 /// drops nothing on the way; with none it is a hard cut.
@@ -779,7 +779,7 @@ pub async fn rotate_webhook_secret(
     ))
 }
 
-/// `GET /internal/connectors` — the project's connections, and which providers
+/// `GET /internal/v1/connectors` — the project's connections, and which providers
 /// this deployment can connect at all.
 pub async fn list_connectors(
     State(state): State<Arc<AppState>>,
@@ -804,7 +804,7 @@ pub async fn list_connectors(
     })))
 }
 
-/// `DELETE /internal/connectors/{id}` — disconnect.
+/// `DELETE /internal/v1/connectors/{id}` — disconnect.
 pub async fn delete_connector(
     State(state): State<Arc<AppState>>,
     Path(id): Path<Uuid>,
@@ -846,7 +846,7 @@ pub async fn delete_connector(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `POST /internal/connectors/{id}/test` — send one message now and report
+/// `POST /internal/v1/connectors/{id}/test` — send one message now and report
 /// what came back: 200 whenever the send was attempted, since the vendor's
 /// answer IS the payload. `Verb::Update`, because it posts into a channel.
 pub async fn test_connector(
@@ -937,7 +937,7 @@ where
     Option::<T>::deserialize(deserializer)
 }
 
-/// `PUT /internal/connectors/{id}/events` — change which notices a webhook
+/// `PUT /internal/v1/connectors/{id}/events` — change which notices a webhook
 /// receives. Takes effect for the next notice; what is already queued goes.
 pub async fn update_webhook_events(
     State(state): State<Arc<AppState>>,
@@ -1004,7 +1004,7 @@ pub struct DeliveryLogQuery {
     pub limit: Option<i64>,
 }
 
-/// `GET /internal/connectors/{id}/deliveries` — one connection's deliveries,
+/// `GET /internal/v1/connectors/{id}/deliveries` — one connection's deliveries,
 /// newest first, each with every send it took. Every role reads it: it is the
 /// record of what the project told the outside world.
 pub async fn list_deliveries(
@@ -1045,7 +1045,7 @@ const REDELIVERY_LEASE_SECS: i64 = 60;
 /// also bounds how many sends one log entry can carry.
 const MAX_MANUAL_RESENDS: i64 = 10;
 
-/// `POST /internal/connectors/{id}/deliveries/{delivery_id}/redeliver` — send
+/// `POST /internal/v1/connectors/{id}/deliveries/{delivery_id}/redeliver` — send
 /// one delivery again, now, and report what came back. The same delivery id,
 /// so a receiver that already has it deduplicates; the attempt is logged as
 /// manual and spends none of the row's retry budget. `Verb::Update`, because

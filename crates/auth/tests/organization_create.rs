@@ -1,4 +1,4 @@
-//! `POST /internal/organizations`: a signed-in person founds another
+//! `POST /internal/v1/organizations`: a signed-in person founds another
 //! organization. Who owns it, the URL it goes by, what is refused, and what
 //! its chain records.
 #![allow(
@@ -96,9 +96,9 @@ async fn call(
     (status, json_body(resp).await)
 }
 
-/// `POST /me` as `user`, naming no organization.
+/// `POST /internal/v1/me` as `user`, naming no organization.
 async fn me(pool: &PgPool, user: &str) -> (StatusCode, Value) {
-    call(pool, "POST", "/me", user, None, None).await
+    call(pool, "POST", "/internal/v1/me", user, None, None).await
 }
 
 /// Sign somebody in for the first time; answers the id of the organization
@@ -110,13 +110,13 @@ async fn sign_in(pool: &PgPool, user: &str) -> String {
     body["activeOrganizationId"].as_str().unwrap().to_owned()
 }
 
-/// `POST /internal/organizations` as `user`. No `x-organization-id`: the lane
+/// `POST /internal/v1/organizations` as `user`. No `x-organization-id`: the lane
 /// names no existing organization.
 async fn create(pool: &PgPool, user: &str, body: Value) -> (StatusCode, Value) {
     call(
         pool,
         "POST",
-        "/internal/organizations",
+        "/internal/v1/organizations",
         user,
         None,
         Some(body),
@@ -129,7 +129,7 @@ async fn join(pool: &PgPool, organization: &str, owner: &str, user: &str) {
     let (status, body) = call(
         pool,
         "POST",
-        "/internal/organization/invites",
+        "/internal/v1/organization/invites",
         owner,
         Some(organization),
         Some(json!({ "email": format!("{user}@example.test"), "role": "member" })),
@@ -140,7 +140,7 @@ async fn join(pool: &PgPool, organization: &str, owner: &str, user: &str) {
     let (status, body) = call(
         pool,
         "POST",
-        &format!("/internal/me/invites/{invite}/accept"),
+        &format!("/internal/v1/me/invites/{invite}/accept"),
         user,
         None,
         None,
@@ -499,7 +499,7 @@ async fn a_creation_waits_on_the_persons_lock_and_is_refused_once_their_deletion
     apply_audit_migrations(&pool).await;
     let own = sign_in(&pool, "user_leaving").await;
 
-    // Stands in for `DELETE /internal/me`, which holds the person's lock for
+    // Stands in for `DELETE /internal/v1/me`, which holds the person's lock for
     // its whole transaction.
     let mut holder = pool.begin().await.unwrap();
     telmoni_auth::db::locks::lock_person(&mut holder, &UserId::try_new("user_leaving").unwrap())
@@ -693,7 +693,7 @@ async fn somebody_who_owns_none_keeps_their_default(pool: PgPool) {
     let (status, body) = call(
         &pool,
         "PUT",
-        "/internal/me/default-organization",
+        "/internal/v1/me/default-organization",
         "user_default_guest",
         None,
         Some(json!({ "organizationId": side })),
@@ -774,7 +774,7 @@ async fn an_organization_header_is_read_by_nothing(pool: PgPool) {
     let (status, body) = call(
         &pool,
         "POST",
-        "/internal/organizations",
+        "/internal/v1/organizations",
         "user_headed",
         Some(&foreign),
         Some(json!({ "name": "Own Way" })),
@@ -807,7 +807,7 @@ async fn an_unproved_address_founds_nothing_while_addresses_must_be_proved(pool:
     let req = as_person(
         Request::builder()
             .method("POST")
-            .uri("/internal/organizations")
+            .uri("/internal/v1/organizations")
             .header("x-service-secret", SERVICE_SECRET)
             .header("content-type", "application/json"),
         &pool,

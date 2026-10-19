@@ -46,7 +46,7 @@ export const fetchOrganizationMembers = cache(
     if (!ctx) return { kind: "unavailable" };
     try {
       const res = await fetchWithTimeout(
-        `${env.SERVER_URL}/internal/organization/members`,
+        `${env.SERVER_URL}/internal/v1/organization/members`,
         { headers: organizationHeaders(ctx), cache: "no-store" },
       );
       if (res.status === 403) return { kind: "forbidden" };
@@ -108,7 +108,7 @@ export const fetchOrganizationInvites = cache(
     if (!ctx) return { kind: "unavailable" };
     try {
       const res = await fetchWithTimeout(
-        `${env.SERVER_URL}/internal/organization/invites`,
+        `${env.SERVER_URL}/internal/v1/organization/invites`,
         { headers: organizationHeaders(ctx), cache: "no-store" },
       );
       if (res.status === 403) return { kind: "forbidden" };

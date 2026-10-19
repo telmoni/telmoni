@@ -1,4 +1,4 @@
-//! The BFF-facing feed under `/internal/notifications`, and what the modules
+//! The BFF-facing feed under `/internal/v1/notifications`, and what the modules
 //! beside this one call in process: the emit, the purges and the redaction.
 //! Emitting is not itself audited: the module that caused the event audits it.
 
@@ -306,7 +306,7 @@ async fn feed_scope(state: &AppState, headers: &HeaderMap) -> Result<FeedScope, 
     }
 }
 
-/// `GET /internal/notifications/feed` — the recent feed, in ONE scope.
+/// `GET /internal/v1/notifications/feed` — the recent feed, in ONE scope.
 pub async fn get_feed(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -338,7 +338,7 @@ pub struct MarkRead {
     pub before: DateTime<Utc>,
 }
 
-/// `POST /internal/notifications/read` — mark the feed read up to `before`,
+/// `POST /internal/v1/notifications/read` — mark the feed read up to `before`,
 /// with the same predicate as the list and count; three readers over three
 /// sets would be a badge nothing can clear.
 pub async fn mark_read(

@@ -553,8 +553,8 @@ pub trait OwnershipHook: Send + Sync {
     async fn ownership_changed(&self, change: OwnershipChange) -> Result<(), TelmoniError>;
 
     /// Whether `founder` may found another organization at their asking:
-    /// asked before `POST /organizations` founds one, never before `/me`
-    /// provisions a person's first. An `Err` is the refusal the person
+    /// asked before `POST /internal/v1/organizations` founds one, never
+    /// before `/me` provisions a person's first. An `Err` is the refusal the person
     /// reads: a deployment that has a second organization paid for first
     /// answers a 402 naming the plan, and founds it itself once it is
     /// ([`Auth::found_organization`]). Yes, by default.

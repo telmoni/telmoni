@@ -118,7 +118,7 @@ async fn refuse_unless_tokens_on(
     access.leave_owner_scope().await
 }
 
-/// `GET /internal/tokens` — the project's `telmoni_` tokens, metadata only.
+/// `GET /internal/v1/tokens` — the project's `telmoni_` tokens, metadata only.
 pub async fn list_tokens(
     State(state): State<Arc<AppState>>,
     principal: Principal,

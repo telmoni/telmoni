@@ -76,7 +76,7 @@ export async function GET(
   // switched-off flag. This route only relays the bearer and the project;
   // the role is auth's to derive, and nothing here asserts it.
   const res = await tryFetchWithTimeout(
-    `${base}/internal/connectors/${provider}/authorize`,
+    `${base}/internal/v1/connectors/${provider}/authorize`,
     {
       method: "POST",
       headers: projectHeaders({ ...ctx, organizationId: project.organizationId }, projectId),

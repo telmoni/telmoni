@@ -175,7 +175,7 @@ pub(crate) async fn roster_ceiling(
     }))
 }
 
-/// `POST /internal/projects/{project_id}/invites` — offer somebody a role.
+/// `POST /internal/v1/projects/{project_id}/invites` — offer somebody a role.
 pub async fn create_invite(
     State(state): State<Arc<AppState>>,
     Path(project_id): Path<String>,
@@ -306,7 +306,7 @@ pub async fn create_invite(
     ))
 }
 
-/// `GET /internal/projects/{project_id}/invites` — what is still outstanding.
+/// `GET /internal/v1/projects/{project_id}/invites` — what is still outstanding.
 pub async fn list_invites(
     State(state): State<Arc<AppState>>,
     Path(project_id): Path<String>,
@@ -323,7 +323,7 @@ pub async fn list_invites(
     Ok(Json(json!({ "invites": rows })))
 }
 
-/// `DELETE /internal/projects/{project_id}/invites/{invite_id}` — take the
+/// `DELETE /internal/v1/projects/{project_id}/invites/{invite_id}` — take the
 /// offer back. The link dies immediately, because accept reads liveness.
 pub async fn revoke_invite(
     State(state): State<Arc<AppState>>,
@@ -382,7 +382,7 @@ fn inviter_label(
     )
 }
 
-/// `POST /internal/invites/look` — what does this link open?
+/// `POST /internal/v1/invites/look` — what does this link open?
 pub async fn look_up_invite(
     State(state): State<Arc<AppState>>,
     Json(req): Json<InviteTokenRequest>,
@@ -689,7 +689,7 @@ fn not_yours() -> TelmoniError {
     .into()
 }
 
-/// `POST /internal/invites/accept` — spend the link, and become a member.
+/// `POST /internal/v1/invites/accept` — spend the link, and become a member.
 pub async fn accept_invite(
     State(state): State<Arc<AppState>>,
     principal: Principal,
@@ -786,7 +786,7 @@ fn invite_link(state: &AppState, secret: &str) -> String {
     )
 }
 
-/// `GET /internal/me/invites` — list pending invitations addressed to the caller.
+/// `GET /internal/v1/me/invites` — list pending invitations addressed to the caller.
 pub async fn list_my_incoming_invites(
     State(state): State<Arc<AppState>>,
     principal: Principal,
@@ -801,7 +801,7 @@ pub async fn list_my_incoming_invites(
     Ok(Json(json!({ "invites": rows })))
 }
 
-/// `POST /internal/me/invites/{invite_id}/accept` — accept an incoming invitation directly.
+/// `POST /internal/v1/me/invites/{invite_id}/accept` — accept an incoming invitation directly.
 pub async fn accept_my_incoming_invite(
     State(state): State<Arc<AppState>>,
     Path(invite_id): Path<Uuid>,
@@ -888,7 +888,7 @@ pub async fn accept_my_incoming_invite(
     Err(AuthError::NotFound("invitation not found or no longer active".into()).into())
 }
 
-/// `POST /internal/me/invites/{invite_id}/decline` — decline an incoming invitation.
+/// `POST /internal/v1/me/invites/{invite_id}/decline` — decline an incoming invitation.
 pub async fn decline_my_incoming_invite(
     State(state): State<Arc<AppState>>,
     Path(invite_id): Path<Uuid>,

@@ -39,7 +39,7 @@ use telmoni_telemetry::handler::ping_keys::{LIVE_MAX, Rotated, retire_each, reti
 use telmoni_telemetry::rotation::REPLACED_AFTER_S;
 use telmoni_telemetry::{AppState, ping_router, router};
 
-const LANE: &str = "/internal/telemetry/ping-keys";
+const LANE: &str = "/internal/v1/telemetry/ping-keys";
 const OWNER: &str = "user_owner";
 const ADMIN: &str = "user_admin";
 const MEMBER: &str = "user_member";

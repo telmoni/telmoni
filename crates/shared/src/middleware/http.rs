@@ -84,15 +84,11 @@ fn make_span(request: &Request<Body>) -> tracing::Span {
 }
 
 /// The path as the span prints it: a ping's key rides in its URL,
-/// `/ping/{ping_key}/{slug}`, so a credential is cut out of every log line
-/// two ways, and a log holds none. By place: the first segment after the
-/// lane's name is one, whatever was pasted there — an API key as likely as
-/// a ping key — in whatever case a shell's join left the name and however
-/// many slashes it doubled, since the likeliest leak is a path the router
-/// never matches and the span prints all the same. By shape: a segment
-/// carrying a ping key's prefix or an API key's ([`PING_KEY_PREFIX`],
-/// [`API_TOKEN_PREFIX`]) wherever it sits, the lane's name misspelt or the
-/// key in a stray quote. Every other path is printed as it came.
+/// `/ping/v1/{ping_key}/{slug}`, so a credential is cut out two ways, since
+/// the likeliest leak is a path the router never matches. By place, the
+/// segment where the key goes ([`keys_place`]), whatever was pasted there;
+/// by shape, any segment carrying a ping key's prefix or an API key's
+/// ([`PING_KEY_PREFIX`], [`API_TOKEN_PREFIX`]).
 fn loggable_path(path: &str) -> std::borrow::Cow<'_, str> {
     let keys_place = keys_place(path);
     if keys_place.is_none() && !path.split('/').any(shaped_as_a_credential) {
@@ -113,8 +109,9 @@ fn loggable_path(path: &str) -> std::borrow::Cow<'_, str> {
 }
 
 /// Where the key sits in a path to the lane, counted in segments: the first
-/// non-empty one after the lane's name; `None` on any other path, and on
-/// the lane's own root.
+/// non-empty one after the lane's name and version, in any case and past
+/// doubled slashes, or after the name alone when no version follows it;
+/// `None` on any other path, and on the lane's own root.
 fn keys_place(path: &str) -> Option<usize> {
     let mut named = path
         .split('/')
@@ -124,7 +121,19 @@ fn keys_place(path: &str) -> Option<usize> {
     if !lane.eq_ignore_ascii_case("ping") {
         return None;
     }
-    named.next().map(|(at, _)| at)
+    let (at, segment) = named.next()?;
+    if is_version(segment) {
+        named.next().map(|(at, _)| at)
+    } else {
+        Some(at)
+    }
+}
+
+/// Whether a segment names a lane's version: `v` and its digits.
+fn is_version(segment: &str) -> bool {
+    segment
+        .strip_prefix(['v', 'V'])
+        .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// Whether a path segment carries a key's prefix anywhere in it: what a
@@ -310,33 +319,34 @@ mod tests {
         assert!(!lines.contains("free text"), "{lines}");
     }
 
-    /// ⚠ A credential never reaches a log line: the span prints the path with
-    /// the first segment after the lane's name cut out, whatever it holds and
-    /// however a shell's join spelled the name or doubled the slash, every
-    /// segment shaped as a key wherever it sits, and every other path as it
-    /// came.
+    /// ⚠ The span cuts the segment where the key goes, and any shaped as one.
     #[test]
     fn a_pings_key_is_cut_out_of_the_logged_path() {
         for (path, logged) in [
             (
-                "/ping/telmoniping_k3yk3yk3yk3yk3yk3yk3yk3yk3yk3yk3y/nightly/start",
-                "/ping/…/nightly/start",
+                "/ping/v1/telmoniping_k3yk3yk3yk3yk3yk3yk3yk3yk3yk3yk3y/nightly/start",
+                "/ping/v1/…/nightly/start",
             ),
-            ("/ping/telmoniping_k3y/nightly", "/ping/…/nightly"),
-            ("/ping/telmoniping_k3y/", "/ping/…/"),
-            ("/ping/telmoniping_k3y", "/ping/…"),
+            ("/ping/v1/telmoniping_k3y/nightly", "/ping/v1/…/nightly"),
+            ("/ping/v1/telmoniping_k3y/", "/ping/v1/…/"),
+            ("/ping/v1/telmoniping_k3y", "/ping/v1/…"),
+            ("/ping/v1/notakey/nightly", "/ping/v1/…/nightly"),
+            ("/ping/v1/telmoni_4p1k3y/nightly", "/ping/v1/…/nightly"),
+            ("/ping/v1//telmoniping_k3y/nightly", "/ping/v1//…/nightly"),
+            ("/ping//v1/notakey/nightly", "/ping//v1/…/nightly"),
+            ("//ping/v1/notakey/nightly", "//ping/v1/…/nightly"),
+            ("/PING/V1/notakey/nightly", "/PING/V1/…/nightly"),
+            ("/ping/v2/notakey/nightly", "/ping/v2/…/nightly"),
             ("/ping/notakey/nightly", "/ping/…/nightly"),
-            ("/ping/telmoni_4p1k3y/nightly", "/ping/…/nightly"),
-            ("/ping//telmoniping_k3y/nightly", "/ping//…/nightly"),
-            ("/ping//notakey/nightly", "/ping//…/nightly"),
-            ("//ping/notakey/nightly", "//ping/…/nightly"),
-            ("/PING/notakey/nightly", "/PING/…/nightly"),
-            ("/pings/telmoniping_k3y/nightly", "/pings/…/nightly"),
-            ("/pings/notakey/nightly", "/pings/notakey/nightly"),
-            ("/ping/'telmoniping_k3y'/nightly", "/ping/…/nightly"),
+            ("/ping/vee/nightly", "/ping/…/nightly"),
+            ("/pings/v1/telmoniping_k3y/nightly", "/pings/v1/…/nightly"),
+            ("/pings/v1/notakey/nightly", "/pings/v1/notakey/nightly"),
+            ("/ping/v1/'telmoniping_k3y'/nightly", "/ping/v1/…/nightly"),
             ("/nightly/telmoniping_k3y", "/nightly/…"),
             ("/v1/telmoni_4p1k3y", "/v1/…"),
-            ("/ping/telmoniping_k3y/telmoniping_k3y", "/ping/…/…"),
+            ("/ping/v1/telmoniping_k3y/telmoniping_k3y", "/ping/v1/…/…"),
+            ("/ping/v1/", "/ping/v1/"),
+            ("/ping/v1", "/ping/v1"),
             ("/ping/", "/ping/"),
             ("/ping", "/ping"),
             ("/v1/organization", "/v1/organization"),

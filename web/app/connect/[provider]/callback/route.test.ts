@@ -86,7 +86,7 @@ describe("GET /connect/[provider]/callback", () => {
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe(`${PAGE}?connected=slack`);
     expect(tryFetchWithTimeout).toHaveBeenCalledWith(
-      "http://notifications:8086/internal/connectors/slack/callback",
+      "http://notifications:8086/internal/v1/connectors/slack/callback",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({

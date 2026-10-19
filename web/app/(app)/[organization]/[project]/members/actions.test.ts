@@ -103,7 +103,7 @@ describe("Incoming invites server actions", () => {
       const res = await acceptIncomingInviteAction("inv_123");
       expect(res).toEqual({ error: null });
       expect(fetchMock).toHaveBeenCalledWith(
-        "http://auth.test/internal/me/invites/inv_123/accept",
+        "http://auth.test/internal/v1/me/invites/inv_123/accept",
         expect.objectContaining({
           method: "POST",
           headers: expect.objectContaining({ authorization: "Bearer at_1" }),
@@ -211,7 +211,7 @@ describe("Incoming invites server actions", () => {
       const res = await declineIncomingInviteAction("inv_456");
       expect(res).toEqual({ error: null });
       expect(fetchMock).toHaveBeenCalledWith(
-        "http://auth.test/internal/me/invites/inv_456/decline",
+        "http://auth.test/internal/v1/me/invites/inv_456/decline",
         expect.objectContaining({
           method: "POST",
           headers: expect.objectContaining({ authorization: "Bearer at_1" }),
@@ -300,7 +300,7 @@ describe("Incoming invites server actions", () => {
       const res = await revokeInviteAction("project_1", "inv_789");
       expect(res).toEqual({ error: null });
       expect(fetchMock).toHaveBeenCalledWith(
-        "http://auth.test/internal/projects/project_1/invites/inv_789",
+        "http://auth.test/internal/v1/projects/project_1/invites/inv_789",
         expect.objectContaining({ method: "DELETE" }),
       );
       const revoked = { type: "invite:revoked", data: { inviteId: "inv_789" } };
@@ -443,7 +443,7 @@ describe("Incoming invites server actions", () => {
       );
       expect(await offerProjectAction("project_1", "user_2")).toEqual({ error: null });
       expect(fetchMock).toHaveBeenCalledWith(
-        "http://auth.test/internal/projects/project_1/transfer",
+        "http://auth.test/internal/v1/projects/project_1/transfer",
         expect.objectContaining({
           method: "POST",
           body: JSON.stringify({ memberId: "user_2" }),
@@ -472,7 +472,7 @@ describe("Incoming invites server actions", () => {
       );
       expect(await cancelProjectOfferAction("project_1")).toEqual({ error: null });
       expect(fetchMock).toHaveBeenCalledWith(
-        "http://auth.test/internal/projects/project_1/transfer",
+        "http://auth.test/internal/v1/projects/project_1/transfer",
         expect.objectContaining({ method: "DELETE" }),
       );
       expect(mockPublishEvent).toHaveBeenCalledTimes(2);
@@ -507,7 +507,7 @@ describe("Incoming invites server actions", () => {
       const res = await removeMemberAction("project_1", "user_2");
       expect(res).toEqual({ error: null });
       expect(fetchMock).toHaveBeenCalledWith(
-        "http://auth.test/internal/projects/project_1/members/user_2",
+        "http://auth.test/internal/v1/projects/project_1/members/user_2",
         expect.objectContaining({
           method: "DELETE",
         }),
@@ -529,7 +529,7 @@ describe("Incoming invites server actions", () => {
       const res = await updateMemberRoleAction("project_1", "user_2", "admin");
       expect(res).toEqual({ error: null });
       expect(fetchMock).toHaveBeenCalledWith(
-        "http://auth.test/internal/projects/project_1/members/user_2/role",
+        "http://auth.test/internal/v1/projects/project_1/members/user_2/role",
         expect.objectContaining({ method: "PUT", body: JSON.stringify({ role: "admin" }) }),
       );
       expect(mockPublishEvent).toHaveBeenCalledTimes(1);

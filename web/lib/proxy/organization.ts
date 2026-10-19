@@ -23,7 +23,7 @@ export const PATH_HEADER = "x-telmoni-path";
 
 /**
  * The organization the console last stood in, for the paths that name none:
- * Account, `/console`, the route handlers. By id, not by slug: it outlives
+ * Account, `/console`, the other route handlers. By id, not by slug: it outlives
  * the page that wrote it, and a URL change moves a slug.
  *
  * ⚠ **Written by the console in the browser** (`OrganizationSync`), **never
@@ -57,12 +57,19 @@ export function activeOrganizationCookie(organizationId: string, secure: boolean
   ].join("; ");
 }
 
+/** The console's Route Handlers for one organization, named as its pages name it. */
+const ORGANIZATION_LANES = "/api/v1/organizations/";
+
 /**
- * The organization `pathname` names: its first segment, when that is a slug
- * none of the console's own paths claims. `null` for those, and for an id,
- * which the layouts redirect to its slug before anything acts on it.
+ * The organization `pathname` names: its first segment, or the one after
+ * `/api/v1/organizations/`, when that is a slug none of the console's own
+ * paths claims. `null` for the rest, and for an id, which the layouts
+ * redirect to its slug before anything acts on it.
  */
 export function namedOrganization(pathname: string): string | null {
-  const segment = pathname.split("/")[1] ?? "";
+  const named = pathname.startsWith(ORGANIZATION_LANES)
+    ? pathname.slice(ORGANIZATION_LANES.length - 1)
+    : pathname;
+  const segment = named.split("/")[1] ?? "";
   return isOrganizationSlug(segment) ? segment : null;
 }

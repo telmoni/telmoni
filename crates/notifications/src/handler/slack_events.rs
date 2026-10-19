@@ -1,4 +1,4 @@
-//! `POST /webhooks/slack` — the events Slack sends about our app.
+//! `POST /webhooks/v1/slack` — the events Slack sends about our app.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -45,7 +45,7 @@ impl Revocation {
     }
 }
 
-/// `POST /webhooks/slack`.
+/// `POST /webhooks/v1/slack`.
 pub async fn slack_events(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,

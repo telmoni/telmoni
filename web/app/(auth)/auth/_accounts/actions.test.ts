@@ -63,7 +63,7 @@ describe("signInAction", () => {
     const res = await signInAction({ email: "ada@example.com", password: "hunter22", state: "st8" });
     expect(res).toEqual({ error: null, next: "/auth/callback?code=code_1&state=st8" });
     const { url, init } = sent();
-    expect(url).toBe("http://auth.test/internal/auth/password/sign-in");
+    expect(url).toBe("http://auth.test/internal/v1/auth/password/sign-in");
     expect(init.headers["x-service-secret"]).toBe("svc");
     expect(init.headers).not.toHaveProperty("authorization");
     expect(JSON.parse(init.body)).toEqual({ email: "ada@example.com", password: "hunter22" });
@@ -110,7 +110,7 @@ describe("signUpAction", () => {
     });
     expect(res).toEqual({ error: null });
     const { url, init } = sent();
-    expect(url).toBe("http://auth.test/internal/auth/password/sign-up");
+    expect(url).toBe("http://auth.test/internal/v1/auth/password/sign-up");
     expect(JSON.parse(init.body)).toEqual({
       email: "ada@example.com",
       password: "correct horse battery staple",
@@ -151,7 +151,7 @@ describe("the link actions", () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
     expect(await verifyEmailAction({ userId: "user_1", token: "tok" })).toEqual({ error: null });
     const { url, init } = sent();
-    expect(url).toBe("http://auth.test/internal/auth/password/verify");
+    expect(url).toBe("http://auth.test/internal/v1/auth/password/verify");
     expect(JSON.parse(init.body)).toEqual({ userId: "user_1", token: "tok" });
   });
 
@@ -163,7 +163,7 @@ describe("the link actions", () => {
   it("forgotPasswordAction says nothing about whether the address has an account", async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ sent: true }), { status: 202 }));
     expect(await forgotPasswordAction({ email: "ada@example.com" })).toEqual({ error: null });
-    expect(sent().url).toBe("http://auth.test/internal/auth/password/forgot");
+    expect(sent().url).toBe("http://auth.test/internal/v1/auth/password/forgot");
   });
 
   it("resetPasswordAction posts the link and the new password", async () => {
@@ -172,7 +172,7 @@ describe("the link actions", () => {
       await resetPasswordAction({ userId: "user_1", token: "tok", password: "correct horse battery staple" }),
     ).toEqual({ error: null });
     const { url, init } = sent();
-    expect(url).toBe("http://auth.test/internal/auth/password/reset");
+    expect(url).toBe("http://auth.test/internal/v1/auth/password/reset");
     expect(JSON.parse(init.body)).toEqual({
       userId: "user_1",
       token: "tok",
@@ -194,7 +194,7 @@ describe("deviceDecisionAction", () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
     expect(await deviceDecisionAction({ userCode: "wdjb-mjht", decision: "approve" })).toEqual({ error: null });
     const { url, init } = sent();
-    expect(url).toBe("http://auth.test/internal/auth/device/approve");
+    expect(url).toBe("http://auth.test/internal/v1/auth/device/approve");
     expect(init.headers.authorization).toBe("Bearer at_1");
     expect(JSON.parse(init.body)).toEqual({ userCode: "wdjb-mjht" });
   });
@@ -202,7 +202,7 @@ describe("deviceDecisionAction", () => {
   it("denies on the deny lane", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
     await deviceDecisionAction({ userCode: "WDJB-MJHT", decision: "deny" });
-    expect(sent().url).toBe("http://auth.test/internal/auth/device/deny");
+    expect(sent().url).toBe("http://auth.test/internal/v1/auth/device/deny");
   });
 
   it("needs a session, and names a code nobody is waiting on", async () => {

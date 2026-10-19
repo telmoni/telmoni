@@ -37,7 +37,7 @@ export const fetchMembers = cache(async (projectId: string): Promise<MemberAcces
   if (!ctx) return { kind: "unavailable" };
   try {
     const res = await fetchWithTimeout(
-      `${env.SERVER_URL}/internal/projects/${encodeURIComponent(projectId)}/members`,
+      `${env.SERVER_URL}/internal/v1/projects/${encodeURIComponent(projectId)}/members`,
       { headers: projectHeaders(ctx, projectId), cache: "no-store" },
     );
     if (res.status === 403) return { kind: "forbidden" };
@@ -102,7 +102,7 @@ export const fetchInvites = cache(async (projectId: string): Promise<InviteAcces
   if (!ctx) return { kind: "unavailable" };
   try {
     const res = await fetchWithTimeout(
-      `${env.SERVER_URL}/internal/projects/${encodeURIComponent(projectId)}/invites`,
+      `${env.SERVER_URL}/internal/v1/projects/${encodeURIComponent(projectId)}/invites`,
       { headers: projectHeaders(ctx, projectId), cache: "no-store" },
     );
     if (res.status === 403) return { kind: "forbidden" };
@@ -150,7 +150,7 @@ export type InviteLook = z.infer<typeof InviteLookSchema>;
 export async function lookUpInvite(token: string): Promise<InviteLook | null> {
   try {
     const res = await fetchWithTimeout(
-      `${env.SERVER_URL}/internal/invites/look`,
+      `${env.SERVER_URL}/internal/v1/invites/look`,
       {
         method: "POST",
         headers: {

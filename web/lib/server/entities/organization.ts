@@ -175,7 +175,7 @@ export const getServerContext = cache(
       // for the sessions table; the header only which organization to act in.
       const requested = await requestedOrganization();
       const named = requested && "slug" in requested ? requested.slug : null;
-      const res = await fetchWithTimeout(`${env.SERVER_URL}/me`, {
+      const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/me`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${session.accessToken}`,

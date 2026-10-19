@@ -6,7 +6,7 @@ import { admitAgentCall } from "@/lib/server/agent-admit";
 import { deleteAgentConversation } from "@/lib/server/entities/agent";
 
 // The agent panel's one write. Its reads — the agent's status, the history,
-// a conversation opened — are Route Handlers under `app/api/agent`, as is the
+// a conversation opened — are Route Handlers under `app/api/v1/agent`, as is the
 // turn, which streams where a Server Action answers once.
 
 export async function deleteAgentConversationAction(

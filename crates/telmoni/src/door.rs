@@ -1,14 +1,10 @@
-//! The machine door: what the binary puts in front of the lanes a machine
-//! reaches straight on the machine host — the public read API under `/v1`,
-//! the CLI's session lanes under `/cli`, the ping lane under `/ping` and
-//! ingest under `/otlp` — because they come in from the internet rather than
-//! from the console. Each lane has a gate of its own, an API key, a bearer
-//! or a device code, or the ping key in a ping's path; the door adds what
-//! every lane shares: the caller's address, read past the proxies in front,
-//! and the limits held in Redis by source and by credential, so one caller
-//! cannot spend the others' room. Ingest's credential is its project, which
-//! its handler meters once the key is known, so the door meters it by
-//! source alone, before the key is looked up.
+//! The machine door, in front of the lanes a machine reaches straight on the
+//! machine host: the read API under `/v1`, the CLI's under `/cli/v1`, pings
+//! under `/ping/v1` and ingest under `/otlp`. Each lane gates its own; the
+//! door adds the caller's address, read past the proxies in front, and the
+//! limits kept in Redis by source and by credential, so one caller cannot
+//! spend the others' room. Ingest is metered here by source alone: its
+//! credential is its project, which its handler meters once the key is known.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -26,14 +22,14 @@ use telmoni_telemetry::handler::{ingest, pings};
 use telmoni_telemetry::rate_limit::RateLimit;
 
 /// How many a minute one credential may make: an API key on `/v1`, a bearer
-/// on `/cli`.
+/// on `/cli/v1`.
 const PER_CREDENTIAL: u32 = 600;
 /// How many a minute one address may make on `/v1`, keyed or not.
 const V1_PER_SOURCE: u32 = 1_200;
-/// How many a minute one address may make on `/cli`: a sign-in's polls, a
+/// How many a minute one address may make on `/cli/v1`: a sign-in's polls, a
 /// refresh now and then, and little else.
 const CLI_PER_SOURCE: u32 = 120;
-/// How many a minute one address may make on `/ping`: a host's crontab
+/// How many a minute one address may make on `/ping/v1`: a host's crontab
 /// lines, each pinging its start and its end. The plan's own numbers, per
 /// organization and per key, come with the limiter (roadmap 2.11).
 const PING_PER_SOURCE: u32 = 1_200;
@@ -100,7 +96,7 @@ impl Door {
         ))
     }
 
-    /// The `/cli` lanes behind the door's limits.
+    /// The `/cli/v1` lanes behind the door's limits.
     pub fn cli(self: &Arc<Self>, lanes: Router) -> Router {
         lanes.layer(middleware::from_fn_with_state(
             (self.clone(), Lane::Cli),
@@ -108,7 +104,7 @@ impl Door {
         ))
     }
 
-    /// The `/ping` lane behind the door's limits: by source, and by the key
+    /// The `/ping/v1` lane behind the door's limits: by source, and by the key
     /// in the path, before the lane reads it — a key spelled otherwise than
     /// minted refused here, as no key. The door's refusals there are none a
     /// cache may keep, as none of the lane's answers is

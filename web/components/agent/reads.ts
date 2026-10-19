@@ -4,7 +4,7 @@ import type {
   AgentStatus,
 } from "@/lib/types/agent";
 
-// The agent panel's reads, from the agent's Route Handlers (`app/api/agent`),
+// The agent panel's reads, from the agent's Route Handlers (`app/api/v1/agent`),
 // made in the browser and so kept out of `lib/`, where a bare fetch is a
 // server's. A refusal comes back as the sentence the panel shows: the
 // handler's own, or — for a lapsed session the console's proxy turned away
@@ -28,17 +28,17 @@ async function read<T extends object>(path: string): Promise<T | { error: string
 const query = (projectId: string) => `project=${encodeURIComponent(projectId)}`;
 
 export function readAgentStatus(projectId: string) {
-  return read<{ status: AgentStatus }>(`/api/agent/status?${query(projectId)}`);
+  return read<{ status: AgentStatus }>(`/api/v1/agent/status?${query(projectId)}`);
 }
 
 export function readAgentConversations(projectId: string) {
   return read<{ conversations: AgentConversationSummary[] }>(
-    `/api/agent/conversations?${query(projectId)}`,
+    `/api/v1/agent/conversations?${query(projectId)}`,
   );
 }
 
 export function readAgentConversation(projectId: string, id: string) {
   return read<{ conversation: AgentConversation }>(
-    `/api/agent/conversations/${encodeURIComponent(id)}?${query(projectId)}`,
+    `/api/v1/agent/conversations/${encodeURIComponent(id)}?${query(projectId)}`,
   );
 }

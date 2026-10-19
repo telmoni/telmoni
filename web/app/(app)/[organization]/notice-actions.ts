@@ -35,7 +35,7 @@ export async function markOrganizationReadAction(
   if (!ctx) return { error: await unplacedOrganization() };
   if (ctx.organizationId !== organizationId) return { error: SWITCHED_ORGANIZATION };
 
-  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/notifications/read`, {
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/notifications/read`, {
     method: "POST",
     headers: { ...organizationHeaders(ctx), "content-type": "application/json" },
     body: JSON.stringify({ before }),

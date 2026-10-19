@@ -55,7 +55,7 @@ const SAVES_A_MINUTE = { limit: 20, windowMs: 60_000 };
 
 type Refusal = { status: "error"; error: string };
 
-/** One of telemetry's lanes under `/internal/telemetry`, called as the
+/** One of telemetry's lanes under `/internal/v1/telemetry`, called as the
  *  person: the answer, or why it was not sent or was refused. */
 async function call(
   method: "POST" | "PUT" | "DELETE",
@@ -70,7 +70,7 @@ async function call(
   const resolved = await activeProjectForMutation(projectId);
   if (resolved.error !== null) return { status: "error", error: resolved.error };
 
-  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/telemetry${lane}`, {
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry${lane}`, {
     method,
     headers: {
       ...sessionHeaders(session, resolved.organizationId, resolved.projectId),

@@ -110,7 +110,7 @@ export const fetchSessions = cache(
     if (!ctx) return { kind: "unavailable" };
     try {
       const res = await fetchWithTimeout(
-        `${env.SERVER_URL}/internal/telemetry/sessions${queryString(query)}`,
+        `${env.SERVER_URL}/internal/v1/telemetry/sessions${queryString(query)}`,
         { headers: projectHeaders(ctx, projectId), cache: "no-store" },
       );
       if (res.status === 403) return { kind: "forbidden" };
@@ -153,7 +153,7 @@ export const fetchSession = cache(
     if (!ctx) return { kind: "unavailable" };
     try {
       const res = await fetchWithTimeout(
-        `${env.SERVER_URL}/internal/telemetry/sessions/${encodeURIComponent(sessionId)}${queryString({ ...query, pinned })}`,
+        `${env.SERVER_URL}/internal/v1/telemetry/sessions/${encodeURIComponent(sessionId)}${queryString({ ...query, pinned })}`,
         { headers: projectHeaders(ctx, projectId), cache: "no-store" },
       );
       if (res.status === 403) return { kind: "forbidden" };

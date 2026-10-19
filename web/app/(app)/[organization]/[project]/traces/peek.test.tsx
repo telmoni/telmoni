@@ -116,7 +116,7 @@ describe("TracePeek", () => {
     expect(document.activeElement).toBe(panel);
     expect(await within(panel).findByRole("tree", { name: "Spans" })).toBeInTheDocument();
     expect(within(panel).getByRole("heading", { level: 2 })).toHaveTextContent("agent-a");
-    expect(fetchMock).toHaveBeenCalledWith(`/api/traces/${RUN_A}?project=project_1`, expect.anything());
+    expect(fetchMock).toHaveBeenCalledWith(`/api/v1/traces/${RUN_A}?project=project_1`, expect.anything());
     expect(cover).not.toHaveBeenCalled();
   });
 

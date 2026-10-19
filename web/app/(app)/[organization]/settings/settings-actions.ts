@@ -27,7 +27,7 @@ interface Answer {
   error: string | null;
 }
 
-/// `PATCH /internal/organization` for the organization the page rendered: the
+/// `PATCH /internal/v1/organization` for the organization the page rendered: the
 /// name, the slug, or both. The name and the URL are two settings, as on
 /// Vercel's team page: a name moves no slug.
 async function patchOrganization(
@@ -50,7 +50,7 @@ async function patchOrganization(
   const gate = await getServerContext();
   const was = gate ? activeOrganization(gate)?.slug : undefined;
 
-  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/organization`, {
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/organization`, {
     method: "PATCH",
     headers: { ...organizationHeaders(ctx), "content-type": "application/json" },
     body: JSON.stringify(body),

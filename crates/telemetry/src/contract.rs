@@ -311,7 +311,7 @@ pub fn is_field(key: &str) -> bool {
 //
 // One row for every name above, so the docs page (`api/field-inventory.mdx`,
 // held to [`INVENTORY`] by `tests/field_inventory.rs`) and the console's
-// privacy page, which reads it over `/internal/telemetry/field-inventory`,
+// privacy page, which reads it over `/internal/v1/telemetry/field-inventory`,
 // say what the code does and nothing else. The lists above are what ingest
 // reads; this table is what a person reads of them, and a test holds the two
 // to each other.

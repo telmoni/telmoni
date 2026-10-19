@@ -28,7 +28,7 @@ use telmoni_shared::{
 };
 use telmoni_telemetry::router;
 
-const LANE: &str = "/internal/telemetry/content-mode";
+const LANE: &str = "/internal/v1/telemetry/content-mode";
 const OWNER: &str = "user_owner";
 const ADMIN: &str = "user_admin";
 const MEMBER: &str = "user_member";

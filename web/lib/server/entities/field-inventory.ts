@@ -33,7 +33,7 @@ export const fetchFieldInventory = cache(
     const ctx = await identityContext();
     if (!ctx) return null;
     try {
-      const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/telemetry/field-inventory`, {
+      const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry/field-inventory`, {
         headers: projectHeaders(ctx, projectId),
         cache: "no-store",
       });

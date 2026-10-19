@@ -105,7 +105,7 @@ describe("disconnectConnectorAction", () => {
     const res = await disconnectConnectorAction(PROJECT, ID);
     expect(res).toEqual({ error: null });
     expect(fetchMock).toHaveBeenCalledWith(
-      `http://notifications.test/internal/connectors/${ID}`,
+      `http://notifications.test/internal/v1/connectors/${ID}`,
       expect.objectContaining({
         method: "DELETE",
         headers: expect.objectContaining({ "x-project-id": PROJECT, authorization: "Bearer at_1" }),
@@ -172,7 +172,7 @@ describe("sendTestMessageAction", () => {
     const res = await sendTestMessageAction(PROJECT, ID);
     expect(res).toEqual({ error: null, delivered: true });
     expect(fetchMock).toHaveBeenCalledWith(
-      `http://notifications.test/internal/connectors/${ID}/test`,
+      `http://notifications.test/internal/v1/connectors/${ID}/test`,
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({ authorization: "Bearer at_1" }),
@@ -238,7 +238,7 @@ describe("createWebhookConnectorAction", () => {
     );
     expect(res).toEqual({ error: null, signingSecret: "whsec_abc", host: "hooks.example.com" });
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://notifications.test/internal/connectors/webhook",
+      "http://notifications.test/internal/v1/connectors/webhook",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
@@ -262,7 +262,7 @@ describe("createWebhookConnectorAction", () => {
       "connector_connected",
     ]);
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://notifications.test/internal/connectors/webhook",
+      "http://notifications.test/internal/v1/connectors/webhook",
       expect.objectContaining({
         body: JSON.stringify({
           url: "https://hooks.example.com/x",
@@ -324,7 +324,7 @@ describe("updateWebhookEventsAction", () => {
     const res = await updateWebhookEventsAction(PROJECT, ID, ["member_added"]);
     expect(res).toEqual({ error: null });
     expect(fetchMock).toHaveBeenCalledWith(
-      `http://notifications.test/internal/connectors/${ID}/events`,
+      `http://notifications.test/internal/v1/connectors/${ID}/events`,
       expect.objectContaining({
         method: "PUT",
         headers: expect.objectContaining({
@@ -394,7 +394,7 @@ describe("rotateWebhookSecretAction", () => {
     const res = await rotateWebhookSecretAction(PROJECT, ID, 24);
     expect(res).toEqual({ error: null, signingSecret: "whsec_new", host: "hooks.example.com" });
     expect(fetchMock).toHaveBeenCalledWith(
-      `http://notifications.test/internal/connectors/${ID}/rotate`,
+      `http://notifications.test/internal/v1/connectors/${ID}/rotate`,
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
@@ -442,7 +442,7 @@ describe("rotateWebhookSecretAction", () => {
 });
 
 describe("redeliverAction", () => {
-  const url = `http://notifications.test/internal/connectors/${ID}/deliveries/${DELIVERY}/redeliver`;
+  const url = `http://notifications.test/internal/v1/connectors/${ID}/deliveries/${DELIVERY}/redeliver`;
 
   it("posts the resend and reports a delivery", async () => {
     fetchMock.mockResolvedValue(json({ delivered: true, error: null }));

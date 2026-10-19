@@ -86,7 +86,7 @@ export const fetchConnectors = cache(
     const [ctx, project] = await Promise.all([identityContext(), fetchProject(projectId)]);
     if (!ctx || !project) return null;
     try {
-      const res = await fetchWithTimeout(`${base}/internal/connectors`, {
+      const res = await fetchWithTimeout(`${base}/internal/v1/connectors`, {
         headers: projectHeaders(ctx, projectId),
         cache: "no-store",
       });

@@ -24,7 +24,7 @@ export const fetchContentMode = cache(
     const ctx = await identityContext();
     if (!ctx) return null;
     try {
-      const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/telemetry/content-mode`, {
+      const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry/content-mode`, {
         headers: projectHeaders(ctx, projectId),
         cache: "no-store",
       });

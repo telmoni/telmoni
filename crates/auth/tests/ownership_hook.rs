@@ -293,7 +293,9 @@ impl Deployment {
     /// were provisioned with.
     async fn sign_in(&self, pool: &PgPool, user: &str) -> String {
         seed_identity(pool, user, &format!("{user}@example.test")).await;
-        let (status, body) = self.call(pool, "POST", "/me", user, None, None).await;
+        let (status, body) = self
+            .call(pool, "POST", "/internal/v1/me", user, None, None)
+            .await;
         assert_eq!(status, StatusCode::OK, "sign-in failed for {user}: {body}");
         body["activeOrganizationId"].as_str().unwrap().to_owned()
     }
@@ -305,7 +307,7 @@ impl Deployment {
             .call(
                 pool,
                 "POST",
-                "/internal/organization/invites",
+                "/internal/v1/organization/invites",
                 OWNER,
                 Some(organization),
                 Some(json!({ "email": format!("{user}@example.test"), "role": "admin" })),
@@ -317,7 +319,7 @@ impl Deployment {
             .call(
                 pool,
                 "POST",
-                &format!("/internal/me/invites/{invite}/accept"),
+                &format!("/internal/v1/me/invites/{invite}/accept"),
                 user,
                 None,
                 None,
@@ -373,7 +375,7 @@ async fn the_hook_is_told_of_every_founding_once(pool: PgPool) {
         .call(
             &pool,
             "POST",
-            "/internal/organizations",
+            "/internal/v1/organizations",
             OWNER,
             None,
             Some(json!({ "name": "Second" })),
@@ -389,7 +391,7 @@ async fn the_hook_is_told_of_every_founding_once(pool: PgPool) {
 
     // `/me` again finds them in an organization, and founds nothing.
     let (status, _) = deployment
-        .call(&pool, "POST", "/me", OWNER, None, None)
+        .call(&pool, "POST", "/internal/v1/me", OWNER, None, None)
         .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(deployment.ownership.told().len(), 2);
@@ -416,7 +418,7 @@ async fn a_founding_at_the_persons_asking_is_the_hooks_to_refuse_and_the_first_i
         .call(
             &pool,
             "POST",
-            "/internal/organizations",
+            "/internal/v1/organizations",
             OWNER,
             None,
             Some(json!({ "name": "Second" })),
@@ -444,7 +446,7 @@ async fn a_founding_at_the_persons_asking_is_the_hooks_to_refuse_and_the_first_i
         .call(
             &pool,
             "POST",
-            "/internal/organizations",
+            "/internal/v1/organizations",
             OWNER,
             None,
             Some(json!({ "name": "Second" })),
@@ -550,7 +552,7 @@ async fn a_handover_is_asked_before_the_offer_and_the_accept_and_told_once(pool:
         .call(
             &pool,
             "POST",
-            "/internal/organization/owner-transfer",
+            "/internal/v1/organization/owner-transfer",
             OWNER,
             Some(&organization),
             Some(json!({ "memberId": ADMIN })),
@@ -561,7 +563,7 @@ async fn a_handover_is_asked_before_the_offer_and_the_accept_and_told_once(pool:
         .call(
             &pool,
             "POST",
-            "/internal/organization/owner-transfer/accept",
+            "/internal/v1/organization/owner-transfer/accept",
             ADMIN,
             Some(&organization),
             None,
@@ -604,7 +606,7 @@ async fn a_refusal_stops_the_offer_and_the_accept(pool: PgPool) {
         .call(
             &pool,
             "POST",
-            "/internal/organization/owner-transfer",
+            "/internal/v1/organization/owner-transfer",
             OWNER,
             Some(&organization),
             Some(json!({ "memberId": ADMIN })),
@@ -629,7 +631,7 @@ async fn a_refusal_stops_the_offer_and_the_accept(pool: PgPool) {
         .call(
             &pool,
             "POST",
-            "/internal/organization/owner-transfer",
+            "/internal/v1/organization/owner-transfer",
             OWNER,
             Some(&organization),
             Some(json!({ "memberId": ADMIN })),
@@ -641,7 +643,7 @@ async fn a_refusal_stops_the_offer_and_the_accept(pool: PgPool) {
         .call(
             &pool,
             "POST",
-            "/internal/organization/owner-transfer/accept",
+            "/internal/v1/organization/owner-transfer/accept",
             ADMIN,
             Some(&organization),
             None,
@@ -677,7 +679,7 @@ async fn only_the_owner_offering_to_an_admin_is_shown_the_hooks_answer(pool: PgP
         .call(
             &pool,
             "POST",
-            "/internal/organization/owner-transfer",
+            "/internal/v1/organization/owner-transfer",
             STRANGER,
             Some(&organization),
             Some(json!({ "memberId": ADMIN })),
@@ -688,7 +690,7 @@ async fn only_the_owner_offering_to_an_admin_is_shown_the_hooks_answer(pool: PgP
         .call(
             &pool,
             "POST",
-            "/internal/organization/owner-transfer",
+            "/internal/v1/organization/owner-transfer",
             OWNER,
             Some(&organization),
             Some(json!({ "memberId": STRANGER })),
@@ -703,7 +705,7 @@ async fn only_the_owner_offering_to_an_admin_is_shown_the_hooks_answer(pool: PgP
         .call(
             &pool,
             "POST",
-            "/internal/organization/owner-transfer/accept",
+            "/internal/v1/organization/owner-transfer/accept",
             STRANGER,
             Some(&organization),
             None,
@@ -715,7 +717,7 @@ async fn only_the_owner_offering_to_an_admin_is_shown_the_hooks_answer(pool: PgP
         .call(
             &pool,
             "POST",
-            "/internal/organization/owner-transfer/accept",
+            "/internal/v1/organization/owner-transfer/accept",
             ADMIN,
             Some(&organization),
             None,
@@ -738,7 +740,7 @@ async fn a_paused_organization_sends_no_invitation(pool: PgPool) {
         .call(
             &pool,
             "POST",
-            "/internal/projects",
+            "/internal/v1/projects",
             OWNER,
             Some(&organization),
             Some(json!({ "name": "Payments" })),
@@ -757,7 +759,7 @@ async fn a_paused_organization_sends_no_invitation(pool: PgPool) {
         .call(
             &pool,
             "POST",
-            "/internal/organization/invites",
+            "/internal/v1/organization/invites",
             OWNER,
             Some(&organization),
             Some(json!({ "email": "someone@example.test", "role": "member" })),
@@ -771,7 +773,7 @@ async fn a_paused_organization_sends_no_invitation(pool: PgPool) {
         .call(
             &pool,
             "POST",
-            &format!("/internal/projects/{project}/invites"),
+            &format!("/internal/v1/projects/{project}/invites"),
             OWNER,
             Some(&organization),
             Some(json!({ "email": "someone@example.test", "role": "member" })),
@@ -792,7 +794,7 @@ async fn a_paused_organization_sends_no_invitation(pool: PgPool) {
         .call(
             &pool,
             "GET",
-            "/internal/organization/members",
+            "/internal/v1/organization/members",
             OWNER,
             Some(&organization),
             None,
@@ -831,7 +833,7 @@ impl Deployment {
             .call(
                 pool,
                 "POST",
-                "/internal/projects",
+                "/internal/v1/projects",
                 OWNER,
                 Some(organization),
                 Some(json!({ "name": name })),
@@ -846,7 +848,7 @@ impl Deployment {
         self.call(
             pool,
             "POST",
-            "/internal/organization/invites",
+            "/internal/v1/organization/invites",
             OWNER,
             Some(organization),
             Some(json!({ "email": email, "role": "member" })),
@@ -865,7 +867,7 @@ impl Deployment {
         self.call(
             pool,
             "POST",
-            &format!("/internal/projects/{project}/invites"),
+            &format!("/internal/v1/projects/{project}/invites"),
             OWNER,
             Some(organization),
             Some(json!({ "email": email, "role": "member" })),
@@ -878,7 +880,7 @@ impl Deployment {
         self.call(
             pool,
             "POST",
-            &format!("/internal/me/invites/{invite}/accept"),
+            &format!("/internal/v1/me/invites/{invite}/accept"),
             user,
             None,
             None,
@@ -948,11 +950,11 @@ async fn an_organization_at_its_ceiling_promises_no_seat_and_its_rosters_say_so(
     let expected = json!({ "limit": 1, "held": 2, "detail": holds(1) });
     assert_eq!(
         deployment
-            .ceiling_read(&pool, &organization, "/internal/organization/members")
+            .ceiling_read(&pool, &organization, "/internal/v1/organization/members")
             .await,
         expected
     );
-    let roster = format!("/internal/projects/{project}/members");
+    let roster = format!("/internal/v1/projects/{project}/members");
     assert_eq!(
         deployment.ceiling_read(&pool, &organization, &roster).await,
         expected
@@ -990,7 +992,7 @@ async fn everyone_invited_counts_once_against_the_ceiling(pool: PgPool) {
     let b = body["id"].as_str().unwrap().to_owned();
     assert_eq!(
         deployment
-            .ceiling_read(&pool, &organization, "/internal/organization/members")
+            .ceiling_read(&pool, &organization, "/internal/v1/organization/members")
             .await["held"],
         3,
         "the owner and two invited"
@@ -1015,7 +1017,7 @@ async fn everyone_invited_counts_once_against_the_ceiling(pool: PgPool) {
         .call(
             &pool,
             "DELETE",
-            &format!("/internal/projects/{project}/invites/{b}"),
+            &format!("/internal/v1/projects/{project}/invites/{b}"),
             OWNER,
             Some(&organization),
             None,
@@ -1061,7 +1063,7 @@ async fn a_seat_is_held_to_the_ceiling_when_it_is_taken(pool: PgPool) {
         .call(
             &pool,
             "POST",
-            "/internal/invites/accept",
+            "/internal/v1/invites/accept",
             STRANGER,
             None,
             Some(json!({ "token": token })),

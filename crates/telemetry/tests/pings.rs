@@ -43,8 +43,8 @@ use telmoni_telemetry::store::SpanRow;
 use telmoni_telemetry::sweep::{self, Swept};
 use telmoni_telemetry::{AppState, ping_router, router};
 
-const MONITORS: &str = "/internal/telemetry/monitors";
-const PING_KEYS: &str = "/internal/telemetry/ping-keys";
+const MONITORS: &str = "/internal/v1/telemetry/monitors";
+const PING_KEYS: &str = "/internal/v1/telemetry/ping-keys";
 const OWNER: &str = "user_owner";
 
 /// The module's two routers, auth as it holds it, the notices it hands

@@ -121,8 +121,8 @@ describe("the panel's edge dragged", () => {
 });
 
 describe("what the panel shows of a trace's reads", () => {
-  const A = "/api/traces/a?project=p";
-  const B = "/api/traces/b?project=p";
+  const A = "/api/v1/traces/a?project=p";
+  const B = "/api/v1/traces/b?project=p";
   const kept = (url: string, version: number, read: KeptRead<string>["read"]): KeptRead<string> => ({
     url,
     version,

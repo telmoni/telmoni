@@ -11,7 +11,7 @@ pub struct Config {
     pub service_secret: Redacted,
     /// Optional secondary secret accepted during a rotation window.
     pub service_secret_next: Option<Redacted>,
-    /// Whether `POST /test/session` is mounted (`ALLOW_TEST_SESSION`): the
+    /// Whether `POST /internal/v1/test/session` is mounted (`ALLOW_TEST_SESSION`): the
     /// door the console's own test door and the e2e suite mint a signed-in
     /// person through, for anyone holding the service secret. ⚠ Refused at
     /// boot in a Kubernetes pod.

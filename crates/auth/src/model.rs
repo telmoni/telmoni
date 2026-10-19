@@ -340,7 +340,7 @@ impl std::fmt::Debug for CreateTokenResponse {
     }
 }
 
-/// Request body for `POST /internal/tokens/{token_id}/rotate`.
+/// Request body for `POST /internal/v1/tokens/{token_id}/rotate`.
 #[derive(Debug, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RotateTokenRequest {
@@ -362,7 +362,7 @@ impl std::fmt::Debug for ValidateTokenRequest {
     }
 }
 
-/// What `/internal/tokens/validate` answers. A token acts for the project it
+/// What `/internal/v1/tokens/validate` answers. A token acts for the project it
 /// was minted on and holds no seat, so there is no membership list to carry.
 #[derive(Debug, Serialize)]
 pub struct ValidateTokenResponse {

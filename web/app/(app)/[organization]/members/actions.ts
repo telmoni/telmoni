@@ -53,7 +53,7 @@ export async function inviteOrganizationMemberAction(
   if (!trimmed) return { error: "Enter the email address of the person to invite." };
 
   const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/organization/invites`,
+    `${gate.base}/internal/v1/organization/invites`,
     {
       method: "POST",
       headers: { ...gate.headers, "content-type": "application/json" },
@@ -112,7 +112,7 @@ export async function revokeOrganizationInviteAction(
   const gate = await open("members:invite-revoke", 30, organizationId);
   if ("error" in gate) return gate;
   const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/organization/invites/${encodeURIComponent(inviteId)}`,
+    `${gate.base}/internal/v1/organization/invites/${encodeURIComponent(inviteId)}`,
     { method: "DELETE", headers: gate.headers },
   );
   const ans = await answer(res);
@@ -146,7 +146,7 @@ export async function updateOrganizationMemberRoleAction(
   const changed =
     roster.kind === "ok" ? roster.members.find((m) => m.member_id === memberId) : undefined;
   const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/organization/members/${encodeURIComponent(memberId)}/role`,
+    `${gate.base}/internal/v1/organization/members/${encodeURIComponent(memberId)}/role`,
     {
       method: "PUT",
       headers: { ...gate.headers, "content-type": "application/json" },
@@ -178,7 +178,7 @@ export async function removeOrganizationMemberAction(
   const removed =
     roster.kind === "ok" ? roster.members.find((m) => m.member_id === memberId) : undefined;
   const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/organization/members/${encodeURIComponent(memberId)}`,
+    `${gate.base}/internal/v1/organization/members/${encodeURIComponent(memberId)}`,
     { method: "DELETE", headers: gate.headers },
   );
   if (!res?.ok) return answer(res);
@@ -201,7 +201,7 @@ export async function offerOwnershipAction(
   const gate = await open("members:transfer", 10, organizationId, "ownership");
   if ("error" in gate) return gate;
   const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/organization/owner-transfer`,
+    `${gate.base}/internal/v1/organization/owner-transfer`,
     {
       method: "POST",
       headers: { ...gate.headers, "content-type": "application/json" },
@@ -220,7 +220,7 @@ export async function cancelOwnershipOfferAction(organizationId: string): Promis
   const gate = await open("members:transfer", 10, organizationId, "ownership");
   if ("error" in gate) return gate;
   const res = await tryFetchWithTimeout(
-    `${gate.base}/internal/organization/owner-transfer`,
+    `${gate.base}/internal/v1/organization/owner-transfer`,
     { method: "DELETE", headers: gate.headers },
   );
   if (!res?.ok) return answer(res);
@@ -267,7 +267,7 @@ export async function leaveOrganizationAction(
   }
 
   const res = await tryFetchWithTimeout(
-    `${env.SERVER_URL}/internal/organization/members/${encodeURIComponent(ctx.userId)}`,
+    `${env.SERVER_URL}/internal/v1/organization/members/${encodeURIComponent(ctx.userId)}`,
     { method: "DELETE", headers: organizationHeaders(ctx) },
   );
   if (!res) {

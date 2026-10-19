@@ -43,7 +43,7 @@ pub struct AppState {
     pub db: PgPool,
     /// Loaded-once configuration.
     pub config: Config,
-    /// Constant-time-comparable service secrets gating `/internal/*`.
+    /// Constant-time-comparable service secrets gating `/internal/v1/*`.
     pub service_secrets: ServiceSecrets,
     /// Auth, in process: who is behind a person lane's bearer and what role
     /// they hold on the project or organization named, and the flag set that
@@ -79,9 +79,8 @@ impl AppState {
     }
 }
 
-/// The module's router: the person lanes under `/internal`, and Slack's
-/// events. The binary mounts it beside the other modules' and adds the
-/// health probes and the request layers once.
+/// The module's router: the person lanes under `/internal/v1`, and Slack's
+/// events at `/webhooks/v1/slack`.
 pub fn router(state: Arc<AppState>) -> Router {
     let person = Router::new()
         .route("/notifications/feed", get(handler::get_feed))
@@ -130,7 +129,10 @@ pub fn router(state: Arc<AppState>) -> Router {
     ));
 
     Router::new()
-        .route("/webhooks/slack", post(handler::slack_events::slack_events))
-        .nest("/internal", internal)
+        .route(
+            "/webhooks/v1/slack",
+            post(handler::slack_events::slack_events),
+        )
+        .nest("/internal/v1", internal)
         .with_state(state)
 }

@@ -120,7 +120,7 @@ describe("saving a new view", () => {
       `REDIRECT:/acme/web/traces?agent=support&days=7&view=${NEW}`,
     );
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://telemetry.test/internal/telemetry/views",
+      "http://telemetry.test/internal/v1/telemetry/views",
       expect.objectContaining({ method: "POST" }),
     );
     expect(mockRefresh).not.toHaveBeenCalled();
@@ -189,7 +189,7 @@ describe("saving over a view", () => {
     fetchMock.mockResolvedValue(view(OPEN));
     expect(await updateTraceViewAction(PROJECT, OPEN, input)).toMatchObject({ status: "ok" });
     expect(fetchMock).toHaveBeenCalledWith(
-      `http://telemetry.test/internal/telemetry/views/${OPEN}`,
+      `http://telemetry.test/internal/v1/telemetry/views/${OPEN}`,
       expect.objectContaining({ method: "PUT" }),
     );
     expect(mockRefresh).toHaveBeenCalledOnce();
@@ -232,7 +232,7 @@ describe("setting what the project opens in", () => {
       setting: { view_id: OPEN },
     });
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://telemetry.test/internal/telemetry/session-layout",
+      "http://telemetry.test/internal/v1/telemetry/session-layout",
       expect.objectContaining({ method: "PUT", body: JSON.stringify({ view_id: OPEN }) }),
     );
     expect(mockRefresh).toHaveBeenCalledOnce();

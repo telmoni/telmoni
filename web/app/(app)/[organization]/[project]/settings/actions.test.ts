@@ -117,7 +117,7 @@ describe("updateProjectNameAction", () => {
     fetchMock.mockResolvedValue(renamed("marketing-site"));
     expect(await updateProjectNameAction(PROJECT, "  Marketing Site  ")).toEqual({ error: null });
     expect(fetchMock).toHaveBeenCalledWith(
-      `http://auth.test/internal/projects/${PROJECT}`,
+      `http://auth.test/internal/v1/projects/${PROJECT}`,
       expect.objectContaining({
         method: "PATCH",
         headers: expect.objectContaining({
@@ -259,7 +259,7 @@ describe("updateContentModeAction", () => {
     );
     expect(await updateContentModeAction(PROJECT, "off")).toEqual({ error: null });
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://auth.test/internal/telemetry/content-mode",
+      "http://auth.test/internal/v1/telemetry/content-mode",
       expect.objectContaining({
         method: "PUT",
         headers: expect.objectContaining({
@@ -322,7 +322,7 @@ describe("deleteProjectAction", () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
     await deleteProjectAction(PROJECT);
     expect(fetchMock).toHaveBeenCalledWith(
-      `http://auth.test/internal/projects/${PROJECT}`,
+      `http://auth.test/internal/v1/projects/${PROJECT}`,
       expect.objectContaining({
         method: "DELETE",
         headers: expect.objectContaining({

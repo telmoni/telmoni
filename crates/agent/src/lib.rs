@@ -91,7 +91,7 @@ impl AppState {
     }
 }
 
-/// The module's lanes, under `/internal` behind the service secret.
+/// The module's lanes, under `/internal/v1` behind the service secret.
 pub fn router(state: Arc<AppState>) -> Router {
     let lanes = Router::new()
         .route("/agent/status", get(handler::status))
@@ -105,7 +105,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             state.service_secrets.clone(),
             require_service_secret,
         ));
-    Router::new().nest("/internal", lanes).with_state(state)
+    Router::new().nest("/internal/v1", lanes).with_state(state)
 }
 
 /// The same lanes for a deployment with no agent at all: the status says
@@ -123,5 +123,5 @@ pub fn absent_router(service_secrets: ServiceSecrets) -> Router {
             service_secrets,
             require_service_secret,
         ));
-    Router::new().nest("/internal", lanes)
+    Router::new().nest("/internal/v1", lanes)
 }

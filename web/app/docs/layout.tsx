@@ -14,10 +14,13 @@ import { source } from "@/lib/source";
 // the dialog's code on every page of the console, and opened the book's
 // search on pages that are not the book. The theme is the root layout's, so
 // its own stays off.
+// The dialog asks the book's index at its versioned route, not Fumadocs' default.
+const search = { options: { api: "/api/v1/search" } };
+
 export default async function DocsRootLayout({ children }: { children: React.ReactNode }) {
   const signedIn = (await getServerSession()) !== null;
   return (
-    <RootProvider theme={{ enabled: false }}>
+    <RootProvider theme={{ enabled: false }} search={search}>
       <PaperShell signedIn={signedIn}>
         <DocsLayout tree={source.getPageTree()} nav={{ enabled: false }}>
           {children}

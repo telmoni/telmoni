@@ -30,7 +30,7 @@ export const CONNECTORS_UNEXPECTED = "Unexpected response from the connector ser
 // asserts it. `connectionId` is `null` for the one call that creates a row
 // rather than naming one. The page's writes are Server Actions
 // (`app/(app)/[organization]/[project]/connectors/actions.ts`) and its one
-// read a Route Handler (`app/api/connectors/[connection]/deliveries`); both
+// read a Route Handler (`app/api/v1/connectors/[connection]/deliveries`); both
 // are let in here.
 export async function admitConnectorsCall(
   call: string,

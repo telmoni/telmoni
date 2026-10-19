@@ -90,7 +90,7 @@ describe("GET /connect/[provider]/start", () => {
     expect(res.headers.get("location")).toBe("https://slack.com/oauth/v2/authorize?state=st8");
     expect(res.headers.get("cache-control")).toBe("no-store, max-age=0");
     expect(tryFetchWithTimeout).toHaveBeenCalledWith(
-      "http://notifications:8086/internal/connectors/slack/authorize",
+      "http://notifications:8086/internal/v1/connectors/slack/authorize",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({ "x-project-id": PROJECT, authorization: "Bearer at_1" }),

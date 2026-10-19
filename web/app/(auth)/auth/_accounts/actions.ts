@@ -10,7 +10,7 @@ import { personHeaders } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
 
 // The console's half of accounts auth holds itself. Each action posts to one
-// of auth's `/internal/auth/password/*` lanes, which exist only on a
+// of auth's `/internal/v1/auth/password/*` lanes, which exist only on a
 // deployment whose provider is auth's own; under an external provider they
 // answer 404, which reads here as "unavailable", and nothing links to these
 // pages there. Every action is a public endpoint reached before any session
@@ -75,7 +75,7 @@ export async function signInAction(input: {
     return { error: "Too many attempts. Try again in a minute." };
   }
 
-  const res = await post("/internal/auth/password/sign-in", {
+  const res = await post("/internal/v1/auth/password/sign-in", {
     email: parsed.data.email,
     password: parsed.data.password,
   });
@@ -125,7 +125,7 @@ export async function signUpAction(input: {
   }
 
   const { givenName, familyName, state, ...rest } = parsed.data;
-  const res = await post("/internal/auth/password/sign-up", {
+  const res = await post("/internal/v1/auth/password/sign-up", {
     ...rest,
     ...(givenName ? { givenName } : {}),
     ...(familyName ? { familyName } : {}),
@@ -150,7 +150,7 @@ export async function verifyEmailAction(input: { userId: string; token: string }
     return { error: "Too many attempts. Try again in an hour." };
   }
 
-  const res = await post("/internal/auth/password/verify", parsed.data);
+  const res = await post("/internal/v1/auth/password/verify", parsed.data);
   if (!res) return { error: UNAVAILABLE };
   if (res.status === 404) return { error: UNAVAILABLE };
   if (!res.ok) return { error: await refusal(res) };
@@ -167,7 +167,7 @@ export async function forgotPasswordAction(input: { email: string }): Promise<Re
     return { error: "Too many requests. Try again in an hour." };
   }
 
-  const res = await post("/internal/auth/password/forgot", parsed.data);
+  const res = await post("/internal/v1/auth/password/forgot", parsed.data);
   if (!res) return { error: UNAVAILABLE };
   if (res.status === 404) return { error: UNAVAILABLE };
   if (!res.ok) return { error: await refusal(res) };
@@ -189,7 +189,7 @@ export async function resetPasswordAction(input: {
     return { error: "Too many attempts. Try again in an hour." };
   }
 
-  const res = await post("/internal/auth/password/reset", parsed.data);
+  const res = await post("/internal/v1/auth/password/reset", parsed.data);
   if (!res) return { error: UNAVAILABLE };
   if (res.status === 404) return { error: UNAVAILABLE };
   if (!res.ok) return { error: await refusal(res) };
@@ -216,7 +216,7 @@ export async function deviceDecisionAction(input: {
   if (limited) return { error: "Too many attempts. Try again in a minute." };
 
   const res = await tryFetchWithTimeout(
-    `${env.SERVER_URL}/internal/auth/device/${parsed.data.decision}`,
+    `${env.SERVER_URL}/internal/v1/auth/device/${parsed.data.decision}`,
     {
       method: "POST",
       headers: { ...personHeaders(session), "content-type": "application/json" },

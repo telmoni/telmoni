@@ -191,7 +191,7 @@ async fn json_body(resp: axum::response::Response) -> serde_json::Value {
 /// The sign-up request every test sends.
 fn sign_up_request(email: &str) -> Request<Body> {
     post_json(
-        "/internal/auth/password/sign-up",
+        "/internal/v1/auth/password/sign-up",
         serde_json::json!({ "email": email, "password": PASSWORD, "givenName": "Ada" }),
     )
 }
@@ -213,7 +213,7 @@ async fn verify(app: &Router, uid: &str, token: &str) {
     let resp = app
         .clone()
         .oneshot(post_json(
-            "/internal/auth/password/verify",
+            "/internal/v1/auth/password/verify",
             serde_json::json!({ "userId": uid, "token": token }),
         ))
         .await
@@ -224,7 +224,7 @@ async fn verify(app: &Router, uid: &str, token: &str) {
 async fn sign_in(app: &Router, email: &str, password: &str) -> axum::response::Response {
     app.clone()
         .oneshot(post_json(
-            "/internal/auth/password/sign-in",
+            "/internal/v1/auth/password/sign-in",
             serde_json::json!({ "email": email, "password": password }),
         ))
         .await
@@ -235,7 +235,7 @@ async fn sign_in(app: &Router, email: &str, password: &str) -> axum::response::R
 async fn exchange(app: &Router, code: &str) -> axum::response::Response {
     app.clone()
         .oneshot(post_json(
-            "/internal/auth/exchange",
+            "/internal/v1/auth/exchange",
             serde_json::json!({ "code": code }),
         ))
         .await
@@ -258,7 +258,7 @@ async fn signed_in(app: &Router, outbox: &Outbox, email: &str) -> serde_json::Va
 
 async fn me(app: &Router, bearer: &str) -> StatusCode {
     app.clone()
-        .oneshot(post_as("/me", bearer, serde_json::json!({})))
+        .oneshot(post_as("/internal/v1/me", bearer, serde_json::json!({})))
         .await
         .unwrap()
         .status()
@@ -287,7 +287,7 @@ async fn a_sign_up_is_verified_from_its_mail_and_then_signs_in(pool: PgPool) {
     let resp = app
         .clone()
         .oneshot(post_json(
-            "/internal/auth/password/verify",
+            "/internal/v1/auth/password/verify",
             serde_json::json!({ "userId": uid, "token": token }),
         ))
         .await
@@ -307,7 +307,7 @@ async fn a_sign_up_is_verified_from_its_mail_and_then_signs_in(pool: PgPool) {
     let resp = app
         .clone()
         .oneshot(post_json(
-            "/internal/auth/password/verify",
+            "/internal/v1/auth/password/verify",
             serde_json::json!({ "userId": uid, "token": token }),
         ))
         .await
@@ -504,7 +504,7 @@ async fn a_refresh_rotates_the_token_and_a_reuse_ends_the_session(pool: PgPool) 
         let app = app.clone();
         async move {
             app.oneshot(post_json(
-                "/internal/auth/refresh",
+                "/internal/v1/auth/refresh",
                 serde_json::json!({ "refresh_token": token }),
             ))
             .await
@@ -601,7 +601,7 @@ async fn a_second_sign_up_for_an_address_is_refused(pool: PgPool) {
     let resp = app
         .clone()
         .oneshot(post_json(
-            "/internal/auth/password/sign-up",
+            "/internal/v1/auth/password/sign-up",
             serde_json::json!({ "email": "ada@example.com", "password": "another password" }),
         ))
         .await
@@ -621,7 +621,7 @@ async fn a_reset_from_the_inbox_sets_the_password_and_ends_every_session(pool: P
     let resp = app
         .clone()
         .oneshot(post_json(
-            "/internal/auth/password/forgot",
+            "/internal/v1/auth/password/forgot",
             serde_json::json!({ "email": "ada@example.com" }),
         ))
         .await
@@ -636,7 +636,7 @@ async fn a_reset_from_the_inbox_sets_the_password_and_ends_every_session(pool: P
     let resp = app
         .clone()
         .oneshot(post_json(
-            "/internal/auth/password/reset",
+            "/internal/v1/auth/password/reset",
             serde_json::json!({ "userId": uid, "token": token, "password": "a brand new password" }),
         ))
         .await
@@ -664,7 +664,7 @@ async fn a_reset_from_the_inbox_sets_the_password_and_ends_every_session(pool: P
     let resp = app
         .clone()
         .oneshot(post_json(
-            "/internal/auth/password/forgot",
+            "/internal/v1/auth/password/forgot",
             serde_json::json!({ "email": "nobody@example.com" }),
         ))
         .await
@@ -685,7 +685,7 @@ async fn a_device_is_approved_or_denied_from_the_console(pool: PgPool) {
         let app = app.clone();
         async move {
             let resp = app
-                .oneshot(post_json("/cli/auth/device", serde_json::json!({})))
+                .oneshot(post_json("/cli/v1/auth/device", serde_json::json!({})))
                 .await
                 .unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
@@ -696,7 +696,7 @@ async fn a_device_is_approved_or_denied_from_the_console(pool: PgPool) {
         let app = app.clone();
         async move {
             app.oneshot(post_json(
-                "/cli/auth/device/poll",
+                "/cli/v1/auth/device/poll",
                 serde_json::json!({ "deviceCode": device_code }),
             ))
             .await
@@ -746,7 +746,7 @@ async fn a_device_is_approved_or_denied_from_the_console(pool: PgPool) {
     let resp = app
         .clone()
         .oneshot(post_as(
-            "/internal/auth/device/approve",
+            "/internal/v1/auth/device/approve",
             &bearer,
             serde_json::json!({ "userCode": user_code.to_lowercase() }),
         ))
@@ -780,7 +780,7 @@ async fn a_device_is_approved_or_denied_from_the_console(pool: PgPool) {
     let resp = app
         .clone()
         .oneshot(post_as(
-            "/internal/auth/device/deny",
+            "/internal/v1/auth/device/deny",
             &bearer,
             serde_json::json!({ "userCode": started["userCode"] }),
         ))
@@ -798,7 +798,7 @@ async fn a_device_is_approved_or_denied_from_the_console(pool: PgPool) {
     let resp = app
         .clone()
         .oneshot(post_as(
-            "/internal/auth/device/approve",
+            "/internal/v1/auth/device/approve",
             &bearer,
             serde_json::json!({ "userCode": "ZZZZ-ZZZZ" }),
         ))
@@ -817,7 +817,7 @@ async fn an_address_change_takes_a_code_from_each_inbox(pool: PgPool) {
     let resp = app
         .clone()
         .oneshot(post_as(
-            "/internal/me/email-change",
+            "/internal/v1/me/email-change",
             &bearer,
             serde_json::json!({ "newEmail": "ada.new@example.com" }),
         ))
@@ -831,7 +831,7 @@ async fn an_address_change_takes_a_code_from_each_inbox(pool: PgPool) {
     let resp = app
         .clone()
         .oneshot(post_as(
-            "/internal/me/email-change/confirm",
+            "/internal/v1/me/email-change/confirm",
             &bearer,
             serde_json::json!({ "currentCode": current, "newCode": "000000" }),
         ))
@@ -846,7 +846,7 @@ async fn an_address_change_takes_a_code_from_each_inbox(pool: PgPool) {
     let resp = app
         .clone()
         .oneshot(post_as(
-            "/internal/me/email-change/confirm",
+            "/internal/v1/me/email-change/confirm",
             &bearer,
             serde_json::json!({ "currentCode": current, "newCode": new }),
         ))
@@ -878,7 +878,7 @@ async fn an_address_change_takes_a_code_from_each_inbox(pool: PgPool) {
     let resp = app
         .clone()
         .oneshot(post_as(
-            "/internal/me/email-change",
+            "/internal/v1/me/email-change",
             &bearer,
             serde_json::json!({ "newEmail": "grace@example.com" }),
         ))
@@ -894,7 +894,7 @@ async fn the_config_lane_describes_the_form(pool: PgPool) {
     let (app, _) = app(pool);
     let resp = app
         .oneshot(
-            Request::get("/internal/auth/config")
+            Request::get("/internal/v1/auth/config")
                 .header("x-service-secret", SERVICE_SECRET)
                 .body(Body::empty())
                 .unwrap(),

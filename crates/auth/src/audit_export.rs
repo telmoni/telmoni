@@ -1,5 +1,5 @@
 //! The audit chain's exports, built in the background. An owner or admin asks
-//! for a range and a format (`POST /internal/audit/organizations/{id}/exports`);
+//! for a range and a format (`POST /internal/v1/audit/organizations/{id}/exports`);
 //! the request queues the export and starts its build in a task of its own,
 //! and [`sweep`], on a five-minute timer inside `telmoni serve`, takes up any
 //! build a restart cut short. A finished file waits for its requester alone

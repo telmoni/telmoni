@@ -146,7 +146,7 @@ function SessionPanel({
   if (query.days !== undefined) params.set("days", String(query.days));
   if (query.limit !== undefined) params.set("limit", String(query.limit));
   for (const name of options.pinned) params.append("pinned", name);
-  const url = `/api/sessions/${encodeURIComponent(sessionId)}?${params}`;
+  const url = `/api/v1/sessions/${encodeURIComponent(sessionId)}?${params}`;
   const [version, setVersion] = useState(0);
   const { read, stale } = useSessionRead(url, version);
   // Read again as the project's runs land, the list beside it redrawn.

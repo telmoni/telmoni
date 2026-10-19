@@ -1,6 +1,6 @@
 //! A project's monitors, under [`Resource::Monitor`] — each an agent's
 //! contract: when its runs are expected, how long one may go quiet, how many
-//! steps it may take and what it may spend. `GET /internal/telemetry/monitors`
+//! steps it may take and what it may spend. `GET /internal/v1/telemetry/monitors`
 //! and `GET /monitors/{slug}`, which every role on the project reads; `POST`,
 //! `PUT /monitors/{slug}`, `DELETE`, `POST /monitors/{slug}/pause` and
 //! `/resume`, which its owners and admins send; and `POST /monitors/schedule`,
@@ -478,7 +478,7 @@ fn taken(error: sqlx::Error) -> TelmoniError {
     )
 }
 
-/// `GET /internal/telemetry/monitors` — the project's monitors, the worst
+/// `GET /internal/v1/telemetry/monitors` — the project's monitors, the worst
 /// state first.
 pub async fn list_monitors(
     State(state): State<Arc<AppState>>,
@@ -496,7 +496,7 @@ pub async fn list_monitors(
     }))
 }
 
-/// `GET /internal/telemetry/monitors/{slug}` — one of the project's
+/// `GET /internal/v1/telemetry/monitors/{slug}` — one of the project's
 /// monitors.
 pub async fn get_monitor(
     State(state): State<Arc<AppState>>,
@@ -514,7 +514,7 @@ pub async fn get_monitor(
     row.map(Monitor::from).map(Json).ok_or_else(not_found)
 }
 
-/// `POST /internal/telemetry/monitors/schedule` — what a schedule means: the
+/// `POST /internal/v1/telemetry/monitors/schedule` — what a schedule means: the
 /// next few times a run would be due. Saves nothing, so every role on the
 /// project may ask.
 pub async fn preview_schedule(
@@ -532,7 +532,7 @@ pub async fn preview_schedule(
     Ok(Json(SchedulePreview { next }))
 }
 
-/// `POST /internal/telemetry/monitors` — a new monitor of the project, made
+/// `POST /internal/v1/telemetry/monitors` — a new monitor of the project, made
 /// under the organization's chain lock, as a view is: the project's settings
 /// row is made with it where the project has none, and the lock puts two
 /// monitors made at once one after the other, so neither counts past the
@@ -652,7 +652,7 @@ async fn held(
         .ok_or_else(not_found)
 }
 
-/// `PUT /internal/telemetry/monitors/{slug}` — one of the project's
+/// `PUT /internal/v1/telemetry/monitors/{slug}` — one of the project's
 /// monitors, saved over: everything but its slug. A monitor its first ping
 /// or run made, `new`, is set up by this and starts; a paused one stays
 /// paused. Its next due time stands while its timing does, but for one a
@@ -768,7 +768,7 @@ async fn change_monitor(
     Ok(row)
 }
 
-/// `POST /internal/telemetry/monitors/{slug}/pause` — the monitor paused:
+/// `POST /internal/v1/telemetry/monitors/{slug}/pause` — the monitor paused:
 /// never late, its runs still kept. One paused already is answered as it is,
 /// and so is one its first ping or run made, paused until its owner saves it.
 pub async fn pause_monitor(
@@ -844,7 +844,7 @@ async fn halt_monitor(
     Ok(row)
 }
 
-/// `POST /internal/telemetry/monitors/{slug}/resume` — a paused monitor
+/// `POST /internal/v1/telemetry/monitors/{slug}/resume` — a paused monitor
 /// watched again, its next run due from now. One not paused is answered as
 /// it is, but for one its first ping or run made, which its settings start.
 pub async fn resume_monitor(
@@ -921,7 +921,7 @@ async fn restart_monitor(
     Ok(row)
 }
 
-/// `DELETE /internal/telemetry/monitors/{slug}` — one of the project's
+/// `DELETE /internal/v1/telemetry/monitors/{slug}` — one of the project's
 /// monitors, gone; its finished runs stay, as traces of its agent, and a
 /// run still open goes with it.
 pub async fn delete_monitor(

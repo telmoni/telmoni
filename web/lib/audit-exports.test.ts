@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   dayField,
   eventsLabel,
+  exportHref,
   exportWindow,
+  exportsHref,
   failureText,
   rangeLabel,
 } from "./audit-exports";
@@ -78,5 +80,14 @@ describe("an export's labels", () => {
   it("says a range too large is the range's fault", () => {
     expect(failureText({ failure: "too_large" })).toMatch(/shorter/);
     expect(failureText({ failure: "error" })).toMatch(/Try again/);
+  });
+});
+
+describe("an export's routes", () => {
+  it("are the organization's lane under /api/v1, a file by its id", () => {
+    expect(exportsHref("acme")).toBe("/api/v1/organizations/acme/audit-log/exports");
+    expect(exportHref("acme", "0192a3b4-1111-7000-8000-000000000001")).toBe(
+      "/api/v1/organizations/acme/audit-log/exports/0192a3b4-1111-7000-8000-000000000001",
+    );
   });
 });

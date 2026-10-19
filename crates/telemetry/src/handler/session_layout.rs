@@ -1,5 +1,5 @@
 //! The layout a project's sessions and traces open in, under
-//! [`Resource::View`]: `GET /internal/telemetry/session-layout`, which every
+//! [`Resource::View`]: `GET /internal/v1/telemetry/session-layout`, which every
 //! role on the project reads, and `PUT`, which its owners and admins send —
 //! one of the project's saved layouts, which stands until it is deleted,
 //! when the project opens in the console's own default again, or none, for
@@ -37,7 +37,7 @@ pub struct SessionLayoutChange {
     pub view_id: Option<Uuid>,
 }
 
-/// `GET /internal/telemetry/session-layout` — what the project's sessions
+/// `GET /internal/v1/telemetry/session-layout` — what the project's sessions
 /// and traces open in.
 pub async fn get_session_layout(
     State(state): State<Arc<AppState>>,
@@ -53,7 +53,7 @@ pub async fn get_session_layout(
     Ok(Json(SessionLayoutSetting { view_id }))
 }
 
-/// `PUT /internal/telemetry/session-layout` — set what they open in. Written
+/// `PUT /internal/v1/telemetry/session-layout` — set what they open in. Written
 /// under the organization's chain lock, as a view is saved: the project's
 /// settings row is made with it where the project has none, filed under the
 /// organization that holds the project now.

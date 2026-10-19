@@ -47,7 +47,7 @@ export async function requestPasswordResetAction(): Promise<{
   const headers = await accountHeaders();
   if (!headers) return { error: UNRESOLVED };
 
-  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/me/password-reset`, {
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/me/password-reset`, {
     method: "POST",
     headers,
   });
@@ -98,7 +98,7 @@ export async function requestEmailChangeAction(
 
   // The new address travels in the body precisely because it has not earned
   // anything yet; the address auth mails its own code to is the one it holds.
-  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/me/email-change`, {
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/me/email-change`, {
     method: "POST",
     headers: { ...headers, "content-type": "application/json" },
     body: JSON.stringify({ newEmail: next }),
@@ -141,7 +141,7 @@ export async function confirmEmailChangeAction(
   // auth checks the person is in it before the identity provider is asked.
   // Somebody in no organization sends none, and auth logs the change instead.
   const res = await tryFetchWithTimeout(
-    `${env.SERVER_URL}/internal/me/email-change/confirm`,
+    `${env.SERVER_URL}/internal/v1/me/email-change/confirm`,
     {
       method: "POST",
       headers: { ...headers, "content-type": "application/json" },
@@ -191,7 +191,7 @@ export async function setDefaultOrganizationAction(
   });
   if (limited) return { error: "Too many requests — slow down a moment." };
 
-  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/me/default-organization`, {
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/me/default-organization`, {
     method: "PUT",
     headers: { ...personHeaders(session), "content-type": "application/json" },
     body: JSON.stringify({ organizationId }),

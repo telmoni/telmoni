@@ -84,7 +84,7 @@ describe.each([
     expect(await answer("org_offered")).toEqual({ error: null });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `http://auth.test/internal/organization/owner-transfer/${verb}`,
+      `http://auth.test/internal/v1/organization/owner-transfer/${verb}`,
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
@@ -177,7 +177,7 @@ describe("answering the offer of a project", () => {
     );
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://auth.test/internal/projects/project_offered/transfer/accept",
+      "http://auth.test/internal/v1/projects/project_offered/transfer/accept",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
@@ -229,7 +229,7 @@ describe("answering the offer of a project", () => {
     );
     expect(await declineProjectOfferAction("project_offered")).toEqual({ error: null });
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://auth.test/internal/projects/project_offered/transfer/decline",
+      "http://auth.test/internal/v1/projects/project_offered/transfer/decline",
       expect.objectContaining({ method: "POST", body: JSON.stringify({}) }),
     );
     expect(mockPublishEvent).toHaveBeenCalledTimes(1);

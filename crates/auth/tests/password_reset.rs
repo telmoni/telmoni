@@ -1,4 +1,4 @@
-//! `POST /internal/me/password-reset` — the lane that asks the provider to mail
+//! `POST /internal/v1/me/password-reset` — the lane that asks the provider to mail
 //! a one-time link.
 #![expect(
     clippy::unwrap_used,
@@ -92,7 +92,7 @@ async fn sign_in(pool: &PgPool, user: &str) -> String {
             as_person(
                 Request::builder()
                     .method("POST")
-                    .uri("/me")
+                    .uri("/internal/v1/me")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("content-type", "application/json"),
                 pool,
@@ -118,7 +118,7 @@ async fn sign_in(pool: &PgPool, user: &str) -> String {
 fn reset_request(organization: Option<&str>) -> axum::http::request::Builder {
     let mut builder = Request::builder()
         .method("POST")
-        .uri("/internal/me/password-reset")
+        .uri("/internal/v1/me/password-reset")
         .header("x-service-secret", SERVICE_SECRET);
     if let Some(organization) = organization {
         builder = builder.header("x-organization-id", organization);

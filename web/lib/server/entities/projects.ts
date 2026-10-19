@@ -29,7 +29,7 @@ export const fetchProjectListing = cache(async (): Promise<ProjectListing> => {
   const ctx = await identityContext();
   if (!ctx) return { kind: "unavailable" };
   try {
-    const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/projects`, {
+    const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/projects`, {
       headers: organizationHeaders(ctx),
     });
     if (!res.ok) {
@@ -112,7 +112,7 @@ export const fetchProjectsEverywhere = cache(async (): Promise<ProjectEverywhere
   const ctx = await identityContext();
   if (!ctx) return { kind: "unavailable" };
   try {
-    const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/projects/everywhere`, {
+    const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/projects/everywhere`, {
       headers: organizationHeaders(ctx),
     });
     if (!res.ok) {

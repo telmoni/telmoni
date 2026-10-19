@@ -17,7 +17,7 @@ export function useSearchIndex(open: boolean, projectId?: string) {
     if (!open || !projectId) return;
     if (indexedProject.current === projectId) return;
     indexedProject.current = projectId;
-    // A read, from the index's Route Handler (`app/api/search/index`),
+    // A read, from the index's Route Handler (`app/api/v1/search/index`),
     // dropped when the palette closes or moves to another project before it
     // lands — and then forgotten, so the next opening asks again.
     const abort = new AbortController();
@@ -28,7 +28,7 @@ export function useSearchIndex(open: boolean, projectId?: string) {
     // was fetched for: dropping it prevents showing previous project's items.
     setIndex(null);
     setIndexError(null);
-    fetch(`/api/search/index?project=${encodeURIComponent(projectId)}`, {
+    fetch(`/api/v1/search/index?project=${encodeURIComponent(projectId)}`, {
       signal: abort.signal,
     })
       .then(async (res) => {

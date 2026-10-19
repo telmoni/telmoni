@@ -297,7 +297,7 @@ describe("organization members actions", () => {
       );
       expect(res).toEqual({ error: null, link: "http://test/invite/abc" });
       expect(fetchMock).toHaveBeenCalledWith(
-        "http://auth.test/internal/organization/invites",
+        "http://auth.test/internal/v1/organization/invites",
         expect.objectContaining({
           method: "POST",
           headers: expect.objectContaining({ "x-organization-id": ORGANIZATION }),
@@ -373,7 +373,7 @@ describe("organization members actions", () => {
       const res = await revokeOrganizationInviteAction(ORGANIZATION, "inv_org_1");
       expect(res).toEqual({ error: null });
       expect(fetchMock).toHaveBeenCalledWith(
-        "http://auth.test/internal/organization/invites/inv_org_1",
+        "http://auth.test/internal/v1/organization/invites/inv_org_1",
         expect.objectContaining({
           method: "DELETE",
           headers: expect.objectContaining({ "x-organization-id": ORGANIZATION }),
@@ -390,7 +390,7 @@ describe("organization members actions", () => {
       const res = await updateOrganizationMemberRoleAction(ORGANIZATION, "user_2", "admin");
       expect(res).toEqual({ error: null });
       expect(fetchMock).toHaveBeenCalledWith(
-        "http://auth.test/internal/organization/members/user_2/role",
+        "http://auth.test/internal/v1/organization/members/user_2/role",
         expect.objectContaining({
           method: "PUT",
           headers: expect.objectContaining({
@@ -427,7 +427,7 @@ describe("organization members actions", () => {
       const res = await removeOrganizationMemberAction(ORGANIZATION, "user_2");
       expect(res).toEqual({ error: null });
       expect(fetchMock).toHaveBeenCalledWith(
-        "http://auth.test/internal/organization/members/user_2",
+        "http://auth.test/internal/v1/organization/members/user_2",
         expect.objectContaining({
           method: "DELETE",
           headers: expect.objectContaining({ "x-organization-id": ORGANIZATION }),
@@ -463,7 +463,7 @@ describe("offerOwnershipAction", () => {
     const res = await offerOwnershipAction(ORGANIZATION, "user_admin");
     expect(res).toEqual({ error: null });
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://auth.test/internal/organization/owner-transfer",
+      "http://auth.test/internal/v1/organization/owner-transfer",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
@@ -590,7 +590,7 @@ describe("cancelOwnershipOfferAction", () => {
     const res = await cancelOwnershipOfferAction(ORGANIZATION);
     expect(res).toEqual({ error: null });
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://auth.test/internal/organization/owner-transfer",
+      "http://auth.test/internal/v1/organization/owner-transfer",
       expect.objectContaining({
         method: "DELETE",
         headers: expect.objectContaining({ "x-organization-id": ORGANIZATION }),
@@ -641,7 +641,7 @@ describe("leaveOrganizationAction", () => {
     expect(
       url,
       "a leave must name the CALLER, never the organization being left",
-    ).toBe("http://auth.test/internal/organization/members/user_1");
+    ).toBe("http://auth.test/internal/v1/organization/members/user_1");
     expect((init as { method: string }).method).toBe("DELETE");
     expect((init as { headers: Record<string, string> }).headers["x-organization-id"]).toBe(
       LEAVING,

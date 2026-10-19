@@ -1,10 +1,9 @@
-//! `/cli` — the CLI's session lanes, which the binary nests under `/cli` for
-//! the CLI to call straight, on the machine host. The device grant's start
-//! and poll carry no credential but the device code, which is worth nothing
-//! until a person approves it in the console; the refresh spends the refresh
-//! token it carries; `/me` and the session revoke act for the person the
-//! bearer names, as every person lane does. The shapes are the CLI's,
-//! camelCase throughout, where the console's own refresh is snake_case.
+//! `/cli/v1` — the CLI's session lanes, which the binary nests there for the
+//! CLI to call straight, on the machine host. The device grant's start and
+//! poll carry only the device code, worth nothing until a person approves it;
+//! the refresh spends its token; `/me` and the session revoke act for the
+//! person the bearer names. The shapes are the CLI's, camelCase throughout,
+//! where the console's own refresh is snake_case.
 //!
 //! Nothing here is for a page: a browser sends `Sec-Fetch-Site` on every
 //! request and a native client sends none, and a page that could reach the
@@ -33,7 +32,7 @@ use crate::handler::{me, recording_organization_of, session};
 /// a row id are a few hundred bytes.
 pub const BODY_CAP_BYTES: usize = 8 * 1024;
 
-/// `POST /cli/auth/refresh` request: the console's refresh, in the CLI's
+/// `POST /cli/v1/auth/refresh` request: the console's refresh, in the CLI's
 /// spelling.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -54,7 +53,7 @@ impl std::fmt::Debug for RefreshRequest {
     }
 }
 
-/// `POST /cli/auth/refresh` — spend a refresh token for the next pair, as
+/// `POST /cli/v1/auth/refresh` — spend a refresh token for the next pair, as
 /// the console's own refresh does.
 pub async fn refresh(
     State(state): State<Arc<AppState>>,
@@ -65,7 +64,7 @@ pub async fn refresh(
         .map(Json)
 }
 
-/// `POST /cli/me` — who the bearer is, as the console's `/me` answers it,
+/// `POST /cli/v1/me` — who the bearer is, as the console's `/me` answers it,
 /// the device recorded from the request's own `User-Agent`. An organization
 /// the CLI names has to be an id: the console's `/me` reads one it cannot
 /// parse as none, right for a stale cookie and wrong for a client, which
@@ -125,7 +124,7 @@ pub async fn method_not_allowed() -> Response {
     problem::method_not_allowed("POST")
 }
 
-/// A path under `/cli` no lane serves: a type of the door's own, since
+/// A path under `/cli/v1` no lane serves: a type of the door's own, since
 /// auth's `/errors/auth/not-found` on a revoke says the session is already
 /// gone, and a path no lane matches says nothing about any session.
 pub async fn not_found() -> Response {

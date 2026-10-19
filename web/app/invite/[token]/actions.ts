@@ -32,7 +32,7 @@ export async function acceptInviteAction(
   // Sent in no organization: whoever holds this link may belong to none yet,
   // and joining one is what it is for.
   const res = await tryFetchWithTimeout(
-    `${env.SERVER_URL}/internal/invites/accept`,
+    `${env.SERVER_URL}/internal/v1/invites/accept`,
     {
       method: "POST",
       headers: { ...personHeaders(session), "content-type": "application/json" },

@@ -29,13 +29,12 @@ use crate::provider::{
 };
 
 /// Every lane the binary mounts for this module, through one router, for the
-/// suites: the console's under `/internal` and `/me`, the public read API
-/// under `/v1` and the CLI's under `/cli` — without the door's limits, which
-/// are the binary's own.
+/// suites: the console's under `/internal/v1`, the read API under `/v1` and
+/// the CLI's under `/cli/v1`, without the binary's door.
 pub fn full_router(state: Arc<crate::AppState>) -> axum::Router {
     crate::router(state.clone())
         .nest("/v1", crate::v1_router(state.clone()))
-        .nest("/cli", crate::cli_router(state))
+        .nest("/cli/v1", crate::cli_router(state))
 }
 
 /// One call auth made on a module beside it, as the recorders keep it.

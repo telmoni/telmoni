@@ -70,7 +70,7 @@ async fn me(pool: &PgPool, user: &str) -> (StatusCode, serde_json::Value) {
             as_person(
                 Request::builder()
                     .method("POST")
-                    .uri("/me")
+                    .uri("/internal/v1/me")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("content-type", "application/json"),
                 pool,
@@ -105,7 +105,7 @@ async fn create_project(pool: &PgPool, owner: &str, organization: &str) -> Strin
             as_person(
                 Request::builder()
                     .method("POST")
-                    .uri("/internal/projects")
+                    .uri("/internal/v1/projects")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("x-organization-id", organization)
                     .header("content-type", "application/json"),
@@ -252,7 +252,7 @@ async fn validation_carries_the_set_and_v1_refuses_when_public_api_is_off(pool: 
             as_person(
                 Request::builder()
                     .method("POST")
-                    .uri("/internal/tokens")
+                    .uri("/internal/v1/tokens")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("x-organization-id", &organization)
                     .header(
@@ -282,7 +282,7 @@ async fn validation_carries_the_set_and_v1_refuses_when_public_api_is_off(pool: 
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/internal/tokens/validate")
+                    .uri("/internal/v1/tokens/validate")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("content-type", "application/json")
                     .body(Body::from(json!({ "token": token }).to_string()))
@@ -372,7 +372,7 @@ async fn a_served_read_stamps_last_used_and_an_organizations_own_switch_refuses_
             as_person(
                 Request::builder()
                     .method("POST")
-                    .uri("/internal/tokens")
+                    .uri("/internal/v1/tokens")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("x-organization-id", &organization)
                     .header(
@@ -482,7 +482,7 @@ async fn a_switched_off_api_tokens_flag_refuses_minting_and_rotating_but_not_rev
         &organization,
         &project,
         "POST",
-        "/internal/tokens",
+        "/internal/v1/tokens",
         json!({ "name": "ci", "created_by": "u_owner", "scopes": ["read"] }),
     )
     .await;
@@ -499,7 +499,7 @@ async fn a_switched_off_api_tokens_flag_refuses_minting_and_rotating_but_not_rev
         &organization,
         &project,
         "POST",
-        "/internal/tokens",
+        "/internal/v1/tokens",
         json!({ "name": "ci-2", "created_by": "u_owner", "scopes": ["read"] }),
     )
     .await;
@@ -513,7 +513,7 @@ async fn a_switched_off_api_tokens_flag_refuses_minting_and_rotating_but_not_rev
         &organization,
         &project,
         "POST",
-        &format!("/internal/tokens/{id}/rotate"),
+        &format!("/internal/v1/tokens/{id}/rotate"),
         json!({}),
     )
     .await;
@@ -525,7 +525,7 @@ async fn a_switched_off_api_tokens_flag_refuses_minting_and_rotating_but_not_rev
         &organization,
         &project,
         "DELETE",
-        &format!("/internal/tokens/{id}"),
+        &format!("/internal/v1/tokens/{id}"),
         json!({}),
     )
     .await;

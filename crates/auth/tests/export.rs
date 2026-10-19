@@ -1,4 +1,4 @@
-//! `GET /internal/organization/export` — the record an owner or an admin
+//! `GET /internal/v1/organization/export` — the record an owner or an admin
 //! downloads.
 
 #![expect(
@@ -83,7 +83,7 @@ async fn sign_in(pool: &PgPool, user: &str) -> String {
             as_person(
                 Request::builder()
                     .method("POST")
-                    .uri("/me")
+                    .uri("/internal/v1/me")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("content-type", "application/json"),
                 pool,
@@ -108,7 +108,7 @@ async fn sign_in_from_a_browser(pool: &PgPool, user: &str, sid: &str, user_agent
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/me")
+                .uri("/internal/v1/me")
                 .header("x-service-secret", SERVICE_SECRET)
                 .header(
                     "authorization",
@@ -179,7 +179,7 @@ async fn export(pool: &PgPool, caller: &str, organization: &str) -> (StatusCode,
     call(
         pool,
         "GET",
-        "/internal/organization/export",
+        "/internal/v1/organization/export",
         caller,
         organization,
         None,
@@ -196,7 +196,7 @@ async fn seed(pool: &PgPool) -> (String, String) {
     let (status, created) = call(
         pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         OWNER,
         &organization,
         None,
@@ -213,7 +213,7 @@ async fn seed(pool: &PgPool) -> (String, String) {
     let (status, _) = call(
         pool,
         "POST",
-        "/internal/tokens",
+        "/internal/v1/tokens",
         OWNER,
         &organization,
         Some(&project),
@@ -225,7 +225,7 @@ async fn seed(pool: &PgPool) -> (String, String) {
     let (status, _) = call(
         pool,
         "POST",
-        &format!("/internal/projects/{project}/invites"),
+        &format!("/internal/v1/projects/{project}/invites"),
         OWNER,
         &organization,
         Some(&project),
@@ -474,7 +474,7 @@ async fn an_export_carries_nothing_from_a_project_the_caller_is_only_a_member_of
     let (status, created) = call(
         &pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         member,
         &own_organization,
         None,

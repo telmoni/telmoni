@@ -17,7 +17,7 @@ describe("isPublic", () => {
     "/sitemap.xml",
     "/docs",
     "/docs/self-host/overview",
-    "/api/search",
+    "/api/v1/search",
     "/llms.txt",
     "/llms-full.txt",
   ])("treats %s as public", (p) => {
@@ -45,12 +45,13 @@ describe("isPublic", () => {
     "/v1x",
     "/v1-internal",
     "/cli",
-    "/cli/me",
+    "/cli/v1/me",
     "/client",
     "/cli-internal",
     "/api/webhooks/slack",
     "/docsx",
-    "/api/search/x",
+    "/api/search",
+    "/api/v1/search/x",
     "/llms.txt/x",
   ])("treats %s as protected", (p) => {
     expect(isPublic(p)).toBe(false);
@@ -86,14 +87,14 @@ describe("isPublic", () => {
 
   describe("the e2e session-injection endpoint", () => {
     it("stays protected unless the test harness flag is set", () => {
-      expect(isPublic("/api/test/session")).toBe(false);
+      expect(isPublic("/api/v1/test/session")).toBe(false);
     });
 
     it("opens only with ALLOW_TEST_SESSION=true (route re-gates on prod)", () => {
       process.env.ALLOW_TEST_SESSION = "true";
       try {
-        expect(isPublic("/api/test/session")).toBe(true);
-        expect(isPublic("/api/test/session/extra")).toBe(false);
+        expect(isPublic("/api/v1/test/session")).toBe(true);
+        expect(isPublic("/api/v1/test/session/extra")).toBe(false);
         expect(isPublic("/api/test")).toBe(false);
       } finally {
         delete process.env.ALLOW_TEST_SESSION;

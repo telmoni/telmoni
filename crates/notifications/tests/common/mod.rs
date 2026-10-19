@@ -1,6 +1,6 @@
 //! What both suites stand up around the module: auth as this module holds
 //! it — a roster the suite seeds, answered in process — and the emit, the
-//! purges and the redaction as auth calls them, mounted as the `/internal`
+//! purges and the redaction as auth calls them, mounted as the `/internal/v1`
 //! lanes, so the suites drive them with the
 //! requests they always made.
 #![allow(dead_code, reason = "each suite uses the part of the harness it needs")]
@@ -347,17 +347,17 @@ pub(crate) fn config() -> Config {
 /// same paths with the same answers. Nothing gates them here.
 pub(crate) fn sibling_lanes(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/internal/notifications/emit", post(emit_lane))
+        .route("/internal/v1/notifications/emit", post(emit_lane))
         .route(
-            "/internal/notifications/organizations/{organization_id}/purge",
+            "/internal/v1/notifications/organizations/{organization_id}/purge",
             post(purge_organization_lane),
         )
         .route(
-            "/internal/notifications/projects/{project_id}/purge",
+            "/internal/v1/notifications/projects/{project_id}/purge",
             post(purge_project_lane),
         )
         .route(
-            "/internal/notifications/people/{user_id}/redact",
+            "/internal/v1/notifications/people/{user_id}/redact",
             post(redact_person_lane),
         )
         .with_state(state)

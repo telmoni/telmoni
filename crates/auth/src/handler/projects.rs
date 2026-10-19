@@ -1,5 +1,5 @@
-//! `GET /internal/projects` — every project the caller can open, and
-//! `POST /internal/projects` — one more of them. Creating is an ORGANIZATION
+//! `GET /internal/v1/projects` — every project the caller can open, and
+//! `POST /internal/v1/projects` — one more of them. Creating is an ORGANIZATION
 //! act: there is no project to bind yet, so the gate is the organization role.
 
 use std::sync::Arc;
@@ -54,7 +54,7 @@ fn name_taken(e: sqlx::Error, name: &str) -> TelmoniError {
     }
 }
 
-/// `GET /internal/projects` — the projects the caller can open in the
+/// `GET /internal/v1/projects` — the projects the caller can open in the
 /// organization named by `x-organization-id`, by name.
 pub async fn list_projects(
     State(state): State<Arc<AppState>>,
@@ -73,7 +73,7 @@ pub async fn list_projects(
     Ok(Json(json!({ "projects": project_list })))
 }
 
-/// `GET /internal/projects/everywhere` — every project the caller can open, in
+/// `GET /internal/v1/projects/everywhere` — every project the caller can open, in
 /// every organization. Maintenance lane, because the question spans
 /// organizations and there is no one GUC to bind.
 pub async fn list_projects_everywhere(
@@ -95,7 +95,7 @@ pub struct CreateProjectRequest {
     pub name: String,
 }
 
-/// `POST /internal/projects` — add a project to the acting organization.
+/// `POST /internal/v1/projects` — add a project to the acting organization.
 pub async fn create_project(
     State(state): State<Arc<AppState>>,
     principal: Principal,
@@ -159,7 +159,7 @@ pub async fn create_project(
     ))
 }
 
-/// `DELETE /internal/projects/{project_id}` — destroy a project and everything that
+/// `DELETE /internal/v1/projects/{project_id}` — destroy a project and everything that
 /// hangs off it here: seats, invitations and API keys cascade.
 ///
 /// **The audit chain stays, and must**: `in_project` has no foreign key, so a
@@ -250,7 +250,7 @@ pub struct UpdateProjectRequest {
     pub name: String,
 }
 
-/// `PATCH /internal/projects/{project_id}` — rename a project. Its slug moves
+/// `PATCH /internal/v1/projects/{project_id}` — rename a project. Its slug moves
 /// with the name, so the answer carries both and the console follows it.
 pub async fn update_project(
     State(state): State<Arc<AppState>>,

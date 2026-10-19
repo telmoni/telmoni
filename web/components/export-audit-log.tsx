@@ -139,8 +139,7 @@ function ExportDialog({
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ format, ...bounds }),
-          // Signed out, the proxy answers with the sign-in page's redirect,
-          // which a POST followed there would only be refused by.
+          // Signed out is the proxy's 401; a redirect to sign in is never followed.
           redirect: "manual",
           signal: AbortSignal.timeout(START_TIMEOUT_MS),
         });

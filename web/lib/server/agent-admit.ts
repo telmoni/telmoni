@@ -17,7 +17,7 @@ export const AGENT_UNAVAILABLE = "The agent is unavailable right now — try aga
 
 // Who may ask the agent anything about a project: a session, under the call's
 // own ceiling a minute, naming a project id. The panel's reads are Route
-// Handlers (`app/api/agent`) and its one write a Server Action
+// Handlers (`app/api/v1/agent`) and its one write a Server Action
 // (`app/(app)/agent-actions.ts`); both are let in here.
 export async function admitAgentCall(
   call: string,

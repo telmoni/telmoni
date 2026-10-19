@@ -1,13 +1,13 @@
 //! The two deletions, driven through the real router with their tails inline:
-//! an owner deleting an organization (`DELETE /internal/organization`), and a
-//! person deleting their account (`DELETE /internal/me`), with the sweep's
+//! an owner deleting an organization (`DELETE /internal/v1/organization`), and a
+//! person deleting their account (`DELETE /internal/v1/me`), with the sweep's
 //! steps that finish whatever the inline tails do not — and, for an
 //! organization, the hard delete only the sweep performs, once its wait has
 //! passed, with every purge run first. And the operator's termination, which
 //! goes the same way.
 //!
 //! The sweep's steps and the operator's commands are `telmoni_auth::sweep`,
-//! called in process. This suite mounts them as the `/internal` lanes they
+//! called in process. This suite mounts them as the `/internal/v1` lanes they
 //! answered ([`sweep_lanes`]), so the saga is driven with
 //! the same requests, in the same order, and the assertions read as they did.
 #![expect(clippy::unwrap_used, clippy::expect_used, reason = "test scaffolding")]
@@ -84,26 +84,26 @@ impl telmoni_shared::mail::MailSender for Recorder {
 fn sweep_lanes(state: Arc<AppState>) -> Router {
     Router::new()
         .route(
-            "/internal/organizations/pending-deletion",
+            "/internal/v1/organizations/pending-deletion",
             get(due_organizations_lane),
         )
         .route(
-            "/internal/organizations/{organization_id}",
+            "/internal/v1/organizations/{organization_id}",
             axum::routing::delete(finalize_lane),
         )
         .route(
-            "/internal/organizations/{organization_id}/purge",
+            "/internal/v1/organizations/{organization_id}/purge",
             post(purge_pending_lane),
         )
         .route(
-            "/internal/organizations/{organization_id}/terminate",
+            "/internal/v1/organizations/{organization_id}/terminate",
             post(terminate_lane),
         )
         .route(
-            "/internal/people/pending-deletion",
+            "/internal/v1/people/pending-deletion",
             get(pending_people_lane),
         )
-        .route("/internal/people/{user_id}/erase", post(erase_lane))
+        .route("/internal/v1/people/{user_id}/erase", post(erase_lane))
         .with_state(state)
 }
 
@@ -472,7 +472,7 @@ async fn delete_organization(
     request(
         pool,
         "DELETE",
-        "/internal/organization",
+        "/internal/v1/organization",
         actor,
         Some(organization),
         Some(json!({ "code": code })),
@@ -485,7 +485,7 @@ async fn delete_account(pool: &PgPool, actor: &str, code: &str) -> Request<Body>
     request(
         pool,
         "DELETE",
-        "/internal/me",
+        "/internal/v1/me",
         actor,
         None,
         Some(json!({ "code": code })),
@@ -696,7 +696,7 @@ async fn listed_organizations(pool: &PgPool) -> Vec<(String, bool)> {
         .0
         .oneshot(service(
             "GET",
-            "/internal/organizations/pending-deletion",
+            "/internal/v1/organizations/pending-deletion",
             None,
         ))
         .await
@@ -732,7 +732,7 @@ async fn ripe_organizations(pool: &PgPool) -> Vec<String> {
 fn finalize(organization: &str) -> Request<Body> {
     service(
         "DELETE",
-        &format!("/internal/organizations/{organization}"),
+        &format!("/internal/v1/organizations/{organization}"),
         None,
     )
 }
@@ -741,7 +741,7 @@ fn finalize(organization: &str) -> Request<Body> {
 fn purge_lane(organization: &str) -> Request<Body> {
     service(
         "POST",
-        &format!("/internal/organizations/{organization}/purge"),
+        &format!("/internal/v1/organizations/{organization}/purge"),
         None,
     )
 }
@@ -750,7 +750,7 @@ fn purge_lane(organization: &str) -> Request<Body> {
 fn terminate(organization: &str) -> Request<Body> {
     service(
         "POST",
-        &format!("/internal/organizations/{organization}/terminate"),
+        &format!("/internal/v1/organizations/{organization}/terminate"),
         None,
     )
 }
@@ -920,7 +920,7 @@ async fn keys_validate(pool: &PgPool, keys: [&str; 3]) -> [bool; 3] {
             .clone()
             .oneshot(service(
                 "POST",
-                "/internal/tokens/validate",
+                "/internal/v1/tokens/validate",
                 Some(json!({ "token": raw })),
             ))
             .await
@@ -1332,34 +1332,38 @@ async fn a_pending_organization_is_refused_on_every_lane_that_acts_in_it(pool: P
     let lanes: Vec<(&str, String, Option<Value>)> = vec![
         (
             "DELETE",
-            "/internal/organization".into(),
+            "/internal/v1/organization".into(),
             Some(json!({ "code": CODE })),
         ),
-        ("POST", "/internal/organization/deletion-code".into(), None),
+        (
+            "POST",
+            "/internal/v1/organization/deletion-code".into(),
+            None,
+        ),
         (
             "PATCH",
-            "/internal/organization".into(),
+            "/internal/v1/organization".into(),
             Some(json!({ "name": "Renamed" })),
         ),
-        ("GET", "/internal/organization/members".into(), None),
+        ("GET", "/internal/v1/organization/members".into(), None),
         (
             "GET",
-            format!("/internal/audit/organizations/{ORGANIZATION}"),
+            format!("/internal/v1/audit/organizations/{ORGANIZATION}"),
             None,
         ),
         (
             "PUT",
-            "/internal/me/analytics".into(),
+            "/internal/v1/me/analytics".into(),
             Some(json!({ "opt_in": true })),
         ),
         (
             "PUT",
-            "/internal/me/default-organization".into(),
+            "/internal/v1/me/default-organization".into(),
             Some(json!({ "organizationId": ORGANIZATION })),
         ),
         (
             "POST",
-            "/internal/auth/sessions/00000000-0000-0000-0000-000000000000/revoke".into(),
+            "/internal/v1/auth/sessions/00000000-0000-0000-0000-000000000000/revoke".into(),
             None,
         ),
     ];
@@ -1411,7 +1415,7 @@ async fn a_pending_organization_is_refused_on_every_lane_that_acts_in_it(pool: P
             as_person(
                 Request::builder()
                     .method("GET")
-                    .uri("/internal/tokens")
+                    .uri("/internal/v1/tokens")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("x-organization-id", ORGANIZATION)
                     .header("x-project-id", &project),
@@ -1429,7 +1433,7 @@ async fn a_pending_organization_is_refused_on_every_lane_that_acts_in_it(pool: P
     assert_eq!(
         status,
         StatusCode::FORBIDDEN,
-        "GET /internal/tokens: {answer}"
+        "GET /internal/v1/tokens: {answer}"
     );
     assert_eq!(answer["detail"], "this organization is being deleted");
 
@@ -1441,7 +1445,7 @@ async fn a_pending_organization_is_refused_on_every_lane_that_acts_in_it(pool: P
             request(
                 &pool,
                 "GET",
-                "/internal/projects",
+                "/internal/v1/projects",
                 USER,
                 Some(ORGANIZATION),
                 None,
@@ -1605,7 +1609,7 @@ async fn a_code_deletes_only_the_organization_it_was_mailed_for(pool: PgPool) {
             request(
                 &pool,
                 "POST",
-                "/internal/organization/deletion-code",
+                "/internal/v1/organization/deletion-code",
                 USER,
                 Some(ORGANIZATION),
                 None,
@@ -1669,23 +1673,23 @@ async fn a_missing_organization_header_is_refused_on_every_lane_that_reads_one(p
     let lanes: &[(&str, &str, Option<Value>)] = &[
         (
             "DELETE",
-            "/internal/organization",
+            "/internal/v1/organization",
             Some(json!({ "code": CODE })),
         ),
-        ("POST", "/internal/organization/deletion-code", None),
+        ("POST", "/internal/v1/organization/deletion-code", None),
         (
             "POST",
-            "/internal/me/email-change/confirm",
+            "/internal/v1/me/email-change/confirm",
             Some(json!({ "currentCode": "111111", "newCode": "222222" })),
         ),
         (
             "PUT",
-            "/internal/me/analytics",
+            "/internal/v1/me/analytics",
             Some(json!({ "opt_in": true })),
         ),
         (
             "POST",
-            "/internal/auth/sessions/00000000-0000-0000-0000-000000000000/revoke",
+            "/internal/v1/auth/sessions/00000000-0000-0000-0000-000000000000/revoke",
             None,
         ),
     ];
@@ -1728,7 +1732,7 @@ async fn only_the_owner_is_mailed_an_organization_deletion_code(pool: PgPool) {
                 request(
                     &pool,
                     "POST",
-                    "/internal/organization/deletion-code",
+                    "/internal/v1/organization/deletion-code",
                     actor,
                     Some(organization),
                     None,
@@ -1830,7 +1834,7 @@ async fn a_pending_deletion_organizations_key_does_not_validate(pool: PgPool) {
         .0
         .oneshot(service(
             "POST",
-            "/internal/tokens/validate",
+            "/internal/v1/tokens/validate",
             Some(json!({ "token": raw })),
         ))
         .await
@@ -1969,7 +1973,7 @@ async fn an_account_that_owns_an_organization_is_finished_by_the_sweep(pool: PgP
     let app = || router.clone();
     let listed = || async {
         let resp = app()
-            .oneshot(service("GET", "/internal/people/pending-deletion", None))
+            .oneshot(service("GET", "/internal/v1/people/pending-deletion", None))
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
@@ -2024,7 +2028,7 @@ async fn an_account_that_owns_an_organization_is_finished_by_the_sweep(pool: PgP
     let resp = app()
         .oneshot(service(
             "POST",
-            &format!("/internal/people/{USER}/erase"),
+            &format!("/internal/v1/people/{USER}/erase"),
             None,
         ))
         .await
@@ -2358,7 +2362,7 @@ async fn the_sweep_finishes_a_stalled_account_deletion(pool: PgPool) {
 
     let resp = app
         .clone()
-        .oneshot(service("GET", "/internal/people/pending-deletion", None))
+        .oneshot(service("GET", "/internal/v1/people/pending-deletion", None))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -2366,7 +2370,7 @@ async fn the_sweep_finishes_a_stalled_account_deletion(pool: PgPool) {
     assert_eq!(pending["count"], 1, "{pending}");
     assert_eq!(pending["people"][0]["user_id"], USER, "{pending}");
 
-    let erase = format!("/internal/people/{USER}/erase");
+    let erase = format!("/internal/v1/people/{USER}/erase");
     for attempt in ["the erasure", "a retried erasure"] {
         let resp = app
             .clone()
@@ -2383,7 +2387,7 @@ async fn the_sweep_finishes_a_stalled_account_deletion(pool: PgPool) {
     );
 
     let resp = app
-        .oneshot(service("GET", "/internal/people/pending-deletion", None))
+        .oneshot(service("GET", "/internal/v1/people/pending-deletion", None))
         .await
         .unwrap();
     assert_eq!(json_body(resp).await["count"], 0);
@@ -2402,7 +2406,7 @@ async fn erasing_a_person_removes_their_memberships_elsewhere(pool: PgPool) {
     let resp = app
         .oneshot(service(
             "POST",
-            &format!("/internal/people/{USER}/erase"),
+            &format!("/internal/v1/people/{USER}/erase"),
             None,
         ))
         .await
@@ -2493,7 +2497,7 @@ async fn erasing_a_person_deletes_the_invitations_they_accepted(pool: PgPool) {
             .clone()
             .oneshot(service(
                 "POST",
-                &format!("/internal/people/{USER}/erase"),
+                &format!("/internal/v1/people/{USER}/erase"),
                 None,
             ))
             .await
@@ -2543,7 +2547,7 @@ async fn the_erase_lane_refuses_a_live_person(pool: PgPool) {
     let resp = app
         .oneshot(service(
             "POST",
-            &format!("/internal/people/{USER}/erase"),
+            &format!("/internal/v1/people/{USER}/erase"),
             None,
         ))
         .await
@@ -2578,7 +2582,7 @@ async fn the_erase_lane_waits_for_an_organization_the_person_still_owns(pool: Pg
     let resp = app
         .oneshot(service(
             "POST",
-            &format!("/internal/people/{USER}/erase"),
+            &format!("/internal/v1/people/{USER}/erase"),
             None,
         ))
         .await
@@ -2612,7 +2616,7 @@ async fn the_erase_lane_calls_out_an_active_organization_the_person_still_owns(p
     let resp = app
         .oneshot(service(
             "POST",
-            &format!("/internal/people/{USER}/erase"),
+            &format!("/internal/v1/people/{USER}/erase"),
             None,
         ))
         .await
@@ -2671,7 +2675,7 @@ async fn an_invitation_from_an_organization_being_deleted_is_withdrawn_with_it(p
             request(
                 &pool,
                 "POST",
-                "/internal/organization/invites",
+                "/internal/v1/organization/invites",
                 USER,
                 Some(ORGANIZATION),
                 Some(json!({ "email": email_of(COLLEAGUE), "role": "member" })),
@@ -2692,17 +2696,27 @@ async fn an_invitation_from_an_organization_being_deleted_is_withdrawn_with_it(p
     mark_pending(&pool, ORGANIZATION).await;
 
     let resp = app()
-        .oneshot(request(&pool, "GET", "/internal/me/invites", COLLEAGUE, None, None).await)
+        .oneshot(
+            request(
+                &pool,
+                "GET",
+                "/internal/v1/me/invites",
+                COLLEAGUE,
+                None,
+                None,
+            )
+            .await,
+        )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(json_body(resp).await["invites"], json!([]));
 
     for (uri, body) in [
-        (format!("/internal/me/invites/{id}/accept"), None),
-        (format!("/internal/me/invites/{id}/decline"), None),
+        (format!("/internal/v1/me/invites/{id}/accept"), None),
+        (format!("/internal/v1/me/invites/{id}/decline"), None),
         (
-            "/internal/invites/accept".to_owned(),
+            "/internal/v1/invites/accept".to_owned(),
             Some(json!({ "token": token })),
         ),
     ] {
@@ -2715,7 +2729,7 @@ async fn an_invitation_from_an_organization_being_deleted_is_withdrawn_with_it(p
     let resp = app()
         .oneshot(service(
             "POST",
-            "/internal/invites/look",
+            "/internal/v1/invites/look",
             Some(json!({ "token": token })),
         ))
         .await
@@ -2768,7 +2782,7 @@ async fn an_operator_terminates_without_a_code(pool: PgPool) {
             request(
                 &pool,
                 "PATCH",
-                "/internal/organization",
+                "/internal/v1/organization",
                 USER,
                 Some(ORGANIZATION),
                 Some(json!({ "name": "Renamed" })),
@@ -2948,7 +2962,7 @@ async fn a_failed_redaction_leaves_the_person_pending_for_the_sweep(pool: PgPool
     let resp = app()
         .oneshot(service(
             "POST",
-            &format!("/internal/people/{USER}/erase"),
+            &format!("/internal/v1/people/{USER}/erase"),
             None,
         ))
         .await

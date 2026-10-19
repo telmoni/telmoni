@@ -333,7 +333,7 @@ async function readLane<T>(
   const ctx = await identityContext();
   if (!ctx) return { kind: "unavailable" };
   try {
-    const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/telemetry${path}`, {
+    const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry${path}`, {
       headers: projectHeaders(ctx, projectId),
       cache: "no-store",
     });
@@ -433,7 +433,7 @@ export async function traceDownload(
   });
   try {
     const res = await fetchWithTimeout(
-      `${env.SERVER_URL}/internal/telemetry/traces/export${lane}`,
+      `${env.SERVER_URL}/internal/v1/telemetry/traces/export${lane}`,
       { headers: projectHeaders(ctx, projectId), cache: "no-store" },
       DOWNLOAD_TIMEOUT_MS,
     );
@@ -464,7 +464,7 @@ export const fetchTrace = cache(
     if (!ctx) return { kind: "unavailable" };
     try {
       const res = await fetchWithTimeout(
-        `${env.SERVER_URL}/internal/telemetry/traces/${encodeURIComponent(runId)}`,
+        `${env.SERVER_URL}/internal/v1/telemetry/traces/${encodeURIComponent(runId)}`,
         { headers: projectHeaders(ctx, projectId), cache: "no-store" },
       );
       if (res.status === 403) return { kind: "forbidden" };

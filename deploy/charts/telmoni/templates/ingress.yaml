@@ -108,16 +108,16 @@ spec:
     kind: Service
     name: web
 ---
-# The machine lanes — ingest at /otlp/v1/traces, the public read API under
-# /v1, the CLI's session lanes under /cli, the ping lane under /ping, and
-# Slack's signed events at /webhooks/slack — on `server-api`: on a host of their own where
+# The machine lanes — ingest at /otlp/v1/traces, the read API under /v1, the
+# CLI's under /cli/v1, pings under /ping/v1 and Slack's signed events at
+# /webhooks/v1/slack — on `server-api`: on a host of their own where
 # `ingress.apiHost` names one, else under their paths on the console's host,
 # whose slugs are reserved so no organization shadows them. Only the lanes'
-# paths, on either host: every other lane of the server is the console's to
-# call, behind the service secret, and stays unreachable from outside. A
-# matched path outranks the console's catch-all, and a named host outranks a
-# route naming none. A backend policy for the lanes is the deployment's to
-# add, as the console's is here.
+# paths reach the server from outside; the console's `/internal/v1`, behind
+# the service secret, never does. Each prefix takes the lane's every version,
+# so a path missing one gets the server's 404. A matched path outranks the
+# console's catch-all, and a named host a route naming none. A backend policy
+# for the lanes is the deployment's to add, as the console's is here.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -150,7 +150,7 @@ spec:
             value: /ping
         - path:
             type: Exact
-            value: /webhooks/slack
+            value: /webhooks/v1/slack
       backendRefs:
         - name: server-api
           port: 8082

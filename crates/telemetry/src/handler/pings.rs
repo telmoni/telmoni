@@ -1,15 +1,14 @@
-//! The public ping lane: `/ping/{ping_key}/{slug}`, `GET` or `POST` with no
-//! header, so a crontab line needs only `curl`. A bare ping is success; its
-//! `/start`, `/checkpoint` and `/fail` are the rest of a run, held on the
-//! run's open row until it ends and becomes a row of `spans` through the
-//! outbox ([`crate::outbox`]). The key rides in the URL; the request runs in
-//! the project's scope, the project held in place while it writes, so a
-//! transfer or a purge waits for the ping. A slug no monitor has makes its
-//! monitor, paused as `new`; past a limit the ping is refused with a problem
-//! document, which `curl -f` turns into cron's mail. A ping's body is
-//! content, never parsed or kept; progress rides in the query, numbers
-//! alone. Only the monitor a first ping makes is audited, and no answer may
-//! be cached, since a `GET` records a run.
+//! The public ping lane: `/ping/v1/{ping_key}/{slug}`, `GET` or `POST` with
+//! no header, so a crontab line needs only `curl`. A bare ping is success;
+//! its `/start`, `/checkpoint` and `/fail` are the rest of a run, held on the
+//! run's open row until it ends and reaches `spans` through the outbox
+//! ([`crate::outbox`]). The request runs in the project's scope, held in place
+//! while it writes, so a transfer or a purge waits for it. A slug no monitor
+//! has makes its monitor, paused as `new`; past a limit the ping is refused
+//! with a problem document, which `curl -f` turns into cron's mail. A body is
+//! content, never parsed or kept; progress rides in the query, numbers alone.
+//! Only the monitor a first ping makes is audited, and no answer may be
+//! cached, since a `GET` records a run.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -215,7 +214,7 @@ struct Heard {
     body_dropped: bool,
 }
 
-/// `GET` or `POST /ping/{ping_key}/{slug}` — success: the open run ends `ok`,
+/// `GET` or `POST /ping/v1/{ping_key}/{slug}` — success: the open run ends `ok`,
 /// or a run of no duration is recorded.
 pub async fn success(
     State(state): State<Arc<AppState>>,
@@ -227,7 +226,7 @@ pub async fn success(
     answer(handle(&state, &headers, path, query, body, Report::Success).await)
 }
 
-/// `GET` or `POST /ping/{ping_key}/{slug}/start` — a run opens, and its
+/// `GET` or `POST /ping/v1/{ping_key}/{slug}/start` — a run opens, and its
 /// stall timeout starts.
 pub async fn start(
     State(state): State<Arc<AppState>>,
@@ -239,7 +238,7 @@ pub async fn start(
     answer(handle(&state, &headers, path, query, body, Report::Start).await)
 }
 
-/// `GET` or `POST /ping/{ping_key}/{slug}/checkpoint?steps=4&cost=0.08` —
+/// `GET` or `POST /ping/v1/{ping_key}/{slug}/checkpoint?steps=4&cost=0.08` —
 /// progress: steps and spend so far, numbers alone, each kept where it is
 /// more than the run holds, so an older checkpoint sent again moves neither
 /// back; the stall timeout starts again. With no run open, it opens the run
@@ -256,7 +255,7 @@ pub async fn checkpoint(
     answer(handle(&state, &headers, path, query, body, Report::Checkpoint).await)
 }
 
-/// `GET` or `POST /ping/{ping_key}/{slug}/fail?exit_code=1` — the open run
+/// `GET` or `POST /ping/v1/{ping_key}/{slug}/fail?exit_code=1` — the open run
 /// ends `error`, with its exit code; with no run open, a run of no duration
 /// ended `error` is recorded.
 pub async fn fail(
@@ -269,10 +268,10 @@ pub async fn fail(
     answer(handle(&state, &headers, path, query, body, Report::Fail).await)
 }
 
-/// A path under `/ping` no lane serves: a `404` problem document, as the
+/// A path under `/ping/v1` no lane serves: a `404` problem document, as the
 /// other machine lanes answer one, in place of axum's bare one.
 pub async fn not_found() -> Response {
-    problem::not_found("no such lane under /ping")
+    problem::not_found("no such lane under /ping/v1")
 }
 
 /// A method no lane takes: `405` with `Allow`, as a problem document.

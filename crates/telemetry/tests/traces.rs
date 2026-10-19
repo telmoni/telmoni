@@ -29,7 +29,7 @@ use telmoni_telemetry::router;
 use telmoni_telemetry::store::SpanRow;
 use telmoni_telemetry::traces::{RUNS_MAX, TRACE_UNITS_MAX};
 
-const LANE: &str = "/internal/telemetry/traces";
+const LANE: &str = "/internal/v1/telemetry/traces";
 const OWNER: &str = "user_owner";
 const ADMIN: &str = "user_admin";
 const MEMBER: &str = "user_member";

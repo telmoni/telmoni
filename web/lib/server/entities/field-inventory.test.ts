@@ -44,7 +44,7 @@ describe("fetchFieldInventory", () => {
   it("reads the inventory from telemetry's lane, as the project", async () => {
     expect(await fetchFieldInventory(PROJECT)).toEqual(INVENTORY);
     const [url, init] = fetchWithTimeout.mock.calls[0];
-    expect(url).toBe("http://server/internal/telemetry/field-inventory");
+    expect(url).toBe("http://server/internal/v1/telemetry/field-inventory");
     expect(init.headers).toMatchObject({ "x-project-id": PROJECT });
   });
 

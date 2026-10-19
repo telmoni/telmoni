@@ -24,7 +24,7 @@ export const fetchActiveSessions = cache(
     if (!headers) return null;
     try {
       const res = await fetchWithTimeout(
-        `${env.SERVER_URL}/internal/auth/sessions`,
+        `${env.SERVER_URL}/internal/v1/auth/sessions`,
         { headers },
       );
       if (!res.ok) {

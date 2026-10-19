@@ -1,6 +1,6 @@
 //! A project's ping keys, under [`Resource::Token`] as its API keys are: a
 //! credential a machine holds, shown once and kept hashed. `GET
-//! /internal/telemetry/ping-keys`, which lists them; `POST`, which mints one
+//! /internal/v1/telemetry/ping-keys`, which lists them; `POST`, which mints one
 //! — two may be live at once, so a rotation moves the crontab lines over one
 //! at a time; and `DELETE /ping-keys/{id}`, which retires one now. The
 //! rotation retires the older of two a week after its last ping
@@ -97,7 +97,7 @@ fn not_found() -> TelmoniError {
     AuthError::NotFound("no ping key by that id in this project".into()).into()
 }
 
-/// `GET /internal/telemetry/ping-keys` — the project's keys: each by its
+/// `GET /internal/v1/telemetry/ping-keys` — the project's keys: each by its
 /// prefix and first eight characters (`SHOWN`), since a ping key has no name
 /// to go by where an API key is listed by its name and shows nothing of
 /// itself; when it was made, its last ping and when it was retired.
@@ -117,7 +117,7 @@ pub async fn list_ping_keys(
     }))
 }
 
-/// `POST /internal/telemetry/ping-keys` — a new key of the project, shown
+/// `POST /internal/v1/telemetry/ping-keys` — a new key of the project, shown
 /// this once, made under the organization's chain lock: the second live key
 /// beside the first for a rotation, and never a third.
 pub async fn create_ping_key(
@@ -199,7 +199,7 @@ async fn mint_key(
     })
 }
 
-/// `DELETE /internal/telemetry/ping-keys/{id}` — the key retired now: every
+/// `DELETE /internal/v1/telemetry/ping-keys/{id}` — the key retired now: every
 /// ping under it a 404 from here on. One retired already is left as it is.
 pub async fn delete_ping_key(
     State(state): State<Arc<AppState>>,

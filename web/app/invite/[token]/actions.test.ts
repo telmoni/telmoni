@@ -104,11 +104,11 @@ describe("acceptInviteAction", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("calls /internal/invites/accept, publishes invite:resolved, and goes on to the console", async () => {
+  it("calls /internal/v1/invites/accept, publishes invite:resolved, and goes on to the console", async () => {
     await acceptInviteAction("token_abc");
     expect(mockRedirect).toHaveBeenCalledWith("/console");
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://auth.test/internal/invites/accept",
+      "http://auth.test/internal/v1/invites/accept",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ token: "token_abc" }),

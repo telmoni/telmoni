@@ -22,12 +22,12 @@ const PUBLIC_PREFIXES: readonly string[] = [
 const PUBLIC_FILES: readonly string[] = [
   "/robots.txt",
   "/sitemap.xml",
-  "/api/search",
+  "/api/v1/search",
   "/llms.txt",
   "/llms-full.txt",
 ];
 
-const TEST_SESSION_PATH = "/api/test/session";
+const TEST_SESSION_PATH = "/api/v1/test/session";
 
 // Nothing a machine calls is here: the public API, the CLI's lanes, ingest
 // and the vendors' webhooks are the server's own, on the machine host, and

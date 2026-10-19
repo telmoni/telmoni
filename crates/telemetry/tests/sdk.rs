@@ -124,7 +124,7 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
     for _ in 0..100 {
         let response = app
             .clone()
-            .oneshot(request(format!("/internal/telemetry/traces/{run_id}")))
+            .oneshot(request(format!("/internal/v1/telemetry/traces/{run_id}")))
             .await
             .expect("the router answers");
         if response.status() == StatusCode::OK {
@@ -177,7 +177,7 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
     let response = app
         .clone()
         .oneshot(request(
-            "/internal/telemetry/traces?agent=nightly-triage".into(),
+            "/internal/v1/telemetry/traces?agent=nightly-triage".into(),
         ))
         .await
         .expect("the router answers");

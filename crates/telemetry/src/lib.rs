@@ -11,22 +11,17 @@
 //!   read and write goes through [`store`], the one query module, which names
 //!   on each read the projects its row policy may admit.
 //!
-//! Its ClickHouse tables are made by [`schema`], which `telmoni migrate` runs
-//! after the Postgres sets, and their expired days and months are dropped,
-//! and the rows deleted projects left rewritten away, by [`retention`], which
-//! `telmoni rotate` runs: both as the migrator's user, whom `tenant_isolation`
-//! does not hold. Auth reaches it through [`telmoni_shared::seam::Telemetry`]
-//! ([`seam`]) to purge an organization's or a project's spans, totals and
-//! settings and to move a project's settings, and the console through
-//! its lanes under `/internal/telemetry` ([`handler`], [`router`]), which ask
-//! auth who is acting through [`telmoni_shared::seam::Auth`]. A crontab
-//! reaches the ping lane, `/ping/{ping_key}/{slug}` ([`ping_router`]), with
-//! the project's ping key in the URL and nothing else; what a ping ends
-//! reaches ClickHouse, and what it discovers reaches the project's feed,
-//! through the [`outbox`], which a loop every replica runs drains, and the
-//! keys' [`rotation`] retires a replaced key a week after its last ping; a
-//! third loop, the [`sweep`], finishes a deleted project's purge that auth's
-//! call could not.
+//! Its ClickHouse tables are made by [`schema`] (`telmoni migrate`); expired
+//! days and months are dropped, and deleted projects' rows rewritten away, by
+//! [`retention`] (`telmoni rotate`), both as the migrator's user, whom
+//! `tenant_isolation` does not hold. Auth reaches it through
+//! [`telmoni_shared::seam::Telemetry`] ([`seam`]) to purge an organization's
+//! or a project's data and move a project's settings; the console through its
+//! lanes under `/internal/v1/telemetry` ([`handler`], [`router`]); a crontab
+//! through the ping lane, `/ping/v1/{ping_key}/{slug}` ([`ping_router`]).
+//! The [`outbox`] carries what a ping ends to ClickHouse and what it
+//! discovers to the feed; [`rotation`] retires a replaced key a week after
+//! its last ping; the [`sweep`] finishes a purge auth's call could not.
 //!
 //! ⚠ **Its readiness reads Postgres alone.** The server is one process for
 //! every module: a ClickHouse outage must leave sign-in, and every console
@@ -83,7 +78,7 @@ pub struct AppState {
     pub config: Config,
     /// ClickHouse, as the `telemetry` user: the spans and their rollup.
     pub store: store::Store,
-    /// Constant-time-comparable service secrets gating `/internal/*`.
+    /// Constant-time-comparable service secrets gating `/internal/v1/*`.
     pub service_secrets: ServiceSecrets,
     /// Auth, in process: who is behind a lane's bearer, and what role they
     /// hold on the project it names.
@@ -131,10 +126,9 @@ impl AppState {
     }
 }
 
-/// The module's router: the console's lanes under `/internal`, behind the
-/// service secret. The binary mounts it beside the other modules' and adds
-/// the health probes and the request layers once; ingest and the ping lane
-/// it nests behind the machine door ([`otlp_router`], [`ping_router`]).
+/// The module's router: the console's lanes under `/internal/v1`, behind the
+/// service secret; ingest and the ping lane the binary nests behind the
+/// machine door ([`otlp_router`], [`ping_router`]).
 pub fn router(state: Arc<AppState>) -> Router {
     let internal = Router::new()
         .route(
@@ -213,7 +207,9 @@ pub fn router(state: Arc<AppState>) -> Router {
             state.service_secrets.clone(),
             require_service_secret,
         ));
-    Router::new().nest("/internal", internal).with_state(state)
+    Router::new()
+        .nest("/internal/v1", internal)
+        .with_state(state)
 }
 
 /// Ingest, for the binary to nest at `/otlp` behind the machine door:
@@ -235,12 +231,11 @@ pub fn otlp_router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-/// The ping lane, for the binary to nest at `/ping` behind the machine
+/// The ping lane, for the binary to nest at `/ping/v1` behind the machine
 /// door: `/{ping_key}/{slug}` and its `/start`, `/checkpoint` and `/fail`,
-/// `GET` or `POST`, the key in the path its one gate
-/// ([`handler::pings`]). A path no lane serves, or a method none takes, is
-/// answered as the other machine lanes answer one; and no answer, those
-/// included, is one a cache may keep ([`handler::pings::never_stored`]).
+/// `GET` or `POST`, the key in the path its one gate ([`handler::pings`]).
+/// A stray path or method is answered as the other machine lanes answer one,
+/// and no answer is one a cache may keep ([`handler::pings::never_stored`]).
 pub fn ping_router(state: Arc<AppState>) -> Router {
     // `GET`'s handler answers `HEAD` too, as axum serves a `GET` route.
     let lane = MethodFilter::GET.or(MethodFilter::POST);

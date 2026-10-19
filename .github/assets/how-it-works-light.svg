@@ -58,7 +58,7 @@
   </g>
   <g class="mono" text-anchor="middle">
     <text class="route cyan" x="298" y="164">/otlp/v1/traces</text>
-    <text class="route plain" x="298" y="260">/cli, /v1</text>
+    <text class="route plain" x="298" y="260">/cli/v1, /v1</text>
     <text class="route ember" x="298" y="364">notifications</text>
   </g>
 

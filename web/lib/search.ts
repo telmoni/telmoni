@@ -24,7 +24,7 @@ export interface SearchSection {
 }
 
 /** What the palette lists of the project it is opened on, as
- *  `/api/search/index` answers it. */
+ *  `/api/v1/search/index` answers it. */
 export interface SearchIndex {
   keys: SearchSection;
   members: SearchSection;

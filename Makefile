@@ -505,7 +505,7 @@ webhook-tunnel:
 .PHONY: log-level
 log-level:
 	@secret="$$(grep -m1 '^SERVICE_SECRET=' .env | cut -d= -f2- | tr -d ' ')"; \
-	base="http://localhost:$(SERVER_PORT)/internal/log-level"; \
+	base="http://localhost:$(SERVER_PORT)/internal/v1/log-level"; \
 	if [ -z "$(LEVEL)" ]; then \
 		curl -sS -H "x-service-secret: $$secret" "$$base"; echo; \
 	elif [ "$(LEVEL)" = "reset" ]; then \

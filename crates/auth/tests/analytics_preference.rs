@@ -1,4 +1,4 @@
-//! `PUT /internal/me/analytics` — the person's own privacy preference.
+//! `PUT /internal/v1/me/analytics` — the person's own privacy preference.
 #![allow(
     clippy::indexing_slicing,
     reason = "a panicking helper is a failing test"
@@ -67,7 +67,7 @@ async fn json_body(resp: axum::response::Response) -> Value {
 async fn me(pool: &PgPool, user: &str, organization: Option<&str>) -> Value {
     let mut builder = Request::builder()
         .method("POST")
-        .uri("/me")
+        .uri("/internal/v1/me")
         .header("x-service-secret", SERVICE_SECRET)
         .header("content-type", "application/json");
     if let Some(organization) = organization {
@@ -116,7 +116,7 @@ async fn set_preference(
             as_person(
                 Request::builder()
                     .method("PUT")
-                    .uri("/internal/me/analytics")
+                    .uri("/internal/v1/me/analytics")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("x-organization-id", organization)
                     .header("content-type", "application/json"),

@@ -88,7 +88,7 @@ async fn sign_in(pool: &PgPool, user: &str) -> String {
             as_person(
                 Request::builder()
                     .method("POST")
-                    .uri("/me")
+                    .uri("/internal/v1/me")
                     .header("x-service-secret", SERVICE_SECRET)
                     .header("content-type", "application/json"),
                 pool,
@@ -113,7 +113,7 @@ async fn create_project(pool: &PgPool, organization: &str, name: &str) -> String
     let (status, body) = call(
         pool,
         "POST",
-        "/internal/projects",
+        "/internal/v1/projects",
         OWNER,
         organization,
         None,
@@ -172,7 +172,7 @@ async fn mint(pool: &PgPool, owner: &str, organization: &str, project: &str, nam
     let (status, _) = call(
         pool,
         "POST",
-        "/internal/tokens",
+        "/internal/v1/tokens",
         owner,
         organization,
         Some(project),
@@ -191,7 +191,7 @@ async fn start(pool: &PgPool, organization: &str, caller: &str, body: Value) -> 
     let (status, entry) = call(
         pool,
         "POST",
-        &format!("/internal/audit/organizations/{organization}/exports"),
+        &format!("/internal/v1/audit/organizations/{organization}/exports"),
         caller,
         organization,
         None,
@@ -208,7 +208,7 @@ async fn listed(pool: &PgPool, organization: &str, caller: &str, id: &str) -> Va
     let (status, body) = call(
         pool,
         "GET",
-        &format!("/internal/audit/organizations/{organization}/exports"),
+        &format!("/internal/v1/audit/organizations/{organization}/exports"),
         caller,
         organization,
         None,
@@ -251,7 +251,7 @@ async fn download(
     let req = Request::builder()
         .method("GET")
         .uri(format!(
-            "/internal/audit/organizations/{organization}/exports/{id}"
+            "/internal/v1/audit/organizations/{organization}/exports/{id}"
         ))
         .header("x-service-secret", SERVICE_SECRET)
         .header("x-organization-id", organization);
@@ -375,7 +375,7 @@ async fn a_projects_page_lists_the_rows_written_inside_it_and_no_others(pool: Pg
         let (status, body) = call(
             &pool,
             "GET",
-            &format!("/internal/audit/projects/{project}"),
+            &format!("/internal/v1/audit/projects/{project}"),
             OWNER,
             &organization,
             None,
@@ -406,7 +406,7 @@ async fn a_projects_page_lists_the_rows_written_inside_it_and_no_others(pool: Pg
     let (status, body) = call(
         &pool,
         "GET",
-        &format!("/internal/audit/organizations/{organization}"),
+        &format!("/internal/v1/audit/organizations/{organization}"),
         OWNER,
         &organization,
         None,
@@ -479,8 +479,8 @@ async fn the_owner_and_admins_read_a_project_and_the_organization(pool: PgPool) 
     tx.commit().await.unwrap();
 
     mint(&pool, OWNER, &owners, &project, "the key").await;
-    let project_page = format!("/internal/audit/projects/{project}");
-    let organization_page = format!("/internal/audit/organizations/{owners}");
+    let project_page = format!("/internal/v1/audit/projects/{project}");
+    let organization_page = format!("/internal/v1/audit/organizations/{owners}");
 
     for reader in [OWNER, ADMIN] {
         let (status, body) = call(&pool, "GET", &project_page, reader, &owners, None, None).await;
@@ -545,7 +545,7 @@ async fn the_owner_and_admins_read_a_project_and_the_organization(pool: PgPool) 
     let (status, body) = call(
         &pool,
         "GET",
-        &format!("/internal/audit/organizations/{admins}"),
+        &format!("/internal/v1/audit/organizations/{admins}"),
         ADMIN,
         &admins,
         None,
@@ -572,7 +572,7 @@ async fn a_filter_narrows_the_page_and_a_word_outside_the_vocabulary_is_refused(
     let project = create_project(&pool, &organization, "Platform").await;
     mint(&pool, OWNER, &organization, &project, "filtered key").await;
 
-    let page = format!("/internal/audit/projects/{project}");
+    let page = format!("/internal/v1/audit/projects/{project}");
 
     let (status, body) = call(
         &pool,
@@ -682,7 +682,7 @@ async fn an_export_is_built_in_the_background_and_verifies_from_the_file_alone(p
     let (status, body) = call(
         &pool,
         "GET",
-        &format!("/internal/audit/organizations/{organization}"),
+        &format!("/internal/v1/audit/organizations/{organization}"),
         OWNER,
         &organization,
         None,
@@ -797,7 +797,7 @@ async fn a_member_may_not_export_list_or_download_the_organizations_audit_log(po
     seat(&pool, &organization, MEMBER, OrganizationRole::Member).await;
     let id = start(&pool, &organization, OWNER, json!({ "format": "json" })).await;
 
-    let exports = format!("/internal/audit/organizations/{organization}/exports");
+    let exports = format!("/internal/v1/audit/organizations/{organization}/exports");
     let (status, _) = call(
         &pool,
         "POST",
@@ -924,7 +924,7 @@ async fn an_export_names_a_known_format_and_a_range_that_starts_before_it_ends(p
         let (status, answer) = call(
             &pool,
             "POST",
-            &format!("/internal/audit/organizations/{organization}/exports"),
+            &format!("/internal/v1/audit/organizations/{organization}/exports"),
             OWNER,
             &organization,
             None,
@@ -946,7 +946,7 @@ async fn three_exports_still_building_hold_off_a_fourth(pool: PgPool) {
     let (status, answer) = call(
         &pool,
         "POST",
-        &format!("/internal/audit/organizations/{organization}/exports"),
+        &format!("/internal/v1/audit/organizations/{organization}/exports"),
         OWNER,
         &organization,
         None,

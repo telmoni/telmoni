@@ -184,7 +184,7 @@ describe("fetchTraces", () => {
     });
     const [url, init] = fetchWithTimeout.mock.calls[0];
     expect(url).toBe(
-      "http://server/internal/telemetry/traces?agent=nightly-report&agent=zeta&sort=user&limit=50&page=2",
+      "http://server/internal/v1/telemetry/traces?agent=nightly-report&agent=zeta&sort=user&limit=50&page=2",
     );
     expect(init.headers).toMatchObject({ "x-project-id": PROJECT });
   });
@@ -217,7 +217,7 @@ describe("the reads beside the list", () => {
     answer(200, FACETS);
     expect(await fetchTraceFacets(PROJECT, QUERY)).toEqual({ kind: "ok", facets: FACETS });
     const [url] = fetchWithTimeout.mock.calls[0];
-    expect(url).toBe("http://server/internal/telemetry/traces/facets?agent=zeta&status=error&days=30");
+    expect(url).toBe("http://server/internal/v1/telemetry/traces/facets?agent=zeta&status=error&days=30");
   });
 
   it("reads the histogram on the reader's clock, its empty bars with no durations", async () => {
@@ -225,7 +225,7 @@ describe("the reads beside the list", () => {
     expect(await fetchTraceHistogram(PROJECT, QUERY, 330)).toEqual({ kind: "ok", histogram: HISTOGRAM });
     const [url] = fetchWithTimeout.mock.calls[0];
     expect(url).toBe(
-      "http://server/internal/telemetry/traces/histogram?agent=zeta&status=error&days=30&utc_offset=330",
+      "http://server/internal/v1/telemetry/traces/histogram?agent=zeta&status=error&days=30&utc_offset=330",
     );
   });
 
@@ -233,12 +233,12 @@ describe("the reads beside the list", () => {
     answer(200, { views: [VIEW] });
     expect(await fetchTraceViews(PROJECT)).toEqual({ kind: "ok", views: [VIEW] });
     const [url] = fetchWithTimeout.mock.calls[0];
-    expect(url).toBe("http://server/internal/telemetry/views?kind=list");
+    expect(url).toBe("http://server/internal/v1/telemetry/views?kind=list");
 
     answer(200, { views: [LAYOUT] });
     expect(await fetchTraceLayouts(PROJECT)).toEqual({ kind: "ok", layouts: [LAYOUT] });
     expect(fetchWithTimeout.mock.calls[1][0]).toBe(
-      "http://server/internal/telemetry/views?kind=layout",
+      "http://server/internal/v1/telemetry/views?kind=layout",
     );
     // A layout among the list's views, or a view among the layouts, is an
     // answer this console cannot read.
@@ -279,7 +279,7 @@ describe("traceDownload", () => {
     expect(result).toMatchObject({ kind: "ok", contentType: "text/csv; charset=utf-8" });
     const [url, , timeout] = fetchWithTimeout.mock.calls[0];
     expect(url).toBe(
-      `http://server/internal/telemetry/traces/export?agent=zeta&sort=tokens&format=csv&run=${RUN}`,
+      `http://server/internal/v1/telemetry/traces/export?agent=zeta&sort=tokens&format=csv&run=${RUN}`,
     );
     expect(timeout).toBeGreaterThan(10_000);
   });
@@ -299,7 +299,7 @@ describe("fetchTrace", () => {
     answer(200, DETAIL);
     expect(await fetchTrace(PROJECT, RUN)).toEqual({ kind: "ok", trace: DETAIL });
     const [url] = fetchWithTimeout.mock.calls[0];
-    expect(url).toBe(`http://server/internal/telemetry/traces/${RUN}`);
+    expect(url).toBe(`http://server/internal/v1/telemetry/traces/${RUN}`);
   });
 
   // A run the project does not hold and an id that is no run id read the

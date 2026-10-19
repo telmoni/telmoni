@@ -58,7 +58,7 @@ export const fetchUsers = cache(
     if (!ctx) return { kind: "unavailable" };
     try {
       const res = await fetchWithTimeout(
-        `${env.SERVER_URL}/internal/telemetry/users${queryString(query)}`,
+        `${env.SERVER_URL}/internal/v1/telemetry/users${queryString(query)}`,
         { headers: projectHeaders(ctx, projectId), cache: "no-store" },
       );
       if (res.status === 403) return { kind: "forbidden" };

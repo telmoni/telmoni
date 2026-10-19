@@ -1,4 +1,4 @@
-//! Sign-in flow: the `/internal/auth/*` endpoints through the real router,
+//! Sign-in flow: the `/internal/v1/auth/*` endpoints through the real router,
 //! with an external identity provider scripted in-process beside the login
 //! form, and the issuer opening every session.
 #![expect(clippy::unwrap_used, clippy::expect_used, reason = "test scaffolding")]
@@ -110,9 +110,9 @@ fn get(uri: &str) -> Request<Body> {
         .unwrap()
 }
 
-/// `POST /me` as the console makes it: the person is who the bearer names,
-/// and what describes them is the identity an exchange recorded — the body
-/// carries nothing about them.
+/// `POST /internal/v1/me` as the console makes it: the person is who the
+/// bearer names, and what describes them is the identity an exchange
+/// recorded — the body carries nothing about them.
 async fn post_me(pool: &PgPool, user: &str) -> Request<Body> {
     post_me_under(&bearer(pool, user).await)
 }
@@ -122,9 +122,9 @@ async fn post_me_with_session(pool: &PgPool, user: &str, sid: &str) -> Request<B
     post_me_under(&bearer_in(pool, user, sid).await)
 }
 
-/// `POST /me` under any bearer.
+/// `POST /internal/v1/me` under any bearer.
 fn post_me_under(bearer: &str) -> Request<Body> {
-    Request::post("/me")
+    Request::post("/internal/v1/me")
         .header("content-type", "application/json")
         .header("x-service-secret", SERVICE_SECRET)
         .header("authorization", format!("Bearer {bearer}"))
@@ -143,7 +143,7 @@ async fn exchange_external(app: &Router, code: &str) -> (StatusCode, serde_json:
     let resp = app
         .clone()
         .oneshot(post_json(
-            "/internal/auth/exchange",
+            "/internal/v1/auth/exchange",
             serde_json::json!({ "code": code, "provider": "external" }),
         ))
         .await
@@ -179,7 +179,7 @@ async fn start_sends_the_browser_to_the_console_page_while_the_form_is_on(pool: 
     let resp = app
         .clone()
         .oneshot(post_json(
-            "/internal/auth/start",
+            "/internal/v1/auth/start",
             serde_json::json!({ "state": "csrf-abc-123" }),
         ))
         .await
@@ -192,7 +192,7 @@ async fn start_sends_the_browser_to_the_console_page_while_the_form_is_on(pool: 
 
     let resp = app
         .oneshot(post_json(
-            "/internal/auth/start",
+            "/internal/v1/auth/start",
             serde_json::json!({
                 "state": "csrf-abc-123",
                 "signUp": true,
@@ -216,7 +216,7 @@ async fn start_names_the_external_provider_when_asked_or_when_the_form_is_off(po
     let (app, provider) = app(pool.clone());
     let resp = app
         .oneshot(post_json(
-            "/internal/auth/start",
+            "/internal/v1/auth/start",
             serde_json::json!({ "state": "csrf-abc-123", "provider": "external" }),
         ))
         .await
@@ -248,7 +248,7 @@ async fn start_names_the_external_provider_when_asked_or_when_the_form_is_off(po
     );
     let resp = app
         .oneshot(post_json(
-            "/internal/auth/start",
+            "/internal/v1/auth/start",
             serde_json::json!({
                 "state": "csrf-abc-123",
                 "signUp": true,
@@ -272,7 +272,7 @@ async fn start_refuses_a_provider_it_does_not_have(pool: PgPool) {
     let (app, provider) = app(pool);
     let resp = app
         .oneshot(post_json(
-            "/internal/auth/start",
+            "/internal/v1/auth/start",
             serde_json::json!({ "state": "csrf-abc-123", "provider": "google" }),
         ))
         .await
@@ -290,7 +290,7 @@ async fn logout_url_names_the_providers_page_only_for_a_session_that_began_there
     let resp = app
         .clone()
         .oneshot(post_json(
-            "/internal/auth/logout-url",
+            "/internal/v1/auth/logout-url",
             serde_json::json!({
                 "session_id": "session_42",
                 "id_token": "id.token.x",
@@ -317,7 +317,7 @@ async fn logout_url_names_the_providers_page_only_for_a_session_that_began_there
 
     let resp = app
         .oneshot(post_json(
-            "/internal/auth/logout-url",
+            "/internal/v1/auth/logout-url",
             serde_json::json!({
                 "session_id": "session_43",
                 "return_to": "http://localhost:3000/",
@@ -483,7 +483,7 @@ async fn refresh_exchanges_the_refresh_token_for_a_fresh_pair(pool: PgPool) {
 
     let resp = app
         .oneshot(post_json(
-            "/internal/auth/refresh",
+            "/internal/v1/auth/refresh",
             serde_json::json!({ "refresh_token": refresh_token }),
         ))
         .await
@@ -512,7 +512,7 @@ async fn session_endpoints_require_the_service_secret(pool: PgPool) {
 
     let resp = app
         .oneshot(
-            Request::post("/internal/auth/exchange")
+            Request::post("/internal/v1/auth/exchange")
                 .header("content-type", "application/json")
                 .body(Body::from(
                     serde_json::json!({ "code": "code_xyz", "provider": "external" }).to_string(),
@@ -533,7 +533,7 @@ async fn a_device_start_hands_the_cli_the_codes(pool: PgPool) {
     let (app, provider) = app(pool);
 
     let resp = app
-        .oneshot(post_json("/cli/auth/device", serde_json::json!({})))
+        .oneshot(post_json("/cli/v1/auth/device", serde_json::json!({})))
         .await
         .unwrap();
 
@@ -554,7 +554,7 @@ async fn a_device_poll_refuses_a_blank_code(pool: PgPool) {
 
     let resp = app
         .oneshot(post_json(
-            "/cli/auth/device/poll",
+            "/cli/v1/auth/device/poll",
             serde_json::json!({ "deviceCode": "  " }),
         ))
         .await
@@ -568,7 +568,7 @@ async fn a_device_poll_refuses_a_blank_code(pool: PgPool) {
 #[sqlx::test]
 async fn the_config_lane_describes_the_sign_in(pool: PgPool) {
     let (app, _) = app(pool.clone());
-    let resp = app.oneshot(get("/internal/auth/config")).await.unwrap();
+    let resp = app.oneshot(get("/internal/v1/auth/config")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(
         json_body(resp).await,
@@ -587,7 +587,7 @@ async fn the_config_lane_describes_the_sign_in(pool: PgPool) {
             ..Setup::default()
         },
     );
-    let resp = app.oneshot(get("/internal/auth/config")).await.unwrap();
+    let resp = app.oneshot(get("/internal/v1/auth/config")).await.unwrap();
     let body = json_body(resp).await;
     assert_eq!(body["passwordSignIn"], false);
     assert_eq!(body["allowSignUp"], false);
@@ -604,9 +604,9 @@ async fn the_password_lanes_are_off_with_the_form(pool: PgPool) {
         },
     );
     for lane in [
-        "/internal/auth/password/sign-up",
-        "/internal/auth/password/sign-in",
-        "/internal/auth/password/forgot",
+        "/internal/v1/auth/password/sign-up",
+        "/internal/v1/auth/password/sign-in",
+        "/internal/v1/auth/password/forgot",
     ] {
         let resp = app
             .clone()
@@ -734,7 +734,7 @@ async fn provisioning_names_the_organization_after_its_holder(pool: PgPool) {
         }
         let resp = application
             .clone()
-            .oneshot(post_json("/test/session", session))
+            .oneshot(post_json("/internal/v1/test/session", session))
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
@@ -857,7 +857,7 @@ async fn me_refuses_a_body_that_describes_the_person(pool: PgPool) {
 
     let resp = application
         .oneshot(
-            Request::post("/me")
+            Request::post("/internal/v1/me")
                 .header("content-type", "application/json")
                 .header("x-service-secret", SERVICE_SECRET)
                 .header("authorization", format!("Bearer {bearer}"))
@@ -905,7 +905,7 @@ async fn me_refuses_a_bearer_no_sign_in_minted(pool: PgPool) {
 async fn the_test_session_route_is_mounted_only_when_the_door_is_open(pool: PgPool) {
     let request = || {
         post_json(
-            "/test/session",
+            "/internal/v1/test/session",
             serde_json::json!({ "userId": "user_test_door", "email": "door@example.com" }),
         )
     };

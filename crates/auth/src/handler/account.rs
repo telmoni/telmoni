@@ -1,4 +1,4 @@
-//! The person's own lanes — `/internal/me/…`: the things somebody does to
+//! The person's own lanes — `/internal/v1/me/…`: the things somebody does to
 //! THEIR account rather than to an organization. Password reset, the address
 //! they sign in with, analytics consent, the organization a sign-in opens them
 //! in, and deleting the account.
@@ -49,7 +49,7 @@ use crate::{
 /// How many email-change codes one person may be issued in a day.
 const EMAIL_CHANGE_DAILY_MAX: i64 = 5;
 
-/// Body for `POST /internal/me/email-change` — the address to move to.
+/// Body for `POST /internal/v1/me/email-change` — the address to move to.
 /// Derived `Debug`: an address is not a credential.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -57,7 +57,7 @@ pub struct RequestEmailChangeRequest {
     pub new_email: String,
 }
 
-/// Body for `POST /internal/me/email-change/confirm` — one code from each
+/// Body for `POST /internal/v1/me/email-change/confirm` — one code from each
 /// inbox. Both are required; each proves half of what this lane needs.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -79,21 +79,21 @@ impl std::fmt::Debug for ConfirmEmailChangeRequest {
     }
 }
 
-/// Body of `PUT /internal/me/analytics`.
+/// Body of `PUT /internal/v1/me/analytics`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnalyticsPreferenceRequest {
     pub opt_in: bool,
 }
 
-/// Body of `PUT /internal/me/default-organization`.
+/// Body of `PUT /internal/v1/me/default-organization`.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DefaultOrganizationRequest {
     pub organization_id: String,
 }
 
-/// Body for `DELETE /internal/me` and `DELETE /internal/organization` — the
+/// Body for `DELETE /internal/v1/me` and `DELETE /internal/v1/organization` — the
 /// emailed confirmation code that gates the irreversible cascade.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -130,7 +130,7 @@ async fn person_of(
     person.ok_or_else(|| AuthError::Unauthenticated.into())
 }
 
-/// `POST /internal/me/password-reset` — ask the identity provider for a
+/// `POST /internal/v1/me/password-reset` — ask the identity provider for a
 /// one-time link, which it mails itself. Not audited: nothing has changed yet.
 pub async fn request_password_reset(
     State(state): State<Arc<AppState>>,
@@ -156,7 +156,7 @@ pub async fn request_password_reset(
     Ok((StatusCode::ACCEPTED, Json(json!({ "sent": true }))))
 }
 
-/// `POST /internal/me/email-change` — open a pending address change: the
+/// `POST /internal/v1/me/email-change` — open a pending address change: the
 /// provider mails a code to the NEW address, and we mail ours to the CURRENT
 /// one.
 ///
@@ -246,7 +246,7 @@ pub async fn request_email_change(
     Ok((StatusCode::ACCEPTED, Json(json!({ "sent": true }))))
 }
 
-/// `POST /internal/me/email-change/confirm` — spend both codes and move the
+/// `POST /internal/v1/me/email-change/confirm` — spend both codes and move the
 /// address.
 ///
 /// Three phases, because the provider's response is what we write: verify our
@@ -364,7 +364,7 @@ pub async fn confirm_email_change(
     ))
 }
 
-/// `PUT /internal/me/analytics` — record whether this person wants to be
+/// `PUT /internal/v1/me/analytics` — record whether this person wants to be
 /// counted. ⚠ **OPT-IN**: the column starts `false` and nothing reaches a
 /// provider until this lane says so. The preference is the person's and
 /// follows them into every organization they are in.
@@ -410,7 +410,7 @@ pub async fn set_analytics_preference(
     Ok(Json(json!({ "analytics_opt_in": req.opt_in })))
 }
 
-/// `PUT /internal/me/default-organization` — the organization a sign-in opens
+/// `PUT /internal/v1/me/default-organization` — the organization a sign-in opens
 /// this person in, and the one a request naming none acts in: one of the
 /// active organizations they hold a seat in, as Vercel's default team is one
 /// of yours. `/me` answers it as `defaultOrganizationId`.
@@ -459,7 +459,7 @@ pub async fn set_default_organization(
     Ok(Json(json!({ "defaultOrganizationId": organization })))
 }
 
-/// `POST /internal/me/deletion-code` — mail the code that authorizes deleting
+/// `POST /internal/v1/me/deletion-code` — mail the code that authorizes deleting
 /// this account.
 pub async fn request_account_deletion_code(
     State(state): State<Arc<AppState>>,
@@ -500,7 +500,7 @@ pub async fn request_account_deletion_code(
     Ok((StatusCode::ACCEPTED, Json(json!({ "sent": true }))))
 }
 
-/// `DELETE /internal/me` — erase the account, gated by its emailed code.
+/// `DELETE /internal/v1/me` — erase the account, gated by its emailed code.
 ///
 /// **Refused while the person owns an organization anybody else is in** (409,
 /// naming them): that organization is those people's too, and deleting it

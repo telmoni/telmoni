@@ -53,7 +53,7 @@ async function read(
   headers: Record<string, string>,
 ): Promise<NotificationFeed | null> {
   try {
-    const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/notifications/feed`, {
+    const res = await fetchWithTimeout(`${env.SERVER_URL}/internal/v1/notifications/feed`, {
       headers,
       cache: "no-store",
     });

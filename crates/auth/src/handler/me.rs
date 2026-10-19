@@ -34,7 +34,7 @@ use crate::{
     },
 };
 
-/// Body for `POST /me`. `deny_unknown_fields` is what refuses an `email` or a
+/// Body for `POST /internal/v1/me`. `deny_unknown_fields` is what refuses an `email` or a
 /// `userId` here: nothing in the body may name or describe the person.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -98,7 +98,7 @@ pub struct MeResponse {
     pub session_row_id: Uuid,
 }
 
-/// Body for `POST /test/session` — who the test door signs in, as an
+/// Body for `POST /internal/v1/test/session` — who the test door signs in, as an
 /// exchange would have recorded them.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -111,7 +111,7 @@ pub struct TestSessionRequest {
     pub last_name: Option<String>,
 }
 
-/// `POST /test/session` — record the person as a code exchange would, the
+/// `POST /internal/v1/test/session` — record the person as a code exchange would, the
 /// address taken as verified, and open a session for them: the same tokens
 /// a sign-in answers with. Mounted only under `ALLOW_TEST_SESSION` (see the
 /// router), which the binary refuses in a pod.
@@ -152,7 +152,7 @@ pub async fn me(
 }
 
 /// The answer behind `/me`, for the console's lane and the CLI's
-/// (`/cli/me`), which differ only in where the device's `User-Agent` comes
+/// (`/cli/v1/me`), which differ only in where the device's `User-Agent` comes
 /// from: the console's body, the CLI's own request header.
 pub(crate) async fn answer(
     state: &AppState,
@@ -195,7 +195,7 @@ pub(crate) async fn answer(
     // ⚠ **The maintenance lane, for a question about the caller.** Each
     // organization comes with its owner to contact — another person's row and
     // identity — and every invitation is another organization's. There is no
-    // one GUC that opens exactly those, as `/internal/projects/everywhere`
+    // one GUC that opens exactly those, as `/internal/v1/projects/everywhere`
     // found before this.
     let mut mtx = maintenance_scope(&state.db, AuthLane).await?;
     let organizations = organization_members::organizations_of(&mut mtx, &user_id).await?;

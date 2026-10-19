@@ -84,7 +84,7 @@ export async function createProjectAction(
   }
 
   const res = await tryFetchWithTimeout(
-    `${env.SERVER_URL}/internal/projects`,
+    `${env.SERVER_URL}/internal/v1/projects`,
     {
       method: "POST",
       headers: {
@@ -187,7 +187,7 @@ export async function createOrganizationAction(
     return "href" in elsewhere ? { error: null, href: elsewhere.href } : elsewhere;
   }
 
-  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/organizations`, {
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/organizations`, {
     method: "POST",
     headers: { ...personHeaders(session), "content-type": "application/json" },
     body: JSON.stringify(url ? { name: trimmed, slug: url } : { name: trimmed }),

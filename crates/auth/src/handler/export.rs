@@ -1,4 +1,4 @@
-//! `GET /internal/organization/export` — everything auth holds about one
+//! `GET /internal/v1/organization/export` — everything auth holds about one
 //! organization, assembled for its owner or an admin to download.
 //!
 //! ⚠ **THE ORGANIZATION'S, AND ITS OWNER'S AND ADMINS' ALONE.** There is no
@@ -58,7 +58,7 @@ async fn rows(tx: &mut sqlx::PgConnection, sql: &str, bind: &str) -> Result<Valu
     Ok(value)
 }
 
-/// `GET /internal/organization/export` — the record of the active
+/// `GET /internal/v1/organization/export` — the record of the active
 /// organization, for its owner or an admin.
 pub async fn export_organization(
     State(state): State<Arc<AppState>>,

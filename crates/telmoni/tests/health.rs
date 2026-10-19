@@ -101,7 +101,7 @@ impl Module for Probe {
     }
 
     fn router(&self) -> Router {
-        Router::new().route("/internal/probe", routing::get(|| async { "probed" }))
+        Router::new().route("/internal/v1/probe", routing::get(|| async { "probed" }))
     }
 
     async fn ready(&self) -> sqlx::Result<()> {
@@ -146,21 +146,21 @@ async fn liveness_ignores_the_databases() {
 /// no service secret — before any of them reaches a table it could not.
 #[tokio::test]
 async fn the_modules_are_mounted_behind_their_gates() {
-    let me = Request::post("/me")
+    let me = Request::post("/internal/v1/me")
         .header("x-service-secret", SECRET)
         .header("content-type", "application/json")
         .body(Body::from("{}"))
         .unwrap();
     assert_eq!(status(me).await, StatusCode::UNAUTHORIZED);
 
-    let feed = Request::get("/internal/notifications/feed")
+    let feed = Request::get("/internal/v1/notifications/feed")
         .header("x-service-secret", SECRET)
         .header("x-organization-id", "org_1")
         .body(Body::empty())
         .unwrap();
     assert_eq!(status(feed).await, StatusCode::UNAUTHORIZED);
 
-    let content_mode = Request::get("/internal/telemetry/content-mode")
+    let content_mode = Request::get("/internal/v1/telemetry/content-mode")
         .header("x-service-secret", SECRET)
         .header("x-organization-id", "org_1")
         .header("x-project-id", "project_1")
@@ -169,10 +169,10 @@ async fn the_modules_are_mounted_behind_their_gates() {
     assert_eq!(status(content_mode).await, StatusCode::UNAUTHORIZED);
 
     assert_eq!(
-        status(get("/internal/log-level")).await,
+        status(get("/internal/v1/log-level")).await,
         StatusCode::UNAUTHORIZED
     );
-    let level = Request::get("/internal/log-level")
+    let level = Request::get("/internal/v1/log-level")
         .header("x-service-secret", SECRET)
         .body(Body::empty())
         .unwrap();
@@ -192,17 +192,17 @@ async fn the_modules_are_mounted_behind_their_gates() {
 /// A deployment with no agent still answers the console's agent lanes, so
 /// the panel can say the operator has not configured it rather than fail:
 /// the status says off, and a question is the agent's own 503. Both behind
-/// the service secret, like every lane under `/internal`.
+/// the service secret, like every lane under `/internal/v1`.
 #[tokio::test]
 async fn without_an_agent_its_lanes_say_so() {
     assert_eq!(
-        status(get("/internal/agent/status")).await,
+        status(get("/internal/v1/agent/status")).await,
         StatusCode::UNAUTHORIZED
     );
     let response = app()
         .router()
         .oneshot(
-            Request::get("/internal/agent/status")
+            Request::get("/internal/v1/agent/status")
                 .header("x-service-secret", SECRET)
                 .body(Body::empty())
                 .unwrap(),
@@ -215,7 +215,7 @@ async fn without_an_agent_its_lanes_say_so() {
         .unwrap();
     assert_eq!(&body[..], br#"{"enabled":false}"#);
 
-    let turn = Request::post("/internal/agent/turns")
+    let turn = Request::post("/internal/v1/agent/turns")
         .header("x-service-secret", SECRET)
         .header("content-type", "application/json")
         .body(Body::from(r#"{"conversation_id":null,"message":"hi"}"#))
@@ -238,7 +238,7 @@ async fn a_mounted_module_is_served_and_probed() {
 
     let served = app
         .router()
-        .oneshot(get("/internal/probe"))
+        .oneshot(get("/internal/v1/probe"))
         .await
         .expect("router responds");
     assert_eq!(served.status(), StatusCode::OK);
@@ -327,7 +327,7 @@ async fn the_public_api_is_served_at_v1_behind_its_key() {
     assert_eq!(problem(root).await["type"], "/errors/not-found");
 }
 
-/// The CLI's lanes are on the binary's `/cli`, each taking `POST` and its
+/// The CLI's lanes are on the binary's `/cli/v1`, each taking `POST` and its
 /// own credential: a bearer lane with no bearer is a 401 before any table,
 /// a browser is refused, a body past the cap is refused, and a path none
 /// serves is a problem document of the door's own.
@@ -335,7 +335,7 @@ async fn the_public_api_is_served_at_v1_behind_its_key() {
 async fn the_cli_lanes_are_served_at_cli_behind_their_gates() {
     let post = |path: &str| Request::post(path).header("content-type", "application/json");
 
-    let no_bearer = send(post("/cli/me").body(Body::empty()).unwrap()).await;
+    let no_bearer = send(post("/cli/v1/me").body(Body::empty()).unwrap()).await;
     assert_eq!(no_bearer.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(
         problem(no_bearer).await["type"],
@@ -343,7 +343,7 @@ async fn the_cli_lanes_are_served_at_cli_behind_their_gates() {
     );
 
     let browser = send(
-        post("/cli/auth/refresh")
+        post("/cli/v1/auth/refresh")
             .header("sec-fetch-site", "same-origin")
             .body(Body::from(r#"{"refreshToken":"x"}"#))
             .unwrap(),
@@ -352,24 +352,27 @@ async fn the_cli_lanes_are_served_at_cli_behind_their_gates() {
     assert_eq!(browser.status(), StatusCode::FORBIDDEN);
     assert_eq!(problem(browser).await["detail"], "not a browser lane");
 
-    let get_me = send(get("/cli/me")).await;
+    let get_me = send(get("/cli/v1/me")).await;
     assert_eq!(get_me.status(), StatusCode::METHOD_NOT_ALLOWED);
     assert_eq!(header(&get_me, "allow"), Some("POST"));
     assert_eq!(problem(get_me).await["type"], "/errors/method-not-allowed");
 
-    let nowhere = send(post("/cli/nowhere").body(Body::empty()).unwrap()).await;
+    let nowhere = send(post("/cli/v1/nowhere").body(Body::empty()).unwrap()).await;
     assert_eq!(nowhere.status(), StatusCode::NOT_FOUND);
     let body = problem(nowhere).await;
     assert_eq!(body["type"], "/errors/not-found");
     assert_eq!(body["detail"], "no such lane");
 
-    let root = send(post("/cli/").body(Body::empty()).unwrap()).await;
+    let root = send(post("/cli/v1/").body(Body::empty()).unwrap()).await;
     assert_eq!(root.status(), StatusCode::NOT_FOUND);
     assert_eq!(problem(root).await["type"], "/errors/not-found");
 
+    let unversioned = send(post("/cli/me").body(Body::empty()).unwrap()).await;
+    assert_eq!(unversioned.status(), StatusCode::NOT_FOUND);
+
     let oversized = format!(r#"{{"refreshToken":"{}"}}"#, "x".repeat(9 * 1024));
     let too_large = send(
-        post("/cli/auth/refresh")
+        post("/cli/v1/auth/refresh")
             .body(Body::from(oversized))
             .unwrap(),
     )
@@ -388,7 +391,7 @@ async fn the_door_meters_the_cli_lanes_by_address() {
     let router = app.router();
     let from = |address: &str| {
         router.clone().oneshot(
-            Request::post("/cli/nowhere")
+            Request::post("/cli/v1/nowhere")
                 .header("x-forwarded-for", format!("{address}, 35.191.0.1"))
                 .body(Body::empty())
                 .unwrap(),
@@ -498,7 +501,7 @@ fn percent_encoded_last(key: &str) -> String {
     format!("{head}%{last:02X}")
 }
 
-/// The ping lane is on the binary's `/ping`, behind the door, which reads
+/// The ping lane is on the binary's `/ping/v1`, behind the door, which reads
 /// the key from the path as it came: a key spelled as minted passes to the
 /// lane, which asks the database for it (unreachable here); any other
 /// spelling in the key's place — the key with a character percent-encoded,
@@ -511,7 +514,7 @@ fn percent_encoded_last(key: &str) -> String {
 #[tokio::test]
 async fn the_ping_lane_is_served_at_ping_behind_the_door() {
     let key = mint_ping_key();
-    let asked = send(get(&format!("/ping/{key}/nightly"))).await;
+    let asked = send(get(&format!("/ping/v1/{key}/nightly"))).await;
     assert_eq!(
         asked.status(),
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -528,23 +531,23 @@ async fn the_ping_lane_is_served_at_ping_behind_the_door() {
     // none a cache may keep either: one that took `%41` for `A` would keep
     // it as the answer for the key itself.
     let encoded = percent_encoded_last(&key);
-    let refused = send(get(&format!("/ping/{encoded}/nightly"))).await;
+    let refused = send(get(&format!("/ping/v1/{encoded}/nightly"))).await;
     assert_eq!(refused.status(), StatusCode::NOT_FOUND);
     assert_eq!(header(&refused, "cache-control"), Some("no-store"));
     let body = problem(refused).await;
     assert_eq!(body["type"], "/errors/auth/not-found");
     assert_eq!(body["detail"], "no ping key by that value");
 
-    let word = send(get("/ping/notakey/nightly")).await;
+    let word = send(get("/ping/v1/notakey/nightly")).await;
     assert_eq!(word.status(), StatusCode::NOT_FOUND);
     assert_eq!(header(&word, "cache-control"), Some("no-store"));
     assert_eq!(problem(word).await["detail"], "no ping key by that value");
 
-    // The lane's own 404 for a path under it with no key where one goes,
-    // and the server's for the lane's root with its trailing slash, which
-    // the nesting's catch-all does not take: nothing to count either way.
-    let doubled = format!("/ping//{key}/nightly");
-    for nothing in ["/ping", doubled.as_str()] {
+    // The lane's own 404 where no key is; the server's for the lane's root
+    // with its trailing slash, which the nesting does not take, and for a
+    // path without the version: nothing to count either way.
+    let doubled = format!("/ping/v1//{key}/nightly");
+    for nothing in ["/ping/v1", doubled.as_str()] {
         let response = send(get(nothing)).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{nothing}");
         assert_eq!(
@@ -554,13 +557,16 @@ async fn the_ping_lane_is_served_at_ping_behind_the_door() {
         );
         assert_eq!(
             problem(response).await["detail"],
-            "no such lane under /ping",
+            "no such lane under /ping/v1",
             "{nothing}"
         );
     }
-    let root = send(get("/ping/")).await;
-    assert_eq!(root.status(), StatusCode::NOT_FOUND);
-    assert_eq!(problem(root).await["detail"], "no such lane");
+    let unversioned = format!("/ping/{key}/nightly");
+    for path in ["/ping/v1/", unversioned.as_str()] {
+        let response = send(get(path)).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        assert_eq!(problem(response).await["detail"], "no such lane", "{path}");
+    }
 }
 
 /// The door meters the ping lane by the key, whatever addresses spend it,
@@ -593,7 +599,7 @@ async fn the_door_meters_the_ping_lane_by_key_from_any_address() {
     for n in 0..600 {
         let address = addresses.next().expect("the addresses cycle");
         assert_eq!(
-            put(format!("/ping/{key}/nightly"), address)
+            put(format!("/ping/v1/{key}/nightly"), address)
                 .await
                 .expect("router responds")
                 .status(),
@@ -607,7 +613,7 @@ async fn the_door_meters_the_ping_lane_by_key_from_any_address() {
     let mut refused = None;
     for _ in 0..600 {
         let address = addresses.next().expect("the addresses cycle");
-        let response = put(format!("/ping/{key}/nightly"), address)
+        let response = put(format!("/ping/v1/{key}/nightly"), address)
             .await
             .expect("router responds");
         if response.status() == StatusCode::TOO_MANY_REQUESTS {
@@ -624,7 +630,7 @@ async fn the_door_meters_the_ping_lane_by_key_from_any_address() {
     );
 
     let encoded = percent_encoded_last(&key);
-    let spelled_otherwise = put(format!("/ping/{encoded}/nightly"), "203.0.113.11")
+    let spelled_otherwise = put(format!("/ping/v1/{encoded}/nightly"), "203.0.113.11")
         .await
         .expect("router responds");
     assert_eq!(
@@ -635,7 +641,7 @@ async fn the_door_meters_the_ping_lane_by_key_from_any_address() {
 
     let other = mint_ping_key();
     assert_eq!(
-        put(format!("/ping/{other}/nightly"), "203.0.113.9")
+        put(format!("/ping/v1/{other}/nightly"), "203.0.113.9")
             .await
             .expect("router responds")
             .status(),
@@ -653,7 +659,7 @@ async fn a_request_is_named_by_this_process_alone() {
     let key = mint_ping_key();
     for sent in ["it's free text, of any length", "req-from-the-caller"] {
         let pinged = send(
-            Request::get(format!("/ping/{key}/nightly"))
+            Request::get(format!("/ping/v1/{key}/nightly"))
                 .header("x-request-id", sent)
                 .body(Body::empty())
                 .unwrap(),
@@ -666,7 +672,7 @@ async fn a_request_is_named_by_this_process_alone() {
 
     for secret in [SECRET, "a-guess"] {
         let probed = send(
-            Request::get(format!("/ping/{key}/nightly"))
+            Request::get(format!("/ping/v1/{key}/nightly"))
                 .header("x-service-secret", secret)
                 .header("x-request-id", "req-probe")
                 .body(Body::empty())
@@ -694,29 +700,34 @@ async fn no_log_line_carries_a_pings_key() {
     let encoded = percent_encoded_last(&key);
     for (path, answered, printed) in [
         (
-            format!("/ping/{key}/nightly"),
+            format!("/ping/v1/{key}/nightly"),
             StatusCode::INTERNAL_SERVER_ERROR,
+            "/ping/v1/…/nightly",
+        ),
+        (
+            format!("/ping/v1//{key}/nightly"),
+            StatusCode::NOT_FOUND,
+            "/ping/v1//…/nightly",
+        ),
+        (
+            format!("/ping/v1/{encoded}/nightly"),
+            StatusCode::NOT_FOUND,
+            "/ping/v1/…/nightly",
+        ),
+        (
+            format!("/PING/V1/{key}/nightly"),
+            StatusCode::NOT_FOUND,
+            "/PING/V1/…/nightly",
+        ),
+        (
+            format!("/pings/v1/{key}/nightly"),
+            StatusCode::NOT_FOUND,
+            "/pings/v1/…/nightly",
+        ),
+        (
+            format!("/ping/{key}/nightly"),
+            StatusCode::NOT_FOUND,
             "/ping/…/nightly",
-        ),
-        (
-            format!("/ping//{key}/nightly"),
-            StatusCode::NOT_FOUND,
-            "/ping//…/nightly",
-        ),
-        (
-            format!("/ping/{encoded}/nightly"),
-            StatusCode::NOT_FOUND,
-            "/ping/…/nightly",
-        ),
-        (
-            format!("/PING/{key}/nightly"),
-            StatusCode::NOT_FOUND,
-            "/PING/…/nightly",
-        ),
-        (
-            format!("/pings/{key}/nightly"),
-            StatusCode::NOT_FOUND,
-            "/pings/…/nightly",
         ),
     ] {
         let before = logs.text().len();
@@ -733,7 +744,7 @@ async fn no_log_line_carries_a_pings_key() {
         .find(|line| line.contains("ping: refused on our side"))
         .expect("the lane's own line at error");
     assert!(
-        refused.contains(r#""path":"/ping/…/nightly""#),
+        refused.contains(r#""path":"/ping/v1/…/nightly""#),
         "the lane's line was written outside the request's span: {refused}"
     );
     // The key less its last character, so its encoded spelling counts too.

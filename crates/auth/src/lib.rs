@@ -290,18 +290,17 @@ impl AppState {
     }
 }
 
-/// The module's router for the console: the person lanes, the pre-session
-/// lanes and `/me`, under this module's own gates. The binary mounts it
-/// beside the other modules' and adds the health probes and the request
-/// layers once; the lanes a machine reaches straight are [`v1_router`] and
-/// [`cli_router`], which the binary nests on the machine host.
+/// The module's router for the console, under `/internal/v1`: the person
+/// lanes, the pre-session lanes and `/me`, behind this module's own gates.
+/// The lanes a machine reaches straight are [`v1_router`] and [`cli_router`],
+/// which the binary nests on the machine host.
 pub fn router(state: Arc<AppState>) -> Router {
     let secrets = ServiceSecrets::new(
         state.config.service_secret.clone(),
         state.config.service_secret_next.clone(),
     );
 
-    // ⚠ **TWO LANES UNDER `/internal`, AND THE SPLIT IS A SECURITY BOUNDARY.**
+    // ⚠ **TWO LANES UNDER `/internal/v1`, AND THE SPLIT IS A SECURITY BOUNDARY.**
     // The service secret is held by the console, so it proves the hop began
     // inside the platform and nothing about WHO is asking. `person` is every
     // route whose handler acts for somebody: `require_person_token` resolves
@@ -497,7 +496,7 @@ pub fn router(state: Arc<AppState>) -> Router {
 
     // The pre-session lanes: the console's own start and exchange, its
     // refresh and its sign-out. The device grant's start and poll are the
-    // CLI's, under `/cli` ([`cli_router`]); its approve and deny are the
+    // CLI's, under `/cli/v1` ([`cli_router`]); its approve and deny are the
     // person's, above.
     let service = Router::new()
         .route("/auth/config", get(handler::session::config))
@@ -569,8 +568,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     };
 
     Router::new()
-        .merge(customer)
-        .nest("/internal", internal)
+        .nest("/internal/v1", internal.merge(customer))
         .with_state(state)
 }
 
@@ -582,14 +580,12 @@ pub fn v1_router(state: Arc<AppState>) -> Router {
     handler::v1::router(state)
 }
 
-/// The CLI's session lanes, which the binary nests under `/cli` on the
-/// machine host: the device grant's start and poll, admitted by the device
-/// code they carry, which is worth nothing until a person approves it in the
-/// console; the refresh, by the refresh token it spends; and `/me` and the
-/// session revoke, by the bearer, as every person lane is. A browser's
-/// request is refused, a body is held to [`handler::cli::BODY_CAP_BYTES`], a
-/// method but `POST` and a path no lane serves are problem documents, and
-/// the shapes are the CLI's ([`handler::cli`]).
+/// The CLI's session lanes, which the binary nests under `/cli/v1` on the
+/// machine host: the device grant's start and poll, admitted by a device code
+/// worth nothing until a person approves it; the refresh, by its token; and
+/// `/me` and the session revoke, by the bearer. A browser is refused, a body
+/// held to [`handler::cli::BODY_CAP_BYTES`], and a stray method or path is a
+/// problem document in the CLI's shapes ([`handler::cli`]).
 pub fn cli_router(state: Arc<AppState>) -> Router {
     let bearer = Router::new()
         .route("/me", post(handler::cli::me))
