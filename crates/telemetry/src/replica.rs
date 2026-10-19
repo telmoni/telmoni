@@ -4,6 +4,7 @@
 //! that cannot reach it serves on, each limit held in the process instead
 //! and the fact logged, as the console's limiter falls back.
 
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use redis::aio::{ConnectionManager, ConnectionManagerConfig};
@@ -22,23 +23,16 @@ const STAND_IN_FOR: Duration = Duration::from_secs(5);
 pub struct Redis {
     /// The URL, parsed; dials nothing by itself.
     client: redis::Client,
-    /// The manager, once made, and when the last dial failed. Behind an
-    /// async lock, so one replica makes one, and the callers that find it
-    /// being made wait for it.
-    manager: Mutex<Slot>,
+    /// The manager, once made, read without a lock from then on.
+    manager: OnceLock<ConnectionManager>,
+    /// When the last dial failed, held by the one dial under way: a caller
+    /// that finds one stands in rather than wait out a Redis that is down.
+    dial: Mutex<Option<Instant>>,
     /// Until when the replica stands in because a call on a live connection
     /// found Redis gone: the manager redials on its own, but without this
     /// every caller would wait out a response timeout of its own, and log
     /// it, for as long as the outage lasts.
     outage_until: std::sync::Mutex<Option<Instant>>,
-}
-
-/// What the replica holds of its connection.
-#[derive(Default)]
-struct Slot {
-    manager: Option<ConnectionManager>,
-    /// The last dial that failed, while the replica stands in.
-    failed_at: Option<Instant>,
 }
 
 impl Redis {
@@ -50,15 +44,16 @@ impl Redis {
     pub fn connect(url: &str) -> anyhow::Result<Self> {
         Ok(Self {
             client: redis::Client::open(url)?,
-            manager: Mutex::new(Slot::default()),
+            manager: OnceLock::new(),
+            dial: Mutex::new(None),
             outage_until: std::sync::Mutex::new(None),
         })
     }
 
     /// The replica's connection, made on first use; `None`, logged, when
-    /// Redis does not answer, which every caller takes as "stand in" — and
-    /// again, unlogged and without a dial, for `STAND_IN_FOR` after that, or
-    /// after a call on the connection found Redis gone (`stood_in`).
+    /// Redis does not answer, which every caller takes as "stand in" — and,
+    /// unlogged and dialling nothing, while another dials, for `STAND_IN_FOR`
+    /// after a failed dial, or after a call found Redis gone (`stood_in`).
     pub async fn connection(&self) -> Option<ConnectionManager> {
         if self
             .outage_until
@@ -68,14 +63,17 @@ impl Redis {
         {
             return None;
         }
-        let mut slot = self.manager.lock().await;
-        if let Some(manager) = slot.manager.as_ref() {
+        if let Some(manager) = self.manager.get() {
             return Some(manager.clone());
         }
-        if slot
-            .failed_at
-            .is_some_and(|failed_at| failed_at.elapsed() < STAND_IN_FOR)
-        {
+        let Ok(mut failed_at) = self.dial.try_lock() else {
+            return None;
+        };
+        // Made by a dial that ended as this caller came in.
+        if let Some(manager) = self.manager.get() {
+            return Some(manager.clone());
+        }
+        if failed_at.is_some_and(|failed_at| failed_at.elapsed() < STAND_IN_FOR) {
             return None;
         }
         let config = ConnectionManagerConfig::new()
@@ -85,8 +83,9 @@ impl Redis {
         match ConnectionManager::new_with_config(self.client.clone(), config).await {
             Ok(manager) => {
                 tracing::info!("telemetry: connected to Redis");
-                slot.manager = Some(manager.clone());
-                slot.failed_at = None;
+                *failed_at = None;
+                // Only the dial's holder sets it, so it is never set already.
+                let _ = self.manager.set(manager.clone());
                 Some(manager)
             }
             Err(error) => {
@@ -96,7 +95,7 @@ impl Redis {
                     error = %error.kind_description(),
                     "telemetry: Redis did not answer; this replica stands in for it"
                 );
-                slot.failed_at = Some(Instant::now());
+                *failed_at = Some(Instant::now());
                 None
             }
         }
@@ -139,5 +138,53 @@ trait KindDescription {
 impl KindDescription for redis::RedisError {
     fn kind_description(&self) -> String {
         format!("{:?}", self.kind())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use tokio::net::TcpListener;
+
+    use super::Redis;
+
+    /// A caller that comes in while a dial is under way stands in at once.
+    #[tokio::test]
+    async fn a_caller_finding_a_dial_under_way_stands_in_at_once() {
+        // Takes connections and never answers, as a Redis gone quiet.
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("a port");
+        let address = listener.local_addr().expect("its address");
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((stream, _)) = listener.accept().await {
+                held.push(stream);
+            }
+        });
+        let redis = Arc::new(Redis::connect(&format!("redis://{address}")).expect("a Redis URL"));
+        let dial_started = Instant::now();
+        let dialling = tokio::spawn({
+            let redis = Arc::clone(&redis);
+            async move { redis.connection().await.is_some() }
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let started = Instant::now();
+        assert!(redis.connection().await.is_none());
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "it waited on the dial"
+        );
+
+        let dialled = tokio::time::timeout(Duration::from_secs(20), dialling)
+            .await
+            .expect("the dial ends")
+            .expect("the dial's task");
+        assert!(!dialled);
+        assert!(
+            dial_started.elapsed() > Duration::from_millis(500),
+            "the dial was not held, so the test proves nothing"
+        );
     }
 }
