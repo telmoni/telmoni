@@ -34,7 +34,7 @@ import {
 } from "@/lib/peek";
 import type { TraceDetail } from "@/lib/server/entities/traces";
 import { summarizeTrace } from "@/lib/trace-tree";
-import { PEEK_PARAM, PEEKED_RUN_LANDED, shortId, traceHref } from "@/lib/traces";
+import { PEEK_PARAM, PEEK_NUDGED, shortId, traceHref } from "@/lib/traces";
 import { offerPageSteps } from "@/lib/use-page-steps";
 import { cn } from "@/lib/utils";
 
@@ -156,8 +156,8 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
   // A run still going is read again as its spans land.
   useEffect(() => {
     const again = () => setVersion((n) => n + 1);
-    window.addEventListener(PEEKED_RUN_LANDED, again);
-    return () => window.removeEventListener(PEEKED_RUN_LANDED, again);
+    window.addEventListener(PEEK_NUDGED, again);
+    return () => window.removeEventListener(PEEK_NUDGED, again);
   }, []);
 
   // `j` and `k` step as the ↓ and ↑ buttons do, while the panel is open. Each

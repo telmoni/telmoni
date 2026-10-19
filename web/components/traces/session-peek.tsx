@@ -36,7 +36,7 @@ import {
 } from "@/lib/peek";
 import type { SessionDetail } from "@/lib/server/data";
 import { sessionHref, sessionSums } from "@/lib/sessions";
-import { PEEK_PARAM, formatCount, tracesHref } from "@/lib/traces";
+import { PEEK_NUDGED, PEEK_PARAM, formatCount, tracesHref } from "@/lib/traces";
 import { cn } from "@/lib/utils";
 
 // A session opened from the list without leaving it, in the console's side
@@ -149,6 +149,12 @@ function SessionPanel({
   const url = `/api/sessions/${encodeURIComponent(sessionId)}?${params}`;
   const [version, setVersion] = useState(0);
   const { read, stale } = useSessionRead(url, version);
+  // Read again as the project's runs land, the list beside it redrawn.
+  useEffect(() => {
+    const again = () => setVersion((n) => n + 1);
+    window.addEventListener(PEEK_NUDGED, again);
+    return () => window.removeEventListener(PEEK_NUDGED, again);
+  }, []);
   const pathname = usePathname();
   const search = useSearchParams().toString();
   const at = sessions.indexOf(sessionId);

@@ -184,9 +184,9 @@ export function traceHref(organization: string, project: string, runId: string):
  *  the browser's, never the server's, so the list is not read again for it. */
 export const PEEK_PARAM = "peek";
 
-/** Sent on the window when the run the peek holds open has landed again, its
- *  nudges held as a page's are (`components/realtime-listener.tsx`). */
-export const PEEKED_RUN_LANDED = "telmoni:peeked-run-landed";
+/** Sent on the window when what a peek holds open may have new spans, held as
+ *  a page's nudges are (`components/realtime-listener.tsx`). */
+export const PEEK_NUDGED = "telmoni:peek-nudged";
 
 /** The query with `value` ticked under `filter`, or unticked where it was,
  *  from the first page again: what clicking a value does. */

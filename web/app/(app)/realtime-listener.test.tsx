@@ -3,7 +3,7 @@ import { render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RealtimeListener } from "@/components/realtime-listener";
-import { PEEKED_RUN_LANDED } from "@/lib/traces";
+import { PEEK_NUDGED } from "@/lib/traces";
 import { listDrawn, newTraces } from "@/lib/use-new-traces";
 
 const mockReplace = vi.fn();
@@ -461,7 +461,7 @@ describe("RealtimeListener - spans:ingested", () => {
   it("tells the list's peek when its own run lands, and the list counts it", () => {
     vi.useFakeTimers();
     const landed = vi.fn();
-    window.addEventListener(PEEKED_RUN_LANDED, landed);
+    window.addEventListener(PEEK_NUDGED, landed);
     try {
       listDrawn("project_1", { rows: ["r1"], empty: false, first: true });
       window.history.replaceState(null, "", "/acme/web/traces?peek=run_7");
@@ -478,7 +478,31 @@ describe("RealtimeListener - spans:ingested", () => {
       expect(mockRefresh).not.toHaveBeenCalled();
       expect(newTraces("project_1").count).toBe(2);
     } finally {
-      window.removeEventListener(PEEKED_RUN_LANDED, landed);
+      window.removeEventListener(PEEK_NUDGED, landed);
+      window.history.replaceState(null, "", "/");
+      vi.useRealTimers();
+    }
+  });
+
+  it("tells the sessions list's peek of any run that lands, as the list is drawn", () => {
+    vi.useFakeTimers();
+    const nudged = vi.fn();
+    window.addEventListener(PEEK_NUDGED, nudged);
+    try {
+      window.history.replaceState(null, "", "/acme/web/sessions?peek=conv_1");
+      mockPathname = "/acme/web/sessions";
+      render(<RealtimeListener liveHoldMs={100} />);
+      nudge("project_1", ["run_1"]);
+      expect(nudged).toHaveBeenCalledTimes(1);
+      expect(mockRefresh).toHaveBeenCalledTimes(1);
+      // Past the hold, where another project's nudge would draw at once.
+      vi.advanceTimersByTime(100);
+      nudge("project_2", ["run_2"]);
+      vi.advanceTimersByTime(100);
+      expect(nudged, "another project's").toHaveBeenCalledTimes(1);
+      expect(mockRefresh, "another project's").toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener(PEEK_NUDGED, nudged);
       window.history.replaceState(null, "", "/");
       vi.useRealTimers();
     }

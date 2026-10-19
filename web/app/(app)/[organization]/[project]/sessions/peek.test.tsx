@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let mockSearch = new URLSearchParams();
@@ -25,6 +25,7 @@ vi.mock("@/app/(app)/[organization]/[project]/traces/actions", () => ({
 
 import { SessionPeek } from "@/components/traces/session-peek";
 import { TRACE_PREFS_KEY } from "@/lib/trace-prefs";
+import { PEEK_NUDGED } from "@/lib/traces";
 
 const A = "conv-1";
 // An id of the application's choosing, with a slash and a space.
@@ -239,5 +240,16 @@ describe("SessionPeek", () => {
     peek();
     fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads the session again as the project's runs land, the list beside it redrawn", async () => {
+    open(A);
+    peek();
+    await screen.findByRole("table");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    act(() => {
+      window.dispatchEvent(new Event(PEEK_NUDGED));
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 });
