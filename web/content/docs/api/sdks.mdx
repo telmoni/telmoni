@@ -109,8 +109,18 @@ holding the **ingest** scope.
     again; a `KeyboardInterrupt` or `asyncio.CancelledError` marks it
     cancelled. `fail("TimeoutError")` and `cancel()` do the same by hand.
     `run` raises `ValueError` for a blank agent name or a sample rate outside
-    its range; a bound that is not a finite number, or a whole one past 64
-    bits, is left off the run, with one warning.
+    its range. A bound or a token count is read from a number or its text, a
+    stall's, steps' or count's fraction cut, and of what Telmoni would refuse,
+    these are left off with one warning: a bound outside 1 to 4294967295, a
+    cost not above 0, a token count below 0 or past 64 bits, a tag whose key
+    is not 1 to 64 characters or whose value is past 256, and the tags past
+    the first 32 kept; an empty user, session, provider or response model is
+    left off as unset. A name, model, provider, user, session or response
+    model that is no string goes as its text with one warning, as does a tag
+    that is no string, finite number or bool. Text past the caps
+    [below](#a-run-recorded-after-it-ended), and a step or model named
+    nothing, still go as given, and Telmoni refuses the span they are on, or
+    the whole run for its agent, user or session.
   </Tab>
   <Tab value="TypeScript">
     ```ts
@@ -146,8 +156,19 @@ holding the **ingest** scope.
     marks it cancelled. `fail('TimeoutError')` and `cancel()` do the same by
     hand, and `wrap` turns a function into one that opens a run per call.
     `run` throws a `TypeError` for a blank agent name and a `RangeError` for
-    a sample rate outside its range; a bound that is not a finite number, or
-    a whole one past 64 bits, is left off the run, with one warning.
+    a sample rate outside its range. A bound or a token count is read from a
+    number, a bigint or a decimal numeral's text, a stall's, steps' or count's
+    fraction cut, and of what Telmoni would refuse, these are left off with
+    one warning: a bound outside 1 to 4294967295, a cost not above 0, a token
+    count below 0 or past 64 bits, a tag whose key is not 1 to 64 characters
+    or whose value is past 256, and the tags past the first 32 kept; an empty
+    user, session, provider or response model is left off as unset. A name,
+    model, provider, user, session or response model that is no string goes
+    as its text with one warning, as does a tag that is no string, finite
+    number or boolean. Text past the caps
+    [below](#a-run-recorded-after-it-ended), and a step or model named
+    nothing, still go as given, and Telmoni refuses the span they are on, or
+    the whole run for its agent, user or session.
   </Tab>
   <Tab value="Go">
     ```go
@@ -192,9 +213,15 @@ holding the **ingest** scope.
     `Fail(err)` marks the span failed with the error's Go type, never its
     message, and marks it cancelled for `context.Canceled`;
     `FailWith("TimeoutError")` and `Cancel()` do the same by hand. The SDK
-    never panics: a blank agent name opens a run that does nothing, and a
-    `MaxCostUSD` that is not a finite number is left off its run, each with
-    one warning.
+    never panics: a blank agent name opens a run that does nothing, and of
+    what Telmoni would refuse, these are left off with one warning — a
+    `StallAfterS` or `MaxSteps` past 4294967295 or below 0, a `MaxCostUSD`
+    that is no finite number above 0 (0 leaves any of the three unset), a
+    token count below 0, a tag whose key is not 1 to 64 characters or whose
+    value is past 256, and the tags past the first 32 kept, by key. Text past
+    the caps [below](#a-run-recorded-after-it-ended), and a step or model
+    named nothing, still go as given, and Telmoni refuses the span they are
+    on, or the whole run for its agent, user or session.
   </Tab>
   <Tab value="Rust">
     ```rust
@@ -235,15 +262,21 @@ holding the **ingest** scope.
     Each handle is a guard that ends its span when dropped or on `end()`.
     `run` returns an error for a blank agent name or a sample rate outside
     its range, and `record_run` for the cases
-    [below](#a-run-recorded-after-it-ended); nothing else in the SDK fails: a
-    `max_cost_usd` that is not a finite number is left off the run with one
-    warning, and an export that fails is warned about, never returned. The
-    closure forms `run_with`, `step_with`,
-    `model_call_with` and `tool_call_with` end the span when the closure
-    returns, and their `try_` forms mark an `Err` on the span with the
-    error's type name before returning it unchanged. `fail("TimeoutError")`
-    and `cancel()` do the same by hand, and `context()` or `attach()` make
-    the run current for your own spans.
+    [below](#a-run-recorded-after-it-ended); nothing else in the SDK fails:
+    of what Telmoni would refuse, these are left off with one warning — a
+    `stall_after_s` or `max_steps` that is no whole number from 1 to
+    4294967295, a `max_cost_usd` that is no finite number above 0, a token
+    count below 0, a tag whose key is not 1 to 64 characters or whose value
+    is past 256, and the tags past the first 32 kept, by key — and an export
+    that fails is warned about, never returned. Text past the caps below, and
+    a step or model named nothing, still go as given, and Telmoni refuses the
+    span they are on, or the whole run for its agent, user or session. The
+    closure forms `run_with`, `step_with`, `model_call_with` and
+    `tool_call_with` end the span when the closure returns, and their `try_`
+    forms mark an `Err` on the span with the error's type name before
+    returning it unchanged. `fail("TimeoutError")` and `cancel()` do the same
+    by hand, and `context()` or `attach()` make the run current for your own
+    spans.
   </Tab>
 </Tabs>
 
@@ -290,9 +323,18 @@ whole, before anything is queued: flush, or wait, and record it again.
     telmoni.flush()
     ```
 
-    Times carry their timezone. A blank agent, a run id that is not a UUID or
-    is the nil UUID, a time without its timezone or a span that ends before it
-    starts raises `ValueError`, and nothing is sent.
+    Times carry their timezone. A blank agent, a run id that is neither a
+    hyphenated UUID nor 32 hex digits, or is the nil UUID, a time without its
+    timezone or outside what Telmoni reads (after the Unix epoch, and less than
+    2^64 nanoseconds after it, in July 2554), an empty step's name or model,
+    text longer than Telmoni keeps (a name, the agent, a model, a provider, a
+    user or an error type past 128 characters, a session past 200, or a model
+    call's operation and model past 127 together), or a span that ends before
+    it starts raises `ValueError`. A field of the wrong type raises
+    `TypeError` — a time that is no `datetime`, an item of another class,
+    `inside` or `calls` that is no sequence (a list or a tuple) — save a token
+    count, read as a whole number where it can be and else left off with one
+    warning, and an `operation` of `None`, a chat. Either way, nothing is sent.
   </Tab>
   <Tab value="TypeScript">
     ```ts
@@ -325,9 +367,17 @@ whole, before anything is queued: flush, or wait, and record it again.
 
     A time is a `Date` or milliseconds since the Unix epoch; a step is
     `{ type: 'step', name, start, end, calls }`. A blank agent, a run id that
-    is not a UUID or is the nil UUID, a time that is not one or an item of no
-    known `type` throws a `TypeError`, and a span that ends before it starts a
-    `RangeError`; either sends nothing.
+    is neither a hyphenated UUID nor 32 hex digits, or is the nil UUID, or an
+    empty step's name or model throws a `TypeError`, as does a field of the
+    wrong type — a time that is not one, an item of no known `type`, `inside`
+    or `calls` that is no array, tags or a usage that is no object — save a
+    token count, read as a whole number where it can be and else left off with
+    one warning. A time outside what Telmoni reads (after the Unix epoch, and
+    less than 2^64 nanoseconds after it, in July 2554), text longer than
+    Telmoni keeps (a name, the agent, a model, a provider, a user or an error
+    type past 128 characters, a session past 200, or a model call's operation
+    and model past 127 together, counted in characters), or a span that ends
+    before it starts throws a `RangeError`. Either way, nothing is sent.
   </Tab>
   <Tab value="Go">
     ```go
@@ -354,8 +404,13 @@ whole, before anything is queued: flush, or wait, and record it again.
     ```
 
     A step is a `telmoni.StepRecord` with its `Calls`. A blank agent, a run
-    id that is not a UUID or is the nil UUID, a zero time, a nil item or a
-    span that ends before it starts returns an error, and nothing is sent.
+    id that is not a UUID or is the nil UUID, a time that is zero or outside
+    what Telmoni reads (after the Unix epoch, and less than 2^64 nanoseconds
+    after it, in July 2554), an empty step's name or model, text longer than
+    Telmoni keeps (a name, the agent, a model, a provider, a user or an error
+    type past 128 characters, a session past 200, or a model call's operation
+    and model past 127 together), a nil item or a span that ends before it
+    starts returns an error, and nothing is sent.
   </Tab>
   <Tab value="Rust">
     ```rust
@@ -389,9 +444,15 @@ whole, before anything is queued: flush, or wait, and record it again.
 
     A step is a `StepRecord` with its `calls`. A blank agent
     (`Error::EmptyAgent`), a run id that is not a UUID or is the nil UUID
-    (`Error::RunId`), a span that ends before it starts
-    (`Error::EndBeforeStart`) or a configured sample rate outside its range
-    (`Error::SampleRate`) is returned as an error, and nothing is sent.
+    (`Error::RunId`), an empty step's name or model (`Error::EmptyName`), a
+    time outside what Telmoni reads, after the Unix epoch and less than 2^64
+    nanoseconds after it, in July 2554 (`Error::RecordedTime`), text longer
+    than Telmoni keeps — a name, the agent, a model, a provider, a user or an
+    error type past 128 characters, a session past 200, or a model call's
+    operation and model past 127 together (`Error::TooLong`) — a span that
+    ends before it starts (`Error::EndBeforeStart`) or a configured sample
+    rate outside its range (`Error::SampleRate`) is returned as an error, and
+    nothing is sent.
   </Tab>
 </Tabs>
 
@@ -517,8 +578,9 @@ propagators are its own.
 A run is a span of its own, named `invoke_agent <agent>`, inside your current
 trace when one is current and a trace of its own otherwise. It carries the
 run's id (`telmoni.run_id`, a UUID), its agent (`telmoni.agent`), the user
-and conversation you named (`user.id`, `gen_ai.conversation.id`), each tag as
-`telmoni.tag.<key>`, the bounds and the sample rate; a `telmoni.run.start`
+and conversation you named (`user.id`, `gen_ai.conversation.id`), the first 32
+of its tags Telmoni would keep, the most it keeps, as `telmoni.tag.<key>`, the
+bounds and the sample rate; a `telmoni.run.start`
 span of no duration goes out at once under it. Every span inside the run
 carries the run's id, agent, user and session, so Telmoni knows each
 span's run without waiting
@@ -532,11 +594,11 @@ the `environment` and `release` of every span and the trace list
 [filters](/docs/workspace/traces#filters) by. A step is a span named as you named it; a model call is
 `chat <model>` (or the operation you gave) with the model asked for, the
 model that answered, the provider and the token counts under the GenAI
-conventions' names, each a whole number, one that is not a finite number or
-does not fit 64 bits left off the call with one warning; a tool call is
-`execute_tool <name>`. The exception's class alone marks a failure, as
-`error.type`; no message, stack trace or event is ever sent. The [ingest page](/docs/api/ingest) lists every
-attribute and what the server keeps of each.
+conventions' names, each a whole number from 0, another left off the call
+with one warning; a tool call is `execute_tool <name>`. The exception's class
+alone marks a failure, as `error.type`; no message, stack trace or event is
+ever sent. The [ingest page](/docs/api/ingest) lists every attribute and what
+the server keeps of each.
 
 ### Content
 
