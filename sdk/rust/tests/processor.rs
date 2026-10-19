@@ -1,6 +1,5 @@
 //! The processor: a bounded queue whose drops are counted and warned once, a
-//! batch that goes when it fills, a shutdown that drains, and a hold that
-//! keeps what is queued under it together.
+//! batch that goes when it fills, and a shutdown that drains.
 
 mod common;
 
@@ -113,39 +112,6 @@ fn a_batch_fills_and_goes_without_a_flush() -> Outcome {
     assert!(transport.wait_for(2), "three steps fill a batch of three");
     run.end();
     telmoni.shutdown();
-    assert!(warnings.all().is_empty());
-    Ok(())
-}
-
-#[test]
-fn a_hold_keeps_what_is_queued_inside_it_together() -> Outcome {
-    let transport = FakeTransport::new([])?;
-    let warnings = Warnings::default();
-    let sleeps = Sleeps::default();
-    let mut hooks = hooks(&transport, &warnings, &sleeps);
-    // A worker that wakes every few milliseconds of its own accord: under the
-    // hold it is awake many times, however late its thread started.
-    hooks.batching = Batching {
-        schedule_delay: Duration::from_millis(10),
-        ..Batching::default()
-    };
-    let telmoni = Telmoni::with_hooks(keyed(), hooks);
-
-    telmoni.with_exports_held(|| -> Outcome {
-        let run = telmoni.run("bot", RunOptions::default())?;
-        // The run's start would have woken the worker at once.
-        std::thread::sleep(Duration::from_millis(200));
-        assert_eq!(transport.count(), 0, "a batch was taken under the hold");
-        run.end();
-        Ok(())
-    })?;
-    assert!(telmoni.flush());
-    telmoni.shutdown();
-    assert_eq!(transport.count(), 1, "one export for both spans");
-    assert_eq!(
-        transport.spans()?.iter().map(name_of).collect::<Vec<_>>(),
-        ["telmoni.run.start", "invoke_agent bot"]
-    );
     assert!(warnings.all().is_empty());
     Ok(())
 }

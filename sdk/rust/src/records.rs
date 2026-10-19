@@ -4,9 +4,9 @@
 //!
 //! Its trace is its own, named by the run's id, whatever trace is current;
 //! each span's id is derived from that id and the span's place in the record.
-//! Its spans are queued together under the processor's hold, the run's start
-//! first and the run's own last, so the same record sent again is the same
-//! bytes.
+//! Its spans are queued whole once built, the run's start first and the run's
+//! own last, and travel in exports of their own, so the same record sent
+//! again is the same bytes, whatever else is sent meanwhile.
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -298,13 +298,14 @@ pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
 
     // Queued whole or not at all: a record that outgrows the queue's room
     // would lose its tail, the run's own span first.
-    let Some(_hold) = inner.processor.hold(need) else {
+    let trace_id = ids::trace_id(&run_uuid);
+    let Some(hold) = inner.processor.hold(trace_id, need) else {
         return Err(Error::QueueFull { spans: need });
     };
     let mut spans = Spans {
         tracer: &inner.tracer,
         run_id: run_uuid,
-        trace_id: ids::trace_id(&run_uuid),
+        trace_id,
         place: 0,
     };
     // Under an empty context rather than the current one: the record's trace
@@ -346,6 +347,7 @@ pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
         }
     }
     close(&run, error_type, cancelled, end);
+    hold.queue();
     Ok(())
 }
 

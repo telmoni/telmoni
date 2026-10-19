@@ -403,10 +403,11 @@ class Opener:
 
         Its trace is its own, named by the run's id, whatever trace is current;
         each span's id is derived from that id and the span's place in the
-        record. Its spans are queued together under the processor's hold, the
-        run's start first and the run's own last, so the same record sent again
-        is the same bytes. Raises ``QueueFullError``, sending nothing, when
-        the export queue has no room for the whole record.
+        record. Its spans are queued whole once built, the run's start first and
+        the run's own last, and travel in exports of their own, so the same
+        record sent again is the same bytes, whatever else is sent meanwhile.
+        Raises ``QueueFullError``, sending nothing, when the export queue has
+        no room for the whole record.
         """
         if not record.agent.strip():
             raise ValueError("a run needs its agent's name")
@@ -452,6 +453,13 @@ class Opener:
             1 + (len(item.calls) if isinstance(item, StepRecord) else 0)
             for item in record.inside
         )
+        # Worked out before the hold: a count that warns runs the application's
+        # logging handlers, which may record a run of their own.
+        usages = {
+            id(item): _usage(item.usage, self._client.exporter.warn_once)
+            for item in _walk(record)
+            if isinstance(item, ModelCallRecord)
+        }
         places = itertools.count()
 
         def open_span(
@@ -475,7 +483,7 @@ class Opener:
                 }
                 if item.provider:
                     attributes[contract.PROVIDER] = item.provider
-                attributes.update(_usage(item.usage, self._client.exporter.warn_once))
+                attributes.update(usages[id(item)])
                 name, kind = f"{operation} {item.model}", SpanKind.CLIENT
             else:
                 attributes = {
@@ -486,7 +494,7 @@ class Opener:
                 name, kind = f"execute_tool {item.name}", SpanKind.INTERNAL
             _close(open_span(name, parent, attributes, kind, item.start), item)
 
-        with self._client.processor.hold(need):
+        with self._client.processor.hold(run_uuid.int, need):
             root = context.Context()
             span = open_span(
                 f"invoke_agent {record.agent}",

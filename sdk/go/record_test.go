@@ -11,9 +11,11 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 
 	telmoni "github.com/telmoni/telmoni/sdk/go"
@@ -497,5 +499,227 @@ func TestARecordTheQueueHasNoRoomForIsRefusedWhole(t *testing.T) {
 	}
 	if warnings := h.logs.warnings(); len(warnings) != 0 {
 		t.Errorf("warnings: %q, want none, since nothing was dropped", warnings)
+	}
+}
+
+// tracesIn is the set of traces an export's spans are in.
+func tracesIn(t *testing.T, body []byte) map[string]bool {
+	t.Helper()
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("decoding an export: %v", err)
+	}
+	out := map[string]bool{}
+	for _, span := range spansIn(decoded) {
+		out[span["traceId"].(string)] = true
+	}
+	return out
+}
+
+// A span queued before a record or ending after it, and a record beside it,
+// go in other exports, so the record is the same bytes as when sent alone.
+func TestARecordTravelsInExportsOfItsOwn(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	record := theRecord(t)
+	beside := record
+	beside.RunID = "0191a3b4-2222-4aaa-8bbb-000000000002"
+	ctx, live := h.client.Run(context.Background(), "live", telmoni.RunOptions{})
+	if !h.transport.waitFor(1, waitTimeout) {
+		t.Fatal("the run's start was not sent at once")
+	}
+	_, step := live.Step(ctx, "live step")
+	step.End()
+	for _, r := range []telmoni.RunRecord{record, beside} {
+		if err := h.client.RecordRun(context.Background(), r); err != nil {
+			t.Fatalf("RecordRun: %v", err)
+		}
+	}
+	live.End()
+	h.flush()
+	sent := len(h.transport.all())
+	recordRun(t, h, record)
+	requests := h.transport.all()
+	var first, other [][]byte
+	for i, request := range requests {
+		traces := tracesIn(t, request.body)
+		if len(traces) != 1 {
+			t.Errorf("export %d is in traces %v, want one", i, traces)
+		}
+		if i < sent && traces[strings.ReplaceAll(record.RunID, "-", "")] {
+			first = append(first, request.body)
+		}
+		if traces[strings.ReplaceAll(beside.RunID, "-", "")] {
+			other = append(other, request.body)
+		}
+	}
+	if len(requests) != sent+1 || len(first) != 1 || !bytes.Equal(first[0], requests[sent].body) {
+		t.Errorf("the record sent beside the live run is not the bytes it is sent again as")
+	}
+	if len(other) != 1 {
+		t.Errorf("the record beside it went in %d exports, want one of its own", len(other))
+	}
+}
+
+// A record larger than a batch is cut into batches counted from its own
+// start, wherever it lands in the queue.
+func TestARecordLargerThanABatchIsCutFromItsOwnStart(t *testing.T) {
+	h := newHarness(t, testConfig(), nil, telmoni.WithQueue(2048, 3, time.Minute))
+	record := theRecord(t)
+	record.Inside = nil
+	for range 3 {
+		record.Inside = append(record.Inside, telmoni.ToolCallRecord{Name: "t", Start: record.Start, End: record.Start})
+	}
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	if !h.transport.waitFor(1, waitTimeout) {
+		t.Fatal("the run's start was not sent at once")
+	}
+	for n := range 2 {
+		_, step := run.Step(ctx, fmt.Sprintf("s%d", n))
+		step.End()
+	}
+	if err := h.client.RecordRun(context.Background(), record); err != nil {
+		t.Fatalf("RecordRun: %v", err)
+	}
+	run.End()
+	h.flush()
+	var got [][]string
+	for _, body := range h.transport.bodies(t) {
+		got = append(got, names(spansIn(body)))
+	}
+	want := [][]string{
+		{"telmoni.run.start"},
+		{"s0", "s1"},
+		{"telmoni.run.start", "execute_tool t", "execute_tool t"},
+		{"execute_tool t", "invoke_agent claude-code"},
+		{"invoke_agent bot"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("exports: %v\nwant: %v", got, want)
+	}
+}
+
+// Nothing a caller passes can fail a build part-way, so the guard is held
+// here, below RecordRun, to queue only a record built whole.
+func TestARecordNotBuiltQueuesNothing(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	runID := [16]byte{1}
+	if !telmoni.HoldOne(h.client, runID, false) {
+		t.Fatal("the hold was refused")
+	}
+	h.flush()
+	if sent := len(h.transport.all()); sent != 0 {
+		t.Fatalf("%d exports of a record not built, want none", sent)
+	}
+	if !telmoni.HoldOne(h.client, runID, true) {
+		t.Fatal("the hold was refused")
+	}
+	h.flush()
+	if sent := len(h.transport.all()); sent != 1 {
+		t.Errorf("%d exports of a record built, want its one", sent)
+	}
+}
+
+// hookedSampler calls its hook once, as the next span with no parent starts:
+// a record's own span, mid-build.
+type hookedSampler struct {
+	hook func()
+}
+
+func (s *hookedSampler) ShouldSample(sdktrace.SamplingParameters) sdktrace.SamplingResult {
+	if hook := s.hook; hook != nil {
+		s.hook = nil
+		hook()
+	}
+	return sdktrace.SamplingResult{Decision: sdktrace.RecordAndSample}
+}
+
+func (*hookedSampler) Description() string { return "hooked" }
+
+// While a record is built its room in the queue is kept: a live step ending
+// meanwhile is dropped past it, so the queue never holds more than its size.
+func TestARecordsRoomIsKeptWhileItIsBuilt(t *testing.T) {
+	sampler := &hookedSampler{}
+	cfg := testConfig()
+	cfg.Sampler = sampler
+	// Room for five spans, and a worker that will not wake until flushed.
+	h := newHarness(t, cfg, nil, telmoni.WithQueue(5, 100, time.Minute))
+	record := theRecord(t)
+	record.Inside = nil
+	for range 2 {
+		record.Inside = append(record.Inside, telmoni.ToolCallRecord{Name: "t", Start: record.Start, End: record.Start})
+	}
+	ctx, live := h.client.Run(context.Background(), "live", telmoni.RunOptions{})
+	if !h.transport.waitFor(1, waitTimeout) {
+		t.Fatal("the run's start was not sent at once")
+	}
+	// Room for one step beside the record's four spans.
+	sampler.hook = func() {
+		for n := range 2 {
+			_, step := live.Step(ctx, fmt.Sprintf("s%d", n))
+			step.End()
+		}
+	}
+	if err := h.client.RecordRun(context.Background(), record); err != nil {
+		t.Fatalf("RecordRun: %v", err)
+	}
+	h.flush()
+	live.End()
+	h.flush()
+	want := []string{"execute_tool t", "execute_tool t", "invoke_agent claude-code", "invoke_agent live", "s0", "telmoni.run.start", "telmoni.run.start"}
+	if got := sortedNames(h.transport.spans(t)); !reflect.DeepEqual(got, want) {
+		t.Errorf("spans sent: %v\nwant: %v", got, want)
+	}
+	if warnings := h.logs.warnings(); len(warnings) != 1 || !strings.Contains(warnings[0], "1 spans were dropped") {
+		t.Errorf("warnings = %q, want the one live step past the record's room", warnings)
+	}
+}
+
+// A record queued behind a live step goes in the export after the step's, as
+// a live run's start would, with no flush.
+func TestARecordGoesAtOnce(t *testing.T) {
+	h := newHarness(t, testConfig(), nil, telmoni.WithQueue(2048, 512, time.Minute))
+	ctx, live := h.client.Run(context.Background(), "live", telmoni.RunOptions{})
+	if !h.transport.waitFor(1, waitTimeout) {
+		t.Fatal("the run's start was not sent at once")
+	}
+	_, step := live.Step(ctx, "live step")
+	step.End()
+	if err := h.client.RecordRun(context.Background(), theRecord(t)); err != nil {
+		t.Fatalf("RecordRun: %v", err)
+	}
+	if !h.transport.waitFor(3, waitTimeout) {
+		t.Error("the record waited for the delay")
+	}
+	live.End()
+}
+
+// A live step ending on another goroutine while a record is built is in no
+// export of the record's. The queue is large, so the goroutine never fills it.
+func TestASpanEndingWhileARecordIsBuiltTravelsApart(t *testing.T) {
+	for range 20 {
+		h := newHarness(t, testConfig(), nil, telmoni.WithQueue(1<<16, 512, 5*time.Second))
+		ctx, live := h.client.Run(context.Background(), "live", telmoni.RunOptions{})
+		var stop atomic.Bool
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for !stop.Load() {
+				_, step := live.Step(ctx, "live step")
+				step.End()
+			}
+		}()
+		err := h.client.RecordRun(context.Background(), theRecord(t))
+		stop.Store(true)
+		<-done
+		if err != nil {
+			t.Fatalf("RecordRun: %v", err)
+		}
+		live.End()
+		h.flush()
+		for i, request := range h.transport.all() {
+			if traces := tracesIn(t, request.body); len(traces) != 1 {
+				t.Fatalf("export %d is in traces %v, want one", i, traces)
+			}
+		}
 	}
 }

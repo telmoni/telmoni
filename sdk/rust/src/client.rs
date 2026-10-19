@@ -237,8 +237,9 @@ impl Telmoni {
     /// current, and each span's id is derived from that id and the span's
     /// place in the record, so the same record sent again is the same bytes,
     /// which ingest answers once: give a run the same id each time it is
-    /// sent. Its spans leave together, in one export when it holds no more
-    /// than a batch, its start first and the run's own span last.
+    /// sent. Its spans travel in exports of their own, whatever else is sent
+    /// meanwhile, in one when it holds no more than a batch, its start first
+    /// and the run's own span last.
     ///
     /// ```no_run
     /// use std::time::{Duration, SystemTime};
@@ -317,16 +318,6 @@ impl Telmoni {
         Some(runs::continued(&self.inner, read))
     }
 
-    /// Runs `f` with every batch held back until it returns, so the spans
-    /// that end meanwhile leave together, in their order: what
-    /// [`Self::record_run`] does with a record's spans. For the processor's
-    /// own tests, and not part of the API.
-    #[doc(hidden)]
-    pub fn with_exports_held<R>(&self, f: impl FnOnce() -> R) -> R {
-        let _hold = self.inner.processor.hold(0);
-        f()
-    }
-
     /// Sends everything queued and waits, up to 30 seconds; `true` once the
     /// queue is empty.
     pub fn flush(&self) -> bool {
@@ -349,5 +340,79 @@ impl fmt::Debug for Telmoni {
         f.debug_struct("Telmoni")
             .field("config", &self.inner.config)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use opentelemetry::trace::{Span as _, SpanId, TraceId, Tracer as _};
+
+    use super::*;
+    use crate::ids;
+    use crate::transport::{Answer, TransportError};
+
+    /// Counts the exports it is handed, answering each as kept.
+    #[derive(Clone, Default)]
+    struct Counting(Arc<AtomicUsize>);
+
+    impl Transport for Counting {
+        fn send(
+            &self,
+            _url: &str,
+            _headers: &[(String, String)],
+            _body: &[u8],
+        ) -> Result<Answer, TransportError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(Answer {
+                status: 200,
+                headers: Vec::new(),
+                body: b"{}".to_vec(),
+            })
+        }
+    }
+
+    /// Ends one span in `trace` under a record's hold, then drops the hold,
+    /// told the record was built only when `built`.
+    fn hold_one(telmoni: &Telmoni, trace: TraceId, built: bool) {
+        let hold = telmoni.inner.processor.hold(trace, 1).unwrap();
+        {
+            let _given = ids::given(trace, SpanId::from_bytes([1; 8]));
+            telmoni.inner.tracer.start("staged").end();
+        }
+        if built {
+            hold.queue();
+        }
+    }
+
+    /// Nothing a caller passes can fail a build part-way, so the guard is
+    /// held here, below `record_run`, to queue only a record built whole.
+    #[test]
+    fn a_record_not_built_queues_nothing() {
+        let sent = Counting::default();
+        let hooks = Hooks {
+            transport: Box::new(sent.clone()),
+            sleep: Box::new(|_| {}),
+            ..Hooks::default()
+        };
+        let config = Config::new("http://localhost:1", None, Some("k".to_owned()));
+        let telmoni = Telmoni::with_hooks(config, hooks);
+        let trace = TraceId::from_bytes([1; 16]);
+        hold_one(&telmoni, trace, false);
+        assert!(telmoni.flush());
+        assert_eq!(
+            sent.0.load(Ordering::SeqCst),
+            0,
+            "a record not built was sent"
+        );
+        hold_one(&telmoni, trace, true);
+        assert!(telmoni.flush());
+        assert_eq!(
+            sent.0.load(Ordering::SeqCst),
+            1,
+            "a record built was not sent"
+        );
+        telmoni.shutdown();
     }
 }

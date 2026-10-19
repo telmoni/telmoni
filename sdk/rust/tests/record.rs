@@ -3,16 +3,18 @@
 
 mod common;
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use common::{
     Failure, FakeTransport, Harness, Outcome, Sleeps, Warnings, attributes_of, field, hooks, int,
-    keyed, load_fixture, lock, name_of, run_span, text,
+    keyed, load_fixture, lock, name_of, run_span, spans_of, text,
 };
-use opentelemetry::Context;
-use opentelemetry::trace::TraceContextExt as _;
+use opentelemetry::trace::{Link, SpanKind, TraceContextExt as _, TraceId};
+use opentelemetry::{Context, KeyValue};
+use opentelemetry_sdk::trace::{SamplingDecision, SamplingResult, ShouldSample};
 use serde_json::{Value, json};
 use telmoni_sdk::{
     Batching, CallRecord, Config, Error, ModelCallRecord, RecordItem, RunOptions, RunRecord,
@@ -538,5 +540,295 @@ fn a_record_the_queue_has_no_room_for_is_refused_whole() -> Outcome {
         "the live run's four spans and the record's four: {names:?}"
     );
     assert!(warnings.all().is_empty(), "{:?}", warnings.all());
+    Ok(())
+}
+
+/// The traces an export's spans are in.
+fn traces_in(body: &[u8]) -> Result<BTreeSet<String>, Failure> {
+    let body: Value = serde_json::from_slice(body)?;
+    spans_of(&body)
+        .iter()
+        .map(|span| Ok(text(span, "traceId")?.to_owned()))
+        .collect()
+}
+
+/// A span queued before a record or ending after it, and a record beside it,
+/// go in other exports, so the record is the same bytes as when sent alone.
+#[test]
+fn a_record_travels_in_exports_of_its_own() -> Outcome {
+    let harness = Harness::new()?;
+    let record = the_record()?;
+    let beside = RunRecord {
+        run_id: "0191a3b4-2222-4aaa-8bbb-000000000002".to_owned(),
+        ..record.clone()
+    };
+    let live = harness.telmoni.run("live", RunOptions::default())?;
+    assert!(
+        harness.transport.wait_for(1),
+        "the live run's start goes alone"
+    );
+    live.step("live step").end();
+    harness.telmoni.record_run(record.clone())?;
+    harness.telmoni.record_run(beside.clone())?;
+    live.end();
+    harness.flush()?;
+    let sent = harness.transport.count();
+    harness.telmoni.record_run(record.clone())?;
+    harness.flush()?;
+    harness.telmoni.shutdown();
+
+    let bodies: Vec<Vec<u8>> = harness
+        .transport
+        .requests()
+        .into_iter()
+        .map(|request| request.body)
+        .collect();
+    let trace_of = |run: &RunRecord| run.run_id.replace('-', "");
+    let mut first = Vec::new();
+    let mut other = 0;
+    for (n, body) in bodies.iter().enumerate() {
+        let traces = traces_in(body)?;
+        assert_eq!(traces.len(), 1, "export {n} is in traces {traces:?}");
+        if n < sent && traces.contains(&trace_of(&record)) {
+            first.push(body);
+        }
+        if traces.contains(&trace_of(&beside)) {
+            other += 1;
+        }
+    }
+    assert_eq!(bodies.len(), sent + 1);
+    assert_eq!(
+        first,
+        [&bodies[sent]],
+        "the record sent beside a live run is the bytes it is sent again as"
+    );
+    assert_eq!(
+        other, 1,
+        "the record beside it went in one export of its own"
+    );
+    Ok(())
+}
+
+/// A record larger than a batch is cut into batches counted from its own
+/// start, wherever it lands in the queue.
+#[test]
+fn a_record_larger_than_a_batch_is_cut_from_its_own_start() -> Outcome {
+    let transport = FakeTransport::new([])?;
+    let warnings = Warnings::default();
+    let sleeps = Sleeps::default();
+    let mut hooks = hooks(&transport, &warnings, &sleeps);
+    hooks.batching = Batching {
+        max_queue_size: 2048,
+        max_batch_size: 3,
+        schedule_delay: Duration::from_secs(60),
+    };
+    let telmoni = Telmoni::with_hooks(keyed(), hooks);
+    let golden = the_record()?;
+    let at = golden.start;
+    let record = RunRecord {
+        inside: vec![
+            ToolCallRecord::new("t", at, at).into(),
+            ToolCallRecord::new("t", at, at).into(),
+            ToolCallRecord::new("t", at, at).into(),
+        ],
+        ..golden
+    };
+    let run = telmoni.run("bot", RunOptions::default())?;
+    assert!(transport.wait_for(1));
+    for n in 0..2 {
+        run.step(&format!("s{n}")).end();
+    }
+    telmoni.record_run(record)?;
+    run.end();
+    assert!(telmoni.flush());
+    telmoni.shutdown();
+
+    let exports: Vec<Vec<String>> = transport
+        .bodies()?
+        .iter()
+        .map(|body| {
+            spans_of(body)
+                .iter()
+                .map(|span| name_of(span).to_owned())
+                .collect()
+        })
+        .collect();
+    assert_eq!(
+        exports,
+        [
+            vec!["telmoni.run.start"],
+            vec!["s0", "s1"],
+            vec!["telmoni.run.start", "execute_tool t", "execute_tool t"],
+            vec!["execute_tool t", "invoke_agent claude-code"],
+            vec!["invoke_agent bot"],
+        ]
+    );
+    Ok(())
+}
+
+/// A live step ending on another thread while a record is built is in no
+/// export of the record's. The queue is large, so the thread never fills it.
+#[test]
+fn a_span_ending_while_a_record_is_built_travels_apart() -> Outcome {
+    let record = the_record()?;
+    for _ in 0..20 {
+        let transport = FakeTransport::new([])?;
+        let warnings = Warnings::default();
+        let sleeps = Sleeps::default();
+        let mut hooks = hooks(&transport, &warnings, &sleeps);
+        hooks.batching = Batching {
+            max_queue_size: 1 << 16,
+            ..Batching::default()
+        };
+        let telmoni = Telmoni::with_hooks(keyed(), hooks);
+        let live = telmoni.run("live", RunOptions::default())?;
+        let stop = AtomicBool::new(false);
+        let recorded = std::thread::scope(|scope| {
+            scope.spawn(|| {
+                while !stop.load(Ordering::Relaxed) {
+                    live.step("live step").end();
+                }
+            });
+            let recorded = telmoni.record_run(record.clone());
+            stop.store(true, Ordering::Relaxed);
+            recorded
+        });
+        recorded?;
+        live.end();
+        assert!(telmoni.flush());
+        telmoni.shutdown();
+        for (n, request) in transport.requests().iter().enumerate() {
+            let traces = traces_in(&request.body)?;
+            assert_eq!(traces.len(), 1, "export {n} is in traces {traces:?}");
+        }
+    }
+    Ok(())
+}
+
+type Hook = Box<dyn FnOnce() + Send>;
+
+/// Calls its hook once, as the next span with no parent starts: a record's
+/// own span, mid-build.
+#[derive(Clone, Default)]
+struct Hooked(Arc<Mutex<Option<Hook>>>);
+
+impl std::fmt::Debug for Hooked {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Hooked")
+    }
+}
+
+impl ShouldSample for Hooked {
+    fn should_sample(
+        &self,
+        _parent_context: Option<&Context>,
+        _trace_id: TraceId,
+        _name: &str,
+        _span_kind: &SpanKind,
+        _attributes: &[KeyValue],
+        _links: &[Link],
+    ) -> SamplingResult {
+        let hook = lock(&self.0).take();
+        if let Some(hook) = hook {
+            hook();
+        }
+        SamplingResult {
+            decision: SamplingDecision::RecordAndSample,
+            attributes: Vec::new(),
+            trace_state: Default::default(),
+        }
+    }
+}
+
+/// While a record is built its room in the queue is kept: a live step ending
+/// meanwhile is dropped past it, so the queue never holds more than its size.
+#[test]
+fn a_records_room_is_kept_while_it_is_built() -> Outcome {
+    let transport = FakeTransport::new([])?;
+    let warnings = Warnings::default();
+    let sleeps = Sleeps::default();
+    let mut hooks = hooks(&transport, &warnings, &sleeps);
+    // Room for five spans, and a worker that will not wake until flushed.
+    hooks.batching = Batching {
+        max_queue_size: 5,
+        max_batch_size: 100,
+        schedule_delay: Duration::from_secs(60),
+    };
+    let sampler = Hooked::default();
+    let config = Config {
+        sampler: Some(Box::new(sampler.clone())),
+        ..keyed()
+    };
+    let telmoni = Telmoni::with_hooks(config, hooks);
+    let golden = the_record()?;
+    let at = golden.start;
+    let record = RunRecord {
+        inside: vec![
+            ToolCallRecord::new("t", at, at).into(),
+            ToolCallRecord::new("t", at, at).into(),
+        ],
+        ..golden
+    };
+    let live = Arc::new(telmoni.run("live", RunOptions::default())?);
+    assert!(transport.wait_for(1));
+    // Room for one step beside the record's four spans.
+    let stepping = Arc::clone(&live);
+    *lock(&sampler.0) = Some(Box::new(move || {
+        stepping.step("s0").end();
+        stepping.step("s1").end();
+    }));
+    telmoni.record_run(record)?;
+    assert!(telmoni.flush());
+    Arc::try_unwrap(live)
+        .map_err(|_| "the live run is still shared")?
+        .end();
+    assert!(telmoni.flush());
+    telmoni.shutdown();
+
+    let mut names: Vec<String> = transport
+        .spans()?
+        .iter()
+        .map(|span| name_of(span).to_owned())
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        [
+            "execute_tool t",
+            "execute_tool t",
+            "invoke_agent claude-code",
+            "invoke_agent live",
+            "s0",
+            "telmoni.run.start",
+            "telmoni.run.start",
+        ]
+    );
+    assert_eq!(
+        warnings.all(),
+        ["telmoni: the export queue was full; 1 spans were dropped"]
+    );
+    Ok(())
+}
+
+/// A record queued behind a live step goes in the export after the step's, as
+/// a live run's start would, with no flush.
+#[test]
+fn a_record_goes_at_once() -> Outcome {
+    let transport = FakeTransport::new([])?;
+    let warnings = Warnings::default();
+    let sleeps = Sleeps::default();
+    let mut hooks = hooks(&transport, &warnings, &sleeps);
+    hooks.batching = Batching {
+        schedule_delay: Duration::from_secs(60),
+        ..Batching::default()
+    };
+    let telmoni = Telmoni::with_hooks(keyed(), hooks);
+    let live = telmoni.run("live", RunOptions::default())?;
+    assert!(transport.wait_for(1));
+    live.step("live step").end();
+    telmoni.record_run(the_record()?)?;
+    assert!(transport.wait_for(3), "the record waited for the delay");
+    live.end();
+    telmoni.shutdown();
     Ok(())
 }

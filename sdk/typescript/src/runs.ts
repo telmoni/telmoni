@@ -15,7 +15,7 @@ import type { Attributes, Context, HrTime, Span, SpanContext, SpanOptions, Trace
 import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 
 import * as contract from './contract.js';
-import { QueueFullError, errorType, isAbort } from './errors.js';
+import { errorType, isAbort } from './errors.js';
 import { type Ids, spanIdAt } from './ids.js';
 import type { Processor } from './processor.js';
 import type {
@@ -326,11 +326,11 @@ export class Opener {
    *
    * Its trace is its own, named by the run's id, whatever context is active;
    * each span's id is derived from that id and the span's place in the record.
-   * The spans end in one synchronous pass, the run's start first and the run's
-   * own last, and the processor's worker is a timer, which runs only once
-   * this returns: so they are queued together, and the same record sent again
-   * is the same bytes. Throws `QueueFullError`, queuing nothing, when the
-   * export queue has no room for the whole record.
+   * Its spans are queued whole once built, the run's start first and the
+   * run's own last, and travel in exports of their own, so the same record
+   * sent again is the same bytes, whatever else is sent meanwhile. Throws
+   * `QueueFullError`, queuing nothing, when the export queue has no room for
+   * the whole record.
    */
   record(record: RunRecord): void {
     if (typeof record.agent !== 'string' || record.agent.trim() === '') {
@@ -367,10 +367,14 @@ export class Opener {
     // Sampled out, no span is built: none of a record's ends after it, and
     // the same record sent again draws again.
     if (rate < 1 && Math.random() >= rate) return;
-    // Queued whole or not at all: a record that outgrows the queue's room
-    // would lose its tail, the run's own span first.
-    const spans = spansIn(record);
-    if (!this.#processor.hasRoom(spans)) throw new QueueFullError(spans);
+    // Worked out before the record is built: a count that warns calls the
+    // `warn` hook, which may record a run of its own.
+    const usages = new Map<CallRecord, Attributes>();
+    for (const item of record.inside ?? []) {
+      for (const each of item.type === 'step' ? (item.calls ?? []) : [item]) {
+        if (each.type === 'model_call') usages.set(each, usageOf(each.usage, this.#warnOnce));
+      }
+    }
     let place = 0;
     const open = (name: string, parent: Context, spanAttributes: Attributes, kind: SpanKind, at: RecordTime): Span =>
       this.#ids.given(runHex, spanIdAt(runHex, place++), () =>
@@ -385,7 +389,7 @@ export class Opener {
           [contract.REQUEST_MODEL]: item.model,
         };
         if (item.provider) callAttributes[contract.PROVIDER] = item.provider;
-        Object.assign(callAttributes, usageOf(item.usage, this.#warnOnce));
+        Object.assign(callAttributes, usages.get(item));
         close(open(`${operation} ${item.model}`, parent, callAttributes, SpanKind.CLIENT, item.start), item);
       } else {
         const callAttributes: Attributes = {
@@ -396,23 +400,27 @@ export class Opener {
         close(open(`execute_tool ${item.name}`, parent, callAttributes, SpanKind.INTERNAL, item.start), item);
       }
     };
-    const span = open(`invoke_agent ${record.agent}`, ROOT_CONTEXT, attributes, SpanKind.INTERNAL, record.start);
-    const ctx = trace.setSpan(ROOT_CONTEXT, span);
-    const at = hrTimeOf(record.start);
-    open(contract.RUN_START, ctx, { ...inherited, [contract.SAMPLE_RATE]: rate }, SpanKind.INTERNAL, record.start).end(
-      at,
-    );
-    for (const item of record.inside ?? []) {
-      if (item.type === 'step') {
-        const step = open(item.name, ctx, inherited, SpanKind.INTERNAL, item.start);
-        const inner = trace.setSpan(ctx, step);
-        for (const each of item.calls ?? []) call(each, inner);
-        close(step, item);
-      } else {
-        call(item, ctx);
+    // Queued whole or not at all: a record that outgrows the queue's room
+    // would lose its tail, the run's own span first.
+    this.#processor.record(runHex, spansIn(record), () => {
+      const span = open(`invoke_agent ${record.agent}`, ROOT_CONTEXT, attributes, SpanKind.INTERNAL, record.start);
+      const ctx = trace.setSpan(ROOT_CONTEXT, span);
+      const at = hrTimeOf(record.start);
+      open(contract.RUN_START, ctx, { ...inherited, [contract.SAMPLE_RATE]: rate }, SpanKind.INTERNAL, record.start).end(
+        at,
+      );
+      for (const item of record.inside ?? []) {
+        if (item.type === 'step') {
+          const step = open(item.name, ctx, inherited, SpanKind.INTERNAL, item.start);
+          const inner = trace.setSpan(ctx, step);
+          for (const each of item.calls ?? []) call(each, inner);
+          close(step, item);
+        } else {
+          call(item, ctx);
+        }
       }
-    }
-    close(span, record);
+      close(span, record);
+    });
   }
 
   #start(name: string, parent: Context, attributes: Attributes, kind: SpanKind): Span {

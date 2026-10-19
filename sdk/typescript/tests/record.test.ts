@@ -2,11 +2,12 @@
  * A run recorded after it ended: `recordRun` and `sdk/fixtures/recorded.json`.
  */
 
+import { SamplingDecision, type Sampler, type SamplingResult } from '@opentelemetry/sdk-trace-base';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { QueueFullError } from '../src/index';
 import type { CallRecord, ModelCallRecord, RunRecord, StepRecord, ToolCallRecord } from '../src/index';
-import { type ExportBody, type JsonAttribute, attributesOf, harness, loadFixture } from './helpers';
+import { type ExportBody, type Harness, type JsonAttribute, attributesOf, harness, loadFixture } from './helpers';
 
 const VERSIONED = new Set(['telemetry.sdk.version', 'telemetry.distro.version']);
 
@@ -126,6 +127,31 @@ function theRecord(): RunRecord {
   return recordFrom(loadFixture<RecordedFixture>('recorded.json').scenario.record);
 }
 
+/** Calls its hook once, as the next span with no parent starts: a record's own span, mid-build. */
+class Hooked implements Sampler {
+  hook: (() => void) | undefined;
+
+  shouldSample(): SamplingResult {
+    const hook = this.hook;
+    this.hook = undefined;
+    hook?.();
+    return { decision: SamplingDecision.RECORD_AND_SAMPLED };
+  }
+
+  toString(): string {
+    return 'Hooked';
+  }
+}
+
+function traceOf(record: RunRecord): string {
+  return record.runId.replaceAll('-', '');
+}
+
+function tracesIn(body: string): Set<string> {
+  const parsed = JSON.parse(body) as ExportBody;
+  return new Set(parsed.resourceSpans.flatMap((r) => r.scopeSpans.flatMap((s) => s.spans.map((span) => span.traceId))));
+}
+
 // Python sorts by code point; the fixture was written in that order.
 function byKey(a: JsonAttribute, b: JsonAttribute): number {
   return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
@@ -213,6 +239,168 @@ describe('a recorded run', () => {
     }
     expect(sent[0]).toHaveLength(1);
     for (const bodies of sent) expect(bodies).toEqual(sent[0]);
+  });
+
+  it('travels in exports of its own, so it is the same bytes whatever is queued beside it', async () => {
+    const record = theRecord();
+    const beside: RunRecord = { ...record, runId: '0191a3b4-2222-4aaa-8bbb-000000000002' };
+    const h = harness();
+    let sent = 0;
+    try {
+      await h.telmoni.run('live', async (run) => {
+        expect(await h.transport.waitFor(1)).toBe(true); // the live run's start goes alone
+        run.step('live step', () => {});
+        h.telmoni.recordRun(record);
+        h.telmoni.recordRun(beside);
+      });
+      expect(await h.telmoni.flush()).toBe(true);
+      sent = h.transport.requests.length;
+      h.telmoni.recordRun(record);
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    const bodies = h.transport.requests.map((request) => request.body);
+    for (const body of bodies) expect(tracesIn(body).size).toBe(1);
+    const alone = bodies.slice(0, sent).filter((body) => tracesIn(body).has(traceOf(record)));
+    expect(alone).toEqual(bodies.slice(sent));
+    expect(bodies.slice(0, sent).some((body) => tracesIn(body).has(traceOf(beside)))).toBe(true);
+  });
+
+  it('larger than a batch is cut from its own start', async () => {
+    const h = harness({}, { processor: { maxBatchSize: 3, scheduleDelaySeconds: 60 } });
+    const golden = theRecord();
+    const call: ToolCallRecord = { type: 'tool_call', name: 't', start: golden.start, end: golden.start };
+    try {
+      await h.telmoni.run('bot', async (run) => {
+        expect(await h.transport.waitFor(1)).toBe(true);
+        run.step('s0', () => {});
+        run.step('s1', () => {});
+        h.telmoni.recordRun({ ...golden, inside: [call, call, call] });
+      });
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    expect(h.transport.bodies().map((body) => body.resourceSpans[0]!.scopeSpans[0]!.spans.map((s) => s.name))).toEqual([
+      ['telmoni.run.start'],
+      ['s0', 's1'],
+      ['telmoni.run.start', 'execute_tool t', 'execute_tool t'],
+      ['execute_tool t', 'invoke_agent claude-code'],
+      ['invoke_agent bot'],
+    ]);
+  });
+
+  it('travels apart from a span ending while it is built', async () => {
+    const sampler = new Hooked();
+    const h = harness({ sampler });
+    try {
+      await h.telmoni.run('live', async (run) => {
+        expect(await h.transport.waitFor(1)).toBe(true);
+        sampler.hook = () => run.step('live step', () => {});
+        h.telmoni.recordRun(theRecord());
+      });
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    for (const request of h.transport.requests) expect(tracesIn(request.body).size).toBe(1);
+    expect(h.transport.spans().map((span) => span.name)).toContain('live step');
+  });
+
+  it('keeps its room while it is built, a live span past it dropped', async () => {
+    const sampler = new Hooked();
+    // Room for five spans, and a worker that will not wake until flushed.
+    const h = harness({ sampler }, { processor: { maxQueueSize: 5, maxBatchSize: 100, scheduleDelaySeconds: 60 } });
+    const golden = theRecord();
+    const call: ToolCallRecord = { type: 'tool_call', name: 't', start: golden.start, end: golden.start };
+    try {
+      await h.telmoni.run('live', async (run) => {
+        expect(await h.transport.waitFor(1)).toBe(true);
+        // Room for one step beside the record's four spans.
+        sampler.hook = () => {
+          run.step('s0', () => {});
+          run.step('s1', () => {});
+        };
+        h.telmoni.recordRun({ ...golden, inside: [call, call] });
+        expect(await h.telmoni.flush()).toBe(true);
+      });
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    expect(
+      h.transport
+        .spans()
+        .map((span) => span.name)
+        .sort(),
+    ).toEqual([
+      'execute_tool t',
+      'execute_tool t',
+      'invoke_agent claude-code',
+      'invoke_agent live',
+      's0',
+      'telmoni.run.start',
+      'telmoni.run.start',
+    ]);
+    expect(h.warnings).toEqual(['telmoni: the export queue was full; 1 spans were dropped']);
+  });
+
+  it("goes at once, as a live run's start does", async () => {
+    const h = harness({}, { processor: { scheduleDelaySeconds: 60 } });
+    try {
+      await h.telmoni.run('live', async (run) => {
+        expect(await h.transport.waitFor(1)).toBe(true);
+        run.step('live step', () => {});
+        h.telmoni.recordRun(theRecord());
+        expect(await h.transport.waitFor(3), 'the record waited for the delay').toBe(true);
+      });
+    } finally {
+      await h.telmoni.shutdown();
+    }
+  });
+
+  it('sends nothing when an item of its throws as it is read, part-way through', async () => {
+    const h = harness();
+    const golden = theRecord();
+    const call = { type: 'tool_call', start: golden.start, end: golden.start } as ToolCallRecord;
+    // Read only as the build opens the call, once the run's start has ended.
+    Object.defineProperty(call, 'name', {
+      get(): string {
+        throw new Error('the name could not be read');
+      },
+    });
+    try {
+      expect(() => h.telmoni.recordRun({ ...golden, inside: [call] })).toThrow('the name could not be read');
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    expect(h.transport.requests).toEqual([]);
+  });
+
+  it('is whole beside a run its warning hook records', async () => {
+    // The warning is given before the record is built.
+    const golden = theRecord();
+    const call: ModelCallRecord = {
+      type: 'model_call',
+      model: 'm',
+      start: golden.start,
+      end: golden.start,
+      usage: { inputTokens: Number.NaN },
+    };
+    const outer: RunRecord = { ...golden, inside: [call] };
+    const inner: RunRecord = { ...golden, runId: '0191a3b4-3333-4aaa-8bbb-000000000003', inside: [] };
+    const h: Harness = harness({}, { warn: () => h.telmoni.recordRun(inner) });
+    try {
+      h.telmoni.recordRun(outer);
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    const traces = h.transport.requests.map((request) => tracesIn(request.body));
+    for (const each of traces) expect(each.size).toBe(1);
+    expect(traces.map((each) => [...each][0]).sort()).toEqual([traceOf(outer), traceOf(inner)].sort());
   });
 
   it('reads milliseconds as the epoch, however early, and a Date the same', async () => {

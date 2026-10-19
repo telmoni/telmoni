@@ -8,6 +8,7 @@ import (
 	"time"
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // queueLimits size the processor: OpenTelemetry's own batch processor's
@@ -33,18 +34,27 @@ const defaultWait = 30 * time.Second
 // run's own sample rate is applied here, by run, never through the trace's
 // flag. The queue is bounded, so a slow Telmoni never slows an agent: past its
 // size, spans are dropped and counted. telmoni.run.start wakes the worker at
-// once.
+// once, and a recorded run travels in exports of its own.
 type processor struct {
 	exporter *exporter
 	logger   *slog.Logger
 	limits   queueLimits
 
-	mu        sync.Mutex
-	queue     []sdktrace.ReadOnlySpan
+	// recording lets one record at a time be built.
+	recording sync.Mutex
+
+	mu    sync.Mutex
+	queue []sdktrace.ReadOnlySpan
+	// The queue's first span is the taken-th ever queued; a batch stops at
+	// each fence, a record's first span and one past its last.
+	taken  int
+	fences []int
+	// The record being built, its trace's spans as they end, and its room.
+	stage     *stage
+	reserved  int
 	dropped   int
 	urgent    bool
 	flushing  int
-	held      int
 	exporting bool
 	stopped   bool
 	// drained is closed for each Flush waiting, once the queue is empty.
@@ -68,25 +78,44 @@ func newProcessor(exp *exporter, logger *slog.Logger, limits queueLimits) *proce
 	return p
 }
 
-// hold has the worker take no batch, unless it is stopping, until release is
-// called, so the spans a record queues in between travel together, in their
-// order, and the record sent again is the same bytes. Refused, holding
-// nothing, when the queue has no room for the record's need spans, so a
-// record is queued whole or not at all; a live span ending meanwhile still
-// takes a slot.
-func (p *processor) hold(need int) (release func(), ok bool) {
+// stage is a record being built: its trace, and its spans as they end.
+type stage struct {
+	traceID trace.TraceID
+	spans   []sdktrace.ReadOnlySpan
+}
+
+// hold stages the spans of the record in trace id as they end, and release
+// queues them whole, to travel in exports of their own: so the same record
+// sent again is the same bytes, whatever else ends meanwhile. One record at a
+// time, its room kept for it; refused, holding nothing, when the queue has
+// none for its need spans. A release told the record was not built queues
+// nothing.
+func (p *processor) hold(id trace.TraceID, need int) (release func(built bool), ok bool) {
+	p.recording.Lock()
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	if len(p.queue)+need > p.limits.maxQueue {
-		p.mu.Unlock()
-		return func() {}, false
+		p.recording.Unlock()
+		return func(bool) {}, false
 	}
-	p.held++
-	p.mu.Unlock()
-	return func() {
+	p.stage = &stage{traceID: id}
+	p.reserved = need
+	return func(built bool) {
+		defer p.recording.Unlock()
 		p.mu.Lock()
-		p.held--
+		defer p.mu.Unlock()
+		staged := p.stage.spans
+		p.stage, p.reserved = nil, 0
+		if !built || p.stopped || len(staged) == 0 {
+			return
+		}
+		first := p.taken + len(p.queue)
+		if first > p.taken {
+			p.fences = append(p.fences, first)
+		}
+		p.fences = append(p.fences, first+len(staged))
+		p.queue = append(p.queue, staged...)
 		p.signal()
-		p.mu.Unlock()
 	}, true
 }
 
@@ -103,7 +132,11 @@ func (p *processor) OnEnd(span sdktrace.ReadOnlySpan) {
 	if p.stopped {
 		return
 	}
-	if len(p.queue) >= p.limits.maxQueue {
+	if p.stage != nil && span.SpanContext().TraceID() == p.stage.traceID {
+		p.stage.spans = append(p.stage.spans, span)
+		return
+	}
+	if len(p.queue)+p.reserved >= p.limits.maxQueue {
 		p.dropped++
 		return
 	}
@@ -208,17 +241,19 @@ func (p *processor) work() {
 			p.mu.Unlock()
 			return
 		}
-		if p.held > 0 && !p.stopped {
-			// The hold's release wakes the worker again.
-			p.mu.Unlock()
-			continue
-		}
 		n := min(len(p.queue), p.limits.maxBatch)
+		if len(p.fences) > 0 {
+			n = min(n, p.fences[0]-p.taken)
+		}
 		batch := make([]sdktrace.ReadOnlySpan, n)
 		copy(batch, p.queue)
 		rest := copy(p.queue, p.queue[n:])
 		clear(p.queue[rest:])
 		p.queue = p.queue[:rest]
+		p.taken += n
+		for len(p.fences) > 0 && p.fences[0] <= p.taken {
+			p.fences = p.fences[1:]
+		}
 		dropped := p.dropped
 		p.dropped = 0
 		p.urgent = false
@@ -260,12 +295,10 @@ func (p *processor) warn(text string) {
 	p.logger.Warn(text)
 }
 
-// due is whether the worker should export without waiting; under the lock.
+// due is whether the worker should export without waiting; under the lock. A
+// record queued goes at once, as a live run's start does.
 func (p *processor) due() bool {
-	if p.held > 0 && !p.stopped {
-		return false
-	}
-	return p.stopped || p.flushing > 0 || p.urgent || len(p.queue) >= p.limits.maxBatch
+	return p.stopped || p.flushing > 0 || p.urgent || len(p.fences) > 0 || len(p.queue) >= p.limits.maxBatch
 }
 
 // release lets every Flush waiting go; under the lock.

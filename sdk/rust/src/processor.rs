@@ -5,16 +5,16 @@
 //! run's own sample rate is applied here, by run, never through the trace's
 //! flag. The queue is bounded, so a slow Telmoni never slows an agent: past
 //! its size, spans are dropped and counted. `telmoni.run.start` wakes the
-//! worker at once, unless a hold keeps every batch back until what is queued
-//! under it is whole.
+//! worker at once, and a recorded run travels in exports of its own.
 
 use std::collections::VecDeque;
 use std::fmt;
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use opentelemetry::Context;
+use opentelemetry::trace::TraceId;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::trace::{Span, SpanData, SpanProcessor};
 
@@ -56,17 +56,23 @@ struct Shared {
     state: Mutex<State>,
     wake: Condvar,
     batching: Batching,
+    /// Lets one record at a time be built.
+    recording: Mutex<()>,
 }
 
 #[derive(Default)]
 struct State {
     queue: VecDeque<SpanData>,
+    /// The queue's first span is the `taken`th ever queued; a batch stops at
+    /// each fence, a record's first span and one past its last.
+    taken: usize,
+    fences: VecDeque<usize>,
+    /// The record being built, and the room its hold keeps for it.
+    stage: Option<Stage>,
+    reserved: usize,
     dropped: usize,
     urgent: bool,
     flushing: usize,
-    /// How many holds are on: while any is, the worker takes no batch unless
-    /// shutting down.
-    held: usize,
     shutdown: bool,
     exporting: bool,
     /// Whether the worker has returned, which `shutdown` waits for.
@@ -86,6 +92,7 @@ impl Processor {
             state: Mutex::new(State::default()),
             wake: Condvar::new(),
             batching,
+            recording: Mutex::new(()),
         });
         let worker = Arc::clone(&shared);
         let spawned = std::thread::Builder::new()
@@ -102,18 +109,27 @@ impl Processor {
         Self { shared }
     }
 
-    /// Takes no batch until the guard drops, so the spans a record queues
-    /// meanwhile travel together, in their order, and the record sent again
-    /// is the same bytes. `None`, holding nothing, when the queue has no room
-    /// for the record's `need` spans, so a record is queued whole or not at
-    /// all; a live span ending meanwhile still takes a slot.
-    pub(crate) fn hold(&self, need: usize) -> Option<Hold<'_>> {
+    /// Stages the spans of the record in `trace` as they end, for
+    /// [`Hold::queue`] to queue whole, to travel in exports of their own: so
+    /// the same record sent again is the same bytes, whatever else ends
+    /// meanwhile. One record at a time, its room kept for it; `None`, holding
+    /// nothing, when the queue has none for its `need` spans.
+    pub(crate) fn hold(&self, trace: TraceId, need: usize) -> Option<Hold<'_>> {
+        let recording = lock(&self.shared.recording);
         let mut state = lock(&self.shared.state);
         if state.queue.len() + need > self.shared.batching.max_queue_size {
             return None;
         }
-        state.held += 1;
-        Some(Hold(&self.shared))
+        state.stage = Some(Stage {
+            trace,
+            spans: Vec::new(),
+        });
+        state.reserved = need;
+        Some(Hold {
+            shared: &self.shared,
+            built: false,
+            _recording: recording,
+        })
     }
 
     /// Everything queued sent, waiting up to `timeout`.
@@ -167,7 +183,13 @@ impl SpanProcessor for Processor {
         if state.shutdown {
             return;
         }
-        if state.queue.len() >= self.shared.batching.max_queue_size {
+        if let Some(stage) = &mut state.stage
+            && span.span_context.trace_id() == stage.trace
+        {
+            stage.spans.push(span);
+            return;
+        }
+        if state.queue.len() + state.reserved >= self.shared.batching.max_queue_size {
             state.dropped += 1;
             return;
         }
@@ -223,11 +245,19 @@ fn work(shared: &Shared, exporter: &Exporter, warner: &Warner) {
             if state.shutdown && state.queue.is_empty() {
                 return;
             }
-            if state.held > 0 && !state.shutdown {
-                continue;
+            let mut size = state.queue.len().min(shared.batching.max_batch_size);
+            if let Some(&fence) = state.fences.front() {
+                size = size.min(fence.saturating_sub(state.taken));
             }
-            let size = state.queue.len().min(shared.batching.max_batch_size);
             let batch: Vec<SpanData> = state.queue.drain(..size).collect();
+            state.taken += size;
+            while state
+                .fences
+                .front()
+                .is_some_and(|&fence| fence <= state.taken)
+            {
+                state.fences.pop_front();
+            }
             let dropped = std::mem::take(&mut state.dropped);
             state.urgent = false;
             state.exporting = !batch.is_empty();
@@ -262,26 +292,58 @@ fn work(shared: &Shared, exporter: &Exporter, warner: &Warner) {
     }
 }
 
-/// Under the lock: whether the worker should export without waiting.
+/// Under the lock: whether the worker should export without waiting; a
+/// record queued goes at once, as a live run's start does.
 fn due(state: &State, batching: &Batching) -> bool {
-    if state.held > 0 && !state.shutdown {
-        return false;
-    }
     state.shutdown
         || state.flushing > 0
         || state.urgent
+        || !state.fences.is_empty()
         || state.queue.len() >= batching.max_batch_size
 }
 
-/// A hold on the worker's batches, lifted when dropped, a panic unwinding
-/// through included.
-pub(crate) struct Hold<'a>(&'a Shared);
+/// A record being built: its trace, and its spans as they end.
+struct Stage {
+    trace: TraceId,
+    spans: Vec<SpanData>,
+}
+
+/// A record being built, its spans staged until the guard drops: queued
+/// whole if [`Hold::queue`] said it was built, dropped otherwise, a panic
+/// unwinding through included.
+pub(crate) struct Hold<'a> {
+    shared: &'a Shared,
+    built: bool,
+    _recording: MutexGuard<'a, ()>,
+}
+
+impl Hold<'_> {
+    /// Queues the record whole: every span of it has ended.
+    pub(crate) fn queue(mut self) {
+        self.built = true;
+    }
+}
 
 impl Drop for Hold<'_> {
     fn drop(&mut self) {
-        lock(&self.0.state).held -= 1;
-        // The worker may have slept through what was queued under the hold.
-        self.0.wake.notify_all();
+        let mut state = lock(&self.shared.state);
+        let staged = state
+            .stage
+            .take()
+            .map(|stage| stage.spans)
+            .unwrap_or_default();
+        state.reserved = 0;
+        if !self.built || state.shutdown || staged.is_empty() {
+            return;
+        }
+        let first = state.taken + state.queue.len();
+        if first > state.taken {
+            state.fences.push_back(first);
+        }
+        state.fences.push_back(first + staged.len());
+        state.queue.extend(staged);
+        drop(state);
+        self.shared.wake.notify_all();
     }
 }
 

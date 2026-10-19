@@ -5,14 +5,15 @@
  * A run inside a trace the application does not sample is still sent; the run's
  * own sample rate is applied here, by run, never through the trace's flag. The
  * queue is bounded, so a slow Telmoni never slows an agent: past its size, spans
- * are dropped and counted. `telmoni.run.start` wakes the worker at once.
+ * are dropped and counted. `telmoni.run.start` wakes the worker at once, and a
+ * recorded run travels in exports of its own.
  */
 
 import type { Context } from '@opentelemetry/api';
 import type { ReadableSpan, Span, SpanProcessor } from '@opentelemetry/sdk-trace-base';
 
 import * as contract from './contract.js';
-import { errorName } from './errors.js';
+import { QueueFullError, errorName } from './errors.js';
 import type { Exporter } from './exporter.js';
 import type { ProcessorOptions } from './types.js';
 
@@ -29,6 +30,15 @@ export class Processor implements SpanProcessor {
   readonly #maxBatchSize: number;
   readonly #delayMs: number;
   readonly #queue: ReadableSpan[] = [];
+  /**
+   * The queue's first span is the `#taken`th ever queued; a batch stops at
+   * each fence, a record's first span and one past its last.
+   */
+  #taken = 0;
+  readonly #fences: number[] = [];
+  /** The record being built: its trace, its spans as they end, and its room. */
+  #stage: { traceId: string; spans: ReadableSpan[] } | undefined;
+  #reserved = 0;
   #dropped = 0;
   #urgent = false;
   #flushers: Array<() => void> = [];
@@ -53,16 +63,43 @@ export class Processor implements SpanProcessor {
     this.#delayMs = (options.scheduleDelaySeconds ?? SCHEDULE_DELAY_S) * 1000;
   }
 
-  /** Whether the queue has room for `need` more spans: a record is queued whole or not at all. */
-  hasRoom(need: number): boolean {
-    return this.#queue.length + need <= this.#maxQueueSize;
+  /**
+   * Runs `build`, staging the spans of trace `traceId` as they end, then
+   * queues them whole, to travel in exports of their own: so the same record
+   * sent again is the same bytes, whatever else ends meanwhile. Throws
+   * `QueueFullError`, running nothing, when the queue has no room for the
+   * record's `need` spans; the room is kept for them meanwhile. A `build` that
+   * throws queues nothing. Of the application's, it runs the root sampler and
+   * the reads of the caller's record alone, a record's warnings given before it.
+   */
+  record(traceId: string, need: number, build: () => void): void {
+    if (this.#queue.length + need > this.#maxQueueSize) throw new QueueFullError(need);
+    const stage = { traceId, spans: [] as ReadableSpan[] };
+    this.#stage = stage;
+    this.#reserved = need;
+    try {
+      build();
+    } finally {
+      this.#stage = undefined;
+      this.#reserved = 0;
+    }
+    if (this.#down || stage.spans.length === 0) return;
+    const first = this.#taken + this.#queue.length;
+    if (first > this.#taken) this.#fences.push(first);
+    this.#fences.push(first + stage.spans.length);
+    for (const span of stage.spans) this.#queue.push(span);
+    this.#wake(0);
   }
 
   onStart(_span: Span, _parentContext: Context): void {}
 
   onEnd(span: ReadableSpan): void {
     if (this.#down || contract.SAMPLED_OUT in span.attributes) return;
-    if (this.#queue.length >= this.#maxQueueSize) {
+    if (this.#stage !== undefined && span.spanContext().traceId === this.#stage.traceId) {
+      this.#stage.spans.push(span);
+      return;
+    }
+    if (this.#queue.length + this.#reserved >= this.#maxQueueSize) {
       this.#dropped += 1;
       return;
     }
@@ -113,10 +150,14 @@ export class Processor implements SpanProcessor {
     return this.#queue.length === 0 && this.#inFlight === undefined;
   }
 
-  /** Whether the worker should export without waiting. */
+  /** Whether the worker should export without waiting; a record queued goes at once, as a live run's start does. */
   #due(): boolean {
     return (
-      this.#down || this.#flushers.length > 0 || this.#urgent || this.#queue.length >= this.#maxBatchSize
+      this.#down ||
+      this.#flushers.length > 0 ||
+      this.#urgent ||
+      this.#fences.length > 0 ||
+      this.#queue.length >= this.#maxBatchSize
     );
   }
 
@@ -139,7 +180,10 @@ export class Processor implements SpanProcessor {
   /** One batch, one at a time; the export's end looks again. */
   #tick(): void {
     if (this.#inFlight !== undefined || this.#givenUp) return;
-    const batch = this.#queue.splice(0, this.#maxBatchSize);
+    const fence = this.#fences[0];
+    const batch = this.#queue.splice(0, Math.min(this.#maxBatchSize, (fence ?? Infinity) - this.#taken));
+    this.#taken += batch.length;
+    while ((this.#fences[0] ?? Infinity) <= this.#taken) this.#fences.shift();
     const dropped = this.#dropped;
     this.#dropped = 0;
     this.#urgent = false;

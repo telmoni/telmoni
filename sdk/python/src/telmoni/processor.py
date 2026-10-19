@@ -4,7 +4,8 @@ without the check that skips a span whose trace is not sampled.
 A run inside a trace the application does not sample is still sent; the run's
 own sample rate is applied here, by run, never through the trace's flag. The
 queue is bounded, so a slow Telmoni never slows an agent: past its size, spans
-are dropped and counted. ``telmoni.run.start`` wakes the worker at once.
+are dropped and counted. ``telmoni.run.start`` wakes the worker at once, and a
+recorded run travels in exports of its own.
 """
 
 from __future__ import annotations
@@ -52,11 +53,18 @@ class Processor(SpanProcessor):
         self._schedule_delay_s = schedule_delay_s
         self._lock = threading.Lock()
         self._wake = threading.Condition(self._lock)
+        self._recording = threading.Lock()
         self._queue: deque[ReadableSpan] = deque()
+        # The queue's first span is the `_taken`th ever queued; a batch stops
+        # at each fence, a record's first span and one past its last.
+        self._taken = 0
+        self._fences: deque[int] = deque()
+        # The record being built, its trace's spans as they end, and its room.
+        self._stage: tuple[int, list[ReadableSpan]] | None = None
+        self._reserved = 0
         self._dropped = 0
         self._urgent = False
         self._flushing = 0
-        self._held = 0
         self._shutdown = False
         self._exporting = False
         self._thread = threading.Thread(
@@ -74,11 +82,15 @@ class Processor(SpanProcessor):
         is the parent's to send."""
         self._lock = threading.Lock()
         self._wake = threading.Condition(self._lock)
+        self._recording = threading.Lock()
         self._queue.clear()
+        self._taken = 0
+        self._fences.clear()
+        self._stage = None
+        self._reserved = 0
         self._dropped = 0
         self._urgent = False
         self._flushing = 0
-        self._held = 0
         self._exporting = False
         if not self._shutdown:
             self._thread = threading.Thread(
@@ -87,25 +99,40 @@ class Processor(SpanProcessor):
             self._thread.start()
 
     @contextmanager
-    def hold(self, need: int = 0) -> Iterator[None]:
-        """Take no batch until the block ends, so the spans a record queues
-        inside it travel together, in their order, and the record sent again
-        is the same bytes. Refused, holding nothing, when the queue has no room
-        for the record's ``need`` spans, so a record is queued whole or not at
-        all; a live span ending meanwhile still takes a slot."""
-        with self._lock:
-            if len(self._queue) + need > self._max_queue_size:
-                raise QueueFullError(
-                    f"the export queue has no room for the record's {need} spans; "
-                    "flush or wait, then record it again"
-                )
-            self._held += 1
-        try:
-            yield
-        finally:
+    def hold(self, trace_id: int, need: int) -> Iterator[None]:
+        """Stage the spans of the record in ``trace_id`` as they end, and queue
+        them whole when the block ends, to travel in exports of their own: the
+        same record sent again is the same bytes, whatever else ends meanwhile.
+        One record at a time, its room kept for it; refused, holding nothing,
+        when the queue has none for its ``need`` spans. A block that raises
+        queues nothing. The block runs nothing of the application's but the
+        root sampler, a record's warnings given before it, since a handler of
+        theirs may record a run."""
+        with self._recording:
             with self._lock:
-                self._held -= 1
-                self._wake.notify_all()
+                if len(self._queue) + need > self._max_queue_size:
+                    raise QueueFullError(
+                        f"the export queue has no room for the record's {need} "
+                        "spans; flush or wait, then record it again"
+                    )
+                staged: list[ReadableSpan] = []
+                self._stage = (trace_id, staged)
+                self._reserved = need
+            built = False
+            try:
+                yield
+                built = True
+            finally:
+                with self._lock:
+                    self._stage = None
+                    self._reserved = 0
+                    if built and staged and not self._shutdown:
+                        first = self._taken + len(self._queue)
+                        if first > self._taken:
+                            self._fences.append(first)
+                        self._fences.append(first + len(staged))
+                        self._queue.extend(staged)
+                        self._wake.notify_all()
 
     def on_start(self, span: Span, parent_context: Context | None = None) -> None:
         return None
@@ -116,7 +143,15 @@ class Processor(SpanProcessor):
         with self._lock:
             if self._shutdown:
                 return
-            if len(self._queue) >= self._max_queue_size:
+            stage = self._stage
+            if (
+                stage is not None
+                and span.context is not None
+                and span.context.trace_id == stage[0]
+            ):
+                stage[1].append(span)
+                return
+            if len(self._queue) + self._reserved >= self._max_queue_size:
                 self._dropped += 1
                 return
             self._queue.append(span)
@@ -157,10 +192,13 @@ class Processor(SpanProcessor):
                     self._wake.wait(timeout=self._schedule_delay_s)
                 if self._shutdown and not self._queue:
                     return
-                if self._held and not self._shutdown:
-                    continue
                 size = min(len(self._queue), self._max_batch_size)
+                if self._fences:
+                    size = min(size, self._fences[0] - self._taken)
                 batch = [self._queue.popleft() for _ in range(size)]
+                self._taken += size
+                while self._fences and self._fences[0] <= self._taken:
+                    self._fences.popleft()
                 dropped, self._dropped = self._dropped, 0
                 self._urgent = False
                 self._exporting = bool(batch)
@@ -175,13 +213,13 @@ class Processor(SpanProcessor):
                 self._wake.notify_all()
 
     def _due(self) -> bool:
-        """Under the lock: whether the worker should export without waiting."""
-        if self._held and not self._shutdown:
-            return False
+        """Under the lock: whether the worker should export without waiting; a
+        record queued goes at once, as a live run's start does."""
         return (
             self._shutdown
             or self._flushing > 0
             or self._urgent
+            or bool(self._fences)
             or len(self._queue) >= self._max_batch_size
         )
 

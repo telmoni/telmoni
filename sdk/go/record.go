@@ -106,9 +106,10 @@ var ErrQueueFull = errors.New("telmoni: the export queue has no room for the rec
 // runs once the turn it reports is over. It goes through the same exporter,
 // content rules and sample rate, in a trace of its own named by the run's id,
 // whatever span ctx carries. Each span's id is derived from the run's id and
-// the span's place in the record, and the spans are queued together, the
-// run's start first and the run's own last, so the same record sent again is
-// the same bytes, which ingest answers once. A record holds no content.
+// the span's place in the record, and the spans are queued whole once built,
+// the run's start first and the run's own last, to travel in exports of
+// their own, so the same record sent again is the same bytes, whatever else
+// is sent meanwhile, and ingest answers it once. A record holds no content.
 //
 // It returns an error, and sends nothing, for a blank agent, a run id that is
 // not a UUID, a zero time, a nil item, or a span that ends before it starts,
@@ -164,11 +165,12 @@ func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 	}
 	// Queued whole or not at all: a record that outgrows the queue's room
 	// would lose its tail, the run's own span first.
-	release, ok := c.processor.hold(recordSpans(record))
+	release, ok := c.processor.hold(trace.TraceID(runUUID), recordSpans(record))
 	if !ok {
 		return ErrQueueFull
 	}
-	defer release()
+	built := false
+	defer func() { release(built) }()
 	r := &recorder{tracer: c.tracer, runID: runUUID, inherited: inherited}
 	// No span in it: whatever span ctx carries, the record's trace is its
 	// own.
@@ -191,6 +193,7 @@ func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 		}
 	}
 	endRecorded(run, record.End, record.ErrorType, record.Cancelled)
+	built = true
 	return nil
 }
 
