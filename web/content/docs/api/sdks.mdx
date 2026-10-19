@@ -398,12 +398,11 @@ whole, before anything is queued: flush, or wait, and record it again.
 The run is sent as the live calls would have sent it, through the same
 exporter, content rules and sample rate, in a trace of its own named by the
 run's id, whatever trace is current. Each span's id is derived from the run's
-id and the span's place in the record, so the same record sent again by a
-client with nothing else waiting to be sent, such as a hook's own process, is
-the same bytes, which Telmoni answers within the hour as it answered the first,
-storing nothing twice: give a run the same id each time you send it. A client
-that is also sending live runs may send the record in one body with their
-spans, which Telmoni stores again. A record holds no content.
+id and the span's place in the record, and a record travels in bodies of its
+own, so the same record sent again is the same bytes, whatever else the client
+is sending, which Telmoni answers within the hour as it answered the first,
+storing nothing twice: give a run the same id each time you send it. A record
+holds no content.
 The [coding-agent plugins](/docs/api/coding-agents) are built on it.
 
 ---
