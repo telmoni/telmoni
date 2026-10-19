@@ -57,16 +57,16 @@ export function one(value: string | string[] | undefined): string | undefined {
 export const FILTER_VALUES_MAX = 50;
 
 /** A filter's values as the URL repeats it, each trimmed and once, an empty
- *  one dropped; past the most a filter admits, the rest are let go rather
- *  than turning the page into a refusal. */
-export function many(value: string | string[] | undefined): string[] {
+ *  one dropped; past `max`, the rest are let go rather than turning the page
+ *  into a refusal. */
+export function many(value: string | string[] | undefined, max = FILTER_VALUES_MAX): string[] {
   const given = Array.isArray(value) ? value : value === undefined ? [] : [value];
   const kept: string[] = [];
   for (const text of given) {
     const trimmed = text.trim();
     if (trimmed && !kept.includes(trimmed)) kept.push(trimmed);
   }
-  return kept.slice(0, FILTER_VALUES_MAX);
+  return kept.slice(0, max);
 }
 
 /** A whole number from 1 to `max`, or none: a day count or a page's limit. */

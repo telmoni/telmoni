@@ -5,7 +5,7 @@ import { rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { fetchProjectBySlug, getServerContext, traceDownload } from "@/lib/server/data";
 import { getServerSession } from "@/lib/server/session";
 import { many, one, type SearchParams } from "@/lib/list-query";
-import { parseTraceQuery } from "@/lib/traces";
+import { FILTERS, parseTraceQuery } from "@/lib/traces";
 
 /** Downloads a person may make in an hour: a file or two a sitting, while a
  *  script looping here would have the server sum ten thousand runs a time. */
@@ -47,13 +47,21 @@ export async function GET(
     searchParams[key] = request.nextUrl.searchParams.getAll(key);
   }
   const format = one(searchParams.format) === "json" ? "json" : "csv";
-  // A run is named by its UUID, and nothing else goes on to the server.
-  const runs = many(searchParams.run).filter((run) => z.uuid().safeParse(run).success);
+  // A UUID of any version, as ingest takes one; dropped, a chosen run would widen the file.
+  const runs = many(searchParams.run, RUNS_MAX + 1);
+  if (runs.some((run) => !z.guid().safeParse(run).success)) {
+    return NextResponse.json({ error: "bad request" }, { status: 400 });
+  }
   if (runs.length > RUNS_MAX) {
     return NextResponse.json({ error: "too many runs" }, { status: 400 });
   }
+  const query = parseTraceQuery(searchParams);
+  // A value the list lets go, one past its length say, would widen the file too.
+  if (FILTERS.some((filter) => many(searchParams[filter]).length !== (query[filter]?.length ?? 0))) {
+    return NextResponse.json({ error: "bad request" }, { status: 400 });
+  }
   // The page and its rows are the table's; a download is every row.
-  const result = await traceDownload(project.id, parseTraceQuery(searchParams), format, runs);
+  const result = await traceDownload(project.id, query, format, runs);
   if (result.kind === "forbidden") {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
