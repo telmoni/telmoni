@@ -2,7 +2,9 @@ import contextlib
 import http.client
 import http.server
 import os
+import ssl
 import threading
+import time
 from collections.abc import Iterator
 from dataclasses import asdict
 from typing import Any
@@ -10,7 +12,7 @@ from unittest import mock
 
 import pytest
 
-from telmoni import DEFAULT_ENDPOINT, Config, Secret, Telmoni, __version__
+from telmoni import DEFAULT_ENDPOINT, Config, Secret, Telmoni, __version__, exporter
 from telmoni.exporter import _urllib_transport
 
 
@@ -125,6 +127,21 @@ _ANSWERS = {
 class _Answering(http.server.BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         self.rfile.read(int(self.headers["Content-Length"]))
+        if self.path in ("/slow-head", "/slow-body"):
+            # A byte every 50 ms, each read's own timeout never reached.
+            head = b"HTTP/1.1 200 OK\r\nContent-Length: 40\r\n\r\n"
+            slow, fast = (
+                (head, b"x" * 40) if self.path == "/slow-head" else (b"x" * 40, head)
+            )
+            with contextlib.suppress(OSError):
+                if self.path == "/slow-body":
+                    self.wfile.write(fast)
+                for byte in slow:
+                    self.wfile.write(bytes([byte]))
+                    time.sleep(0.05)
+                if self.path == "/slow-head":
+                    self.wfile.write(fast)
+            return
         status, declared, sent = _ANSWERS[self.path]
         self.send_response(status)
         self.send_header("Content-Length", str(declared))
@@ -160,6 +177,38 @@ def test_an_answer_is_read_up_to_its_first_mebibyte(answering: str) -> None:
 def test_an_answer_cut_short_is_still_a_broken_one(answering: str) -> None:
     with pytest.raises(http.client.IncompleteRead):
         _urllib_transport(answering + "/cut", {}, b"{}")
+
+
+@pytest.mark.parametrize("path", ["/slow-head", "/slow-body"])
+def test_an_answer_sent_slowly_is_given_up_at_the_requests_deadline(
+    answering: str, path: str
+) -> None:
+    started = time.monotonic()
+    with (
+        mock.patch("telmoni.exporter.REQUEST_TIMEOUT_S", 0.5),
+        pytest.raises(TimeoutError),
+    ):
+        _urllib_transport(answering + path, {}, b"{}")
+    assert time.monotonic() - started < 1.5
+
+
+def test_the_transport_makes_one_tls_context_through_the_hook_urllib_reads(
+    answering: str,
+) -> None:
+    """So an application's trust set there holds, its certificates loaded once."""
+    made: list[None] = []
+    real = ssl.create_default_context
+
+    def counted(*args: Any, **kwargs: Any) -> ssl.SSLContext:
+        made.append(None)
+        return real(*args, **kwargs)
+
+    exporter._tls.cache_clear()
+    with mock.patch("ssl._create_default_https_context", counted):
+        for _ in range(2):
+            _urllib_transport(answering + "/short", {}, b"{}")
+    exporter._tls.cache_clear()
+    assert len(made) == 1
 
 
 def test_plain_http_is_refused_except_to_this_machine() -> None:

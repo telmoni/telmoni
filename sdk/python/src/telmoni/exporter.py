@@ -8,11 +8,16 @@ from each answer, warning once for each attribute an answer names dropped.
 
 from __future__ import annotations
 
+import contextlib
+import functools
 import http.client
 import json
 import logging
 import math
 import re
+import socket
+import ssl
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -81,20 +86,119 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-_OPENER = urllib.request.build_opener(_NoRedirect())
+class _Deadline:
+    """A request's ten seconds from its start, held once it is connected: a
+    socket's timeout is each read's alone, which a trickled answer outlasts."""
+
+    def __init__(self, seconds: float) -> None:
+        self._lock = threading.Lock()
+        self._sockets: list[socket.socket] = []
+        self._over = False
+        self.expired = False
+        self._timer = threading.Timer(seconds, self._expire)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def watch(self, sock: socket.socket) -> None:
+        # A descriptor of its own, which no socket opened since can be given,
+        # as the connection's may be once the answer's read closes it.
+        held = socket.fromfd(sock.fileno(), sock.family, sock.type, sock.proto)
+        with self._lock:
+            if self._over:
+                held.close()
+                return
+            self._sockets.append(held)
+            if self.expired:
+                _shut(held)
+
+    def _expire(self) -> None:
+        with self._lock:
+            if self._over:
+                return
+            self.expired = True
+            for sock in self._sockets:
+                _shut(sock)
+
+    def end(self) -> None:
+        """Stop watching, and let go of the descriptors held."""
+        with self._lock:
+            self._over = True
+            for sock in self._sockets:
+                sock.close()
+            self._sockets.clear()
+        self._timer.cancel()
+
+
+def _shut(sock: socket.socket) -> None:
+    # Shuts the connection for every descriptor of it, a TLS socket's too.
+    with contextlib.suppress(OSError):
+        sock.shutdown(socket.SHUT_RDWR)
+
+
+def _watched(
+    base: type[http.client.HTTPConnection], deadline: _Deadline
+) -> type[http.client.HTTPConnection]:
+    class Watched(base):  # type: ignore[valid-type,misc]
+        def connect(self) -> None:
+            super().connect()
+            deadline.watch(self.sock)
+
+    return Watched
+
+
+class _Plain(urllib.request.HTTPHandler):
+    def __init__(self, deadline: _Deadline) -> None:
+        super().__init__()
+        self._deadline = deadline
+
+    def do_open(self, http_class: Any, req: Any, **kwargs: Any) -> Any:
+        return super().do_open(_watched(http_class, self._deadline), req, **kwargs)
+
+
+class _Tls(urllib.request.HTTPSHandler):
+    def __init__(self, deadline: _Deadline) -> None:
+        super().__init__(context=_tls())
+        self._deadline = deadline
+
+    def do_open(self, http_class: Any, req: Any, **kwargs: Any) -> Any:
+        return super().do_open(_watched(http_class, self._deadline), req, **kwargs)
+
+
+@functools.cache
+def _tls() -> ssl.SSLContext:
+    """One context for every export, made as urllib makes its own, through the
+    hook an application may set its trust by; each loads the certificates."""
+    context = ssl._create_default_https_context()
+    context.set_alpn_protocols(["http/1.1"])
+    return context
 
 
 def _urllib_transport(url: str, headers: Mapping[str, str], body: bytes) -> Answer:
     request = urllib.request.Request(
         url, data=body, headers=dict(headers), method="POST"
     )
+    deadline = _Deadline(REQUEST_TIMEOUT_S)
+    opener = urllib.request.build_opener(
+        _NoRedirect(), _Plain(deadline), _Tls(deadline)
+    )
     try:
-        with _OPENER.open(request, timeout=REQUEST_TIMEOUT_S) as response:
-            return Answer(
-                response.status, dict(response.headers.items()), _body(response)
-            )
-    except urllib.error.HTTPError as error:
-        return Answer(error.code, dict(error.headers.items()), _body(error))
+        try:
+            response = opener.open(request, timeout=REQUEST_TIMEOUT_S)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            try:
+                return Answer(
+                    response.status, dict(response.headers.items()), _body(response)
+                )
+            finally:
+                deadline.end()
+    except (OSError, http.client.HTTPException) as error:
+        if deadline.expired:
+            raise TimeoutError("the answer outlasted the request's deadline") from error
+        raise
+    finally:
+        deadline.end()
 
 
 def _body(response: Any) -> bytes:
