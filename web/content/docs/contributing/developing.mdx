@@ -28,7 +28,7 @@ $ make up
 - The server is at http://localhost:8082.
 - Mailpit is at http://localhost:8025, where every mail the server sends lands.
 
-`ALLOW_TEST_SESSION=true` also mounts `POST /test/session`, which is how the end-to-end tests sign in; a Kubernetes pod refuses to start with it.
+`ALLOW_TEST_SESSION=true` also mounts `POST /internal/v1/test/session`, which is how the end-to-end tests sign in; a Kubernetes pod refuses to start with it.
 
 `.env` configures the server and `web/.env.local` the console; their examples, `.env.example` and `web/.env.local.example`, document the variables you set there. The checks:
 

@@ -12,12 +12,12 @@ These variables configure the Rust backend service (`telmoni serve`).
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `PORT` | `8082` | HTTP listen port for the backend server. |
-| `TRUSTED_PROXY_HOPS` | `2` | How many `X-Forwarded-For` entries the proxies in front of the server append, counted from the end: the machine lanes' per-address rate limits (`/v1`, `/cli`) read the caller's address there. Google's load balancer appends two, a single reverse proxy one, and `0` is nothing in front, which reads the socket's own peer; so does a request with fewer entries than the count, which came in beside the proxies. The same count the console reads, since both sit behind the same front. |
+| `TRUSTED_PROXY_HOPS` | `2` | How many `X-Forwarded-For` entries the proxies in front of the server append, counted from the end: the machine lanes' per-address rate limits (`/v1`, `/cli`, `/ping`, `/otlp`) read the caller's address there. Google's load balancer appends two, a single reverse proxy one, and `0` is nothing in front, which reads the socket's own peer; so does a request with fewer entries than the count, which came in beside the proxies. The same count the console reads, since both sit behind the same front. |
 | `APP_URL` | *Required* | The public origin of the web console. Used to format invitation links, password reset emails, and OAuth callback URLs. |
 | `SERVICE_SECRET` | *Required* | A random secret (`openssl rand -hex 32`, for example) shared between the web console and the core server; both refuse to start without it. The console sends it as the `x-service-secret` header on every internal call, and the server compares it in constant time. |
 | `SERVICE_SECRET_NEXT` | *Optional* | A second value the server accepts beside `SERVICE_SECRET`. The console sends only its own `SERVICE_SECRET`, so to rotate: set the new value here, move the console's `SERVICE_SECRET` to it, then make it the server's `SERVICE_SECRET` and unset this one. |
 | `DATABASE_CA_CERT` | *Optional* | The PEM of the database's own CA. Required in a Kubernetes pod, optional elsewhere. When set, every connection verifies the server's certificate chain against it (`verify-ca`). |
-| `ALLOW_TEST_SESSION` | `false` | When `true`, exposes the `POST /test/session` route for end-to-end testing. Refused at boot in a Kubernetes pod. |
+| `ALLOW_TEST_SESSION` | `false` | When `true`, exposes the `POST /internal/v1/test/session` route for end-to-end testing. Refused at boot in a Kubernetes pod. |
 | `DELETION_TAIL_BUDGET_MS` | `8000` | How long, in milliseconds, a deletion request runs its purges inline before the deletion sweep takes over the rest. An organization's deletion answers `202 Accepted` either way, with `purged: false` when the purge did not finish in time; an account's answers `200` when the person was erased in time and `202` otherwise. |
 | `RUN_SWEEPS` | `true` | Runs the deletion, retention, audit-verification and audit-export sweeps inside `telmoni serve`. `false` leaves them to `telmoni sweep <name>` runs you schedule yourself. |
 | `LOG_LEVEL` | `info` | The log filter, in `RUST_LOG` syntax (`debug`, `telmoni_auth=debug`). `RUST_LOG` is read first when both are set. The console reads the same variable as a plain level (`trace`, `debug`, `info`, `warn`, `error`, `fatal` or `silent`) and stops at start on anything else, such as `telmoni_auth=debug`; the Helm chart gives both containers its `config.logLevel`, so set a plain level there. |
@@ -121,9 +121,9 @@ To offer Slack, register a Slack app and set its credentials above:
 
 - Allow `{APP_URL}/connect/slack/callback` as the app's OAuth redirect URL;
   the server builds it from `APP_URL`.
-- Point the app's Event Subscriptions at `/webhooks/slack` on the
+- Point the app's Event Subscriptions at `/webhooks/v1/slack` on the
   host the machine lanes are served on, an HTTPS address: the machine host
-  (`https://api.telmoni.example.com/webhooks/slack`), or the console's host
+  (`https://api.telmoni.example.com/webhooks/v1/slack`), or the console's host
   where the lanes are routed by path
   ([reverse proxy configuration](/docs/self-host/production#reverse-proxy-configuration)).
   Subscribe to `app_uninstalled` and `tokens_revoked`, so that removing the

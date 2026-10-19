@@ -68,14 +68,15 @@ than conclude the route is gone.
 
 ## Methods, and lanes that do not exist
 
-Every lane under `/v1` and `/cli` answers a problem document, the two the door
-itself mints among them; ingest answers OTLP's `Status` instead
+Every lane under `/v1`, `/cli` and `/ping` answers a problem document, the two
+the door itself mints among them; ingest answers OTLP's `Status` instead
 ([Sending spans](/docs/api/ingest#refusals)).
 
 **A method a lane does not take** is `405` with an `Allow` header,
 `/errors/method-not-allowed`. The [API](/docs/api/reference) takes `GET` and
 `HEAD`, and `OPTIONS` alone answers `204` with `Allow: GET, HEAD, OPTIONS`; the
-CLI's lanes take `POST`, and every other method, `OPTIONS` included, is told so:
+CLI's lanes take `POST` and the ping lane `GET`, `HEAD` and `POST`, and every
+other method, `OPTIONS` included, is told so:
 
 ```json
 {
@@ -86,7 +87,7 @@ CLI's lanes take `POST`, and every other method, `OPTIONS` included, is told so:
 }
 ```
 
-**A path no lane serves**, under `/v1` or `/cli`, is `404` with
+**A path no lane serves**, under `/v1`, `/cli` or `/ping`, is `404` with
 `/errors/not-found`: a type apart from `/errors/auth/not-found`, which a lane
 answers about a resource it looked for and did not find, so a client can tell
 a missing lane from a missing row:
