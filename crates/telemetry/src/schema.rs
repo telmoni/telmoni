@@ -44,6 +44,12 @@ const SPANS_EXIST: &str = "EXISTS TABLE telemetry.spans";
 /// `rotate` for good.
 pub(crate) const STATEMENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// What a store made from other statements takes: the database's drop keeps
+/// its row policies, which `IF NOT EXISTS` would otherwise leave as they were.
+const MADE_AGAIN: &str = "before launch the file is edited in place, so the store is made \
+    again: `make db-reset` on a laptop; elsewhere, as an administrator, drop the `telemetry` \
+    database and its row policies, and run `migrate` again";
+
 /// Apply every statement of [`MIGRATION`], in order, as `client`'s user —
 /// the one `tenant_isolation` exempts, whose own `migrator_reads_all` admits
 /// it to every row, and whom the view runs as — unless the store was made
@@ -60,8 +66,7 @@ pub async fn apply(client: &clickhouse::Client) -> anyhow::Result<usize> {
     {
         Some(recorded) if recorded != digest => anyhow::bail!(
             "the ClickHouse store was made from other statements than this binary's file \
-             (its ledger holds {recorded}, the file is {digest}); before launch the file is \
-             edited in place, so the store is rebuilt: `make db-reset` on a laptop"
+             (its ledger holds {recorded}, the file is {digest}); {MADE_AGAIN}"
         ),
         Some(_) => {}
         None => {
@@ -74,8 +79,7 @@ pub async fn apply(client: &clickhouse::Client) -> anyhow::Result<usize> {
             if spans != 0 {
                 anyhow::bail!(
                     "the ClickHouse store has its tables but no record of the file that made \
-                     them; before launch the file is edited in place, so the store is rebuilt: \
-                     `make db-reset` on a laptop"
+                     them; {MADE_AGAIN}"
                 );
             }
             within(
