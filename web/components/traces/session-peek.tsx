@@ -51,14 +51,14 @@ import { cn } from "@/lib/utils";
 /** How long a read of the session may take before the panel says it failed. */
 const READ_TIMEOUT_MS = 15_000;
 
-/** The longest a session's id is, as the server takes it. */
+/** The longest a session's id is, in characters as the server counts them. */
 const SESSION_ID_MAX = 200;
 
 /** The session a `?peek=` value names, or `null` for a value that names
  *  none: a session id is the application's own text. */
 export function peekedSession(value: string | null): string | null {
   const id = value?.trim() ?? "";
-  return id && id.length <= SESSION_ID_MAX ? id : null;
+  return id && [...id].length <= SESSION_ID_MAX ? id : null;
 }
 
 /** The session the panel holds open, from the URL; `null` while it is shut. */

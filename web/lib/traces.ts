@@ -77,6 +77,20 @@ export const FILTER_LABEL: Record<FilterKey, string> = {
  *  alone: the sidebar offers them typed in as well, a tag as `key:value`. */
 export const TYPED_FILTERS: readonly FilterKey[] = ["user", "session", "tag"];
 
+/** The longest value each filter takes, in characters, as the server caps it
+ *  (`crates/telemetry/src/contract.rs`); a tag's is its key, colon and value. */
+const VALUE_MAX: Record<Exclude<FilterKey, "status">, number> = {
+  agent: 128,
+  model: 128,
+  tool: 128,
+  user: 128,
+  session: 200,
+  environment: 128,
+  release: 128,
+  tag: 64 + 1 + 256,
+  prompt: 1_024,
+};
+
 /** The page's own state beside the list's query: never sent to the server. */
 export type TraceUi = {
   /** The charts in place of the table; the table when left out. */
@@ -92,27 +106,38 @@ function some<T>(values: T[]): T[] | undefined {
   return values.length > 0 ? values : undefined;
 }
 
+/** Whether `value` is within `filter`'s length, counted in characters as the
+ *  server counts them, not in UTF-16's units. */
+export function fits(filter: Exclude<FilterKey, "status">, value: string): boolean {
+  return [...value].length <= VALUE_MAX[filter];
+}
+
+/** A filter's values from the URL, but those past its length. */
+function capped(filter: Exclude<FilterKey, "status">, searchParams: SearchParams): string[] {
+  return many(searchParams[filter]).filter((value) => fits(filter, value));
+}
+
 /** The query the URL carries, every value the server would refuse dropped
- *  — a status that is no status, a day count past the window, rows a page
- *  does not offer — so a stale or hand-edited link still opens the list
- *  rather than a 400. The first page is the URL's when it names none. */
+ *  — a status that is no status, a value past its length, rows a page does
+ *  not offer — so a stale or hand-edited link opens the list, not a 400.
+ *  The first page is the URL's when it names none. */
 export function parseTraceQuery(searchParams: SearchParams): TraceQuery {
   const statuses = Object.values(SpanStatus) as string[];
   const rows = whole(searchParams.limit, 100);
   const page = whole(searchParams.page, MAX_PAGE);
   return compact({
-    agent: some(many(searchParams.agent)),
-    user: some(many(searchParams.user)),
-    session: some(many(searchParams.session)),
+    agent: some(capped("agent", searchParams)),
+    user: some(capped("user", searchParams)),
+    session: some(capped("session", searchParams)),
     status: some(
       many(searchParams.status).filter((s): s is SpanStatus => statuses.includes(s)),
     ),
-    model: some(many(searchParams.model)),
-    tool: some(many(searchParams.tool)),
-    environment: some(many(searchParams.environment)),
-    release: some(many(searchParams.release)),
-    tag: some(many(searchParams.tag).filter(isTagPair)),
-    prompt: some(many(searchParams.prompt)),
+    model: some(capped("model", searchParams)),
+    tool: some(capped("tool", searchParams)),
+    environment: some(capped("environment", searchParams)),
+    release: some(capped("release", searchParams)),
+    tag: some(capped("tag", searchParams).filter(isTagPair)),
+    prompt: some(capped("prompt", searchParams)),
     sort: oneOf(searchParams.sort, TraceSort),
     dir: oneOf(searchParams.dir, SortDirection),
     days: whole(searchParams.days, MAX_DAYS),

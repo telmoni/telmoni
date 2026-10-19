@@ -64,6 +64,15 @@ describe("GET /api/sessions/[session]", () => {
     expect(fetchSession).not.toHaveBeenCalled();
   });
 
+  it("counts a session's id and a pinned name in characters, as the server does", async () => {
+    const wide = "😀".repeat(200);
+    expect((await read(`?project=${PROJECT}&pinned=${"😀".repeat(128)}`, wide)).status).toBe(200);
+    expect(fetchSession).toHaveBeenCalledWith(PROJECT, wide, {}, ["😀".repeat(128)]);
+    expect((await read(`?project=${PROJECT}`, `${wide}😀`)).status).toBe(404);
+    expect((await read(`?project=${PROJECT}&pinned=${"😀".repeat(129)}`)).status).toBe(400);
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+  });
+
   it("drops a window the server would refuse rather than refusing", async () => {
     expect((await read(`?project=${PROJECT}&days=0&limit=x`)).status).toBe(200);
     expect(fetchSession).toHaveBeenCalledWith(PROJECT, SESSION, {}, []);

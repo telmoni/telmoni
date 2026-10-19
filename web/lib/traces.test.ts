@@ -10,6 +10,7 @@ import {
   activeFilters,
   currentSort,
   downloadHref,
+  fits,
   formatDuration,
   isTagPair,
   nextSort,
@@ -125,6 +126,31 @@ describe("the URL as the list's state", () => {
     expect(parseTraceQuery({ days: "361" })).toEqual({});
     expect(parseTraceQuery({ page: "1001" })).toEqual({});
     expect(parseTraceQuery({})).toEqual({});
+  });
+
+  it("drops a value past the length the server takes for its filter, counting characters as it does", () => {
+    const at = (n: number) => "s".repeat(n);
+    expect(
+      parseTraceQuery({
+        session: [at(200), at(201)],
+        agent: [at(128), at(129)],
+        user: "😀".repeat(128),
+        prompt: at(1_025),
+        tag: [`${at(64)}:${at(256)}`, `${at(65)}:v`],
+      }),
+    ).toEqual({
+      session: [at(200)],
+      agent: [at(128)],
+      user: ["😀".repeat(128)],
+      tag: [`${at(64)}:${at(256)}`],
+    });
+  });
+
+  it("measures a typed value in characters, so an id of 128 emoji fits as the server takes it", () => {
+    expect(fits("user", "😀".repeat(128))).toBe(true);
+    expect(fits("user", "u".repeat(129))).toBe(false);
+    expect(fits("tag", `${"k".repeat(64)}:${"v".repeat(256)}`)).toBe(true);
+    expect(fits("tag", `${"k".repeat(64)}:${"v".repeat(257)}`)).toBe(false);
   });
 
   it("reads the page's own state apart from the list's, which the server never sees", () => {

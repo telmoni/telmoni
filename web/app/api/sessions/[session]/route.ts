@@ -11,9 +11,9 @@ import { getServerSession } from "@/lib/server/session";
  *  and far fewer than a hand makes. */
 const READS_A_MINUTE = { limit: 120, windowMs: 60_000 };
 
-/** The longest a session's id is, as the server takes it. */
+/** The longest a session's id is, in characters as the server counts them. */
 const SESSION_ID_MAX = 200;
-/** The longest a span's name is, as the server takes it. */
+/** The longest a span's name is, in characters as the server counts them. */
 const NAME_MAX = 128;
 
 /** The session's own answer, so nothing in between keeps a copy. */
@@ -40,9 +40,9 @@ export async function GET(
   const projectId = search.get("project") ?? "";
   if (!isProjectId(projectId)) return reply({ error: "Unknown project." }, 404);
   const sessionId = (await params).session.trim();
-  if (!sessionId || sessionId.length > SESSION_ID_MAX) return reply({ error: "No such session." }, 404);
+  if (!sessionId || [...sessionId].length > SESSION_ID_MAX) return reply({ error: "No such session." }, 404);
   const pinned = [...new Set(search.getAll("pinned").map((name) => name.trim()).filter(Boolean))];
-  if (pinned.length > PINNED_MAX || pinned.some((name) => name.length > NAME_MAX)) {
+  if (pinned.length > PINNED_MAX || pinned.some((name) => [...name].length > NAME_MAX)) {
     return reply({ error: `Up to ${PINNED_MAX} span names, each up to ${NAME_MAX} characters.` }, 400);
   }
   const query = parseWindow({

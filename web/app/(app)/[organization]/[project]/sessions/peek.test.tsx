@@ -124,6 +124,18 @@ describe("SessionPeek", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("opens for an id of 200 characters, counted as the server counts them, and stands shut past them", async () => {
+    const wide = "😀".repeat(200);
+    answers[wide] = () => Response.json(detail(wide));
+    open(wide);
+    const { unmount } = peek();
+    expect(await within(screen.getByRole("dialog")).findByRole("table")).toBeInTheDocument();
+    unmount();
+    open(`${wide}😀`);
+    peek();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("opens beside the list and reads the session by the project's id in the list's window, its runs under the default layout", async () => {
     open(B);
     peek();

@@ -27,6 +27,7 @@ import {
   STATUS_LABEL,
   TYPED_FILTERS,
   activeFilters,
+  fits,
   formatCount,
   isTagPair,
   toggled,
@@ -302,7 +303,8 @@ function TypedValue({
   const trimmed = value.trim();
   const tag = filter === "tag";
   const asked = tag ? "A tag, as key:value" : `A ${label.toLowerCase()}'s id`;
-  const taken = trimmed !== "" && (!tag || isTagPair(trimmed));
+  const taken =
+    trimmed !== "" && (filter === "status" || fits(filter, trimmed)) && (!tag || isTagPair(trimmed));
   return (
     <form
       className="flex gap-2"
