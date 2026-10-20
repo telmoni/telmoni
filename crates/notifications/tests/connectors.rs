@@ -2537,11 +2537,23 @@ async fn a_sweep_that_loses_its_database_ends_there(pool: PgPool) {
     );
 }
 
-/// How many of this database's sessions wait on a lock now.
+/// How many of this database's sessions wait now on a lock a transaction the test
+/// holds open has, or behind one that does: one waiting a moment on anything else
+/// is no lane under test, and counted had let a test go on before its lane queued.
 async fn lock_waiters(pool: &PgPool) -> i64 {
     sqlx::query_scalar(
-        "SELECT count(*) FROM pg_stat_activity
-          WHERE datname = current_database() AND wait_event_type = 'Lock'",
+        "WITH RECURSIVE queued(pid) AS (
+             SELECT waiter.pid FROM pg_stat_activity waiter
+              WHERE waiter.datname = current_database() AND waiter.wait_event_type = 'Lock'
+                AND EXISTS (SELECT 1 FROM pg_stat_activity holder
+                             WHERE holder.pid = ANY(pg_blocking_pids(waiter.pid))
+                               AND holder.state LIKE 'idle in transaction%')
+             UNION
+             SELECT waiter.pid FROM pg_stat_activity waiter, queued
+              WHERE waiter.datname = current_database() AND waiter.wait_event_type = 'Lock'
+                AND queued.pid = ANY(pg_blocking_pids(waiter.pid))
+         )
+         SELECT count(*) FROM queued",
     )
     .fetch_one(pool)
     .await
