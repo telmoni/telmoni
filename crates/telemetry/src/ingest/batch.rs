@@ -170,6 +170,7 @@ mod tests {
 
     use super::*;
     use crate::contract;
+    use crate::ingest::report::DROPS_NAMED_MAX;
 
     fn kv(key: &str, text: &str) -> KeyValue {
         KeyValue {
@@ -447,6 +448,51 @@ mod tests {
             times(&request, in_milliseconds, ahead, false),
             "a clock in another unit, ended past by every span: as none"
         );
+    }
+
+    /// A refused span's drops roll back across the names kept, the next span's taking them.
+    #[test]
+    fn a_refused_spans_drops_are_rolled_back_across_the_names_kept() {
+        let with_unlisted = |span: Span, from: usize, count: usize| Span {
+            attributes: span
+                .attributes
+                .into_iter()
+                .chain((from..from + count).map(|i| kv(&format!("vendor.x{i}"), "v")))
+                .collect(),
+            ..span
+        };
+        let not_a_run = Span {
+            attributes: Vec::new(),
+            ..ours(2, None)
+        };
+        let request = ExportTraceServiceRequest {
+            resource_spans: vec![ResourceSpans {
+                scope_spans: vec![scoped(
+                    contract::SCOPE,
+                    vec![
+                        with_unlisted(ours(1, None), 0, DROPS_NAMED_MAX - 3),
+                        with_unlisted(not_a_run, 0, 7),
+                        with_unlisted(ours(3, None), 0, 5),
+                    ],
+                )],
+                ..ResourceSpans::default()
+            }],
+        };
+        let keep = |id: &str| id.to_owned();
+        let batch = read(&request, &ProjectId::new(), Utc::now(), None, &keep).expect("spans");
+        assert_eq!(batch.report.refused.len(), 1);
+        let dropped = &batch.report.dropped;
+        assert_eq!(
+            (dropped.named().len(), dropped.len()),
+            (DROPS_NAMED_MAX, DROPS_NAMED_MAX + 2)
+        );
+        let spans: Vec<&str> = dropped
+            .named()
+            .iter()
+            .skip(DROPS_NAMED_MAX - 3)
+            .map(|d| d.span_id.as_str())
+            .collect();
+        assert_eq!(spans, vec!["03".repeat(8); 3]);
     }
 
     #[test]

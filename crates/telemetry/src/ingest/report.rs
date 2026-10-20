@@ -15,7 +15,58 @@ pub struct Report {
     pub refused: Vec<Refused>,
     /// The attributes dropped from spans that were kept, in the order they
     /// came.
-    pub dropped: Vec<Dropped>,
+    pub dropped: Drops,
+}
+
+/// How many drops are kept by name: each line names its span's sixteen hex
+/// digits, so no message names more.
+pub const DROPS_NAMED_MAX: usize = ERROR_MESSAGE_MAX / 16;
+
+/// The attributes dropped: the first [`DROPS_NAMED_MAX`] by name, the rest counted,
+/// so an export of empty attributes holds no more than its answer can name.
+#[derive(Debug, Default)]
+pub struct Drops {
+    named: Vec<Dropped>,
+    counted: usize,
+}
+
+impl Drops {
+    /// One more dropped: by name while there is room, else counted.
+    pub fn push(&mut self, span_id: &str, attribute: &str, reason: DropReason) {
+        if self.named.len() < DROPS_NAMED_MAX {
+            self.named.push(Dropped {
+                span_id: span_id.to_owned(),
+                attribute: attribute.to_owned(),
+                reason,
+            });
+        } else {
+            self.counted += 1;
+        }
+    }
+
+    /// How many were dropped, named or counted.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.named.len() + self.counted
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Back to the first `len` dropped, as a `Vec` is truncated: the named
+    /// fill first, so the count holds only what came past them.
+    pub fn truncate(&mut self, len: usize) {
+        self.named.truncate(len);
+        self.counted = self.counted.min(len.saturating_sub(self.named.len()));
+    }
+
+    /// The drops kept by name, in the order they came.
+    #[must_use]
+    pub fn named(&self) -> &[Dropped] {
+        &self.named
+    }
 }
 
 impl Report {
@@ -40,11 +91,12 @@ impl Report {
     /// The lines, refusals first, cut at [`ERROR_MESSAGE_MAX`] with a count
     /// of what was left out.
     fn message(&self, content_mode: ContentMode) -> String {
-        let lines = self
-            .refused
-            .iter()
-            .map(refused_line)
-            .chain(self.dropped.iter().map(|d| dropped_line(d, content_mode)));
+        let lines = self.refused.iter().map(refused_line).chain(
+            self.dropped
+                .named()
+                .iter()
+                .map(|d| dropped_line(d, content_mode)),
+        );
         cut(lines, self.refused.len() + self.dropped.len())
     }
 }
@@ -108,12 +160,17 @@ fn dropped_line(dropped: &Dropped, content_mode: ContentMode) -> String {
 mod tests {
     use super::*;
 
-    fn dropped(n: usize) -> Dropped {
-        Dropped {
-            span_id: "00f067aa0ba902b7".into(),
-            attribute: format!("gen_ai.input.messages.{n}"),
-            reason: DropReason::Content,
+    /// Content dropped as `gen_ai.input.messages.<n>`, for each `n`.
+    fn dropped(numbers: std::ops::Range<usize>) -> Drops {
+        let mut drops = Drops::default();
+        for n in numbers {
+            drops.push(
+                "00f067aa0ba902b7",
+                &format!("gen_ai.input.messages.{n}"),
+                DropReason::Content,
+            );
         }
+        drops
     }
 
     #[test]
@@ -132,7 +189,7 @@ mod tests {
                 span_id: "0f0f0f0f0f0f0f0f".into(),
                 reason: Refusal::NotARun,
             }],
-            dropped: vec![dropped(1)],
+            dropped: dropped(1..2),
         };
         let partial = report.partial_success(ContentMode::Off).expect("not clean");
         assert_eq!(partial.rejected_spans, 1);
@@ -152,7 +209,7 @@ mod tests {
     fn the_message_is_cut_at_four_kib_with_a_count_of_the_rest() {
         let report = Report {
             refused: Vec::new(),
-            dropped: (0..200).map(dropped).collect(),
+            dropped: dropped(0..200),
         };
         let partial = report.partial_success(ContentMode::Off).expect("not clean");
         assert_eq!(partial.rejected_spans, 0);
@@ -192,5 +249,62 @@ mod tests {
             "the line that did not fit, and none after"
         );
         assert!(message.ends_with(&format!("\nand {} more", 100_000 - named)));
+    }
+
+    /// ⚠ A drop past what a message can name is counted, never kept, however many come.
+    #[test]
+    fn drops_past_what_a_message_can_name_are_counted_never_kept() {
+        let report = Report {
+            refused: Vec::new(),
+            dropped: dropped(0..100_000),
+        };
+        assert_eq!(
+            (report.dropped.named().len(), report.dropped.len()),
+            (DROPS_NAMED_MAX, 100_000)
+        );
+        let message = report
+            .partial_success(ContentMode::Off)
+            .expect("not clean")
+            .error_message;
+        let named = message.lines().count() - 1;
+        assert!(message.ends_with(&format!("\nand {} more", 100_000 - named)));
+    }
+
+    /// The shortest line names its span, so a message runs out before the names kept do.
+    #[test]
+    fn a_message_of_the_shortest_lines_names_fewer_than_are_kept() {
+        let mut drops = Drops::default();
+        for _ in 0..=DROPS_NAMED_MAX {
+            drops.push(
+                "00f067aa0ba902b7",
+                "",
+                DropReason::OverCap("a span keeps up to 64 attributes"),
+            );
+        }
+        let message = Report {
+            refused: Vec::new(),
+            dropped: drops,
+        }
+        .partial_success(ContentMode::Off)
+        .expect("not clean")
+        .error_message;
+        assert!(message.lines().count() - 1 < DROPS_NAMED_MAX, "{message}");
+    }
+
+    #[test]
+    fn drops_are_truncated_as_a_vec_is() {
+        let mut drops = dropped(0..DROPS_NAMED_MAX + 10);
+        drops.truncate(DROPS_NAMED_MAX + 3);
+        assert_eq!(
+            (drops.named().len(), drops.len()),
+            (DROPS_NAMED_MAX, DROPS_NAMED_MAX + 3)
+        );
+        drops.truncate(5);
+        assert_eq!((drops.named().len(), drops.len()), (5, 5));
+        drops.push("00f067aa0ba902b7", "after", DropReason::Unlisted);
+        assert_eq!(
+            drops.named().last().map(|d| d.attribute.as_str()),
+            Some("after")
+        );
     }
 }

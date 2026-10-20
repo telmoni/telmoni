@@ -14,6 +14,7 @@ use uuid::Uuid;
 use telmoni_shared::{ProjectId, SpanKind, SpanStatus};
 
 use crate::contract::{self, ATTRIBUTES_MAX, SPAN_FIXED_BYTES, SPAN_UNIT_BYTES};
+use crate::ingest::report::Drops;
 use crate::store::SpanRow;
 
 /// What every span of one export is read under.
@@ -158,7 +159,7 @@ fn resource_text(value: Option<&Value>, max: usize) -> String {
 pub fn map(
     span: &Span,
     context: &Context<'_>,
-    dropped: &mut Vec<Dropped>,
+    dropped: &mut Drops,
 ) -> Result<Option<SpanRow>, Refused> {
     let span_id = hex(&span.span_id);
     let refuse = |reason: Refusal| Refused {
@@ -333,23 +334,13 @@ struct Fields {
 impl Fields {
     /// Read one attribute: into a column, into `tags` or `attributes`, or
     /// onto `dropped`. A field whose value breaks its rule refuses the span.
-    fn read(
-        &mut self,
-        kv: &KeyValue,
-        span_id: &str,
-        dropped: &mut Vec<Dropped>,
-    ) -> Result<(), Refusal> {
+    fn read(&mut self, kv: &KeyValue, span_id: &str, dropped: &mut Drops) -> Result<(), Refusal> {
         let key = contract::current_name(&kv.key);
         let Some(value) = kv.value.as_ref().and_then(|v| v.value.as_ref()) else {
             return Ok(());
         };
-        let mut drop_attribute = |attribute: &str, reason: DropReason| {
-            dropped.push(Dropped {
-                span_id: span_id.to_owned(),
-                attribute: attribute.to_owned(),
-                reason,
-            });
-        };
+        let mut drop_attribute =
+            |attribute: &str, reason: DropReason| dropped.push(span_id, attribute, reason);
 
         if let Some(tag) = key.strip_prefix(contract::TAG_PREFIX) {
             self.read_tag(tag, key, value, &mut drop_attribute);
@@ -731,7 +722,7 @@ mod tests {
         let project = ProjectId::new();
         let resource = vec![("service.name".to_owned(), "reporter".to_owned())];
         let hash = |id: &str| format!("h({id})");
-        let mut dropped = Vec::new();
+        let mut dropped = Drops::default();
         let row = map(&call(), &context(&project, &resource, &hash), &mut dropped)
             .expect("kept")
             .expect("a row");
@@ -779,6 +770,7 @@ mod tests {
         assert_eq!(row.units, 1);
 
         let reasons: Vec<(&str, &DropReason)> = dropped
+            .named()
             .iter()
             .map(|d| (d.attribute.as_str(), &d.reason))
             .collect();
@@ -790,14 +782,14 @@ mod tests {
                 ("vendor.prompt", &DropReason::Unlisted),
             ]
         );
-        assert!(dropped.iter().all(|d| d.span_id == "0f".repeat(8)));
+        assert!(dropped.named().iter().all(|d| d.span_id == "0f".repeat(8)));
     }
 
     #[test]
     fn a_run_is_named_by_its_agent_and_carries_its_bounds() {
         let project = ProjectId::new();
         let keep = |id: &str| id.to_owned();
-        let mut dropped = Vec::new();
+        let mut dropped = Drops::default();
         let run = Span {
             name: "invoke_agent".into(),
             parent_span_id: Vec::new(),
@@ -848,7 +840,7 @@ mod tests {
             ..call()
         };
         let ours = context(&project, &[], &keep);
-        let row = map(&plain, &ours, &mut Vec::new())
+        let row = map(&plain, &ours, &mut Drops::default())
             .expect("kept")
             .expect("a row");
         assert_eq!(row.kind, SpanKind::Step);
@@ -856,7 +848,7 @@ mod tests {
             scope: "opentelemetry.instrumentation.httpx",
             ..ours
         };
-        let row = map(&plain, &theirs, &mut Vec::new())
+        let row = map(&plain, &theirs, &mut Drops::default())
             .expect("kept")
             .expect("a row");
         assert_eq!(row.kind, SpanKind::Span);
@@ -872,7 +864,12 @@ mod tests {
             attributes: vec![kv(contract::OPERATION, s("chat"))],
             ..call()
         };
-        let refused = map(&foreign, &context(&project, &[], &keep), &mut Vec::new()).unwrap_err();
+        let refused = map(
+            &foreign,
+            &context(&project, &[], &keep),
+            &mut Drops::default(),
+        )
+        .unwrap_err();
         assert_eq!(refused.reason, Refusal::NotARun);
         assert_eq!(refused.span_id, "0f".repeat(8));
     }
@@ -885,7 +882,12 @@ mod tests {
             name: contract::RUN_START.into(),
             ..call()
         };
-        let outcome = map(&start, &context(&project, &[], &keep), &mut Vec::new()).expect("kept");
+        let outcome = map(
+            &start,
+            &context(&project, &[], &keep),
+            &mut Drops::default(),
+        )
+        .expect("kept");
         assert!(outcome.is_none());
     }
 
@@ -946,19 +948,29 @@ mod tests {
             let refused = map(
                 &with(key, value),
                 &context(&project, &[], &keep),
-                &mut Vec::new(),
+                &mut Drops::default(),
             )
             .unwrap_err();
             assert_eq!(refused.reason, expected, "{key}");
         }
         let bad_run = with(contract::RUN_ID, s("not-a-uuid"));
-        let refused = map(&bad_run, &context(&project, &[], &keep), &mut Vec::new()).unwrap_err();
+        let refused = map(
+            &bad_run,
+            &context(&project, &[], &keep),
+            &mut Drops::default(),
+        )
+        .unwrap_err();
         assert_eq!(refused.reason, Refusal::Invalid(contract::RUN_ID));
         let long_name = Span {
             name: "n".repeat(contract::NAME_MAX + 1),
             ..with(contract::OPERATION, s("chat"))
         };
-        let refused = map(&long_name, &context(&project, &[], &keep), &mut Vec::new()).unwrap_err();
+        let refused = map(
+            &long_name,
+            &context(&project, &[], &keep),
+            &mut Drops::default(),
+        )
+        .unwrap_err();
         assert_eq!(refused.reason, Refusal::OverCap("name"));
         let widest_model = "m".repeat(contract::MODEL_MAX);
         let named_by_both = Span {
@@ -974,7 +986,7 @@ mod tests {
         let row = map(
             &named_by_both,
             &context(&project, &[], &keep),
-            &mut Vec::new(),
+            &mut Drops::default(),
         )
         .expect("a model at its cap keeps its call")
         .expect("a row");
@@ -983,13 +995,23 @@ mod tests {
             end_time_unix_nano: 1,
             ..with(contract::OPERATION, s("chat"))
         };
-        let refused = map(&backwards, &context(&project, &[], &keep), &mut Vec::new()).unwrap_err();
+        let refused = map(
+            &backwards,
+            &context(&project, &[], &keep),
+            &mut Drops::default(),
+        )
+        .unwrap_err();
         assert_eq!(refused.reason, Refusal::Invalid("end_time"));
         let no_trace = Span {
             trace_id: vec![0; 16],
             ..with(contract::OPERATION, s("chat"))
         };
-        let refused = map(&no_trace, &context(&project, &[], &keep), &mut Vec::new()).unwrap_err();
+        let refused = map(
+            &no_trace,
+            &context(&project, &[], &keep),
+            &mut Drops::default(),
+        )
+        .unwrap_err();
         assert_eq!(refused.reason, Refusal::Invalid("trace_id"));
     }
 
@@ -1014,19 +1036,21 @@ mod tests {
             attributes,
             ..call()
         };
-        let mut dropped = Vec::new();
+        let mut dropped = Drops::default();
         let row = map(&span, &context(&project, &[], &keep), &mut dropped)
             .expect("kept")
             .expect("a row");
         assert_eq!(row.tags.len(), contract::TAGS_MAX);
         assert_eq!(row.attributes.len(), ATTRIBUTES_MAX);
         let over_cap = dropped
+            .named()
             .iter()
             .filter(|d| matches!(d.reason, DropReason::OverCap(_)))
             .count();
         assert_eq!(over_cap, 4, "{dropped:?}");
         assert!(
             dropped
+                .named()
                 .iter()
                 .any(|d| d.attribute == "telmoni.unknown" && d.reason == DropReason::Unlisted)
         );
@@ -1036,9 +1060,13 @@ mod tests {
     fn units_count_each_started_kib_of_text() {
         let project = ProjectId::new();
         let keep = |id: &str| id.to_owned();
-        let row = map(&call(), &context(&project, &[], &keep), &mut Vec::new())
-            .expect("kept")
-            .expect("a row");
+        let row = map(
+            &call(),
+            &context(&project, &[], &keep),
+            &mut Drops::default(),
+        )
+        .expect("kept")
+        .expect("a row");
         assert_eq!(units_of(&row), 1);
         let heavy = SpanRow {
             attributes: (0..60)
@@ -1065,9 +1093,13 @@ mod tests {
     fn the_widest_span_fits_a_traces_page() {
         let project = ProjectId::new();
         let keep = |id: &str| id.to_owned();
-        let row = map(&call(), &context(&project, &[], &keep), &mut Vec::new())
-            .expect("kept")
-            .expect("a row");
+        let row = map(
+            &call(),
+            &context(&project, &[], &keep),
+            &mut Drops::default(),
+        )
+        .expect("kept")
+        .expect("a row");
         let wide = |chars: usize| "\u{1F600}".repeat(chars);
         let widest = SpanRow {
             agent: wide(contract::AGENT_MAX),
@@ -1149,7 +1181,7 @@ mod tests {
             release: &read.release,
             ..context(&project, &read.attributes, &keep)
         };
-        let row = map(&call(), &on_every_span, &mut Vec::new())
+        let row = map(&call(), &on_every_span, &mut Drops::default())
             .expect("kept")
             .expect("a row");
         assert_eq!(row.environment, "production");
