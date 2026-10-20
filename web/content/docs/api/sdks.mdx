@@ -656,9 +656,11 @@ sent.
 The SDK batches spans and sends them in the background, on a bounded queue,
 so a slow Telmoni never slows an agent. Each request times out after 10
 seconds. It retries a `429` or a `503` after its `Retry-After`, waiting at most
-60 seconds, and a request that failed or timed out after 1 second, then 2;
-after three attempts in all it drops the batch with one warning. Any other
-refusal is logged once and never retried. A flush waits up to 30 seconds. An attribute the
+60 seconds, and a request that failed or timed out before its answer's status
+after 1 second, then 2; after three attempts in all it drops the batch with one
+warning. Any other refusal is logged once and never retried, and an answer whose
+body breaks after its status, or runs past the 10 seconds, is decided by its
+status, read as far as it came. A flush waits up to 30 seconds. An attribute the
 server drops is logged once: content with the project's content mode, which
 decides the drop, and a link to [what is dropped at the
 door](/docs/api/ingest#what-is-dropped-at-the-door); text the field inventory
