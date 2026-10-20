@@ -16,7 +16,7 @@ Telemetry is kept only while its project is active.
 | Data | Kept | Then |
 |---|---|---|
 | Spans: every run, step, model call and tool call, as metadata | 360 days after a span arrives | `telmoni rotate` drops each day of spans once every span in it is older |
-| Hourly totals: spans, units, tokens and durations by project, agent, kind, model, provider, tool and status, which name no user and no tag | 13 months | `rotate` drops each month of totals once it is older |
+| Hourly totals: spans, units, tokens and durations by project, agent, kind, model, provider, tool, status, environment and release, which name no user and no tag | 13 months | `rotate` drops each month of totals once it is older |
 | A deleted project's spans and totals | Until the project is deleted | Marked deleted the moment the project goes, and gone from every read within moments, as the store applies the mark; `rotate` rewrites them off the disk that night |
 | The claim on an export's bytes, which answers a retry with the first answer rather than writing twice | 1 hour | Expires |
 | A project's telemetry settings: its content mode, whether end-user ids are hashed, and the key they are hashed under | While the project exists | Purged with the project |
