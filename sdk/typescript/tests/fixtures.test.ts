@@ -191,6 +191,7 @@ describe('run.json', () => {
       expect(request.headers['Authorization']).toBe('Bearer telmoni_test_key');
       expect(request.headers['Content-Type']).toBe('application/json');
       expect(request.headers['User-Agent']).toMatch(/^telmoni-typescript\/\d/);
+      expect(request.headers['Telmoni-Sent-At']).toMatch(/^\d+$/);
     }
   });
 });
@@ -270,6 +271,25 @@ describe('answers/', () => {
     expect(h.sleeps).toEqual([2]);
     expect(h.transport.requests[0]!.body).toBe(h.transport.requests[1]!.body);
     expect(h.warnings).toEqual([]);
+  });
+
+  it('each attempt carries this clock as it leaves, in nanoseconds, a retry its own', async () => {
+    const h = harness(
+      { apiKey: 'k' },
+      { sleep: () => new Promise((resolve) => setTimeout(resolve, 5)) },
+      answers('unavailable'),
+    );
+    const before = BigInt(Date.now()) * 1_000_000n;
+    try {
+      await aRun(h);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    const after = BigInt(Date.now()) * 1_000_000n;
+    const sent = h.transport.requests.map((request) => BigInt(request.headers['Telmoni-Sent-At'] ?? '-1'));
+    for (const at of sent) expect(at >= before && at <= after, `${before} ${at} ${after}`).toBe(true);
+    expect(h.transport.requests[1]!.body, 'the same export, sent again').toBe(h.transport.requests[0]!.body);
+    expect(sent[1]! > sent[0]!).toBe(true);
   });
 
   it('unavailable is retried three times then dropped', async () => {

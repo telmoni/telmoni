@@ -97,3 +97,8 @@ export const TOOL_OPERATION = 'execute_tool';
 
 /** The answer's header naming the project's content mode: off, on or sealed. */
 export const CONTENT_MODE_HEADER = 'Telmoni-Content-Mode';
+/**
+ * The request's header naming this clock as the export leaves, in nanoseconds
+ * since the epoch, by which ingest moves a run from a clock a zone or a date out.
+ */
+export const SENT_AT_HEADER = 'Telmoni-Sent-At';

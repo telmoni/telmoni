@@ -8,7 +8,7 @@ use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 
 use telmoni_shared::ProjectId;
 
-use crate::contract::{BATCH_SPANS_MAX, CLOCK_AHEAD_MAX_SECS};
+use crate::contract::{BATCH_SPANS_MAX, CLOCK_DRIFT_MAX_SECS};
 use crate::ingest::report::Report;
 use crate::ingest::span::{self, Context};
 use crate::store::SpanRow;
@@ -31,8 +31,17 @@ pub struct Batch {
     pub report: Report,
 }
 
+/// The sender's clock as its export left, by its [`crate::contract::SENT_AT`],
+/// and ours as the export arrived.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SenderClock {
+    pub sent_at: DateTime<Utc>,
+    pub arrived: DateTime<Utc>,
+}
+
 /// Every span of `request`, read as the key's `project_id`'s, received at
-/// `received_at`, each `user_id` stored as `store_user_id` says.
+/// `received_at`, each `user_id` stored as `store_user_id` says; `sender` is
+/// the sender's clock, where its export names it.
 ///
 /// # Errors
 ///
@@ -42,6 +51,7 @@ pub fn read(
     request: &ExportTraceServiceRequest,
     project_id: &ProjectId,
     received_at: DateTime<Utc>,
+    sender: Option<SenderClock>,
     store_user_id: &dyn Fn(&str) -> String,
 ) -> Result<Batch, BatchError> {
     let count: usize = request
@@ -58,6 +68,7 @@ pub fn read(
     }
 
     let mut batch = Batch::default();
+    let mut resources = Vec::with_capacity(request.resource_spans.len());
     for resource_spans in &request.resource_spans {
         let first = batch.rows.len();
         let resource = span::read_resource(resource_spans.resource.as_ref());
@@ -89,23 +100,47 @@ pub fn read(
                 }
             }
         }
+        resources.push(first..batch.rows.len());
+    }
+    // Believed only where no span ends a drift past it: a span is sent once ended.
+    let allowed = chrono::Duration::seconds(CLOCK_DRIFT_MAX_SECS);
+    let believed = sender.filter(|clock| {
+        batch
+            .rows
+            .iter()
+            .all(|row| row.ended_at - clock.sent_at <= allowed)
+    });
+    match believed {
+        Some(clock) => {
+            let ahead = clock.sent_at - clock.arrived;
+            if ahead.abs() > allowed {
+                for row in &mut batch.rows {
+                    row.started_at -= ahead;
+                    row.ended_at -= ahead;
+                }
+            }
+        }
         // One resource is one process, so one clock.
-        if let Some(rows) = batch.rows.get_mut(first..) {
-            arrived(rows, received_at);
+        None => {
+            for range in resources {
+                if let Some(rows) = batch.rows.get_mut(range) {
+                    arrived(rows, received_at);
+                }
+            }
         }
     }
     Ok(batch)
 }
 
-/// Each trace among `rows` ending past [`CLOCK_AHEAD_MAX_SECS`] after arrival,
-/// moved back as one to end then: spans are sent once ended, so its clock is ahead.
+/// Where no clock is believed, a trace ending over [`CLOCK_DRIFT_MAX_SECS`] past arrival
+/// moves back to end then, as one: spans are sent once ended, so its clock is ahead.
 fn arrived(rows: &mut [SpanRow], received_at: DateTime<Utc>) {
     let mut last_end: HashMap<&str, DateTime<Utc>> = HashMap::new();
     for row in &*rows {
         let end = last_end.entry(&row.trace_id).or_insert(row.ended_at);
         *end = (*end).max(row.ended_at);
     }
-    let allowed = chrono::Duration::seconds(CLOCK_AHEAD_MAX_SECS);
+    let allowed = chrono::Duration::seconds(CLOCK_DRIFT_MAX_SECS);
     let moves: Vec<Option<chrono::Duration>> = rows
         .iter()
         .map(|row| {
@@ -220,7 +255,7 @@ mod tests {
         let project = ProjectId::new();
         let now = Utc::now().trunc_subsecs(6);
         let keep = |id: &str| id.to_owned();
-        let batch = read(&request, &project, now, &keep).expect("spans");
+        let batch = read(&request, &project, now, None, &keep).expect("spans");
 
         let kinds: Vec<(String, SpanKind)> = batch
             .rows
@@ -304,7 +339,7 @@ mod tests {
         let project = ProjectId::new();
         let keep = |id: &str| id.to_owned();
         let times = |received_at| -> Vec<_> {
-            read(&request, &project, received_at, &keep)
+            read(&request, &project, received_at, None, &keep)
                 .expect("spans")
                 .rows
                 .iter()
@@ -322,8 +357,96 @@ mod tests {
                 sent[3],
             ]
         );
-        let allowed = chrono::Duration::seconds(CLOCK_AHEAD_MAX_SECS);
+        let allowed = chrono::Duration::seconds(CLOCK_DRIFT_MAX_SECS);
         assert_eq!(times(at(SENT + 300_000_000) - allowed), sent);
+    }
+
+    /// A sender's clock past the drift moves its whole export, unless a span ends a drift past it.
+    #[test]
+    fn a_senders_clock_moves_its_whole_export_alike() {
+        const SECOND: u64 = 1_000_000_000;
+        const SENT: u64 = 1_760_000_000 * SECOND;
+        const DAYS_400: u64 = 400 * 24 * 60 * 60 * SECOND;
+        let timed = |n: u8, trace: u8, start: u64, end: u64| Span {
+            trace_id: vec![trace; 16],
+            start_time_unix_nano: start,
+            end_time_unix_nano: end,
+            ..ours(n, None)
+        };
+        // Two resources, timed by the clock that sent them, one end a typo or not.
+        let export = |last_end: u64| ExportTraceServiceRequest {
+            resource_spans: vec![
+                ResourceSpans {
+                    scope_spans: vec![scoped(
+                        contract::SCOPE,
+                        vec![
+                            timed(1, 0x4b, SENT - 3 * SECOND, SENT - 2 * SECOND),
+                            timed(2, 0x4b, SENT - 3 * SECOND, last_end),
+                        ],
+                    )],
+                    ..ResourceSpans::default()
+                },
+                ResourceSpans {
+                    scope_spans: vec![scoped(
+                        contract::SCOPE,
+                        vec![timed(3, 0x5c, SENT - 2 * SECOND, SENT - SECOND)],
+                    )],
+                    ..ResourceSpans::default()
+                },
+            ],
+        };
+        let at = |nanos: u64| DateTime::from_timestamp_nanos(i64::try_from(nanos).expect("an i64"));
+        let project = ProjectId::new();
+        let keep = |id: &str| id.to_owned();
+        // As sent from a clock `ahead` of ours, or with no clock named.
+        let times = |request: &ExportTraceServiceRequest,
+                     sent_at: DateTime<Utc>,
+                     ahead: chrono::Duration,
+                     named: bool|
+         -> Vec<_> {
+            let arrived = at(SENT) - ahead;
+            let sender = named.then_some(SenderClock { sent_at, arrived });
+            read(request, &project, arrived, sender, &keep)
+                .expect("spans")
+                .rows
+                .iter()
+                .map(|row| (row.started_at, row.ended_at))
+                .collect()
+        };
+
+        let request = export(SENT - SECOND);
+        let sent = times(&request, at(SENT), chrono::Duration::zero(), false);
+        let allowed = chrono::Duration::seconds(CLOCK_DRIFT_MAX_SECS);
+        let nanosecond = chrono::Duration::nanoseconds(1);
+        for ahead in [
+            chrono::Duration::hours(3),
+            -chrono::Duration::days(1),
+            allowed + nanosecond,
+            -allowed - nanosecond,
+        ] {
+            let moved: Vec<_> = sent
+                .iter()
+                .map(|(start, end)| (*start - ahead, *end - ahead))
+                .collect();
+            assert_eq!(times(&request, at(SENT), ahead, true), moved, "{ahead}");
+        }
+        for ahead in [allowed, -allowed] {
+            assert_eq!(times(&request, at(SENT), ahead, true), sent, "{ahead}");
+        }
+
+        let ahead = chrono::Duration::hours(3);
+        let typo = export(SENT + DAYS_400);
+        assert_eq!(
+            times(&typo, at(SENT), ahead, true),
+            times(&typo, at(SENT), ahead, false),
+            "a span ending past the clock, which cannot have timed it: as none"
+        );
+        let in_milliseconds = at(SENT / 1_000_000);
+        assert_eq!(
+            times(&request, in_milliseconds, ahead, true),
+            times(&request, in_milliseconds, ahead, false),
+            "a clock in another unit, ended past by every span: as none"
+        );
     }
 
     #[test]
@@ -337,7 +460,7 @@ mod tests {
             }],
         };
         assert_eq!(
-            read(&empty, &project, Utc::now(), &keep).unwrap_err(),
+            read(&empty, &project, Utc::now(), None, &keep).unwrap_err(),
             BatchError::NoSpans
         );
         let too_many = ExportTraceServiceRequest {
@@ -350,7 +473,7 @@ mod tests {
             }],
         };
         assert_eq!(
-            read(&too_many, &project, Utc::now(), &keep).unwrap_err(),
+            read(&too_many, &project, Utc::now(), None, &keep).unwrap_err(),
             BatchError::TooManySpans(BATCH_SPANS_MAX + 1)
         );
     }

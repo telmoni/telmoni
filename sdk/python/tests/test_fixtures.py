@@ -7,6 +7,7 @@ import copy
 import http.client
 import logging
 import re
+import time
 from typing import Any
 
 import pytest
@@ -135,6 +136,27 @@ def test_the_run_matches_the_golden_export(
         assert headers["Authorization"] == "Bearer telmoni_test_key"
         assert headers["Content-Type"] == "application/json"
         assert headers["User-Agent"].startswith("telmoni-python/")
+        assert headers["Telmoni-Sent-At"].isdigit()
+
+
+def test_each_attempt_carries_this_clock_as_it_leaves() -> None:
+    """In nanoseconds, a retry its own: ingest moves a run by it."""
+    unavailable = answer_from(load_fixture("answers/unavailable.json"))
+    transport = FakeTransport([unavailable])
+    before = time.time_ns()
+    telmoni = Telmoni(
+        Config(api_key="k"), transport=transport, sleep=lambda _: time.sleep(0.005)
+    )
+    try:
+        a_run(telmoni)
+    finally:
+        telmoni.shutdown()
+    after = time.time_ns()
+    sent = [int(headers["Telmoni-Sent-At"]) for _, headers, _ in transport.requests]
+    assert all(before <= at <= after for at in sent), (before, sent, after)
+    (_, _, body), (_, _, again) = transport.requests[:2]
+    assert body == again, "the same export, sent again"
+    assert sent[1] > sent[0]
 
 
 def warnings_in(caplog: pytest.LogCaptureFixture) -> list[str]:

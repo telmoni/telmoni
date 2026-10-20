@@ -217,9 +217,10 @@ over HTTPS: a plain-HTTP endpoint is refused with a `TypeError` unless its host
 is this machine, and no redirect is followed, since every export carries the
 key. An endpoint without a scheme gets `https://`, or `http://` for this
 machine, as the CLI reads one; any other scheme is refused with a `TypeError`.
-A `429` or `503` is retried after `Retry-After`, three attempts in all; an answer
-whose body breaks after its status is decided by that status, as a whole one is.
-Every warning — an attribute the server dropped, a batch given up on — is logged once
+Each attempt carries `Telmoni-Sent-At`, this clock as it leaves, by which ingest
+moves a run from a clock a zone or a date out as one. A `429` or `503` is retried
+after `Retry-After`, three attempts in all; an answer whose body breaks after its
+status is decided by that status, as a whole one is. Every warning — an attribute the server dropped, a batch given up on — is logged once
 per client through `console.warn`. `await telmoni.flush()` sends what is queued
 and resolves `true` once the platform has it; `await telmoni.shutdown()` drains
 and stops. The SDK's worker never keeps the process alive on its own, so call

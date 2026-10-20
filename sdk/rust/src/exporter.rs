@@ -1,9 +1,5 @@
-//! The exporter: OTLP's JSON encoding over the transport.
-//!
-//! It takes content off every span unless the code asked and the project's
-//! mode allows, sends to `POST {endpoint}/otlp/v1/traces`, waits out a
-//! `Retry-After`, and reads `Telmoni-Content-Mode` and the partial success
-//! from each answer, warning once for each attribute an answer names dropped.
+//! The exporter: OTLP's JSON over the transport, content off unless asked and allowed,
+//! each attempt stamped with this clock, each answer's content mode and drops read.
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
@@ -91,7 +87,13 @@ impl Exporter {
         }
         let mut failure = String::new();
         for attempt in 0..ATTEMPTS {
-            let answer = match self.transport.send(&self.url, &headers, &body) {
+            // This clock as the attempt leaves, the spans' own.
+            let mut sent = headers.clone();
+            sent.push((
+                contract::SENT_AT_HEADER.to_owned(),
+                nanos(std::time::SystemTime::now()),
+            ));
+            let answer = match self.transport.send(&self.url, &sent, &body) {
                 Ok(answer) => answer,
                 Err(error) => {
                     failure = error.name;

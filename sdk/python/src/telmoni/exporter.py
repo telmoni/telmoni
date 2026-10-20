@@ -277,8 +277,10 @@ class Exporter:
             headers["Authorization"] = f"Bearer {bearer}"
         failure = ""
         for attempt in range(ATTEMPTS):
+            # This clock as the attempt leaves, the spans' own.
+            sent = {**headers, contract.SENT_AT_HEADER: str(time.time_ns())}
             try:
-                answer = self._transport(self._url, headers, body)
+                answer = self._transport(self._url, sent, body)
             except (OSError, http.client.HTTPException) as error:
                 # No status came: a transport fault the next attempt may not meet.
                 failure = type(error).__name__

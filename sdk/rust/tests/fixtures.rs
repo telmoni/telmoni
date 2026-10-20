@@ -254,8 +254,60 @@ fn the_run_matches_the_golden_export() -> Outcome {
                 .header("User-Agent")
                 .is_some_and(|agent| agent.starts_with("telmoni-rust/"))
         );
+        assert!(
+            request
+                .header("Telmoni-Sent-At")
+                .is_some_and(|at| !at.is_empty() && at.bytes().all(|b| b.is_ascii_digit()))
+        );
         assert!(request.url.ends_with("/otlp/v1/traces"));
     }
+    Ok(())
+}
+
+/// In nanoseconds, a retry its own: ingest moves a run by it.
+#[test]
+fn each_attempt_carries_this_clock_as_it_leaves() -> Outcome {
+    let now = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos())
+    };
+    let transport = common::FakeTransport::new([Ok(answer("unavailable")?)])?;
+    let telmoni = Telmoni::with_hooks(
+        keyed(),
+        Hooks {
+            transport: Box::new(transport.clone()),
+            sleep: Box::new(|_| thread::sleep(Duration::from_millis(5))),
+            warn: Box::new(|_| {}),
+            ..Hooks::default()
+        },
+    );
+    let before = now();
+    telmoni.run("bot", RunOptions::default())?.end();
+    telmoni.shutdown();
+    let after = now();
+    let requests = transport.requests();
+    let sent = requests
+        .iter()
+        .map(|request| {
+            request
+                .header("Telmoni-Sent-At")
+                .and_then(|at| at.parse::<u128>().ok())
+                .ok_or("a Telmoni-Sent-At in nanoseconds")
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    assert!(
+        sent.iter().all(|at| (before..=after).contains(at)),
+        "{before} {sent:?} {after}"
+    );
+    let (first, again) = (requests.first(), requests.get(1));
+    assert!(
+        first
+            .zip(again)
+            .is_some_and(|(first, again)| first.body == again.body),
+        "the same export, sent again"
+    );
+    assert!(sent.get(1) > sent.first(), "{sent:?}");
     Ok(())
 }
 

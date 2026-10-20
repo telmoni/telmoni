@@ -61,6 +61,9 @@ const (
 	// contentModeHeader names the project's content mode on every answer:
 	// off, on or sealed.
 	contentModeHeader = "Telmoni-Content-Mode"
+	// sentAtHeader names this clock as an export leaves, in nanoseconds since
+	// the epoch, by which ingest moves a run from a clock a zone or a date out.
+	sentAtHeader = "Telmoni-Sent-At"
 )
 
 const (

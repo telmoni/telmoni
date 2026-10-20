@@ -210,9 +210,15 @@ export class Exporter {
     let failure = '';
     for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
       if (this.#givenUp.signal.aborted) return;
+      // This clock as the attempt leaves, the spans' own.
+      const sentAt = (BigInt(Math.trunc(Date.now())) * 1_000_000n).toString();
       let answer: TransportResponse;
       try {
-        answer = await this.#transport(this.#url, { method: 'POST', headers, body });
+        answer = await this.#transport(this.#url, {
+          method: 'POST',
+          headers: { ...headers, [contract.SENT_AT_HEADER]: sentAt },
+          body,
+        });
       } catch (error) {
         failure = errorName(error);
         await this.#wait(null, attempt);

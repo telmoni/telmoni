@@ -4,6 +4,7 @@ package telmoni_test
 // same run, and what each must do with the server's answers.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -307,6 +309,35 @@ func TestTheRunMatchesTheGoldenExport(t *testing.T) {
 		if got := req.header.Get("User-Agent"); got != "telmoni-go/"+telmoni.Version {
 			t.Errorf("User-Agent = %q", got)
 		}
+		if got := req.header.Get("Telmoni-Sent-At"); got == "" || strings.Trim(got, "0123456789") != "" {
+			t.Errorf("Telmoni-Sent-At = %q", got)
+		}
+	}
+}
+
+// In nanoseconds, a retry its own: ingest moves a run by it.
+func TestEachAttemptCarriesThisClockAsItLeaves(t *testing.T) {
+	h := newHarness(t, telmoni.Config{APIKey: "k"},
+		newFakeTransport(t, answerFrom(t, "answers/unavailable.json")),
+		telmoni.WithSleep(func(time.Duration) { time.Sleep(5 * time.Millisecond) }))
+	before := time.Now().UnixNano()
+	aRun(t, h)
+	h.shutdown()
+	after := time.Now().UnixNano()
+	requests := h.transport.all()
+	var sent []int64
+	for _, req := range requests {
+		at, err := strconv.ParseInt(req.header.Get("Telmoni-Sent-At"), 10, 64)
+		if err != nil || at < before || at > after {
+			t.Errorf("Telmoni-Sent-At %q, want nanoseconds within %d to %d", req.header.Get("Telmoni-Sent-At"), before, after)
+		}
+		sent = append(sent, at)
+	}
+	if len(requests) < 2 || !bytes.Equal(requests[0].body, requests[1].body) {
+		t.Fatal("the export was not sent again")
+	}
+	if sent[1] <= sent[0] {
+		t.Errorf("the retry left at %d, the first attempt at %d", sent[1], sent[0])
 	}
 }
 

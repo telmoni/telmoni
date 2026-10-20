@@ -18,6 +18,8 @@ Before comparing, a suite normalizes what it captured:
 
 The content the scenario hands the model call (`gen_ai.input.messages`, `gen_ai.output.messages`) is absent from the export: the exporter takes content off every span unless the code asked for it and the project's mode allows.
 
+Every request carries `Telmoni-Sent-At`, the SDK's clock as the attempt leaves, in decimal nanoseconds since the Unix epoch, stamped anew on each attempt, by which ingest moves an export from a clock a zone or a date out.
+
 ## `recorded.json`
 
 `scenario.record` is a run that has already ended, handed whole to `record_run` (`recordRun`, `RecordRun`): its id, its agent, user, session and tags, its times, and what ran inside it, a step holding its own calls. Times are RFC 3339 in UTC, to the millisecond, which every language holds exactly. `export` is the one body the SDK must send for it: a record travels in a single export when it holds no more spans than a batch, its `telmoni.run.start` first, then each span as it ended — a step after its calls — and the run's own last.

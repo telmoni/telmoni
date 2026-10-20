@@ -19,7 +19,7 @@ use axum::body::{Body, to_bytes};
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use chrono::{SubsecRound as _, Utc};
+use chrono::{DateTime, SubsecRound as _, Utc};
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse;
 use prost::Message as _;
 use serde_json::json;
@@ -28,8 +28,8 @@ use telmoni_shared::acting::ActingKey;
 use telmoni_shared::db::tenant_session::project_scope;
 use telmoni_shared::{ContentMode, ProjectId, TelemetryError, TelmoniError};
 
-use crate::contract::{BATCH_MAX_BYTES, BATCH_SPANS_MAX};
-use crate::ingest::batch::{self, BatchError};
+use crate::contract::{self, BATCH_MAX_BYTES, BATCH_SPANS_MAX};
+use crate::ingest::batch::{self, BatchError, SenderClock};
 use crate::ingest::claims::{self, Claim, Guard};
 use crate::ingest::decode::{self, DecodeError, Encoding};
 use crate::ingest::report::Report;
@@ -40,6 +40,9 @@ use crate::{AppState, db, hashing};
 /// learns it from its first export.
 pub const CONTENT_MODE_HEADER: HeaderName = HeaderName::from_static("telmoni-content-mode");
 
+/// The header the SDKs send their clock in ([`contract::SENT_AT`]).
+const SENT_AT_HEADER: HeaderName = HeaderName::from_static(contract::SENT_AT);
+
 /// The longest an export's body may take to arrive: six times OTel's
 /// ten-second export timeout, and far inside the fifteen minutes an
 /// organization's deletion waits before its purge.
@@ -47,6 +50,8 @@ pub(crate) const BODY_WAIT: Duration = Duration::from_secs(60);
 
 /// `POST /otlp/v1/traces`.
 pub async fn export(State(state): State<Arc<AppState>>, request: Request) -> Response {
+    // Before anything waits: the sender's clock is read against it.
+    let arrived = Utc::now();
     let (parts, body) = request.into_parts();
     let headers = parts.headers;
     let Some(key) = parts.extensions.get::<ActingKey>().cloned() else {
@@ -55,7 +60,7 @@ pub async fn export(State(state): State<Arc<AppState>>, request: Request) -> Res
             &headers,
         );
     };
-    match handle(&state, &key, &headers, body).await {
+    match handle(&state, &key, &headers, body, arrived).await {
         Ok(response) => response,
         Err(error) => refuse(error, &headers),
     }
@@ -66,6 +71,7 @@ async fn handle(
     key: &ActingKey,
     headers: &HeaderMap,
     body: Body,
+    arrived: DateTime<Utc>,
 ) -> Result<Response, TelmoniError> {
     let encoding = header(headers, &header::CONTENT_TYPE)
         .and_then(Encoding::of_content_type)
@@ -127,11 +133,12 @@ async fn handle(
 
     // Its own task, so an exporter that hangs up cannot cancel the write
     // between its insert and its settling.
+    let sender = sender_clock(headers, arrived);
     let written = tokio::spawn({
         let state = Arc::clone(state);
         let key = key.clone();
         async move {
-            match write(&state, &key, encoding, &bytes).await {
+            match write(&state, &key, encoding, &bytes, sender).await {
                 Ok((content_mode, body)) => {
                     guard.answer(&state.redis, content_mode).await;
                     Ok((content_mode, body))
@@ -158,13 +165,14 @@ async fn write(
     key: &ActingKey,
     encoding: Encoding,
     bytes: &[u8],
+    sender: Option<SenderClock>,
 ) -> Result<(ContentMode, Vec<u8>), TelmoniError> {
     let request = decode::request(bytes, encoding).map_err(decode_error)?;
     // Made and sealed on the project's first export, which also files its
     // settings row, so the purges find every project with spans.
     let storage = hashing::storage_for(state, key).await?;
     let received_at = Utc::now().trunc_subsecs(6);
-    let batch = batch::read(&request, &key.project_id, received_at, &|raw| {
+    let batch = batch::read(&request, &key.project_id, received_at, sender, &|raw| {
         storage.store(raw)
     })
     .map_err(batch_error)?;
@@ -212,8 +220,8 @@ fn answer_again(
     content_mode: ContentMode,
 ) -> Result<Response, TelmoniError> {
     let request = decode::request(bytes, encoding).map_err(decode_error)?;
-    let batch =
-        batch::read(&request, project_id, Utc::now(), &|_| String::new()).map_err(batch_error)?;
+    let batch = batch::read(&request, project_id, Utc::now(), None, &|_| String::new())
+        .map_err(batch_error)?;
     let body = response_body(encoding, &batch.report, content_mode)?;
     Ok(answer(encoding, content_mode, body))
 }
@@ -423,6 +431,19 @@ fn store_failed(error: clickhouse::error::Error) -> TelmoniError {
     TelemetryError::StoreUnavailable("the span store did not take the rows; retry".into()).into()
 }
 
+/// The sender's clock as its export left, by its [`contract::SENT_AT`], beside
+/// ours as it `arrived`; `None` where that names no time.
+fn sender_clock(headers: &HeaderMap, arrived: DateTime<Utc>) -> Option<SenderClock> {
+    let nanos = header(headers, &SENT_AT_HEADER)?
+        .parse::<i64>()
+        .ok()
+        .filter(|nanos| *nanos > 0)?;
+    Some(SenderClock {
+        sent_at: DateTime::from_timestamp_nanos(nanos),
+        arrived,
+    })
+}
+
 fn header<'a>(headers: &'a HeaderMap, name: &HeaderName) -> Option<&'a str> {
     headers
         .get(name)
@@ -475,6 +496,32 @@ mod tests {
         let decoded = RpcStatus::decode(encoded.as_slice()).unwrap();
         assert_eq!(decoded.code, 7);
         assert!(decoded.message.starts_with("/errors/authz/forbidden"));
+    }
+
+    /// Beside the export's arrival; a header naming no time is none.
+    #[test]
+    fn the_senders_clock_is_read_from_its_header() {
+        let arrived = DateTime::from_timestamp(1_760_000_000, 0).unwrap();
+        let sent_at = |value: &str| {
+            let mut headers = HeaderMap::new();
+            headers.insert(SENT_AT_HEADER, HeaderValue::from_str(value).unwrap());
+            sender_clock(&headers, arrived).map(|clock| {
+                assert_eq!(clock.arrived, arrived);
+                clock.sent_at
+            })
+        };
+        assert_eq!(
+            sent_at("1760003600000000000"),
+            DateTime::from_timestamp(1_760_003_600, 0)
+        );
+        assert_eq!(
+            sent_at(" 1759996400000000001 "),
+            DateTime::from_timestamp(1_759_996_400, 1)
+        );
+        for none in ["", "0", "-5", "soon", "1.76e18", "99999999999999999999"] {
+            assert_eq!(sent_at(none), None, "{none:?}");
+        }
+        assert_eq!(sender_clock(&HeaderMap::new(), arrived), None);
     }
 
     #[test]
