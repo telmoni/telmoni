@@ -1,12 +1,10 @@
-//! What telemetry tells the console's open pages, on the organization's
-//! channel, so a page draws itself again instead of polling: that a project's
-//! spans arrived (`spans:ingested`), or that a ping landed on one of its
-//! monitors (`monitors:changed`). Each message is a nudge, not the data — the
-//! batch's run ids, which a trace's page compares with its own, and nothing a
-//! span holds; the ping's project, and nothing of the ping. It goes out on
-//! its own task, never waited on, and a Redis that stands in loses it, as
-//! the console's own events are lost then — the page's Refresh is there for
-//! that.
+//! What telemetry tells the console's open pages, so one draws itself again
+//! rather than polls: a project's spans arrived (`spans:ingested`, naming the
+//! batch's runs and nothing a span holds), or a ping landed on one of its
+//! monitors (`monitors:changed`). Sent on the organization's channel, which
+//! the console's stream passes on to the project's readers alone
+//! (`web/app/api/v1/events/route.ts`); on a task of its own, never waited on,
+//! and lost while Redis stands in, the page's Refresh being there for that.
 
 use std::sync::Arc;
 

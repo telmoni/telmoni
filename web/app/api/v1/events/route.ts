@@ -8,6 +8,7 @@ import {
   sessionRevokedChannel,
 } from "@/lib/auth/session-blacklist";
 import { organizationChannel, userChannel } from "@/lib/events/publisher";
+import { readsProject } from "@/lib/events/readers";
 import { subscribe } from "@/lib/events/subscriber";
 import { RealtimeEventSchema, type RealtimeEvent } from "@/lib/events/types";
 import { getServerContext } from "@/lib/server/entities/organization";
@@ -138,6 +139,14 @@ export async function GET(request: NextRequest) {
         // more than in `/me`: a sign-up for an invited address is open to
         // anyone who knows it, and the seat itself is refused to them.
         if (event.type.startsWith("invite:") && ctx.person.emailVerified !== true) return;
+        // The organization's channel reaches every member, seat or not; a
+        // project's nudges, and the run ids in them, go to its readers alone.
+        if (
+          (event.type === "spans:ingested" || event.type === "monitors:changed") &&
+          !readsProject(ctx, event.data.organizationId, event.data.projectId)
+        ) {
+          return;
+        }
         send(`event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`);
       });
     },

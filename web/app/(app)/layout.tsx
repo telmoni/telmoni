@@ -26,6 +26,7 @@ import {
   fetchProjectAnnouncement,
 } from "@/lib/server/data";
 import { env } from "@/lib/env";
+import { readingKey } from "@/lib/events/readers";
 import { getServerSession } from "@/lib/server/session";
 import { storeSeed } from "@/lib/server/store-seed";
 import { VERSION } from "@/lib/server/version";
@@ -49,8 +50,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   if (!session || !seed) redirect("/auth/logout");
 
-  // The listener runs in the browser and reads no environment of its own.
+  // The listener runs in the browser and reads no environment of its own; it
+  // opens its stream again when the projects the person reads change.
   const liveHoldMs = env.LIVE_REFRESH_HOLD_SECS * 1_000;
+  const reading = readingKey(ctx);
 
   // Every route under (app) answers this way while the gate is up, so no page
   // below renders for somebody with no organization to render it in.
@@ -73,7 +76,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         {/* The screen promises that an invitation shows up here: the listener
             refreshes it from the person's channel, so it does without a
             reload. */}
-        <RealtimeListener liveHoldMs={liveHoldMs} />
+        <RealtimeListener liveHoldMs={liveHoldMs} readingKey={reading} />
         <AccountOnly
           email={session.email}
           authMethod={session.authMethod}
@@ -98,7 +101,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <ConsoleTrailRecorder />
       <StoreProvider {...seed}>
         <OrganizationSync rendered={(ctx && activeOrganization(ctx)?.slug) ?? null} />
-        <RealtimeListener liveHoldMs={liveHoldMs} />
+        <RealtimeListener liveHoldMs={liveHoldMs} readingKey={reading} />
         <InviteToastNotifier />
         <ConsoleUiProvider>
           <PagePrimaryActionProvider>

@@ -262,7 +262,8 @@ describe("GET /api/v1/events (SSE)", () => {
 
   // Telemetry's nudges come on the organization's channel as the console's
   // own events do, spelled by the server (`crates/telemetry/src/live.rs`),
-  // and are relayed as they came: the listener decides which page each moves.
+  // and are relayed as they came to the project's readers: the listener
+  // decides which page each moves.
   it("relays ingest's spans:ingested nudge on the organization's channel as it came", async () => {
     mockGetSession.mockResolvedValue(LIVE_SESSION);
     const res = await GET(new NextRequest("http://localhost:3000/api/v1/events"));
@@ -308,6 +309,74 @@ describe("GET /api/v1/events (SSE)", () => {
       'event: monitors:changed\ndata: {"organizationId":"org_own","projectId":"project_1"}\n\n',
     );
     await reader.cancel();
+  });
+
+  describe("a project's nudges, on a channel every member of its organization hears", () => {
+    const TEAM = { organizationId: "org_team", ownerEmail: "boss@example.com", role: "member" };
+    const SEAT = { projectId: "project_2", organizationId: "org_team", role: "member" };
+
+    // What the stream passes on of a spans and a ping nudge for project_2,
+    // read up to an event it always passes, so a dropped nudge is never waited on.
+    async function heard(organizations: object[], memberships: object[]): Promise<string> {
+      mockGetSession.mockResolvedValue(LIVE_SESSION);
+      mockGetServerContext.mockResolvedValue({ person: PERSON, organizations, memberships });
+      const res = await GET(new NextRequest("http://localhost:3000/api/v1/events"));
+      const reader = res.body!.getReader();
+      await reader.read();
+
+      const channel = organizationChannel("org_team");
+      messageListener?.(
+        channel,
+        JSON.stringify({
+          type: "spans:ingested",
+          data: {
+            organizationId: "org_team",
+            projectId: "project_2",
+            runs: ["d86dd262-54c7-445a-8647-8623af421fa5"],
+            more: false,
+          },
+        }),
+      );
+      messageListener?.(
+        channel,
+        JSON.stringify({
+          type: "monitors:changed",
+          data: { organizationId: "org_team", projectId: "project_2" },
+        }),
+      );
+      messageListener?.(
+        USER_CHANNEL,
+        JSON.stringify({ type: "membership:changed", data: { organizationId: "org_team" } }),
+      );
+
+      let text = "";
+      while (!text.includes("event: membership:changed\n")) {
+        text += new TextDecoder().decode((await reader.read()).value);
+      }
+      await reader.cancel();
+      return text;
+    }
+
+    it("tells a member without a seat on the project nothing of it, not even its run ids", async () => {
+      const text = await heard([TEAM], []);
+      expect(text).not.toContain("spans:ingested");
+      expect(text).not.toContain("d86dd262");
+      expect(text).not.toContain("monitors:changed");
+    });
+
+    it("tells a member holding a seat on the project", async () => {
+      const text = await heard([TEAM], [SEAT]);
+      expect(text).toContain("event: spans:ingested\n");
+      expect(text).toContain("event: monitors:changed\n");
+    });
+
+    it("tells the organization's admins and owner of every project, seat or not", async () => {
+      for (const role of ["admin", "owner"]) {
+        const text = await heard([{ ...TEAM, role }], []);
+        expect(text).toContain("event: spans:ingested\n");
+        expect(text).toContain("event: monitors:changed\n");
+      }
+    });
   });
 
   it("relays a membership:removed event on the user personal channel as it came", async () => {

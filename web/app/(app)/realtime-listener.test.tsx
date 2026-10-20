@@ -21,23 +21,27 @@ const ORGANIZATIONS = [
   { organizationId: "org_2", slug: "globex" },
 ];
 
+// One router and one of each action across renders, as Next and the store
+// hand them out, so a render alone never opens another stream.
+const ROUTER = { replace: mockReplace, refresh: mockRefresh };
+const NO_INVITES: never[] = [];
+const mockAddInvite = vi.fn();
+const mockRemoveInvite = vi.fn();
+
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({
-    replace: mockReplace,
-    refresh: mockRefresh,
-  }),
+  useRouter: () => ROUTER,
   usePathname: () => mockPathname,
 }));
 
 vi.mock("@/lib/store", () => ({
-  useIncomingInvites: () => [],
+  useIncomingInvites: () => NO_INVITES,
   useOrganizations: () => ORGANIZATIONS,
   useProjects: () => mockProjects,
   useActiveOrganizationId: () => mockActiveOrgId,
   useActiveOrganization: () =>
     ORGANIZATIONS.find((o) => o.organizationId === mockActiveOrgId) ?? null,
-  useAddIncomingInvite: () => vi.fn(),
-  useRemoveIncomingInvite: () => vi.fn(),
+  useAddIncomingInvite: () => mockAddInvite,
+  useRemoveIncomingInvite: () => mockRemoveInvite,
 }));
 
 class MockEventSource {
@@ -597,5 +601,26 @@ describe("RealtimeListener - monitors:changed", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("RealtimeListener - what the person reads", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    MockEventSource.instances = [];
+    mockActiveOrgId = "org_1";
+    mockPathname = "/acme/web/traces";
+  });
+
+  // The stream passes a project's nudges on to its readers as it found them
+  // when it opened, so a change of seat or role needs a stream of its own.
+  it("opens its stream again when the projects the person reads change, and only then", () => {
+    const { rerender } = render(<RealtimeListener readingKey="org_1:member" />);
+    rerender(<RealtimeListener readingKey="org_1:member" />);
+    expect(MockEventSource.instances).toHaveLength(1);
+
+    rerender(<RealtimeListener readingKey={"org_1/project_1\norg_1:member"} />);
+    expect(MockEventSource.instances).toHaveLength(2);
+    expect(MockEventSource.instances[0].readyState).toBe(2);
   });
 });

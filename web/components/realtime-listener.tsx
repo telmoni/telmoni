@@ -52,8 +52,15 @@ function payload<K extends keyof typeof RealtimeEventDataSchema>(
 /// `liveHoldMs` is how long a page reading spans holds between the redraws
 /// ingest's nudges ask for: the layout passes the deployment's
 /// (`LIVE_REFRESH_HOLD_SECS`), since this runs in the browser and reads no
-/// environment of its own.
-export function RealtimeListener({ liveHoldMs = LIVE_HOLD_MS }: { liveHoldMs?: number }) {
+/// environment of its own. `readingKey` changes with the projects the person
+/// reads, whose nudges the stream passes on as it found them when it opened.
+export function RealtimeListener({
+  liveHoldMs = LIVE_HOLD_MS,
+  readingKey = "",
+}: {
+  liveHoldMs?: number;
+  readingKey?: string;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const addInvite = useAddIncomingInvite();
@@ -298,7 +305,7 @@ export function RealtimeListener({ liveHoldMs = LIVE_HOLD_MS }: { liveHoldMs?: n
         esRef.current = null;
       }
     };
-  }, [addInvite, removeInvite, router, membershipKey, liveHoldMs]);
+  }, [addInvite, removeInvite, router, membershipKey, readingKey, liveHoldMs]);
 
   return null;
 }
