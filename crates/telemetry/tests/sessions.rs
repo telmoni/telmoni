@@ -356,22 +356,18 @@ async fn a_session_is_its_traces_in_the_order_they_ran(pool: PgPool) {
         .await;
     assert_eq!(status, StatusCode::OK, "{pinned}");
     assert_eq!(pinned["pinned"], json!(["answer", "nothing"]));
-    for trace in pinned["traces"].as_array().expect("traces") {
+    assert_eq!(runs(&pinned), [seeded.a, seeded.b]);
+    // Each run's own step, under its own run span, by the seed's ids.
+    let traces = pinned["traces"].as_array().expect("traces");
+    for (trace, run_span) in traces.iter().zip([0x10_u64, 0x20]) {
         let spans = trace["pinned"].as_array().expect("pinned spans");
         assert_eq!(spans.len(), 1, "{trace}");
         assert_eq!(spans[0]["name"], "answer");
         assert_eq!(spans[0]["kind"], "step");
         assert_eq!(spans[0]["status"], "ok");
         assert!(spans[0]["started_at"].as_str().is_some());
-        assert_eq!(
-            spans[0]["parent_span_id"],
-            trace["run_id"]
-                .as_str()
-                .map_or(String::new(), |_| spans[0]["parent_span_id"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_owned())
-        );
+        assert_eq!(spans[0]["span_id"], format!("{:016x}", run_span + 1));
+        assert_eq!(spans[0]["parent_span_id"], format!("{run_span:016x}"));
     }
     let nine = (0..=8)
         .map(|i| format!("pinned=step-{i}"))
