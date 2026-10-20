@@ -1,23 +1,26 @@
 //! `POST /otlp/v1/traces` — ingest, OTLP/HTTP, behind a project API key
 //! holding the ingest scope ([`telmoni_shared::middleware::api_key`]). The
 //! order is the contract's: the rate limit, and then the organization's
-//! grants ([`telmoni_shared::seam::admit_new`]), before the body is read; the
-//! body, no further than its cap; its digest claimed, so a retry with the
-//! same bytes is answered rather than written again; then the spans read by
-//! the contract, their content dropped, and the rows written once ClickHouse
-//! holds them, marked deleted again if their project was deleted meanwhile;
-//! and the organization's open consoles told of them ([`crate::live`]).
+//! grants ([`telmoni_shared::seam::admit_new`]), before the body is kept, a
+//! refusal reading it out first; the body, no further than its cap; its
+//! digest claimed, so a retry with the same bytes is answered rather than
+//! written again; then the spans read by the contract, their content dropped,
+//! and the rows written once ClickHouse holds them, marked deleted again if
+//! their project was deleted meanwhile; and the organization's open consoles
+//! told of them ([`crate::live`]).
 //! Every answer is OTLP's, in the request's encoding: the response on `200`,
 //! and on a refusal a `Status` whose message opens with the problem type,
 //! since OTLP asks that shape where every other lane answers a problem
 //! document.
 
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::body::{Body, to_bytes};
+use axum::body::{Body, Bytes, HttpBody as _, to_bytes};
 use axum::extract::{Request, State};
-use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
+use axum::http::request::Parts;
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Version, header};
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, SubsecRound as _, Utc};
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse;
@@ -53,53 +56,33 @@ pub async fn export(State(state): State<Arc<AppState>>, request: Request) -> Res
     // Before anything waits: the sender's clock is read against it.
     let arrived = Utc::now();
     let (parts, body) = request.into_parts();
-    let headers = parts.headers;
     let Some(key) = parts.extensions.get::<ActingKey>().cloned() else {
         return refuse(
             TelmoniError::Internal("ingest: the request carries no key".into()),
-            &headers,
+            &parts.headers,
         );
     };
-    match handle(&state, &key, &headers, body, arrived).await {
+    match handle(&state, &key, &parts, body, arrived).await {
         Ok(response) => response,
-        Err(error) => refuse(error, &headers),
+        Err(error) => refuse(error, &parts.headers),
     }
 }
 
 async fn handle(
     state: &Arc<AppState>,
     key: &ActingKey,
-    headers: &HeaderMap,
+    request: &Parts,
     body: Body,
     arrived: DateTime<Utc>,
 ) -> Result<Response, TelmoniError> {
-    let encoding = header(headers, &header::CONTENT_TYPE)
-        .and_then(Encoding::of_content_type)
-        .ok_or_else(|| {
-            TelemetryError::InvalidBatch(
-                "Content-Type must be application/json or application/x-protobuf".into(),
-            )
-        })?;
-    let gzipped = match header(headers, &header::CONTENT_ENCODING) {
-        None => false,
-        Some(value) if value.eq_ignore_ascii_case("identity") => false,
-        Some(value) if value.eq_ignore_ascii_case("gzip") => true,
-        Some(_) => {
-            return Err(TelemetryError::InvalidBatch(
-                "Content-Encoding must be gzip, or absent".into(),
-            )
-            .into());
+    let headers = &request.headers;
+    let (encoding, gzipped) = match admit(state, key, headers).await {
+        Ok(admitted) => admitted,
+        Err(refused) => {
+            read_out(request, body, state.body_wait).await;
+            return Err(refused);
         }
     };
-
-    // Before the body is read, so a flood costs its connections and no more.
-    state
-        .rate_limit
-        .admit(&state.redis, key.project_id.as_str())
-        .await?;
-    // A paused organization keeps what it holds and takes in nothing new: a
-    // 402, which an exporter drops rather than retries.
-    telmoni_shared::seam::admit_new(state.entitlements.as_ref(), &key.organization_id).await?;
 
     // One byte past the cap is read, so that past it is known.
     let Ok(read) = tokio::time::timeout(state.body_wait, to_bytes(body, BATCH_MAX_BYTES + 1)).await
@@ -155,6 +138,43 @@ async fn handle(
         Ok(Err(error)) => Err(error),
         Err(died) => Err(TelmoniError::internal("ingest: the write died", died)),
     }
+}
+
+/// What is settled before the body is kept: the encodings its headers name,
+/// the rate limit and the organization's grants; the encodings, if it may come.
+async fn admit(
+    state: &AppState,
+    key: &ActingKey,
+    headers: &HeaderMap,
+) -> Result<(Encoding, bool), TelmoniError> {
+    let encoding = header(headers, &header::CONTENT_TYPE)
+        .and_then(Encoding::of_content_type)
+        .ok_or_else(|| {
+            TelemetryError::InvalidBatch(
+                "Content-Type must be application/json or application/x-protobuf".into(),
+            )
+        })?;
+    let gzipped = match header(headers, &header::CONTENT_ENCODING) {
+        None => false,
+        Some(value) if value.eq_ignore_ascii_case("identity") => false,
+        Some(value) if value.eq_ignore_ascii_case("gzip") => true,
+        Some(_) => {
+            return Err(TelemetryError::InvalidBatch(
+                "Content-Encoding must be gzip, or absent".into(),
+            )
+            .into());
+        }
+    };
+    // Before the body is kept, so a flood costs its connections and what it
+    // sends, read and let go, and no more memory than hyper's buffer for each.
+    state
+        .rate_limit
+        .admit(&state.redis, key.project_id.as_str())
+        .await?;
+    // A paused organization keeps what it holds and takes in nothing new: a
+    // 402, which an exporter drops rather than retries.
+    telmoni_shared::seam::admit_new(state.entitlements.as_ref(), &key.organization_id).await?;
+    Ok((encoding, gzipped))
 }
 
 /// The claimed body, written: the spans read by the contract, the rows put
@@ -353,6 +373,54 @@ pub fn refuse(error: TelmoniError, headers: &HeaderMap) -> Response {
         response.headers_mut().insert(header::RETRY_AFTER, value);
     }
     response
+}
+
+/// [`refuse`] for a request whose body is unread, once it is read out: the
+/// key gate's refusals and the door's.
+pub async fn refuse_unread(error: TelmoniError, request: Request) -> Response {
+    let (parts, body) = request.into_parts();
+    read_out(&parts, body, BODY_WAIT).await;
+    refuse(error, &parts.headers)
+}
+
+/// Reads out a body a refusal leaves unread, to the cap and within `wait`:
+/// hyper closes on one, and an exporter still sending loses the refusal to it.
+async fn read_out(request: &Parts, mut body: Body, wait: Duration) {
+    if announced_past_cap(&request.headers) || waits_to_continue(request) {
+        return;
+    }
+    let mut left = BATCH_MAX_BYTES + 1;
+    let _ = tokio::time::timeout(wait, async {
+        while left > 0 {
+            let Some(Ok(frame)) =
+                std::future::poll_fn(|cx| Pin::new(&mut body).poll_frame(cx)).await
+            else {
+                return;
+            };
+            left = left.saturating_sub(frame.data_ref().map_or(0, Bytes::len));
+        }
+    })
+    .await;
+}
+
+/// Whether the body says it is past the cap, where the close comes however
+/// much of it is read.
+fn announced_past_cap(headers: &HeaderMap) -> bool {
+    header(headers, &header::CONTENT_LENGTH)
+        .and_then(|length| length.parse::<usize>().ok())
+        .is_some_and(|length| length > BATCH_MAX_BYTES)
+}
+
+/// Whether the client holds its body back for `100 Continue`, as hyper reads
+/// one: past HTTP/1.0, by its last `Expect`. Asked for nothing, it sends nothing.
+fn waits_to_continue(request: &Parts) -> bool {
+    request.version > Version::HTTP_10
+        && request
+            .headers
+            .get_all(header::EXPECT)
+            .iter()
+            .next_back()
+            .is_some_and(|expect| expect.as_bytes().eq_ignore_ascii_case(b"100-continue"))
 }
 
 /// `google.rpc.Status`, the one message OTLP borrows that its crate lacks;

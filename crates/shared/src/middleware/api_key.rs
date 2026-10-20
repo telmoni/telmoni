@@ -1,11 +1,12 @@
 //! [`require_api_key`] — the gate in front of a lane a machine calls with an
 //! API key rather than a person with a session.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use axum::{
     extract::{Request, State},
-    http::HeaderMap,
     middleware::Next,
     response::Response,
 };
@@ -13,6 +14,9 @@ use axum::{
 use crate::error::TelmoniError;
 use crate::seam::Auth;
 use crate::types::ApiKeyScope;
+
+/// A lane's refusal on its way: a lane may read the request's body first.
+pub type Refusal = Pin<Box<dyn Future<Output = Response> + Send>>;
 
 /// What the gate is handed: who verifies a key, the scope its lane needs,
 /// and how that lane refuses. The refusal is the lane's own because the
@@ -24,9 +28,9 @@ pub struct ApiKeyGate {
     pub auth: Arc<dyn Auth>,
     /// The scope a key needs to pass.
     pub scope: ApiKeyScope,
-    /// The lane's refusal, given the request's headers so it can answer in
-    /// the encoding the request came in.
-    pub refuse: fn(TelmoniError, &HeaderMap) -> Response,
+    /// The lane's refusal, given the request: its headers name the encoding
+    /// to answer in, and ingest reads its body out first.
+    pub refuse: fn(TelmoniError, Request) -> Refusal,
 }
 
 impl std::fmt::Debug for ApiKeyGate {
@@ -48,10 +52,10 @@ pub async fn require_api_key(
 ) -> Response {
     let key = match gate.auth.resolve_api_key(request.headers()).await {
         Ok(key) => key,
-        Err(e) => return (gate.refuse)(e, request.headers()),
+        Err(e) => return (gate.refuse)(e, request).await,
     };
     if let Err(e) = key.require_scope(gate.scope) {
-        return (gate.refuse)(e, request.headers());
+        return (gate.refuse)(e, request).await;
     }
     request.extensions_mut().insert(key);
     next.run(request).await

@@ -860,6 +860,80 @@ async fn answer_raw(state: Arc<telmoni_telemetry::AppState>, request: &str) -> S
     String::from_utf8_lossy(&answer).into_owned()
 }
 
+/// What a server over `state` answers an export of `length` bytes whose head
+/// and first half come at once and whose second half comes once a fifth of a
+/// second has passed with nothing answered.
+async fn answered_after_its_body(
+    state: Arc<telmoni_telemetry::AppState>,
+    head: &str,
+    length: usize,
+) -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a port");
+    let address = listener.local_addr().expect("its address");
+    tokio::spawn(async move { axum::serve(listener, lanes(state)).await });
+
+    let mut stream = tokio::net::TcpStream::connect(address)
+        .await
+        .expect("a connection");
+    let half = vec![b' '; length / 2];
+    stream
+        .write_all(
+            format!("{head}connection: close\r\ncontent-length: {length}\r\n\r\n").as_bytes(),
+        )
+        .await
+        .expect("the head");
+    stream.write_all(&half).await.expect("the first half");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), stream.peek(&mut [0u8; 1]))
+            .await
+            .is_err(),
+        "answered with half the body still to come"
+    );
+    stream.write_all(&half).await.expect("the second half");
+    let mut answer = Vec::new();
+    tokio::time::timeout(Duration::from_secs(10), stream.read_to_end(&mut answer))
+        .await
+        .expect("answered within ten seconds")
+        .expect("the answer");
+    String::from_utf8_lossy(&answer).into_owned()
+}
+
+/// A refusal before the body is read waits for the body: hyper's close over
+/// one still coming breaks the upload, which an exporter takes for no answer.
+#[sqlx::test]
+async fn a_refusal_before_the_body_is_read_waits_for_the_body(pool: PgPool) {
+    let (organization, project) = (OrganizationId::new(), ProjectId::new());
+    let auth = AuthStub::new();
+    auth.key(INGEST_KEY, &organization, &project, &[ApiKeyScope::Ingest])
+        .key(READ_KEY, &organization, &project, &[ApiKeyScope::Read]);
+    let open = common::state(&pool, auth.clone());
+    let paused = common::state_with_entitlements(
+        &pool,
+        auth.clone(),
+        Arc::new(common::PausedOrganization(organization)),
+    );
+    let head = |bearer: &str, content_type: &str| {
+        format!(
+            "POST {LANE} HTTP/1.1\r\nhost: localhost\r\ncontent-type: {content_type}\r\n\
+             authorization: Bearer {bearer}\r\n"
+        )
+    };
+    for (state, head, status) in [
+        (open.clone(), head("not_a_key", "application/json"), "401"),
+        (open.clone(), head(READ_KEY, "application/json"), "403"),
+        (open, head(INGEST_KEY, "text/plain"), "400"),
+        (paused, head(INGEST_KEY, "application/json"), "402"),
+    ] {
+        let answer = answered_after_its_body(state, &head, 600_000).await;
+        assert!(
+            answer.starts_with(&format!("HTTP/1.1 {status} ")),
+            "{answer}"
+        );
+    }
+}
+
 /// A body that has not arrived within the wait (a fifth of a second here, a
 /// minute on every binary) is refused `invalid-batch`, and nothing written.
 #[sqlx::test]

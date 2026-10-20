@@ -21,7 +21,7 @@ use serde_json::json;
 use telmoni_shared::acting::ActingKey;
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::extract::Json;
-use telmoni_shared::middleware::api_key::{ApiKeyGate, require_api_key};
+use telmoni_shared::middleware::api_key::{ApiKeyGate, Refusal, require_api_key};
 use telmoni_shared::middleware::problem;
 use telmoni_shared::openapi::{Answer, Method, Route};
 use telmoni_shared::types::{API_TOKEN_PREFIX, ApiKeyScope};
@@ -162,8 +162,9 @@ pub fn router(state: Arc<AppState>) -> Router {
 /// How every `/v1` lane refuses a key: a problem document, as every answer
 /// here is, and on a `401` the `WWW-Authenticate` challenge and the detail a
 /// customer can act on. The type is the one a bad credential gets everywhere
-/// else; the headers are read by no one, since a `/v1` answer has one shape.
-fn refuse(error: TelmoniError, _headers: &HeaderMap) -> Response {
+/// else; the request is read no further, since a `/v1` answer has one shape
+/// and no `/v1` lane takes a body.
+fn refuse(error: TelmoniError, _request: Request) -> Refusal {
     let mut problem = error.to_problem_details();
     let status = StatusCode::from_u16(problem.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
     if status == StatusCode::UNAUTHORIZED {
@@ -179,7 +180,7 @@ fn refuse(error: TelmoniError, _headers: &HeaderMap) -> Response {
             .headers_mut()
             .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
     }
-    response
+    Box::pin(std::future::ready(response))
 }
 
 /// The organization's own switch, `Flag::PublicApi`: off, every lane is a

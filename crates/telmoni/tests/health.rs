@@ -5,11 +5,13 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::{Router, routing};
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tower::ServiceExt;
 
 use telmoni::{App, Module, Parts};
@@ -489,6 +491,76 @@ async fn the_door_meters_ingest_by_address_before_its_key() {
         StatusCode::UNAUTHORIZED,
         "another address is metered on its own"
     );
+}
+
+/// The door's refusal of an export waits for its body, as the lane's own do:
+/// hyper's close over one still coming breaks the upload, which an exporter
+/// takes for no answer.
+#[tokio::test]
+async fn the_doors_refusal_of_an_export_waits_for_its_body() {
+    const FROM: &str = "203.0.113.10, 35.191.0.1";
+    let router = app().router();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a port");
+    let address = listener.local_addr().expect("its address");
+    tokio::spawn({
+        let router = router.clone();
+        async move { axum::serve(listener, router).await }
+    });
+    // The spent minute leaks one a 50 ms, which can let the probe in, to the
+    // lane's own 401 after its body as well: spent again and probed again.
+    for _ in 0..5 {
+        let mut spent = false;
+        for _ in 0..1_400 {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::post("/otlp/v1/traces")
+                        .header("content-type", "application/json")
+                        .header("x-forwarded-for", FROM)
+                        .body(Body::from("{}"))
+                        .unwrap(),
+                )
+                .await
+                .expect("router responds");
+            if response.status() == StatusCode::TOO_MANY_REQUESTS {
+                spent = true;
+                break;
+            }
+        }
+        assert!(spent, "the minute's allowance was spent");
+
+        let mut stream = tokio::net::TcpStream::connect(address)
+            .await
+            .expect("a connection");
+        let half = vec![b' '; 300_000];
+        let head = format!(
+            "POST /otlp/v1/traces HTTP/1.1\r\nhost: localhost\r\nconnection: close\r\n\
+             content-type: application/json\r\nx-forwarded-for: {FROM}\r\ncontent-length: {}\r\n\r\n",
+            2 * half.len()
+        );
+        stream.write_all(head.as_bytes()).await.expect("the head");
+        stream.write_all(&half).await.expect("the first half");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), stream.peek(&mut [0u8; 1]))
+                .await
+                .is_err(),
+            "answered with half the body still to come"
+        );
+        stream.write_all(&half).await.expect("the second half");
+        let mut answer = Vec::new();
+        tokio::time::timeout(Duration::from_secs(10), stream.read_to_end(&mut answer))
+            .await
+            .expect("answered within ten seconds")
+            .expect("the answer");
+        let answer = String::from_utf8_lossy(&answer);
+        if answer.starts_with("HTTP/1.1 429 ") {
+            return;
+        }
+        assert!(answer.starts_with("HTTP/1.1 401 "), "{answer}");
+    }
+    panic!("the door let every probe in");
 }
 
 /// The key with its last character percent-encoded: one key to the lane,

@@ -215,15 +215,15 @@ pub fn router(state: Arc<AppState>) -> Router {
 /// Ingest, for the binary to nest at `/otlp` behind the machine door:
 /// `POST /v1/traces` behind a project API key holding the ingest scope and
 /// nothing else — a machine reaches it straight, and the key is its gate,
-/// refusing as the lane answers, in OTLP's shape
-/// ([`handler::ingest::refuse`]). The lane's own limit, per project, runs in
-/// its handler once the key is known, so the door meters it by address
-/// alone.
+/// refusing as the lane answers, in OTLP's shape, once the body is read out
+/// ([`handler::ingest::refuse_unread`]). The lane's own limit, per project,
+/// runs in its handler once the key is known, so the door meters it by
+/// address alone.
 pub fn otlp_router(state: Arc<AppState>) -> Router {
     let gate = ApiKeyGate {
         auth: state.auth.clone(),
         scope: ApiKeyScope::Ingest,
-        refuse: handler::ingest::refuse,
+        refuse: |error, request| Box::pin(handler::ingest::refuse_unread(error, request)),
     };
     Router::new()
         .route("/v1/traces", post(handler::ingest::export))

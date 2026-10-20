@@ -179,9 +179,10 @@ async fn admit(
     };
     match door.admit(lane, &source, credential.as_deref()).await {
         Ok(()) => next.run(request).await,
-        // Ingest's refusals are OTLP's shape, the door's as the lane's own.
+        // Ingest's refusals are OTLP's shape, the door's as the lane's own,
+        // sent once the body is read out.
         Err(refused) => match lane {
-            Lane::Otlp => ingest::refuse(refused, request.headers()),
+            Lane::Otlp => ingest::refuse_unread(refused, request).await,
             Lane::V1 | Lane::Cli | Lane::Ping => refused.into_response(),
         },
     }
