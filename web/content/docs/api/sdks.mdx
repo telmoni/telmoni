@@ -659,16 +659,16 @@ sent.
 The SDK batches spans and sends them in the background, on a bounded queue,
 so a slow Telmoni never slows an agent. Each request times out after 10
 seconds. It retries a `429` or a `503` after its `Retry-After`, waiting at most
-60 seconds, and a request that failed or timed out before its answer's status
-after 1 second, then 2; after three attempts in all it drops the batch with one
-warning. Any other refusal is logged once and never retried, and an answer whose
-body breaks after its status, or runs past the 10 seconds, is decided by its
-status, read as far as it came. A batch whose body would pass the 1 MiB
-[ingest](/docs/api/ingest#refusals) takes is sent in halves, each within it, and
-a span that alone passes the 1 MiB is sent without the attributes ingest drops
-for their length — a key past 128 characters, a value past 1,024 — with one
-warning. Each attempt carries `Telmoni-Sent-At`, the agent's clock as it leaves,
-so [ingest](/docs/api/ingest#what-is-kept) can move
+60 seconds, and a request that failed or timed out before its answer's head was
+whole after 1 second, then 2; after three attempts in all it drops the batch
+with one warning. Any other refusal is logged once and never retried, and an
+answer whose body breaks after its head, or runs past the 10 seconds, is
+decided by its status, read as far as it came. A batch whose body would pass the
+1 MiB [ingest](/docs/api/ingest#refusals) takes is sent in halves, each within
+it, and a span that alone passes the 1 MiB is sent without the attributes ingest
+drops for their length — a key past 128 characters, a value past 1,024 — with
+one warning. Each attempt carries `Telmoni-Sent-At`, the agent's clock as it
+leaves, so [ingest](/docs/api/ingest#what-is-kept) can move
 a run from a clock a time zone or a date out as one. A flush waits up to 30 seconds. An attribute the
 server drops is logged once: content with the project's content mode, which
 decides the drop, and a link to [what is dropped at the
