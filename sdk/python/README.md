@@ -154,9 +154,16 @@ the resource's `deployment.environment.name` and `service.version`.
 and never through the trace's sampled flag. The key never appears in `repr`,
 `str` or `dataclasses.asdict`, and `pickle` refuses it. It travels over HTTPS
 only: a plain-HTTP endpoint is refused with a `ValueError` unless its host is
-this machine, and no redirect is followed. An endpoint without a scheme gets
-`https://`, or `http://` for this machine, as the CLI reads one; any other
-scheme is refused with a `ValueError`.
+this machine — `localhost`, a name under it, 127.0.0.0/8 or `::1`, an
+IPv4-mapped address read as its IPv4 — and no redirect is followed. An
+endpoint without a scheme gets `https://`, or `http://` for this machine, as
+the CLI reads one; any other scheme is refused with a `ValueError`, as is one
+the four SDKs could read two ways: one not in printable ASCII, or holding
+credentials, an escape, a query, a fragment, a dot segment or a character a
+URL parser would escape, or a port of 0 or past 65535, or naming a host that
+is neither a name of letters, digits, dots, hyphens and underscores, in labels
+of 1 to 63 characters with no hyphen at either end and the last no number, nor
+an IPv4 address in four decimal parts, nor an IPv6 one in brackets.
 
 ## A run across services
 

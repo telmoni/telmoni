@@ -214,17 +214,25 @@ takes when it starts a trace of its own.
 Spans are batched (a queue of 2048, batches of 512, every five seconds; a run's
 start goes at once) and sent as OTLP/JSON to `POST {endpoint}/otlp/v1/traces`
 over HTTPS: a plain-HTTP endpoint is refused with a `TypeError` unless its host
-is this machine, and no redirect is followed, since every export carries the
-key. An endpoint without a scheme gets `https://`, or `http://` for this
-machine, as the CLI reads one; any other scheme is refused with a `TypeError`.
-Each attempt carries `Telmoni-Sent-At`, this clock as it leaves, by which ingest
-moves a run from a clock a zone or a date out as one. A `429` or `503` is retried
-after `Retry-After`, three attempts in all; an answer whose body breaks after its
-status is decided by that status, as a whole one is. Every warning — an attribute the server dropped, a batch given up on — is logged once
-per client through `console.warn`. `await telmoni.flush()` sends what is queued
-and resolves `true` once the platform has it; `await telmoni.shutdown()` drains
-and stops. The SDK's worker never keeps the process alive on its own, so call
-`shutdown()` before exiting.
+is this machine — `localhost`, a name under it, 127.0.0.0/8 or `::1`, an
+IPv4-mapped address read as its IPv4 — and no redirect is followed, since every
+export carries the key. An endpoint without a scheme gets `https://`, or
+`http://` for this machine, as the CLI reads one; any other scheme is refused
+with a `TypeError`, as is one the four SDKs could read two ways: one not in
+printable ASCII, or holding credentials, an escape, a query, a fragment, a dot
+segment or a character a URL parser would escape, or a port of 0 or past
+65535, or naming a host that is neither a name of letters, digits, dots,
+hyphens and underscores, in labels of 1 to 63 characters with no hyphen at
+either end and the last no number, nor an IPv4 address in four decimal parts,
+nor an IPv6 one in brackets. Each attempt carries `Telmoni-Sent-At`, this clock
+as it leaves, by which ingest moves a run from a clock a zone or a date out as
+one. A `429` or `503` is retried after `Retry-After`, three attempts in all; an
+answer whose body breaks after its status is decided by that status, as a whole
+one is. Every warning — an attribute the server dropped, a batch given up on —
+is logged once per client through `console.warn`. `await telmoni.flush()` sends
+what is queued and resolves `true` once the platform has it;
+`await telmoni.shutdown()` drains and stops. The SDK's worker never keeps the
+process alive on its own, so call `shutdown()` before exiting.
 
 For tests, inject the seams: `new Telmoni(config, { transport, sleep, warn,
 processor })`, where `transport` has `fetch`'s shape, `sleep` is the wait

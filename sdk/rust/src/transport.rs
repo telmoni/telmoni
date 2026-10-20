@@ -3,6 +3,7 @@
 
 use std::fmt;
 use std::io::{self, Read};
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -71,33 +72,128 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// never pays for more.
 const ANSWER_MAX: u64 = 1 << 20;
 
-/// Whether `host`, as `Url::host_str` spells it, is this machine: `localhost`,
-/// a name under it, or a loopback address. An IPv6 address comes in brackets.
-pub(crate) fn is_loopback_host(host: &str) -> bool {
-    let bare = host.trim_start_matches('[').trim_end_matches(']');
-    match bare.parse::<std::net::IpAddr>() {
-        Ok(address) => address.is_loopback(),
-        Err(_) => host == "localhost" || host.ends_with(".localhost"),
+/// What a host's name is written in.
+const NAME: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-";
+
+/// What a path is written in: nothing any SDK's request escapes or rewrites.
+const PATH: &str =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-~!$&'()*+,;=:@/";
+
+/// The host `endpoint` names, as written, or `None` where it is no URL every SDK reads
+/// alike (`sdk/fixtures/endpoints.json`): nothing a URL parser fills in or rewrites.
+pub(crate) fn host_of(endpoint: &str) -> Option<&str> {
+    if !endpoint.bytes().all(|byte| (b'!'..=b'~').contains(&byte)) {
+        return None;
+    }
+    let (scheme, rest) = endpoint.split_once("://")?;
+    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+        return None;
+    }
+    let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+    if !only(path, PATH)
+        || path
+            .split('/')
+            .any(|segment| segment == "." || segment == "..")
+    {
+        return None;
+    }
+    let (host, port) = if authority.starts_with('[') {
+        let (host, port) = authority.split_at(authority.find(']')? + 1);
+        let inner = host.strip_prefix('[')?.strip_suffix(']')?;
+        let digits = inner
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() || byte == b':' || byte == b'.');
+        if !digits || inner.parse::<Ipv6Addr>().is_err() {
+            return None;
+        }
+        (host, port)
+    } else {
+        let (host, port) = authority
+            .find(':')
+            .map_or((authority, ""), |at| authority.split_at(at));
+        // WHATWG's parser reads a name ending in a number as an IPv4 address.
+        let address = host.parse::<Ipv4Addr>().is_ok();
+        let labels = host.strip_suffix('.').unwrap_or(host).split('.');
+        if host.is_empty()
+            || !only(host, NAME)
+            || !labels.into_iter().all(label_ok)
+            || (numbered(host) && !address)
+        {
+            return None;
+        }
+        (host, port)
+    };
+    port_ok(port).then_some(host)
+}
+
+/// A name's label as DNS and TLS take it: 1 to 63 characters, no hyphen at
+/// either end.
+fn label_ok(label: &str) -> bool {
+    (1..=63).contains(&label.len()) && !label.starts_with('-') && !label.ends_with('-')
+}
+
+/// Whether every byte of `text` is one of `set`'s.
+fn only(text: &str, set: &str) -> bool {
+    text.bytes().all(|byte| set.as_bytes().contains(&byte))
+}
+
+/// Whether `host`'s last label, a trailing dot aside, is a number.
+fn numbered(host: &str) -> bool {
+    let host = host.strip_suffix('.').unwrap_or(host);
+    let last = host.rsplit('.').next().unwrap_or_default();
+    let decimal = !last.is_empty() && last.bytes().all(|byte| byte.is_ascii_digit());
+    let hexadecimal = last
+        .get(..2)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("0x"))
+        && last.bytes().skip(2).all(|byte| byte.is_ascii_hexdigit());
+    decimal || hexadecimal
+}
+
+/// Whether `port` is none, an empty one, or up to five digits from 1 to 65535.
+fn port_ok(port: &str) -> bool {
+    match port.strip_prefix(':') {
+        None => port.is_empty(),
+        Some(digits) => {
+            digits.is_empty()
+                || (digits.len() <= 5
+                    && digits.bytes().all(|byte| byte.is_ascii_digit())
+                    && digits
+                        .parse::<u32>()
+                        .is_ok_and(|n| (1..=65_535).contains(&n)))
+        }
     }
 }
 
-/// Why nothing goes to `endpoint`: a scheme but HTTP and HTTPS fails every
-/// export, and plain HTTP to another machine would carry the key in the clear.
-pub(crate) fn refusal(endpoint: &str) -> Option<String> {
-    let parsed = reqwest::Url::parse(endpoint)
-        .ok()
-        .filter(|_| endpoint.contains("://"));
-    let host = parsed
-        .as_ref()
-        .and_then(reqwest::Url::host_str)
-        .unwrap_or_default();
-    match parsed.as_ref().map(reqwest::Url::scheme) {
-        Some("https") if !host.is_empty() => None,
-        Some("http") if !host.is_empty() => (!is_loopback_host(host)).then(|| {
-            format!("refusing to send the API key over unencrypted HTTP to '{host}'; use HTTPS")
-        }),
-        _ => Some("the endpoint must be an http:// or https:// URL".to_owned()),
+/// Whether `host`, as [`host_of`] gives it, is this machine: `localhost`, a
+/// name under it, 127.0.0.0/8 or ::1, an IPv4-mapped address read as its IPv4.
+pub(crate) fn is_this_machine(host: &str) -> bool {
+    if let Some(inner) = host
+        .strip_prefix('[')
+        .and_then(|host| host.strip_suffix(']'))
+    {
+        return inner.parse::<Ipv6Addr>().is_ok_and(|address| {
+            address.is_loopback() || address.to_ipv4_mapped().is_some_and(|v4| v4.is_loopback())
+        });
     }
+    if let Ok(address) = host.parse::<Ipv4Addr>() {
+        return address.is_loopback();
+    }
+    let name = host.to_ascii_lowercase();
+    name == "localhost" || name.ends_with(".localhost")
+}
+
+/// Why nothing goes to `endpoint`: one the SDKs could read two ways fails an export or
+/// reaches another host, and plain HTTP to another machine carries the key in the clear.
+pub(crate) fn refusal(endpoint: &str) -> Option<String> {
+    let Some(host) = host_of(endpoint) else {
+        return Some("the endpoint must be an http:// or https:// URL".to_owned());
+    };
+    let http = endpoint
+        .split_once("://")
+        .is_some_and(|(scheme, _)| scheme.eq_ignore_ascii_case("http"));
+    (http && !is_this_machine(host)).then(|| {
+        format!("refusing to send the API key over unencrypted HTTP to '{host}'; use HTTPS")
+    })
 }
 
 /// reqwest's blocking client, built at the first send. That send comes from

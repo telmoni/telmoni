@@ -5,7 +5,7 @@ use std::fmt;
 use opentelemetry_sdk::trace::ShouldSample;
 use serde::{Deserialize, Serialize};
 
-use crate::transport::is_loopback_host;
+use crate::transport::{host_of, is_this_machine};
 
 /// The machine host; the console's, `https://telmoni.com`, serves people.
 pub const DEFAULT_ENDPOINT: &str = "https://api.telmoni.com";
@@ -142,9 +142,10 @@ impl Config {
     }
 }
 
-/// A variable's value, `None` when it is unset, empty or whitespace.
+/// A variable's value, `None` when unset, empty or whitespace; one that is no Unicode is
+/// read lossily, so it is refused as in the other SDKs rather than taken as unset.
 fn env_var(name: &str) -> Option<String> {
-    std::env::var(name).ok().as_deref().and_then(unset_if_blank)
+    unset_if_blank(&std::env::var_os(name)?.to_string_lossy())
 }
 
 /// The endpoint as the CLI reads one: a host without a scheme gets
@@ -164,8 +165,7 @@ fn endpoint_of(given: &str) -> String {
     if first.eq_ignore_ascii_case("http") || first.eq_ignore_ascii_case("https") {
         return endpoint.to_owned();
     }
-    let local = reqwest::Url::parse(&format!("http://{endpoint}"))
-        .is_ok_and(|url| url.host_str().is_some_and(is_loopback_host));
+    let local = host_of(&format!("http://{endpoint}")).is_some_and(is_this_machine);
     format!("{}://{endpoint}", if local { "http" } else { "https" })
 }
 

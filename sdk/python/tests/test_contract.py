@@ -15,7 +15,7 @@ import pytest
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.trace import SpanContext
 
-from conftest import FakeTransport
+from conftest import FakeTransport, load_fixture
 from telmoni import DEFAULT_ENDPOINT, Config, Secret, Telmoni, __version__, exporter
 from telmoni.exporter import _urllib_transport
 
@@ -293,46 +293,16 @@ def test_a_span_time_past_what_ingest_reads_goes_as_0() -> None:
     assert sent == {"s0": (str(2**64 - 1), str(2**64 - 1)), "s1": ("0", "0")}
 
 
-def test_plain_http_is_refused_except_to_this_machine() -> None:
-    for endpoint in (
-        "http://localhost:8080",
-        "http://api.localhost",
-        "http://127.0.0.1:8080/",
-        "http://[::1]:8080",
-        "https://api.example.com",
-    ):
-        assert Config(endpoint=endpoint).endpoint == endpoint.rstrip("/")
-    for endpoint in ("http://api.example.com", "http://10.0.0.5:8080"):
-        with pytest.raises(ValueError, match="unencrypted HTTP"):
-            Config(endpoint=endpoint)
-
-
-def test_a_host_without_a_scheme_is_read_as_the_cli_reads_it() -> None:
-    for given, endpoint in (
-        ("api.example.com", "https://api.example.com"),
-        ("localhost:8080/", "http://localhost:8080"),
-        ("LOCALHOST:8080", "http://LOCALHOST:8080"),
-        ("127.0.0.1:8080", "http://127.0.0.1:8080"),
-        ("[::1]:8080", "http://[::1]:8080"),
-        ("localhost.example.com", "https://localhost.example.com"),
-        ("https://api.example.com /", "https://api.example.com"),
-        ("api.example.com /", "https://api.example.com"),
-        ("/", DEFAULT_ENDPOINT),
-    ):
-        assert Config(endpoint=given).endpoint == endpoint
-        assert Config(endpoint=endpoint).endpoint == endpoint, "read twice"
-    for endpoint in (
-        "ftp://api.example.com",
-        "https://",
-        "file:///tmp/telmoni",
-        "localhost:abc",
-        "https:api.example.com",
-        "https:/api.example.com",
-        "https//api.example.com",
-        "https://api .example.com",
-    ):
-        with pytest.raises(ValueError, match="http:// or https://"):
-            Config(endpoint=endpoint)
+def test_every_endpoint_is_read_as_the_fixture_reads_it() -> None:
+    """The four SDKs take and refuse the same endpoints (``endpoints.json``)."""
+    fixture = load_fixture("endpoints.json")
+    for case in fixture["taken"]:
+        assert Config(endpoint=case["given"]).endpoint == case["endpoint"], case
+        assert Config(endpoint=case["endpoint"]).endpoint == case["endpoint"], case
+    for case in fixture["refused"]:
+        why = "unencrypted HTTP" if case["as"] == "cleartext" else "http:// or https://"
+        with pytest.raises(ValueError, match=why):
+            Config(endpoint=case["given"])
 
 
 def test_a_configuration_changed_after_it_was_built_is_checked_again() -> None:

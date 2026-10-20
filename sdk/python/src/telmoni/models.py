@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import string
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
     from opentelemetry.sdk.trace.sampling import Sampler
@@ -62,20 +62,109 @@ def _unset_if_blank(value: str | None) -> str | None:
     return value.strip()
 
 
-def is_loopback_host(host: str) -> bool:
-    """Whether ``host`` is this machine: ``localhost``, a name under it, or a
-    loopback address; an IPv6 address comes in brackets."""
-    bare = host.strip("[]")
+_WHITE_SPACE = (
+    "\t\n\v\f\r \x85\xa0\u1680"
+    + "".join(map(chr, range(0x2000, 0x200B)))
+    + "\u2028\u2029\u202f\u205f\u3000"
+)
+"""Unicode's White_Space, which an endpoint's ends are trimmed of, as Go and
+Rust trim them; `str.isspace` takes U+001C to U+001F too."""
+_NAME = frozenset(string.ascii_letters + string.digits + "._-")
+_PATH = frozenset(string.ascii_letters + string.digits + "-._~!$&'()*+,;=:@/")
+_IPV6 = frozenset(string.hexdigits + ":.")
+_LOOPBACK = ipaddress.IPv4Network("127.0.0.0/8")
+
+
+def _host_of(endpoint: str) -> str | None:
+    """The host ``endpoint`` names, as written, or None where it is no URL every SDK
+    reads alike (``sdk/fixtures/endpoints.json``), nothing a parser rewrites."""
+    if not all("!" <= char <= "~" for char in endpoint):
+        return None
+    scheme, found, rest = endpoint.partition("://")
+    authority, _, path = rest.partition("/")
+    if (
+        not found
+        or scheme.lower() not in ("http", "https")
+        or not set(path) <= _PATH
+        or {".", ".."} & set(path.split("/"))
+    ):
+        return None
+    if authority.startswith("["):
+        end = authority.find("]") + 1
+        host, port = authority[:end], authority[end:]
+        if not end or not set(host[1:-1]) <= _IPV6 or _ipv6(host[1:-1]) is None:
+            return None
+    else:
+        host, colon, digits = authority.partition(":")
+        port = colon + digits
+        # WHATWG's parser reads a name ending in a number as an IPv4 address.
+        if (
+            not host
+            or not set(host) <= _NAME
+            or not all(map(_label_ok, host.removesuffix(".").split(".")))
+            or (_numbered(host) and _ipv4(host) is None)
+        ):
+            return None
+    return host if _port_ok(port) else None
+
+
+def _label_ok(label: str) -> bool:
+    """A name's label as DNS and TLS take it: 1 to 63 characters, no hyphen at
+    either end."""
+    return 0 < len(label) <= 63 and label[0] != "-" and label[-1] != "-"
+
+
+def _port_ok(port: str) -> bool:
+    """No port, an empty one, or up to five digits from 1 to 65535."""
+    if not port:
+        return True
+    digits = port[1:]
+    within = len(digits) <= 5 and digits.isdigit() and 0 < int(digits) <= 65535
+    return port[0] == ":" and (not digits or within)
+
+
+def _numbered(host: str) -> bool:
+    """Whether ``host``'s last label, a trailing dot aside, is a number."""
+    last = host.removesuffix(".").rpartition(".")[2]
+    hexadecimal = last[:2].lower() == "0x" and set(last[2:]) <= set(string.hexdigits)
+    return last.isdigit() or hexadecimal
+
+
+def _ipv4(text: str) -> ipaddress.IPv4Address | None:
     try:
-        return ipaddress.ip_address(bare).is_loopback
+        return ipaddress.IPv4Address(text)
     except ValueError:
-        return host == "localhost" or host.endswith(".localhost")
+        return None
+
+
+def _ipv6(text: str) -> ipaddress.IPv6Address | None:
+    try:
+        return ipaddress.IPv6Address(text)
+    except ValueError:
+        return None
+
+
+def _this_machine(host: str) -> bool:
+    """Whether ``host``, as ``_host_of`` gives it, is ``localhost``, a name under it,
+    127.0.0.0/8 or ::1, an IPv4-mapped address read as its IPv4."""
+    if host.startswith("["):
+        address = _ipv6(host[1:-1])
+        if address is None:
+            return False
+        mapped = address.ipv4_mapped
+        loopback = mapped is not None and mapped in _LOOPBACK
+        return loopback or address == ipaddress.IPv6Address("::1")
+    address4 = _ipv4(host)
+    if address4 is not None:
+        return address4 in _LOOPBACK
+    name = host.lower()
+    return name == "localhost" or name.endswith(".localhost")
 
 
 def endpoint_of(given: str | None) -> str:
     """The endpoint as the CLI reads one: a host without a scheme gets
     ``https://``, or ``http://`` for this machine."""
-    text = _unset_if_blank(given) or ""
+    text = (given or "").strip(_WHITE_SPACE)
     # Only what follows the "://" is trimmed, so a second reading changes nothing.
     head, scheme, tail = text.partition("://")
     if scheme:
@@ -86,38 +175,26 @@ def endpoint_of(given: str | None) -> str:
     # "https:/host" or "https//host" is a scheme mistyped, not a host: the check refuses it.
     if endpoint.split(":", 1)[0].split("/", 1)[0].lower() in ("http", "https"):
         return endpoint
-    try:
-        local = is_loopback_host(urlsplit(f"http://{endpoint}").hostname or "")
-    except ValueError:
-        local = False
+    host = _host_of(f"http://{endpoint}")
+    local = host is not None and _this_machine(host)
     return f"{'http' if local else 'https'}://{endpoint}"
 
 
 def _trim_tail(text: str) -> str:
     """Trailing slashes and whitespace off, so the path appends cleanly."""
     end = len(text)
-    while end and (text[end - 1] == "/" or text[end - 1].isspace()):
+    while end and (text[end - 1] == "/" or text[end - 1] in _WHITE_SPACE):
         end -= 1
     return text[:end]
 
 
 def check_endpoint(endpoint: str) -> None:
-    """A scheme but HTTP or HTTPS, or a host or port that is none, fails every
-    export, and plain HTTP to another machine would carry the key bare."""
-    try:
-        parts = urlsplit(endpoint)
-        scheme, host, _port = parts.scheme, parts.hostname or "", parts.port
-    except ValueError:
-        scheme, host = "", ""
-    # urllib takes whitespace in a host, which http.client then refuses at every export.
-    if (
-        "://" not in endpoint
-        or any(char.isspace() for char in endpoint)
-        or scheme not in ("http", "https")
-        or not host
-    ):
+    """An endpoint the SDKs could read two ways fails an export or reaches another
+    host, and plain HTTP to another machine would carry the key bare."""
+    host = _host_of(endpoint)
+    if host is None:
         raise ValueError("the endpoint must be an http:// or https:// URL")
-    if scheme == "http" and not is_loopback_host(host):
+    if endpoint[:7].lower() == "http://" and not _this_machine(host):
         raise ValueError(
             f"refusing to send the API key over unencrypted HTTP to '{host}'; use HTTPS"
         )

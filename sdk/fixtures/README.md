@@ -41,6 +41,12 @@ A run across services: what `inject` writes into an outgoing request's headers, 
 
 `extract` is a list of cases, each the `headers` given — their names in whatever case, matched as the language's headers are (Rust's `HashMap` carrier lowercases them on both sides, so its suite lowercases the fixture's) — and the `run` read, or `null` where the headers name none: its `run_id` (lowercase, whatever case it was given in), its `agent` (percent-decoded), and the `trace_id`, `parent_span_id` and `sampled` flag its steps and calls open under. A run is read only from a well-formed `traceparent` — a version other than `ff`, lowercase hex, a trace id and a span id that are not zeros, nothing after the flags under version `00` — and a `baggage` holding both members, the id a UUID and the agent not blank.
 
+## `endpoints.json`
+
+What each SDK makes of an endpoint, configured or from `TELMONI_ENDPOINT`. `taken` lists each as `given` and as the SDK holds it (`endpoint`), which, given again, it holds unchanged. `refused` lists each the SDK refuses — at construction in Python, TypeScript and Go, and in Rust at the first export, which sends nothing — `as` `url`, no endpoint any SDK takes (`the endpoint must be an http:// or https:// URL`), or `cleartext`, plain HTTP to another machine (`refusing to send the API key over unencrypted HTTP`).
+
+One rule in all four, written out by each rather than left to its URL parser, since those read shorthand, escapes, credentials and a missing host four ways: Unicode's White_Space trimmed from the ends, as Go and Rust trim; printable ASCII; HTTP or HTTPS, in any case; a host that is a name of letters, digits, dots, hyphens and underscores, in labels of 1 to 63 characters with no hyphen at either end, its last label no number unless the whole is an IPv4 address in four decimal parts, or an IPv6 address in brackets; a port of up to five digits from 1 to 65535, or an empty one; a path of the same plain characters and `~!$&'()*+,;=:@`, with no `.` or `..` segment; and plain HTTP only to this machine: `localhost`, a name under it, 127.0.0.0/8 or `::1`, an IPv4-mapped address read as its IPv4.
+
 ## `answers/`
 
 Each file is one answer from `POST /otlp/v1/traces` — `status`, `headers`, `body` — and `expect`, what the SDK must do with it. A suite's fake transport answers from these files; the asserted behaviour is the `expect` line.

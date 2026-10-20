@@ -294,56 +294,51 @@ func (b *countedBody) Read(p []byte) (int, error) {
 
 func (b *countedBody) Close() error { return nil }
 
-func TestPlainHTTPIsRefusedExceptToThisMachine(t *testing.T) {
-	for _, endpoint := range []string{
-		"http://localhost:8080",
-		"http://api.localhost",
-		"http://127.0.0.1:8080/",
-		"http://[::1]:8080",
-		"https://api.example.com",
-	} {
-		if got := mustNew(t, telmoni.Config{Endpoint: endpoint}).Config().Endpoint; got != strings.TrimSuffix(endpoint, "/") {
-			t.Errorf("Endpoint %q became %q", endpoint, got)
-		}
+// Every endpoint, configured or from the environment, is read as sdk/fixtures/endpoints.json says.
+func TestEveryEndpointIsReadAsTheFixtureReadsIt(t *testing.T) {
+	var fixture struct {
+		Taken []struct {
+			Given    string `json:"given"`
+			Endpoint string `json:"endpoint"`
+		} `json:"taken"`
+		Refused []struct {
+			Given string `json:"given"`
+			As    string `json:"as"`
+		} `json:"refused"`
 	}
-	for _, endpoint := range []string{"http://api.example.com", "http://10.0.0.5:8080"} {
-		if _, err := telmoni.New(telmoni.Config{Endpoint: endpoint}); err == nil || !strings.Contains(err.Error(), "unencrypted HTTP") {
-			t.Errorf("New(%q) = %v, want a refusal of unencrypted HTTP", endpoint, err)
-		}
+	if err := json.Unmarshal(loadFixture(t, "endpoints.json"), &fixture); err != nil {
+		t.Fatalf("decoding endpoints.json: %v", err)
 	}
-}
-
-func TestAHostWithoutASchemeIsReadAsTheCLIReadsIt(t *testing.T) {
-	for given, want := range map[string]string{
-		"api.example.com":           "https://api.example.com",
-		"localhost:8080/":           "http://localhost:8080",
-		"LOCALHOST:8080":            "http://LOCALHOST:8080",
-		"127.0.0.1:8080":            "http://127.0.0.1:8080",
-		"[::1]:8080":                "http://[::1]:8080",
-		"localhost.example.com":     "https://localhost.example.com",
-		"https://api.example.com /": "https://api.example.com",
-		"api.example.com /":         "https://api.example.com",
-		"/":                         telmoni.DefaultEndpoint,
-	} {
-		if got := mustNew(t, telmoni.Config{Endpoint: given}).Config().Endpoint; got != want {
-			t.Errorf("Endpoint %q became %q, want %q", given, got, want)
+	for _, taken := range fixture.Taken {
+		for _, given := range []string{taken.Given, taken.Endpoint} {
+			if got := mustNew(t, telmoni.Config{Endpoint: given}).Config().Endpoint; got != taken.Endpoint {
+				t.Errorf("Endpoint %q became %q, want %q", given, got, taken.Endpoint)
+			}
 		}
-		if got := mustNew(t, telmoni.Config{Endpoint: want}).Config().Endpoint; got != want {
-			t.Errorf("Endpoint %q, read twice, became %q", want, got)
+		// From the environment, read twice on its way to New.
+		t.Setenv("TELMONI_ENDPOINT", taken.Given)
+		client, err := telmoni.NewFromEnv()
+		if err != nil {
+			t.Errorf("NewFromEnv() with %q: %v", taken.Given, err)
+			continue
 		}
+		if got := client.Config().Endpoint; got != taken.Endpoint {
+			t.Errorf("NewFromEnv() read %q as %q, want %q", taken.Given, got, taken.Endpoint)
+		}
+		_ = client.Shutdown(context.Background())
 	}
-	for _, endpoint := range []string{
-		"ftp://api.example.com", "https://", "file:///tmp/telmoni", "localhost:abc", "localhost:99999",
-		"https:/api.example.com", "https//api.example.com", "https://api .example.com",
-	} {
-		if _, err := telmoni.New(telmoni.Config{Endpoint: endpoint}); err == nil || !strings.Contains(err.Error(), "http:// or https://") {
-			t.Errorf("New(%q) = %v, want a refusal of the endpoint", endpoint, err)
+	for _, refused := range fixture.Refused {
+		why := "http:// or https://"
+		if refused.As == "cleartext" {
+			why = "unencrypted HTTP"
 		}
-	}
-	// From the environment, normalized twice on its way to New.
-	t.Setenv("TELMONI_ENDPOINT", "https://")
-	if _, err := telmoni.NewFromEnv(); err == nil || !strings.Contains(err.Error(), "http:// or https://") {
-		t.Errorf("NewFromEnv() with https:// = %v, want a refusal of the endpoint", err)
+		if _, err := telmoni.New(telmoni.Config{Endpoint: refused.Given}); err == nil || !strings.Contains(err.Error(), why) {
+			t.Errorf("New(%q) = %v, want a refusal naming %q", refused.Given, err, why)
+		}
+		t.Setenv("TELMONI_ENDPOINT", refused.Given)
+		if _, err := telmoni.NewFromEnv(); err == nil || !strings.Contains(err.Error(), why) {
+			t.Errorf("NewFromEnv() with %q = %v, want a refusal naming %q", refused.Given, err, why)
+		}
 	}
 }
 

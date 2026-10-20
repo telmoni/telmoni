@@ -440,7 +440,11 @@ pub(crate) fn is_child() -> bool {
 
 /// Runs the test named `test` in this binary again as a child process, with
 /// `set` in its environment and `unset` out of it, and fails as it failed.
-pub(crate) fn in_child(test: &str, set: &[(&str, &str)], unset: &[&str]) -> Outcome {
+pub(crate) fn in_child<V: AsRef<std::ffi::OsStr>>(
+    test: &str,
+    set: &[(&str, V)],
+    unset: &[&str],
+) -> Outcome {
     let mut command = Command::new(std::env::current_exe()?);
     command
         .args(["--exact", test, "--nocapture", "--test-threads=1"])
@@ -544,5 +548,5 @@ fn the_fakes_work() -> Outcome {
     assert!(harness.sleeps.all().is_empty());
     assert!(harness.spans()?.is_empty());
 
-    in_child("common::the_fakes_work", &[], &[])
+    in_child::<&str>("common::the_fakes_work", &[], &[])
 }

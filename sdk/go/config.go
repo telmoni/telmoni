@@ -3,9 +3,9 @@ package telmoni
 import (
 	"errors"
 	"fmt"
-	"net"
-	"net/url"
+	"net/netip"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -82,13 +82,114 @@ func (c Config) normalized() Config {
 	return c
 }
 
-// isLoopbackHost is whether host is this machine: localhost, a name under it,
-// or a loopback address.
-func isLoopbackHost(host string) bool {
-	if ip := net.ParseIP(host); ip != nil {
-		return ip.IsLoopback()
+const (
+	nameChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-"
+	pathChars = nameChars + "~!$&'()*+,;=:@/"
+	hexDigits = "0123456789ABCDEFabcdef"
+	digits    = "0123456789"
+)
+
+// hostOf is the host endpoint names, as written, or false where it is no URL every SDK
+// reads alike (sdk/fixtures/endpoints.json): nothing a URL parser fills in or rewrites.
+func hostOf(endpoint string) (string, bool) {
+	for i := 0; i < len(endpoint); i++ {
+		if endpoint[i] < '!' || endpoint[i] > '~' {
+			return "", false
+		}
 	}
-	// url.Parse keeps a host's case, which the other SDKs' parsers fold.
+	scheme, rest, found := strings.Cut(endpoint, "://")
+	if !found || !(strings.EqualFold(scheme, "http") || strings.EqualFold(scheme, "https")) {
+		return "", false
+	}
+	authority, path, _ := strings.Cut(rest, "/")
+	segments := strings.Split(path, "/")
+	if !only(path, pathChars) || slices.Contains(segments, ".") || slices.Contains(segments, "..") {
+		return "", false
+	}
+	var host, port string
+	if strings.HasPrefix(authority, "[") {
+		end := strings.IndexByte(authority, ']') + 1
+		if end == 0 {
+			return "", false
+		}
+		host, port = authority[:end], authority[end:]
+		inner := host[1 : end-1]
+		if addr, err := netip.ParseAddr(inner); !only(inner, hexDigits+":.") || err != nil || !addr.Is6() {
+			return "", false
+		}
+	} else {
+		name, number, colon := strings.Cut(authority, ":")
+		host = name
+		if colon {
+			port = ":" + number
+		}
+		// WHATWG's parser reads a name ending in a number as an IPv4 address.
+		labels := strings.Split(strings.TrimSuffix(host, "."), ".")
+		if host == "" || !only(host, nameChars) || slices.ContainsFunc(labels, badLabel) || (numbered(host) && !isIPv4(host)) {
+			return "", false
+		}
+	}
+	return host, portOK(port)
+}
+
+// only is whether every byte of s is one of set's.
+func only(s, set string) bool {
+	for i := 0; i < len(s); i++ {
+		if strings.IndexByte(set, s[i]) < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// numbered is whether host's last label, a trailing dot aside, is a number.
+func numbered(host string) bool {
+	host = strings.TrimSuffix(host, ".")
+	last := host[strings.LastIndexByte(host, '.')+1:]
+	if last != "" && only(last, digits) {
+		return true
+	}
+	return len(last) >= 2 && strings.EqualFold(last[:2], "0x") && only(last[2:], hexDigits)
+}
+
+func isIPv4(host string) bool {
+	addr, err := netip.ParseAddr(host)
+	return err == nil && addr.Is4()
+}
+
+// portOK is whether port is none, an empty one, or up to five digits from 1 to
+// 65535.
+func portOK(port string) bool {
+	if port == "" {
+		return true
+	}
+	number := port[1:]
+	if port[0] != ':' || len(number) > 5 || !only(number, digits) {
+		return false
+	}
+	if number == "" {
+		return true
+	}
+	n, _ := strconv.Atoi(number)
+	return n > 0 && n <= 65535
+}
+
+// badLabel is whether a name's label is one DNS or TLS refuses: empty, past
+// 63 characters, or with a hyphen at either end.
+func badLabel(label string) bool {
+	return label == "" || len(label) > 63 || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-")
+}
+
+// isThisMachine is whether host, as hostOf gives it, is localhost, a name under it,
+// 127.0.0.0/8 or ::1, an IPv4-mapped address read as its IPv4.
+func isThisMachine(host string) bool {
+	if strings.HasPrefix(host, "[") {
+		addr, err := netip.ParseAddr(host[1 : len(host)-1])
+		return err == nil && addr.Unmap().IsLoopback()
+	}
+	if addr, err := netip.ParseAddr(host); err == nil && addr.Is4() {
+		return addr.IsLoopback()
+	}
 	host = strings.ToLower(host)
 	return host == "localhost" || strings.HasSuffix(host, ".localhost")
 }
@@ -113,7 +214,7 @@ func endpointOf(given string) string {
 	if strings.EqualFold(first, "http") || strings.EqualFold(first, "https") {
 		return endpoint
 	}
-	if parsed, err := url.Parse("http://" + endpoint); err == nil && isLoopbackHost(parsed.Hostname()) {
+	if host, ok := hostOf("http://" + endpoint); ok && isThisMachine(host) {
 		return "http://" + endpoint
 	}
 	return "https://" + endpoint
@@ -124,21 +225,15 @@ func trimTail(text string) string {
 	return strings.TrimRightFunc(text, func(r rune) bool { return r == '/' || unicode.IsSpace(r) })
 }
 
-// checkEndpoint refuses an endpoint every export would fail, its scheme or its
-// port wrong, and plain HTTP to another machine, which would bare the key.
+// checkEndpoint refuses an endpoint the SDKs could read two ways, which fails an export
+// or reaches another host, and plain HTTP to another machine, which would bare the key.
 func checkEndpoint(endpoint string) error {
-	notAURL := errors.New("telmoni: the endpoint must be an http:// or https:// URL")
-	parsed, err := url.Parse(endpoint)
-	if err != nil || !strings.Contains(endpoint, "://") || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" {
-		return notAURL
+	host, ok := hostOf(endpoint)
+	if !ok {
+		return errors.New("telmoni: the endpoint must be an http:// or https:// URL")
 	}
-	if port := parsed.Port(); port != "" {
-		if _, err := strconv.ParseUint(port, 10, 16); err != nil {
-			return notAURL
-		}
-	}
-	if parsed.Scheme == "http" && !isLoopbackHost(parsed.Hostname()) {
-		return fmt.Errorf("telmoni: refusing to send the API key over unencrypted HTTP to %q; use HTTPS", parsed.Hostname())
+	if scheme, _, _ := strings.Cut(endpoint, "://"); strings.EqualFold(scheme, "http") && !isThisMachine(host) {
+		return fmt.Errorf("telmoni: refusing to send the API key over unencrypted HTTP to %q; use HTTPS", host)
 	}
 	return nil
 }

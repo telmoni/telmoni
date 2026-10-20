@@ -26,7 +26,7 @@ const CONTENT_DOCS: &str = "https://telmoni.com/docs/api/ingest#what-is-dropped-
 pub(crate) struct Exporter {
     url: String,
     /// Why nothing is sent to the endpoint ([`refusal`]), which the first
-    /// export says. The CLI refuses plain HTTP the same.
+    /// export says.
     refusal: Option<String>,
     bearer: Option<String>,
     capture_content: bool,

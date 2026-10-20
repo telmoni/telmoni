@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ANSWER_MAX, Exporter, fetchTransport } from '../src/exporter';
 import { DEFAULT_ENDPOINT, Telmoni, VERSION, type Config } from '../src/index';
+import { loadFixture } from './helpers';
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -123,46 +124,18 @@ describe('configuration', () => {
 });
 
 describe('the endpoint', () => {
-  it('takes plain HTTP only to this machine', () => {
-    for (const endpoint of [
-      'http://localhost:8080',
-      'http://api.localhost',
-      'http://127.0.0.1:8080/',
-      'http://[::1]:8080',
-      'https://api.example.com',
-    ]) {
-      expect(new Telmoni({ endpoint }).config.endpoint).toBe(endpoint.replace(/\/$/, ''));
+  it('is read as the fixture reads it: plain HTTP to this machine alone, and a host without a scheme as the CLI reads it', () => {
+    const fixture = loadFixture<{
+      taken: { given: string; endpoint: string }[];
+      refused: { given: string; as: 'url' | 'cleartext' }[];
+    }>('endpoints.json');
+    for (const { given, endpoint } of fixture.taken) {
+      expect(new Telmoni({ endpoint: given }).config.endpoint, given).toBe(endpoint);
+      expect(new Telmoni({ endpoint }).config.endpoint, `${given}, read twice`).toBe(endpoint);
     }
-    for (const endpoint of ['http://api.example.com', 'http://10.0.0.5:8080']) {
-      expect(() => new Telmoni({ endpoint })).toThrow(/unencrypted HTTP/);
-    }
-  });
-
-  it('reads a host without a scheme as the CLI does, and takes no scheme but HTTP and HTTPS', () => {
-    for (const [given, endpoint] of [
-      ['api.example.com', 'https://api.example.com'],
-      ['localhost:8080/', 'http://localhost:8080'],
-      ['LOCALHOST:8080', 'http://LOCALHOST:8080'],
-      ['127.0.0.1:8080', 'http://127.0.0.1:8080'],
-      ['[::1]:8080', 'http://[::1]:8080'],
-      ['localhost.example.com', 'https://localhost.example.com'],
-      ['https://api.example.com /', 'https://api.example.com'],
-      ['api.example.com /', 'https://api.example.com'],
-      ['/', DEFAULT_ENDPOINT],
-    ] as const) {
-      expect(new Telmoni({ endpoint: given }).config.endpoint).toBe(endpoint);
-      expect(new Telmoni({ endpoint }).config.endpoint, 'read twice').toBe(endpoint);
-    }
-    for (const endpoint of [
-      'ftp://api.example.com',
-      'https://',
-      'file:///tmp/telmoni',
-      'localhost:abc',
-      'https:/api.example.com',
-      'https//api.example.com',
-      'https://api .example.com',
-    ]) {
-      expect(() => new Telmoni({ endpoint })).toThrow('the endpoint must be an http:// or https:// URL');
+    for (const { given, as } of fixture.refused) {
+      const why = as === 'cleartext' ? /unencrypted HTTP/ : /the endpoint must be an http:\/\/ or https:\/\/ URL/;
+      expect(() => new Telmoni({ endpoint: given }), given).toThrow(why);
     }
   });
 });

@@ -1,4 +1,4 @@
-import { isIP } from 'node:net';
+import { BlockList, isIPv4, isIPv6 } from 'node:net';
 
 import { context, isSpanContextValid, trace } from '@opentelemetry/api';
 import { resourceFromAttributes } from '@opentelemetry/resources';
@@ -17,12 +17,22 @@ import { VERSION } from './version.js';
 /** The machine host; the console's, `https://telmoni.com`, serves people. */
 export const DEFAULT_ENDPOINT = 'https://api.telmoni.com';
 
-// Not /[\s/]+$/: that regex takes quadratic time on a long run of slashes that
-// something follows, and the endpoint can come from anywhere.
+/** Unicode's White_Space, which an endpoint's ends are trimmed of, as Go and Rust trim them: `trim` differs. */
+const WHITE_SPACE = new Set('\t\n\v\f\r \u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000');
+
+// Loops, not /[\s/]+$/, which takes quadratic time on a long run of slashes something follows.
 function trimTail(value: string): string {
   let end = value.length;
-  while (end > 0 && (value.charAt(end - 1) === '/' || value.charAt(end - 1).trim() === '')) end--;
+  while (end > 0 && (value.charAt(end - 1) === '/' || WHITE_SPACE.has(value.charAt(end - 1)))) end--;
   return value.slice(0, end);
+}
+
+function trimEnds(value: string): string {
+  let start = 0;
+  while (start < value.length && WHITE_SPACE.has(value.charAt(start))) start++;
+  let end = value.length;
+  while (end > start && WHITE_SPACE.has(value.charAt(end - 1))) end--;
+  return value.slice(start, end);
 }
 
 function unsetIfBlank(value: string | undefined): string | undefined {
@@ -30,18 +40,81 @@ function unsetIfBlank(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-/** Whether `hostname`, as `URL` spells it, is this machine: `localhost`, a name under it, or a loopback address. */
-function isLoopbackHost(hostname: string): boolean {
-  const bare = hostname.replace(/^\[|\]$/g, '');
-  const version = isIP(bare);
-  if (version === 4) return bare.startsWith('127.');
-  if (version === 6) return bare === '::1';
-  return hostname === 'localhost' || hostname.endsWith('.localhost');
+const PRINTABLE = /^[\x21-\x7e]*$/;
+const NAME = /^[A-Za-z0-9._-]+$/;
+const PATH = /^[A-Za-z0-9\-._~!$&'()*+,;=:@/]*$/;
+const IPV6 = /^[0-9A-Fa-f:.]+$/;
+const PORT = /^(:\d{0,5})?$/;
+
+/** The loopback addresses, which a `BlockList` also matches IPv4-mapped. */
+const LOOPBACK = new BlockList();
+LOOPBACK.addSubnet('127.0.0.0', 8, 'ipv4');
+LOOPBACK.addAddress('::1', 'ipv6');
+
+/**
+ * The host `endpoint` names, as written, or `undefined` where it is no URL every SDK
+ * reads alike (`sdk/fixtures/endpoints.json`): nothing a URL parser fills in or rewrites.
+ */
+function hostOf(endpoint: string): string | undefined {
+  const scheme = endpoint.indexOf('://');
+  if (!PRINTABLE.test(endpoint) || scheme < 0 || !/^https?$/i.test(endpoint.slice(0, scheme))) return undefined;
+  const rest = endpoint.slice(scheme + 3);
+  const slash = rest.indexOf('/');
+  const authority = slash < 0 ? rest : rest.slice(0, slash);
+  const path = slash < 0 ? '' : rest.slice(slash + 1);
+  if (!PATH.test(path) || path.split('/').some((segment) => segment === '.' || segment === '..')) return undefined;
+  let host: string;
+  let port: string;
+  if (authority.startsWith('[')) {
+    const end = authority.indexOf(']') + 1;
+    host = authority.slice(0, end);
+    port = authority.slice(end);
+    const inner = host.slice(1, -1);
+    if (end === 0 || !IPV6.test(inner) || !isIPv6(inner)) return undefined;
+  } else {
+    const colon = authority.indexOf(':');
+    host = colon < 0 ? authority : authority.slice(0, colon);
+    port = colon < 0 ? '' : authority.slice(colon);
+    // WHATWG's parser reads a name ending in a number as an IPv4 address.
+    const labels = host.replace(/\.$/, '').split('.');
+    if (!NAME.test(host) || !labels.every(labelOk) || (numbered(host) && !isIPv4(host))) return undefined;
+  }
+  return portOk(port) ? host : undefined;
+}
+
+/** A name's label as DNS and TLS take it: 1 to 63 characters, no hyphen at either end. */
+function labelOk(label: string): boolean {
+  return label.length > 0 && label.length <= 63 && !label.startsWith('-') && !label.endsWith('-');
+}
+
+/** No port, an empty one, or up to five digits from 1 to 65535. */
+function portOk(port: string): boolean {
+  if (!PORT.test(port)) return false;
+  if (port.length <= 1) return true;
+  const number = Number(port.slice(1));
+  return number > 0 && number <= 65535;
+}
+
+/** Whether `host`'s last label, a trailing dot aside, is a number. */
+function numbered(host: string): boolean {
+  const last = host.replace(/\.$/, '').split('.').pop() ?? '';
+  return /^\d+$/.test(last) || /^0x[0-9a-f]*$/i.test(last);
+}
+
+/**
+ * Whether `host`, as `hostOf` gives it, is this machine: `localhost`, a name
+ * under it, 127.0.0.0/8 or ::1, an IPv4-mapped address read as its IPv4.
+ */
+function isThisMachine(host: string): boolean {
+  if (host.startsWith('[')) return LOOPBACK.check(host.slice(1, -1), 'ipv6');
+  if (isIPv4(host)) return LOOPBACK.check(host, 'ipv4');
+  const name = host.toLowerCase();
+  return name === 'localhost' || name.endsWith('.localhost');
 }
 
 /** The endpoint as the CLI reads one: a host without a scheme gets `https://`, or `http://` for this machine. */
 function endpointOf(given: string | undefined): string {
-  const text = unsetIfBlank(given) ?? '';
+  const text = trimEnds(given ?? '');
   // Only what follows the `://` is trimmed, so a second reading changes nothing.
   const scheme = text.indexOf('://');
   if (scheme >= 0) return text.slice(0, scheme + 3) + trimTail(text.slice(scheme + 3));
@@ -49,29 +122,20 @@ function endpointOf(given: string | undefined): string {
   if (endpoint === '') return DEFAULT_ENDPOINT;
   // `https:/host` or `https//host` is a scheme mistyped, not a host: the check refuses it.
   if (/^https?$/i.test(endpoint.split(/[:/]/, 1)[0] ?? '')) return endpoint;
-  let local = false;
-  try {
-    local = isLoopbackHost(new URL(`http://${endpoint}`).hostname);
-  } catch {
-    // No host either: the check refuses it.
-  }
+  const host = hostOf(`http://${endpoint}`);
+  const local = host !== undefined && isThisMachine(host);
   return `${local ? 'http' : 'https'}://${endpoint}`;
 }
 
-const NOT_A_URL = 'the endpoint must be an http:// or https:// URL';
-
-/** A scheme but HTTP or HTTPS fails every export, and plain HTTP to another machine would carry the key bare. */
+/**
+ * An endpoint the four SDKs could read two ways fails some export or reaches
+ * another host, and plain HTTP to another machine would carry the key bare.
+ */
 function checkEndpoint(endpoint: string): void {
-  if (!endpoint.includes('://')) throw new TypeError(NOT_A_URL);
-  let url: URL;
-  try {
-    url = new URL(endpoint);
-  } catch {
-    throw new TypeError(NOT_A_URL);
-  }
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new TypeError(NOT_A_URL);
-  if (url.protocol === 'http:' && !isLoopbackHost(url.hostname)) {
-    throw new TypeError(`refusing to send the API key over unencrypted HTTP to '${url.hostname}'; use HTTPS`);
+  const host = hostOf(endpoint);
+  if (host === undefined) throw new TypeError('the endpoint must be an http:// or https:// URL');
+  if (endpoint.slice(0, 7).toLowerCase() === 'http://' && !isThisMachine(host)) {
+    throw new TypeError(`refusing to send the API key over unencrypted HTTP to '${host}'; use HTTPS`);
   }
 }
 

@@ -94,9 +94,16 @@ with no model is named by its operation alone; each with one warning, where
 ingest would refuse the span, or the whole run for its agent, user or session.
 `New` returns an error for a client-wide
 `SampleRate` outside (0, 1], for a plain-HTTP endpoint whose host is not this
-machine, and for one of any scheme but HTTP and HTTPS; `RecordRun`, below, for
-a record it refuses. An endpoint without a scheme gets `https://`, or
-`http://` for this machine, as the CLI reads one.
+machine — `localhost`, a name under it, 127.0.0.0/8 or `::1`, an IPv4-mapped
+address read as its IPv4 — for one of any scheme but HTTP and HTTPS, and for
+one the four SDKs could read two ways: one not in printable ASCII, or holding
+credentials, an escape, a query, a fragment, a dot segment or a character a
+URL parser would escape, or a port of 0 or past 65535, or naming a host that
+is neither a name of letters, digits, dots, hyphens and underscores, in labels
+of 1 to 63 characters with no hyphen at either end and the last no number, nor
+an IPv4 address in four decimal parts, nor an IPv6 one in brackets; `RecordRun`,
+below, for a record it refuses. An endpoint without a scheme gets `https://`,
+or `http://` for this machine, as the CLI reads one.
 
 ## A run recorded after it ended
 

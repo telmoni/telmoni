@@ -167,106 +167,98 @@ fn the_client_builds_from_env_with_the_real_transport() -> Outcome {
         telmoni.shutdown();
         return Ok(());
     }
-    in_child(
+    in_child::<&str>(
         "the_client_builds_from_env_with_the_real_transport",
         &[],
         &["TELMONI_ENDPOINT", "TELMONI_API_KEY", "TELMONI_ORG"],
     )
 }
 
+/// Read as unset, it sent to the hosted default with the key: refused instead.
+#[cfg(unix)]
 #[test]
-fn plain_http_is_refused_except_to_this_machine() -> Outcome {
-    for endpoint in [
-        "http://localhost:8080",
-        "http://api.localhost",
-        "http://127.0.0.1:8080/",
-        "http://[::1]:8080",
-        "https://api.example.com",
-    ] {
-        let harness =
-            common::Harness::with(Config::new(endpoint, None, Some("telmoni_k".to_owned())))?;
-        let run = harness
-            .telmoni
-            .run("bot", telmoni_sdk::RunOptions::default())?;
-        run.end();
-        harness.flush()?;
-        assert!(harness.transport.count() >= 1, "{endpoint} sent nothing");
-        let warnings = harness.warnings.all();
-        assert!(warnings.is_empty(), "{endpoint}: {warnings:?}");
-        harness.telmoni.shutdown();
-    }
-    for endpoint in ["http://api.example.com", "http://10.0.0.5:8080"] {
-        let harness =
-            common::Harness::with(Config::new(endpoint, None, Some("telmoni_k".to_owned())))?;
-        let run = harness
-            .telmoni
-            .run("bot", telmoni_sdk::RunOptions::default())?;
-        run.end();
-        harness.flush()?;
-        assert_eq!(
-            harness.transport.count(),
-            0,
-            "{endpoint} sent the key in the clear"
-        );
-        let warnings = harness.warnings.all();
-        assert_eq!(warnings.len(), 1, "{warnings:?}");
-        assert!(
-            warnings
-                .first()
-                .is_some_and(|warning| warning.contains("unencrypted HTTP")),
-            "{warnings:?}"
-        );
-        harness.telmoni.shutdown();
-    }
-    Ok(())
-}
+fn an_endpoint_variable_that_is_no_unicode_is_refused() -> Outcome {
+    use std::os::unix::ffi::OsStrExt as _;
 
-#[test]
-fn a_host_without_a_scheme_is_read_as_the_cli_reads_it() -> Outcome {
-    for (given, endpoint) in [
-        ("api.example.com", "https://api.example.com"),
-        ("localhost:8080/", "http://localhost:8080"),
-        ("LOCALHOST:8080", "http://LOCALHOST:8080"),
-        ("127.0.0.1:8080", "http://127.0.0.1:8080"),
-        ("[::1]:8080", "http://[::1]:8080"),
-        ("localhost.example.com", "https://localhost.example.com"),
-        ("https://api.example.com /", "https://api.example.com"),
-        ("api.example.com /", "https://api.example.com"),
-        ("/", DEFAULT_ENDPOINT),
-    ] {
-        assert_eq!(Config::new(given, None, None).endpoint, endpoint, "{given}");
-        assert_eq!(
-            Config::new(endpoint, None, None).endpoint,
-            endpoint,
-            "{endpoint}, read twice"
-        );
-    }
-    for endpoint in [
-        "ftp://api.example.com",
-        "https://",
-        "file:///tmp/telmoni",
-        "localhost:abc",
-        "https:/api.example.com",
-        "https//api.example.com",
-        "https://api .example.com",
-    ] {
-        let harness =
-            common::Harness::with(Config::new(endpoint, None, Some("telmoni_k".to_owned())))?;
-        let run = harness
+    if is_child() {
+        let harness = common::Harness::with(Config::from_env())?;
+        harness
             .telmoni
-            .run("bot", telmoni_sdk::RunOptions::default())?;
-        run.end();
+            .run("bot", telmoni_sdk::RunOptions::default())?
+            .end();
         harness.flush()?;
-        assert_eq!(harness.transport.count(), 0, "{endpoint} was sent to");
+        harness.telmoni.shutdown();
+        assert_eq!(harness.transport.count(), 0, "it was sent somewhere");
         let warnings = harness.warnings.all();
-        assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(
             warnings
                 .first()
                 .is_some_and(|warning| warning.contains("http:// or https://")),
             "{warnings:?}"
         );
-        harness.telmoni.shutdown();
+        return Ok(());
+    }
+    in_child(
+        "an_endpoint_variable_that_is_no_unicode_is_refused",
+        &[(
+            "TELMONI_ENDPOINT",
+            std::ffi::OsStr::from_bytes(b"http://localhost:4318\xc3"),
+        )],
+        &[],
+    )
+}
+
+/// As `sdk/fixtures/endpoints.json` reads them: plain HTTP to this machine
+/// alone, and a host without a scheme as the CLI reads it.
+#[test]
+fn every_endpoint_is_read_as_the_fixture_reads_it() -> Outcome {
+    let fixture = common::load_fixture("endpoints.json")?;
+    let taken = common::field(&fixture, "taken")?
+        .as_array()
+        .ok_or("taken")?;
+    for case in taken {
+        let given = common::text(case, "given")?;
+        let endpoint = common::text(case, "endpoint")?;
+        assert_eq!(Config::new(given, None, None).endpoint, endpoint, "{given}");
+        assert_eq!(
+            Config::new(endpoint, None, None).endpoint,
+            endpoint,
+            "{given}, read twice"
+        );
+        let (sent, warnings) = one_run(given)?;
+        assert!(
+            sent >= 1 && warnings.is_empty(),
+            "{given}: {sent} sent, {warnings:?}"
+        );
+    }
+    let refused = common::field(&fixture, "refused")?
+        .as_array()
+        .ok_or("refused")?;
+    for case in refused {
+        let given = common::text(case, "given")?;
+        let why = match common::text(case, "as")? {
+            "cleartext" => "unencrypted HTTP",
+            _ => "http:// or https://",
+        };
+        let (sent, warnings) = one_run(given)?;
+        assert_eq!(sent, 0, "{given} was sent to");
+        assert!(
+            warnings.len() == 1 && warnings.first().is_some_and(|text| text.contains(why)),
+            "{given}: {warnings:?}"
+        );
     }
     Ok(())
+}
+
+/// One run on a client whose endpoint is `given`: the exports it sent, and its
+/// warnings.
+fn one_run(given: &str) -> Result<(usize, Vec<String>), common::Failure> {
+    let harness = common::Harness::with(Config::new(given, None, Some("telmoni_k".to_owned())))?;
+    harness
+        .telmoni
+        .run("bot", telmoni_sdk::RunOptions::default())?
+        .end();
+    harness.flush()?;
+    harness.telmoni.shutdown();
+    Ok((harness.transport.count(), harness.warnings.all()))
 }
