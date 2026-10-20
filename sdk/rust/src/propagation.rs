@@ -10,7 +10,7 @@ use opentelemetry::propagation::{Extractor, Injector};
 use opentelemetry::trace::{
     SpanContext, SpanId, TraceContextExt as _, TraceFlags, TraceId, TraceState,
 };
-use uuid::Uuid;
+use uuid::fmt::Hyphenated;
 
 use crate::contract;
 use crate::runs::RunInfo;
@@ -95,7 +95,8 @@ pub(crate) fn read_headers(headers: &dyn Carrier) -> Option<Continued> {
             _ => {}
         }
     }
-    let run_id = run_id.filter(|id| Uuid::parse_str(id).is_ok())?;
+    // The hyphenated form alone, as the other SDKs read it: `parse_str` takes four.
+    let run_id = run_id.filter(|id| id.parse::<Hyphenated>().is_ok())?;
     let agent = agent.filter(|agent| !agent.is_empty())?;
     Some(Continued {
         span_context,
@@ -160,6 +161,8 @@ pub(crate) fn decode_baggage_value(value: &str) -> String {
         let encoded = (first == b'%')
             .then(|| after.get(..2))
             .flatten()
+            // `from_str_radix` takes a leading `+` too.
+            .filter(|pair| pair.iter().all(u8::is_ascii_hexdigit))
             .and_then(|pair| std::str::from_utf8(pair).ok())
             .and_then(|pair| u8::from_str_radix(pair, 16).ok());
         match encoded {

@@ -38,6 +38,20 @@
       }
     },
     {
+      "name": "a % before a sign and a digit, kept as it is",
+      "headers": {
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "baggage": "telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=bot%+5"
+      },
+      "run": {
+        "run_id": "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
+        "agent": "bot%+5",
+        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "parent_span_id": "00f067aa0ba902b7",
+        "sampled": true
+      }
+    },
+    {
       "name": "an agent in another script, percent-encoded",
       "headers": {
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
@@ -88,6 +102,30 @@
       "headers": {
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
         "baggage": "telmoni.run_id=not-a-uuid,telmoni.agent=bot"
+      },
+      "run": null
+    },
+    {
+      "name": "a run id in braces",
+      "headers": {
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "baggage": "telmoni.run_id={0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01},telmoni.agent=bot"
+      },
+      "run": null
+    },
+    {
+      "name": "a run id as 32 hex digits",
+      "headers": {
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "baggage": "telmoni.run_id=0191a3b47c2e7d3f8e4a5b6c7d8e9f01,telmoni.agent=bot"
+      },
+      "run": null
+    },
+    {
+      "name": "a run id as a URN",
+      "headers": {
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "baggage": "telmoni.run_id=urn:uuid:0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=bot"
       },
       "run": null
     },
