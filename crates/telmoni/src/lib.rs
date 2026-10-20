@@ -20,9 +20,9 @@
 
 pub mod cli;
 pub mod door;
+mod serve;
 pub mod sweeps;
 
-use std::net::SocketAddr;
 use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
@@ -468,18 +468,18 @@ impl App {
 
         // With the peer's address on every request, so the door's per-address
         // limits hold a caller that sends no `X-Forwarded-For` too.
-        let serve = axum::serve(
+        let serve = serve::serve(
             listener,
-            self.router()
-                .into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .with_graceful_shutdown(telmoni_shared::shutdown::shutdown_signal());
+            self.router(),
+            serve::HEAD_WAIT,
+            telmoni_shared::shutdown::shutdown_signal(),
+        );
         // ⚠ These loops are raced against the server: a dead one would leave
         // a Ready pod that quietly stops delivering, writing pings, retiring
         // keys or finishing purges, so the process exits and the restart is
         // the recovery.
         tokio::select! {
-            served = serve => served?,
+            () = serve => {},
             ended = delivery => match ended {
                 Ok(()) => anyhow::bail!("the delivery loop exited; restarting the process"),
                 Err(e) => anyhow::bail!("the delivery loop died: {e}"),

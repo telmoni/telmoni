@@ -2886,6 +2886,7 @@ dependencies = [
  "async-trait",
  "axum",
  "dotenvy",
+ "hyper-util",
  "mimalloc",
  "serde_json",
  "sqlx",
