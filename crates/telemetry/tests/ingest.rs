@@ -400,6 +400,15 @@ async fn a_body_past_the_cap_is_too_large_however_it_is_sent(pool: PgPool) {
         headers.get(header::RETRY_AFTER).is_none(),
         "a 413 is not retried"
     );
+    let past_the_read = vec![b' '; contract::BATCH_MAX_BYTES + 2];
+    let (status, _, _) = lane
+        .send(Some(INGEST_KEY), "application/json", None, past_the_read)
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::PAYLOAD_TOO_LARGE,
+        "a body the read itself stops"
+    );
 
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
     encoder.write_all(&huge).expect("compress");
@@ -819,35 +828,22 @@ async fn an_export_nobody_waits_for_is_settled_all_the_same(pool: PgPool) {
     .await;
 }
 
-/// A body that has not arrived within the wait (a fifth of a second here, a
-/// minute on every binary) is refused `invalid-batch`, and nothing written.
-#[sqlx::test]
-async fn a_body_that_does_not_arrive_in_time_is_refused(pool: PgPool) {
-    let (organization, project) = (OrganizationId::new(), ProjectId::new());
-    let auth = AuthStub::new();
-    auth.key(INGEST_KEY, &organization, &project, &[ApiKeyScope::Ingest]);
-    let state = common::state_waiting_bodies(&pool, auth.clone(), Duration::from_millis(200));
+/// What a server over `state` answers `request`, sent raw on a connection of
+/// its own, so hyper reads the body as it reads a client's.
+async fn answer_raw(state: Arc<telmoni_telemetry::AppState>, request: &str) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("a port");
     let address = listener.local_addr().expect("its address");
     tokio::spawn(async move { axum::serve(listener, lanes(state)).await });
 
-    // Its headers whole, and the first byte of the thousand its body says.
     let mut stream = tokio::net::TcpStream::connect(address)
         .await
         .expect("a connection");
     stream
-        .write_all(
-            format!(
-                "POST {LANE} HTTP/1.1\r\nhost: localhost\r\nauthorization: Bearer {INGEST_KEY}\r\n\
-                 content-type: application/json\r\ncontent-length: 1000\r\n\r\n{{"
-            )
-            .as_bytes(),
-        )
+        .write_all(request.as_bytes())
         .await
-        .expect("the request's start");
-    let started = Instant::now();
+        .expect("the request");
     let mut answer = Vec::new();
     tokio::time::timeout(Duration::from_secs(10), async {
         let mut buffer = [0u8; 4096];
@@ -861,7 +857,28 @@ async fn a_body_that_does_not_arrive_in_time_is_refused(pool: PgPool) {
     })
     .await
     .expect("answered within ten seconds");
-    let answer = String::from_utf8_lossy(&answer);
+    String::from_utf8_lossy(&answer).into_owned()
+}
+
+/// A body that has not arrived within the wait (a fifth of a second here, a
+/// minute on every binary) is refused `invalid-batch`, and nothing written.
+#[sqlx::test]
+async fn a_body_that_does_not_arrive_in_time_is_refused(pool: PgPool) {
+    let (organization, project) = (OrganizationId::new(), ProjectId::new());
+    let auth = AuthStub::new();
+    auth.key(INGEST_KEY, &organization, &project, &[ApiKeyScope::Ingest]);
+    let state = common::state_waiting_bodies(&pool, auth.clone(), Duration::from_millis(200));
+
+    // Its headers whole, and the first byte of the thousand its body says.
+    let started = Instant::now();
+    let answer = answer_raw(
+        state,
+        &format!(
+            "POST {LANE} HTTP/1.1\r\nhost: localhost\r\nauthorization: Bearer {INGEST_KEY}\r\n\
+             content-type: application/json\r\ncontent-length: 1000\r\n\r\n{{"
+        ),
+    )
+    .await;
     assert!(answer.starts_with("HTTP/1.1 400"), "{answer}");
     assert!(
         answer.contains(
@@ -870,5 +887,29 @@ async fn a_body_that_does_not_arrive_in_time_is_refused(pool: PgPool) {
         "{answer}"
     );
     assert!(started.elapsed() < Duration::from_secs(5));
+    assert_eq!(auth.homes_asked(), 0, "nothing keyed");
+}
+
+/// A chunked body hyper cannot read is refused `invalid-batch`, never as too large.
+#[sqlx::test]
+async fn a_body_that_cannot_be_read_is_invalid_not_too_large(pool: PgPool) {
+    let (organization, project) = (OrganizationId::new(), ProjectId::new());
+    let auth = AuthStub::new();
+    auth.key(INGEST_KEY, &organization, &project, &[ApiKeyScope::Ingest]);
+
+    // A chunk whose size line is no hex.
+    let answer = answer_raw(
+        common::state(&pool, auth.clone()),
+        &format!(
+            "POST {LANE} HTTP/1.1\r\nhost: localhost\r\nauthorization: Bearer {INGEST_KEY}\r\n\
+             content-type: application/json\r\ntransfer-encoding: chunked\r\n\r\nzz\r\n"
+        ),
+    )
+    .await;
+    assert!(answer.starts_with("HTTP/1.1 400"), "{answer}");
+    assert!(
+        answer.contains("/errors/telemetry/invalid-batch: the body could not be read"),
+        "{answer}"
+    );
     assert_eq!(auth.homes_asked(), 0, "nothing keyed");
 }

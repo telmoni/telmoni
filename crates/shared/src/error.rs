@@ -426,9 +426,8 @@ impl AuthzError {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum TelemetryError {
-    /// The body did not decode as OTLP in the encoding its `Content-Type`
-    /// named, held no span, held more than the batch allows, or did not
-    /// arrive within the lane's wait. Maps to 400.
+    /// The body could not be read or did not arrive within the lane's wait,
+    /// did not decode as OTLP, or held no span or more than the batch allows. Maps to 400.
     #[error("invalid batch: {0}")]
     InvalidBatch(String),
 

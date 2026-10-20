@@ -3,9 +3,9 @@
 //! `Content-Type` names. Nothing here quotes the body back: what a span
 //! carries is the sender's, and an error names a place, never a value.
 
-use std::borrow::Cow;
 use std::io::Read as _;
 
+use axum::body::Bytes;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message as _;
 use prost::encoding::{WireType, decode_key, decode_varint};
@@ -61,31 +61,30 @@ pub enum DecodeError {
     Invalid(String),
 }
 
-/// The body as sent, or inflated where `Content-Encoding` said gzip —
-/// reading only as far as the cap, since a small body may unfold to a very
-/// large one.
+/// The body as sent, or inflated where `Content-Encoding` said gzip, read no
+/// further than the cap, since a small body may unfold to a very large one.
 ///
 /// # Errors
 ///
 /// The body, inflated, is past the cap; or it is not gzip.
-pub fn inflate(body: &[u8], gzipped: bool) -> Result<Cow<'_, [u8]>, DecodeError> {
+pub fn inflate(body: Bytes, gzipped: bool) -> Result<Bytes, DecodeError> {
     if !gzipped {
         return if body.len() > BATCH_MAX_BYTES {
             Err(DecodeError::TooLarge)
         } else {
-            Ok(Cow::Borrowed(body))
+            Ok(body)
         };
     }
     let cap = u64::try_from(BATCH_MAX_BYTES).unwrap_or(u64::MAX);
     let mut inflated = Vec::new();
-    flate2::read::GzDecoder::new(body)
+    flate2::read::GzDecoder::new(body.as_ref())
         .take(cap.saturating_add(1))
         .read_to_end(&mut inflated)
         .map_err(|_| DecodeError::Invalid("the body is not gzip".into()))?;
     if inflated.len() > BATCH_MAX_BYTES {
         return Err(DecodeError::TooLarge);
     }
-    Ok(Cow::Owned(inflated))
+    Ok(Bytes::from(inflated))
 }
 
 /// The request `bytes` hold, read as `encoding`.
@@ -343,10 +342,16 @@ mod tests {
         let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
         encoder.write_all(plain).expect("compress");
         let gzipped = encoder.finish().expect("compress");
-        assert_eq!(inflate(&gzipped, true).expect("gzip").as_ref(), plain);
-        assert_eq!(inflate(plain, false).expect("identity").as_ref(), plain);
         assert_eq!(
-            inflate(b"not gzip", true).unwrap_err(),
+            inflate(Bytes::from(gzipped), true).expect("gzip").as_ref(),
+            plain
+        );
+        let sent = Bytes::from_static(plain);
+        let kept = inflate(sent.clone(), false).expect("identity");
+        assert_eq!(kept, sent);
+        assert_eq!(kept.as_ptr(), sent.as_ptr(), "moved, never copied");
+        assert_eq!(
+            inflate(Bytes::from_static(b"not gzip"), true).unwrap_err(),
             DecodeError::Invalid("the body is not gzip".into())
         );
     }
@@ -364,10 +369,16 @@ mod tests {
             "zeros compress: {}",
             gzipped.len()
         );
-        assert_eq!(inflate(&gzipped, true).unwrap_err(), DecodeError::TooLarge);
-        assert_eq!(inflate(&huge, false).unwrap_err(), DecodeError::TooLarge);
+        assert_eq!(
+            inflate(Bytes::from(gzipped), true).unwrap_err(),
+            DecodeError::TooLarge
+        );
+        assert_eq!(
+            inflate(Bytes::from(huge), false).unwrap_err(),
+            DecodeError::TooLarge
+        );
         let at_cap = vec![0u8; BATCH_MAX_BYTES];
-        assert!(inflate(&at_cap, false).is_ok());
+        assert!(inflate(Bytes::from(at_cap), false).is_ok());
     }
 
     fn hex_literal(hex: &[u8]) -> Vec<u8> {

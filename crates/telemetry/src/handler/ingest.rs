@@ -104,13 +104,8 @@ async fn handle(
         ))
         .into());
     };
-    let raw = read.map_err(|_| TelemetryError::BatchTooLarge {
-        max_bytes: BATCH_MAX_BYTES,
-    })?;
-    // Owned, for the write's own task.
-    let bytes = decode::inflate(&raw, gzipped)
-        .map_err(decode_error)?
-        .into_owned();
+    let raw = read.map_err(unread)?;
+    let bytes = decode::inflate(raw, gzipped).map_err(decode_error)?;
 
     let digest = claims::digest(&bytes);
     let guard = match claims::claim(&state.redis, &key.project_id, &digest).await {
@@ -376,6 +371,19 @@ const fn rpc_code(status: StatusCode) -> i32 {
         StatusCode::SERVICE_UNAVAILABLE => 14,
         _ => 13,
     }
+}
+
+/// A failed `to_bytes`: the body's own failure (hyper could not read it)
+/// comes boxed as axum's error and is a 400; anything else is the cap's 413.
+fn unread(error: axum::Error) -> TelmoniError {
+    if error.into_inner().is::<axum::Error>() {
+        TelemetryError::InvalidBatch("the body could not be read".into())
+    } else {
+        TelemetryError::BatchTooLarge {
+            max_bytes: BATCH_MAX_BYTES,
+        }
+    }
+    .into()
 }
 
 fn decode_error(error: DecodeError) -> TelmoniError {
