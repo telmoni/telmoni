@@ -47,27 +47,35 @@ impl Report {
             .iter()
             .map(refused_line)
             .chain(self.dropped.iter().map(|d| dropped_line(d, content_mode)));
-        let mut message = String::new();
-        let mut left_out = 0usize;
-        for line in lines {
-            let needed = message.len() + line.len() + usize::from(!message.is_empty());
-            if left_out > 0 || needed > ERROR_MESSAGE_MAX {
-                left_out += 1;
-                continue;
-            }
-            if !message.is_empty() {
-                message.push('\n');
-            }
-            message.push_str(&line);
-        }
-        if left_out > 0 {
-            if !message.is_empty() {
-                message.push('\n');
-            }
-            message.push_str(&format!("and {left_out} more"));
-        }
-        message
+        cut(lines, self.refused.len() + self.dropped.len())
     }
+}
+
+/// `lines` joined while they fit in [`ERROR_MESSAGE_MAX`], then "and N more"
+/// for the rest of `total`, counted and never formatted: an export of a
+/// hundred thousand drops formats only the lines its answer can hold.
+fn cut(lines: impl Iterator<Item = String>, total: usize) -> String {
+    let mut message = String::new();
+    let mut named = 0usize;
+    for line in lines {
+        let needed = message.len() + line.len() + usize::from(!message.is_empty());
+        if needed > ERROR_MESSAGE_MAX {
+            break;
+        }
+        if !message.is_empty() {
+            message.push('\n');
+        }
+        message.push_str(&line);
+        named += 1;
+    }
+    let left_out = total.saturating_sub(named);
+    if left_out > 0 {
+        if !message.is_empty() {
+            message.push('\n');
+        }
+        message.push_str(&format!("and {left_out} more"));
+    }
+    message
 }
 
 fn refused_line(refused: &Refused) -> String {
@@ -168,5 +176,23 @@ mod tests {
             .parse()
             .expect("a count");
         assert_eq!(named + counted, 200, "every drop is named or counted");
+    }
+
+    /// Past the first line that does not fit, no line is formatted.
+    #[test]
+    fn lines_past_the_cap_are_counted_never_formatted() {
+        let formatted = std::cell::Cell::new(0usize);
+        let lines = (0..100_000).map(|n| {
+            formatted.set(formatted.get() + 1);
+            format!("span 00f067aa0ba902b7 dropped gen_ai.input.messages.{n}: content")
+        });
+        let message = cut(lines, 100_000);
+        let named = message.lines().count() - 1;
+        assert_eq!(
+            formatted.get(),
+            named + 1,
+            "the line that did not fit, and none after"
+        );
+        assert!(message.ends_with(&format!("\nand {} more", 100_000 - named)));
     }
 }
