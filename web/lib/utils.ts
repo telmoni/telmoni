@@ -21,3 +21,8 @@ const twMerge = extendTailwindMerge({
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+/** How far a menu, popover, select or tooltip stands off the window's edges:
+ *  the 14px every control keeps from an edge (`p-3.5`). Near one, it moves
+ *  in, or scrolls inside that, rather than touch it. */
+export const WINDOW_INSET = 14;
