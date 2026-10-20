@@ -139,8 +139,7 @@ function SessionPanel({
   const titleId = useId();
   const panel = useRef<HTMLDivElement>(null);
   const { full, width, toggleFull, edge } = usePanelWidth(panel);
-  // The session is read with the spans the layout pins, so the rows need no
-  // second read; a layout that pins others reads it again, as the page does.
+  // Read with the layout's pins, which the rows take as theirs: a pin changed reads once.
   const { options } = useLayout({ layouts, project });
   const params = new URLSearchParams({ project: projectId });
   if (query.days !== undefined) params.set("days", String(query.days));
@@ -310,7 +309,7 @@ function SessionPanel({
               {...page}
               sessionId={read.trace.session_id}
               traces={read.trace.traces}
-              readWith={read.trace.pinned}
+              readWith={options.pinned}
               window={query}
             />
             {read.trace.more && (

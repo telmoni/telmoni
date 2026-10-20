@@ -24,7 +24,9 @@ vi.mock("@/app/(app)/[organization]/[project]/traces/actions", () => ({
 }));
 
 import { SessionPeek } from "@/components/traces/session-peek";
+import { DEFAULT_LAYOUT } from "@/lib/layout";
 import { TRACE_PREFS_KEY } from "@/lib/trace-prefs";
+import { setTracePrefs } from "@/lib/use-trace-prefs";
 import { PEEK_NUDGED } from "@/lib/traces";
 
 const A = "conv-1";
@@ -239,6 +241,20 @@ describe("SessionPeek", () => {
     open(A);
     peek();
     fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads the session once for a pin changed, its rows taking the panel's read", async () => {
+    open(A);
+    peek();
+    await screen.findByRole("table");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    answers[A] = () => Response.json({ ...detail(A), pinned: ["answer"] });
+    act(() => setTracePrefs({ layout: { view: null, options: { ...DEFAULT_LAYOUT, pinned: ["answer"] } } }));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(String(fetchMock.mock.calls[1]![0])).toContain("pinned=answer");
+    // Any read the rows made of their own would have gone by now.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 

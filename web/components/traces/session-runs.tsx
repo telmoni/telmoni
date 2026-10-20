@@ -83,14 +83,16 @@ function usePinnedSpans(
     null,
   );
   const key = [...pinned].sort().join("\u0000");
+  // By the names, not the array: a saved layout's is built afresh each draw.
+  const names = pinned.join("\u0000");
   useEffect(() => {
-    if (same || pinned.length === 0) return;
+    if (same || names === "") return;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), READ_TIMEOUT_MS);
     const params = new URLSearchParams({ project: projectId });
     if (query.days !== undefined) params.set("days", String(query.days));
     if (query.limit !== undefined) params.set("limit", String(query.limit));
-    for (const name of pinned) params.append("pinned", name);
+    for (const name of names.split("\u0000")) params.append("pinned", name);
     // The route's answer is the session as the server checked it; a shape
     // this build cannot read is left as nothing pinned.
     void fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}?${params}`, {
@@ -110,7 +112,7 @@ function usePinnedSpans(
       clearTimeout(timer);
       controller.abort();
     };
-  }, [same, pinned, key, projectId, sessionId, query.days, query.limit]);
+  }, [same, names, key, projectId, sessionId, query.days, query.limit]);
 
   if (pinned.length === 0) return new Map();
   if (same) return new Map(traces.map((t) => [t.run_id, t.pinned]));
