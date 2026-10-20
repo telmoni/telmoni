@@ -1,11 +1,5 @@
-//! The spans and their rollup, against a real ClickHouse: an insert as the
-//! module's user, with no setting on it, lands in both tables; a read sees
-//! only the projects it names, by the row policy and by its own `WHERE`
-//! each on its own, and a read naming none fails; the module's user reaches
-//! nothing else; a failed read's error quotes none of its values; the
-//! nightly purge drops whole days and months past retention and nothing
-//! newer; a deleted project's rows are hidden at once and off the disk once
-//! the nightly purge has rewritten them away.
+//! The spans and their rollup against a real ClickHouse: inserts, reads held
+//! to their projects, retention's purge, and a deleted project's rows.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
 mod common;
@@ -462,7 +456,7 @@ async fn the_nightly_purge_drops_whole_days_and_months_past_retention() {
 /// which the migrator reads past, with `apply_deleted_mask` off, to prove.
 /// A second delete finds nothing and is fine.
 #[tokio::test]
-async fn a_deleted_projects_rows_are_hidden_at_once_and_off_the_disk_by_the_nightly_purge() {
+async fn a_deleted_projects_rows_are_hidden_within_moments_and_off_the_disk_by_the_nightly_purge() {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };

@@ -1,9 +1,5 @@
-//! Each project's settings, in Postgres, as the `telemetry` role under
-//! row-level security: a project with none keeps no content, a project reads
-//! its own settings and no other's, a write binds the project and its own
-//! organization, and auth's purges and a transfer's move reach the rows they
-//! name and no others — the purges in ClickHouse too, where a purged
-//! project's spans and totals are hidden at once.
+//! Each project's settings under row-level security, and auth's purges and a
+//! transfer's move, which reach the rows they name alone, in ClickHouse too.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
 mod common;
@@ -199,11 +195,7 @@ async fn a_write_binds_the_project_and_its_own_organization(pool: PgPool) {
     }
 }
 
-/// The purges reach the rows they name and no others — the settings in
-/// Postgres, and the spans and totals in ClickHouse, hidden at once — a
-/// transfer's move takes a row out of its old organization's purge, and
-/// each is idempotent. The organization's purge finds its projects through
-/// their settings rows, so a project that left it keeps its spans.
+/// The purges and a transfer's move reach the rows they name and no others, idempotently.
 #[sqlx::test]
 async fn the_purges_and_the_move_reach_only_what_they_name(pool: PgPool) {
     let Some(ch) = common::clickhouse_or_skip(module_path!()).await else {

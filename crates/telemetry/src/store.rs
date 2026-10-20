@@ -372,15 +372,13 @@ impl Store {
         insert.end().await
     }
 
-    /// Every row of `project`'s, in the spans and in their hourly totals,
-    /// marked deleted: a lightweight delete on each table, held to the one
-    /// project by its own `WHERE` and by the policy's setting, which names
-    /// that project alone. The mark hides the rows from every read; the disk
-    /// gives them up when `rotate` applies it ([`crate::retention`]). Each
-    /// statement answers once ClickHouse has recorded the mutation, not once
-    /// it has run, so a project of any size is purged within a deletion's
-    /// budget and its rows go in the background, as a mutation's do, usually
-    /// within the second. Idempotent: the second mark finds no row.
+    /// Every row of `project`'s, in the spans and their hourly totals, marked
+    /// deleted, held to the project by its `WHERE` and the policy's setting.
+    /// Each statement answers once the mutation is recorded, so a project of
+    /// any size is purged within a deletion's budget: its rows are gone from
+    /// every read within moments as the store applies the mark, and off the
+    /// disk by `rotate` ([`crate::retention`]). Idempotent: a second mark
+    /// finds no row.
     ///
     /// ⚠ An error's text can carry ClickHouse's own message: log its kind,
     /// never the text.

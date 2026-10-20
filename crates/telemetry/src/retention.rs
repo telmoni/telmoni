@@ -1,18 +1,12 @@
 //! The nightly purge of ClickHouse's partitions, which `telmoni rotate` runs
-//! as the migrator's user beside its Postgres rotation, under the CronJob a
-//! tier's job alerts already watch.
-//!
-//! Retention is a purge, not a filter: a span's day is dropped whole once
-//! every row in it is older than the longest retention sold, and an hour's
-//! totals once their month is older than [`ROLLUP_RETENTION_MONTHS`]. A
-//! partition is listed from the rows themselves, which the migrator reads
-//! all of by a row policy of its own, and dropped by its id, so a night the
-//! job missed is caught up by the next.
-//!
-//! The same night rewrites away the rows a deleted project left: a purge
-//! marks them with a lightweight delete, which hides them from every read at
-//! once ([`crate::store::Store::delete_project`]), and [`rewrite_deleted`]
-//! applies the mask, so they leave the disk too.
+//! as the migrator's user. Retention is a purge, not a filter: a span's day
+//! goes whole once every row in it is older than the longest retention sold,
+//! an hour's totals once their month is older than
+//! [`ROLLUP_RETENTION_MONTHS`], each partition listed from the rows, so a
+//! night missed is caught up by the next. A deleted project's rows, marked by
+//! its purge and gone from every read within moments as the store applies
+//! the mark ([`crate::store::Store::delete_project`]), leave the disk by
+//! the next night's run ([`rewrite_deleted`]).
 
 use anyhow::Context;
 use chrono::{DateTime, Datelike, Duration, Months, NaiveDate, TimeZone, Utc};
