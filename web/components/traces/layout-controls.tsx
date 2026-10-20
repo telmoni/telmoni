@@ -160,7 +160,7 @@ function CustomizeMenu({ layout, from }: { layout: Layout; from: string }) {
             {isEdited && <span aria-hidden="true">*</span>}
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-80">
+        <DropdownMenuContent align="start" className="w-80">
           <ChoiceSub
             label="How far a trace opens"
             labels={DEPTH_LABEL}
@@ -606,7 +606,7 @@ function LayoutsMenu({ projectId, layouts, project, canSave, layout }: Props & {
             <ChevronDownIcon className="text-muted-foreground" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-72">
+        <DropdownMenuContent align="start" className="w-72">
           <DropdownMenuLabel>Saved layouts</DropdownMenuLabel>
           {layouts === null ? (
             <DropdownMenuItem disabled>The layouts could not be read</DropdownMenuItem>
