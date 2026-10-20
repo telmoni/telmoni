@@ -16,6 +16,7 @@ import {
   type LayoutOptions,
   type LayoutSource,
 } from "@/lib/layout";
+import { PEEKED, pushedHere } from "@/lib/peek";
 import type { SessionLayoutSetting, TraceLayout } from "@/lib/server/data";
 import { setTracePrefs, useTracePrefs } from "@/lib/use-trace-prefs";
 
@@ -54,13 +55,12 @@ type Applied = { before: string | null; wrote: string | null; choice: LayoutChoi
 const sameChoice = (a: LayoutChoice, b: LayoutChoice) =>
   a.view === b.view && sameLayout(a.options, b.options);
 
-/** The link's part of the URL, written in place. ⚠ A fresh state object,
- *  never `window.history.state`: Next copies its own into one and follows
- *  the URL, and passes one that is already its own straight through, with
- *  the router — and `useSearchParams` — none the wiser. */
+/** The link's part of the URL, written in place. ⚠ A fresh state object, never `history.state`,
+ *  which Next passes through unfollowed; a peek's mark kept, so shutting the peek still goes back. */
 function rewrite(choice: LayoutChoice, isEdited: boolean): string | null {
   const query = withLayoutParams(window.location.search, choice, isEdited);
-  window.history.replaceState({}, "", `${window.location.pathname}${query}`);
+  const state = pushedHere() ? { [PEEKED]: true } : {};
+  window.history.replaceState(state, "", `${window.location.pathname}${query}`);
   return new URLSearchParams(query).get(VIEW_PARAM);
 }
 

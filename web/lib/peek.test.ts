@@ -20,6 +20,8 @@ import {
 const RUN_A = "5d4f5c68-0000-4000-8000-000000000001";
 const RUN_B = "5d4f5c68-0000-4000-8000-000000000002";
 const peeked = () => new URL(window.location.href).searchParams.get("peek");
+/** The traversal a shut peek started, landed: its own listener runs first. */
+const landed = () => new Promise<void>((resolve) => window.addEventListener("popstate", () => resolve(), { once: true }));
 
 describe("the peek in the browser's history", () => {
   beforeEach(() => {
@@ -60,21 +62,67 @@ describe("the peek in the browser's history", () => {
     expect(peeked()).toBe(RUN_B);
   });
 
-  it("shuts by going back over the entry it pushed, or rewrites a link's URL without it", () => {
+  it("shuts by going back over the entry it pushed, or rewrites a link's URL without it", async () => {
+    openPeek(RUN_A);
+    const length = window.history.length;
+    closePeek(true);
+    await landed();
+    expect(window.location.search).toBe("?status=error&days=30");
+    expect(window.history.state, "the list's entry as it was").toBeNull();
+
+    window.history.replaceState(null, "", `/acme/web/traces?days=30&peek=${RUN_A}`);
+    closePeek(false);
+    expect(window.location.search).toBe("?days=30");
+    expect(window.history.length).toBe(length);
+  });
+
+  // Else the list's entry still names the peek's first layout, which the next peek reads as a link's.
+  it("gives the entry it goes back to the address the list now stands at", async () => {
+    window.history.replaceState(null, "", "/acme/web/sessions?days=30&view=v1");
+    openPeek(RUN_A);
+    const length = window.history.length;
+    // A layout chosen in the peek, its rewrite keeping the mark (`use-layout.ts`).
+    window.history.replaceState({ [PEEKED]: true }, "", `/acme/web/sessions?days=30&view=v2&peek=${RUN_A}`);
+    closePeek(true);
+    await landed();
+    expect(window.location.search).toBe("?days=30&view=v2");
+    expect(window.history.length, "and no entry more").toBe(length);
+    expect(window.history.state, "a fresh state, which Next's router follows").toEqual({});
+  });
+
+  it("rewrites no entry a traversal it did not start lands on, the same list's in another window", async () => {
+    openPeek(RUN_A);
     const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    closePeek(true);
+    back.mockRestore();
+    window.history.pushState(null, "", "/acme/web/traces?days=1");
+    window.history.pushState(null, "", "/acme/web/traces?days=2");
+    window.history.back();
+    await landed();
+    expect(window.location.search).toBe("?days=1");
+  });
+
+  it("goes back no further when pressed again while the list is on its way", async () => {
+    openPeek(RUN_A);
+    closePeek(true);
+    await landed();
+    const back = vi.spyOn(window.history, "back");
     try {
       closePeek(true);
-      expect(back).toHaveBeenCalledTimes(1);
-
-      window.history.replaceState(null, "", `/acme/web/traces?days=30&peek=${RUN_A}`);
-      const length = window.history.length;
-      closePeek(false);
-      expect(back).toHaveBeenCalledTimes(1);
-      expect(window.location.search).toBe("?days=30");
-      expect(window.history.length).toBe(length);
+      expect(back).not.toHaveBeenCalled();
+      expect(window.location.search).toBe("?status=error&days=30");
     } finally {
       back.mockRestore();
     }
+  });
+
+  it("leaves the list's entry as it was where only its spelling moved", async () => {
+    window.history.replaceState(null, "", "/acme/web/traces?user=a@b.com&days=30");
+    openPeek(RUN_A);
+    closePeek(true);
+    await landed();
+    expect(window.location.search).toBe("?user=a@b.com&days=30");
+    expect(window.history.state).toBeNull();
   });
 
   it("follows the entry it pushed as a step moves it to another run in place", () => {
@@ -104,6 +152,17 @@ describe("the peek in the browser's history", () => {
     expect(followEntry(entry)).toBeNull();
     expect(pushedHere()).toBe(false);
     expect(followEntry(null)).toBeNull();
+  });
+
+  // Else Close, rewriting in place, would leave the duplicate it goes back to spare.
+  it("takes its entry back where Back returns to it from the list moved on", async () => {
+    openPeek(RUN_A);
+    const entry = pushedEntry();
+    window.history.pushState({ __NA: true }, "", `/acme/web/traces?days=7&peek=${RUN_A}`);
+    expect(followEntry(entry)).toBeNull();
+    window.history.back();
+    await landed();
+    expect(followEntry(null)).toBe(entry);
   });
 });
 

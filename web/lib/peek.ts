@@ -1,3 +1,4 @@
+import { VIEW_PARAM } from "@/lib/layout";
 import { PEEK_PARAM } from "@/lib/traces";
 
 // The trace list's peek and the browser's history (`components/traces/peek.tsx`):
@@ -45,13 +46,32 @@ export function openPeek(run: string): void {
   }
 }
 
-/** Shuts the peek: back over the entry it pushed, or, where it was opened
- *  from a link or the list has moved on since, the URL rewritten without it.
- *  `pushed` is the panel's own memory of the entry, since the mark itself
- *  does not always last (`followEntry`). */
+/** Shuts the peek: back over the entry it pushed, then giving the list's entry its present address;
+ *  else, as from a link, the URL rewritten. `pushed` is the panel's memory, as the mark may lapse. */
 export function closePeek(pushed: boolean): void {
-  if (pushed) window.history.back();
-  else window.history.replaceState(null, "", peekUrl(null));
+  // Shut already: a second press while the list is on its way back.
+  if (!new URLSearchParams(window.location.search).has(PEEK_PARAM)) return;
+  const shut = peekUrl(null);
+  if (!pushed) {
+    window.history.replaceState(null, "", shut);
+    return;
+  }
+  const landed = () => {
+    // Only the entry the peek was pushed from, its layout aside; a fresh state, which Next follows.
+    const list = spelled(here(), false) === spelled(shut, false);
+    if (list && spelled(here()) !== spelled(shut)) window.history.replaceState({}, "", shut);
+  };
+  window.addEventListener("popstate", landed, { once: true });
+  window.history.back();
+}
+
+/** `address` in `URLSearchParams`' own spelling and order, without its layout
+ *  where `view` is false. */
+function spelled(address: string, view = true): string {
+  const url = new URL(address, window.location.origin);
+  url.searchParams.sort();
+  if (!view) url.searchParams.delete(VIEW_PARAM);
+  return `${url.pathname}?${url.searchParams}`;
 }
 
 /** The page's address as an entry is told by. */
@@ -65,18 +85,11 @@ export function pushedEntry(): string | null {
   return pushedHere() ? here() : null;
 }
 
-/** The entry the peek pushed, followed through a draw: `entry` its address
- *  as last known. Next writes its own state over an entry on a refresh or
- *  an action, keeping a page's own only on Back and Forward (`HistoryUpdater`
- *  in `next/dist/client/components/app-router.js`), so at the same address
- *  the mark is written back, with Next's state in it, which its router
- *  passes straight through. At another address it is a new entry — the list
- *  moved to another window with the peek kept — and not the peek's to go
- *  back over. Still marked, it is the peek's, stepped to another run in
- *  place. */
+/** The entry the peek pushed, `entry` its address as last known: the marked one in front, or at that
+ *  address its mark written back over Next's own state (`HistoryUpdater`); elsewhere, a new entry. */
 export function followEntry(entry: string | null): string | null {
-  if (entry === null) return null;
   if (pushedHere()) return here();
+  if (entry === null) return null;
   if (here() !== entry) return null;
   window.history.replaceState({ ...(window.history.state ?? {}), [PEEKED]: true }, "");
   return entry;

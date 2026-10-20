@@ -11,6 +11,7 @@ vi.mock("next/navigation", () => ({
 
 import { useLayout } from "@/components/traces/use-layout";
 import { DEFAULT_LAYOUT, choiceOfLayout } from "@/lib/layout";
+import { PEEKED } from "@/lib/peek";
 import type { TraceLayout } from "@/lib/server/data";
 import { TRACE_PREFS_KEY, readPrefs } from "@/lib/trace-prefs";
 
@@ -118,6 +119,19 @@ describe("useLayout", () => {
     expect(result.current.current?.name).toBe("Review");
     expect(result.current.options.pinned).toEqual(["answer"]);
     expect(window.history.replaceState).toHaveBeenLastCalledWith({}, "", `/acme/web/sessions/conv-1?days=30&view=${VIEW}`);
+  });
+
+  // Unmarked, the peek's entry would be shut as a link's, leaving a second entry of the list.
+  it("keeps a peek's mark through its rewrite", () => {
+    window.history.pushState({ [PEEKED]: true }, "", "/acme/web/sessions?days=30&peek=conv-1");
+    mockSearch = "days=30&peek=conv-1";
+    const { result } = renderHook(() => useLayout(PAGE));
+    act(() => result.current.applyLayout(REVIEW));
+    expect(window.history.replaceState).toHaveBeenLastCalledWith(
+      { [PEEKED]: true },
+      "",
+      `/acme/web/sessions?days=30&peek=conv-1&view=${VIEW}`,
+    );
   });
 
   it("opens in the project's default layout where the browser holds no choice", () => {
