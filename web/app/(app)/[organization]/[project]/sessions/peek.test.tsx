@@ -218,6 +218,66 @@ describe("SessionPeek", () => {
     expect(window.location.search).toBe("?days=30");
   });
 
+  it("lands the browser's own Back on the list as the peek last stood, though Next unmounts the panel first", async () => {
+    // The list's entry under a saved layout's link, and the peek pushed from it and customized since.
+    window.history.replaceState(null, "", "/acme/web/sessions?days=30&view=layout_1");
+    window.history.pushState({ telmoniPeek: true }, "", `/acme/web/sessions?days=30&peek=${A}`);
+    mockSearch = new URLSearchParams({ days: "30", peek: A });
+    // As Next's own listener, registered first, commits the list inside the traversal.
+    let unmountPanel = () => {};
+    const commit = () => unmountPanel();
+    window.addEventListener("popstate", commit, { once: true });
+    unmountPanel = peek().unmount;
+    await within(screen.getByRole("dialog")).findByRole("table");
+    const landed = new Promise((resolve) => window.addEventListener("popstate", resolve, { once: true }));
+    window.history.back();
+    await landed;
+    expect(window.location.search).toBe("?days=30");
+  });
+
+  it("keeps the landing for the list across a Back between two of the peek's own entries", async () => {
+    // The list under a saved layout's link, the peek pushed from it and customized, and a new
+    // window pushed while it is open.
+    window.history.replaceState(null, "", "/acme/web/sessions?days=30&view=layout_1");
+    window.history.pushState({ telmoniPeek: true }, "", `/acme/web/sessions?days=30&peek=${A}`);
+    window.history.pushState(null, "", `/acme/web/sessions?days=7&peek=${A}`);
+    mockSearch = new URLSearchParams({ days: "7", peek: A });
+    const ui = () => (
+      <SessionPeek
+        organization="acme"
+        slug="web"
+        projectId="project_1"
+        sessions={[A, B]}
+        window={{ days: 30 }}
+        layouts={[]}
+        project={{ view_id: null }}
+        canSave={false}
+      />
+    );
+    // As Next's own listener, registered first: onto a peek it draws the panel again, onto the
+    // list it unmounts it.
+    let view: ReturnType<typeof render> | null = null;
+    const commit = () => {
+      if (new URLSearchParams(window.location.search).has("peek")) {
+        mockSearch = new URLSearchParams(window.location.search);
+        view?.rerender(ui());
+      } else view?.unmount();
+    };
+    window.addEventListener("popstate", commit);
+    view = render(ui());
+    await within(screen.getByRole("dialog")).findByRole("table");
+    const back = () => {
+      const landed = new Promise((resolve) => window.addEventListener("popstate", resolve, { once: true }));
+      window.history.back();
+      return landed;
+    };
+    await back();
+    expect(window.location.search).toBe(`?days=30&peek=${A}`);
+    await back();
+    window.removeEventListener("popstate", commit);
+    expect(window.location.search).toBe("?days=30");
+  });
+
   it("says when the session is not there, and when the sign-in has ended, keeping the list's query", async () => {
     answers[A] = () => new Response("{}", { status: 404 });
     open(A);

@@ -56,13 +56,16 @@ export function closePeek(pushed: boolean): void {
     window.history.replaceState(null, "", shut);
     return;
   }
-  const landed = () => {
-    // Only the entry the peek was pushed from, its layout aside; a fresh state, which Next follows.
-    const list = spelled(here(), false) === spelled(shut, false);
-    if (list && spelled(here()) !== spelled(shut)) window.history.replaceState({}, "", shut);
-  };
-  window.addEventListener("popstate", landed, { once: true });
+  window.addEventListener("popstate", () => landOnList(shut), { once: true });
   window.history.back();
+}
+
+/** Gives the entry a traversal from the peek landed on `shut`, the list's address as the peek
+ *  last stood, where it reads as the list but for its layout — the one the peek was pushed
+ *  from, unless a jump went past it; a fresh state, which Next follows. */
+export function landOnList(shut: string): void {
+  const list = spelled(here(), false) === spelled(shut, false);
+  if (list && spelled(here()) !== spelled(shut)) window.history.replaceState({}, "", shut);
 }
 
 /** `address` in `URLSearchParams`' own spelling and order, without its layout

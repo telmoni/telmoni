@@ -28,7 +28,9 @@ import {
   closePeek,
   followEntry,
   keepRead,
+  landOnList,
   openPeek,
+  peekUrl,
   pushedEntry,
   shownRead,
   type KeptRead,
@@ -173,6 +175,26 @@ function SessionPanel({
     entry.current = followEntry(entry.current);
   });
   const close = () => closePeek(entry.current !== null);
+
+  // The browser's own Back lands on the list as Close does (`landOnList`), from
+  // the list's address as the peek last stood: once, off the peek's own entries.
+  const shut = useRef("");
+  useEffect(() => {
+    shut.current = peekUrl(null);
+  });
+  useEffect(() => {
+    const landed = () => {
+      // Onto another of the peek's own entries: the landing is kept for the list.
+      if (new URLSearchParams(window.location.search).has(PEEK_PARAM)) return;
+      const from = shut.current;
+      shut.current = "";
+      if (from) landOnList(from);
+    };
+    window.addEventListener("popstate", landed);
+    // Let go after the event in hand: Next commits the list inside the popstate
+    // itself, which unmounts the panel before this listener's turn comes.
+    return () => void setTimeout(() => window.removeEventListener("popstate", landed));
+  }, []);
 
   // The session open as the panel shuts, for the focus to go back to its row.
   const openId = useRef(sessionId);
