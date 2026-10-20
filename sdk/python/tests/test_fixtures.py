@@ -282,11 +282,16 @@ def test_a_network_failure_is_retried_with_backoff(
     assert warnings_in(caplog) == []
 
 
-def test_a_broken_answer_is_retried_like_a_refused_connection(
+def test_an_answer_broken_before_its_status_is_retried_like_a_refused_connection(
     sleeps: list[float], caplog: pytest.LogCaptureFixture
 ) -> None:
     transport = FakeTransport(
-        [http.client.IncompleteRead(b""), http.client.BadStatusLine(""), kept(), kept()]
+        [
+            http.client.RemoteDisconnected(""),
+            http.client.BadStatusLine(""),
+            kept(),
+            kept(),
+        ]
     )
     client = Telmoni(Config(api_key="k"), transport=transport)
     client.exporter._sleep = sleeps.append

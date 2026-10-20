@@ -1,6 +1,7 @@
 import contextlib
 import http.client
 import http.server
+import logging
 import os
 import ssl
 import threading
@@ -118,18 +119,34 @@ def test_the_client_builds_from_env_with_the_real_transport() -> None:
         client.shutdown()
 
 
+_PROBLEM = b'{"message":"/errors/batch-too-large: the batch is too large"}'
+"""A refusal's problem, which "/too-large" sends whole before it hangs up."""
+
 _ANSWERS = {
-    "/kept": (200, 2 << 20, 2 << 20),
-    "/refused": (503, 2 << 20, 2 << 20),
-    "/short": (200, 300, 300),
-    "/cut": (200, 300, 100),
+    "/kept": (200, 2 << 20, b"x" * (2 << 20)),
+    "/refused": (503, 2 << 20, b"x" * (2 << 20)),
+    "/short": (200, 300, b"x" * 300),
+    "/cut": (200, 300, b"x" * 100),
+    "/too-large": (413, 300, _PROBLEM),
 }
-"""Each path's status, the length its answer declares, and how much is sent."""
+"""Each path's status, the length its answer declares, and what is sent."""
+
+_SENT: list[bytes] = []
+"""Every body the server was sent, in order."""
 
 
 class _Answering(http.server.BaseHTTPRequestHandler):
     def do_POST(self) -> None:
-        self.rfile.read(int(self.headers["Content-Length"]))
+        _SENT.append(self.rfile.read(int(self.headers["Content-Length"])))
+        # An endpoint's path, as the exporter's URL ends.
+        self.path = self.path.removesuffix("/otlp/v1/traces")
+        if self.path == "/chunked-cut":
+            # One chunk and no last: http.client raises `IncompleteRead`.
+            self.send_response(413)
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            self.wfile.write(b"%x\r\n%s\r\n" % (len(_PROBLEM), _PROBLEM))
+            return
         if self.path in ("/slow-head", "/slow-body"):
             # A byte every 50 ms, each read's own timeout never reached.
             head = b"HTTP/1.1 200 OK\r\nContent-Length: 40\r\n\r\n"
@@ -150,7 +167,7 @@ class _Answering(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(declared))
         self.end_headers()
         with contextlib.suppress(OSError):  # the client hangs up past its cap
-            self.wfile.write(b"x" * sent)
+            self.wfile.write(sent)
 
     def log_message(self, format: str, *args: Any) -> None:
         pass
@@ -158,6 +175,7 @@ class _Answering(http.server.BaseHTTPRequestHandler):
 
 @pytest.fixture
 def answering() -> Iterator[str]:
+    _SENT.clear()
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Answering)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
@@ -177,22 +195,59 @@ def test_an_answer_is_read_up_to_its_first_mebibyte(answering: str) -> None:
         assert (answer.status, len(answer.body)) == (status, read)
 
 
-def test_an_answer_cut_short_is_still_a_broken_one(answering: str) -> None:
-    with pytest.raises(http.client.IncompleteRead):
-        _urllib_transport(answering + "/cut", {}, b"{}")
+def test_an_answer_whose_body_breaks_is_kept_as_far_as_it_came(
+    answering: str,
+) -> None:
+    """Its status decides: a body cut short is no failure to retry."""
+    for path, status, body in (
+        ("/cut", 200, b"x" * 100),
+        ("/too-large", 413, _PROBLEM),
+        ("/chunked-cut", 413, _PROBLEM),
+    ):
+        answer = _urllib_transport(answering + path, {}, b"{}")
+        assert (answer.status, answer.body) == (status, body)
 
 
-@pytest.mark.parametrize("path", ["/slow-head", "/slow-body"])
-def test_an_answer_sent_slowly_is_given_up_at_the_requests_deadline(
-    answering: str, path: str
+def test_a_refusal_whose_body_breaks_is_sent_once(
+    answering: str, sleeps: list[float], caplog: pytest.LogCaptureFixture
+) -> None:
+    client = Telmoni(Config(endpoint=answering + "/too-large", api_key="k"))
+    client.exporter._sleep = sleeps.append
+    try:
+        with client.run("bot"):
+            pass
+    finally:
+        client.shutdown()
+    assert _SENT, "nothing was sent"
+    assert len(set(_SENT)) == len(_SENT), "an export was sent again"
+    assert sleeps == []
+    warned = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warned == [
+        "telmoni: export refused with 413 /errors/batch-too-large; the batch was dropped"
+    ]
+
+
+def test_an_answer_whose_head_comes_slowly_is_given_up_at_the_requests_deadline(
+    answering: str,
 ) -> None:
     started = time.monotonic()
     with (
         mock.patch("telmoni.exporter.REQUEST_TIMEOUT_S", 0.5),
         pytest.raises(TimeoutError),
     ):
-        _urllib_transport(answering + path, {}, b"{}")
+        _urllib_transport(answering + "/slow-head", {}, b"{}")
     assert time.monotonic() - started < 1.5
+
+
+def test_an_answer_whose_body_comes_slowly_is_kept_as_far_as_it_came_by_the_deadline(
+    answering: str,
+) -> None:
+    started = time.monotonic()
+    with mock.patch("telmoni.exporter.REQUEST_TIMEOUT_S", 0.5):
+        answer = _urllib_transport(answering + "/slow-body", {}, b"{}")
+    assert time.monotonic() - started < 1.5
+    assert answer.status == 200
+    assert len(answer.body) < 40 and set(answer.body) <= {ord("x")}
 
 
 def test_the_transport_makes_one_tls_context_through_the_hook_urllib_reads(

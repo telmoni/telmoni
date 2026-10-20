@@ -197,6 +197,67 @@ describe('the transport', () => {
       await new Promise((resolve) => server.close(resolve));
     }
   });
+
+  // A refusal's problem, sent whole before its answer hangs up short of the length it declared.
+  const PROBLEM = '{"message":"/errors/batch-too-large: the batch is too large"}';
+  // Each body the server was sent.
+  const breaking = async (status: number) => {
+    const bodies: string[] = [];
+    const server = createServer((request, response) => {
+      let body = '';
+      request.setEncoding('utf8');
+      request.on('data', (chunk: string) => (body += chunk));
+      request.on('end', () => {
+        bodies.push(body);
+        response.writeHead(status, { 'Content-Length': 300 });
+        response.write(PROBLEM, () => response.socket?.end());
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const close = async () => {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    };
+    return { bodies, close, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` };
+  };
+
+  it('keeps an answer whose body breaks as far as it came, its status deciding', async () => {
+    for (const status of [200, 413]) {
+      const server = await breaking(status);
+      try {
+        const answer = await fetchTransport(server.url, { method: 'POST', headers: {}, body: '{}' });
+        expect([answer.status, await answer.text()]).toEqual([status, PROBLEM]);
+      } finally {
+        await server.close();
+      }
+    }
+  });
+
+  it('sends a refusal whose body breaks once, as any refusal', async () => {
+    const server = await breaking(413);
+    const sleeps: number[] = [];
+    const warnings: string[] = [];
+    try {
+      const telmoni = new Telmoni(
+        { endpoint: server.url, apiKey: 'k' },
+        {
+          sleep: (seconds) => {
+            sleeps.push(seconds);
+            return Promise.resolve();
+          },
+          warn: (message) => warnings.push(message),
+        },
+      );
+      telmoni.run('bot', () => undefined);
+      await telmoni.shutdown();
+    } finally {
+      await server.close();
+    }
+    expect(server.bodies.length).toBeGreaterThan(0);
+    expect(new Set(server.bodies).size).toBe(server.bodies.length);
+    expect(sleeps).toEqual([]);
+    expect(warnings).toEqual(['telmoni: export refused with 413 /errors/batch-too-large; the batch was dropped']);
+  });
 });
 
 describe('a span time', () => {

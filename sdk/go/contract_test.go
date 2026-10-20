@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"regexp"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -216,6 +220,59 @@ func TestAnAnswerIsReadUpToItsFirstMebibyte(t *testing.T) {
 		if answer.read != 1<<20 {
 			t.Errorf("%d bytes of an answer read, want its first mebibyte", answer.read)
 		}
+	}
+}
+
+// A refusal whose body breaks is sent once, named by the problem that came before the break.
+func TestARefusalWhoseBodyBreaksIsSentOnce(t *testing.T) {
+	const problem = `{"message":"/errors/batch-too-large: the batch is too large"}`
+	var mu sync.Mutex
+	var bodies []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(body))
+		mu.Unlock()
+		conn, sent, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		fmt.Fprintf(sent, "HTTP/1.1 413 Answer\r\nContent-Length: 300\r\n\r\n%s", problem)
+		_ = sent.Flush()
+	}))
+	defer server.Close()
+	sleeps, logs := &sleepLog{}, &logSink{}
+	client, err := telmoni.New(telmoni.Config{Endpoint: server.URL, APIKey: testKey},
+		telmoni.WithSleep(sleeps.sleep), telmoni.WithLogger(slog.New(logs)))
+	if err != nil {
+		t.Fatalf("building the client: %v", err)
+	}
+	_, run := client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	run.End()
+	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
+	defer cancel()
+	if err := client.Shutdown(ctx); err != nil {
+		t.Errorf("shutting down: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) == 0 {
+		t.Fatal("nothing was sent")
+	}
+	seen := map[string]bool{}
+	for _, body := range bodies {
+		if seen[body] {
+			t.Error("an export was sent again")
+		}
+		seen[body] = true
+	}
+	if got := sleeps.all(); len(got) != 0 {
+		t.Errorf("waited %v before sending again", got)
+	}
+	want := []string{"telmoni: export refused with 413 /errors/batch-too-large; the batch was dropped"}
+	if got := logs.warnings(); !slices.Equal(got, want) {
+		t.Errorf("warnings %q, want %q", got, want)
 	}
 }
 

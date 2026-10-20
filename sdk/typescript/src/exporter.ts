@@ -103,7 +103,10 @@ export const fetchTransport: Transport = async (url, init) => {
   return { status: response.status, headers: response.headers, text: () => textOf(response.body) };
 };
 
-/** At most `ANSWER_MAX` bytes of a body, as text; the rest is never read. */
+/**
+ * At most `ANSWER_MAX` bytes of a body, as text, the rest never read; its status decides,
+ * so a body that breaks or outlasts the request's ten seconds is kept as far as it came.
+ */
 async function textOf(body: ReadableStream<Uint8Array> | null): Promise<string> {
   if (body === null) return '';
   const reader = body.getReader();
@@ -118,8 +121,9 @@ async function textOf(body: ReadableStream<Uint8Array> | null): Promise<string> 
       text += decoder.decode(part, { stream: true });
       left -= part.byteLength;
     }
-  } finally {
     await reader.cancel();
+  } catch {
+    // Broken or timed out: a stream that failed needs no cancelling.
   }
   return text + decoder.decode();
 }

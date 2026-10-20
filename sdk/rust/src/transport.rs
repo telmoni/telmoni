@@ -142,16 +142,14 @@ impl Transport for Reqwest {
         let response = request
             .send()
             .map_err(|error| TransportError::new(kind(&error)))?;
-        answer(response, deadline)
+        Ok(answer(response, deadline))
     }
 }
 
 /// What `response` answered, at most [`ANSWER_MAX`] bytes of its body read,
-/// given up at `deadline`.
-fn answer(
-    response: reqwest::blocking::Response,
-    deadline: Instant,
-) -> Result<Answer, TransportError> {
+/// given up at `deadline`. Its status decides: a body that breaks after it, or
+/// outlasts the deadline, is kept as far as it came, as in every SDK.
+fn answer(response: reqwest::blocking::Response, deadline: Instant) -> Answer {
     let status = response.status().as_u16();
     let headers = response
         .headers()
@@ -164,18 +162,18 @@ fn answer(
         })
         .collect();
     let mut body = Vec::new();
-    Within {
+    // `read_to_end` keeps what it read before an error.
+    let _ = Within {
         reader: response,
         deadline,
     }
     .take(ANSWER_MAX)
-    .read_to_end(&mut body)
-    .map_err(|error| TransportError::new(read_kind(&error)))?;
-    Ok(Answer {
+    .read_to_end(&mut body);
+    Answer {
         status,
         headers,
         body,
-    })
+    }
 }
 
 /// A reader given up at `deadline`: reqwest's own wait starts again at each
@@ -191,19 +189,6 @@ impl<R: Read> Read for Within<R> {
             return Err(io::ErrorKind::TimedOut.into());
         }
         self.reader.read(buf)
-    }
-}
-
-/// The name of a failed read: reqwest's reader carries its error inside the
-/// I/O error.
-fn read_kind(error: &io::Error) -> &'static str {
-    match error
-        .get_ref()
-        .and_then(|inner| inner.downcast_ref::<reqwest::Error>())
-    {
-        Some(error) => kind(error),
-        None if error.kind() == io::ErrorKind::TimedOut => "Timeout",
-        None => "Body",
     }
 }
 
@@ -237,9 +222,9 @@ mod tests {
 
     use super::*;
 
-    /// The URL of a loopback server that answers one export with `status` and
-    /// `size` bytes of body, one every `gap` unless the gap is zero.
-    fn answering(status: u16, size: usize, gap: Duration) -> String {
+    /// A loopback server's URL that answers one export with `status`, `size` bytes declared
+    /// and `sent` sent, one every `gap` unless it is zero, before it hangs up.
+    fn answering(status: u16, size: usize, sent: usize, gap: Duration) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/otlp/v1/traces", listener.local_addr().unwrap());
         thread::spawn(move || {
@@ -264,10 +249,10 @@ mod tests {
                 "HTTP/1.1 {status} Answer\r\nContent-Length: {size}\r\n\r\n"
             );
             if gap.is_zero() {
-                let _ = stream.write_all(&vec![b'x'; size]);
+                let _ = stream.write_all(&vec![b'x'; sent]);
                 return;
             }
-            for _ in 0..size {
+            for _ in 0..sent {
                 thread::sleep(gap);
                 if stream.write_all(b"x").is_err() {
                     return;
@@ -285,15 +270,26 @@ mod tests {
             (503, 2 << 20, 1 << 20),
             (200, 300, 300),
         ] {
-            let url = answering(status, size, Duration::ZERO);
+            let url = answering(status, size, size, Duration::ZERO);
             let answer = transport.send(&url, &[], b"{}").unwrap();
             assert_eq!((answer.status, answer.body.len()), (status, read));
         }
     }
 
+    /// The status decides: a body that breaks after it is no failure to retry.
     #[test]
-    fn an_answer_sent_slowly_is_given_up_at_the_deadline() {
-        let url = answering(200, 100, Duration::from_millis(50));
+    fn an_answer_whose_body_breaks_is_kept_as_far_as_it_came() {
+        let transport = Reqwest::default();
+        for status in [200, 413] {
+            let url = answering(status, 300, 100, Duration::ZERO);
+            let answer = transport.send(&url, &[], b"{}").unwrap();
+            assert_eq!((answer.status, answer.body), (status, vec![b'x'; 100]));
+        }
+    }
+
+    #[test]
+    fn an_answer_sent_slowly_is_given_up_at_the_deadline_as_far_as_it_came() {
+        let url = answering(200, 100, 100, Duration::from_millis(50));
         let response = Reqwest::default()
             .client()
             .unwrap()
@@ -302,12 +298,17 @@ mod tests {
             .send()
             .unwrap();
         let began = Instant::now();
-        let error = answer(response, began + Duration::from_millis(300)).unwrap_err();
-        assert_eq!(error.name, "Timeout");
+        let answer = answer(response, began + Duration::from_millis(300));
         assert!(
             began.elapsed() < Duration::from_secs(2),
             "{:?}",
             began.elapsed()
+        );
+        assert_eq!(answer.status, 200);
+        assert!(
+            answer.body.len() < 100 && answer.body.iter().all(|byte| *byte == b'x'),
+            "{}",
+            answer.body.len()
         );
     }
 }

@@ -203,13 +203,17 @@ def _urllib_transport(url: str, headers: Mapping[str, str], body: bytes) -> Answ
 
 
 def _body(response: Any) -> bytes:
-    """At most ``ANSWER_MAX`` bytes of the answer's body."""
-    body: bytes = response.read(ANSWER_MAX)
-    if len(body) < ANSWER_MAX:
-        # Read to the end, which raises `IncompleteRead` for a body cut short
-        # as `read()` would: a read of a given size returns what came.
-        response.read()
-    return body
+    """At most ``ANSWER_MAX`` bytes of the body, as far as it came: its status
+    decides, so a body that breaks or outlasts the deadline is no failure to retry."""
+    body = bytearray()
+    # A read at a time, so a failure loses none of what came before it.
+    with contextlib.suppress(OSError, http.client.HTTPException):
+        while len(body) < ANSWER_MAX:
+            part = response.read1(ANSWER_MAX - len(body))
+            if not part:
+                break
+            body += part
+    return bytes(body)
 
 
 def _sdk_version() -> str:
@@ -276,9 +280,7 @@ class Exporter:
             try:
                 answer = self._transport(self._url, headers, body)
             except (OSError, http.client.HTTPException) as error:
-                # A connection that failed, or one that broke mid-answer
-                # (`IncompleteRead`, `BadStatusLine`): both a transport fault
-                # the next attempt may not meet.
+                # No status came: a transport fault the next attempt may not meet.
                 failure = type(error).__name__
                 self._wait(None, attempt)
                 continue

@@ -4,15 +4,20 @@
 mod common;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpListener;
+use std::thread;
 use std::time::Duration;
 
 use common::{
-    Failure, Harness, Outcome, answer, field, float, int, is_hex, is_uuid_v4, keyed, load_fixture,
-    name_of, spans_of, text,
+    Collected, Failure, Harness, Outcome, Sleeps, Warnings, answer, field, float, int, is_hex,
+    is_uuid_v4, keyed, load_fixture, name_of, spans_of, text,
 };
 use serde_json::{Value, json};
 use telmoni_sdk::transport::TransportError;
-use telmoni_sdk::{Bounds, Config, ModelCallOptions, Reply, RunOptions, ToolCallOptions, Usage};
+use telmoni_sdk::{
+    Bounds, Config, Hooks, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage,
+};
 
 /// The fixture's normalization, as its README sets it out.
 fn normalize(export: &Value) -> Result<Value, Failure> {
@@ -446,5 +451,84 @@ fn a_platform_never_reached_is_warned_once_with_the_errors_name() -> Outcome {
         Some("telmoni: export failed after 3 attempts (ConnectionRefused); the batch was dropped")
     );
     assert_eq!(harness.transport.count(), 6);
+    Ok(())
+}
+
+/// A refusal's problem, sent whole before its answer hangs up short of the
+/// length it declared.
+const PROBLEM: &str = r#"{"message":"/errors/batch-too-large: the batch is too large"}"#;
+
+/// A loopback endpoint answering each export `status` and [`PROBLEM`], and
+/// the bodies it was sent.
+fn breaking(status: u16) -> Result<(String, Collected<Vec<u8>>), Failure> {
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let endpoint = format!("http://{}", listener.local_addr()?);
+    let bodies = Collected::default();
+    let sent = bodies.clone();
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { return };
+            let mut reader = BufReader::new(stream);
+            let mut length = 0;
+            let mut line = String::new();
+            while reader.read_line(&mut line).is_ok_and(|n| n > 0) && line != "\r\n" {
+                if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    length = value.trim().parse().unwrap_or(0);
+                }
+                line.clear();
+            }
+            let mut body = vec![0; length];
+            if reader.read_exact(&mut body).is_err() {
+                continue;
+            }
+            sent.push(body);
+            let _ = write!(
+                reader.into_inner(),
+                "HTTP/1.1 {status} Answer\r\nContent-Length: 300\r\n\r\n{PROBLEM}"
+            );
+        }
+    });
+    Ok((endpoint, bodies))
+}
+
+/// The status decides an answer whose body breaks: a refusal is sent once, a 200 kept.
+#[test]
+fn an_answer_whose_body_breaks_is_decided_by_its_status() -> Outcome {
+    for status in [413, 200] {
+        let (endpoint, bodies) = breaking(status)?;
+        let warnings = Warnings::default();
+        let sleeps = Sleeps::default();
+        let (warned, slept) = (warnings.clone(), sleeps.clone());
+        let telmoni = Telmoni::with_hooks(
+            Config::new(endpoint, None, Some("telmoni_k".to_owned())),
+            Hooks {
+                sleep: Box::new(move |duration| slept.push(duration)),
+                warn: Box::new(move |text| warned.push(text.to_owned())),
+                ..Hooks::default()
+            },
+        );
+        telmoni.run("bot", RunOptions::default())?.end();
+        telmoni.shutdown();
+        let sent = bodies.all();
+        assert!(!sent.is_empty(), "{status}: nothing was sent");
+        assert_eq!(
+            sent.iter().collect::<HashSet<_>>().len(),
+            sent.len(),
+            "{status}: an export was sent again"
+        );
+        assert_eq!(sleeps.all(), Vec::<Duration>::new(), "{status}");
+        let warnings = warnings.all();
+        if status == 200 {
+            assert_eq!(warnings, Vec::<String>::new());
+        } else {
+            assert_eq!(warnings.len(), 1, "{warnings:?}");
+            assert_eq!(
+                warnings.first().map(String::as_str),
+                Some(
+                    "telmoni: export refused with 413 /errors/batch-too-large; the batch was dropped"
+                )
+            );
+        }
+    }
     Ok(())
 }
