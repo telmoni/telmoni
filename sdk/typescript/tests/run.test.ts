@@ -234,6 +234,61 @@ describe('a run', () => {
     ]);
   });
 
+  it('sends an error type that is no string as its class, never its message, which is content, else as its text', async () => {
+    class RateLimited extends Error {}
+    const given: unknown[] = [new RateLimited('quota exceeded for alice@example.com'), RateLimited, 429];
+    for (const errorType of given) h.telmoni.run('bot', (run) => run.fail(errorType as string));
+    expect(await h.telmoni.flush()).toBe(true);
+    const runs = runsIn(h.transport);
+    expect(runs.map((run) => attributesOf(run)['error.type'])).toEqual(['RateLimited', 'RateLimited', '429']);
+    for (const run of runs) expect(run.status).toEqual({ code: 2 });
+    expect(h.transport.text()).not.toContain('alice@example.com');
+    expect(h.warnings).toEqual(["telmoni: a span's error type that is no string is sent as its text"]);
+  });
+
+  it('cuts its text past ingest\'s caps, or leaves off an id, warned once, where each lost the run whole', async () => {
+    const long = 'E'.repeat(129);
+    const LongError = { [long]: class extends Error {} }[long] as new () => Error;
+    for (let i = 0; i < 2; i++) {
+      expect(() =>
+        h.telmoni.run('😀'.repeat(129), { userId: 'u'.repeat(129), sessionId: 's'.repeat(201) }, (run) => {
+          expect(run.agent).toBe('😀'.repeat(128));
+          throw new LongError();
+        }),
+      ).toThrow(LongError);
+    }
+    expect(await h.telmoni.flush()).toBe(true);
+    for (const span of h.transport.spans()) {
+      const sent = attributesOf(span);
+      expect(sent['telmoni.agent']).toBe('😀'.repeat(128));
+      expect(Object.keys(sent)).not.toContain('user.id');
+      expect(Object.keys(sent)).not.toContain('gen_ai.conversation.id');
+    }
+    const runs = runsIn(h.transport);
+    expect(runs.map((run) => run.name)).toEqual([`invoke_agent ${'😀'.repeat(128)}`, `invoke_agent ${'😀'.repeat(128)}`]);
+    for (const run of runs) {
+      expect(attributesOf(run)['gen_ai.agent.name']).toBe('😀'.repeat(128));
+      expect(attributesOf(run)['error.type']).toBe('E'.repeat(128));
+    }
+    expect([...h.warnings].sort()).toEqual([
+      "telmoni: a run's agent must be up to 128 characters; it is sent cut to its first 128",
+      'telmoni: a session id must be up to 200 characters; the run is sent without it',
+      "telmoni: a span's error type must be up to 128 characters; it is sent cut to its first 128",
+      'telmoni: a user id must be up to 128 characters; the run is sent without it',
+    ]);
+  });
+
+  it("sends its text at ingest's caps whole, counted in characters, never in UTF-8's bytes", async () => {
+    h.telmoni.run('😀'.repeat(128), { userId: '😀'.repeat(128), sessionId: '😀'.repeat(200) }, (run) => {
+      run.fail('😀'.repeat(128));
+    });
+    expect(await h.telmoni.flush()).toBe(true);
+    const sent = attributesOf(one(runsIn(h.transport)));
+    expect([sent['telmoni.agent'], sent['user.id'], sent['error.type']]).toEqual(Array(3).fill('😀'.repeat(128)));
+    expect(sent['gen_ai.conversation.id']).toBe('😀'.repeat(200));
+    expect(h.warnings).toEqual([]);
+  });
+
   it("keeps a warning whose hook throws out of the agent's call", async () => {
     const t = harness(
       {},

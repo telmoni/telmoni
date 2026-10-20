@@ -21,8 +21,12 @@ export const TAGS_MAX = 32;
 /** A tag's longest key and value, in characters: ingest drops a tag past either. */
 export const TAG_KEY_MAX = 64;
 export const TAG_VALUE_MAX = 256;
-/** Ingest's longest text of each, in characters: it refuses a span past one. */
-export const NAME_MAX = 128;
+/**
+ * Ingest's longest text of each, in characters: it refuses a span past one. A
+ * name holds a model call's `<operation> <model>`, a model at its cap.
+ */
+export const NAME_MAX = 145;
+export const AGENT_MAX = 128;
 export const ERROR_TYPE_MAX = 128;
 export const MODEL_MAX = 128;
 export const PROVIDER_MAX = 128;

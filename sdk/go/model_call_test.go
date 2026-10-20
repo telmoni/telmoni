@@ -6,6 +6,7 @@ import (
 	"math"
 	"net"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -257,5 +258,72 @@ func TestAFailedCallRecordsTheErrorType(t *testing.T) {
 	}
 	if strings.Contains(h.transport.text(), "provider down") {
 		t.Error("the error's message was sent")
+	}
+}
+
+// Ingest refuses a call over an empty model, or text past its cap.
+func TestAModelCallsTextPastIngestsCapsKeepsItsCall(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	m := func(n int) string { return strings.Repeat("m", n) }
+	for range 2 {
+		_, call := run.ModelCall(ctx, "", telmoni.ModelCallOptions{})
+		call.End()
+		_, call = run.ModelCall(ctx, m(129), telmoni.ModelCallOptions{Provider: strings.Repeat("p", 129), Operation: "generate_content"})
+		call.Answered(telmoni.Answer{ResponseModel: strings.Repeat("r", 129)})
+		call.End()
+		_, call = run.ModelCall(ctx, m(128), telmoni.ModelCallOptions{Operation: strings.Repeat("o", 20)})
+		call.End()
+	}
+	// At their caps: the longest operation and a model at its cap fit.
+	smiles := strings.Repeat("😀", 128)
+	_, call := run.ModelCall(ctx, smiles, telmoni.ModelCallOptions{Operation: "generate_content"})
+	call.Answered(telmoni.Answer{ResponseModel: smiles})
+	call.End()
+	run.End()
+	h.flush()
+	sent := map[string]map[string]any{}
+	for _, span := range h.transport.spans(t) {
+		if name := span["name"].(string); name != "telmoni.run.start" && name != "invoke_agent bot" {
+			sent[name] = attributesOf(t, span)
+		}
+	}
+	want := []string{"chat", "generate_content " + m(128), "generate_content " + smiles, (strings.Repeat("o", 20) + " " + m(128))[:145]}
+	got := make([]string, 0, len(sent))
+	for name := range sent {
+		got = append(got, name)
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("calls sent: %q", got)
+	}
+	if _, has := sent["chat"]["gen_ai.request.model"]; has {
+		t.Error("a call with no model carries an empty one")
+	}
+	cut := sent["generate_content "+m(128)]
+	for key, value := range map[string]string{
+		"gen_ai.request.model":  m(128),
+		"gen_ai.provider.name":  strings.Repeat("p", 128),
+		"gen_ai.response.model": strings.Repeat("r", 128),
+	} {
+		if cut[key] != value {
+			t.Errorf("%s is not cut to its 128 characters", key)
+		}
+	}
+	if sent["generate_content "+smiles]["gen_ai.response.model"] != smiles {
+		t.Error("a response model at its cap is not sent whole")
+	}
+	warnings := h.logs.warnings()
+	slices.Sort(warnings)
+	wantWarnings := []string{
+		"telmoni: a model call needs its model; one without is sent named by its operation alone",
+		"telmoni: a model call's name must be up to 145 characters; it is sent cut to its first 145",
+		"telmoni: a model must be up to 128 characters; it is sent cut to its first 128",
+		"telmoni: a provider must be up to 128 characters; it is sent cut to its first 128",
+		"telmoni: a response model must be up to 128 characters; it is sent cut to its first 128",
+	}
+	if !reflect.DeepEqual(warnings, wantWarnings) {
+		t.Errorf("warnings = %q, want %q", warnings, wantWarnings)
 	}
 }

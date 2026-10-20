@@ -118,6 +118,22 @@ describe('a name of no string', () => {
     expect(h.warnings.every((warning) => warning.includes('is sent as its text'))).toBe(true);
   });
 
+  it("is named step where empty, and cut past ingest's 145 characters, warned once, where either lost the span", async () => {
+    h.telmoni.run('bot', (run) => {
+      for (const name of ['', '', 'n'.repeat(146), 'n'.repeat(146), 'n'.repeat(145)]) run.step(name, () => {});
+    });
+    expect(await h.telmoni.flush()).toBe(true);
+    const steps = h.transport
+      .spans()
+      .map((span) => span.name)
+      .filter((name) => !['telmoni.run.start', 'invoke_agent bot'].includes(name));
+    expect(steps.sort()).toEqual([...Array(3).fill('n'.repeat(145)), 'step', 'step']);
+    expect(h.warnings).toEqual([
+      'telmoni: a step needs its name; one without is sent named step',
+      "telmoni: a step's name must be up to 145 characters; it is sent cut to its first 145",
+    ]);
+  });
+
   it('goes with the replacement character for a lone surrogate, which ingest would refuse with the request', async () => {
     for (const name of ['a\ud800b', 'c\udc80d', 'e\ud83d\ude00f']) h.telmoni.run('bot', (run) => run.step(name, () => {}));
     expect(await h.telmoni.flush()).toBe(true);

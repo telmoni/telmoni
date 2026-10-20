@@ -654,7 +654,7 @@ fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
             error_type: Some(text(n)),
             ..golden.clone()
         }),
-        ("step's name", 128, &|n| {
+        ("step's name", 145, &|n| {
             inside(StepRecord::new(text(n), at, at).into())
         }),
         ("step's error_type", 128, &|n| {
@@ -662,6 +662,16 @@ fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
                 StepRecord {
                     error_type: Some(text(n)),
                     ..StepRecord::new("s", at, at)
+                }
+                .into(),
+            )
+        }),
+        // The longest operation and a model at its cap keep the call its name.
+        ("model call's model", 128, &|n| {
+            inside(
+                ModelCallRecord {
+                    operation: Some("generate_content".to_owned()),
+                    ..model(n)
                 }
                 .into(),
             )
@@ -684,20 +694,17 @@ fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
                 .into(),
             )
         }),
-        // The operation is `chat` unless given, a blank one too.
-        ("model call's operation and model", 127, &|n| {
-            inside(model(n - 4).into())
-        }),
-        ("model call's operation and model", 127, &|n| {
+        // An operation of its own, since the longest ingest reads leaves room.
+        ("model call's operation and model", 144, &|n| {
             in_step(
                 ModelCallRecord {
-                    operation: Some(" ".to_owned()),
-                    ..model(n - 4)
+                    operation: Some(text(20)),
+                    ..model(n - 20)
                 }
                 .into(),
             )
         }),
-        ("model call's operation and model", 127, &|n| {
+        ("model call's operation and model", 144, &|n| {
             inside(
                 ModelCallRecord {
                     operation: Some(text(27)),
@@ -706,7 +713,7 @@ fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
                 .into(),
             )
         }),
-        ("tool call's name", 128, &|n| inside(tool(n).into())),
+        ("tool call's name", 145, &|n| inside(tool(n).into())),
         ("tool call's error_type", 128, &|n| {
             in_step(
                 ToolCallRecord {
@@ -725,21 +732,6 @@ fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
             "{what}"
         );
     }
-    // A model at its own cap is still past the span name's, with `chat` before it.
-    assert_eq!(
-        harness.telmoni.record_run(inside(model(129).into())),
-        Err(Error::TooLong {
-            what: "model call's model",
-            max: 128
-        })
-    );
-    assert_eq!(
-        harness.telmoni.record_run(inside(model(128).into())),
-        Err(Error::TooLong {
-            what: "model call's operation and model",
-            max: 127
-        })
-    );
     harness.flush()?;
     let runs = harness
         .spans()?

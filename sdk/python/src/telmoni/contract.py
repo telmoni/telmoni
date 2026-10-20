@@ -22,13 +22,15 @@ TAGS_MAX = 32
 TAG_KEY_MAX = 64
 TAG_VALUE_MAX = 256
 """A tag's longest key and value, in characters: ingest drops a tag past either."""
-NAME_MAX = 128
+NAME_MAX = 145
+AGENT_MAX = 128
 ERROR_TYPE_MAX = 128
 MODEL_MAX = 128
 PROVIDER_MAX = 128
 USER_ID_MAX = 128
 SESSION_ID_MAX = 200
-"""Ingest's longest text of each, in characters: it refuses a span past one."""
+"""Ingest's longest text of each, in characters: it refuses a span past one. A
+name holds a model call's ``<operation> <model>``, a model at its cap."""
 BOUND_STALL_AFTER_S = "telmoni.bound.stall_after_s"
 BOUND_MAX_STEPS = "telmoni.bound.max_steps"
 BOUND_MAX_COST_USD = "telmoni.bound.max_cost_usd"

@@ -76,9 +76,14 @@ class Handle:
 
     def fail(self, error_type: str) -> None:
         """Mark it failed, with the error's class and never its message."""
+        warn_once = self._client.exporter.warn_once
+        text = _error_type(error_type, warn_once) if error_type else ""
         # Ingest refuses the span over an empty one, and with a run's, the run.
-        if error_type:
-            self._span.set_attribute(contract.ERROR_TYPE, error_type)
+        if text:
+            self._span.set_attribute(
+                contract.ERROR_TYPE,
+                _cut(text, contract.ERROR_TYPE_MAX, "span's error type", warn_once),
+            )
         self._span.set_status(Status(StatusCode.ERROR))
 
     def cancel(self) -> None:
@@ -167,7 +172,10 @@ class ModelCall(Handle):
         if response_model is not None and (
             model := _text(response_model, "response model", warn_once)
         ):
-            self._span.set_attribute(contract.RESPONSE_MODEL, model)
+            self._span.set_attribute(
+                contract.RESPONSE_MODEL,
+                _cut(model, contract.MODEL_MAX, "response model", warn_once),
+            )
         self._span.set_attributes(_usage(usage, warn_once))
         if output_messages is not None:
             self._span.set_attribute(
@@ -278,7 +286,12 @@ class Opener:
         given: object = agent
         if given is None or not _str(given).strip():
             raise ValueError("a run needs its agent's name")
-        agent = _text(given, "run's agent", warn_once)
+        agent = _cut(
+            _text(given, "run's agent", warn_once),
+            contract.AGENT_MAX,
+            "run's agent",
+            warn_once,
+        )
         rate = self._client.config.sample_rate if sample_rate is None else sample_rate
         if not 0 < rate <= 1:
             raise ValueError("sample_rate must be above 0 and up to 1")
@@ -286,10 +299,16 @@ class Opener:
         sampled_out = rate < 1 and random.random() >= rate
         run_id = str(uuid.uuid4())
         inherited: dict[str, str] = {contract.RUN_ID: run_id, contract.AGENT: agent}
-        if user_id is not None and (user := _text(user_id, "user id", warn_once)):
+        if (
+            user_id is not None
+            and (user := _text(user_id, "user id", warn_once))
+            and _within(user, contract.USER_ID_MAX, "user id", warn_once)
+        ):
             inherited[contract.USER_ID] = user
-        if session_id is not None and (
-            session := _text(session_id, "session id", warn_once)
+        if (
+            session_id is not None
+            and (session := _text(session_id, "session id", warn_once))
+            and _within(session, contract.SESSION_ID_MAX, "session id", warn_once)
         ):
             inherited[contract.SESSION_ID] = session
         # On every span of the run from its start, for the processor to drop:
@@ -340,6 +359,8 @@ class Opener:
         headers named: a run whose own span is the caller's, non-recording
         here, so its steps and calls nest under it and carry the run, and
         nothing of it is sent or ended from this side."""
+        warn_once = self._client.exporter.warn_once
+        agent = _cut(agent, contract.AGENT_MAX, "run's agent", warn_once)
         inherited = {contract.RUN_ID: run_id, contract.AGENT: agent}
         return Run(
             self._client,
@@ -353,7 +374,16 @@ class Opener:
         run = run or self._outside("step")
         if run is None:
             return None
-        name = _text(name, "step's name", self._client.exporter.warn_once)
+        warn_once = self._client.exporter.warn_once
+        name = _text(name, "step's name", warn_once)
+        # Ingest refuses a span named nothing.
+        if not name:
+            warn_once(
+                "step:name",
+                "telmoni: a step needs its name; one without is sent named step",
+            )
+            name = "step"
+        name = _cut(name, contract.NAME_MAX, "step's name", warn_once)
         return self._child(run, Step, name, run.inherited, SpanKind.INTERNAL)
 
     def model_call(
@@ -369,27 +399,34 @@ class Opener:
         run = run or self._outside("model_call")
         if run is None:
             return None
-        model = _text(model, "model", self._client.exporter.warn_once)
+        warn_once = self._client.exporter.warn_once
+        model = _text(model, "model", warn_once)
         # Sent blank, the span would be named " <model>" and ingest would read
         # it as a step; one that is no string is no operation either.
         if not (isinstance(operation, str) and operation.strip()):
             operation = "chat"
-        attributes: dict[str, Any] = {
-            **run.inherited,
-            contract.OPERATION: operation,
-            contract.REQUEST_MODEL: model,
-        }
-        if provider is not None and (
-            named := _text(provider, "provider", self._client.exporter.warn_once)
-        ):
-            attributes[contract.PROVIDER] = named
+        attributes: dict[str, Any] = {**run.inherited, contract.OPERATION: operation}
+        # Ingest refuses a call over an empty model, but keeps one with none.
+        if model:
+            model = _cut(model, contract.MODEL_MAX, "model", warn_once)
+            attributes[contract.REQUEST_MODEL] = model
+        else:
+            warn_once(
+                "call:model",
+                "telmoni: a model call needs its model; one without is sent "
+                "named by its operation alone",
+            )
+        if provider is not None and (named := _text(provider, "provider", warn_once)):
+            attributes[contract.PROVIDER] = _cut(
+                named, contract.PROVIDER_MAX, "provider", warn_once
+            )
         if input_messages is not None:
             attributes[contract.INPUT_MESSAGES] = _as_json(input_messages)
         if system_instructions is not None:
             attributes[contract.SYSTEM_INSTRUCTIONS] = _as_json(system_instructions)
-        return self._child(
-            run, ModelCall, f"{operation} {model}", attributes, SpanKind.CLIENT
-        )
+        name = f"{operation} {model}" if model else operation
+        name = _cut(name, contract.NAME_MAX, "model call's name", warn_once)
+        return self._child(run, ModelCall, name, attributes, SpanKind.CLIENT)
 
     def tool_call(
         self, name: str, run: Run | None, *, arguments: object | None
@@ -397,7 +434,13 @@ class Opener:
         run = run or self._outside("tool_call")
         if run is None:
             return None
-        name = _text(name, "tool's name", self._client.exporter.warn_once)
+        warn_once = self._client.exporter.warn_once
+        name = _cut(
+            _text(name, "tool's name", warn_once),
+            contract.NAME_MAX,
+            "tool's name",
+            warn_once,
+        )
         attributes: dict[str, Any] = {
             **run.inherited,
             contract.OPERATION: contract.TOOL_OPERATION,
@@ -704,6 +747,46 @@ def _text(value: object, what: str, warn_once: Callable[[str, str], None]) -> st
     return _str(value)
 
 
+def _error_type(value: object, warn_once: Callable[[str, str], None]) -> str:
+    """An error type that is no string: an exception's class, or a class's
+    name, never its message, which is content; anything else as its text."""
+    if isinstance(value, BaseException):
+        return type(value).__name__
+    if isinstance(value, type) and issubclass(value, BaseException):
+        return value.__name__
+    return _text(value, "span's error type", warn_once)
+
+
+def _cut(
+    value: str, most: int, what: str, warn_once: Callable[[str, str], None]
+) -> str:
+    """`value` up to ingest's cap, in characters, cut there with one warning,
+    since ingest refuses a span past it."""
+    if len(value) <= most:
+        return value
+    warn_once(
+        f"cut:{what}",
+        f"telmoni: a {what} must be up to {most} characters; "
+        f"it is sent cut to its first {most}",
+    )
+    return value[:most]
+
+
+def _within(
+    value: str, most: int, what: str, warn_once: Callable[[str, str], None]
+) -> bool:
+    """Whether an id is within ingest's cap; one past it is left off with one
+    warning, since cut it would name another."""
+    if len(value) <= most:
+        return True
+    warn_once(
+        f"long:{what}",
+        f"telmoni: a {what} must be up to {most} characters; "
+        "the run is sent without it",
+    )
+    return False
+
+
 def _str(value: object) -> str:
     """`str(value)`, or its class's name where its own `__str__` raises."""
     try:
@@ -799,7 +882,7 @@ _FIELDS: dict[type, tuple[str, dict[str, tuple[type, ...]]]] = {
 # The longest each recorded text may be, in characters, as ingest caps it.
 _CAPS: dict[type, dict[str, int]] = {
     RunRecord: {
-        "agent": contract.NAME_MAX,
+        "agent": contract.AGENT_MAX,
         "user_id": contract.USER_ID_MAX,
         "session_id": contract.SESSION_ID_MAX,
     },
@@ -841,8 +924,8 @@ def _check(item: RunRecord | StepRecord | CallRecord) -> None:
         )
         if len(operation) + len(item.model) > contract.NAME_MAX - 1:
             raise ValueError(
-                "a recorded model call's operation and model must be up to 127 "
-                "characters together"
+                "a recorded model call's operation and model must be up to "
+                f"{contract.NAME_MAX - 1} characters together"
             )
 
 

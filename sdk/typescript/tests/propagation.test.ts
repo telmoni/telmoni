@@ -191,6 +191,18 @@ describe('extract', () => {
     expect(parentOf(named['chat gpt-x'])).toBe(named['work']!.spanId);
   });
 
+  it("a continued run's spans carry its agent cut to its cap, where uncut ingest refused every one", async () => {
+    const h = harness();
+    const given = fixture.extract.find((each) => each.name.startsWith('an agent past'))!;
+    try {
+      h.telmoni.extract(given.headers)!.step('work', () => {});
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    expect(attributesOf(byName(h.transport)['work']!)['telmoni.agent']).toBe(given.run!.agent);
+  });
+
   it('a continued run hands itself on again, under the span current here', async () => {
     const h = harness();
     const first = { traceparent: '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01', baggage: 'telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=bot' };

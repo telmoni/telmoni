@@ -3,7 +3,9 @@
 
 mod common;
 
-use common::{Failure, Harness, Outcome, attributes_of, keyed, only, starting_with};
+use std::collections::BTreeSet;
+
+use common::{Failure, Harness, Outcome, attributes_of, keyed, name_of, only, starting_with};
 use serde_json::{Map, Value, json};
 use telmoni_sdk::transport::Answer;
 use telmoni_sdk::{Config, Content, ModelCallOptions, Reply, RunOptions, Usage};
@@ -184,6 +186,95 @@ fn an_empty_response_model_or_provider_is_left_off() -> Outcome {
     let attributes = attributes_of(calls[0])?;
     assert_eq!(attributes.get("gen_ai.response.model"), None);
     assert_eq!(attributes.get("gen_ai.provider.name"), None);
+    Ok(())
+}
+
+/// Ingest refuses a call over an empty model, or text past its cap.
+#[test]
+fn a_model_calls_text_past_ingests_caps_keeps_its_call() -> Outcome {
+    let harness = Harness::new()?;
+    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let m = |n: usize| "m".repeat(n);
+    let generate = || ModelCallOptions {
+        operation: Some("generate_content".to_owned()),
+        ..ModelCallOptions::default()
+    };
+    for _ in 0..2 {
+        run.model_call("", ModelCallOptions::default()).end();
+        let call = run.model_call(
+            &m(129),
+            ModelCallOptions {
+                provider: Some("p".repeat(129)),
+                ..generate()
+            },
+        );
+        call.answered(Reply {
+            response_model: Some("r".repeat(129)),
+            ..Reply::default()
+        });
+        call.end();
+        let custom = ModelCallOptions {
+            operation: Some("o".repeat(20)),
+            ..ModelCallOptions::default()
+        };
+        run.model_call(&m(128), custom).end();
+    }
+    // At their caps: the longest operation and a model at its cap fit.
+    let smiles = "😀".repeat(128);
+    let call = run.model_call(&smiles, generate());
+    call.answered(Reply {
+        response_model: Some(smiles.clone()),
+        ..Reply::default()
+    });
+    call.end();
+    run.end();
+    harness.flush()?;
+
+    let spans = harness.spans()?;
+    let sent: Map<String, Value> = spans
+        .iter()
+        .filter(|span| !["telmoni.run.start", "invoke_agent bot"].contains(&name_of(span)))
+        .map(|span| Ok((name_of(span).to_owned(), attributes_of(span)?)))
+        .collect::<Result<_, Failure>>()?;
+    let custom_name: String = format!("{} {}", "o".repeat(20), m(128))
+        .chars()
+        .take(145)
+        .collect();
+    let names: BTreeSet<String> = sent.keys().cloned().collect();
+    let want = BTreeSet::from([
+        "chat".to_owned(),
+        format!("generate_content {}", m(128)),
+        format!("generate_content {smiles}"),
+        custom_name,
+    ]);
+    assert_eq!(names, want);
+    assert_eq!(sent["chat"].get("gen_ai.request.model"), None);
+    let cut = &sent[&format!("generate_content {}", m(128))];
+    assert_eq!(cut.get("gen_ai.request.model"), Some(&json!(m(128))));
+    assert_eq!(
+        cut.get("gen_ai.provider.name"),
+        Some(&json!("p".repeat(128)))
+    );
+    assert_eq!(
+        cut.get("gen_ai.response.model"),
+        Some(&json!("r".repeat(128)))
+    );
+    assert_eq!(
+        sent[&format!("generate_content {smiles}")].get("gen_ai.response.model"),
+        Some(&json!(smiles))
+    );
+    let mut warnings = harness.warnings.all();
+    warnings.sort();
+    assert_eq!(
+        warnings,
+        [
+            "telmoni: a model call needs its model; one without is sent named by its operation alone",
+            "telmoni: a model call's name must be up to 145 characters; it is sent cut to its first 145",
+            "telmoni: a model must be up to 128 characters; it is sent cut to its first 128",
+            "telmoni: a provider must be up to 128 characters; it is sent cut to its first 128",
+            "telmoni: a response model must be up to 128 characters; it is sent cut to its first 128",
+        ]
+    );
     Ok(())
 }
 

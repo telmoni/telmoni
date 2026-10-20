@@ -132,3 +132,28 @@ func TestASecondEndAndALateMarkDoNothing(t *testing.T) {
 		t.Error("a cancel after End was recorded")
 	}
 }
+
+// Ingest refuses a span named nothing, or past 145 characters, each invalid
+// byte one of them, which JSON sends as U+FFFD.
+func TestAStepNamedNothingOrPastIngestsCapKeepsItsSpan(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	n := func(count int) string { return strings.Repeat("n", count) }
+	for _, name := range []string{"", "", n(146), n(146), n(145), strings.Repeat("\xff", 146)} {
+		_, step := run.Step(ctx, name)
+		step.End()
+	}
+	run.End()
+	h.flush()
+	want := []string{"invoke_agent bot", n(145), n(145), n(145), "step", "step", "telmoni.run.start", strings.Repeat("�", 145)}
+	if got := sortedNames(h.transport.spans(t)); !reflect.DeepEqual(got, want) {
+		t.Errorf("spans sent: %q", got)
+	}
+	warnings := []string{
+		"telmoni: a step needs its name; one without is sent named step",
+		"telmoni: a step's name must be up to 145 characters; it is sent cut to its first 145",
+	}
+	if got := h.logs.warnings(); !reflect.DeepEqual(got, warnings) {
+		t.Errorf("warnings = %q, want %q", got, warnings)
+	}
+}

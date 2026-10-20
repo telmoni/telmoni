@@ -229,6 +229,32 @@ fn a_continued_runs_steps_and_calls_carry_the_callers_run_under_its_span() -> Ou
     Ok(())
 }
 
+/// Uncut, ingest would refuse every span this side sends of the run.
+#[test]
+fn a_continued_runs_spans_carry_its_agent_cut_to_its_cap() -> Outcome {
+    let fixture = load_fixture("headers.json")?;
+    let given = field(&fixture, "extract")?
+        .as_array()
+        .ok_or("extract")?
+        .iter()
+        .find(|given| text(given, "name").is_ok_and(|name| name.starts_with("an agent past")))
+        .ok_or("headers.json holds no agent past its cap")?;
+    let harness = Harness::new()?;
+    let continued = harness
+        .telmoni
+        .extract(&headers_of(field(given, "headers")?)?)
+        .ok_or("no run was read")?;
+    continued.step("work").end();
+    harness.flush()?;
+    let spans = harness.spans()?;
+    let agent = text(field(given, "run")?, "agent")?;
+    assert_eq!(
+        attributes_of(named(&spans, "work")?)?.get("telmoni.agent"),
+        Some(&Value::from(agent))
+    );
+    Ok(())
+}
+
 #[test]
 fn a_continued_run_hands_itself_on_again_under_the_span_current_here() -> Outcome {
     let harness = Harness::new()?;

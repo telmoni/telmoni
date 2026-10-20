@@ -85,9 +85,14 @@ of what ingest would refuse or drop, these are left off with one warning: a
 token count below zero off its call, and a tag whose key is not 1 to 64
 characters or whose value is over 256, which takes no place among a run's 32.
 A run sends its first 32 tags by key, the most ingest keeps, and warns once of
-the rest. Text past ingest's caps, below, and a step or model named nothing
-still go as given, and ingest refuses the span they are on, or the whole run
-for its agent, user or session. `New` returns an error for a client-wide
+the rest. Past ingest's caps, counted in characters, a name, the agent, a
+model, a provider, a response model or an error type is cut to its cap — a
+step's or a tool's name, and a model call's `<operation> <model>`, to 145, the
+rest to 128 — and a user past 128 or a session past 200 is left off, since cut
+it would name another; a step named nothing goes as `step`, and a model call
+with no model is named by its operation alone; each with one warning, where
+ingest would refuse the span, or the whole run for its agent, user or session.
+`New` returns an error for a client-wide
 `SampleRate` outside (0, 1], for a plain-HTTP endpoint whose host is not this
 machine, and for one of any scheme but HTTP and HTTPS; `RecordRun`, below, for
 a record it refuses. An endpoint without a scheme gets `https://`, or
@@ -142,9 +147,10 @@ the span's place in the record, so the same record sent again is the same
 bytes, which ingest answers once: give a run the same id each time you send it.
 A record holds no content; a tag or token count a live run would leave off is
 left off with one warning. A blank agent, a run id that is not a UUID or is the
-nil UUID, text past ingest's caps (names, the agent, the model and provider and
-error types 128 characters, the user 128, the session 200, a model call's
-operation and model 127 together), a step with an empty name or a model call
+nil UUID, text past ingest's caps (a step's or a tool's name 145 characters,
+the agent, the model, provider and error types 128, the user 128, the session
+200, a model call's operation and model 144 together), a step with an empty
+name or a model call
 with an empty model, a nil item, a span that ends before it starts, or a time
 that is zero, at or before the Unix epoch, or 2^64 nanoseconds or more after
 it, in July 2554, returns an error, and nothing is sent: a record is handed

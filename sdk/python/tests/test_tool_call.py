@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import logging
+
+import pytest
+
 from conftest import FakeTransport, attributes_of
 from telmoni import Telmoni
 
@@ -47,6 +51,27 @@ def test_a_failing_tool_records_its_error_class(
     assert attributes_of(by_name["execute_tool search"])["error.type"] == "TimeoutError"
     assert by_name["execute_tool search"]["status"] == {"code": 2}
     assert attributes_of(by_name["execute_tool lookup"])["error.type"] == "NotFound"
+
+
+def test_a_tool_name_past_ingests_cap_is_cut_warned_once(
+    telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Ingest refuses a tool call named past 145 characters."""
+    with telmoni.run("bot"):
+        for name in ("t" * 146, "t" * 146, "t" * 145):
+            with telmoni.tool_call(name):
+                pass
+    assert telmoni.flush()
+    assert [attributes_of(s)["gen_ai.tool.name"] for s in tools(transport)] == [
+        "t" * 145
+    ] * 3
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warnings == [
+        (
+            "telmoni: a tool's name must be up to 145 characters; "
+            "it is sent cut to its first 145"
+        )
+    ]
 
 
 def test_the_tool_call_decorator(telmoni: Telmoni, transport: FakeTransport) -> None:

@@ -133,6 +133,53 @@ describe('a model call', () => {
     for (const span of spans) expect(attributesOf(span)['gen_ai.operation.name']).toBe('chat');
   });
 
+  it("keeps its call where its model is empty or its text past ingest's caps, warned once", async () => {
+    h.telmoni.run('bot', (run) => {
+      for (let i = 0; i < 2; i++) {
+        run.modelCall('', () => {});
+        run.modelCall('m'.repeat(129), { provider: 'p'.repeat(129), operation: 'generate_content' }, (call) => {
+          call.answered({ responseModel: 'r'.repeat(129) });
+        });
+        run.modelCall('m'.repeat(128), { operation: 'o'.repeat(20) }, () => {});
+      }
+      // At their caps: the longest operation and a model at its cap fit.
+      run.modelCall('😀'.repeat(128), { operation: 'generate_content' }, (call) => {
+        call.answered({ responseModel: '😀'.repeat(128) });
+      });
+    });
+    expect(await h.telmoni.flush()).toBe(true);
+    const sent = Object.fromEntries(
+      h.transport
+        .spans()
+        .filter((span) => !['telmoni.run.start', 'invoke_agent bot'].includes(span.name))
+        .map((span) => [span.name, attributesOf(span)]),
+    );
+    expect(Object.keys(sent).sort()).toEqual(
+      [
+        'chat',
+        `generate_content ${'m'.repeat(128)}`,
+        `${'o'.repeat(20)} ${'m'.repeat(128)}`.slice(0, 145),
+        `generate_content ${'😀'.repeat(128)}`,
+      ].sort(),
+    );
+    expect(Object.keys(sent['chat']!)).not.toContain('gen_ai.request.model');
+    expect(sent['chat']!['gen_ai.operation.name']).toBe('chat');
+    const cut = sent[`generate_content ${'m'.repeat(128)}`]!;
+    expect([cut['gen_ai.request.model'], cut['gen_ai.provider.name'], cut['gen_ai.response.model']]).toEqual([
+      'm'.repeat(128),
+      'p'.repeat(128),
+      'r'.repeat(128),
+    ]);
+    expect(sent[`generate_content ${'😀'.repeat(128)}`]!['gen_ai.response.model']).toBe('😀'.repeat(128));
+    expect([...h.warnings].sort()).toEqual([
+      'telmoni: a model call needs its model; one without is sent named by its operation alone',
+      "telmoni: a model call's name must be up to 145 characters; it is sent cut to its first 145",
+      'telmoni: a model must be up to 128 characters; it is sent cut to its first 128',
+      'telmoni: a provider must be up to 128 characters; it is sent cut to its first 128',
+      'telmoni: a response model must be up to 128 characters; it is sent cut to its first 128',
+    ]);
+  });
+
   it('has content taken off before it leaves', async () => {
     h.telmoni.run('bot', (run) => {
       run.modelCall('m', { inputMessages: [{ role: 'user', content: 'my secret prompt' }] }, (call) => {

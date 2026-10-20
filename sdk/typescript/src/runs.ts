@@ -55,18 +55,24 @@ export class Handle {
    */
   readonly context: Context;
   protected readonly span: Span;
+  readonly #warnOnce: WarnOnce;
   #ended = false;
 
-  constructor(span: Span, parent: Context, run: Run | undefined) {
+  constructor(span: Span, parent: Context, run: Run | undefined, warnOnce: WarnOnce) {
     this.span = span;
+    this.#warnOnce = warnOnce;
     // A run is found from any context inside it; a run's own handle is the run.
     this.context = trace.setSpan(parent, span).setValue(RUN_KEY, run ?? this);
   }
 
   /** Mark it failed, with the error's class and never its message. */
   fail(errorType: string): void {
+    const given: unknown = errorType;
+    const text = given ? typeOfError(given, this.#warnOnce) : '';
     // Ingest refuses the span over an empty one, and with a run's, the run.
-    if (errorType) this.span.setAttribute(contract.ERROR_TYPE, errorType);
+    if (text !== '') {
+      this.span.setAttribute(contract.ERROR_TYPE, cut(text, contract.ERROR_TYPE_MAX, "span's error type", this.#warnOnce));
+    }
     this.span.setStatus({ code: SpanStatusCode.ERROR });
   }
 
@@ -92,7 +98,7 @@ export abstract class Parent extends Handle {
   readonly #run: Run;
 
   constructor(opener: Opener, span: Span, parent: Context, run: Run | undefined) {
-    super(span, parent, run);
+    super(span, parent, run, opener.warnOnce);
     this.#opener = opener;
     // Only a Run passes no run: it is its own.
     this.#run = run ?? (this as unknown as Run);
@@ -156,14 +162,16 @@ export class ModelCall extends Handle {
   readonly #warnOnce: WarnOnce;
 
   constructor(span: Span, parent: Context, run: Run, warnOnce: WarnOnce) {
-    super(span, parent, run);
+    super(span, parent, run, warnOnce);
     this.#warnOnce = warnOnce;
   }
 
   /** What the model answered: its name, its tokens, and its messages. */
   answered(answer: ModelAnswer): void {
     const model = filled(answer.responseModel, 'response model', this.#warnOnce);
-    if (model !== undefined) this.span.setAttribute(contract.RESPONSE_MODEL, model);
+    if (model !== undefined) {
+      this.span.setAttribute(contract.RESPONSE_MODEL, cut(model, contract.MODEL_MAX, 'response model', this.#warnOnce));
+    }
     this.span.setAttributes(usageOf(answer.usage, this.#warnOnce));
     if (answer.outputMessages !== undefined) {
       this.span.setAttribute(contract.OUTPUT_MESSAGES, asJson(answer.outputMessages));
@@ -233,12 +241,17 @@ export class Opener {
     this.#warnOnce = warnOnce;
   }
 
+  /** The client's warning, once per key, which every handle gives. */
+  get warnOnce(): WarnOnce {
+    return this.#warnOnce;
+  }
+
   run(given: string, options: RunOptions): Run {
     const named: unknown = given;
     if (!isSet(named) || textOf(named).trim() === '') {
       throw new TypeError("a run needs its agent's name");
     }
-    const agent = asText(named, "run's agent", this.#warnOnce);
+    const agent = cut(asText(named, "run's agent", this.#warnOnce), contract.AGENT_MAX, "run's agent", this.#warnOnce);
     const rate: unknown = options.sampleRate ?? this.#config.sampleRate;
     if (typeof rate !== 'number' || !(rate > 0 && rate <= 1)) {
       throw new RangeError('sampleRate must be a number above 0 and up to 1');
@@ -248,9 +261,13 @@ export class Opener {
     const runId = randomUUID();
     const inherited: Attributes = { [contract.RUN_ID]: runId, [contract.AGENT]: agent };
     const user = filled(options.userId, 'user id', this.#warnOnce);
-    if (user !== undefined) inherited[contract.USER_ID] = user;
+    if (user !== undefined && fits(user, contract.USER_ID_MAX, 'user id', this.#warnOnce)) {
+      inherited[contract.USER_ID] = user;
+    }
     const session = filled(options.sessionId, 'session id', this.#warnOnce);
-    if (session !== undefined) inherited[contract.SESSION_ID] = session;
+    if (session !== undefined && fits(session, contract.SESSION_ID_MAX, 'session id', this.#warnOnce)) {
+      inherited[contract.SESSION_ID] = session;
+    }
     // On every span of the run from its start, for the processor to drop: a
     // sampler's drop would clear the flag the application's spans inherit.
     if (sampledOut) inherited[contract.SAMPLED_OUT] = true;
@@ -283,41 +300,60 @@ export class Opener {
    * steps and calls nest under it and carry the run, and nothing of it is
    * sent or ended from this side.
    */
-  continued(remote: SpanContext, runId: string, agent: string): Run {
+  continued(remote: SpanContext, runId: string, given: string): Run {
+    const agent = cut(given, contract.AGENT_MAX, "run's agent", this.#warnOnce);
     const inherited: Attributes = { [contract.RUN_ID]: runId, [contract.AGENT]: agent };
     return new Run(this, trace.wrapSpanContext(remote), context.active(), runId, agent, inherited);
   }
 
-  step(run: Run, parent: Context, name: string): Step {
-    const span = this.#start(asText(name, "step's name", this.#warnOnce), parent, run.inherited, SpanKind.INTERNAL);
+  step(run: Run, parent: Context, given: string): Step {
+    let name = asText(given, "step's name", this.#warnOnce);
+    // Ingest refuses a span named nothing.
+    if (name === '') {
+      this.#warnOnce('step:name', 'telmoni: a step needs its name; one without is sent named step');
+      name = 'step';
+    }
+    const span = this.#start(cut(name, contract.NAME_MAX, "step's name", this.#warnOnce), parent, run.inherited, SpanKind.INTERNAL);
     return new Step(this, span, parent, run);
   }
 
   modelCall(run: Run, parent: Context, given: string, options: ModelCallOptions): ModelCall {
-    const model = asText(given, 'model', this.#warnOnce);
+    const asked = asText(given, 'model', this.#warnOnce);
     // Sent blank, the span would be named ` <model>` and ingest would read it
     // as a step.
     const operation =
       typeof options.operation === 'string' && options.operation.trim() !== '' ? options.operation : 'chat';
-    const attributes: Attributes = {
-      ...run.inherited,
-      [contract.OPERATION]: operation,
-      [contract.REQUEST_MODEL]: model,
-    };
+    const attributes: Attributes = { ...run.inherited, [contract.OPERATION]: operation };
+    // Ingest refuses a call over an empty model, but keeps one with none.
+    const model = asked === '' ? undefined : cut(asked, contract.MODEL_MAX, 'model', this.#warnOnce);
+    if (model === undefined) {
+      this.#warnOnce(
+        'call:model',
+        'telmoni: a model call needs its model; one without is sent named by its operation alone',
+      );
+    } else {
+      attributes[contract.REQUEST_MODEL] = model;
+    }
     const provider = filled(options.provider, 'provider', this.#warnOnce);
-    if (provider !== undefined) attributes[contract.PROVIDER] = provider;
+    if (provider !== undefined) attributes[contract.PROVIDER] = cut(provider, contract.PROVIDER_MAX, 'provider', this.#warnOnce);
     if (isSet(options.inputMessages)) {
       attributes[contract.INPUT_MESSAGES] = asJson(options.inputMessages);
     }
     if (isSet(options.systemInstructions)) {
       attributes[contract.SYSTEM_INSTRUCTIONS] = asJson(options.systemInstructions);
     }
-    const span = this.#start(`${operation} ${model}`, parent, attributes, SpanKind.CLIENT);
+    const name = cut(
+      model === undefined ? operation : `${operation} ${model}`,
+      contract.NAME_MAX,
+      "model call's name",
+      this.#warnOnce,
+    );
+    const span = this.#start(name, parent, attributes, SpanKind.CLIENT);
     return new ModelCall(span, parent, run, this.#warnOnce);
   }
 
   toolCall(run: Run, parent: Context, given: string, options: ToolCallOptions): ToolCall {
-    const name = asText(given, "tool's name", this.#warnOnce);
+    const name = cut(asText(given, "tool's name", this.#warnOnce), contract.NAME_MAX, "tool's name", this.#warnOnce);
     const attributes: Attributes = {
       ...run.inherited,
       [contract.OPERATION]: contract.TOOL_OPERATION,
@@ -327,7 +363,7 @@ export class Opener {
       attributes[contract.TOOL_CALL_ARGUMENTS] = asJson(options.arguments);
     }
     const span = this.#start(`execute_tool ${name}`, parent, attributes, SpanKind.INTERNAL);
-    return new ToolCall(span, parent, run);
+    return new ToolCall(span, parent, run, this.#warnOnce);
   }
 
   /**
@@ -346,8 +382,8 @@ export class Opener {
     if (typeof agent !== 'string' || agent.trim() === '') {
       throw new TypeError("a run needs its agent's name");
     }
-    if ([...agent].length > contract.NAME_MAX) {
-      throw new RangeError(`a recorded run's agent must be up to ${contract.NAME_MAX} characters`);
+    if ([...agent].length > contract.AGENT_MAX) {
+      throw new RangeError(`a recorded run's agent must be up to ${contract.AGENT_MAX} characters`);
     }
     const runHex = uuidHex(record.runId);
     // Checked whole before anything is queued, so a record refused sends
@@ -583,7 +619,9 @@ function check(item: RunRecord | Item, kind: keyof typeof FIELDS): void {
   if (kind === 'model_call') {
     const operation = typeof read.operation === 'string' && read.operation.trim() !== '' ? read.operation : 'chat';
     if ([...operation].length + [...String(read.model)].length > contract.NAME_MAX - 1) {
-      throw new RangeError("a recorded model call's operation and model must be up to 127 characters together");
+      throw new RangeError(
+        `a recorded model call's operation and model must be up to ${contract.NAME_MAX - 1} characters together`,
+      );
     }
   }
 }
@@ -738,6 +776,34 @@ function asText(value: unknown, what: string, warnOnce: WarnOnce): string {
   if (typeof value === 'string') return value;
   warnOnce(`text:${what}`, `telmoni: a ${what} that is no string is sent as its text`);
   return textOf(value);
+}
+
+/**
+ * An error type that is no string: an error's class, or a class's name, never
+ * its message, which is content; anything else as its text.
+ */
+function typeOfError(value: unknown, warnOnce: WarnOnce): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object' && value !== null) return errorType(value);
+  if (typeof value === 'function' && value.name !== '') return value.name;
+  return asText(value, "span's error type", warnOnce);
+}
+
+/** `value` up to ingest's cap, in characters, cut there with one warning, since ingest refuses a span past it. */
+function cut(value: string, most: number, what: string, warnOnce: WarnOnce): string {
+  // UTF-16's units are never fewer than its characters.
+  if (value.length <= most) return value;
+  const characters = [...value];
+  if (characters.length <= most) return value;
+  warnOnce(`cut:${what}`, `telmoni: a ${what} must be up to ${most} characters; it is sent cut to its first ${most}`);
+  return characters.slice(0, most).join('');
+}
+
+/** Whether an id is within ingest's cap; one past it is left off with one warning, since cut it would name another. */
+function fits(value: string, most: number, what: string, warnOnce: WarnOnce): boolean {
+  if (value.length <= most || [...value].length <= most) return true;
+  warnOnce(`long:${what}`, `telmoni: a ${what} must be up to ${most} characters; the run is sent without it`);
+  return false;
 }
 
 /** `String(value)`, or its type where that throws, as a null-prototype object's does. */

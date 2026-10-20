@@ -199,13 +199,37 @@ impl Handle {
     }
 
     fn step(&self, name: &str) -> Step {
+        let warner = &self.client.warner;
+        // Ingest refuses a span named nothing.
+        let name = if name.is_empty() {
+            warner.once(
+                "step:name".to_owned(),
+                "telmoni: a step needs its name; one without is sent named step",
+            );
+            "step"
+        } else {
+            name
+        };
+        let name = cut(name, contract::NAME_MAX, "step's name", warner);
         Step {
-            handle: self.child(name.to_owned(), SpanKind::Internal, Vec::new()),
+            handle: self.child(name, SpanKind::Internal, Vec::new()),
         }
     }
 
     fn model_call(&self, model: &str, options: ModelCallOptions) -> ModelCall {
-        let (name, mut attributes) = model_call_opening(model, options.operation, options.provider);
+        let warner = &self.client.warner;
+        if model.is_empty() {
+            warner.once(
+                "call:model".to_owned(),
+                "telmoni: a model call needs its model; one without is sent named by its operation alone",
+            );
+        }
+        let model = cut(model, contract::MODEL_MAX, "model", warner);
+        let provider = options
+            .provider
+            .map(|provider| cut(&provider, contract::PROVIDER_MAX, "provider", warner));
+        let (name, mut attributes) = model_call_opening(&model, options.operation, provider);
+        let name = cut(&name, contract::NAME_MAX, "model call's name", warner);
         if let Some(messages) = options.input_messages {
             attributes.push(KeyValue::new(contract::INPUT_MESSAGES, messages.0));
         }
@@ -218,7 +242,8 @@ impl Handle {
     }
 
     fn tool_call(&self, name: &str, options: ToolCallOptions) -> ToolCall {
-        let (name, mut attributes) = tool_call_opening(name);
+        let name = cut(name, contract::NAME_MAX, "tool's name", &self.client.warner);
+        let (name, mut attributes) = tool_call_opening(&name);
         if let Some(arguments) = options.arguments {
             attributes.push(KeyValue::new(contract::TOOL_CALL_ARGUMENTS, arguments.0));
         }
@@ -228,7 +253,14 @@ impl Handle {
     }
 
     fn fail(&self, error_type: &str) {
-        mark_failed(&self.cx.span(), error_type.to_owned());
+        let warner = &self.client.warner;
+        let error_type = cut(
+            error_type,
+            contract::ERROR_TYPE_MAX,
+            "span's error type",
+            warner,
+        );
+        mark_failed(&self.cx.span(), error_type);
         self.failed.store(true, Ordering::Relaxed);
     }
 
@@ -473,7 +505,7 @@ impl Run {
         &self.run_id
     }
 
-    /// The agent's name, as given.
+    /// The agent's name as the run sends it, cut to 128 characters.
     #[must_use]
     pub fn agent(&self) -> &str {
         &self.agent
@@ -497,6 +529,8 @@ impl ModelCall {
         let span = self.handle.cx.span();
         // Ingest refuses the call over an empty one.
         if let Some(model) = reply.response_model.filter(|model| !model.is_empty()) {
+            let warner = &self.handle.client.warner;
+            let model = cut(&model, contract::MODEL_MAX, "response model", warner);
             span.set_attribute(KeyValue::new(contract::RESPONSE_MODEL, model));
         }
         if let Some(usage) = reply.usage {
@@ -524,6 +558,7 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
     if agent.trim().is_empty() {
         return Err(Error::EmptyAgent);
     }
+    let agent = cut(agent, contract::AGENT_MAX, "run's agent", &inner.warner);
     let rate = options.sample_rate.unwrap_or(inner.config.sample_rate);
     if !(rate > 0.0 && rate <= 1.0) {
         return Err(Error::SampleRate(rate));
@@ -558,7 +593,11 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
 
     let sampled_out = rate < 1.0 && (inner.random)() >= rate;
     let run_id = Uuid::new_v4().to_string();
-    let mut inherited = inherited(&run_id, agent, options.user_id, options.session_id);
+    let user_id =
+        (options.user_id).filter(|id| fits(id, contract::USER_ID_MAX, "user id", &inner.warner));
+    let session_id = (options.session_id)
+        .filter(|id| fits(id, contract::SESSION_ID_MAX, "session id", &inner.warner));
+    let mut inherited = inherited(&run_id, &agent, user_id, session_id);
     // On every span of the run from its start, for the processor to drop: a
     // sampler's drop would clear the flag the application's spans inherit.
     if sampled_out {
@@ -566,7 +605,7 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
     }
     let bounds = bound_attributes(&limits);
     let attributes = run_attributes(
-        agent,
+        &agent,
         &inherited,
         &bounds,
         rate,
@@ -585,7 +624,7 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
         .start_with_context(tracer, &parent);
     let cx = parent.with_span(span).with_value(RunInfo {
         run_id: run_id.clone(),
-        agent: agent.to_owned(),
+        agent: agent.clone(),
         sampled_out,
     });
 
@@ -608,7 +647,7 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
             ended: false,
         },
         run_id,
-        agent: agent.to_owned(),
+        agent,
     })
 }
 
@@ -617,12 +656,18 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
 /// here, so its steps and calls nest under it and carry the run, and nothing
 /// of it is sent or ended from this side.
 pub(crate) fn continued(inner: &Arc<Inner>, read: Continued) -> Run {
-    let inherited = inherited(&read.run_id, &read.agent, None, None);
+    let agent = cut(
+        &read.agent,
+        contract::AGENT_MAX,
+        "run's agent",
+        &inner.warner,
+    );
+    let inherited = inherited(&read.run_id, &agent, None, None);
     let cx = Context::current()
         .with_remote_span_context(read.span_context)
         .with_value(RunInfo {
             run_id: read.run_id.clone(),
-            agent: read.agent.clone(),
+            agent: agent.clone(),
             sampled_out: false,
         });
     Run {
@@ -634,7 +679,7 @@ pub(crate) fn continued(inner: &Arc<Inner>, read: Continued) -> Run {
             ended: false,
         },
         run_id: read.run_id,
-        agent: read.agent,
+        agent,
     }
 }
 
@@ -742,11 +787,16 @@ pub(crate) fn model_call_opening(
     provider: Option<String>,
 ) -> (String, Vec<KeyValue>) {
     let operation = model_operation(operation.as_deref()).to_owned();
-    let name = format!("{operation} {model}");
-    let mut attributes = vec![
-        KeyValue::new(contract::OPERATION, operation),
-        KeyValue::new(contract::REQUEST_MODEL, model.to_owned()),
-    ];
+    // Ingest refuses a call over an empty model, but keeps one with none.
+    let name = if model.is_empty() {
+        operation.clone()
+    } else {
+        format!("{operation} {model}")
+    };
+    let mut attributes = vec![KeyValue::new(contract::OPERATION, operation)];
+    if !model.is_empty() {
+        attributes.push(KeyValue::new(contract::REQUEST_MODEL, model.to_owned()));
+    }
     if let Some(provider) = provider.filter(|provider| !provider.is_empty()) {
         attributes.push(KeyValue::new(contract::PROVIDER, provider));
     }
@@ -810,6 +860,34 @@ pub(crate) fn sendable_usage(usage: Usage, warner: &Warner) -> Usage {
             usage.cache_write_input_tokens,
         ),
     }
+}
+
+/// `text` up to ingest's cap, in characters, cut there with one warning,
+/// since ingest refuses a span past it.
+fn cut(text: &str, most: usize, what: &str, warner: &Warner) -> String {
+    if text.chars().nth(most).is_none() {
+        return text.to_owned();
+    }
+    warner.once(
+        format!("cut:{what}"),
+        &format!(
+            "telmoni: a {what} must be up to {most} characters; it is sent cut to its first {most}"
+        ),
+    );
+    text.chars().take(most).collect()
+}
+
+/// Whether an id is within ingest's cap; one past it is left off with one
+/// warning, since cut it would name another.
+fn fits(id: &str, most: usize, what: &str, warner: &Warner) -> bool {
+    if id.chars().nth(most).is_none() {
+        return true;
+    }
+    warner.once(
+        format!("long:{what}"),
+        &format!("telmoni: a {what} must be up to {most} characters; the run is sent without it"),
+    );
+    false
 }
 
 /// Marks `span` failed: `error.type`, unless empty, which ingest would refuse

@@ -205,6 +205,27 @@ func TestAContinuedRunsStepsAndCallsCarryTheCallersRunUnderItsSpan(t *testing.T)
 	}
 }
 
+// Uncut, ingest would refuse every span this side sends of the run.
+func TestAContinuedRunsSpansCarryItsAgentCutToItsCap(t *testing.T) {
+	fixture := loadHeaders(t)
+	h := newHarness(t, testConfig(), nil)
+	for _, given := range fixture.Extract {
+		if !strings.HasPrefix(given.Name, "an agent past") {
+			continue
+		}
+		ctx := h.client.Extract(context.Background(), headerOf(given.Headers))
+		_, work := telmoni.RunFromContext(ctx).Step(ctx, "work")
+		work.End()
+		h.flush()
+		span := byName(h.transport.spans(t))["work"]
+		if got := attributesOf(t, span)["telmoni.agent"]; got != given.Run.Agent {
+			t.Errorf("the continued run's step carries telmoni.agent %q, want it cut", got)
+		}
+		return
+	}
+	t.Fatal("headers.json holds no agent past its cap")
+}
+
 func TestAContinuedRunHandsItselfOnAgainUnderTheSpanCurrentHere(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	first := http.Header{}

@@ -469,3 +469,95 @@ def test_a_user_or_session_that_is_no_string_goes_as_its_text(
         "telmoni: a user id that is no string is sent as its text",
         "telmoni: a session id that is no string is sent as its text",
     }
+
+
+class RateLimited(Exception):
+    pass
+
+
+class Blank:
+    def __str__(self) -> str:
+        return ""
+
+
+def test_an_error_type_that_is_no_string_goes_as_its_class_or_its_text(
+    telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An exception's message is content; as given, the rest would raise."""
+    given: list[object] = [
+        RateLimited("quota exceeded for alice@example.com"),
+        RateLimited(),
+        RateLimited,
+        429,
+        Blank(),
+    ]
+    for error_type in given:
+        with telmoni.run("bot") as run:
+            run.fail(error_type)  # type: ignore[arg-type]
+    assert telmoni.flush()
+    runs = [s for s in transport.spans() if s["name"] == "invoke_agent bot"]
+    assert [attributes_of(s).get("error.type") for s in runs] == [
+        "RateLimited",
+        "RateLimited",
+        "RateLimited",
+        "429",
+        None,
+    ]
+    assert all(s["status"] == {"code": 2} for s in runs)
+    assert "alice@example.com" not in str(transport.requests)
+    texts = {r.getMessage() for r in caplog.records if "as its text" in r.getMessage()}
+    assert texts == {
+        "telmoni: a span's error type that is no string is sent as its text"
+    }
+
+
+def test_a_runs_text_past_ingests_caps_is_cut_or_left_off_warned_once(
+    telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    """On every span of the run, one past its cap cost ingest the run whole."""
+    long_error = type("E" * 129, (Exception,), {})
+    for _ in range(2):
+        with (
+            pytest.raises(long_error),
+            telmoni.run("😀" * 129, user_id="u" * 129, session_id="s" * 201) as run,
+        ):
+            assert run.agent == "😀" * 128
+            raise long_error
+    assert telmoni.flush()
+    for span in transport.spans():
+        sent = attributes_of(span)
+        assert sent["telmoni.agent"] == "😀" * 128
+        assert "user.id" not in sent and "gen_ai.conversation.id" not in sent
+    runs = [s for s in transport.spans() if s["name"] == "invoke_agent " + "😀" * 128]
+    assert len(runs) == 2
+    assert all(attributes_of(s)["gen_ai.agent.name"] == "😀" * 128 for s in runs)
+    assert all(attributes_of(s)["error.type"] == "E" * 128 for s in runs)
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert sorted(warnings) == [
+        (
+            "telmoni: a run's agent must be up to 128 characters; "
+            "it is sent cut to its first 128"
+        ),
+        (
+            "telmoni: a session id must be up to 200 characters; "
+            "the run is sent without it"
+        ),
+        (
+            "telmoni: a span's error type must be up to 128 characters; "
+            "it is sent cut to its first 128"
+        ),
+        "telmoni: a user id must be up to 128 characters; the run is sent without it",
+    ]
+
+
+def test_a_runs_text_at_ingests_caps_is_sent_whole(
+    telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Counted in characters, as ingest counts them, never in UTF-8's bytes."""
+    with telmoni.run("😀" * 128, user_id="😀" * 128, session_id="😀" * 200) as run:
+        run.fail("😀" * 128)
+    assert telmoni.flush()
+    sent = attributes_of(run_span(transport))
+    assert sent["telmoni.agent"] == sent["user.id"] == sent["error.type"] == "😀" * 128
+    assert sent["gen_ai.conversation.id"] == "😀" * 200
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]

@@ -178,8 +178,10 @@ impl Telmoni {
 
     /// A run of `agent`, as a guard: the span `invoke_agent <agent>` in
     /// whatever trace is current, opened by `telmoni.run.start`, sent at once,
-    /// and ended when the guard drops or on [`Run::end`]. A bound or tag out of
-    /// range, or a tag past the first 32 by key, is left off with one warning.
+    /// and ended when the guard drops or on [`Run::end`]. An agent past 128
+    /// characters is cut to them, and a bound or tag out of range, a tag past
+    /// the first 32 by key, or a user or session past its cap is left off,
+    /// each with one warning.
     ///
     /// # Errors
     ///

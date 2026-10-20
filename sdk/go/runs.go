@@ -70,8 +70,9 @@ type Answer struct {
 // handle is a span the SDK opened, until its End. A handle opened outside a
 // run has no span and does nothing.
 type handle struct {
-	span trace.Span
-	once sync.Once
+	span   trace.Span
+	client *Client
+	once   sync.Once
 }
 
 // End ends the span; a second End does nothing.
@@ -106,7 +107,7 @@ func (h *handle) FailWith(errorType string) {
 	}
 	// Ingest refuses the span over an empty one, and with a run's, the run.
 	if errorType != "" {
-		h.span.SetAttributes(attribute.String(attrErrorType, errorType))
+		h.span.SetAttributes(attribute.String(attrErrorType, h.client.cut(errorType, errorTypeMax, "span's error type")))
 	}
 	h.span.SetStatus(codes.Error, "")
 }
@@ -132,7 +133,6 @@ func errorTypeName(err error) string {
 // waiting for the trace's tree.
 type Run struct {
 	handle
-	client    *Client
 	id        string
 	agent     string
 	inherited []attribute.KeyValue
@@ -149,7 +149,6 @@ type Step struct {
 // ModelCall is a call to a model inside a run.
 type ModelCall struct {
 	handle
-	client *Client
 }
 
 // ToolCall is a call to a tool inside a run.
@@ -181,10 +180,12 @@ func RunFromContext(ctx context.Context) *Run {
 // deferred.
 //
 // A blank agent name opens no run: its handle does nothing, and the client
-// warns once. A SampleRate outside (0, 1] falls back to the client's, and a
-// bound ingest refuses or a tag it drops or past the 32nd by key is left
-// off, each with one warning. None panics: telemetry never takes the agent
-// down, where Python and TypeScript raise for a blank agent or a bad rate.
+// warns once. A SampleRate outside (0, 1] falls back to the client's; an
+// agent past 128 characters is cut to them; and a bound ingest refuses, a
+// user or session id past its cap, or a tag it drops or past the 32nd by key
+// is left off, each with one warning. None panics: telemetry never takes the
+// agent down, where Python and TypeScript raise for a blank agent or a bad
+// rate.
 func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (context.Context, *Run) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -194,8 +195,9 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 	}
 	if strings.TrimSpace(agent) == "" {
 		c.exporter.warnOnce("run:agent", "telmoni: a run needs its agent's name; nothing is sent for one without")
-		return ctx, &Run{client: c}
+		return ctx, &Run{handle: handle{client: c}}
 	}
+	agent = c.cut(agent, agentMax, "run's agent")
 	rate := c.config.SampleRate
 	if opts.SampleRate != 0 {
 		if opts.SampleRate > 0 && opts.SampleRate <= 1 {
@@ -210,10 +212,10 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 		attribute.String(attrRunID, runID),
 		attribute.String(attrAgent, agent),
 	}
-	if opts.UserID != "" {
+	if opts.UserID != "" && c.fits(opts.UserID, userIDMax, "user id") {
 		inherited = append(inherited, attribute.String(attrUserID, opts.UserID))
 	}
-	if opts.SessionID != "" {
+	if opts.SessionID != "" && c.fits(opts.SessionID, sessionIDMax, "session id") {
 		inherited = append(inherited, attribute.String(attrSessionID, opts.SessionID))
 	}
 	// On every span of the run from its start, for the processor to drop: a
@@ -245,7 +247,7 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 		trace.WithTimestamp(start),
 	)
 	opener.End(trace.WithTimestamp(start))
-	run := &Run{handle: handle{span: span}, client: c, id: runID, agent: agent, inherited: inherited, sampledOut: sampledOut}
+	run := &Run{handle: handle{span: span, client: c}, id: runID, agent: agent, inherited: inherited, sampledOut: sampledOut}
 	return contextWithRun(ctx, run), run
 }
 
@@ -257,7 +259,7 @@ func (r *Run) ID() string {
 	return r.id
 }
 
-// Agent is the agent's name.
+// Agent is the agent's name as the run sends it, cut to 128 characters.
 func (r *Run) Agent() string {
 	if r == nil {
 		return ""
@@ -310,8 +312,13 @@ func (r *Run) Step(ctx context.Context, name string) (context.Context, *Step) {
 	if r == nil || r.span == nil {
 		return ctx, &Step{}
 	}
-	ctx, span := r.child(ctx, name, trace.SpanKindInternal, nil)
-	return ctx, &Step{handle: handle{span: span}}
+	// Ingest refuses a span named nothing.
+	if name == "" {
+		r.client.exporter.warnOnce("step:name", "telmoni: a step needs its name; one without is sent named step")
+		name = "step"
+	}
+	ctx, span := r.child(ctx, r.client.cut(name, nameMax, "step's name"), trace.SpanKindInternal, nil)
+	return ctx, &Step{handle: handle{span: span, client: r.client}}
 }
 
 // ModelCall opens a call to model under the span in ctx; Answered records
@@ -320,13 +327,20 @@ func (r *Run) ModelCall(ctx context.Context, model string, opts ModelCallOptions
 	if r == nil || r.span == nil {
 		return ctx, &ModelCall{}
 	}
+	c := r.client
 	operation := modelOperation(opts.Operation)
-	attrs := []attribute.KeyValue{
-		attribute.String(attrOperation, operation),
-		attribute.String(attrRequestModel, model),
+	attrs := []attribute.KeyValue{attribute.String(attrOperation, operation)}
+	name := operation
+	// Ingest refuses a call over an empty model, but keeps one with none.
+	if model == "" {
+		c.exporter.warnOnce("call:model", "telmoni: a model call needs its model; one without is sent named by its operation alone")
+	} else {
+		model = c.cut(model, modelMax, "model")
+		attrs = append(attrs, attribute.String(attrRequestModel, model))
+		name = operation + " " + model
 	}
 	if opts.Provider != "" {
-		attrs = append(attrs, attribute.String(attrProvider, opts.Provider))
+		attrs = append(attrs, attribute.String(attrProvider, c.cut(opts.Provider, providerMax, "provider")))
 	}
 	if opts.InputMessages != nil {
 		attrs = append(attrs, attribute.String(attrInputMessages, asJSON(opts.InputMessages)))
@@ -334,8 +348,8 @@ func (r *Run) ModelCall(ctx context.Context, model string, opts ModelCallOptions
 	if opts.SystemInstructions != nil {
 		attrs = append(attrs, attribute.String(attrSystemInstructions, asJSON(opts.SystemInstructions)))
 	}
-	ctx, span := r.child(ctx, operation+" "+model, trace.SpanKindClient, attrs)
-	return ctx, &ModelCall{handle: handle{span: span}, client: r.client}
+	ctx, span := r.child(ctx, c.cut(name, nameMax, "model call's name"), trace.SpanKindClient, attrs)
+	return ctx, &ModelCall{handle: handle{span: span, client: c}}
 }
 
 // ToolCall opens a call to the tool named name under the span in ctx;
@@ -344,6 +358,7 @@ func (r *Run) ToolCall(ctx context.Context, name string, opts ToolCallOptions) (
 	if r == nil || r.span == nil {
 		return ctx, &ToolCall{}
 	}
+	name = r.client.cut(name, nameMax, "tool's name")
 	attrs := []attribute.KeyValue{
 		attribute.String(attrOperation, toolOperation),
 		attribute.String(attrToolName, name),
@@ -352,7 +367,7 @@ func (r *Run) ToolCall(ctx context.Context, name string, opts ToolCallOptions) (
 		attrs = append(attrs, attribute.String(attrToolCallArguments, asJSON(opts.Arguments)))
 	}
 	ctx, span := r.child(ctx, toolOperation+" "+name, trace.SpanKindInternal, attrs)
-	return ctx, &ToolCall{handle: handle{span: span}}
+	return ctx, &ToolCall{handle: handle{span: span, client: r.client}}
 }
 
 func (r *Run) child(ctx context.Context, name string, kind trace.SpanKind, attrs []attribute.KeyValue) (context.Context, trace.Span) {
@@ -379,7 +394,7 @@ func (m *ModelCall) Answered(a Answer) {
 	}
 	var attrs []attribute.KeyValue
 	if a.ResponseModel != "" {
-		attrs = append(attrs, attribute.String(attrResponseModel, a.ResponseModel))
+		attrs = append(attrs, attribute.String(attrResponseModel, m.client.cut(a.ResponseModel, modelMax, "response model")))
 	}
 	attrs = append(attrs, usageAttributes(a.Usage, m.client.warnCount)...)
 	if a.OutputMessages != nil {
@@ -435,6 +450,39 @@ func usageAttributes(u *Usage, warn func(name string)) []attribute.KeyValue {
 
 func (c *Client) warnCount(name string) {
 	c.exporter.warnOnce("usage:"+name, "telmoni: "+name+" must be a whole number from 0 within 64 bits; the call is sent without it")
+}
+
+// cut is text up to ingest's cap, in characters, cut there with one warning,
+// since ingest refuses a span past it. JSON sends each invalid byte as one
+// U+FFFD, which range counts as one rune too.
+func (c *Client) cut(text string, most int, what string) string {
+	// A string's bytes are never fewer than its runes.
+	if len(text) <= most || utf8.RuneCountInString(text) <= most {
+		return text
+	}
+	if c.built() {
+		c.exporter.warnOnce("cut:"+what, fmt.Sprintf("telmoni: a %s must be up to %d characters; it is sent cut to its first %d", what, most, most))
+	}
+	runes := 0
+	for at := range text {
+		if runes == most {
+			return text[:at]
+		}
+		runes++
+	}
+	return text
+}
+
+// fits reports whether an id is within ingest's cap; one past it is left off
+// with one warning, since cut it would name another.
+func (c *Client) fits(id string, most int, what string) bool {
+	if len(id) <= most || utf8.RuneCountInString(id) <= most {
+		return true
+	}
+	if c.built() {
+		c.exporter.warnOnce("long:"+what, fmt.Sprintf("telmoni: a %s must be up to %d characters; the run is sent without it", what, most))
+	}
+	return false
 }
 
 // boundAttributes is the bounds a run is sent with, a zero one unset; one

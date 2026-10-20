@@ -650,6 +650,88 @@ fn a_warning_sink_that_panics_never_reaches_the_agent() -> Outcome {
     Ok(())
 }
 
+/// On every span of the run, any of these past its cap cost ingest the run whole.
+#[test]
+fn a_runs_text_past_ingests_caps_is_cut_or_left_off_warned_once() -> Outcome {
+    let harness = Harness::new()?;
+    let smiles = |n: usize| "😀".repeat(n);
+    for _ in 0..2 {
+        let run = harness.telmoni.run(
+            &smiles(129),
+            RunOptions {
+                user_id: Some("u".repeat(129)),
+                session_id: Some("s".repeat(201)),
+                ..RunOptions::default()
+            },
+        )?;
+        assert_eq!(run.agent(), smiles(128));
+        run.fail(&"E".repeat(129));
+        run.end();
+    }
+    harness.flush()?;
+    let spans = harness.spans()?;
+    for span in &spans {
+        let attributes = attributes_of(span)?;
+        assert_eq!(attributes.get("telmoni.agent"), Some(&json!(smiles(128))));
+        assert_eq!(attributes.get("user.id"), None);
+        assert_eq!(attributes.get("gen_ai.conversation.id"), None);
+    }
+    let runs = starting_with(&spans, "invoke_agent ");
+    assert_eq!(runs.len(), 2);
+    for span in runs {
+        assert_eq!(name_of(span), format!("invoke_agent {}", smiles(128)));
+        let attributes = attributes_of(span)?;
+        assert_eq!(
+            attributes.get("gen_ai.agent.name"),
+            Some(&json!(smiles(128)))
+        );
+        assert_eq!(attributes.get("error.type"), Some(&json!("E".repeat(128))));
+    }
+    let mut warnings = harness.warnings.all();
+    warnings.sort();
+    assert_eq!(
+        warnings,
+        [
+            "telmoni: a run's agent must be up to 128 characters; it is sent cut to its first 128",
+            "telmoni: a session id must be up to 200 characters; the run is sent without it",
+            "telmoni: a span's error type must be up to 128 characters; it is sent cut to its first 128",
+            "telmoni: a user id must be up to 128 characters; the run is sent without it",
+        ]
+    );
+    Ok(())
+}
+
+/// Counted in characters, as ingest counts them, never in UTF-8's bytes.
+#[test]
+fn a_runs_text_at_ingests_caps_is_sent_whole() -> Outcome {
+    let harness = Harness::new()?;
+    let smiles = |n: usize| "😀".repeat(n);
+    let run = harness.telmoni.run(
+        &smiles(128),
+        RunOptions {
+            user_id: Some(smiles(128)),
+            session_id: Some(smiles(200)),
+            ..RunOptions::default()
+        },
+    )?;
+    let id = run.run_id().to_owned();
+    run.fail(&smiles(128));
+    run.end();
+    harness.flush()?;
+    let spans = harness.spans()?;
+    let attributes = attributes_of(run_span(&spans, &id)?)?;
+    for (key, want) in [
+        ("telmoni.agent", smiles(128)),
+        ("user.id", smiles(128)),
+        ("gen_ai.conversation.id", smiles(200)),
+        ("error.type", smiles(128)),
+    ] {
+        assert_eq!(attributes.get(key), Some(&json!(want)), "{key}");
+    }
+    assert!(harness.warnings.all().is_empty());
+    Ok(())
+}
+
 #[test]
 fn a_run_is_shared_across_threads() -> Outcome {
     fn send_and_sync<T: Send + Sync>() {}

@@ -130,3 +130,28 @@ func TestAFunctionWrappedInAToolCall(t *testing.T) {
 		t.Errorf("want one tool call, got %d", got)
 	}
 }
+
+// Ingest refuses a tool call named past 145 characters.
+func TestAToolNamePastIngestsCapIsCutWarnedOnce(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	for _, name := range []string{strings.Repeat("t", 146), strings.Repeat("t", 146), strings.Repeat("t", 145)} {
+		_, tool := run.ToolCall(ctx, name, telmoni.ToolCallOptions{})
+		tool.End()
+	}
+	run.End()
+	h.flush()
+	spans := tools(t, h)
+	if len(spans) != 3 {
+		t.Fatalf("want three tool calls, got %v", names(spans))
+	}
+	for _, span := range spans {
+		if got := attributesOf(t, span)["gen_ai.tool.name"]; got != strings.Repeat("t", 145) {
+			t.Errorf("gen_ai.tool.name of %d characters, want 145", len(got.(string)))
+		}
+	}
+	want := []string{"telmoni: a tool's name must be up to 145 characters; it is sent cut to its first 145"}
+	if got := h.logs.warnings(); !reflect.DeepEqual(got, want) {
+		t.Errorf("warnings = %q, want %q", got, want)
+	}
+}

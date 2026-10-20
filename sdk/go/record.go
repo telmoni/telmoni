@@ -350,10 +350,10 @@ func (c *Client) warnUsage(record RunRecord) {
 
 func checkRun(record RunRecord) error {
 	err := checkCaps("run", []capped{
-		{"Agent", record.Agent, 128},
-		{"UserID", record.UserID, 128},
-		{"SessionID", record.SessionID, 200},
-		{"ErrorType", record.ErrorType, 128},
+		{"Agent", record.Agent, agentMax},
+		{"UserID", record.UserID, userIDMax},
+		{"SessionID", record.SessionID, sessionIDMax},
+		{"ErrorType", record.ErrorType, errorTypeMax},
 	})
 	if err != nil {
 		return err
@@ -365,7 +365,7 @@ func checkStep(step StepRecord) error {
 	if step.Name == "" {
 		return errNoName
 	}
-	if err := checkCaps("step", []capped{{"Name", step.Name, 128}, {"ErrorType", step.ErrorType, 128}}); err != nil {
+	if err := checkCaps("step", []capped{{"Name", step.Name, nameMax}, {"ErrorType", step.ErrorType, errorTypeMax}}); err != nil {
 		return err
 	}
 	return checkTimes(step.Start, step.End)
@@ -378,21 +378,21 @@ func checkCall(call CallRecord) error {
 			return errNoName
 		}
 		err := checkCaps("model call", []capped{
-			{"Model", call.Model, 128},
-			{"Provider", call.Provider, 128},
-			{"ErrorType", call.ErrorType, 128},
+			{"Model", call.Model, modelMax},
+			{"Provider", call.Provider, providerMax},
+			{"ErrorType", call.ErrorType, errorTypeMax},
 		})
 		if err != nil {
 			return err
 		}
-		// Its span is named "<operation> <model>", which ingest caps at 128.
-		if utf8.RuneCountInString(modelOperation(call.Operation))+utf8.RuneCountInString(call.Model) > 127 {
-			return errors.New("telmoni: a recorded model call's operation and model must be up to 127 characters together")
+		// Its span is named "<operation> <model>", a name ingest caps too.
+		if utf8.RuneCountInString(modelOperation(call.Operation))+utf8.RuneCountInString(call.Model) > nameMax-1 {
+			return fmt.Errorf("telmoni: a recorded model call's operation and model must be up to %d characters together", nameMax-1)
 		}
 		return checkTimes(call.Start, call.End)
 	case ToolCallRecord:
 		// A tool's empty name ingest reads as none, keeping the call.
-		if err := checkCaps("tool call", []capped{{"Name", call.Name, 128}, {"ErrorType", call.ErrorType, 128}}); err != nil {
+		if err := checkCaps("tool call", []capped{{"Name", call.Name, nameMax}, {"ErrorType", call.ErrorType, errorTypeMax}}); err != nil {
 			return err
 		}
 		return checkTimes(call.Start, call.End)

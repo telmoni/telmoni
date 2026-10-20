@@ -143,6 +143,24 @@ def test_a_continued_runs_steps_and_calls_carry_the_callers_run_under_its_span(
     assert named["chat gpt-x"]["parentSpanId"] == named["work"]["spanId"]
 
 
+def test_a_continued_runs_spans_carry_its_agent_cut_to_its_cap(
+    telmoni: Telmoni, transport: FakeTransport
+) -> None:
+    """Uncut, ingest would refuse every span this side sends of the run."""
+    given = next(
+        case for case in FIXTURE["extract"] if case["name"].startswith("an agent past")
+    )
+    continued = telmoni.extract(given["headers"])
+    assert isinstance(continued, Run)
+    with telmoni.step("work", run=continued):
+        pass
+    assert telmoni.flush()
+    assert (
+        attributes_of(by_name(transport)["work"])["telmoni.agent"]
+        == (given["run"]["agent"])
+    )
+
+
 def test_a_continued_run_hands_itself_on_again_under_the_span_current_here(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:

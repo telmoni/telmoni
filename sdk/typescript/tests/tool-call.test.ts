@@ -58,6 +58,19 @@ describe('a tool call', () => {
     expect(h.transport.text()).not.toContain('took 30 s');
   });
 
+  it("cuts a name past ingest's 145 characters, warned once, where it lost the call", async () => {
+    h.telmoni.run('bot', (run) => {
+      for (const name of ['t'.repeat(146), 't'.repeat(146), 't'.repeat(145)]) run.toolCall(name, () => {});
+    });
+    expect(await h.telmoni.flush()).toBe(true);
+    expect(tools(h.transport).map((span) => attributesOf(span)['gen_ai.tool.name'])).toEqual(
+      Array(3).fill('t'.repeat(145)),
+    );
+    expect(h.warnings).toEqual([
+      "telmoni: a tool's name must be up to 145 characters; it is sent cut to its first 145",
+    ]);
+  });
+
   it('returns what its callback returns', async () => {
     expect(h.telmoni.run('bot', (run) => run.toolCall('search', () => 'cba'))).toBe('cba');
     expect(await h.telmoni.flush()).toBe(true);

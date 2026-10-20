@@ -69,9 +69,14 @@ run over — a `stall_after_s` or `max_steps` outside 1 to 4294967295, a
 one warning, and a negative token count off its call; a run sends its first 32
 tags by key, the most ingest keeps, and warns once of the rest. A tag whose key
 is not 1 to 64 characters or whose value is over 256 is left off with one
-warning first and takes no place among them. Text past ingest's caps, below,
-and a step or model named nothing still go as given, and ingest refuses the
-span they are on, or the whole run for its agent, user or session.
+warning first and takes no place among them. Past ingest's caps, counted in
+characters, a name, the agent, a model, a provider, a response model or an
+error type is cut to its cap — a step's or a tool's name, and a model call's
+`<operation> <model>`, to 145, the rest to 128 — and a user past 128 or a
+session past 200 is left off, since cut it would name another; a step named
+nothing goes as `step`, and a model call with no model is named by its
+operation alone; each with one warning, where ingest would refuse the span, or
+the whole run for its agent, user or session.
 `fail("ErrorType")` marks a span failed with the error's type, none if empty,
 and no message; `cancel()` marks it cancelled by the agent. The `_with`
 methods take a closure and return its value — `telmoni.run_with(..)`,
@@ -140,9 +145,10 @@ which ingest answers once: give a run the same id each time you send it. A
 record holds no content, and its tags and token counts go as a live run's do.
 A blank agent (`Error::EmptyAgent`), a run id that is not a UUID or is the nil
 UUID (`Error::RunId`), an empty step name or model (`Error::EmptyName`), text
-past ingest's caps (`Error::TooLong`: names, the agent, models, providers and
-error types 128 characters, the user 128, the session 200, and a model call's
-operation and model 127 together), a time at or before the Unix epoch or 2^64
+past ingest's caps (`Error::TooLong`: a step's or a tool's name 145
+characters, the agent, models, providers and error types 128, the user 128,
+the session 200, and a model call's operation and model 144 together), a time
+at or before the Unix epoch or 2^64
 nanoseconds or more after it, in July 2554 (`Error::RecordedTime`), or a span
 that ends before it starts (`Error::EndBeforeStart`) is returned as an error,
 and nothing is sent. A record the export queue has no room for is

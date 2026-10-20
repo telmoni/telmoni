@@ -92,8 +92,11 @@ pub(crate) const CONTENT_MODE_HEADER: &str = "Telmoni-Content-Mode";
 
 // ── Ingest's caps, in characters ─────────────────────────────────────────────
 
-/// A span's name, an agent's and a tool's among them: ingest's `NAME_MAX`.
-pub(crate) const NAME_MAX: usize = 128;
+/// A span's name, a step's and a tool's among them: ingest's `NAME_MAX`,
+/// room for a model call's `<operation> <model>`, a model at its cap.
+pub(crate) const NAME_MAX: usize = 145;
+/// `telmoni.agent`: ingest's `AGENT_MAX`.
+pub(crate) const AGENT_MAX: usize = 128;
 /// `error.type`: ingest's `ERROR_TYPE_MAX`.
 pub(crate) const ERROR_TYPE_MAX: usize = 128;
 /// `gen_ai.request.model`: ingest's `MODEL_MAX`.

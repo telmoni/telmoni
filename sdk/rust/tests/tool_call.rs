@@ -122,3 +122,29 @@ fn a_tool_call_opens_children_of_its_own() -> Outcome {
     );
     Ok(())
 }
+
+/// Ingest refuses a tool call named past 145 characters.
+#[test]
+fn a_tool_name_past_ingests_cap_is_cut_warned_once() -> Outcome {
+    let harness = Harness::new()?;
+    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    for name in ["t".repeat(146), "t".repeat(146), "t".repeat(145)] {
+        run.tool_call(&name, ToolCallOptions::default()).end();
+    }
+    run.end();
+    harness.flush()?;
+    let spans = harness.spans()?;
+    let tools = starting_with(&spans, "execute_tool ");
+    assert_eq!(tools.len(), 3);
+    for tool in tools {
+        assert_eq!(
+            attributes_of(tool)?.get("gen_ai.tool.name"),
+            Some(&json!("t".repeat(145)))
+        );
+    }
+    assert_eq!(
+        harness.warnings.all(),
+        ["telmoni: a tool's name must be up to 145 characters; it is sent cut to its first 145"]
+    );
+    Ok(())
+}

@@ -138,6 +138,31 @@ def test_a_name_of_no_string_goes_as_its_text_and_keeps_the_batch(
     assert len(warnings) == 4 and all("is sent as its text" in w for w in warnings)
 
 
+def test_a_step_named_nothing_or_past_ingests_cap_keeps_its_span(
+    telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Ingest refuses a span named nothing, or past 145 characters."""
+    with telmoni.run("bot") as run:
+        for name in ("", "", "n" * 146, "n" * 146, "n" * 145):
+            with run.step(name):
+                pass
+    assert telmoni.flush()
+    steps = sorted(
+        s["name"]
+        for s in transport.spans()
+        if s["name"] not in ("telmoni.run.start", "invoke_agent bot")
+    )
+    assert steps == ["n" * 145] * 3 + ["step"] * 2
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warnings == [
+        "telmoni: a step needs its name; one without is sent named step",
+        (
+            "telmoni: a step's name must be up to 145 characters; "
+            "it is sent cut to its first 145"
+        ),
+    ]
+
+
 def test_a_name_with_a_lone_surrogate_goes_with_the_replacement_character(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:

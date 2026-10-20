@@ -395,9 +395,9 @@ func TestARecordRefusedReturnsAnErrorAndSendsNothing(t *testing.T) {
 			"telmoni: a recorded run's SessionID must be up to 200 characters"},
 		{"a run's error type of 129 characters", func(r *telmoni.RunRecord) { r.ErrorType = strings.Repeat("e", 129) },
 			"telmoni: a recorded run's ErrorType must be up to 128 characters"},
-		{"a step's name of 129 characters", func(r *telmoni.RunRecord) {
-			r.Inside = append(r.Inside, telmoni.StepRecord{Name: strings.Repeat("s", 129), Start: start, End: start})
-		}, "telmoni: a recorded step's Name must be up to 128 characters"},
+		{"a step's name of 146 characters", func(r *telmoni.RunRecord) {
+			r.Inside = append(r.Inside, telmoni.StepRecord{Name: strings.Repeat("s", 146), Start: start, End: start})
+		}, "telmoni: a recorded step's Name must be up to 145 characters"},
 		{"a step's error type of 129 characters", func(r *telmoni.RunRecord) {
 			r.Inside = append(r.Inside, telmoni.StepRecord{Name: "s", ErrorType: strings.Repeat("e", 129), Start: start, End: start})
 		}, "telmoni: a recorded step's ErrorType must be up to 128 characters"},
@@ -410,17 +410,17 @@ func TestARecordRefusedReturnsAnErrorAndSendsNothing(t *testing.T) {
 		{"a model call's error type of 129 characters", func(r *telmoni.RunRecord) {
 			r.Inside = append(r.Inside, telmoni.ModelCallRecord{Model: "m", ErrorType: strings.Repeat("e", 129), Start: start, End: start})
 		}, "telmoni: a recorded model call's ErrorType must be up to 128 characters"},
-		{"chat and a model of 128 characters together", func(r *telmoni.RunRecord) {
-			r.Inside = append(r.Inside, telmoni.ModelCallRecord{Model: strings.Repeat("m", 124), Start: start, End: start})
-		}, "telmoni: a recorded model call's operation and model must be up to 127 characters together"},
-		{"an operation and model of 128 characters together, in a step", func(r *telmoni.RunRecord) {
+		{"an operation and a model of 145 characters together", func(r *telmoni.RunRecord) {
+			r.Inside = append(r.Inside, telmoni.ModelCallRecord{Operation: strings.Repeat("o", 17), Model: strings.Repeat("m", 128), Start: start, End: start})
+		}, "telmoni: a recorded model call's operation and model must be up to 144 characters together"},
+		{"an operation and a model of 145 characters together, in a step", func(r *telmoni.RunRecord) {
 			r.Inside = append(r.Inside, telmoni.StepRecord{Name: "s", Start: start, End: start, Calls: []telmoni.CallRecord{
-				telmoni.ModelCallRecord{Operation: "generate_content", Model: strings.Repeat("é", 112), Start: start, End: start},
+				telmoni.ModelCallRecord{Operation: strings.Repeat("é", 20), Model: strings.Repeat("é", 125), Start: start, End: start},
 			}})
-		}, "telmoni: a recorded model call's operation and model must be up to 127 characters together"},
-		{"a tool's name of 129 characters", func(r *telmoni.RunRecord) {
-			r.Inside = append(r.Inside, telmoni.ToolCallRecord{Name: strings.Repeat("t", 129), Start: start, End: start})
-		}, "telmoni: a recorded tool call's Name must be up to 128 characters"},
+		}, "telmoni: a recorded model call's operation and model must be up to 144 characters together"},
+		{"a tool's name of 146 characters", func(r *telmoni.RunRecord) {
+			r.Inside = append(r.Inside, telmoni.ToolCallRecord{Name: strings.Repeat("t", 146), Start: start, End: start})
+		}, "telmoni: a recorded tool call's Name must be up to 145 characters"},
 		{"a tool call's error type of 129 characters, in a step", func(r *telmoni.RunRecord) {
 			r.Inside = append(r.Inside, telmoni.StepRecord{Name: "s", Start: start, End: start, Calls: []telmoni.CallRecord{
 				telmoni.ToolCallRecord{Name: "t", ErrorType: strings.Repeat("e", 129), Start: start, End: start},
@@ -490,11 +490,11 @@ func TestARecordAtIngestsCapsIsSentAsGiven(t *testing.T) {
 	start := record.Start
 	record.Agent, record.UserID, record.SessionID, record.ErrorType = wide(128), wide(128), wide(200), wide(128)
 	record.Inside = []telmoni.RecordItem{
-		telmoni.StepRecord{Name: wide(128), ErrorType: wide(128), Start: start, End: start, Calls: []telmoni.CallRecord{
-			telmoni.ToolCallRecord{Name: wide(128), ErrorType: wide(128), Start: start, End: start},
+		telmoni.StepRecord{Name: wide(145), ErrorType: wide(128), Start: start, End: start, Calls: []telmoni.CallRecord{
+			telmoni.ToolCallRecord{Name: wide(145), ErrorType: wide(128), Start: start, End: start},
 		}},
-		telmoni.ModelCallRecord{Model: wide(123), Provider: wide(128), ErrorType: wide(128), Start: start, End: start},
-		telmoni.ModelCallRecord{Operation: "generate_content", Model: wide(111), Start: start, End: start},
+		telmoni.ModelCallRecord{Model: wide(128), Provider: wide(128), ErrorType: wide(128), Start: start, End: start},
+		telmoni.ModelCallRecord{Operation: "generate_content", Model: wide(128), Start: start, End: start},
 	}
 	recordRun(t, h, record)
 	spans := h.transport.spans(t)
@@ -503,10 +503,10 @@ func TestARecordAtIngestsCapsIsSentAsGiven(t *testing.T) {
 	}
 	for name, want := range map[string]map[string]any{
 		"invoke_agent " + wide(128):     {"telmoni.agent": wide(128), "user.id": wide(128), "gen_ai.conversation.id": wide(200), "error.type": wide(128)},
-		wide(128):                       {"error.type": wide(128)},
-		"execute_tool " + wide(128):     {"gen_ai.tool.name": wide(128), "error.type": wide(128)},
-		"chat " + wide(123):             {"gen_ai.request.model": wide(123), "gen_ai.provider.name": wide(128), "error.type": wide(128)},
-		"generate_content " + wide(111): {"gen_ai.request.model": wide(111)},
+		wide(145):                       {"error.type": wide(128)},
+		"execute_tool " + wide(145):     {"gen_ai.tool.name": wide(145), "error.type": wide(128)},
+		"chat " + wide(128):             {"gen_ai.request.model": wide(128), "gen_ai.provider.name": wide(128), "error.type": wide(128)},
+		"generate_content " + wide(128): {"gen_ai.request.model": wide(128)},
 	} {
 		span := byName(spans)[name]
 		if span == nil {

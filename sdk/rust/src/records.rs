@@ -427,7 +427,7 @@ impl<'a> Checked<'a> {
                 (
                     "run's agent",
                     chars(Some(&record.agent)),
-                    contract::NAME_MAX,
+                    contract::AGENT_MAX,
                 ),
                 (
                     "run's user_id",
@@ -493,7 +493,7 @@ impl<'a> Checked<'a> {
                     chars(call.error_type.as_deref()),
                     contract::ERROR_TYPE_MAX,
                 ),
-                // The span is `<operation> <model>`: the space takes one of the 128.
+                // The span is `<operation> <model>`: the space takes one of the name's.
                 (
                     "model call's operation and model",
                     chars(Some(operation)) + chars(Some(&call.model)),

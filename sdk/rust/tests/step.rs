@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::{Harness, Outcome, attributes_of, named, only};
+use common::{Harness, Outcome, attributes_of, name_of, named, only};
 use serde_json::json;
 use telmoni_sdk::RunOptions;
 
@@ -96,5 +96,37 @@ fn the_step_closure_returns_its_value_and_nests() -> Outcome {
         plan.get("spanId")
     );
     assert!(named(&spans, "act")?.get("status").is_none());
+    Ok(())
+}
+
+/// Ingest refuses a span named nothing, or past 145 characters.
+#[test]
+fn a_step_named_nothing_or_past_ingests_cap_keeps_its_span() -> Outcome {
+    let harness = Harness::new()?;
+    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let n = |count: usize| "n".repeat(count);
+    for name in ["", "", &n(146), &n(146), &n(145)] {
+        run.step(name).end();
+    }
+    run.end();
+    harness.flush()?;
+    let mut steps: Vec<String> = harness
+        .spans()?
+        .iter()
+        .map(|span| name_of(span).to_owned())
+        .filter(|name| name != "telmoni.run.start" && name != "invoke_agent bot")
+        .collect();
+    steps.sort();
+    assert_eq!(
+        steps,
+        [n(145), n(145), n(145), "step".to_owned(), "step".to_owned()]
+    );
+    assert_eq!(
+        harness.warnings.all(),
+        [
+            "telmoni: a step needs its name; one without is sent named step",
+            "telmoni: a step's name must be up to 145 characters; it is sent cut to its first 145",
+        ]
+    );
     Ok(())
 }

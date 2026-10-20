@@ -65,11 +65,16 @@ ingest would refuse, these are left off with one warning: a bound outside 1 to
 whose key is not 1 to 64 characters or whose value is past 256, and the tags
 past the first 32 kept, the most ingest keeps; an empty user, session,
 provider or response model is left off as unset. A name, model, provider,
-user, session or response model that is no string goes as its text with one
-warning, as does a tag that is no string, finite number or bool. Text past
-ingest's caps, below, and a step or model named nothing still go as given,
-and ingest refuses the span they are on, or the whole run for its agent, user
-or session.
+user, session, response model or error type that is no string goes as its
+text with one warning, as does a tag that is no string, finite number or bool;
+an exception or an exception's class handed to `fail()` goes as the class's
+name, never its message. Past ingest's caps, counted in characters, a name, the agent, a model, a
+provider, a response model or an error type is cut to its cap — a step's or a
+tool's name, and a model call's `<operation> <model>`, to 145, the rest to
+128 — and a user past 128 or a session past 200 is left off, since cut it
+would name another; a step named nothing goes as `step`, and a model call with
+no model is named by its operation alone; each with one warning, where ingest
+would refuse the span, or the whole run for its agent, user or session.
 
 ## A run recorded after it ended
 
@@ -117,9 +122,10 @@ record holds no content. A blank agent, a run id that is neither a hyphenated
 UUID nor 32 hex digits, or is the nil UUID, a time without its timezone or
 outside what ingest reads (after the Unix epoch, and less than 2^64 nanoseconds
 after it, in July 2554), an empty step's name or model, text longer than
-ingest keeps (a name, the agent, a model, a provider, a user or an error type
-past 128 characters, a session past 200, or a model call's operation and model
-past 127 together), or a span that ends before it starts raises `ValueError`. A
+ingest keeps (a step's or a tool's name past 145 characters, the agent, a
+model, a provider, a user or an error type past 128, a session past 200, or a
+model call's operation and model past 144 together), or a span that ends
+before it starts raises `ValueError`. A
 field of the wrong type raises `TypeError` — a time that is no `datetime`, an
 item of another class, `inside` or `calls` that is no sequence (a list or a
 tuple, in the order it ran) — save a token count, read as a whole number where

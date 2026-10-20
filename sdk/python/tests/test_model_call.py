@@ -137,6 +137,65 @@ def test_a_provider_or_response_model_goes_as_text_and_an_empty_one_not_at_all(
     }
 
 
+def test_a_model_calls_text_past_ingests_caps_keeps_its_call(
+    telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Ingest refuses a call over an empty model, or text past its cap."""
+    with telmoni.run("bot") as run:
+        for _ in range(2):
+            with run.model_call(""):
+                pass
+            with run.model_call(
+                "m" * 129, provider="p" * 129, operation="generate_content"
+            ) as call:
+                call.answered(response_model="r" * 129)
+            with run.model_call("m" * 128, operation="o" * 20):
+                pass
+        # At their caps: the longest operation and a model at its cap fit.
+        with run.model_call("😀" * 128, operation="generate_content") as call:
+            call.answered(response_model="😀" * 128)
+    assert telmoni.flush()
+    sent = {
+        s["name"]: attributes_of(s)
+        for s in transport.spans()
+        if s["name"] not in ("telmoni.run.start", "invoke_agent bot")
+    }
+    assert sent.keys() == {
+        "chat",
+        "generate_content " + "m" * 128,
+        ("o" * 20 + " " + "m" * 128)[:145],
+        "generate_content " + "😀" * 128,
+    }
+    assert "gen_ai.request.model" not in sent["chat"]
+    assert sent["chat"]["gen_ai.operation.name"] == "chat"
+    cut = sent["generate_content " + "m" * 128]
+    assert cut["gen_ai.request.model"] == "m" * 128
+    assert cut["gen_ai.provider.name"] == "p" * 128
+    assert cut["gen_ai.response.model"] == "r" * 128
+    widest = sent["generate_content " + "😀" * 128]
+    assert widest["gen_ai.response.model"] == "😀" * 128
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert sorted(warnings) == [
+        (
+            "telmoni: a model call needs its model; one without is sent named by "
+            "its operation alone"
+        ),
+        (
+            "telmoni: a model call's name must be up to 145 characters; "
+            "it is sent cut to its first 145"
+        ),
+        "telmoni: a model must be up to 128 characters; it is sent cut to its first 128",
+        (
+            "telmoni: a provider must be up to 128 characters; "
+            "it is sent cut to its first 128"
+        ),
+        (
+            "telmoni: a response model must be up to 128 characters; "
+            "it is sent cut to its first 128"
+        ),
+    ]
+
+
 def test_content_is_taken_off_before_it_leaves(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:

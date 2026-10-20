@@ -583,20 +583,20 @@ class Shifting(Sequence[StepRecord | ModelCallRecord | ToolCallRecord]):
         ({"session_id": "s" * 201}, ValueError, "run's session_id must be up to 200"),
         ({"error_type": "E" * 129}, ValueError, "run's error_type must be up to 128"),
         (
-            {"inside": [dataclasses.replace(STEP, name="n" * 129)]},
+            {"inside": [dataclasses.replace(STEP, name="n" * 146)]},
             ValueError,
-            "step's name must be up to 128",
+            "step's name must be up to 145",
         ),
         (
             {
                 "inside": [
                     dataclasses.replace(
-                        STEP, calls=[dataclasses.replace(TOOL, name="t" * 129)]
+                        STEP, calls=[dataclasses.replace(TOOL, name="t" * 146)]
                     )
                 ]
             },
             ValueError,
-            "tool call's name must be up to 128",
+            "tool call's name must be up to 145",
         ),
         (
             {"inside": [dataclasses.replace(MODEL, model="m" * 129)]},
@@ -604,9 +604,13 @@ class Shifting(Sequence[StepRecord | ModelCallRecord | ToolCallRecord]):
             "model call's model must be up to 128",
         ),
         (
-            {"inside": [dataclasses.replace(MODEL, model="m" * 124)]},
+            {
+                "inside": [
+                    dataclasses.replace(MODEL, operation="o" * 17, model="m" * 128)
+                ]
+            },
             ValueError,
-            "operation and model must be up to 127",
+            "operation and model must be up to 144",
         ),
         (
             {"inside": [dataclasses.replace(MODEL, provider="p" * 129)]},
@@ -754,21 +758,22 @@ def test_a_record_at_ingests_text_caps_is_sent_whole(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
     """Counted in characters, as ingest counts them, never in UTF-8's bytes."""
-    tool = dataclasses.replace(TOOL, name="t" * 128, error_type="E" * 128)
+    tool = dataclasses.replace(TOOL, name="t" * 145, error_type="E" * 128)
+    model = dataclasses.replace(
+        MODEL, operation="generate_content", model="m" * 128, provider="p" * 128
+    )
     record = dataclasses.replace(
         RUN,
         agent="\u00e9" * 128,
         user_id="u" * 128,
         session_id="s" * 200,
-        inside=[
-            dataclasses.replace(STEP, name="n" * 128, calls=[tool]),
-            dataclasses.replace(MODEL, model="m" * 123, provider="p" * 128),
-        ],
+        inside=[dataclasses.replace(STEP, name="n" * 145, calls=[tool]), model],
     )
     telmoni.record_run(record)
     assert telmoni.flush()
     names = {span["name"] for span in transport.spans()}
-    assert {"n" * 128, "chat " + "m" * 123, "execute_tool " + "t" * 128} <= names
+    widest_call = "generate_content " + "m" * 128
+    assert {"n" * 145, widest_call, "execute_tool " + "t" * 145} <= names
 
 
 def test_a_record_sends_its_first_32_tags_and_its_own_attributes(

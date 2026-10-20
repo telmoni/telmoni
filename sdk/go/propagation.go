@@ -54,16 +54,16 @@ func (c *Client) Extract(ctx context.Context, header http.Header) context.Contex
 		return ctx
 	}
 	ctx = trace.ContextWithRemoteSpanContext(ctx, read.spanContext)
+	agent := c.cut(read.agent, agentMax, "run's agent")
 	// The caller's span, non-recording here: steps and calls nest under it,
 	// and nothing of it is sent or ended from this side.
 	run := &Run{
-		handle: handle{span: trace.SpanFromContext(ctx)},
-		client: c,
+		handle: handle{span: trace.SpanFromContext(ctx), client: c},
 		id:     read.runID,
-		agent:  read.agent,
+		agent:  agent,
 		inherited: []attribute.KeyValue{
 			attribute.String(attrRunID, read.runID),
-			attribute.String(attrAgent, read.agent),
+			attribute.String(attrAgent, agent),
 		},
 	}
 	return contextWithRun(ctx, run)

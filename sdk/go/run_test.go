@@ -203,6 +203,98 @@ func TestFailWithAnEmptyTypeFailsTheRunWithNone(t *testing.T) {
 	}
 }
 
+// generic's type runs past ingest's 128 characters, as a generic's instance
+// can: %T spells out its type argument.
+type generic[T any] struct{}
+
+func (generic[T]) Error() string { return "failed" }
+
+// On every span of the run, any of these past its cap cost ingest the run
+// whole.
+func TestARunsTextPastIngestsCapsIsCutOrLeftOffWarnedOnce(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	smiles := func(n int) string { return strings.Repeat("😀", n) }
+	err := generic[struct {
+		TheFirstFieldOfALongTypeName, TheSecondFieldOfALongTypeName int
+		TheThirdFieldOfALongTypeName, TheFourthFieldOfALongTypeName int
+	}]{}
+	errorType := fmt.Sprintf("%T", err)
+	if len(errorType) <= 128 {
+		t.Fatalf("%q is within the cap", errorType)
+	}
+	for range 2 {
+		_, run := h.client.Run(context.Background(), smiles(129), telmoni.RunOptions{
+			UserID:    strings.Repeat("u", 129),
+			SessionID: strings.Repeat("s", 201),
+		})
+		if got := run.Agent(); got != smiles(128) {
+			t.Errorf("Agent() = %q, want it cut to 128 characters", got)
+		}
+		run.Fail(err)
+		run.End()
+	}
+	h.flush()
+	for _, span := range h.transport.spans(t) {
+		attributes := attributesOf(t, span)
+		if attributes["telmoni.agent"] != smiles(128) {
+			t.Errorf("%v carries telmoni.agent uncut", span["name"])
+		}
+		for _, key := range []string{"user.id", "gen_ai.conversation.id"} {
+			if _, has := attributes[key]; has {
+				t.Errorf("%v carries %s past its cap", span["name"], key)
+			}
+		}
+	}
+	runs := withPrefix(h.transport.spans(t), "invoke_agent ")
+	if len(runs) != 2 {
+		t.Fatalf("want two runs, got %v", names(runs))
+	}
+	for _, span := range runs {
+		attributes := attributesOf(t, span)
+		if span["name"] != "invoke_agent "+smiles(128) || attributes["gen_ai.agent.name"] != smiles(128) {
+			t.Errorf("the run's name and gen_ai.agent.name are not cut")
+		}
+		if attributes["error.type"] != errorType[:128] {
+			t.Errorf("error.type = %v, want its first 128 characters", attributes["error.type"])
+		}
+	}
+	warnings := h.logs.warnings()
+	slices.Sort(warnings)
+	want := []string{
+		"telmoni: a run's agent must be up to 128 characters; it is sent cut to its first 128",
+		"telmoni: a session id must be up to 200 characters; the run is sent without it",
+		"telmoni: a span's error type must be up to 128 characters; it is sent cut to its first 128",
+		"telmoni: a user id must be up to 128 characters; the run is sent without it",
+	}
+	if !reflect.DeepEqual(warnings, want) {
+		t.Errorf("warnings = %q, want %q", warnings, want)
+	}
+}
+
+// Counted in characters, as ingest counts them, never in UTF-8's bytes.
+func TestARunsTextAtIngestsCapsIsSentWhole(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	smiles := func(n int) string { return strings.Repeat("😀", n) }
+	_, run := h.client.Run(context.Background(), smiles(128), telmoni.RunOptions{UserID: smiles(128), SessionID: smiles(200)})
+	run.FailWith(smiles(128))
+	run.End()
+	h.flush()
+	attributes := attributesOf(t, runSpan(t, h))
+	for key, want := range map[string]string{
+		"telmoni.agent":          smiles(128),
+		"user.id":                smiles(128),
+		"gen_ai.conversation.id": smiles(200),
+		"error.type":             smiles(128),
+	} {
+		if attributes[key] != want {
+			t.Errorf("%s is not as given", key)
+		}
+	}
+	if warnings := h.logs.warnings(); len(warnings) != 0 {
+		t.Errorf("warnings = %q, want none", warnings)
+	}
+}
+
 // A deadline that ran out is a failure, not a cancellation: a stalled call is
 // what a monitor is for, and the other SDKs fail a timeout with its type.
 func TestADeadlineThatRanOutIsAFailure(t *testing.T) {

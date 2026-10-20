@@ -70,6 +70,17 @@ const (
 	tagKeyMax = 64
 	// tagValueMax is a tag value's most characters, contract.rs's TAG_VALUE_MAX.
 	tagValueMax = 256
+	// nameMax is a span's name's most characters, a step's or a tool's,
+	// contract.rs's NAME_MAX: room for a model call's "<operation> <model>".
+	nameMax = 145
+	// The rest of ingest's caps, in characters, each named after its field:
+	// it refuses a span past any.
+	agentMax     = 128
+	errorTypeMax = 128
+	modelMax     = 128
+	providerMax  = 128
+	userIDMax    = 128
+	sessionIDMax = 200
 )
 
 // content is what the exporter takes off a span unless the code asked and the

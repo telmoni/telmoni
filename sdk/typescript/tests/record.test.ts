@@ -513,12 +513,12 @@ describe('a recorded run', () => {
     ["a run's user past 128 characters", { userId: 'u'.repeat(129) }, RangeError, /run's userId must be up to 128/],
     ["a run's session past 200 characters", { sessionId: 's'.repeat(201) }, RangeError, /run's sessionId must be up to 200/],
     ["a run's error type past 128 characters", { errorType: 'E'.repeat(129) }, RangeError, /run's errorType must be up to 128/],
-    ["a step's name past 128 characters", { inside: [{ ...step, name: 'n'.repeat(129) }] }, RangeError, /step's name must be up to 128/],
+    ["a step's name past 145 characters", { inside: [{ ...step, name: 'n'.repeat(146) }] }, RangeError, /step's name must be up to 145/],
     [
-      "a tool call's name past 128 characters, in a step",
-      { inside: [{ ...step, calls: [{ ...tool, name: 't'.repeat(129) }] }] },
+      "a tool call's name past 145 characters, in a step",
+      { inside: [{ ...step, calls: [{ ...tool, name: 't'.repeat(146) }] }] },
       RangeError,
-      /tool call's name must be up to 128/,
+      /tool call's name must be up to 145/,
     ],
     [
       "a model call's model past 128 characters",
@@ -527,10 +527,10 @@ describe('a recorded run', () => {
       /model call's model must be up to 128/,
     ],
     [
-      "a model call's operation and model past 127 characters together",
-      { inside: [{ type: 'model_call', model: 'm'.repeat(124), start, end: start }] },
+      "a model call's operation and model past 144 characters together",
+      { inside: [{ type: 'model_call', operation: 'o'.repeat(17), model: 'm'.repeat(128), start, end: start }] },
       RangeError,
-      /operation and model must be up to 127/,
+      /operation and model must be up to 144/,
     ],
     [
       "a model call's provider past 128 characters",
@@ -773,12 +773,19 @@ describe('a recorded run', () => {
         inside: [
           {
             type: 'step',
-            name: 'n'.repeat(128),
+            name: 'n'.repeat(145),
             start,
             end: start,
-            calls: [{ type: 'tool_call', name: 't'.repeat(128), errorType: 'E'.repeat(128), start, end: start }],
+            calls: [{ type: 'tool_call', name: 't'.repeat(145), errorType: 'E'.repeat(128), start, end: start }],
           },
-          { type: 'model_call', model: smile.repeat(123), provider: 'p'.repeat(128), start, end: start },
+          {
+            type: 'model_call',
+            operation: 'generate_content',
+            model: smile.repeat(128),
+            provider: 'p'.repeat(128),
+            start,
+            end: start,
+          },
         ],
       });
       expect(await h.telmoni.flush()).toBe(true);
@@ -786,7 +793,9 @@ describe('a recorded run', () => {
       await h.telmoni.shutdown();
     }
     const names = h.transport.spans().map((span) => span.name);
-    expect(names).toEqual(expect.arrayContaining(['n'.repeat(128), `chat ${smile.repeat(123)}`, `execute_tool ${'t'.repeat(128)}`]));
+    expect(names).toEqual(
+      expect.arrayContaining(['n'.repeat(145), `generate_content ${smile.repeat(128)}`, `execute_tool ${'t'.repeat(145)}`]),
+    );
   });
 
   it('sends its first 32 tags and its own attributes, its error and its cancelling among them', async () => {
