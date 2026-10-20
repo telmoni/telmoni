@@ -527,6 +527,35 @@ func TestAnAnswerWhoseHeadIsCutIsSentAgain(t *testing.T) {
 	}
 }
 
+// A float of NaN or an infinity, which JSON cannot carry, is sent as null, as
+// in every SDK: that attribute lost at ingest, never the export it rides in.
+func TestANonFiniteFloatIsSentAsNullWithTheRestOfItsExport(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	spans := bigSpans(1, 1)
+	odd := tracetest.SpanStubFromReadOnlySpan(spans[0])
+	odd.Attributes = append(odd.Attributes,
+		attribute.Float64("app.nan", math.NaN()),
+		attribute.Float64("app.below", math.Inf(-1)),
+		attribute.Float64Slice("app.ratios", []float64{1.5, math.Inf(1)}),
+		attribute.Float64("app.ratio", 0.25),
+	)
+	telmoni.ExportSpans(h.client, []sdktrace.ReadOnlySpan{odd.Snapshot(), spans[1]})
+	if bodies := h.transport.bodies(t); len(bodies) != 1 || len(spansIn(bodies[0])) != 2 {
+		t.Fatalf("%d exports sent, want one of both spans", len(bodies))
+	}
+	sent := h.transport.text()
+	for _, want := range []string{
+		`{"key":"app.nan","value":{"doubleValue":null}}`,
+		`{"key":"app.below","value":{"doubleValue":null}}`,
+		`{"key":"app.ratios","value":{"arrayValue":{"values":[{"doubleValue":1.5},{"doubleValue":null}]}}}`,
+		`{"key":"app.ratio","value":{"doubleValue":0.25}}`,
+	} {
+		if !strings.Contains(sent, want) {
+			t.Errorf("%s not sent", want)
+		}
+	}
+}
+
 // bigSpans is a span named s<n> for each size, an attribute of that many bytes
 // beside one of a few.
 func bigSpans(sizes ...int) []sdktrace.ReadOnlySpan {

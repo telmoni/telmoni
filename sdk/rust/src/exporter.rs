@@ -465,6 +465,8 @@ fn past_caps(key: &str, value: &Value) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use opentelemetry::KeyValue;
     use opentelemetry::trace::{SpanContext, TraceFlags, TraceId, TraceState};
     use opentelemetry_sdk::trace::{SpanEvents, SpanLinks};
@@ -619,6 +621,39 @@ mod tests {
             *lock(&warnings),
             ["telmoni: a span past the 1 MiB an export may hold was dropped"]
         );
+    }
+
+    /// A float of NaN or an infinity, which JSON cannot carry, is sent as null,
+    /// as in every SDK: that attribute lost at ingest, never the export it rides in.
+    #[test]
+    fn a_non_finite_float_is_sent_as_null_with_the_rest_of_its_export() {
+        let (kept, warnings) = (Kept::default(), Arc::default());
+        let mut both = spans(&[1, 1]);
+        both[0].attributes.extend([
+            KeyValue::new("app.nan", f64::NAN),
+            KeyValue::new("app.below", f64::NEG_INFINITY),
+            KeyValue::new("app.ratios", Value::Array(vec![1.5, f64::INFINITY].into())),
+            KeyValue::new("app.ratio", 0.25),
+        ]);
+        exporter(&kept, &warnings).export(&both);
+        let bodies = lock(&kept.0);
+        assert_eq!(bodies.len(), 1, "one export of both spans");
+        let body: serde_json::Value = serde_json::from_slice(&bodies[0]).unwrap();
+        let sent = &body["resourceSpans"][0]["scopeSpans"][0]["spans"];
+        assert_eq!(sent.as_array().map(Vec::len), Some(2));
+        let typed: BTreeMap<&str, &serde_json::Value> = sent[0]["attributes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|each| (each["key"].as_str().unwrap(), &each["value"]))
+            .collect();
+        assert_eq!(typed["app.nan"], &json!({ "doubleValue": null }));
+        assert_eq!(typed["app.below"], &json!({ "doubleValue": null }));
+        assert_eq!(
+            typed["app.ratios"],
+            &json!({ "arrayValue": { "values": [{ "doubleValue": 1.5 }, { "doubleValue": null }] } })
+        );
+        assert_eq!(typed["app.ratio"], &json!({ "doubleValue": 0.25 }));
     }
 
     /// 2^64 ns after the epoch is written 0, a nanosecond less as its digits.

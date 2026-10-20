@@ -299,6 +299,31 @@ mod tests {
         );
     }
 
+    /// The SDKs send a double JSON cannot carry, `NaN` or an infinity, as
+    /// `null`: read as no value, alone or in a list, and the export read whole.
+    #[test]
+    fn a_null_double_reads_as_no_value() {
+        use opentelemetry_proto::tonic::common::v1::any_value::Value;
+        let body = br#"{"resourceSpans":[{"scopeSpans":[{"spans":[
+            {"traceId":"4bf92f3577b34da6a3ce929d0e0e4736","spanId":"00f067aa0ba902b7","name":"chat",
+             "attributes":[{"key":"app.nan","value":{"doubleValue":null}},
+               {"key":"app.ratios","value":{"arrayValue":{"values":[{"doubleValue":1.5},{"doubleValue":null}]}}}]}
+        ]}]}]}"#;
+        let request = request(body, Encoding::Json).expect("an export with a null double");
+        let attributes = &request.resource_spans[0].scope_spans[0].spans[0].attributes;
+        assert_eq!(
+            attributes[0].value.as_ref().map(|v| v.value.clone()),
+            Some(None)
+        );
+        let Some(Value::ArrayValue(ratios)) =
+            attributes[1].value.as_ref().and_then(|v| v.value.clone())
+        else {
+            panic!("a list of doubles");
+        };
+        assert_eq!(ratios.values[0].value, Some(Value::DoubleValue(1.5)));
+        assert_eq!(ratios.values[1].value, None);
+    }
+
     #[test]
     fn protobuf_round_trips() {
         let sent = ExportTraceServiceRequest {

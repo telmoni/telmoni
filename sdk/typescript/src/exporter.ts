@@ -509,7 +509,11 @@ function anyValue(key: string, value: AttributeValue): AnyValue {
   if (typeof value === 'boolean') return { boolValue: value };
   if (typeof value === 'number') {
     if (DOUBLES.has(key)) return { doubleValue: value };
-    if (INTEGERS.has(key) || Number.isSafeInteger(value)) return { intValue: String(Math.trunc(value)) };
+    // Within 64 bits alone: past them, or NaN, ingest's parser refuses the whole export.
+    const whole = Math.trunc(value);
+    if ((INTEGERS.has(key) || Number.isSafeInteger(value)) && whole >= -(2 ** 63) && whole < 2 ** 63) {
+      return { intValue: String(whole) };
+    }
     return { doubleValue: value };
   }
   if (typeof value === 'string') return { stringValue: value };

@@ -530,8 +530,11 @@ def _attribute(key: str, value: object) -> dict[str, Any]:
     if isinstance(value, bool):
         encoded = {"boolValue": value}
     elif isinstance(value, int):
-        # An `(int, Enum)`'s own `str()` is its name, which ingest's parser refuses.
-        encoded = {"intValue": str(int(value))}
+        # An `(int, Enum)`'s own `str()` is its name, which ingest's parser refuses;
+        # past 64 bits the number refuses the whole export there: as its text.
+        whole = int(value)
+        kind = "intValue" if -(1 << 63) <= whole < 1 << 63 else "stringValue"
+        encoded = {kind: str(whole)}
     elif isinstance(value, float):
         # NaN or an infinity as null, as JavaScript and serde write one, which
         # ingest reads as no value: the attribute lost, never the batch.

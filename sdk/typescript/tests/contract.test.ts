@@ -431,6 +431,52 @@ describe("an export past ingest's 1 MiB", () => {
   });
 });
 
+describe('a number ingest cannot read', () => {
+  it('goes as no value, NaN or an infinity as null and a count past 64 bits as a double, never costing its export', async () => {
+    const transport = new FakeTransport();
+    const exporter = new Exporter(new Telmoni({ apiKey: 'k' }).config, {
+      transport: transport.send,
+      sleep: () => Promise.resolve(),
+      warn: () => {},
+    });
+    const span = (name: string, attributes: Record<string, unknown>): ReadableSpan =>
+      ({
+        name,
+        kind: SpanKind.INTERNAL,
+        spanContext: () => ({ traceId: `${'0'.repeat(31)}1`, spanId: `${'0'.repeat(15)}1`, traceFlags: 1 }),
+        parentSpanContext: undefined,
+        startTime: [1, 0],
+        endTime: [2, 0],
+        attributes,
+        status: { code: SpanStatusCode.UNSET },
+      }) as unknown as ReadableSpan;
+    await exporter.export([
+      span('odd', {
+        'app.nan': Number.NaN,
+        'app.below': -Infinity,
+        'app.ratios': [1.5, Infinity],
+        'app.ratio': 0.25,
+        'gen_ai.usage.input_tokens': Number.NaN,
+        'telmoni.bound.max_steps': Infinity,
+        'gen_ai.usage.output_tokens': 2 ** 64,
+      }),
+      span('beside', {}),
+    ]);
+    expect(transport.requests).toHaveLength(1);
+    const [odd, beside] = transport.spans();
+    expect(beside?.name).toBe('beside');
+    expect(Object.fromEntries(odd!.attributes.map((each) => [each.key, each.value]))).toEqual({
+      'app.nan': { doubleValue: null },
+      'app.below': { doubleValue: null },
+      'app.ratios': { arrayValue: { values: [{ doubleValue: 1.5 }, { doubleValue: null }] } },
+      'app.ratio': { doubleValue: 0.25 },
+      'gen_ai.usage.input_tokens': { doubleValue: null },
+      'telmoni.bound.max_steps': { doubleValue: null },
+      'gen_ai.usage.output_tokens': { doubleValue: 2 ** 64 },
+    });
+  });
+});
+
 describe('a span time', () => {
   it('goes as 0 outside 64 bits of nanoseconds, so ingest refuses that span rather than the whole export', () => {
     const config = new Telmoni({ apiKey: 'k' }).config;

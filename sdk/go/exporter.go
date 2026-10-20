@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -354,8 +355,19 @@ type anyValue struct {
 	StringValue *string     `json:"stringValue,omitempty"`
 	BoolValue   *bool       `json:"boolValue,omitempty"`
 	IntValue    *string     `json:"intValue,omitempty"`
-	DoubleValue *float64    `json:"doubleValue,omitempty"`
+	DoubleValue *double     `json:"doubleValue,omitempty"`
 	ArrayValue  *arrayValue `json:"arrayValue,omitempty"`
+}
+
+// double writes NaN or an infinity as null, as the other SDKs do, which ingest
+// reads as no value: encoding/json refuses one, which lost the whole batch.
+type double float64
+
+func (d double) MarshalJSON() ([]byte, error) {
+	if math.IsNaN(float64(d)) || math.IsInf(float64(d), 0) {
+		return []byte("null"), nil
+	}
+	return json.Marshal(float64(d))
 }
 
 type arrayValue struct {
@@ -468,7 +480,7 @@ func stringAttribute(key, value string) keyValue {
 
 func stringValue(s string) anyValue  { return anyValue{StringValue: &s} }
 func boolValue(b bool) anyValue      { return anyValue{BoolValue: &b} }
-func doubleValue(f float64) anyValue { return anyValue{DoubleValue: &f} }
+func doubleValue(f float64) anyValue { d := double(f); return anyValue{DoubleValue: &d} }
 func intValue(i int64) anyValue      { s := strconv.FormatInt(i, 10); return anyValue{IntValue: &s} }
 func arrayOf[T any](values []T, each func(T) anyValue) anyValue {
 	out := make([]anyValue, 0, len(values))

@@ -404,6 +404,44 @@ def test_the_mebibyte_is_counted_in_the_bytes_sent() -> None:
     assert len(sizes) == 2 and max(sizes) <= 1 << 20, sizes
 
 
+def test_a_number_ingest_cannot_read_never_costs_its_export() -> None:
+    """NaN or an infinity, which JSON cannot carry, as null; an int past 64 bits as
+    its text."""
+    transport = FakeTransport()
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    context = SpanContext(trace_id=1, span_id=1, is_remote=False)
+    odd = ReadableSpan(
+        name="odd",
+        context=context,
+        start_time=1,
+        end_time=2,
+        attributes={
+            "app.nan": float("nan"),
+            "app.below": float("-inf"),
+            "app.ratios": [1.5, float("inf")],
+            "app.ratio": 0.25,
+            "app.big": 2**64,
+        },
+    )
+    beside = ReadableSpan(name="beside", context=context, start_time=1, end_time=2)
+    try:
+        client.exporter.export([odd, beside])
+    finally:
+        client.shutdown()
+    assert len(transport.requests) == 1
+    sent_odd, sent_beside = transport.spans()
+    assert sent_beside["name"] == "beside"
+    assert {a["key"]: a["value"] for a in sent_odd["attributes"]} == {
+        "app.nan": {"doubleValue": None},
+        "app.below": {"doubleValue": None},
+        "app.ratios": {
+            "arrayValue": {"values": [{"doubleValue": 1.5}, {"doubleValue": None}]}
+        },
+        "app.ratio": {"doubleValue": 0.25},
+        "app.big": {"stringValue": str(2**64)},
+    }
+
+
 def test_a_span_alone_past_it_goes_without_what_ingest_drops_for_its_length(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
