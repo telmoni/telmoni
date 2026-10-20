@@ -158,14 +158,16 @@ status maps to:
 | `401` | `/errors/auth/invalid-token` | No live key |
 | `402` | `/errors/plan/limit-reached` | On the hosted service, the key's organization is paused ([One Hobby organization](https://telmoni.com/docs/workspace/billing#one-hobby-organization)): nothing is kept, and the message says what lifts it. A self-hosted server never answers it |
 | `403` | `/errors/authz/forbidden` | A key without the ingest scope |
+| `404` | `/errors/not-found` | A path under `/otlp` other than `/otlp/v1/traces`, such as the `/otlp/v1/logs` and `/otlp/v1/metrics` an OpenTelemetry SDK given `/otlp` as its endpoint sends: Telmoni takes traces alone |
+| `405` | `/errors/method-not-allowed` | A method other than `POST`; `Allow` names `POST` |
 | `413` | `/errors/telemetry/batch-too-large` | More than 1 MiB once decompressed |
-| `429` | `/errors/tenant/rate-limited` | More than 600 exports a minute from one project, or more than 1,200 requests a minute from one address (an IPv6 address by its /64), keyed or not; `Retry-After` says how long to wait |
+| `429` | `/errors/tenant/rate-limited` | More than 600 exports a minute from one project, or more than 1,200 requests a minute to `/otlp/v1/traces` from one address (an IPv6 address by its /64), keyed or not; `Retry-After` says how long to wait |
 | `500` | `/errors/internal/unknown` | The store refused the rows as malformed, a fault on Telmoni's side that retrying does not mend |
 | `503` | `/errors/telemetry/store-unavailable` | The store did not take the rows, the key service that seals the project's hashing key did not answer, a copy of the export is being written, or the project's first export came while the project was being moved to another organization or deleted; retry after `Retry-After` |
 | `503` | `/errors/auth/identity-unavailable` | The key could not be checked just then, or, for a project's first export, nor could which organization holds the project; no `Retry-After` |
 
 `429` and `503` are the two an exporter retries; `400`, `401`, `402`, `403`,
-`413` and `500` it does not.
+`404`, `405`, `413` and `500` it does not.
 
 Every refusal of an export waits for its body, up to 60 seconds, so an exporter
 still sending one reads the refusal rather than a broken connection. A body past

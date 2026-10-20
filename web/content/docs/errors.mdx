@@ -45,8 +45,8 @@ your code can branch on.
 | `/errors/tenant/cross-tenant-denied` | 403 | Reserved for a request that reaches outside the organization or project it may act in; no lane returns it. | |
 | `/errors/bad-request` | 400 | The request body or query string is not the shape the lane takes, or a value failed its rule. `detail` names the shape or the parameter, never the value sent. | |
 | `/errors/payload-too-large` | 413 | The request body is larger than this route accepts, such as a body over 8 KiB sent to the CLI's lanes. | |
-| `/errors/not-found` | 404 | No lane answers at this path on the machine host, under `/v1`, `/cli` or `/ping`. Not a resource a lane looked for: that is `/errors/auth/not-found`. | |
-| `/errors/method-not-allowed` | 405 | The lane does not take this method. The `Allow` header lists the ones it does. | |
+| `/errors/not-found` | 404 | No lane answers at this path on the machine host, under `/v1`, `/cli`, `/ping` or `/otlp`. Not a resource a lane looked for: that is `/errors/auth/not-found`. Under `/otlp` the body is OTLP's `Status` rather than a problem document, its message opening with the type. | |
+| `/errors/method-not-allowed` | 405 | The lane does not take this method. The `Allow` header lists the ones it does. On `/otlp/v1/traces` the body is OTLP's `Status`. | |
 | `/errors/incompatible-client` | 426 | Reserved for a client older than the oldest version Telmoni supports; no lane checks a client's version, so none returns it. | |
 | `/errors/tenant/rate-limited` | 429 | Too many requests. Wait and try again. A `Retry-After` header carries the same number of seconds. | `retry_after_secs` |
 | `/errors/tenant/feature-off` | 503 | This feature is switched off, for your organization or for the whole deployment. `detail` says which in a sentence. | `flag`, `retry_after_secs` |
@@ -69,14 +69,14 @@ than conclude the route is gone.
 ## Methods, and lanes that do not exist
 
 Every lane under `/v1`, `/cli` and `/ping` answers a problem document, the two
-the door itself mints among them; ingest answers OTLP's `Status` instead
-([Sending spans](/docs/api/ingest#refusals)).
+the door itself mints among them; ingest, under `/otlp`, answers OTLP's `Status`
+instead, these two among them ([Sending spans](/docs/api/ingest#refusals)).
 
 **A method a lane does not take** is `405` with an `Allow` header,
 `/errors/method-not-allowed`. The [API](/docs/api/reference) takes `GET` and
 `HEAD`, and `OPTIONS` alone answers `204` with `Allow: GET, HEAD, OPTIONS`; the
-CLI's lanes take `POST` and the ping lane `GET`, `HEAD` and `POST`, and every
-other method, `OPTIONS` included, is told so:
+CLI's lanes and ingest take `POST` and the ping lane `GET`, `HEAD` and `POST`,
+and every other method, `OPTIONS` included, is told so:
 
 ```json
 {
@@ -87,7 +87,7 @@ other method, `OPTIONS` included, is told so:
 }
 ```
 
-**A path no lane serves**, under `/v1`, `/cli` or `/ping`, is `404` with
+**A path no lane serves**, under `/v1`, `/cli`, `/ping` or `/otlp`, is `404` with
 `/errors/not-found`: a type apart from `/errors/auth/not-found`, which a lane
 answers about a resource it looked for and did not find, so a client can tell
 a missing lane from a missing row:
