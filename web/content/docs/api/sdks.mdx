@@ -652,8 +652,10 @@ The key travels as a bearer over HTTPS. Plain HTTP is accepted only to this
 machine, `localhost` or a loopback address, for a server you run beside the
 agent: Python, TypeScript and Go refuse any other `http://` endpoint when the
 client is built, and Rust when the first export would go, with one warning.
-No SDK follows a redirect, which could carry the key to another host, and the
-key never appears in a log, a warning or an error.
+An endpoint given without a scheme gets `https://`, or `http://` for this
+machine, as the CLI reads one; any scheme but those two is refused the same
+way. No SDK follows a redirect, which could carry the key to another host,
+and the key never appears in a log, a warning or an error.
 
 ---
 
