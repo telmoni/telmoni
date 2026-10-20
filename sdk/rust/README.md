@@ -167,8 +167,10 @@ up to 1, decided per run and never through the trace's sampled flag),
 a trace of its own, and `environment` and `release`, the deployment the
 variables above name. The API key is never printed or serialized: `Debug`
 shows it redacted, and `Serialize` leaves it out. It travels over HTTPS only:
-with a plain-HTTP endpoint whose host is not this machine, nothing is sent and
-the first export warns once, and no redirect is followed.
+with a plain-HTTP endpoint whose host is not this machine, or one of any
+scheme but HTTP and HTTPS, nothing is sent and the first export warns once,
+and no redirect is followed. An endpoint without a scheme gets `https://`, or
+`http://` for this machine, as the CLI reads one.
 
 ## A run across services
 

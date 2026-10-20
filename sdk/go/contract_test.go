@@ -255,3 +255,37 @@ func TestPlainHTTPIsRefusedExceptToThisMachine(t *testing.T) {
 		}
 	}
 }
+
+func TestAHostWithoutASchemeIsReadAsTheCLIReadsIt(t *testing.T) {
+	for given, want := range map[string]string{
+		"api.example.com":           "https://api.example.com",
+		"localhost:8080/":           "http://localhost:8080",
+		"LOCALHOST:8080":            "http://LOCALHOST:8080",
+		"127.0.0.1:8080":            "http://127.0.0.1:8080",
+		"[::1]:8080":                "http://[::1]:8080",
+		"localhost.example.com":     "https://localhost.example.com",
+		"https://api.example.com /": "https://api.example.com",
+		"api.example.com /":         "https://api.example.com",
+		"/":                         telmoni.DefaultEndpoint,
+	} {
+		if got := mustNew(t, telmoni.Config{Endpoint: given}).Config().Endpoint; got != want {
+			t.Errorf("Endpoint %q became %q, want %q", given, got, want)
+		}
+		if got := mustNew(t, telmoni.Config{Endpoint: want}).Config().Endpoint; got != want {
+			t.Errorf("Endpoint %q, read twice, became %q", want, got)
+		}
+	}
+	for _, endpoint := range []string{
+		"ftp://api.example.com", "https://", "file:///tmp/telmoni", "localhost:abc", "localhost:99999",
+		"https:/api.example.com", "https//api.example.com", "https://api .example.com",
+	} {
+		if _, err := telmoni.New(telmoni.Config{Endpoint: endpoint}); err == nil || !strings.Contains(err.Error(), "http:// or https://") {
+			t.Errorf("New(%q) = %v, want a refusal of the endpoint", endpoint, err)
+		}
+	}
+	// From the environment, normalized twice on its way to New.
+	t.Setenv("TELMONI_ENDPOINT", "https://")
+	if _, err := telmoni.NewFromEnv(); err == nil || !strings.Contains(err.Error(), "http:// or https://") {
+		t.Errorf("NewFromEnv() with https:// = %v, want a refusal of the endpoint", err)
+	}
+}

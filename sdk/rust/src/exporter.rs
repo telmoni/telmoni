@@ -16,7 +16,7 @@ use serde_json::{Map, json};
 
 use crate::config::Config;
 use crate::contract;
-use crate::transport::{Answer, Transport, cleartext_host};
+use crate::transport::{Answer, Transport, refusal};
 use crate::warnings::Warner;
 use crate::{VERSION, lock};
 
@@ -29,10 +29,9 @@ const CONTENT_DOCS: &str = "https://telmoni.com/docs/api/ingest#what-is-dropped-
 
 pub(crate) struct Exporter {
     url: String,
-    /// The host a plain-HTTP endpoint would carry the key to in the clear,
-    /// when it is not this machine: nothing is sent, and the first export
-    /// says why. The CLI refuses the same.
-    cleartext: Option<String>,
+    /// Why nothing is sent to the endpoint ([`refusal`]), which the first
+    /// export says. The CLI refuses plain HTTP the same.
+    refusal: Option<String>,
     bearer: Option<String>,
     capture_content: bool,
     transport: Box<dyn Transport>,
@@ -53,7 +52,7 @@ impl Exporter {
     ) -> Self {
         Self {
             url: format!("{}/otlp/v1/traces", config.endpoint),
-            cleartext: cleartext_host(&config.endpoint),
+            refusal: refusal(&config.endpoint),
             bearer: config.api_key.clone(),
             capture_content: config.capture_content,
             transport,
@@ -73,12 +72,10 @@ impl Exporter {
         if spans.is_empty() {
             return;
         }
-        if let Some(host) = &self.cleartext {
+        if let Some(refusal) = &self.refusal {
             self.warner.once(
-                "cleartext".to_owned(),
-                &format!(
-                    "telmoni: refusing to send the API key over unencrypted HTTP to '{host}'; use HTTPS; nothing is sent"
-                ),
+                "endpoint".to_owned(),
+                &format!("telmoni: {refusal}; nothing is sent"),
             );
             return;
         }

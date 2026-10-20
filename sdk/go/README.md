@@ -86,8 +86,10 @@ A run sends its first 32 tags by key, the most ingest keeps, and warns once of
 the rest. Text past ingest's caps, below, and a step or model named nothing
 still go as given, and ingest refuses the span they are on, or the whole run
 for its agent, user or session. `New` returns an error for a client-wide
-`SampleRate` outside (0, 1], and for a plain-HTTP endpoint whose host is not
-this machine; `RecordRun`, below, for a record it refuses.
+`SampleRate` outside (0, 1], for a plain-HTTP endpoint whose host is not this
+machine, and for one of any scheme but HTTP and HTTPS; `RecordRun`, below, for
+a record it refuses. An endpoint without a scheme gets `https://`, or
+`http://` for this machine, as the CLI reads one.
 
 ## A run recorded after it ended
 

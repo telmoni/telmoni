@@ -220,3 +220,53 @@ fn plain_http_is_refused_except_to_this_machine() -> Outcome {
     }
     Ok(())
 }
+
+#[test]
+fn a_host_without_a_scheme_is_read_as_the_cli_reads_it() -> Outcome {
+    for (given, endpoint) in [
+        ("api.example.com", "https://api.example.com"),
+        ("localhost:8080/", "http://localhost:8080"),
+        ("LOCALHOST:8080", "http://LOCALHOST:8080"),
+        ("127.0.0.1:8080", "http://127.0.0.1:8080"),
+        ("[::1]:8080", "http://[::1]:8080"),
+        ("localhost.example.com", "https://localhost.example.com"),
+        ("https://api.example.com /", "https://api.example.com"),
+        ("api.example.com /", "https://api.example.com"),
+        ("/", DEFAULT_ENDPOINT),
+    ] {
+        assert_eq!(Config::new(given, None, None).endpoint, endpoint, "{given}");
+        assert_eq!(
+            Config::new(endpoint, None, None).endpoint,
+            endpoint,
+            "{endpoint}, read twice"
+        );
+    }
+    for endpoint in [
+        "ftp://api.example.com",
+        "https://",
+        "file:///tmp/telmoni",
+        "localhost:abc",
+        "https:/api.example.com",
+        "https//api.example.com",
+        "https://api .example.com",
+    ] {
+        let harness =
+            common::Harness::with(Config::new(endpoint, None, Some("telmoni_k".to_owned())))?;
+        let run = harness
+            .telmoni
+            .run("bot", telmoni_sdk::RunOptions::default())?;
+        run.end();
+        harness.flush()?;
+        assert_eq!(harness.transport.count(), 0, "{endpoint} was sent to");
+        let warnings = harness.warnings.all();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings
+                .first()
+                .is_some_and(|warning| warning.contains("http:// or https://")),
+            "{warnings:?}"
+        );
+        harness.telmoni.shutdown();
+    }
+    Ok(())
+}

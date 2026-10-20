@@ -1,11 +1,14 @@
 package telmoni
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
+	"unicode"
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
@@ -16,8 +19,8 @@ const DefaultEndpoint = "https://api.telmoni.com"
 
 // Config is how the SDK reaches Telmoni, and what it sends.
 type Config struct {
-	// Endpoint is the platform's base URL. Blank means DefaultEndpoint, and
-	// trailing slashes are stripped.
+	// Endpoint is the platform's base URL, read as the CLI reads one: blank is
+	// DefaultEndpoint, a host without a scheme gets https://, http:// locally.
 	Endpoint       string `json:"endpoint"`
 	OrganizationID string `json:"organization_id,omitempty"`
 	// APIKey is the API key (telmoni_…) with the ingest scope. It is never
@@ -66,13 +69,9 @@ func redacted(secret string) string {
 }
 
 // normalized is the configuration as the client holds it: a blank value is
-// unset, as the CLI reads the same variables, and the endpoint carries no
-// trailing slash since the path is appended to it.
+// unset and the endpoint read as the CLI reads the same variables.
 func (c Config) normalized() Config {
-	c.Endpoint = strings.TrimRight(strings.TrimSpace(c.Endpoint), "/")
-	if c.Endpoint == "" {
-		c.Endpoint = DefaultEndpoint
-	}
+	c.Endpoint = endpointOf(c.Endpoint)
 	c.OrganizationID = strings.TrimSpace(c.OrganizationID)
 	c.APIKey = strings.TrimSpace(c.APIKey)
 	c.Environment = strings.TrimSpace(c.Environment)
@@ -89,15 +88,54 @@ func isLoopbackHost(host string) bool {
 	if ip := net.ParseIP(host); ip != nil {
 		return ip.IsLoopback()
 	}
+	// url.Parse keeps a host's case, which the other SDKs' parsers fold.
+	host = strings.ToLower(host)
 	return host == "localhost" || strings.HasSuffix(host, ".localhost")
 }
 
-// refuseCleartext keeps plain HTTP to this machine: every export carries the
-// key.
-func refuseCleartext(endpoint string) error {
+// endpointOf is the endpoint as the CLI reads one: a host without a scheme
+// gets https://, or http:// for this machine.
+func endpointOf(given string) string {
+	given = strings.TrimSpace(given)
+	// Only what follows the :// is trimmed, so a second reading changes nothing.
+	if head, tail, found := strings.Cut(given, "://"); found {
+		return head + "://" + trimTail(tail)
+	}
+	endpoint := trimTail(given)
+	if endpoint == "" {
+		return DefaultEndpoint
+	}
+	// https:/host or https//host is a scheme mistyped, not a host: checkEndpoint refuses it.
+	first := endpoint
+	if i := strings.IndexAny(endpoint, ":/"); i >= 0 {
+		first = endpoint[:i]
+	}
+	if strings.EqualFold(first, "http") || strings.EqualFold(first, "https") {
+		return endpoint
+	}
+	if parsed, err := url.Parse("http://" + endpoint); err == nil && isLoopbackHost(parsed.Hostname()) {
+		return "http://" + endpoint
+	}
+	return "https://" + endpoint
+}
+
+// trimTail drops trailing slashes and spaces, so the path appends cleanly.
+func trimTail(text string) string {
+	return strings.TrimRightFunc(text, func(r rune) bool { return r == '/' || unicode.IsSpace(r) })
+}
+
+// checkEndpoint refuses an endpoint every export would fail, its scheme or its
+// port wrong, and plain HTTP to another machine, which would bare the key.
+func checkEndpoint(endpoint string) error {
+	notAURL := errors.New("telmoni: the endpoint must be an http:// or https:// URL")
 	parsed, err := url.Parse(endpoint)
-	if err != nil {
-		return nil
+	if err != nil || !strings.Contains(endpoint, "://") || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" {
+		return notAURL
+	}
+	if port := parsed.Port(); port != "" {
+		if _, err := strconv.ParseUint(port, 10, 16); err != nil {
+			return notAURL
+		}
 	}
 	if parsed.Scheme == "http" && !isLoopbackHost(parsed.Hostname()) {
 		return fmt.Errorf("telmoni: refusing to send the API key over unencrypted HTTP to %q; use HTTPS", parsed.Hostname())

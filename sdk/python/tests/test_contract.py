@@ -252,6 +252,34 @@ def test_plain_http_is_refused_except_to_this_machine() -> None:
             Config(endpoint=endpoint)
 
 
+def test_a_host_without_a_scheme_is_read_as_the_cli_reads_it() -> None:
+    for given, endpoint in (
+        ("api.example.com", "https://api.example.com"),
+        ("localhost:8080/", "http://localhost:8080"),
+        ("LOCALHOST:8080", "http://LOCALHOST:8080"),
+        ("127.0.0.1:8080", "http://127.0.0.1:8080"),
+        ("[::1]:8080", "http://[::1]:8080"),
+        ("localhost.example.com", "https://localhost.example.com"),
+        ("https://api.example.com /", "https://api.example.com"),
+        ("api.example.com /", "https://api.example.com"),
+        ("/", DEFAULT_ENDPOINT),
+    ):
+        assert Config(endpoint=given).endpoint == endpoint
+        assert Config(endpoint=endpoint).endpoint == endpoint, "read twice"
+    for endpoint in (
+        "ftp://api.example.com",
+        "https://",
+        "file:///tmp/telmoni",
+        "localhost:abc",
+        "https:api.example.com",
+        "https:/api.example.com",
+        "https//api.example.com",
+        "https://api .example.com",
+    ):
+        with pytest.raises(ValueError, match="http:// or https://"):
+            Config(endpoint=endpoint)
+
+
 def test_a_configuration_changed_after_it_was_built_is_checked_again() -> None:
     # The client checks what it is given, as the other SDKs do: a field set
     # after the configuration was built skipped the checks it was built with.

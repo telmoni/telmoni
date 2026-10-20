@@ -17,11 +17,11 @@ import { VERSION } from './version.js';
 /** The machine host; the console's, `https://telmoni.com`, serves people. */
 export const DEFAULT_ENDPOINT = 'https://api.telmoni.com';
 
-// Not /\/+$/: that regex takes quadratic time on a long run of slashes that
+// Not /[\s/]+$/: that regex takes quadratic time on a long run of slashes that
 // something follows, and the endpoint can come from anywhere.
-function trimTrailingSlashes(value: string): string {
+function trimTail(value: string): string {
   let end = value.length;
-  while (end > 0 && value[end - 1] === '/') end--;
+  while (end > 0 && (value.charAt(end - 1) === '/' || value.charAt(end - 1).trim() === '')) end--;
   return value.slice(0, end);
 }
 
@@ -39,22 +39,45 @@ function isLoopbackHost(hostname: string): boolean {
   return hostname === 'localhost' || hostname.endsWith('.localhost');
 }
 
-/** Plain HTTP reaches only this machine: every export carries the key. */
-function refuseCleartext(endpoint: string): void {
+/** The endpoint as the CLI reads one: a host without a scheme gets `https://`, or `http://` for this machine. */
+function endpointOf(given: string | undefined): string {
+  const text = unsetIfBlank(given) ?? '';
+  // Only what follows the `://` is trimmed, so a second reading changes nothing.
+  const scheme = text.indexOf('://');
+  if (scheme >= 0) return text.slice(0, scheme + 3) + trimTail(text.slice(scheme + 3));
+  const endpoint = trimTail(text);
+  if (endpoint === '') return DEFAULT_ENDPOINT;
+  // `https:/host` or `https//host` is a scheme mistyped, not a host: the check refuses it.
+  if (/^https?$/i.test(endpoint.split(/[:/]/, 1)[0] ?? '')) return endpoint;
+  let local = false;
+  try {
+    local = isLoopbackHost(new URL(`http://${endpoint}`).hostname);
+  } catch {
+    // No host either: the check refuses it.
+  }
+  return `${local ? 'http' : 'https'}://${endpoint}`;
+}
+
+const NOT_A_URL = 'the endpoint must be an http:// or https:// URL';
+
+/** A scheme but HTTP or HTTPS fails every export, and plain HTTP to another machine would carry the key bare. */
+function checkEndpoint(endpoint: string): void {
+  if (!endpoint.includes('://')) throw new TypeError(NOT_A_URL);
   let url: URL;
   try {
     url = new URL(endpoint);
   } catch {
-    return;
+    throw new TypeError(NOT_A_URL);
   }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new TypeError(NOT_A_URL);
   if (url.protocol === 'http:' && !isLoopbackHost(url.hostname)) {
     throw new TypeError(`refusing to send the API key over unencrypted HTTP to '${url.hostname}'; use HTTPS`);
   }
 }
 
 function resolve(config: Config | undefined): ResolvedConfig {
-  const endpoint = trimTrailingSlashes(unsetIfBlank(config?.endpoint) ?? DEFAULT_ENDPOINT) || DEFAULT_ENDPOINT;
-  refuseCleartext(endpoint);
+  const endpoint = endpointOf(config?.endpoint);
+  checkEndpoint(endpoint);
   const sampleRate: unknown = config?.sampleRate ?? 1;
   // '0.5' from an environment variable compares as a number, and goes out as text ingest refuses.
   if (typeof sampleRate !== 'number' || !(sampleRate > 0 && sampleRate <= 1)) {

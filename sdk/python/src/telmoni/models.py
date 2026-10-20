@@ -72,13 +72,54 @@ def is_loopback_host(host: str) -> bool:
         return host == "localhost" or host.endswith(".localhost")
 
 
-def refuse_cleartext(endpoint: str) -> None:
-    """Plain HTTP reaches only this machine: every export carries the key."""
-    parts = urlsplit(endpoint)
-    if parts.scheme == "http" and not is_loopback_host(parts.hostname or ""):
+def endpoint_of(given: str | None) -> str:
+    """The endpoint as the CLI reads one: a host without a scheme gets
+    ``https://``, or ``http://`` for this machine."""
+    text = _unset_if_blank(given) or ""
+    # Only what follows the "://" is trimmed, so a second reading changes nothing.
+    head, scheme, tail = text.partition("://")
+    if scheme:
+        return head + scheme + _trim_tail(tail)
+    endpoint = _trim_tail(text)
+    if not endpoint:
+        return DEFAULT_ENDPOINT
+    # "https:/host" or "https//host" is a scheme mistyped, not a host: the check refuses it.
+    if endpoint.split(":", 1)[0].split("/", 1)[0].lower() in ("http", "https"):
+        return endpoint
+    try:
+        local = is_loopback_host(urlsplit(f"http://{endpoint}").hostname or "")
+    except ValueError:
+        local = False
+    return f"{'http' if local else 'https'}://{endpoint}"
+
+
+def _trim_tail(text: str) -> str:
+    """Trailing slashes and whitespace off, so the path appends cleanly."""
+    end = len(text)
+    while end and (text[end - 1] == "/" or text[end - 1].isspace()):
+        end -= 1
+    return text[:end]
+
+
+def check_endpoint(endpoint: str) -> None:
+    """A scheme but HTTP or HTTPS, or a host or port that is none, fails every
+    export, and plain HTTP to another machine would carry the key bare."""
+    try:
+        parts = urlsplit(endpoint)
+        scheme, host, _port = parts.scheme, parts.hostname or "", parts.port
+    except ValueError:
+        scheme, host = "", ""
+    # urllib takes whitespace in a host, which http.client then refuses at every export.
+    if (
+        "://" not in endpoint
+        or any(char.isspace() for char in endpoint)
+        or scheme not in ("http", "https")
+        or not host
+    ):
+        raise ValueError("the endpoint must be an http:// or https:// URL")
+    if scheme == "http" and not is_loopback_host(host):
         raise ValueError(
-            "refusing to send the API key over unencrypted HTTP to "
-            f"'{parts.hostname or ''}'; use HTTPS"
+            f"refusing to send the API key over unencrypted HTTP to '{host}'; use HTTPS"
         )
 
 
@@ -110,13 +151,10 @@ class Config:
         self._normalize()
 
     def _normalize(self) -> None:
-        """Blank values unset, the endpoint's trailing slashes off, the key
-        wrapped, and every check: as the configuration is built, and again as
-        a client is built on it, since a field set in between is otherwise
-        never checked."""
-        endpoint = _unset_if_blank(self.endpoint)
-        self.endpoint = (endpoint or DEFAULT_ENDPOINT).rstrip("/")
-        refuse_cleartext(self.endpoint)
+        """Blank values unset, the endpoint read as the CLI reads it, the key
+        wrapped and every check, again as a client is built, for a field set since."""
+        self.endpoint = endpoint_of(self.endpoint)
+        check_endpoint(self.endpoint)
         self.organization_id = _unset_if_blank(self.organization_id)
         if isinstance(self.api_key, str):
             key = _unset_if_blank(self.api_key)

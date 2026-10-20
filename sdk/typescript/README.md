@@ -208,7 +208,9 @@ Spans are batched (a queue of 2048, batches of 512, every five seconds; a run's
 start goes at once) and sent as OTLP/JSON to `POST {endpoint}/otlp/v1/traces`
 over HTTPS: a plain-HTTP endpoint is refused with a `TypeError` unless its host
 is this machine, and no redirect is followed, since every export carries the
-key. A `429` or `503` is retried after `Retry-After`, three attempts in all. Every
+key. An endpoint without a scheme gets `https://`, or `http://` for this
+machine, as the CLI reads one; any other scheme is refused with a `TypeError`.
+A `429` or `503` is retried after `Retry-After`, three attempts in all. Every
 warning — an attribute the server dropped, a batch given up on — is logged once
 per client through `console.warn`. `await telmoni.flush()` sends what is queued
 and resolves `true` once the platform has it; `await telmoni.shutdown()` drains

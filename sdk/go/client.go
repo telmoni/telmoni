@@ -102,14 +102,14 @@ type Client struct {
 // Telmoni is a convenience alias for Client.
 type Telmoni = Client
 
-// New builds a client from cfg. It fails when SampleRate is not above 0 and
-// up to 1.
+// New builds a client from cfg. It fails on a SampleRate outside (0, 1], and on
+// an endpoint no export could use or that would carry the key in the clear.
 func New(cfg Config, opts ...Option) (*Client, error) {
 	cfg = cfg.normalized()
 	if !(cfg.SampleRate > 0 && cfg.SampleRate <= 1) {
 		return nil, errors.New("telmoni: SampleRate must be above 0 and up to 1")
 	}
-	if err := refuseCleartext(cfg.Endpoint); err != nil {
+	if err := checkEndpoint(cfg.Endpoint); err != nil {
 		return nil, err
 	}
 	o := options{

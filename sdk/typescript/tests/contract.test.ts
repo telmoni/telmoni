@@ -137,6 +137,34 @@ describe('the endpoint', () => {
       expect(() => new Telmoni({ endpoint })).toThrow(/unencrypted HTTP/);
     }
   });
+
+  it('reads a host without a scheme as the CLI does, and takes no scheme but HTTP and HTTPS', () => {
+    for (const [given, endpoint] of [
+      ['api.example.com', 'https://api.example.com'],
+      ['localhost:8080/', 'http://localhost:8080'],
+      ['LOCALHOST:8080', 'http://LOCALHOST:8080'],
+      ['127.0.0.1:8080', 'http://127.0.0.1:8080'],
+      ['[::1]:8080', 'http://[::1]:8080'],
+      ['localhost.example.com', 'https://localhost.example.com'],
+      ['https://api.example.com /', 'https://api.example.com'],
+      ['api.example.com /', 'https://api.example.com'],
+      ['/', DEFAULT_ENDPOINT],
+    ] as const) {
+      expect(new Telmoni({ endpoint: given }).config.endpoint).toBe(endpoint);
+      expect(new Telmoni({ endpoint }).config.endpoint, 'read twice').toBe(endpoint);
+    }
+    for (const endpoint of [
+      'ftp://api.example.com',
+      'https://',
+      'file:///tmp/telmoni',
+      'localhost:abc',
+      'https:/api.example.com',
+      'https//api.example.com',
+      'https://api .example.com',
+    ]) {
+      expect(() => new Telmoni({ endpoint })).toThrow('the endpoint must be an http:// or https:// URL');
+    }
+  });
 });
 
 describe('the transport', () => {

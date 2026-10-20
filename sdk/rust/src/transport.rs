@@ -81,15 +81,23 @@ pub(crate) fn is_loopback_host(host: &str) -> bool {
     }
 }
 
-/// The host a plain-HTTP `endpoint` would send the key to in the clear, when
-/// that host is not this machine; `None` when the endpoint is fine to use.
-pub(crate) fn cleartext_host(endpoint: &str) -> Option<String> {
-    let parsed = reqwest::Url::parse(endpoint).ok()?;
-    if parsed.scheme() != "http" {
-        return None;
+/// Why nothing goes to `endpoint`: a scheme but HTTP and HTTPS fails every
+/// export, and plain HTTP to another machine would carry the key in the clear.
+pub(crate) fn refusal(endpoint: &str) -> Option<String> {
+    let parsed = reqwest::Url::parse(endpoint)
+        .ok()
+        .filter(|_| endpoint.contains("://"));
+    let host = parsed
+        .as_ref()
+        .and_then(reqwest::Url::host_str)
+        .unwrap_or_default();
+    match parsed.as_ref().map(reqwest::Url::scheme) {
+        Some("https") if !host.is_empty() => None,
+        Some("http") if !host.is_empty() => (!is_loopback_host(host)).then(|| {
+            format!("refusing to send the API key over unencrypted HTTP to '{host}'; use HTTPS")
+        }),
+        _ => Some("the endpoint must be an http:// or https:// URL".to_owned()),
     }
-    let host = parsed.host_str().unwrap_or_default();
-    (!is_loopback_host(host)).then(|| host.to_owned())
 }
 
 /// reqwest's blocking client, built at the first send. That send comes from
