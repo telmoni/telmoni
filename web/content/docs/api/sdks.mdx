@@ -310,7 +310,10 @@ over, hands the finished run over whole, as data: its id, a UUID you give and
 keep with the log; its agent, user, session and tags; its start and end and
 how it ended; and its steps and calls, each with its own times. A step holds
 the calls made inside it. A record the export queue has no room for is refused
-whole, before anything is queued: flush, or wait, and record it again.
+whole, before anything is queued: flush, or wait, and record it again. Its
+times are read as the clock of the process that sends it: where that clock is
+a time zone or a date out, [ingest moves the record](/docs/api/ingest#what-is-kept)
+by as much, so time a record by the clock that sends it.
 
 <Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
   <Tab value="Python">
@@ -660,7 +663,9 @@ seconds. It retries a `429` or a `503` after its `Retry-After`, waiting at most
 after 1 second, then 2; after three attempts in all it drops the batch with one
 warning. Any other refusal is logged once and never retried, and an answer whose
 body breaks after its status, or runs past the 10 seconds, is decided by its
-status, read as far as it came. A flush waits up to 30 seconds. An attribute the
+status, read as far as it came. Each attempt carries `Telmoni-Sent-At`, the
+agent's clock as it leaves, so [ingest](/docs/api/ingest#what-is-kept) can move
+a run from a clock a time zone or a date out as one. A flush waits up to 30 seconds. An attribute the
 server drops is logged once: content with the project's content mode, which
 decides the drop, and a link to [what is dropped at the
 door](/docs/api/ingest#what-is-dropped-at-the-door); text the field inventory

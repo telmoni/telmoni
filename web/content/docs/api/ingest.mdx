@@ -17,7 +17,9 @@ routed by path: [Self-hosting → Production](/docs/self-host/production#reverse
 The wire is OTLP's, unchanged: an `ExportTraceServiceRequest`, as
 `Content-Type: application/json` in OTLP's JSON encoding or
 `application/x-protobuf`, gzipped (`Content-Encoding: gzip`) or not. What is
-Telmoni's is which attributes are read, and what is done with each.
+Telmoni's is which attributes are read, and what is done with each, and the
+`Telmoni-Sent-At` header the SDKs add, by which a clock set wrong is read
+([what is kept](#what-is-kept)).
 
 ## The key
 
@@ -74,12 +76,20 @@ current ones (`gen_ai.system`, `gen_ai.usage.prompt_tokens`,
 A field whose value breaks its rule refuses the span whole; an attribute past
 its cap is dropped and the span kept.
 
-A span's start and end are kept as sent, to the microsecond, unless the spans
-one resource sends of a trace in an export end more than 55 minutes after the
-export arrived: the clock that timed them is a time zone or a date out, so
-they are moved back together until the last ends as the export arrived, each
-keeping its length. A run sent over several exports is moved export by
-export, so its parts may land seconds apart, or further where an export
+A span's start and end are kept as sent, to the microsecond, unless the clock
+that timed them is a time zone or a date out. The SDKs send their clock with
+every export, as `Telmoni-Sent-At`, in nanoseconds since the Unix epoch; where
+it stands more than 55 minutes from the server's as the export arrives, ahead
+or behind, every span of the export is moved by the difference, each keeping
+its length, so every export of a run moves alike and its parts keep their
+places. A recorded run's times are read as that clock's too. A span is sent
+once it has ended, so an export holding one that ends more than 55 minutes
+after the clock it names was not timed by that clock, or was mistyped; it is
+read as though it named none. Where none is named, as from another exporter,
+the spans one resource sends of a trace in an export are moved back together
+when they end more than 55 minutes after the export arrived, until the last
+ends as it arrived, so a run sent over several exports is moved export by
+export, its parts perhaps landing seconds apart, or further where an export
 arrives late. A clock drifting by less is left as it is.
 
 The [field inventory](/docs/api/field-inventory) names, on a span, `gen_ai.response.id`,
