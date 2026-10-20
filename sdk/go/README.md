@@ -75,10 +75,12 @@ marks it cancelled for `context.Canceled`; a deadline that ran out fails with
 its own type, since a stalled call is what a monitor is for.
 `FailWith("TimeoutError")` and `Cancel()` do the same by hand.
 
-The SDK never panics: a blank agent name opens a run that does nothing and
-warns once, a run's `SampleRate` outside (0, 1] falls back to the client's with
-one warning, and of what ingest would refuse or drop, these are left off with
-one warning: a `StallAfterS` or `MaxSteps` below 0 or past 4294967295, or a
+The SDK never panics: a `Client` not from `New`, the nil a failed `New`
+returns among them, sends nothing, its `RecordRun` returning an error; a
+blank agent name opens a run that does nothing and warns once, a run's
+`SampleRate` outside (0, 1] falls back to the client's with one warning, and
+of what ingest would refuse or drop, these are left off with one warning: a
+`StallAfterS` or `MaxSteps` below 0 or past 4294967295, or a
 `MaxCostUSD` below 0 or not finite, off its run (a zero bound is unset), a
 token count below zero off its call, and a tag whose key is not 1 to 64
 characters or whose value is over 256, which takes no place among a run's 32.

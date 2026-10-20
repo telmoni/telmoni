@@ -46,6 +46,9 @@ func (c *Client) Extract(ctx context.Context, header http.Header) context.Contex
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if !c.built() {
+		return ctx
+	}
 	read, ok := readHeaders(header)
 	if !ok {
 		return ctx

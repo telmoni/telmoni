@@ -165,14 +165,26 @@ func NewFromEnv() (*Client, error) {
 	return New(ConfigFromEnv())
 }
 
+// built is whether c came from New: a zero Client, or the nil one a failed New
+// returns, sends nothing rather than panic.
+func (c *Client) built() bool {
+	return c != nil && c.exporter != nil
+}
+
 // Config returns the configuration as the client holds it.
 func (c *Client) Config() Config {
+	if c == nil {
+		return Config{}
+	}
 	return c.config
 }
 
 // ContentMode is the project's content mode, learned from the last answer:
 // "" before the first one.
 func (c *Client) ContentMode() string {
+	if !c.built() {
+		return ""
+	}
 	return c.exporter.contentMode()
 }
 
@@ -181,6 +193,12 @@ func (c *Client) ContentMode() string {
 // most, and then returns ctx's error; a batch still being sent is left to the
 // worker.
 func (c *Client) Flush(ctx context.Context) error {
+	if !c.built() {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	return c.provider.ForceFlush(ctx)
 }
 
@@ -189,6 +207,12 @@ func (c *Client) Flush(ctx context.Context) error {
 // when ctx has no deadline, and a batch still retrying past that is left to
 // the worker, which the process exit takes with it.
 func (c *Client) Shutdown(ctx context.Context) error {
+	if !c.built() {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// Ours first: the provider's returns before reaching it when ctx is
 	// already done, and never runs twice. Its error can only be ctx's.
 	err := c.processor.Shutdown(ctx)

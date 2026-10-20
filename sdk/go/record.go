@@ -122,6 +122,9 @@ var ErrQueueFull = errors.New("telmoni: the export queue has no room for the rec
 // room for it. A record is handed over whole, so it is refused whole, where
 // a live run's mistakes are warned of.
 func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
+	if !c.built() {
+		return errors.New("telmoni: a Client must come from New; nothing is sent")
+	}
 	if strings.TrimSpace(record.Agent) == "" {
 		return errors.New("telmoni: a run needs its agent's name")
 	}

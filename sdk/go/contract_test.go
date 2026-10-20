@@ -289,3 +289,38 @@ func TestAHostWithoutASchemeIsReadAsTheCLIReadsIt(t *testing.T) {
 		t.Errorf("NewFromEnv() with https:// = %v, want a refusal of the endpoint", err)
 	}
 }
+
+func TestAClientNotFromNewSendsNothingAndNeverPanics(t *testing.T) {
+	ctx := context.Background()
+	header := http.Header{}
+	header.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	header.Set("baggage", "telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=bot")
+	for name, client := range map[string]*telmoni.Client{"zero": {}, "nil": nil} {
+		runCtx, run := client.Run(ctx, "bot", telmoni.RunOptions{})
+		stepCtx, step := run.Step(runCtx, "plan")
+		_, call := run.ModelCall(stepCtx, "claude", telmoni.ModelCallOptions{})
+		call.Answered(telmoni.Answer{})
+		step.End()
+		run.End()
+		client.Inject(runCtx, http.Header{})
+		if telmoni.RunFromContext(client.Extract(ctx, header)) != nil {
+			t.Errorf("%s: Extract continued a run", name)
+		}
+		if err := client.RecordRun(ctx, telmoni.RunRecord{Agent: "bot"}); err == nil {
+			t.Errorf("%s: RecordRun took a record", name)
+		}
+		if client.Flush(ctx) != nil || client.Shutdown(ctx) != nil || client.ContentMode() != "" || client.Config() != (telmoni.Config{}) {
+			t.Errorf("%s: a client not from New answered as one that is", name)
+		}
+	}
+}
+
+func TestFlushAndShutdownTakeANilContextAsRunDoes(t *testing.T) {
+	client := mustNew(t, telmoni.Config{})
+	if err := client.Flush(nil); err != nil {
+		t.Errorf("Flush(nil) = %v", err)
+	}
+	if err := client.Shutdown(nil); err != nil {
+		t.Errorf("Shutdown(nil) = %v", err)
+	}
+}

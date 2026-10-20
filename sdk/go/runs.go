@@ -189,6 +189,9 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if !c.built() {
+		return ctx, &Run{}
+	}
 	if strings.TrimSpace(agent) == "" {
 		c.exporter.warnOnce("run:agent", "telmoni: a run needs its agent's name; nothing is sent for one without")
 		return ctx, &Run{client: c}
