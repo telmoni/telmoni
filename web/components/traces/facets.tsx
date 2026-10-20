@@ -48,6 +48,10 @@ const SEARCHABLE_FROM = 8;
 /** How many values the server names of a facet, the most runs first. */
 const FACET_VALUES_MAX = 50;
 
+/** The value a facet's list starts on: no item's, cmdk trimming each, so none is chosen and
+ *  scrolled into view as it mounts, which in Chrome moves where the page's first Tab starts. */
+const NONE_CHOSEN = " ";
+
 type Props = {
   organization: string;
   slug: string;
@@ -254,7 +258,7 @@ function FacetSection({
             No {label.toLowerCase()} among the window&rsquo;s runs.
           </p>
         ) : (
-          <Command className="bg-transparent">
+          <Command className="bg-transparent" defaultValue={NONE_CHOSEN}>
             {values.length > SEARCHABLE_FROM && (
               <CommandInput placeholder={`Search ${label.toLowerCase()}s`} />
             )}

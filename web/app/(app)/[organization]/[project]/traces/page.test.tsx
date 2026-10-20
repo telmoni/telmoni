@@ -260,6 +260,15 @@ describe("TracesPage", () => {
     expect(screen.getByTestId("histogram")).toBeInTheDocument();
   });
 
+  // In Chrome a scroll into view moves where the page's first Tab starts, past the skip link.
+  it("chooses no facet's value as its list mounts, so none is scrolled into view", async () => {
+    render(await TracesPage({ params: PARAMS }));
+    expect(document.querySelectorAll("[cmdk-item]").length).toBeGreaterThan(0);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(document.querySelector('[cmdk-item][aria-selected="true"]')).toBeNull();
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+
   it("reads each filter's values, the sort, the window and the page, and hands them to the server", async () => {
     render(
       await TracesPage({
