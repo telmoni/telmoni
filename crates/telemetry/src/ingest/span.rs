@@ -364,7 +364,7 @@ impl Fields {
                 );
             }
             contract::AGENT => {
-                self.agent = Some(bounded_text(value, contract::NAME_MAX, contract::AGENT)?);
+                self.agent = Some(bounded_text(value, contract::AGENT_MAX, contract::AGENT)?);
             }
             contract::USER_ID => {
                 self.user_id = Some(bounded_text(
@@ -933,6 +933,11 @@ mod tests {
                 Refusal::OverCap(contract::ERROR_TYPE),
             ),
             (
+                contract::AGENT,
+                s(&"a".repeat(contract::AGENT_MAX + 1)),
+                Refusal::OverCap(contract::AGENT),
+            ),
+            (
                 contract::SESSION_ID,
                 s(&"c".repeat(201)),
                 Refusal::OverCap(contract::SESSION_ID),
@@ -950,11 +955,30 @@ mod tests {
         let refused = map(&bad_run, &context(&project, &[], &keep), &mut Vec::new()).unwrap_err();
         assert_eq!(refused.reason, Refusal::Invalid(contract::RUN_ID));
         let long_name = Span {
-            name: "n".repeat(129),
+            name: "n".repeat(contract::NAME_MAX + 1),
             ..with(contract::OPERATION, s("chat"))
         };
         let refused = map(&long_name, &context(&project, &[], &keep), &mut Vec::new()).unwrap_err();
         assert_eq!(refused.reason, Refusal::OverCap("name"));
+        let widest_model = "m".repeat(contract::MODEL_MAX);
+        let named_by_both = Span {
+            name: format!("generate_content {widest_model}"),
+            attributes: vec![
+                kv(contract::RUN_ID, s(RUN)),
+                kv(contract::AGENT, s("nightly-report")),
+                kv(contract::OPERATION, s("generate_content")),
+                kv(contract::REQUEST_MODEL, s(&widest_model)),
+            ],
+            ..call()
+        };
+        let row = map(
+            &named_by_both,
+            &context(&project, &[], &keep),
+            &mut Vec::new(),
+        )
+        .expect("a model at its cap keeps its call")
+        .expect("a row");
+        assert_eq!((row.kind, row.model), (SpanKind::ModelCall, widest_model));
         let backwards = Span {
             end_time_unix_nano: 1,
             ..with(contract::OPERATION, s("chat"))
@@ -1046,7 +1070,7 @@ mod tests {
             .expect("a row");
         let wide = |chars: usize| "\u{1F600}".repeat(chars);
         let widest = SpanRow {
-            agent: wide(contract::NAME_MAX),
+            agent: wide(contract::AGENT_MAX),
             name: wide(contract::NAME_MAX),
             error_type: wide(contract::ERROR_TYPE_MAX),
             model: wide(contract::MODEL_MAX),

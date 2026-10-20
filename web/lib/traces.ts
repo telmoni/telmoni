@@ -82,7 +82,7 @@ export const TYPED_FILTERS: readonly FilterKey[] = ["user", "session", "tag"];
 const VALUE_MAX: Record<Exclude<FilterKey, "status">, number> = {
   agent: 128,
   model: 128,
-  tool: 128,
+  tool: 145,
   user: 128,
   session: 200,
   environment: 128,

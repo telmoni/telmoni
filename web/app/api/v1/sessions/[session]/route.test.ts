@@ -60,16 +60,16 @@ describe("GET /api/v1/sessions/[session]", () => {
     expect((await read(`?project=${PROJECT}`, "s".repeat(201))).status).toBe(404);
     const nine = Array.from({ length: 9 }, (_, i) => `pinned=s${i}`).join("&");
     expect((await read(`?project=${PROJECT}&${nine}`)).status).toBe(400);
-    expect((await read(`?project=${PROJECT}&pinned=${"n".repeat(129)}`)).status).toBe(400);
+    expect((await read(`?project=${PROJECT}&pinned=${"n".repeat(146)}`)).status).toBe(400);
     expect(fetchSession).not.toHaveBeenCalled();
   });
 
   it("counts a session's id and a pinned name in characters, as the server does", async () => {
     const wide = "😀".repeat(200);
-    expect((await read(`?project=${PROJECT}&pinned=${"😀".repeat(128)}`, wide)).status).toBe(200);
-    expect(fetchSession).toHaveBeenCalledWith(PROJECT, wide, {}, ["😀".repeat(128)]);
+    expect((await read(`?project=${PROJECT}&pinned=${"😀".repeat(145)}`, wide)).status).toBe(200);
+    expect(fetchSession).toHaveBeenCalledWith(PROJECT, wide, {}, ["😀".repeat(145)]);
     expect((await read(`?project=${PROJECT}`, `${wide}😀`)).status).toBe(404);
-    expect((await read(`?project=${PROJECT}&pinned=${"😀".repeat(129)}`)).status).toBe(400);
+    expect((await read(`?project=${PROJECT}&pinned=${"😀".repeat(146)}`)).status).toBe(400);
     expect(fetchSession).toHaveBeenCalledTimes(1);
   });
 

@@ -58,8 +58,11 @@ pub const EXIT_CODE: &str = "process.exit.code";
 
 // ── Caps, each named after its field ─────────────────────────────────────────
 
-/// A span's `name`, an agent's and a tool's among them.
-pub const NAME_MAX: usize = 128;
+/// A span's `name`, a run's and a tool's among them: room for a model call's
+/// `<operation> <model>`, the longest operation and a model at its cap.
+pub const NAME_MAX: usize = longest(&MODEL_OPERATIONS) + 1 + MODEL_MAX;
+/// `agent`, the monitor a run counts under: the monitors' and open runs' CHECK.
+pub const AGENT_MAX: usize = 128;
 /// `error_type`: the exception's class.
 pub const ERROR_TYPE_MAX: usize = 128;
 /// `model`, as the provider spells it.
@@ -186,16 +189,34 @@ pub fn current_name(key: &str) -> &str {
         .map_or(key, |(_, now)| now)
 }
 
+/// The operations a span is read as a model call by.
+pub const MODEL_OPERATIONS: [&str; 4] =
+    ["chat", "generate_content", "text_completion", "embeddings"];
+
 /// The kind a span's operation makes it, or `None` for a span the
 /// conventions give no operation: a step under our scope, a span elsewhere.
 #[must_use]
 pub fn kind_of_operation(operation: &str) -> Option<SpanKind> {
     match operation {
         "invoke_agent" | "invoke_workflow" => Some(SpanKind::Run),
-        "chat" | "generate_content" | "text_completion" | "embeddings" => Some(SpanKind::ModelCall),
         "execute_tool" => Some(SpanKind::ToolCall),
+        _ if MODEL_OPERATIONS.contains(&operation) => Some(SpanKind::ModelCall),
         _ => None,
     }
+}
+
+/// The longest of `names` in bytes, which for the conventions' ASCII names
+/// is characters.
+const fn longest(names: &[&str]) -> usize {
+    let mut most = 0;
+    let mut rest = names;
+    while let [first, tail @ ..] = rest {
+        if first.len() > most {
+            most = first.len();
+        }
+        rest = tail;
+    }
+    most
 }
 
 // ── Content ──────────────────────────────────────────────────────────────────
@@ -446,7 +467,7 @@ const KEPT_CONTENT: &str = "dropped at the door on a project whose content mode 
                             a project may keep content";
 const RULE_CONTENT: &str = "content: what a person or a model wrote";
 const RULE_PERSON: &str = "names a person: content, whatever else the span carries";
-const RULE_NAME: &str = "1 to 128 characters";
+const RULE_NAME: &str = "1 to 145 characters";
 const RULE_UP_TO_128: &str = "up to 128 characters";
 const RULE_COUNT: &str = "a whole number, 0 or more";
 const RULE_REPLACED: &str = "a name the conventions replaced, read as the current one";
@@ -978,6 +999,19 @@ mod tests {
         }
         assert_eq!(kind_of_operation("create_agent"), None);
         assert_eq!(kind_of_operation(""), None);
+    }
+
+    /// A model it takes never costs a call its name, `<operation> <model>`.
+    #[test]
+    fn a_model_calls_name_holds_a_model_at_its_cap() {
+        for operation in MODEL_OPERATIONS {
+            assert_eq!(kind_of_operation(operation), Some(SpanKind::ModelCall));
+            assert!(
+                operation.chars().count() + 1 + MODEL_MAX <= NAME_MAX,
+                "{operation}"
+            );
+        }
+        assert_eq!(NAME_MAX, 145, "each SDK's contract copies the number");
     }
 
     /// ⚠ The people a span names are content, whatever a project's mode.

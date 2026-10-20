@@ -134,6 +134,7 @@ describe("the URL as the list's state", () => {
       parseTraceQuery({
         session: [at(200), at(201)],
         agent: [at(128), at(129)],
+        tool: [at(145), at(146)],
         user: "😀".repeat(128),
         prompt: at(1_025),
         tag: [`${at(64)}:${at(256)}`, `${at(65)}:v`],
@@ -141,6 +142,7 @@ describe("the URL as the list's state", () => {
     ).toEqual({
       session: [at(200)],
       agent: [at(128)],
+      tool: [at(145)],
       user: ["😀".repeat(128)],
       tag: [`${at(64)}:${at(256)}`],
     });

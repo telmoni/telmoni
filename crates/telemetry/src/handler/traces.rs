@@ -27,8 +27,8 @@ use telmoni_shared::{
 
 use crate::AppState;
 use crate::contract::{
-    ATTRIBUTE_VALUE_MAX, ENVIRONMENT_MAX, MODEL_MAX, NAME_MAX, RELEASE_MAX, SESSION_ID_MAX,
-    TAG_KEY_MAX, TAG_VALUE_MAX, USER_ID_MAX,
+    AGENT_MAX, ATTRIBUTE_VALUE_MAX, ENVIRONMENT_MAX, MODEL_MAX, NAME_MAX, RELEASE_MAX,
+    SESSION_ID_MAX, TAG_KEY_MAX, TAG_VALUE_MAX, USER_ID_MAX,
 };
 use crate::store::{self, Projects, SpanRow};
 use crate::traces::{
@@ -197,7 +197,7 @@ impl TraceQuery {
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(TraceFilter {
-            agents: values("agent", &self.agent, NAME_MAX)?,
+            agents: values("agent", &self.agent, AGENT_MAX)?,
             user_ids: values("user", &self.user, USER_ID_MAX)?,
             session_ids: values("session", &self.session, SESSION_ID_MAX)?,
             statuses,
@@ -1073,7 +1073,9 @@ mod tests {
             read(Reading::Histogram, &[("utc_offset", "841")]).and_then(|q| {
                 parse_utc_offset(q.utc_offset.as_deref().unwrap_or_default()).map(|_| ())
             }),
-            read(Reading::List, &[("agent", &"a".repeat(NAME_MAX + 1))])
+            read(Reading::List, &[("agent", &"a".repeat(AGENT_MAX + 1))])
+                .and_then(|q| q.filter().map(|_| ())),
+            read(Reading::List, &[("tool", &"t".repeat(NAME_MAX + 1))])
                 .and_then(|q| q.filter().map(|_| ())),
             read(
                 Reading::List,
@@ -1103,7 +1105,17 @@ mod tests {
         .into_iter()
         .filter_map(Result::err)
         .collect();
-        assert_eq!(refusals.len(), 19, "every query above is refused");
+        assert_eq!(refusals.len(), 20, "every query above is refused");
+        for (filter, value) in [
+            ("agent", "a".repeat(AGENT_MAX)),
+            ("tool", "t".repeat(NAME_MAX)),
+        ] {
+            let query = read(Reading::List, &[(filter, value.as_str())]);
+            assert!(
+                query.and_then(|q| q.filter()).is_ok(),
+                "{filter} at its cap"
+            );
+        }
         for refused in refusals {
             let problem = refused.to_problem_details();
             assert_eq!(problem.status, 400);

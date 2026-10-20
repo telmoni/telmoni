@@ -39,7 +39,7 @@ use crate::schedule::{Fault, PERIOD_MAX_S, PREVIEW, Schedule};
 /// it.
 pub const NAME_MAX: usize = 60;
 /// The longest an agent's name is: the contract's, since every run names it.
-pub const AGENT_MAX: usize = contract::NAME_MAX;
+pub const AGENT_MAX: usize = contract::AGENT_MAX;
 /// The longest a zone's name is, as the table's CHECK has it.
 pub const TIMEZONE_MAX: usize = 64;
 /// The most steps a cap may name.

@@ -352,7 +352,7 @@ function Names({
           id={id}
           value={draft}
           placeholder={placeholder}
-          maxLength={128}
+          maxLength={145}
           autoComplete="off"
           disabled={names.length >= max}
           onChange={(event) => setDraft(event.target.value)}

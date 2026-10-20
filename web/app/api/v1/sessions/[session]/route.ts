@@ -14,7 +14,7 @@ const READS_A_MINUTE = { limit: 120, windowMs: 60_000 };
 /** The longest a session's id is, in characters as the server counts them. */
 const SESSION_ID_MAX = 200;
 /** The longest a span's name is, in characters as the server counts them. */
-const NAME_MAX = 128;
+const NAME_MAX = 145;
 
 /** The session's own answer, so nothing in between keeps a copy. */
 function reply(body: unknown, status = 200) {
