@@ -690,7 +690,9 @@ hyphen at either end and the last no number, nor an IPv4 address in four
 decimal parts, nor an IPv6 address in brackets. Write an
 address in full, `127.0.0.1` rather than `127.1`, and a name in another script
 in its `xn--` form. No SDK follows a redirect, which could carry the key to
-another host, and the key never appears in a log, a warning or an error.
+another host, nor sends to this machine through a proxy, whatever the proxy
+variables name, since the proxy would read it; and the key never appears in a
+log, a warning or an error.
 
 ---
 
