@@ -10,6 +10,7 @@
 
 mod common;
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use axum::Router;
@@ -654,31 +655,84 @@ async fn the_histogram_counts_each_run_in_the_bar_it_started_in(pool: PgPool) {
         return;
     };
     let p = projects(&pool);
-    seed(&ch, &p).await;
+    let Seeded { a, b, c, .. } = seed(&ch, &p).await;
+    // Run E, at :55 five hours back: the last bar, or a shift the wrong way, misplaces it.
+    let hour = (Utc::now() - Duration::hours(5))
+        .timestamp()
+        .div_euclid(3_600)
+        * 3_600;
+    let e_start = DateTime::from_timestamp(hour + 55 * 60, 0).expect("a time");
+    let e = span_at(
+        &p.ours,
+        Uuid::new_v4(),
+        SpanKind::Run,
+        "nightly-report",
+        e_start,
+        1_000,
+        9,
+    );
+    ch.store.insert_spans(&[e]).await.expect("the span lands");
 
-    // Five and a half hours east of UTC: its hours start on UTC's half hours.
+    // Nepal's clock, 5:45 east of UTC: its hours start at UTC's :15, a wrong sign's at :45.
     let histogram = p
-        .get(&format!("{LANE}/histogram?days=1&utc_offset=330"))
+        .get(&format!("{LANE}/histogram?days=1&utc_offset=345"))
         .await;
     assert_eq!(histogram["bucket_seconds"], 3_600);
-    assert_eq!(histogram["utc_offset"], 330);
+    assert_eq!(histogram["utc_offset"], 345);
     let bars = histogram["bars"].as_array().expect("bars");
     assert!((25..=26).contains(&bars.len()), "{} bars", bars.len());
     let sum = |key: &str| -> u64 { bars.iter().map(|b| b[key].as_u64().expect("a count")).sum() };
-    assert_eq!((sum("ok"), sum("error"), sum("cancelled")), (2, 1, 0));
+    assert_eq!((sum("ok"), sum("error"), sum("cancelled")), (3, 1, 0));
     assert_eq!(sum("tokens"), 1_515);
-    for bar in bars {
-        let at: DateTime<Utc> = bar["at"]
+    let at = |bar: &Value| -> DateTime<Utc> {
+        bar["at"]
             .as_str()
             .expect("a time")
             .parse()
-            .expect("RFC 3339");
+            .expect("RFC 3339")
+    };
+    for bar in bars {
         assert_eq!(
-            at.timestamp() % 3_600,
-            1_800,
-            "{at} starts on the reader's hour"
+            at(bar).timestamp() % 3_600,
+            900,
+            "{} starts on the reader's hour",
+            at(bar)
         );
     }
+
+    // Each run in the reader's hour it started in, by the list's starts.
+    let list = p.list("").await;
+    let started = |run: Uuid| -> DateTime<Utc> {
+        trace(&list, run)["started_at"]
+            .as_str()
+            .expect("a time")
+            .parse()
+            .expect("RFC 3339")
+    };
+    let reader_hour = |start: DateTime<Utc>| {
+        let shift = 345 * 60_000;
+        let ms = (start.timestamp_millis() + shift).div_euclid(3_600_000) * 3_600_000 - shift;
+        DateTime::from_timestamp_millis(ms).expect("a time")
+    };
+    let mut expected: BTreeMap<DateTime<Utc>, (u64, u64)> = BTreeMap::new();
+    for (start, (ok, error)) in [
+        (started(a), (1, 0)),
+        (started(b), (0, 1)),
+        (started(c), (1, 0)),
+        (e_start, (1, 0)),
+    ] {
+        let bar = expected.entry(reader_hour(start)).or_default();
+        *bar = (bar.0 + ok, bar.1 + error);
+    }
+    let counted: BTreeMap<DateTime<Utc>, (u64, u64)> = bars
+        .iter()
+        .map(|bar| {
+            let count = |key: &str| bar[key].as_u64().expect("a count");
+            (at(bar), (count("ok"), count("error")))
+        })
+        .filter(|(_, counts)| *counts != (0, 0))
+        .collect();
+    assert_eq!(counted, expected);
     let empty = bars
         .iter()
         .find(|b| b["ok"] == 0 && b["error"] == 0 && b["cancelled"] == 0)
