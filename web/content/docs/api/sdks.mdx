@@ -674,13 +674,23 @@ does not name with the `telmoni.tag.<key>` that would keep it.
 ### The key on the wire
 
 The key travels as a bearer over HTTPS. Plain HTTP is accepted only to this
-machine, `localhost` or a loopback address, for a server you run beside the
-agent: Python, TypeScript and Go refuse any other `http://` endpoint when the
-client is built, and Rust when the first export would go, with one warning.
-An endpoint given without a scheme gets `https://`, or `http://` for this
-machine, as the CLI reads one; any scheme but those two is refused the same
-way. No SDK follows a redirect, which could carry the key to another host,
-and the key never appears in a log, a warning or an error.
+machine, for a server you run beside the agent: `localhost`, a name under it,
+an address in `127.0.0.0/8`, or `::1`, an IPv4-mapped address such as
+`[::ffff:127.0.0.1]` counting as its IPv4. Python, TypeScript and Go refuse any
+other `http://` endpoint when the client is built, and Rust when the first
+export would go, with one warning. An endpoint given without a scheme gets
+`https://`, or `http://` for this machine, as the CLI reads one; any scheme
+but those two is refused the same way, as is an endpoint the four SDKs could
+read two ways: one that is not printable ASCII once the whitespace around it
+is trimmed, or holds credentials, a percent-escape, a query, a fragment, a `.`
+or `..` segment or a character a URL parser would escape, such as a space or
+`|`, or a port of 0 or past 65535, or whose host is neither a name of letters,
+digits, dots, hyphens and underscores, in labels of 1 to 63 characters with no
+hyphen at either end and the last no number, nor an IPv4 address in four
+decimal parts, nor an IPv6 address in brackets. Write an
+address in full, `127.0.0.1` rather than `127.1`, and a name in another script
+in its `xn--` form. No SDK follows a redirect, which could carry the key to
+another host, and the key never appears in a log, a warning or an error.
 
 ---
 
