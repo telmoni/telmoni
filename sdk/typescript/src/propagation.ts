@@ -99,19 +99,26 @@ export function encodeBaggageValue(value: string): string {
   return out;
 }
 
-/** A baggage value read back: each `%XX` its byte, a `%` without two hex digits kept as it is. */
+/**
+ * A baggage value read back: each `%XX` its byte, a `%` without two hex digits
+ * kept as it is, any other character its UTF-8, a code point at a time.
+ */
 export function decodeBaggageValue(value: string): string {
   const bytes: number[] = [];
-  for (let i = 0; i < value.length; i++) {
+  const encoder = new TextEncoder();
+  for (let i = 0; i < value.length; ) {
     const pair = value.slice(i + 1, i + 3);
     if (value[i] === '%' && pair.length === 2 && HEX.test(pair.toLowerCase())) {
       bytes.push(Number.parseInt(pair, 16));
-      i += 2;
-    } else {
-      for (const byte of new TextEncoder().encode(value[i]!)) bytes.push(byte);
+      i += 3;
+      continue;
     }
+    const char = String.fromCodePoint(value.codePointAt(i)!);
+    for (const byte of encoder.encode(char)) bytes.push(byte);
+    i += char.length;
   }
-  return new TextDecoder().decode(Uint8Array.from(bytes));
+  // A byte-order mark is a character, as the three others read it.
+  return new TextDecoder('utf-8', { ignoreBOM: true }).decode(Uint8Array.from(bytes));
 }
 
 /**

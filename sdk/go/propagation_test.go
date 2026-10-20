@@ -266,6 +266,37 @@ func TestABaggageValueIsEncodedAsTheGrammarAsksAndReadBack(t *testing.T) {
 	}
 }
 
+// Bytes that are no UTF-8 are one U+FFFD a maximal subpart, as the other three read them.
+func TestABaggageValueThatIsNoUTF8IsReadAsTheOtherSDKsReadIt(t *testing.T) {
+	for given, want := range map[string]string{
+		"bot%E2%82%FF":                          "bot\uFFFD\uFFFD",
+		"%E2%82":                                "\uFFFD",
+		"%FF%FE":                                "\uFFFD\uFFFD",
+		"%C0%AF":                                "\uFFFD\uFFFD",
+		"%C3(":                                  "\uFFFD(",
+		"%E0%80%AF":                             "\uFFFD\uFFFD\uFFFD",
+		"%E0%9F%BF":                             "\uFFFD\uFFFD\uFFFD",
+		"%E0%A0":                                "\uFFFD",
+		"%E2%82%C0":                             "\uFFFD\uFFFD",
+		"%E2%82%7F":                             "\uFFFD\x7f",
+		"%ED%A0%80":                             "\uFFFD\uFFFD\uFFFD",
+		"%ED%9F%BF":                             "\uD7FF",
+		"%F0%8F%BF%BF":                          "\uFFFD\uFFFD\uFFFD\uFFFD",
+		"%F0%9F%98":                             "\uFFFD",
+		"%F0%9F%98%80%9F":                       "\U0001F600\uFFFD",
+		"%F4%8F%BF%BF":                          "\U0010FFFF",
+		"%F4%90%80%80":                          "\uFFFD\uFFFD\uFFFD\uFFFD",
+		"%F5%80":                                "\uFFFD\uFFFD",
+		"%EF%BF%BD%C3":                          "\uFFFD\uFFFD",
+		"a%E2%82%FFb%ED%A0%80c%F0%9F%98":        "a\uFFFD\uFFFDb\uFFFD\uFFFD\uFFFDc\uFFFD",
+		"%C0%AF%E0%80%AF%F4%90%80%80%F8%88%80x": "\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFDx",
+	} {
+		if got := telmoni.DecodeBaggageValue(given); got != want {
+			t.Errorf("decode %q = %+q, want %+q", given, got, want)
+		}
+	}
+}
+
 func TestATraceparentIsParsedAsTheGrammarAsks(t *testing.T) {
 	span, ok := telmoni.ParseTraceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
 	if !ok || span.TraceID().String() != "4bf92f3577b34da6a3ce929d0e0e4736" || span.SpanID().String() != "00f067aa0ba902b7" || !span.IsSampled() || !span.IsRemote() {

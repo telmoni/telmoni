@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -223,7 +224,56 @@ func decodeBaggageValue(value string) string {
 		}
 		out = append(out, value[i])
 	}
-	return strings.ToValidUTF8(string(out), "�")
+	return toValidUTF8(out)
+}
+
+// toValidUTF8 is b with one U+FFFD for each maximal subpart of no UTF-8, as the other
+// SDKs' decoders read it, where strings.ToValidUTF8 gives a whole run one.
+func toValidUTF8(b []byte) string {
+	var out strings.Builder
+	for len(b) > 0 {
+		r, size := utf8.DecodeRune(b)
+		if r == utf8.RuneError && size == 1 {
+			out.WriteRune(utf8.RuneError)
+			b = b[maximalSubpart(b):]
+			continue
+		}
+		out.Write(b[:size])
+		b = b[size:]
+	}
+	return out.String()
+}
+
+// maximalSubpart is how many bytes of b, which opens no UTF-8 sequence, one
+// U+FFFD stands for: its lead byte and what a sequence could still follow it with.
+func maximalSubpart(b []byte) int {
+	lo, hi, length := byte(0x80), byte(0xBF), 0
+	switch lead := b[0]; {
+	case 0xC2 <= lead && lead <= 0xDF:
+		length = 2
+	case lead == 0xE0:
+		lo, length = 0xA0, 3
+	case lead == 0xED:
+		hi, length = 0x9F, 3
+	case 0xE1 <= lead && lead <= 0xEF:
+		length = 3
+	case lead == 0xF0:
+		lo, length = 0x90, 4
+	case lead == 0xF4:
+		hi, length = 0x8F, 4
+	case 0xF1 <= lead && lead <= 0xF3:
+		length = 4
+	default:
+		return 1
+	}
+	if len(b) < 2 || b[1] < lo || b[1] > hi {
+		return 1
+	}
+	n := 2
+	for n < length && n < len(b) && 0x80 <= b[n] && b[n] <= 0xBF {
+		n++
+	}
+	return n
 }
 
 func isHexDigitAnyCase(b byte) bool {

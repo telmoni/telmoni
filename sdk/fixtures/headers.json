@@ -80,6 +80,48 @@
       }
     },
     {
+      "name": "an agent whose escapes are no UTF-8, one replacement character for each sequence that breaks off",
+      "headers": {
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "baggage": "telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=a%E2%82%FFb%ED%A0%80c%F0%9F%98"
+      },
+      "run": {
+        "run_id": "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
+        "agent": "a\ufffd\ufffdb\ufffd\ufffd\ufffdc\ufffd",
+        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "parent_span_id": "00f067aa0ba902b7",
+        "sampled": true
+      }
+    },
+    {
+      "name": "an agent opening on a byte-order mark, which is a character",
+      "headers": {
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "baggage": "telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=%EF%BB%BFbot"
+      },
+      "run": {
+        "run_id": "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
+        "agent": "\ufeffbot",
+        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "parent_span_id": "00f067aa0ba902b7",
+        "sampled": true
+      }
+    },
+    {
+      "name": "an agent with a character past the BMP given unescaped, taken as its UTF-8",
+      "headers": {
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "baggage": "telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=bot\ud83d\ude00"
+      },
+      "run": {
+        "run_id": "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
+        "agent": "bot\ud83d\ude00",
+        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "parent_span_id": "00f067aa0ba902b7",
+        "sampled": true
+      }
+    },
+    {
       "name": "a future version of traceparent, with more after the flags",
       "headers": {
         "traceparent": "cc-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-what-follows",
