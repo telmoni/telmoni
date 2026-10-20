@@ -115,12 +115,17 @@ holding the **ingest** scope.
     cost not above 0, a token count below 0 or past 64 bits, a tag whose key
     is not 1 to 64 characters or whose value is past 256, and the tags past
     the first 32 kept; an empty user, session, provider or response model is
-    left off as unset. A name, model, provider, user, session or response
-    model that is no string goes as its text with one warning, as does a tag
-    that is no string, finite number or bool. Text past the caps
-    [below](#a-run-recorded-after-it-ended), and a step or model named
-    nothing, still go as given, and Telmoni refuses the span they are on, or
-    the whole run for its agent, user or session.
+    left off as unset. A name, model, provider, user, session, response model
+    or error type that is no string goes as its text with one warning, as does
+    a tag that is no string, finite number or bool; an exception or an
+    exception's class handed to `fail()` goes as the class's name, never its
+    message. Past Telmoni's caps, counted in characters, a name, the agent, a
+    model, a provider, a response model or an error type is cut to its cap — a
+    step's or a tool's name, and a model call's `<operation> <model>`, to 145,
+    the rest to 128 — and a user past 128 or a session past 200 is left off,
+    since cut it would name another; a step named nothing goes as `step`, and a
+    model call with no model is named by its operation alone; each with one
+    warning.
   </Tab>
   <Tab value="TypeScript">
     ```ts
@@ -163,12 +168,16 @@ holding the **ingest** scope.
     cost not above 0, a token count below 0 or past 64 bits, a tag whose key
     is not 1 to 64 characters or whose value is past 256, and the tags past
     the first 32 kept; an empty user, session, provider or response model is
-    left off as unset. A name, model, provider, user, session or response
-    model that is no string goes as its text with one warning, as does a tag
-    that is no string, finite number or boolean. Text past the caps
-    [below](#a-run-recorded-after-it-ended), and a step or model named
-    nothing, still go as given, and Telmoni refuses the span they are on, or
-    the whole run for its agent, user or session.
+    left off as unset. A name, model, provider, user, session, response model
+    or error type that is no string goes as its text with one warning, as does
+    a tag that is no string, finite number or boolean; an error, or a class,
+    handed to `fail()` goes as its class's name, never its message. Past
+    Telmoni's caps, counted in characters, a name, the agent, a model, a
+    provider, a response model or an error type is cut to its cap — a step's
+    or a tool's name, and a model call's `<operation> <model>`, to 145, the
+    rest to 128 — and a user past 128 or a session past 200 is left off, since
+    cut it would name another; a step named nothing goes as `step`, and a model
+    call with no model is named by its operation alone; each with one warning.
   </Tab>
   <Tab value="Go">
     ```go
@@ -219,10 +228,14 @@ holding the **ingest** scope.
     warning — a `StallAfterS` or `MaxSteps` past 4294967295 or below 0, a
     `MaxCostUSD` that is no finite number above 0 (0 leaves any of the three
     unset), a token count below 0, a tag whose key is not 1 to 64 characters
-    or whose value is past 256, and the tags past the first 32 kept, by key. Text past
-    the caps [below](#a-run-recorded-after-it-ended), and a step or model
-    named nothing, still go as given, and Telmoni refuses the span they are
-    on, or the whole run for its agent, user or session.
+    or whose value is past 256, and the tags past the first 32 kept, by key.
+    Past Telmoni's caps, counted in characters, a name, the agent, a model, a
+    provider, a response model or an error type is cut to its cap — a step's
+    or a tool's name, and a model call's `<operation> <model>`, to 145, the
+    rest to 128 — and a user past 128 or a session past 200 is left off,
+    since cut it would name another; a step named nothing goes as `step`, and
+    a model call with no model is named by its operation alone; each with one
+    warning.
   </Tab>
   <Tab value="Rust">
     ```rust
@@ -269,10 +282,13 @@ holding the **ingest** scope.
     4294967295, a `max_cost_usd` that is no finite number above 0, a token
     count below 0, a tag whose key is not 1 to 64 characters or whose value
     is past 256, and the tags past the first 32 kept, by key — and an export
-    that fails is warned about, never returned. Text past the caps below, and
-    a step or model named nothing, still go as given, and Telmoni refuses the
-    span they are on, or the whole run for its agent, user or session. The
-    closure forms `run_with`, `step_with`, `model_call_with` and
+    that fails is warned about, never returned. Past Telmoni's caps, counted
+    in characters, a name, the agent, a model, a provider, a response model or
+    an error type is cut to its cap — a step's or a tool's name, and a model
+    call's `<operation> <model>`, to 145, the rest to 128 — and a user past
+    128 or a session past 200 is left off, since cut it would name another; a
+    step named nothing goes as `step`, and a model call with no model is named
+    by its operation alone; each with one warning. The closure forms `run_with`, `step_with`, `model_call_with` and
     `tool_call_with` end the span when the closure returns, and their `try_`
     forms mark an `Err` on the span with the error's type name before
     returning it unchanged. `fail("TimeoutError")` and `cancel()` do the same
@@ -328,10 +344,10 @@ whole, before anything is queued: flush, or wait, and record it again.
     hyphenated UUID nor 32 hex digits, or is the nil UUID, a time without its
     timezone or outside what Telmoni reads (after the Unix epoch, and less than
     2^64 nanoseconds after it, in July 2554), an empty step's name or model,
-    text longer than Telmoni keeps (a name, the agent, a model, a provider, a
-    user or an error type past 128 characters, a session past 200, or a model
-    call's operation and model past 127 together), or a span that ends before
-    it starts raises `ValueError`. A field of the wrong type raises
+    text longer than Telmoni keeps (a step's or a tool's name past 145
+    characters, the agent, a model, a provider, a user or an error type past
+    128, a session past 200, or a model call's operation and model past 144
+    together), or a span that ends before it starts raises `ValueError`. A field of the wrong type raises
     `TypeError` — a time that is no `datetime`, an item of another class,
     `inside` or `calls` that is no sequence (a list or a tuple) — save a token
     count, read as a whole number where it can be and else left off with one
@@ -375,10 +391,10 @@ whole, before anything is queued: flush, or wait, and record it again.
     token count, read as a whole number where it can be and else left off with
     one warning. A time outside what Telmoni reads (after the Unix epoch, and
     less than 2^64 nanoseconds after it, in July 2554), text longer than
-    Telmoni keeps (a name, the agent, a model, a provider, a user or an error
-    type past 128 characters, a session past 200, or a model call's operation
-    and model past 127 together, counted in characters), or a span that ends
-    before it starts throws a `RangeError`. Either way, nothing is sent.
+    Telmoni keeps (a step's or a tool's name past 145 characters, the agent, a
+    model, a provider, a user or an error type past 128, a session past 200,
+    or a model call's operation and model past 144 together, counted in
+    characters), or a span that ends before it starts throws a `RangeError`. Either way, nothing is sent.
   </Tab>
   <Tab value="Go">
     ```go
@@ -408,10 +424,10 @@ whole, before anything is queued: flush, or wait, and record it again.
     id that is not a UUID or is the nil UUID, a time that is zero or outside
     what Telmoni reads (after the Unix epoch, and less than 2^64 nanoseconds
     after it, in July 2554), an empty step's name or model, text longer than
-    Telmoni keeps (a name, the agent, a model, a provider, a user or an error
-    type past 128 characters, a session past 200, or a model call's operation
-    and model past 127 together), a nil item or a span that ends before it
-    starts returns an error, and nothing is sent.
+    Telmoni keeps (a step's or a tool's name past 145 characters, the agent, a
+    model, a provider, a user or an error type past 128, a session past 200,
+    or a model call's operation and model past 144 together), a nil item or a
+    span that ends before it starts returns an error, and nothing is sent.
   </Tab>
   <Tab value="Rust">
     ```rust
@@ -448,9 +464,10 @@ whole, before anything is queued: flush, or wait, and record it again.
     (`Error::RunId`), an empty step's name or model (`Error::EmptyName`), a
     time outside what Telmoni reads, after the Unix epoch and less than 2^64
     nanoseconds after it, in July 2554 (`Error::RecordedTime`), text longer
-    than Telmoni keeps — a name, the agent, a model, a provider, a user or an
-    error type past 128 characters, a session past 200, or a model call's
-    operation and model past 127 together (`Error::TooLong`) — a span that
+    than Telmoni keeps — a step's or a tool's name past 145 characters, the
+    agent, a model, a provider, a user or an error type past 128, a session
+    past 200, or a model call's operation and model past 144 together
+    (`Error::TooLong`) — a span that
     ends before it starts (`Error::EndBeforeStart`) or a configured sample
     rate outside its range (`Error::SampleRate`) is returned as an error, and
     nothing is sent.
