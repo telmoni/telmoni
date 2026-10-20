@@ -253,10 +253,39 @@ export class Exporter {
 
   async export(spans: readonly ReadableSpan[]): Promise<void> {
     if (spans.length === 0) return;
+    let body = this.#body(spans);
+    if (Buffer.byteLength(body) > contract.BATCH_MAX_BYTES) {
+      // Ingest refuses it whole, its 413 maybe breaking the upload still
+      // going out, which reads as no answer and is sent again: halved.
+      if (spans.length > 1) {
+        const half = Math.floor(spans.length / 2);
+        await this.export(spans.slice(0, half));
+        await this.export(spans.slice(half));
+        return;
+      }
+      // A span alone past it goes without what ingest drops for its length,
+      // and then fits, unless its own name does not.
+      body = this.#body(spans, true);
+      if (Buffer.byteLength(body) > contract.BATCH_MAX_BYTES) {
+        this.warnOnce('too-large', 'telmoni: a span past the 1 MiB an export may hold was dropped');
+        return;
+      }
+      this.warnOnce(
+        'trimmed',
+        'telmoni: a span past the 1 MiB an export may hold was sent without the attributes ingest drops for their length',
+      );
+    }
+    await this.#send(body);
+  }
+
+  #body(spans: readonly ReadableSpan[], trimmed = false): string {
     // A lone surrogate is no text ingest reads, and would lose the batch.
-    const body = JSON.stringify(this.encode(spans), (_key, value: unknown) =>
+    return JSON.stringify(this.encode(spans, trimmed), (_key, value: unknown) =>
       typeof value === 'string' ? value.replace(LONE_SURROGATE, '\ufffd') : value,
     );
+  }
+
+  async #send(body: string): Promise<void> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'User-Agent': `telmoni-typescript/${VERSION}`,
@@ -303,8 +332,8 @@ export class Exporter {
     );
   }
 
-  /** OTLP's `ExportTraceServiceRequest`, in its JSON encoding. */
-  encode(spans: readonly ReadableSpan[]): ExportTraceServiceRequest {
+  /** OTLP's `ExportTraceServiceRequest`, in its JSON encoding; `trimmed`, without the attributes ingest drops for their length. */
+  encode(spans: readonly ReadableSpan[], trimmed = false): ExportTraceServiceRequest {
     return {
       resourceSpans: [
         {
@@ -312,7 +341,7 @@ export class Exporter {
           scopeSpans: [
             {
               scope: { name: contract.SCOPE, version: VERSION },
-              spans: spans.map((span) => this.#span(span)),
+              spans: spans.map((span) => this.#span(span, trimmed)),
             },
           ],
         },
@@ -320,12 +349,13 @@ export class Exporter {
     };
   }
 
-  #span(span: ReadableSpan): OtlpSpan {
+  #span(span: ReadableSpan, trimmed = false): OtlpSpan {
     const keepContent = this.#config.captureContent && this.#contentMode === 'on';
     const attributes: KeyValue[] = [];
     for (const [key, value] of Object.entries(span.attributes)) {
       if (value === undefined) continue;
       if (!keepContent && contract.CONTENT.has(key)) continue;
+      if (trimmed && pastCaps(key, value)) continue;
       attributes.push(attribute(key, value));
     }
     const spanContext = span.spanContext();
@@ -405,6 +435,18 @@ export class Exporter {
       // Nowhere left to say so, and never into the agent's own call.
     }
   }
+}
+
+/**
+ * Whether ingest drops an attribute for its length alone: a key past 128 characters,
+ * or a value past 1,024 as text, an array's items together.
+ */
+function pastCaps(key: string, value: AttributeValue): boolean {
+  if (Array.from(key).length > contract.ATTRIBUTE_KEY_MAX) return true;
+  const items: readonly unknown[] = Array.isArray(value) ? value : [value];
+  let length = 0;
+  for (const item of items) length += Array.from(String(item ?? '')).length;
+  return length > contract.ATTRIBUTE_VALUE_MAX;
 }
 
 function remedy(attributeName: string, reason: string): string {

@@ -75,9 +75,37 @@ impl Exporter {
             );
             return;
         }
-        let Ok(body) = serde_json::to_vec(&self.encode(spans)) else {
+        let Ok(mut body) = serde_json::to_vec(&self.encode(spans, false)) else {
             return;
         };
+        if body.len() > contract::BATCH_MAX_BYTES {
+            // Ingest refuses it whole, its 413 maybe breaking the upload still
+            // going out, which reads as no answer and is sent again: halved.
+            if spans.len() > 1 {
+                let (head, tail) = spans.split_at(spans.len() / 2);
+                self.export(head);
+                self.export(tail);
+                return;
+            }
+            // A span alone past it goes without what ingest drops for its length,
+            // and then fits, unless its own name does not.
+            match serde_json::to_vec(&self.encode(spans, true)) {
+                Ok(trimmed) if trimmed.len() <= contract::BATCH_MAX_BYTES => {
+                    self.warner.once(
+                        "trimmed".to_owned(),
+                        "telmoni: a span past the 1 MiB an export may hold was sent without the attributes ingest drops for their length",
+                    );
+                    body = trimmed;
+                }
+                _ => {
+                    self.warner.once(
+                        "too-large".to_owned(),
+                        "telmoni: a span past the 1 MiB an export may hold was dropped",
+                    );
+                    return;
+                }
+            }
+        }
         let mut headers = vec![
             ("Content-Type".to_owned(), "application/json".to_owned()),
             ("User-Agent".to_owned(), format!("telmoni-rust/{VERSION}")),
@@ -128,9 +156,11 @@ impl Exporter {
         );
     }
 
-    /// OTLP's `ExportTraceServiceRequest`, in its JSON encoding.
-    fn encode(&self, spans: &[SpanData]) -> serde_json::Value {
-        let spans: Vec<serde_json::Value> = spans.iter().map(|span| self.span(span)).collect();
+    /// OTLP's `ExportTraceServiceRequest`, in its JSON encoding; `trimmed`, without
+    /// the attributes ingest drops for their length.
+    fn encode(&self, spans: &[SpanData], trimmed: bool) -> serde_json::Value {
+        let spans: Vec<serde_json::Value> =
+            spans.iter().map(|span| self.span(span, trimmed)).collect();
         json!({
             "resourceSpans": [{
                 "resource": { "attributes": self.resource },
@@ -142,7 +172,7 @@ impl Exporter {
         })
     }
 
-    fn span(&self, span: &SpanData) -> serde_json::Value {
+    fn span(&self, span: &SpanData, trimmed: bool) -> serde_json::Value {
         let keep_content = self.capture_content && self.content_mode().as_deref() == Some("on");
         // The last value set under a key is the one that stands, as a map
         // would have it: OpenTelemetry's span keeps every set in a list.
@@ -159,6 +189,7 @@ impl Exporter {
         }
         let attributes: Vec<serde_json::Value> = attributes
             .into_iter()
+            .filter(|(key, value)| !(trimmed && past_caps(key, value)))
             .map(|(key, value)| attribute(key, value))
             .collect();
 
@@ -416,9 +447,179 @@ fn array_values(array: &Array) -> Vec<serde_json::Value> {
     }
 }
 
+/// Whether ingest drops an attribute for its length alone: a key past 128
+/// characters, or a value past 1,024 as text, an array's items together.
+fn past_caps(key: &str, value: &Value) -> bool {
+    if key.chars().count() > contract::ATTRIBUTE_KEY_MAX {
+        return true;
+    }
+    let length = match value {
+        Value::String(text) => text.as_str().chars().count(),
+        Value::Array(Array::String(items)) => {
+            items.iter().map(|item| item.as_str().chars().count()).sum()
+        }
+        other => other.to_string().chars().count(),
+    };
+    length > contract::ATTRIBUTE_VALUE_MAX
+}
+
 #[cfg(test)]
 mod tests {
+    use opentelemetry::KeyValue;
+    use opentelemetry::trace::{SpanContext, TraceFlags, TraceId, TraceState};
+    use opentelemetry_sdk::trace::{SpanEvents, SpanLinks};
+
     use super::*;
+    use crate::transport::TransportError;
+
+    /// A transport that keeps each body it is given, and answers 200.
+    #[derive(Clone, Default)]
+    struct Kept(Arc<Mutex<Vec<Vec<u8>>>>);
+
+    impl Transport for Kept {
+        fn send(
+            &self,
+            _url: &str,
+            _headers: &[(String, String)],
+            body: &[u8],
+        ) -> Result<Answer, TransportError> {
+            lock(&self.0).push(body.to_vec());
+            Ok(Answer {
+                status: 200,
+                headers: Vec::new(),
+                body: b"{}".to_vec(),
+            })
+        }
+    }
+
+    fn exporter(kept: &Kept, warnings: &Arc<Mutex<Vec<String>>>) -> Exporter {
+        let warned = Arc::clone(warnings);
+        let config = Config {
+            api_key: Some("k".to_owned()),
+            ..Config::default()
+        };
+        Exporter::new(
+            &config,
+            Box::new(kept.clone()),
+            Box::new(|_| {}),
+            Arc::new(Warner::new(Box::new(move |text| {
+                lock(&warned).push(text.to_owned());
+            }))),
+        )
+    }
+
+    /// A span named `s<n>` for each size, an attribute of that many bytes beside
+    /// one of a few.
+    fn spans(sizes: &[usize]) -> Vec<SpanData> {
+        let context = SpanContext::new(
+            TraceId::from_bytes([1; 16]),
+            SpanId::from_bytes([1; 8]),
+            TraceFlags::SAMPLED,
+            false,
+            TraceState::default(),
+        );
+        sizes
+            .iter()
+            .enumerate()
+            .map(|(n, size)| SpanData {
+                span_context: context.clone(),
+                parent_span_id: SpanId::INVALID,
+                parent_span_is_remote: false,
+                span_kind: SpanKind::Internal,
+                name: format!("s{n}").into(),
+                start_time: UNIX_EPOCH + Duration::from_secs(1),
+                end_time: UNIX_EPOCH + Duration::from_secs(2),
+                attributes: vec![
+                    KeyValue::new("telmoni.tag.big", "x".repeat(*size)),
+                    KeyValue::new("app.kept", "yes"),
+                ],
+                dropped_attributes_count: 0,
+                events: SpanEvents::default(),
+                links: SpanLinks::default(),
+                status: Status::Unset,
+                instrumentation_scope: opentelemetry::InstrumentationScope::default(),
+            })
+            .collect()
+    }
+
+    /// Each span the bodies carry, in the order sent, as its name and its
+    /// attributes' keys.
+    fn sent(kept: &Kept) -> Vec<String> {
+        lock(&kept.0)
+            .iter()
+            .flat_map(|body| {
+                let value: serde_json::Value = serde_json::from_slice(body).unwrap();
+                value["resourceSpans"][0]["scopeSpans"][0]["spans"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|span| {
+                        let mut keys: Vec<&str> = span["attributes"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .map(|each| each["key"].as_str().unwrap())
+                            .collect();
+                        keys.sort_unstable();
+                        format!("{}:{}", span["name"].as_str().unwrap(), keys.join(","))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    /// Ingest refuses an export past its 1 MiB whole, and its 413 may break an
+    /// upload still going out: halved until each part fits.
+    #[test]
+    fn an_export_past_ingests_mebibyte_is_halved_until_each_part_fits() {
+        let (kept, warnings) = (Kept::default(), Arc::default());
+        exporter(&kept, &warnings).export(&spans(&[300_000; 8]));
+        let sizes: Vec<usize> = lock(&kept.0).iter().map(Vec::len).collect();
+        assert_eq!(sizes.len(), 4, "{sizes:?}");
+        assert!(sizes.iter().all(|size| *size <= 1 << 20), "{sizes:?}");
+        let want: Vec<String> = (0..8)
+            .map(|n| format!("s{n}:app.kept,telmoni.tag.big"))
+            .collect();
+        assert_eq!(sent(&kept), want);
+        assert!(lock(&warnings).is_empty());
+    }
+
+    /// Rather than lost, since a run's own span carries the run's end.
+    #[test]
+    fn a_span_alone_past_it_goes_without_what_ingest_drops_for_its_length() {
+        let (kept, warnings) = (Kept::default(), Arc::default());
+        let sender = exporter(&kept, &warnings);
+        sender.export(&spans(&[100, 1 << 20, 100]));
+        sender.export(&spans(&[1 << 20]));
+        assert_eq!(
+            sent(&kept),
+            [
+                "s0:app.kept,telmoni.tag.big",
+                "s1:app.kept",
+                "s2:app.kept,telmoni.tag.big",
+                "s0:app.kept"
+            ]
+        );
+        assert_eq!(
+            *lock(&warnings),
+            [
+                "telmoni: a span past the 1 MiB an export may hold was sent without the attributes ingest drops for their length"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_span_whose_own_name_passes_it_is_dropped_with_one_warning() {
+        let (kept, warnings) = (Kept::default(), Arc::default());
+        let mut named = spans(&[1]);
+        named[0].name = "x".repeat(1 << 20).into();
+        exporter(&kept, &warnings).export(&named);
+        assert!(lock(&kept.0).is_empty());
+        assert_eq!(
+            *lock(&warnings),
+            ["telmoni: a span past the 1 MiB an export may hold was dropped"]
+        );
+    }
 
     /// 2^64 ns after the epoch is written 0, a nanosecond less as its digits.
     #[test]

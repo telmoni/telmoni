@@ -15,7 +15,7 @@ import pytest
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.trace import SpanContext
 
-from conftest import FakeTransport, load_fixture
+from conftest import FakeTransport, attributes_of, load_fixture
 from telmoni import DEFAULT_ENDPOINT, Config, Secret, Telmoni, __version__, exporter
 from telmoni.exporter import _urllib_transport
 
@@ -287,6 +287,93 @@ def test_this_machine_is_reached_past_any_proxy_the_environment_names(
     finally:
         proxy.shutdown()
         proxy.server_close()
+
+
+def _spans(*sizes: int, char: str = "x") -> list[ReadableSpan]:
+    """A span named ``s<n>`` for each size, an attribute of that many characters
+    beside one of a few."""
+    context = SpanContext(trace_id=1, span_id=1, is_remote=False)
+    return [
+        ReadableSpan(
+            name=f"s{n}",
+            context=context,
+            start_time=1,
+            end_time=2,
+            attributes={"telmoni.tag.big": char * size, "app.kept": "yes"},
+        )
+        for n, size in enumerate(sizes)
+    ]
+
+
+def test_an_export_past_ingest_s_1_mib_is_halved_until_each_part_fits() -> None:
+    """Ingest refuses it whole, its 413 maybe breaking an upload still going out."""
+    transport = FakeTransport()
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    try:
+        client.exporter.export(_spans(*[300_000] * 8))
+    finally:
+        client.shutdown()
+    sizes = [len(body) for _, _, body in transport.requests]
+    assert len(sizes) == 4 and max(sizes) <= 1 << 20, sizes
+    assert [s["name"] for s in transport.spans()] == [f"s{n}" for n in range(8)]
+
+
+def test_the_mebibyte_is_counted_in_the_bytes_sent() -> None:
+    """Two bytes a character: past 1 MiB in bytes, short of it in characters."""
+    transport = FakeTransport()
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    try:
+        client.exporter.export(_spans(*[200_000] * 4, char="é"))
+    finally:
+        client.shutdown()
+    sizes = [len(body) for _, _, body in transport.requests]
+    assert len(sizes) == 2 and max(sizes) <= 1 << 20, sizes
+
+
+def test_a_span_alone_past_it_goes_without_what_ingest_drops_for_its_length(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Rather than lost, since a run's own span carries the run's end."""
+    transport = FakeTransport()
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    try:
+        client.exporter.export(_spans(100, 1 << 20, 100))
+        client.exporter.export(_spans(1 << 20))
+    finally:
+        client.shutdown()
+    kept = [(s["name"], sorted(attributes_of(s))) for s in transport.spans()]
+    both = ["app.kept", "telmoni.tag.big"]
+    assert kept == [
+        ("s0", both),
+        ("s1", ["app.kept"]),
+        ("s2", both),
+        ("s0", ["app.kept"]),
+    ]
+    warned = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warned == [
+        (
+            "telmoni: a span past the 1 MiB an export may hold was sent without "
+            "the attributes ingest drops for their length"
+        )
+    ]
+
+
+def test_a_span_whose_own_name_passes_it_is_dropped_with_one_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    transport = FakeTransport()
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    context = SpanContext(trace_id=1, span_id=1, is_remote=False)
+    named = ReadableSpan(
+        name="x" * (1 << 20), context=context, start_time=1, end_time=2
+    )
+    try:
+        client.exporter.export([named])
+    finally:
+        client.shutdown()
+    assert transport.requests == []
+    warned = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warned == ["telmoni: a span past the 1 MiB an export may hold was dropped"]
 
 
 def test_an_answer_whose_body_comes_slowly_is_kept_as_far_as_it_came_by_the_deadline(

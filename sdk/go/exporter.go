@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -107,10 +108,28 @@ func (e *exporter) export(spans []sdktrace.ReadOnlySpan) {
 	if len(spans) == 0 {
 		return
 	}
-	body, err := json.Marshal(e.encode(spans))
+	body, err := json.Marshal(e.encode(spans, false))
 	if err != nil {
 		e.warnOnce("encode", "telmoni: an export could not be encoded; the batch was dropped")
 		return
+	}
+	if len(body) > batchMaxBytes {
+		// Ingest refuses it whole, its 413 maybe breaking the upload still
+		// going out, which reads as no answer and is sent again: halved.
+		if len(spans) > 1 {
+			half := len(spans) / 2
+			e.export(spans[:half])
+			e.export(spans[half:])
+			return
+		}
+		// A span alone past it goes without what ingest drops for its length,
+		// and then fits, unless its own name does not.
+		body, err = json.Marshal(e.encode(spans, true))
+		if err != nil || len(body) > batchMaxBytes {
+			e.warnOnce("too-large", "telmoni: a span past the 1 MiB an export may hold was dropped")
+			return
+		}
+		e.warnOnce("trimmed", "telmoni: a span past the 1 MiB an export may hold was sent without the attributes ingest drops for their length")
 	}
 	// A request that cannot be built, from an endpoint that is no URL, will
 	// not be built on the next attempt either.
@@ -343,13 +362,15 @@ type arrayValue struct {
 	Values []anyValue `json:"values"`
 }
 
-func (e *exporter) encode(spans []sdktrace.ReadOnlySpan) exportRequest {
+// encode is OTLP's ExportTraceServiceRequest; trimmed, without the attributes
+// ingest drops for their length.
+func (e *exporter) encode(spans []sdktrace.ReadOnlySpan, trimmed bool) exportRequest {
 	e.mu.Lock()
 	keepContent := e.config.CaptureContent && e.mode == "on"
 	e.mu.Unlock()
 	encoded := make([]otlpSpan, 0, len(spans))
 	for _, span := range spans {
-		encoded = append(encoded, encodeSpan(span, keepContent))
+		encoded = append(encoded, encodeSpan(span, keepContent, trimmed))
 	}
 	return exportRequest{ResourceSpans: []resourceSpans{{
 		Resource: otlpResource{Attributes: e.resource},
@@ -360,11 +381,14 @@ func (e *exporter) encode(spans []sdktrace.ReadOnlySpan) exportRequest {
 	}}}
 }
 
-func encodeSpan(span sdktrace.ReadOnlySpan, keepContent bool) otlpSpan {
+func encodeSpan(span sdktrace.ReadOnlySpan, keepContent, trimmed bool) otlpSpan {
 	attributes := span.Attributes()
 	encoded := make([]keyValue, 0, len(attributes))
 	for _, kv := range attributes {
 		if !keepContent && content[string(kv.Key)] {
+			continue
+		}
+		if trimmed && pastCaps(kv) {
 			continue
 		}
 		encoded = append(encoded, keyValue{Key: string(kv.Key), Value: encodeValue(kv.Value)})
@@ -392,6 +416,26 @@ func encodeSpan(span sdktrace.ReadOnlySpan, keepContent bool) otlpSpan {
 		out.Status = &otlpStatus{Code: 2}
 	}
 	return out
+}
+
+// pastCaps is whether ingest drops an attribute for its length alone: a key past
+// 128 characters, or a value past 1,024 as text, a slice's items together.
+func pastCaps(kv attribute.KeyValue) bool {
+	if utf8.RuneCountInString(string(kv.Key)) > attributeKeyMax {
+		return true
+	}
+	length := 0
+	switch kv.Value.Type() {
+	case attribute.STRING:
+		length = utf8.RuneCountInString(kv.Value.AsString())
+	case attribute.STRINGSLICE:
+		for _, item := range kv.Value.AsStringSlice() {
+			length += utf8.RuneCountInString(item)
+		}
+	default:
+		length = utf8.RuneCountInString(kv.Value.Emit())
+	}
+	return length > attributeValueMax
 }
 
 // nanos is OTLP's JSON spelling of a time: its Unix nanoseconds, in decimal,

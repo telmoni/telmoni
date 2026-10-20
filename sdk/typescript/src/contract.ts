@@ -32,6 +32,11 @@ export const MODEL_MAX = 128;
 export const PROVIDER_MAX = 128;
 export const USER_ID_MAX = 128;
 export const SESSION_ID_MAX = 200;
+/** The largest body an export may be: ingest refuses one past it whole. */
+export const BATCH_MAX_BYTES = 1 << 20;
+/** An attribute's longest key and value as text, in characters: ingest drops one past either. */
+export const ATTRIBUTE_KEY_MAX = 128;
+export const ATTRIBUTE_VALUE_MAX = 1024;
 export const BOUND_STALL_AFTER_S = 'telmoni.bound.stall_after_s';
 export const BOUND_MAX_STEPS = 'telmoni.bound.max_steps';
 export const BOUND_MAX_COST_USD = 'telmoni.bound.max_cost_usd';

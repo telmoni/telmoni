@@ -222,6 +222,15 @@ def _body(response: Any) -> bytes:
     return bytes(body)
 
 
+def _past_caps(key: str, value: Any) -> bool:
+    """Whether ingest drops an attribute for its length alone: a key past 128
+    characters, or a value past 1,024 as text, a sequence's items together."""
+    if len(key) > contract.ATTRIBUTE_KEY_MAX:
+        return True
+    items = value if isinstance(value, (list, tuple)) else (value,)
+    return sum(len(str(item)) for item in items) > contract.ATTRIBUTE_VALUE_MAX
+
+
 def _sdk_version() -> str:
     try:
         return metadata.version("opentelemetry-sdk")
@@ -265,15 +274,43 @@ class Exporter:
     def export(self, spans: Sequence[ReadableSpan]) -> None:
         if not spans:
             return
+        body = self._body(spans)
+        if len(body) > contract.BATCH_MAX_BYTES:
+            # Ingest refuses it whole, its 413 maybe breaking the upload still
+            # going out, which reads as no answer and is sent again: halved.
+            if len(spans) > 1:
+                half = len(spans) // 2
+                self.export(spans[:half])
+                self.export(spans[half:])
+                return
+            # A span alone past it goes without what ingest drops for its length,
+            # and then fits, unless its own name does not.
+            body = self._body(spans, trimmed=True)
+            if len(body) > contract.BATCH_MAX_BYTES:
+                self.warn_once(
+                    "too-large",
+                    "telmoni: a span past the 1 MiB an export may hold was dropped",
+                )
+                return
+            self.warn_once(
+                "trimmed",
+                "telmoni: a span past the 1 MiB an export may hold was sent without "
+                "the attributes ingest drops for their length",
+            )
+        self._send(body)
+
+    def _body(self, spans: Sequence[ReadableSpan], *, trimmed: bool = False) -> bytes:
         # Python writes NaN and Infinity, which are no JSON: refused here, never sent.
         text = json.dumps(
-            self.encode(spans),
+            self.encode(spans, trimmed=trimmed),
             separators=(",", ":"),
             allow_nan=False,
             ensure_ascii=False,
         )
         # A lone surrogate is no text ingest reads, and would lose the batch.
-        body = _SURROGATE.sub("\ufffd", text).encode()
+        return _SURROGATE.sub("\ufffd", text).encode()
+
+    def _send(self, body: bytes) -> None:
         headers = {
             "Content-Type": "application/json",
             "User-Agent": f"telmoni-python/{__version__}",
@@ -311,8 +348,11 @@ class Exporter:
             "the batch was dropped",
         )
 
-    def encode(self, spans: Sequence[ReadableSpan]) -> dict[str, Any]:
-        """OTLP's ``ExportTraceServiceRequest``, in its JSON encoding."""
+    def encode(
+        self, spans: Sequence[ReadableSpan], *, trimmed: bool = False
+    ) -> dict[str, Any]:
+        """OTLP's ``ExportTraceServiceRequest``, in its JSON encoding; ``trimmed``,
+        without the attributes ingest drops for their length."""
         return {
             "resourceSpans": [
                 {
@@ -320,19 +360,20 @@ class Exporter:
                     "scopeSpans": [
                         {
                             "scope": {"name": contract.SCOPE, "version": __version__},
-                            "spans": [self._span(span) for span in spans],
+                            "spans": [self._span(span, trimmed) for span in spans],
                         }
                     ],
                 }
             ]
         }
 
-    def _span(self, span: ReadableSpan) -> dict[str, Any]:
+    def _span(self, span: ReadableSpan, trimmed: bool = False) -> dict[str, Any]:
         keep_content = self._config.capture_content and self._content_mode == "on"
         attributes = [
             _attribute(key, value)
             for key, value in (span.attributes or {}).items()
-            if keep_content or key not in contract.CONTENT
+            if (keep_content or key not in contract.CONTENT)
+            and not (trimmed and _past_caps(key, value))
         ]
         encoded: dict[str, Any] = {
             "traceId": format(span.context.trace_id, "032x"),

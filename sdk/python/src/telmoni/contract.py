@@ -31,6 +31,12 @@ USER_ID_MAX = 128
 SESSION_ID_MAX = 200
 """Ingest's longest text of each, in characters: it refuses a span past one. A
 name holds a model call's ``<operation> <model>``, a model at its cap."""
+BATCH_MAX_BYTES = 1 << 20
+"""The largest body an export may be: ingest refuses one past it whole."""
+ATTRIBUTE_KEY_MAX = 128
+ATTRIBUTE_VALUE_MAX = 1024
+"""An attribute's longest key and value as text, in characters: ingest drops one
+past either."""
 BOUND_STALL_AFTER_S = "telmoni.bound.stall_after_s"
 BOUND_MAX_STEPS = "telmoni.bound.max_steps"
 BOUND_MAX_COST_USD = "telmoni.bound.max_cost_usd"

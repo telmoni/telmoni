@@ -205,11 +205,14 @@ over HTTPS, following no redirect and to this machine through no proxy, each
 attempt carrying `Telmoni-Sent-At`, this clock as it leaves, by which ingest
 moves a run from a clock a zone or a date out as one. A `429` or `503` is
 retried after `Retry-After`, three attempts in all; an answer whose body
-breaks after its status is decided by that status, as a whole one is. Every
-warning is logged once per client through `log/slog`. `client.Flush(ctx)`
-sends what is queued; `client.Shutdown(ctx)` drains and stops. Each waits for
-`ctx`, or 30 seconds when it has no deadline; a `Shutdown` whose `ctx` is
-already done still stops, waiting for nothing.
+breaks after its status is decided by that status, as a whole one is. A batch
+whose body would pass the 1 MiB ingest takes is sent in halves, each within
+it, and a span alone past it is sent without the attributes ingest drops for
+their length, with one warning. Every warning is logged once per client
+through `log/slog`. `client.Flush(ctx)` sends what is queued;
+`client.Shutdown(ctx)` drains and stops. Each waits for `ctx`, or 30 seconds
+when it has no deadline; a `Shutdown` whose `ctx` is already done still stops,
+waiting for nothing.
 
 The variables, the attributes each span carries, and the other SDKs are
 documented at [telmoni.com/docs/api/sdks](https://telmoni.com/docs/api/sdks).

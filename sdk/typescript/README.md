@@ -230,9 +230,12 @@ nor an IPv6 one in brackets. Each attempt carries `Telmoni-Sent-At`, this clock
 as it leaves, by which ingest moves a run from a clock a zone or a date out as
 one. A `429` or `503` is retried after `Retry-After`, three attempts in all; an
 answer whose body breaks after its status is decided by that status, as a whole
-one is. Every warning — an attribute the server dropped, a batch given up on —
-is logged once per client through `console.warn`. `await telmoni.flush()` sends
-what is queued and resolves `true` once the platform has it;
+one is. A batch whose body would pass the 1 MiB ingest takes is sent in halves,
+each within it, and a span alone past it is sent without the attributes ingest
+drops for their length, with one warning. Every warning — an attribute the
+server dropped, a batch given up on — is logged once per client through
+`console.warn`. `await telmoni.flush()` sends what is queued and resolves
+`true` once the platform has it;
 `await telmoni.shutdown()` drains and stops. The SDK's worker never keeps the
 process alive on its own, so call `shutdown()` before exiting.
 

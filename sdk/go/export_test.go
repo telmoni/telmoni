@@ -3,6 +3,7 @@ package telmoni
 import (
 	"context"
 
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -18,6 +19,9 @@ var (
 	Nanos              = nanos
 	DefaultClient      = defaultClient
 )
+
+// ExportSpans sends spans as the processor would a batch.
+func ExportSpans(c *Client, spans []sdktrace.ReadOnlySpan) { c.exporter.export(spans) }
 
 // holdOne ends one span in the trace of runID under a record's hold, then
 // releases the hold, told the record was built only when built. False when

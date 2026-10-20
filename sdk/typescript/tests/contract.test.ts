@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ANSWER_MAX, Exporter, directTransport, fetchTransport } from '../src/exporter';
 import { DEFAULT_ENDPOINT, Telmoni, VERSION, type Config } from '../src/index';
-import { loadFixture } from './helpers';
+import { FakeTransport, loadFixture } from './helpers';
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -304,6 +304,71 @@ describe('the exporter, sending to this machine', () => {
     expect(taken).toEqual([...(honoured ? [`${at}/fetch`] : []), `${at}/http`]);
     expect(keys.length).toBeGreaterThan(0);
     expect(new Set(keys)).toEqual(new Set(['Bearer k']));
+  });
+});
+
+describe("an export past ingest's 1 MiB", () => {
+  // A span named `s<n>`, or `name`, for each size, an attribute of that many characters beside one of a few.
+  const spans = (sizes: number[], char = 'x', name?: string): ReadableSpan[] =>
+    sizes.map(
+      (size, n) =>
+        ({
+          name: name ?? `s${n}`,
+          kind: SpanKind.INTERNAL,
+          spanContext: () => ({ traceId: `${'0'.repeat(31)}1`, spanId: `${'0'.repeat(15)}1`, traceFlags: 1 }),
+          parentSpanContext: undefined,
+          startTime: [1, 0],
+          endTime: [2, 0],
+          attributes: { 'telmoni.tag.big': char.repeat(size), 'app.kept': 'yes' },
+          status: { code: SpanStatusCode.UNSET },
+        }) as unknown as ReadableSpan,
+    );
+  const exporter = (transport: FakeTransport, warnings: string[]) =>
+    new Exporter(new Telmoni({ apiKey: 'k' }).config, {
+      transport: transport.send,
+      sleep: () => Promise.resolve(),
+      warn: (message) => warnings.push(message),
+    });
+
+  it('is halved until each part fits, its spans each sent once and in order', async () => {
+    const transport = new FakeTransport();
+    const warnings: string[] = [];
+    await exporter(transport, warnings).export(spans(Array<number>(8).fill(300_000)));
+    const sizes = transport.requests.map((request) => Buffer.byteLength(request.body));
+    expect(sizes).toHaveLength(4);
+    expect(Math.max(...sizes)).toBeLessThanOrEqual(1 << 20);
+    expect(transport.spans().map((span) => span.name)).toEqual(Array.from({ length: 8 }, (_, n) => `s${n}`));
+    expect(warnings).toEqual([]);
+  });
+
+  it('is counted in the bytes sent: two a character, past it in bytes and short of it in characters', async () => {
+    const transport = new FakeTransport();
+    await exporter(transport, []).export(spans(Array<number>(4).fill(200_000), 'é'));
+    const sizes = transport.requests.map((request) => Buffer.byteLength(request.body));
+    expect(sizes).toHaveLength(2);
+    expect(Math.max(...sizes)).toBeLessThanOrEqual(1 << 20);
+  });
+
+  it('sends a span alone past it without what ingest drops for its length, rather than lose it', async () => {
+    const transport = new FakeTransport();
+    const warnings: string[] = [];
+    const sender = exporter(transport, warnings);
+    await sender.export(spans([100, 1 << 20, 100]));
+    await sender.export(spans([1 << 20]));
+    const kept = transport.spans().map((span) => [span.name, span.attributes.map((each) => each.key).sort()]);
+    const both = ['app.kept', 'telmoni.tag.big'];
+    expect(kept).toEqual([['s0', both], ['s1', ['app.kept']], ['s2', both], ['s0', ['app.kept']]]);
+    expect(warnings).toEqual([
+      'telmoni: a span past the 1 MiB an export may hold was sent without the attributes ingest drops for their length',
+    ]);
+  });
+
+  it('drops a span whose own name passes it, with one warning', async () => {
+    const transport = new FakeTransport();
+    const warnings: string[] = [];
+    await exporter(transport, warnings).export(spans([1], 'x', 'x'.repeat(1 << 20)));
+    expect(transport.requests).toEqual([]);
+    expect(warnings).toEqual(['telmoni: a span past the 1 MiB an export may hold was dropped']);
   });
 });
 

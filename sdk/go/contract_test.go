@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"math"
 	"net"
 	"net/http"
@@ -18,6 +19,11 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 
 	telmoni "github.com/telmoni/telmoni/sdk/go"
 )
@@ -465,5 +471,89 @@ func TestProxyEnvironmentHelper(t *testing.T) {
 	defer cancel()
 	if err := client.Shutdown(ctx); err != nil {
 		t.Fatalf("shutting down: %v", err)
+	}
+}
+
+// bigSpans is a span named s<n> for each size, an attribute of that many bytes
+// beside one of a few.
+func bigSpans(sizes ...int) []sdktrace.ReadOnlySpan {
+	spans := make([]sdktrace.ReadOnlySpan, len(sizes))
+	for n, size := range sizes {
+		spans[n] = tracetest.SpanStub{
+			Name: fmt.Sprintf("s%d", n),
+			SpanContext: trace.NewSpanContext(trace.SpanContextConfig{
+				TraceID: trace.TraceID{1}, SpanID: trace.SpanID{1}, TraceFlags: trace.FlagsSampled,
+			}),
+			StartTime: time.Unix(1, 0),
+			EndTime:   time.Unix(2, 0),
+			Attributes: []attribute.KeyValue{
+				attribute.String("telmoni.tag.big", strings.Repeat("x", size)), attribute.String("app.kept", "yes"),
+			},
+		}.Snapshot()
+	}
+	return spans
+}
+
+// An export past ingest's 1 MiB, which it refuses whole and whose 413 may
+// break an upload still going out, is halved until each part fits.
+func TestAnExportPastIngestsMebibyteIsHalvedUntilEachPartFits(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	telmoni.ExportSpans(h.client, bigSpans(300_000, 300_000, 300_000, 300_000, 300_000, 300_000, 300_000, 300_000))
+	requests := h.transport.all()
+	if len(requests) != 4 {
+		t.Fatalf("%d exports, want 4", len(requests))
+	}
+	for _, request := range requests {
+		if len(request.body) > 1<<20 {
+			t.Errorf("an export of %d bytes", len(request.body))
+		}
+	}
+	want := []string{"s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7"}
+	if got := names(h.transport.spans(t)); !slices.Equal(got, want) {
+		t.Errorf("sent %q, want %q", got, want)
+	}
+	if warned := h.logs.warnings(); len(warned) != 0 {
+		t.Errorf("warnings %q", warned)
+	}
+}
+
+// A span alone past it is sent without what ingest drops for its length, rather
+// than lost, since a run's own span carries the run's end.
+func TestASpanAlonePastItGoesWithoutWhatIngestDropsForItsLength(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	telmoni.ExportSpans(h.client, bigSpans(100, 1<<20, 100))
+	telmoni.ExportSpans(h.client, bigSpans(1<<20))
+	var got []string
+	for _, span := range h.transport.spans(t) {
+		keys := slices.Sorted(maps.Keys(attributesOf(t, span)))
+		got = append(got, span["name"].(string)+":"+strings.Join(keys, ","))
+	}
+	want := []string{"s0:app.kept,telmoni.tag.big", "s1:app.kept", "s2:app.kept,telmoni.tag.big", "s0:app.kept"}
+	if !slices.Equal(got, want) {
+		t.Errorf("sent %q, want %q", got, want)
+	}
+	warned := []string{"telmoni: a span past the 1 MiB an export may hold was sent without the attributes ingest drops for their length"}
+	if got := h.logs.warnings(); !slices.Equal(got, warned) {
+		t.Errorf("warnings %q, want %q", got, warned)
+	}
+}
+
+func TestASpanWhoseOwnNamePassesItIsDroppedWithOneWarning(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	named := tracetest.SpanStub{
+		Name: strings.Repeat("x", 1<<20),
+		SpanContext: trace.NewSpanContext(trace.SpanContextConfig{
+			TraceID: trace.TraceID{1}, SpanID: trace.SpanID{1}, TraceFlags: trace.FlagsSampled,
+		}),
+		StartTime: time.Unix(1, 0),
+		EndTime:   time.Unix(2, 0),
+	}.Snapshot()
+	telmoni.ExportSpans(h.client, []sdktrace.ReadOnlySpan{named})
+	if sent := h.transport.all(); len(sent) != 0 {
+		t.Errorf("%d exports, want none", len(sent))
+	}
+	want := []string{"telmoni: a span past the 1 MiB an export may hold was dropped"}
+	if got := h.logs.warnings(); !slices.Equal(got, want) {
+		t.Errorf("warnings %q, want %q", got, want)
 	}
 }

@@ -84,6 +84,13 @@ const (
 	providerMax  = 128
 	userIDMax    = 128
 	sessionIDMax = 200
+	// batchMaxBytes is the largest body an export may be, contract.rs's
+	// BATCH_MAX_BYTES: ingest refuses one past it whole.
+	batchMaxBytes = 1 << 20
+	// attributeKeyMax and attributeValueMax are an attribute's longest key and
+	// value as text, in characters, contract.rs's: ingest drops one past either.
+	attributeKeyMax   = 128
+	attributeValueMax = 1024
 )
 
 // content is what the exporter takes off a span unless the code asked and the
