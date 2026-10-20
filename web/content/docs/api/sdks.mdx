@@ -156,16 +156,16 @@ holding the **ingest** scope.
     marks it cancelled. `fail('TimeoutError')` and `cancel()` do the same by
     hand, and `wrap` turns a function into one that opens a run per call.
     `run` throws a `TypeError` for a blank agent name and a `RangeError` for
-    a sample rate outside its range. A bound or a token count is read from a
-    number, a bigint or a decimal numeral's text, a stall's, steps' or count's
-    fraction cut, and of what Telmoni would refuse, these are left off with
-    one warning: a bound outside 1 to 4294967295, a cost not above 0, a token
-    count below 0 or past 64 bits, a tag whose key is not 1 to 64 characters
-    or whose value is past 256, and the tags past the first 32 kept; an empty
-    user, session, provider or response model is left off as unset. A name,
-    model, provider, user, session or response model that is no string goes
-    as its text with one warning, as does a tag that is no string, finite
-    number or boolean. Text past the caps
+    a sample rate that is no number or outside its range. A bound or a token
+    count is read from a number, a bigint or a decimal numeral's text, a
+    stall's, steps' or count's fraction cut, and of what Telmoni would refuse,
+    these are left off with one warning: a bound outside 1 to 4294967295, a
+    cost not above 0, a token count below 0 or past 64 bits, a tag whose key
+    is not 1 to 64 characters or whose value is past 256, and the tags past
+    the first 32 kept; an empty user, session, provider or response model is
+    left off as unset. A name, model, provider, user, session or response
+    model that is no string goes as its text with one warning, as does a tag
+    that is no string, finite number or boolean. Text past the caps
     [below](#a-run-recorded-after-it-ended), and a step or model named
     nothing, still go as given, and Telmoni refuses the span they are on, or
     the whole run for its agent, user or session.
@@ -613,11 +613,12 @@ is the second lock, not the first.
 
 ### Sampling
 
-`sample_rate`, on the client or on one run, is the share of runs sent, between
-0 and 1. A run sampled out is dropped whole in the SDK, its start among it,
-never through the trace's sampled flag, so your application's own sampling
-is untouched and the volume Telmoni sees is a dial you hold. A step or call
-still open when its run ends is dropped too, however late it ends.
+`sample_rate`, on the client or on one run, is the share of runs sent, a
+number above 0 and up to 1. A run sampled out is dropped whole in the SDK,
+its start among it, never through the trace's sampled flag, so your
+application's own sampling is untouched and the volume Telmoni sees is a
+dial you hold. A step or call still open when its run ends is dropped too,
+however late it ends.
 
 ### Beside your own OpenTelemetry
 
