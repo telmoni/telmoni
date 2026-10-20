@@ -34,6 +34,8 @@ export const USER_ID_MAX = 128;
 export const SESSION_ID_MAX = 200;
 /** The largest body an export may be: ingest refuses one past it whole. */
 export const BATCH_MAX_BYTES = 1 << 20;
+/** The most spans an export may hold: ingest refuses one past it whole. */
+export const BATCH_SPANS_MAX = 1000;
 /** An attribute's longest key and value as text, in characters: ingest drops one past either. */
 export const ATTRIBUTE_KEY_MAX = 128;
 export const ATTRIBUTE_VALUE_MAX = 1024;

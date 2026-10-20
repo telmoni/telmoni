@@ -251,31 +251,38 @@ export class Exporter {
     this.#givenUp.abort();
   }
 
-  async export(spans: readonly ReadableSpan[]): Promise<void> {
-    if (spans.length === 0) return;
+  /**
+   * Sends the spans, halved past ingest's caps; false once they failed for a
+   * reason not their own, which the rest of a batch they are part of would meet.
+   */
+  async export(spans: readonly ReadableSpan[]): Promise<boolean> {
+    if (spans.length === 0) return true;
+    // Ingest refuses an export past 1,000 spans whole, as one past 1 MiB below.
+    if (spans.length > contract.BATCH_SPANS_MAX) return this.#halve(spans);
     let body = this.#body(spans);
     if (Buffer.byteLength(body) > contract.BATCH_MAX_BYTES) {
       // Ingest refuses it whole, its 413 maybe breaking the upload still
       // going out, which reads as no answer and is sent again: halved.
-      if (spans.length > 1) {
-        const half = Math.floor(spans.length / 2);
-        await this.export(spans.slice(0, half));
-        await this.export(spans.slice(half));
-        return;
-      }
+      if (spans.length > 1) return this.#halve(spans);
       // A span alone past it goes without what ingest drops for its length,
       // and then fits, unless its own name does not.
       body = this.#body(spans, true);
       if (Buffer.byteLength(body) > contract.BATCH_MAX_BYTES) {
         this.warnOnce('too-large', 'telmoni: a span past the 1 MiB an export may hold was dropped');
-        return;
+        return true;
       }
       this.warnOnce(
         'trimmed',
         'telmoni: a span past the 1 MiB an export may hold was sent without the attributes ingest drops for their length',
       );
     }
-    await this.#send(body);
+    return this.#send(body);
+  }
+
+  /** Exports each half of the spans, the second only where the first went. */
+  async #halve(spans: readonly ReadableSpan[]): Promise<boolean> {
+    const half = Math.floor(spans.length / 2);
+    return (await this.export(spans.slice(0, half))) && this.export(spans.slice(half));
   }
 
   #body(spans: readonly ReadableSpan[], trimmed = false): string {
@@ -285,7 +292,7 @@ export class Exporter {
     );
   }
 
-  async #send(body: string): Promise<void> {
+  async #send(body: string): Promise<boolean> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'User-Agent': `telmoni-typescript/${VERSION}`,
@@ -295,7 +302,7 @@ export class Exporter {
     }
     let failure = '';
     for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
-      if (this.#givenUp.signal.aborted) return;
+      if (this.#givenUp.signal.aborted) return false;
       // This clock as the attempt leaves, the spans' own.
       const sentAt = (BigInt(Math.trunc(Date.now())) * 1_000_000n).toString();
       let answer: TransportResponse;
@@ -312,7 +319,7 @@ export class Exporter {
       }
       if (answer.status >= 200 && answer.status < 300) {
         await this.#read(answer);
-        return;
+        return true;
       }
       const text = await bodyOf(answer);
       if (answer.status === 429 || answer.status === 503) {
@@ -324,12 +331,14 @@ export class Exporter {
         `status:${answer.status}`,
         `telmoni: export refused with ${answer.status} ${problemType(text)}; the batch was dropped`,
       );
-      return;
+      // Refused for what it holds, the rest of a batch may still go.
+      return answer.status === 400 || answer.status === 413;
     }
     this.warnOnce(
       `failed:${failure}`,
       `telmoni: export failed after ${ATTEMPTS} attempts (${failure}); the batch was dropped`,
     );
+    return false;
   }
 
   /** OTLP's `ExportTraceServiceRequest`, in its JSON encoding; `trimmed`, without the attributes ingest drops for their length. */
@@ -439,14 +448,14 @@ export class Exporter {
 
 /**
  * Whether ingest drops an attribute for its length alone: a key past 128 characters,
- * or a value past 1,024 as text, an array's items together.
+ * or a value past 1,024 as ingest writes it, a list as its JSON.
  */
 function pastCaps(key: string, value: AttributeValue): boolean {
   if (Array.from(key).length > contract.ATTRIBUTE_KEY_MAX) return true;
-  const items: readonly unknown[] = Array.isArray(value) ? value : [value];
-  let length = 0;
-  for (const item of items) length += Array.from(String(item ?? '')).length;
-  return length > contract.ATTRIBUTE_VALUE_MAX;
+  const text = Array.isArray(value)
+    ? JSON.stringify(value.filter((item) => item !== null && item !== undefined))
+    : String(value);
+  return Array.from(text).length > contract.ATTRIBUTE_VALUE_MAX;
 }
 
 function remedy(attributeName: string, reason: string): string {

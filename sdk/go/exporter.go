@@ -105,30 +105,33 @@ type answer struct {
 	body   []byte
 }
 
-func (e *exporter) export(spans []sdktrace.ReadOnlySpan) {
+// export sends spans, halved past ingest's caps; false once they failed for
+// a reason not their own, which the rest of a batch they are part of would meet.
+func (e *exporter) export(spans []sdktrace.ReadOnlySpan) bool {
 	if len(spans) == 0 {
-		return
+		return true
+	}
+	// Ingest refuses an export past 1,000 spans whole, as one past 1 MiB below.
+	if len(spans) > batchSpansMax {
+		return e.halve(spans)
 	}
 	body, err := json.Marshal(e.encode(spans, false))
 	if err != nil {
 		e.warnOnce("encode", "telmoni: an export could not be encoded; the batch was dropped")
-		return
+		return true
 	}
 	if len(body) > batchMaxBytes {
 		// Ingest refuses it whole, its 413 maybe breaking the upload still
 		// going out, which reads as no answer and is sent again: halved.
 		if len(spans) > 1 {
-			half := len(spans) / 2
-			e.export(spans[:half])
-			e.export(spans[half:])
-			return
+			return e.halve(spans)
 		}
 		// A span alone past it goes without what ingest drops for its length,
 		// and then fits, unless its own name does not.
 		body, err = json.Marshal(e.encode(spans, true))
 		if err != nil || len(body) > batchMaxBytes {
 			e.warnOnce("too-large", "telmoni: a span past the 1 MiB an export may hold was dropped")
-			return
+			return true
 		}
 		e.warnOnce("trimmed", "telmoni: a span past the 1 MiB an export may hold was sent without the attributes ingest drops for their length")
 	}
@@ -137,7 +140,7 @@ func (e *exporter) export(spans []sdktrace.ReadOnlySpan) {
 	if _, err := e.request(body); err != nil {
 		e.warnOnce("request:"+errorTypeName(err),
 			fmt.Sprintf("telmoni: export request could not be built (%s); the batch was dropped", errorTypeName(err)))
-		return
+		return false
 	}
 	var failure string
 	for attempt := 0; attempt < attempts; attempt++ {
@@ -149,7 +152,7 @@ func (e *exporter) export(spans []sdktrace.ReadOnlySpan) {
 		}
 		if got.status >= 200 && got.status < 300 {
 			e.read(got)
-			return
+			return true
 		}
 		if got.status == http.StatusTooManyRequests || got.status == http.StatusServiceUnavailable {
 			failure = fmt.Sprintf("%d %s", got.status, problemType(got.body))
@@ -158,10 +161,18 @@ func (e *exporter) export(spans []sdktrace.ReadOnlySpan) {
 		}
 		e.warnOnce("status:"+strconv.Itoa(got.status),
 			fmt.Sprintf("telmoni: export refused with %d %s; the batch was dropped", got.status, problemType(got.body)))
-		return
+		// Refused for what it holds, the rest of a batch may still go.
+		return got.status == http.StatusBadRequest || got.status == http.StatusRequestEntityTooLarge
 	}
 	e.warnOnce("failed:"+failure,
 		fmt.Sprintf("telmoni: export failed after %d attempts (%s); the batch was dropped", attempts, failure))
+	return false
+}
+
+// halve exports each half of spans, the second only where the first went.
+func (e *exporter) halve(spans []sdktrace.ReadOnlySpan) bool {
+	half := len(spans) / 2
+	return e.export(spans[:half]) && e.export(spans[half:])
 }
 
 func (e *exporter) request(body []byte) (*http.Request, error) {
@@ -431,23 +442,25 @@ func encodeSpan(span sdktrace.ReadOnlySpan, keepContent, trimmed bool) otlpSpan 
 }
 
 // pastCaps is whether ingest drops an attribute for its length alone: a key past
-// 128 characters, or a value past 1,024 as text, a slice's items together.
+// 128 characters, or a value past 1,024 as ingest writes it, a slice as its JSON.
 func pastCaps(kv attribute.KeyValue) bool {
 	if utf8.RuneCountInString(string(kv.Key)) > attributeKeyMax {
 		return true
 	}
-	length := 0
 	switch kv.Value.Type() {
 	case attribute.STRING:
-		length = utf8.RuneCountInString(kv.Value.AsString())
-	case attribute.STRINGSLICE:
-		for _, item := range kv.Value.AsStringSlice() {
-			length += utf8.RuneCountInString(item)
+		return utf8.RuneCountInString(kv.Value.AsString()) > attributeValueMax
+	case attribute.BOOLSLICE, attribute.INT64SLICE, attribute.FLOAT64SLICE, attribute.STRINGSLICE:
+		var text bytes.Buffer
+		encoder := json.NewEncoder(&text)
+		encoder.SetEscapeHTML(false)
+		// One with NaN in it, which ingest drops whole, is dropped here too.
+		if err := encoder.Encode(kv.Value.AsInterface()); err != nil {
+			return true
 		}
-	default:
-		length = utf8.RuneCountInString(kv.Value.Emit())
+		return utf8.RuneCount(bytes.TrimSuffix(text.Bytes(), []byte("\n"))) > attributeValueMax
 	}
-	return length > attributeValueMax
+	return utf8.RuneCountInString(kv.Value.Emit()) > attributeValueMax
 }
 
 // nanos is OTLP's JSON spelling of a time: its Unix nanoseconds, in decimal,

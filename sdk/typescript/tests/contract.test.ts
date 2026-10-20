@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ANSWER_MAX, Exporter, directTransport, fetchTransport } from '../src/exporter';
 import { DEFAULT_ENDPOINT, Telmoni, VERSION, type Config } from '../src/index';
-import { FakeTransport, loadFixture } from './helpers';
+import { FakeTransport, answer, loadFixture } from './helpers';
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -366,7 +366,7 @@ describe('the exporter, sending to this machine', () => {
   });
 });
 
-describe("an export past ingest's 1 MiB", () => {
+describe("an export past ingest's 1 MiB or 1,000 spans", () => {
   // A span named `s<n>`, or `name`, for each size, an attribute of that many characters beside one of a few.
   const spans = (sizes: number[], char = 'x', name?: string): ReadableSpan[] =>
     sizes.map(
@@ -406,6 +406,41 @@ describe("an export past ingest's 1 MiB", () => {
     const sizes = transport.requests.map((request) => Buffer.byteLength(request.body));
     expect(sizes).toHaveLength(2);
     expect(Math.max(...sizes)).toBeLessThanOrEqual(1 << 20);
+  });
+
+  it('is halved past 1,000 spans until each part holds them, one of 1,000 going as it is', async () => {
+    const transport = new FakeTransport();
+    await exporter(transport, []).export(spans(Array<number>(2001).fill(1)));
+    const counts = transport.bodies().map((body) => body.resourceSpans[0]!.scopeSpans[0]!.spans.length);
+    expect(counts).toEqual([1000, 500, 501]);
+    expect(transport.spans().map((span) => span.name)).toEqual(Array.from({ length: 2001 }, (_, n) => `s${n}`));
+  });
+
+  it('goes no further once a part fails as the rest would, and on past a part refused for what it holds', async () => {
+    for (const [answers, sent, warned] of [
+      [
+        Array.from({ length: 9 }, () => new Error('refused')),
+        3,
+        'telmoni: export failed after 3 attempts (Error); the batch was dropped',
+      ],
+      [[answer(400, {}, '')], 3, 'telmoni: export refused with 400 ; the batch was dropped'],
+    ] as const) {
+      const transport = new FakeTransport([...answers]);
+      const warnings: string[] = [];
+      await exporter(transport, warnings).export(spans(Array<number>(2001).fill(1)));
+      expect(transport.requests).toHaveLength(sent);
+      expect(warnings).toEqual([warned]);
+    }
+  });
+
+  it('measures a list as ingest writes it, its JSON, so a span past it for a list of short strings goes without the list', async () => {
+    const transport = new FakeTransport();
+    const [one] = spans([1]);
+    (one!.attributes as Record<string, unknown>)['app.list'] = Array<string>(60_000).fill('');
+    await exporter(transport, []).export([one!]);
+    expect(transport.spans().map((span) => span.attributes.map((each) => each.key).sort())).toEqual([
+      ['app.kept', 'telmoni.tag.big'],
+    ]);
   });
 
   it('sends a span alone past it without what ingest drops for its length, rather than lose it', async () => {

@@ -259,11 +259,16 @@ def _body(response: Any) -> bytes:
 
 def _past_caps(key: str, value: Any) -> bool:
     """Whether ingest drops an attribute for its length alone: a key past 128
-    characters, or a value past 1,024 as text, a sequence's items together."""
+    characters, or a value past 1,024 as ingest writes it, a sequence as its JSON."""
     if len(key) > contract.ATTRIBUTE_KEY_MAX:
         return True
-    items = value if isinstance(value, (list, tuple)) else (value,)
-    return sum(len(str(item)) for item in items) > contract.ATTRIBUTE_VALUE_MAX
+    if isinstance(value, (list, tuple)):
+        text = json.dumps(
+            list(value), ensure_ascii=False, separators=(",", ":"), default=str
+        )
+    else:
+        text = str(value)
+    return len(text) > contract.ATTRIBUTE_VALUE_MAX
 
 
 def _sdk_version() -> str:
@@ -306,18 +311,20 @@ class Exporter:
         """The project's mode, as the last answer named it; None before one."""
         return self._content_mode
 
-    def export(self, spans: Sequence[ReadableSpan]) -> None:
+    def export(self, spans: Sequence[ReadableSpan]) -> bool:
+        """Sends the spans, halved past ingest's caps; false once they failed for a
+        reason not their own, which the rest of a batch they are part of would meet."""
         if not spans:
-            return
+            return True
+        # Ingest refuses an export past 1,000 spans whole, as one past 1 MiB below.
+        if len(spans) > contract.BATCH_SPANS_MAX:
+            return self._halve(spans)
         body = self._body(spans)
         if len(body) > contract.BATCH_MAX_BYTES:
             # Ingest refuses it whole, its 413 maybe breaking the upload still
             # going out, which reads as no answer and is sent again: halved.
             if len(spans) > 1:
-                half = len(spans) // 2
-                self.export(spans[:half])
-                self.export(spans[half:])
-                return
+                return self._halve(spans)
             # A span alone past it goes without what ingest drops for its length,
             # and then fits, unless its own name does not.
             body = self._body(spans, trimmed=True)
@@ -326,13 +333,18 @@ class Exporter:
                     "too-large",
                     "telmoni: a span past the 1 MiB an export may hold was dropped",
                 )
-                return
+                return True
             self.warn_once(
                 "trimmed",
                 "telmoni: a span past the 1 MiB an export may hold was sent without "
                 "the attributes ingest drops for their length",
             )
-        self._send(body)
+        return self._send(body)
+
+    def _halve(self, spans: Sequence[ReadableSpan]) -> bool:
+        """Exports each half of the spans, the second only where the first went."""
+        half = len(spans) // 2
+        return self.export(spans[:half]) and self.export(spans[half:])
 
     def _body(self, spans: Sequence[ReadableSpan], *, trimmed: bool = False) -> bytes:
         # Python writes NaN and Infinity, which are no JSON: refused here, never sent.
@@ -345,7 +357,7 @@ class Exporter:
         # A lone surrogate is no text ingest reads, and would lose the batch.
         return _SURROGATE.sub("\ufffd", text).encode()
 
-    def _send(self, body: bytes) -> None:
+    def _send(self, body: bytes) -> bool:
         headers = {
             "Content-Type": "application/json",
             "User-Agent": f"telmoni-python/{__version__}",
@@ -366,7 +378,7 @@ class Exporter:
                 continue
             if 200 <= answer.status < 300:
                 self._read(answer)
-                return
+                return True
             if answer.status in (429, 503):
                 failure = f"{answer.status} {_problem_type(answer.body)}"
                 self._wait(answer.header("Retry-After"), attempt)
@@ -376,12 +388,14 @@ class Exporter:
                 f"telmoni: export refused with {answer.status} "
                 f"{_problem_type(answer.body)}; the batch was dropped",
             )
-            return
+            # Refused for what it holds, the rest of a batch may still go.
+            return answer.status in (400, 413)
         self.warn_once(
             f"failed:{failure}",
             f"telmoni: export failed after {ATTEMPTS} attempts ({failure}); "
             "the batch was dropped",
         )
+        return False
 
     def encode(
         self, spans: Sequence[ReadableSpan], *, trimmed: bool = False

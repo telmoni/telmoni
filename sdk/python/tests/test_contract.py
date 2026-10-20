@@ -18,7 +18,7 @@ from opentelemetry.trace import SpanContext
 
 from conftest import FakeTransport, attributes_of, load_fixture
 from telmoni import DEFAULT_ENDPOINT, Config, Secret, Telmoni, __version__, exporter
-from telmoni.exporter import _urllib_transport
+from telmoni.exporter import Answer, _urllib_transport
 
 
 def test_the_default_endpoint_is_the_machine_host() -> None:
@@ -402,6 +402,77 @@ def test_the_mebibyte_is_counted_in_the_bytes_sent() -> None:
         client.shutdown()
     sizes = [len(body) for _, _, body in transport.requests]
     assert len(sizes) == 2 and max(sizes) <= 1 << 20, sizes
+
+
+def test_an_export_past_ingest_s_1000_spans_is_halved_until_each_holds_them() -> None:
+    """Ingest refuses it whole; one of 1,000 goes as it is."""
+    transport = FakeTransport()
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    try:
+        client.exporter.export(_spans(*[1] * 2001))
+    finally:
+        client.shutdown()
+    counts = [
+        len(body["resourceSpans"][0]["scopeSpans"][0]["spans"])
+        for body in transport.bodies()
+    ]
+    assert counts == [1000, 500, 501]
+    assert [s["name"] for s in transport.spans()] == [f"s{n}" for n in range(2001)]
+
+
+def test_a_batch_in_parts_ends_at_a_part_that_fails_as_the_rest_would(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The platform out of reach, the rest goes no further; a part refused for what
+    it holds leaves the rest to go."""
+    for answers, sent, warned in (
+        (
+            [ConnectionRefusedError()] * 9,
+            3,
+            (
+                "telmoni: export failed after 3 attempts (ConnectionRefusedError); "
+                "the batch was dropped"
+            ),
+        ),
+        (
+            [Answer(400, {}, b"")],
+            3,
+            "telmoni: export refused with 400 ; the batch was dropped",
+        ),
+    ):
+        caplog.clear()
+        transport = FakeTransport(list(answers))
+        client = Telmoni(Config(api_key="k"), transport=transport, sleep=lambda _: None)
+        try:
+            client.exporter.export(_spans(*[1] * 2001))
+        finally:
+            client.shutdown()
+        assert len(transport.requests) == sent
+        logged = [
+            r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING
+        ]
+        assert logged == [warned]
+
+
+def test_a_list_is_measured_as_ingest_writes_it_its_json() -> None:
+    """So a span past 1 MiB for a list of short strings goes without the list."""
+    transport = FakeTransport()
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    (span,) = _spans(1)
+    listed = ReadableSpan(
+        name=span.name,
+        context=span.context,
+        start_time=1,
+        end_time=2,
+        attributes={**(span.attributes or {}), "app.list": [""] * 60_000},
+    )
+    try:
+        client.exporter.export([listed])
+    finally:
+        client.shutdown()
+    assert [sorted(attributes_of(s)) for s in transport.spans()] == [
+        ["app.kept", "telmoni.tag.big"]
+    ]
 
 
 def test_a_number_ingest_cannot_read_never_costs_its_export() -> None:

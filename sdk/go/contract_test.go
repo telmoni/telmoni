@@ -3,6 +3,7 @@ package telmoni_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -596,6 +597,75 @@ func TestAnExportPastIngestsMebibyteIsHalvedUntilEachPartFits(t *testing.T) {
 	}
 	if warned := h.logs.warnings(); len(warned) != 0 {
 		t.Errorf("warnings %q", warned)
+	}
+}
+
+// An export past ingest's 1,000 spans, which it refuses whole, is halved until
+// each part holds them; one of 1,000 goes as it is.
+func TestAnExportPastIngestsThousandSpansIsHalvedUntilEachPartHoldsThem(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	sizes := make([]int, 2001)
+	want := make([]string, len(sizes))
+	for n := range sizes {
+		sizes[n] = 1
+		want[n] = fmt.Sprintf("s%d", n)
+	}
+	telmoni.ExportSpans(h.client, bigSpans(sizes...))
+	var counts []int
+	for _, body := range h.transport.bodies(t) {
+		counts = append(counts, len(spansIn(body)))
+	}
+	if !slices.Equal(counts, []int{1000, 500, 501}) {
+		t.Errorf("exports of %v spans, want [1000 500 501]", counts)
+	}
+	if got := names(h.transport.spans(t)); !slices.Equal(got, want) {
+		t.Errorf("sent %d spans out of order or not once each", len(got))
+	}
+}
+
+// A batch in parts goes no further once a part fails as the rest would, the
+// platform out of reach, and on past a part refused for what it holds.
+func TestABatchInPartsEndsAtAPartThatFailsAsTheRestWould(t *testing.T) {
+	sizes := make([]int, 2001)
+	for n := range sizes {
+		sizes[n] = 1
+	}
+	unreached := []any{}
+	for range 9 {
+		unreached = append(unreached, errors.New("connection refused"))
+	}
+	for _, c := range []struct {
+		answers []any
+		sent    int
+		warned  *regexp.Regexp
+	}{
+		{unreached, 3, regexp.MustCompile(`^telmoni: export failed after 3 attempts \(\S+\); the batch was dropped$`)},
+		{[]any{scripted{status: 400}}, 3, regexp.MustCompile(`^telmoni: export refused with 400 .*; the batch was dropped$`)},
+	} {
+		h := newHarness(t, testConfig(), newFakeTransport(t, c.answers...))
+		telmoni.ExportSpans(h.client, bigSpans(sizes...))
+		if got := len(h.transport.all()); got != c.sent {
+			t.Errorf("%d requests, want %d", got, c.sent)
+		}
+		if warned := h.logs.warnings(); len(warned) != 1 || !c.warned.MatchString(warned[0]) {
+			t.Errorf("warnings %q", warned)
+		}
+	}
+}
+
+// A slice is measured as ingest writes it, its JSON, so a span past 1 MiB for a
+// slice of many short strings goes without that slice rather than dropped.
+func TestASpanPastItForASliceOfShortStringsGoesWithoutTheSlice(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	span := tracetest.SpanStubFromReadOnlySpan(bigSpans(1)[0])
+	span.Attributes = append(span.Attributes, attribute.StringSlice("app.list", make([]string, 60_000)))
+	telmoni.ExportSpans(h.client, []sdktrace.ReadOnlySpan{span.Snapshot()})
+	spans := h.transport.spans(t)
+	if len(spans) != 1 {
+		t.Fatalf("%d spans sent, want the one", len(spans))
+	}
+	if got := slices.Sorted(maps.Keys(attributesOf(t, spans[0]))); !slices.Equal(got, []string{"app.kept", "telmoni.tag.big"}) {
+		t.Errorf("sent with %q", got)
 	}
 }
 

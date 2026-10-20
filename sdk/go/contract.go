@@ -87,6 +87,9 @@ const (
 	// batchMaxBytes is the largest body an export may be, contract.rs's
 	// BATCH_MAX_BYTES: ingest refuses one past it whole.
 	batchMaxBytes = 1 << 20
+	// batchSpansMax is the most spans an export may hold, contract.rs's
+	// BATCH_SPANS_MAX: ingest refuses one past it whole.
+	batchSpansMax = 1000
 	// attributeKeyMax and attributeValueMax are an attribute's longest key and
 	// value as text, in characters, contract.rs's: ingest drops one past either.
 	attributeKeyMax   = 128

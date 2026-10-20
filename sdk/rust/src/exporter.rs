@@ -64,28 +64,31 @@ impl Exporter {
         lock(&self.content_mode).clone()
     }
 
-    pub(crate) fn export(&self, spans: &[SpanData]) {
+    /// Sends `spans`, halved past ingest's caps; false once they failed for a
+    /// reason not their own, which the rest of a batch they are part of would meet.
+    pub(crate) fn export(&self, spans: &[SpanData]) -> bool {
         if spans.is_empty() {
-            return;
+            return true;
         }
         if let Some(refusal) = &self.refusal {
             self.warner.once(
                 "endpoint".to_owned(),
                 &format!("telmoni: {refusal}; nothing is sent"),
             );
-            return;
+            return false;
+        }
+        // Ingest refuses an export past 1,000 spans whole, as one past 1 MiB below.
+        if spans.len() > contract::BATCH_SPANS_MAX {
+            return self.halve(spans);
         }
         let Ok(mut body) = serde_json::to_vec(&self.encode(spans, false)) else {
-            return;
+            return true;
         };
         if body.len() > contract::BATCH_MAX_BYTES {
             // Ingest refuses it whole, its 413 maybe breaking the upload still
             // going out, which reads as no answer and is sent again: halved.
             if spans.len() > 1 {
-                let (head, tail) = spans.split_at(spans.len() / 2);
-                self.export(head);
-                self.export(tail);
-                return;
+                return self.halve(spans);
             }
             // A span alone past it goes without what ingest drops for its length,
             // and then fits, unless its own name does not.
@@ -102,7 +105,7 @@ impl Exporter {
                         "too-large".to_owned(),
                         "telmoni: a span past the 1 MiB an export may hold was dropped",
                     );
-                    return;
+                    return true;
                 }
             }
         }
@@ -131,7 +134,7 @@ impl Exporter {
             };
             if (200..300).contains(&answer.status) {
                 self.read(&answer);
-                return;
+                return true;
             }
             if answer.status == 429 || answer.status == 503 {
                 failure = format!("{} {}", answer.status, problem_type(&answer.body));
@@ -146,7 +149,8 @@ impl Exporter {
                     problem_type(&answer.body)
                 ),
             );
-            return;
+            // Refused for what it holds, the rest of a batch may still go.
+            return answer.status == 400 || answer.status == 413;
         }
         self.warner.once(
             format!("failed:{failure}"),
@@ -154,6 +158,13 @@ impl Exporter {
                 "telmoni: export failed after {ATTEMPTS} attempts ({failure}); the batch was dropped"
             ),
         );
+        false
+    }
+
+    /// Exports each half of `spans`, the second only where the first went.
+    fn halve(&self, spans: &[SpanData]) -> bool {
+        let (head, tail) = spans.split_at(spans.len() / 2);
+        self.export(head) && self.export(tail)
     }
 
     /// OTLP's `ExportTraceServiceRequest`, in its JSON encoding; `trimmed`, without
@@ -448,15 +459,22 @@ fn array_values(array: &Array) -> Vec<serde_json::Value> {
 }
 
 /// Whether ingest drops an attribute for its length alone: a key past 128
-/// characters, or a value past 1,024 as text, an array's items together.
+/// characters, or a value past 1,024 as ingest writes it, a list as its JSON.
 fn past_caps(key: &str, value: &Value) -> bool {
     if key.chars().count() > contract::ATTRIBUTE_KEY_MAX {
         return true;
     }
     let length = match value {
         Value::String(text) => text.as_str().chars().count(),
-        Value::Array(Array::String(items)) => {
-            items.iter().map(|item| item.as_str().chars().count()).sum()
+        Value::Array(array) => {
+            let items: Vec<serde_json::Value> = match array {
+                Array::Bool(items) => items.iter().map(|item| json!(item)).collect(),
+                Array::I64(items) => items.iter().map(|item| json!(item)).collect(),
+                Array::F64(items) => items.iter().map(|item| json!(item)).collect(),
+                Array::String(items) => items.iter().map(|item| json!(item.as_str())).collect(),
+                _ => Vec::new(),
+            };
+            serde_json::Value::Array(items).to_string().chars().count()
         }
         other => other.to_string().chars().count(),
     };
@@ -586,6 +604,28 @@ mod tests {
         assert!(lock(&warnings).is_empty());
     }
 
+    /// Ingest refuses an export past its 1,000 spans whole; one of 1,000 goes as it is.
+    #[test]
+    fn an_export_past_ingests_thousand_spans_is_halved_until_each_part_holds_them() {
+        let (kept, warnings) = (Kept::default(), Arc::default());
+        exporter(&kept, &warnings).export(&spans(&[1; 2001]));
+        let counts: Vec<usize> = lock(&kept.0)
+            .iter()
+            .map(|body| {
+                let value: serde_json::Value = serde_json::from_slice(body).unwrap();
+                value["resourceSpans"][0]["scopeSpans"][0]["spans"]
+                    .as_array()
+                    .unwrap()
+                    .len()
+            })
+            .collect();
+        assert_eq!(counts, [1000, 500, 501]);
+        let want: Vec<String> = (0..2001)
+            .map(|n| format!("s{n}:app.kept,telmoni.tag.big"))
+            .collect();
+        assert_eq!(sent(&kept), want);
+    }
+
     /// Rather than lost, since a run's own span carries the run's end.
     #[test]
     fn a_span_alone_past_it_goes_without_what_ingest_drops_for_its_length() {
@@ -623,6 +663,75 @@ mod tests {
         );
     }
 
+    /// A transport that answers each request from `answers` in turn, `None` a
+    /// failure to reach it, then `200`, counting them.
+    #[derive(Clone, Default)]
+    struct Scripted {
+        answers: Arc<Mutex<Vec<Option<u16>>>>,
+        sent: Arc<Mutex<usize>>,
+    }
+
+    impl Transport for Scripted {
+        fn send(
+            &self,
+            _url: &str,
+            _headers: &[(String, String)],
+            _body: &[u8],
+        ) -> Result<Answer, TransportError> {
+            *lock(&self.sent) += 1;
+            let mut answers = lock(&self.answers);
+            let next = if answers.is_empty() {
+                Some(200)
+            } else {
+                answers.remove(0)
+            };
+            let status = next.ok_or_else(|| TransportError::new("Connect"))?;
+            Ok(Answer {
+                status,
+                headers: Vec::new(),
+                body: b"{}".to_vec(),
+            })
+        }
+    }
+
+    /// A batch in parts goes no further once a part fails as the rest would,
+    /// the platform out of reach, and on past a part refused for what it holds.
+    #[test]
+    fn a_batch_in_parts_ends_at_a_part_that_fails_as_the_rest_would() {
+        for (answers, sent, warned) in [
+            (
+                vec![None; 9],
+                3,
+                "telmoni: export failed after 3 attempts (Connect); the batch was dropped",
+            ),
+            (
+                vec![Some(400)],
+                3,
+                "telmoni: export refused with 400 ; the batch was dropped",
+            ),
+        ] {
+            let transport = Scripted::default();
+            *lock(&transport.answers) = answers;
+            let warnings = Arc::new(Mutex::new(Vec::new()));
+            let warned_to = Arc::clone(&warnings);
+            let config = Config {
+                api_key: Some("k".to_owned()),
+                ..Config::default()
+            };
+            let exporter = Exporter::new(
+                &config,
+                Box::new(transport.clone()),
+                Box::new(|_| {}),
+                Arc::new(Warner::new(Box::new(move |text| {
+                    lock(&warned_to).push(text.to_owned());
+                }))),
+            );
+            exporter.export(&spans(&[1; 2001]));
+            assert_eq!(*lock(&transport.sent), sent);
+            assert_eq!(*lock(&warnings), [warned]);
+        }
+    }
+
     /// A float of NaN or an infinity, which JSON cannot carry, is sent as null,
     /// as in every SDK: that attribute lost at ingest, never the export it rides in.
     #[test]
@@ -654,6 +763,20 @@ mod tests {
             &json!({ "arrayValue": { "values": [{ "doubleValue": 1.5 }, { "doubleValue": null }] } })
         );
         assert_eq!(typed["app.ratio"], &json!({ "doubleValue": 0.25 }));
+    }
+
+    /// A list is measured as ingest writes it, its JSON, so a span past 1 MiB for
+    /// a list of many short strings goes without that list rather than dropped.
+    #[test]
+    fn a_span_past_it_for_a_list_of_short_strings_goes_without_the_list() {
+        let (kept, warnings) = (Kept::default(), Arc::default());
+        let mut one = spans(&[1]);
+        one[0].attributes.push(KeyValue::new(
+            "app.list",
+            Value::Array(vec![opentelemetry::StringValue::from(""); 60_000].into()),
+        ));
+        exporter(&kept, &warnings).export(&one);
+        assert_eq!(sent(&kept), ["s0:app.kept,telmoni.tag.big"]);
     }
 
     /// 2^64 ns after the epoch is written 0, a nanosecond less as its digits.

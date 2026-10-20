@@ -33,6 +33,8 @@ SESSION_ID_MAX = 200
 name holds a model call's ``<operation> <model>``, a model at its cap."""
 BATCH_MAX_BYTES = 1 << 20
 """The largest body an export may be: ingest refuses one past it whole."""
+BATCH_SPANS_MAX = 1000
+"""The most spans an export may hold: ingest refuses one past it whole."""
 ATTRIBUTE_KEY_MAX = 128
 ATTRIBUTE_VALUE_MAX = 1024
 """An attribute's longest key and value as text, in characters: ingest drops one

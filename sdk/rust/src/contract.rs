@@ -113,6 +113,9 @@ pub(crate) const SESSION_ID_MAX: usize = 200;
 /// The largest body an export may be: ingest's `BATCH_MAX_BYTES`, past which it
 /// refuses one whole.
 pub(crate) const BATCH_MAX_BYTES: usize = 1 << 20;
+/// The most spans an export may hold: ingest's `BATCH_SPANS_MAX`, past which it
+/// refuses one whole.
+pub(crate) const BATCH_SPANS_MAX: usize = 1_000;
 /// An attribute's longest key as text, in characters: ingest drops one past it.
 pub(crate) const ATTRIBUTE_KEY_MAX: usize = 128;
 /// An attribute's longest value as text, in characters: ingest drops one past it.
