@@ -73,6 +73,14 @@ current ones (`gen_ai.system`, `gen_ai.usage.prompt_tokens`,
 A field whose value breaks its rule refuses the span whole; an attribute past
 its cap is dropped and the span kept.
 
+A span's start and end are kept as sent, to the microsecond, unless the spans
+one resource sends of a trace in an export end more than 55 minutes after the
+export arrived: the clock that timed them is a time zone or a date out, so
+they are moved back together until the last ends as the export arrived, each
+keeping its length. A run sent over several exports is moved export by
+export, so its parts may land seconds apart, or further where an export
+arrives late. A clock drifting by less is left as it is.
+
 The [field inventory](/docs/api/field-inventory) names, on a span, `gen_ai.response.id`,
 `gen_ai.response.finish_reasons`, `gen_ai.response.status`,
 `gen_ai.request.reasoning.level`, `gen_ai.agent.version`, `gen_ai.tool.call.id`,
@@ -104,7 +112,7 @@ kept.
 `200` with OTLP's `ExportTraceServiceResponse` in the request's encoding, once
 the rows are stored, and the header `Telmoni-Content-Mode` naming the
 project's mode. `partialSuccess` is `null` in JSON, and absent in protobuf,
-when every span was kept as sent;
+when no span was refused and no attribute dropped;
 otherwise `rejectedSpans` counts the spans refused whole, and `errorMessage`
 names each span refused and each attribute dropped, with why — its first 4 KiB,
 then a count of the rest:
