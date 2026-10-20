@@ -170,6 +170,7 @@ export function SidePanel({
   return (
     <div
       ref={panel}
+      data-slot="side-panel"
       role="dialog"
       // Non-modal, and said so: the page beside it keeps its pointer and its
       // keys, which the letter shortcuts read this to know (`MODAL_SELECTOR`,
