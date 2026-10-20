@@ -55,9 +55,10 @@ function refuseCleartext(endpoint: string): void {
 function resolve(config: Config | undefined): ResolvedConfig {
   const endpoint = trimTrailingSlashes(unsetIfBlank(config?.endpoint) ?? DEFAULT_ENDPOINT) || DEFAULT_ENDPOINT;
   refuseCleartext(endpoint);
-  const sampleRate = config?.sampleRate ?? 1;
-  if (!(sampleRate > 0 && sampleRate <= 1)) {
-    throw new RangeError('sampleRate must be above 0 and up to 1');
+  const sampleRate: unknown = config?.sampleRate ?? 1;
+  // '0.5' from an environment variable compares as a number, and goes out as text ingest refuses.
+  if (typeof sampleRate !== 'number' || !(sampleRate > 0 && sampleRate <= 1)) {
+    throw new RangeError('sampleRate must be a number above 0 and up to 1');
   }
   const resolved = {
     endpoint,
@@ -71,7 +72,8 @@ function resolve(config: Config | undefined): ResolvedConfig {
   // Not enumerable: console.log, util.inspect and JSON.stringify skip it, so
   // a client or a configuration logged or serialized whole leaves the key out.
   Object.defineProperty(resolved, 'apiKey', { value: unsetIfBlank(config?.apiKey), enumerable: false });
-  return resolved as ResolvedConfig;
+  // Frozen, so plain JavaScript cannot set what was checked here to what was not.
+  return Object.freeze(resolved) as ResolvedConfig;
 }
 
 /**

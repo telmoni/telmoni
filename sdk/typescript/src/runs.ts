@@ -239,8 +239,10 @@ export class Opener {
       throw new TypeError("a run needs its agent's name");
     }
     const agent = asText(named, "run's agent", this.#warnOnce);
-    const rate = options.sampleRate ?? this.#config.sampleRate;
-    if (!(rate > 0 && rate <= 1)) throw new RangeError('sampleRate must be above 0 and up to 1');
+    const rate: unknown = options.sampleRate ?? this.#config.sampleRate;
+    if (typeof rate !== 'number' || !(rate > 0 && rate <= 1)) {
+      throw new RangeError('sampleRate must be a number above 0 and up to 1');
+    }
     const bounds = boundsOf(options.bounds, this.#warnOnce);
     const sampledOut = rate < 1 && Math.random() >= rate;
     const runId = randomUUID();

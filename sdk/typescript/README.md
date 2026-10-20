@@ -62,18 +62,18 @@ marks the span cancelled instead. `run.fail('RateLimit')` and `run.cancel()`
 mark a span by hand. Steps nest: `step.step(...)`, `step.modelCall(...)` and
 `step.toolCall(...)` open under the step; the same methods on `run` open under
 the run. `run` throws a `TypeError` for a blank agent name and a `RangeError`
-for a sample rate outside (0, 1]. A bound or a token count is read from a
-number, a bigint or a decimal numeral's text, a stall's, steps' or count's
-fraction cut, and of what ingest would refuse, these are left off with one
-warning: a bound outside 1 to 4294967295, a cost not above 0, a token count
-below 0 or past 64 bits, a tag whose key is not 1 to 64 characters or whose
-value is past 256, and the tags past the first 32 kept, the most ingest keeps;
-an empty user, session, provider or response model is left off as unset. A
-name, model, provider, user, session or response model that is no string goes
-as its text with one warning, as does a tag that is no string, finite number
-or boolean. Text past ingest's caps, below, and a step or model named nothing
-still go as given, and ingest refuses the span they are on, or the whole run
-for its agent, user or session.
+for a sample rate that is no number or outside (0, 1]. A bound or a token
+count is read from a number, a bigint or a decimal numeral's text, a stall's,
+steps' or count's fraction cut, and of what ingest would refuse, these are
+left off with one warning: a bound outside 1 to 4294967295, a cost not above
+0, a token count below 0 or past 64 bits, a tag whose key is not 1 to 64
+characters or whose value is past 256, and the tags past the first 32 kept,
+the most ingest keeps; an empty user, session, provider or response model is
+left off as unset. A name, model, provider, user, session or response model
+that is no string goes as its text with one warning, as does a tag that is no
+string, finite number or boolean. Text past ingest's caps, below, and a step
+or model named nothing still go as given, and ingest refuses the span they
+are on, or the whole run for its agent, user or session.
 
 `telmoni.wrap(agent, options, fn)` returns `fn` opening a run per call, with
 the run's handle as `fn`'s last argument:

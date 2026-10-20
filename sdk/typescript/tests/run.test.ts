@@ -156,6 +156,7 @@ describe('a run', () => {
     expect(() => h.telmoni.run([] as unknown as string, () => {})).toThrow("a run needs its agent's name");
     expect(() => h.telmoni.run('bot', { sampleRate: 0 }, () => {})).toThrow(RangeError);
     expect(() => h.telmoni.run('bot', { sampleRate: 1.5 }, () => {})).toThrow(RangeError);
+    expect(() => h.telmoni.run('bot', { sampleRate: '0.5' as unknown as number }, () => {})).toThrow(RangeError);
   });
 
   it('sends its first 32 tags, warned once of the rest, so none crowds out its own', async () => {

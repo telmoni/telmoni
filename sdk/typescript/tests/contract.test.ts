@@ -89,12 +89,19 @@ describe('configuration', () => {
     expect(client.config.release).toBe('2026.10.18');
   });
 
-  it('holds the sample rate above zero and up to one', () => {
+  it('holds the sample rate to a number above zero and up to one', () => {
     expect(new Telmoni({ sampleRate: 1 }).config.sampleRate).toBe(1);
     expect(new Telmoni({ sampleRate: 0.25 }).config.sampleRate).toBe(0.25);
     expect(() => new Telmoni({ sampleRate: 0 })).toThrow(RangeError);
     expect(() => new Telmoni({ sampleRate: 1.5 })).toThrow(RangeError);
     expect(() => new Telmoni({ sampleRate: Number.NaN })).toThrow(RangeError);
+    for (const notANumber of ['0.5', true, 1n]) {
+      expect(() => new Telmoni({ sampleRate: notANumber as unknown as number })).toThrow(RangeError);
+    }
+    const config = new Telmoni({ sampleRate: 0.25 }).config as { sampleRate: unknown };
+    expect(() => {
+      config.sampleRate = '0.5';
+    }).toThrow(TypeError);
   });
 
   it('is the version package.json names', () => {
