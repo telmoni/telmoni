@@ -16,6 +16,7 @@ var (
 	DecodeBaggageValue = decodeBaggageValue
 	ParseTraceparent   = parseTraceparent
 	Nanos              = nanos
+	DefaultClient      = defaultClient
 )
 
 // holdOne ends one span in the trace of runID under a record's hold, then

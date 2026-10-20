@@ -31,7 +31,7 @@ from opentelemetry.trace import SpanKind, StatusCode
 
 from . import contract
 from ._version import __version__
-from .models import Config
+from .models import Config, bypasses_proxy
 
 logger = logging.getLogger("telmoni")
 
@@ -179,9 +179,15 @@ def _urllib_transport(url: str, headers: Mapping[str, str], body: bytes) -> Answ
         url, data=body, headers=dict(headers), method="POST"
     )
     deadline = _Deadline(REQUEST_TIMEOUT_S)
-    opener = urllib.request.build_opener(
-        _NoRedirect(), _Plain(deadline), _Tls(deadline)
-    )
+    handlers: list[urllib.request.BaseHandler] = [
+        _NoRedirect(),
+        _Plain(deadline),
+        _Tls(deadline),
+    ]
+    if bypasses_proxy(url):
+        # No proxies: given one, build_opener adds no handler of the environment's.
+        handlers.append(urllib.request.ProxyHandler({}))
+    opener = urllib.request.build_opener(*handlers)
     try:
         try:
             response = opener.open(request, timeout=REQUEST_TIMEOUT_S)

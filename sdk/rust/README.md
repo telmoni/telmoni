@@ -182,7 +182,8 @@ fragment, a dot segment or a character a URL parser would escape, or a port of
 dots, hyphens and underscores, in labels of 1 to 63 characters with no hyphen
 at either end and the last no number, nor an IPv4 address in four decimal
 parts, nor an IPv6 one in brackets — nothing is sent and the first export
-warns once, and no redirect is followed. An endpoint without a scheme gets
+warns once, and no redirect is followed. A request to this machine goes through
+no proxy, whatever the environment names. An endpoint without a scheme gets
 `https://`, or `http://` for this machine, as the CLI reads one.
 
 ## A run across services

@@ -239,6 +239,56 @@ def test_an_answer_whose_head_comes_slowly_is_given_up_at_the_requests_deadline(
     assert time.monotonic() - started < 1.5
 
 
+_TAKEN: list[str] = []
+"""Every request the proxy was given, in order."""
+
+
+class _Proxy(http.server.BaseHTTPRequestHandler):
+    """A proxy that takes every request it is given and answers it itself."""
+
+    def do_POST(self) -> None:
+        _TAKEN.append(self.path)
+        self.send_response(200)
+        self.send_header("Content-Length", "2")
+        self.end_headers()
+        self.wfile.write(b"{}")
+
+    def log_message(self, format: str, *args: Any) -> None:
+        pass
+
+
+def test_this_machine_is_reached_past_any_proxy_the_environment_names(
+    answering: str,
+) -> None:
+    """A proxy would take plain HTTP's key off this machine in the clear."""
+    _TAKEN.clear()
+    proxy = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Proxy)
+    threading.Thread(target=proxy.serve_forever, daemon=True).start()
+    named = f"http://127.0.0.1:{proxy.server_port}"
+    port = answering.rsplit(":", 1)[1]
+    try:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "HTTP_PROXY": named,
+                "http_proxy": named,
+                "ALL_PROXY": named,
+                "NO_PROXY": "",
+                "no_proxy": "",
+            },
+        ):
+            for host in ("127.0.0.1", "localhost", "LOCALHOST"):
+                answer = _urllib_transport(f"http://{host}:{port}/short", {}, b"{}")
+                assert answer.status == 200 and len(answer.body) == 300, host
+            assert _TAKEN == []
+            # Another host still goes through it, as urllib sends.
+            _urllib_transport("http://telmoni-test.invalid/otlp/v1/traces", {}, b"{}")
+            assert _TAKEN == ["http://telmoni-test.invalid/otlp/v1/traces"]
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+
+
 def test_an_answer_whose_body_comes_slowly_is_kept_as_far_as_it_came_by_the_deadline(
     answering: str,
 ) -> None:

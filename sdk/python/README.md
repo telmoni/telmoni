@@ -155,7 +155,8 @@ and never through the trace's sampled flag. The key never appears in `repr`,
 `str` or `dataclasses.asdict`, and `pickle` refuses it. It travels over HTTPS
 only: a plain-HTTP endpoint is refused with a `ValueError` unless its host is
 this machine — `localhost`, a name under it, 127.0.0.0/8 or `::1`, an
-IPv4-mapped address read as its IPv4 — and no redirect is followed. An
+IPv4-mapped address read as its IPv4 — and no redirect is followed. A request
+to this machine goes through no proxy, whatever the environment names. An
 endpoint without a scheme gets `https://`, or `http://` for this machine, as
 the CLI reads one; any other scheme is refused with a `ValueError`, as is one
 the four SDKs could read two ways: one not in printable ASCII, or holding

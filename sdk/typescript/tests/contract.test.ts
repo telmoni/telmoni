@@ -1,13 +1,16 @@
-import { readFileSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { existsSync, readFileSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { fileURLToPath } from 'node:url';
 import { inspect } from 'node:util';
 
 import { SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ANSWER_MAX, Exporter, fetchTransport } from '../src/exporter';
+import { ANSWER_MAX, Exporter, directTransport, fetchTransport } from '../src/exporter';
 import { DEFAULT_ENDPOINT, Telmoni, VERSION, type Config } from '../src/index';
 import { loadFixture } from './helpers';
 
@@ -140,7 +143,34 @@ describe('the endpoint', () => {
   });
 });
 
-describe('the transport', () => {
+// A refusal's problem, sent whole before its answer hangs up short of the length it declared.
+const PROBLEM = '{"message":"/errors/batch-too-large: the batch is too large"}';
+
+// A server answering `status` with PROBLEM and hanging up short; each body it was sent.
+const breaking = async (status: number) => {
+  const bodies: string[] = [];
+  const server = createServer((request, response) => {
+    let body = '';
+    request.setEncoding('utf8');
+    request.on('data', (chunk: string) => (body += chunk));
+    request.on('end', () => {
+      bodies.push(body);
+      response.writeHead(status, { 'Content-Length': 300 });
+      response.write(PROBLEM, () => response.socket?.end());
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const close = async () => {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  };
+  return { bodies, close, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` };
+};
+
+describe.each([
+  ['fetch', fetchTransport],
+  ['direct', directTransport],
+] as const)('the %s transport', (_name, transport) => {
   it('reads an answer up to its first mebibyte', async () => {
     // Each path's status and the length of its answer.
     const answers: Record<string, [number, number]> = {
@@ -162,7 +192,7 @@ describe('the transport', () => {
         ['/refused', 503, ANSWER_MAX],
         ['/short', 200, 300],
       ] as const) {
-        const answer = await fetchTransport(`http://127.0.0.1:${port}${path}`, { method: 'POST', headers: {}, body: '{}' });
+        const answer = await transport(`http://127.0.0.1:${port}${path}`, { method: 'POST', headers: {}, body: '{}' });
         expect([answer.status, (await answer.text()).length]).toEqual([status, read]);
       }
     } finally {
@@ -171,41 +201,20 @@ describe('the transport', () => {
     }
   });
 
-  // A refusal's problem, sent whole before its answer hangs up short of the length it declared.
-  const PROBLEM = '{"message":"/errors/batch-too-large: the batch is too large"}';
-  // Each body the server was sent.
-  const breaking = async (status: number) => {
-    const bodies: string[] = [];
-    const server = createServer((request, response) => {
-      let body = '';
-      request.setEncoding('utf8');
-      request.on('data', (chunk: string) => (body += chunk));
-      request.on('end', () => {
-        bodies.push(body);
-        response.writeHead(status, { 'Content-Length': 300 });
-        response.write(PROBLEM, () => response.socket?.end());
-      });
-    });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const close = async () => {
-      server.closeAllConnections();
-      await new Promise((resolve) => server.close(resolve));
-    };
-    return { bodies, close, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` };
-  };
-
   it('keeps an answer whose body breaks as far as it came, its status deciding', async () => {
     for (const status of [200, 413]) {
       const server = await breaking(status);
       try {
-        const answer = await fetchTransport(server.url, { method: 'POST', headers: {}, body: '{}' });
+        const answer = await transport(server.url, { method: 'POST', headers: {}, body: '{}' });
         expect([answer.status, await answer.text()]).toEqual([status, PROBLEM]);
       } finally {
         await server.close();
       }
     }
   });
+});
 
+describe('the exporter, sending to this machine', () => {
   it('sends a refusal whose body breaks once, as any refusal', async () => {
     const server = await breaking(413);
     const sleeps: number[] = [];
@@ -230,6 +239,71 @@ describe('the transport', () => {
     expect(new Set(server.bodies).size).toBe(server.bodies.length);
     expect(sleeps).toEqual([]);
     expect(warnings).toEqual(['telmoni: export refused with 413 /errors/batch-too-large; the batch was dropped']);
+  });
+
+  it('reaches this machine past any proxy the environment or the application names', async () => {
+    const built = fileURLToPath(new URL('../dist/index.mjs', import.meta.url));
+    expect(existsSync(built), 'build the SDK first: npm run build').toBe(true);
+    // What the proxy was given, and the keys the server itself was sent.
+    const taken: string[] = [];
+    const keys: string[] = [];
+    const proxy = createServer((request, response) => {
+      taken.push(request.url ?? '');
+      request.resume().on('end', () => response.end('{}'));
+    });
+    const server = createServer((request, response) => {
+      keys.push(request.headers.authorization ?? '');
+      request.resume().on('end', () => response.end('{}'));
+    });
+    const port = async (listening: Server) => {
+      await new Promise<void>((resolve) => listening.listen(0, '127.0.0.1', resolve));
+      return (listening.address() as AddressInfo).port;
+    };
+    const named = `http://127.0.0.1:${await port(proxy)}`;
+    const at = `http://127.0.0.1:${await port(server)}`;
+    try {
+      // An application's own proxy, as proxy-agent and global-agent set one: Node's
+      // global agent replaced, and \`http.request\` wrapped to force it whatever is asked.
+      const script = `
+        import http from 'node:http';
+        import { syncBuiltinESMExports } from 'node:module';
+        class Proxying extends http.Agent {
+          addRequest(request, options) {
+            request.path = 'http://' + options.host + ':' + options.port + request.path;
+            return super.addRequest(request, { ...options, host: '127.0.0.1', port: ${new URL(named).port} });
+          }
+        }
+        const agent = new Proxying();
+        http.globalAgent = agent;
+        const original = http.request;
+        http.request = (url, options, callback) => {
+          if (typeof options === 'function') [options, callback] = [{}, options];
+          return original(url, { ...options, agent }, callback);
+        };
+        syncBuiltinESMExports();
+        await fetch(${JSON.stringify(`${at}/fetch`)}, { method: 'POST', body: '{}' }).catch(() => {});
+        await new Promise((resolve) => http.request(${JSON.stringify(`${at}/http`)}, { method: 'POST' }, (answer) => answer.resume().on('end', resolve)).on('error', resolve).end('{}'));
+        const { Telmoni } = await import(${JSON.stringify(built)});
+        const telmoni = new Telmoni({ endpoint: ${JSON.stringify(at)}, apiKey: 'k' });
+        telmoni.run('bot', () => undefined);
+        await telmoni.shutdown();
+      `;
+      const env = { ...process.env, NODE_USE_ENV_PROXY: '1', HTTP_PROXY: named, http_proxy: named, NO_PROXY: '', no_proxy: '' };
+      const child = spawn(process.execPath, ['--input-type=module', '-e', script], { env, stdio: 'ignore' });
+      await once(child, 'exit');
+    } finally {
+      for (const listening of [proxy, server]) {
+        listening.closeAllConnections();
+        await new Promise((resolve) => listening.close(resolve));
+      }
+    }
+    // Node's own http went through the application's proxy, and its fetch through the
+    // environment's where this Node honours the variable.
+    const [major = 0, minor = 0] = process.versions.node.split('.').map(Number);
+    const honoured = major >= 25 || (major === 24 && minor >= 5) || (major === 22 && minor >= 21);
+    expect(taken).toEqual([...(honoured ? [`${at}/fetch`] : []), `${at}/http`]);
+    expect(keys.length).toBeGreaterThan(0);
+    expect(new Set(keys)).toEqual(new Set(['Bearer k']));
   });
 });
 

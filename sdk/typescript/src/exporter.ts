@@ -7,6 +7,10 @@
  * from each answer, warning once for each attribute an answer names dropped.
  */
 
+import { Agent as HttpAgent, ClientRequest, type IncomingMessage } from 'node:http';
+import { Agent as HttpsAgent } from 'node:https';
+import { urlToHttpOptions } from 'node:url';
+
 import { SpanKind, SpanStatusCode, isSpanContextValid } from '@opentelemetry/api';
 import type { AttributeValue, HrTime } from '@opentelemetry/api';
 import { defaultResource } from '@opentelemetry/resources';
@@ -102,6 +106,59 @@ export const fetchTransport: Transport = async (url, init) => {
   const response = await fetch(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   return { status: response.status, headers: response.headers, text: () => textOf(response.body) };
 };
+
+/**
+ * This machine's transport: Node's own request on an agent of its own, so through no
+ * proxy, where `fetch` takes the environment's under `NODE_USE_ENV_PROXY`, and an
+ * application may set one on Node's global agent or wrap `http.request` to force its
+ * own. As `fetchTransport` in all else: ten seconds, no redirect followed.
+ */
+export const directTransport: Transport = (url, init) =>
+  new Promise((resolve, reject) => {
+    const body = Buffer.from(init.body);
+    const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    const request = new ClientRequest(
+      {
+        ...urlToHttpOptions(new URL(url)),
+        method: init.method,
+        headers: { ...init.headers, 'Content-Length': String(body.byteLength) },
+        agent: /^https:/i.test(url) ? new HttpsAgent() : new HttpAgent(),
+        signal,
+      },
+      (response) => {
+        // A body that breaks unread would otherwise throw where nothing catches it.
+        response.on('error', () => {});
+        const headers = {
+          get: (name: string) => {
+            const value = response.headers[name.toLowerCase()];
+            return value === undefined ? null : Array.isArray(value) ? value.join(', ') : value;
+          },
+        };
+        resolve({ status: response.statusCode ?? 0, headers, text: () => messageText(response) });
+      },
+    );
+    // The timeout's own error, as `fetch` gives it, rather than the abort it causes.
+    request.on('error', (error) => reject(signal.aborted ? signal.reason : error));
+    request.end(body);
+  });
+
+/** As `textOf`, from Node's own answer. */
+async function messageText(response: IncomingMessage): Promise<string> {
+  const decoder = new TextDecoder();
+  let text = '';
+  let left = ANSWER_MAX;
+  try {
+    for await (const chunk of response) {
+      const part = (chunk as Buffer).subarray(0, left);
+      text += decoder.decode(part, { stream: true });
+      left -= part.byteLength;
+      if (left <= 0) break;
+    }
+  } catch {
+    // Broken or timed out: kept as far as it came.
+  }
+  return text + decoder.decode();
+}
 
 /**
  * At most `ANSWER_MAX` bytes of a body, as text, the rest never read; its status decides,

@@ -5,7 +5,7 @@ import { resourceFromAttributes } from '@opentelemetry/resources';
 import { BasicTracerProvider } from '@opentelemetry/sdk-trace-base';
 
 import * as contract from './contract.js';
-import { Exporter, fetchTransport, realSleep } from './exporter.js';
+import { Exporter, directTransport, fetchTransport, realSleep } from './exporter.js';
 import { Ids } from './ids.js';
 import { Processor } from './processor.js';
 import { readHeaders, writeHeaders } from './propagation.js';
@@ -112,6 +112,16 @@ function isThisMachine(host: string): boolean {
   return name === 'localhost' || name.endsWith('.localhost');
 }
 
+/**
+ * Whether `endpoint` goes straight to this machine, past any proxy the environment names:
+ * a proxy would take plain HTTP's key off it in the clear, and one on another machine
+ * cannot reach this one's ports anyway.
+ */
+function bypassesProxy(endpoint: string): boolean {
+  const host = hostOf(endpoint);
+  return host !== undefined && isThisMachine(host);
+}
+
 /** The endpoint as the CLI reads one: a host without a scheme gets `https://`, or `http://` for this machine. */
 function endpointOf(given: string | undefined): string {
   const text = trimEnds(given ?? '');
@@ -182,7 +192,7 @@ export class Telmoni {
     this.config = resolve(config);
     const warn = hooks?.warn ?? ((message: string) => console.warn(message));
     this.#exporter = new Exporter(this.config, {
-      transport: hooks?.transport ?? fetchTransport,
+      transport: hooks?.transport ?? (bypassesProxy(this.config.endpoint) ? directTransport : fetchTransport),
       sleep: hooks?.sleep ?? realSleep,
       warn,
     });

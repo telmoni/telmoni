@@ -196,26 +196,41 @@ pub(crate) fn refusal(endpoint: &str) -> Option<String> {
     })
 }
 
-/// reqwest's blocking client, built at the first send. That send comes from
+/// Whether `url` goes straight to this machine, past any proxy the environment
+/// names: reqwest exempts no loopback host from them, and a proxy would take plain
+/// HTTP's key off this machine in the clear; one elsewhere cannot reach its ports.
+pub(crate) fn bypasses_proxy(url: &str) -> bool {
+    host_of(url).is_some_and(is_this_machine)
+}
+
+/// reqwest's blocking clients, each built at its first send. That send comes from
 /// the processor's own thread, which matters: the blocking client refuses to
 /// be built or used inside an async runtime, and an application may well build
 /// its [`Telmoni`](crate::Telmoni) inside one.
 #[derive(Default)]
 pub(crate) struct Reqwest {
+    /// Every other host, through any proxy the environment names.
     client: Mutex<Option<reqwest::blocking::Client>>,
+    /// This machine, through none ([`bypasses_proxy`]).
+    direct: Mutex<Option<reqwest::blocking::Client>>,
 }
 
 impl Reqwest {
-    fn client(&self) -> Result<reqwest::blocking::Client, TransportError> {
-        let mut slot = crate::lock(&self.client);
+    fn client(&self, url: &str) -> Result<reqwest::blocking::Client, TransportError> {
+        let direct = bypasses_proxy(url);
+        let mut slot = crate::lock(if direct { &self.direct } else { &self.client });
         if let Some(client) = slot.as_ref() {
             return Ok(client.clone());
         }
         // No redirect is followed: followed, one would resend the bearer to
         // wherever it points; the 3xx comes back as the answer it is.
-        let client = reqwest::blocking::Client::builder()
+        let mut builder = reqwest::blocking::Client::builder()
             .timeout(REQUEST_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none())
+            .redirect(reqwest::redirect::Policy::none());
+        if direct {
+            builder = builder.no_proxy();
+        }
+        let client = builder
             .build()
             .map_err(|error| TransportError::new(kind(&error)))?;
         *slot = Some(client.clone());
@@ -231,7 +246,7 @@ impl Transport for Reqwest {
         body: &[u8],
     ) -> Result<Answer, TransportError> {
         let deadline = Instant::now() + REQUEST_TIMEOUT;
-        let mut request = self.client()?.post(url).body(body.to_vec());
+        let mut request = self.client(url)?.post(url).body(body.to_vec());
         for (name, value) in headers {
             request = request.header(name.as_str(), value.as_str());
         }
@@ -313,10 +328,122 @@ fn kind(error: &reqwest::Error) -> &'static str {
 #[cfg(test)]
 mod tests {
     use std::io::{BufRead, BufReader, Write};
-    use std::net::TcpListener;
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::Arc;
     use std::thread;
 
     use super::*;
+
+    /// One request's head and body read off `stream`: its request line, and its
+    /// `Authorization`, or nothing.
+    fn request(stream: TcpStream) -> (String, String, TcpStream) {
+        let mut reader = BufReader::new(stream);
+        let mut first = String::new();
+        reader.read_line(&mut first).unwrap();
+        let (mut length, mut key) = (0, String::new());
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            if line == "\r\n" || line.is_empty() {
+                break;
+            }
+            let lower = line.to_ascii_lowercase();
+            if let Some(value) = lower.strip_prefix("content-length:") {
+                length = value.trim().parse().unwrap();
+            }
+            if lower.starts_with("authorization:")
+                && let Some((_, value)) = line.split_once(':')
+            {
+                key = value.trim().to_owned();
+            }
+        }
+        reader.read_exact(&mut vec![0; length]).unwrap();
+        (first.trim_end().to_owned(), key, reader.into_inner())
+    }
+
+    /// Each request's line and key, as a server was sent them.
+    type Seen = Arc<Mutex<Vec<(String, String)>>>;
+
+    /// A loopback server's port that answers every request `{}`, and what it
+    /// was sent.
+    fn recording() -> (u16, Seen) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let kept = Arc::clone(&seen);
+        thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let (line, key, mut stream) = request(stream);
+                crate::lock(&kept).push((line, key));
+                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}");
+            }
+        });
+        (port, seen)
+    }
+
+    #[test]
+    fn this_machine_is_reached_through_no_proxy() {
+        for url in [
+            "http://localhost:7100/otlp/v1/traces",
+            "http://LOCALHOST:7100/otlp/v1/traces",
+            "http://api.localhost:7100/otlp/v1/traces",
+            "http://127.0.0.2:7100/otlp/v1/traces",
+            "http://[::1]:7100/otlp/v1/traces",
+            "http://[::ffff:127.0.0.1]:7100/otlp/v1/traces",
+            "https://localhost/otlp/v1/traces",
+        ] {
+            assert!(bypasses_proxy(url), "{url}");
+        }
+        assert!(!bypasses_proxy("https://api.telmoni.com/otlp/v1/traces"));
+    }
+
+    /// A proxy the environment names, which reqwest takes for this machine too,
+    /// never stands between an export and this machine: it would read the key.
+    #[test]
+    fn a_proxy_the_environment_names_is_passed_for_this_machine() {
+        let (proxy, taken) = recording();
+        let (port, sent) = recording();
+        let named = format!("http://127.0.0.1:{proxy}");
+        // A process of its own, which reads the environment afresh.
+        let helper = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "transport::tests::proxy_environment_helper"])
+            .args(["--ignored", "--quiet"])
+            .env("TELMONI_PROXY_HELPER", port.to_string())
+            .env("HTTP_PROXY", &named)
+            .env("http_proxy", &named)
+            .env("ALL_PROXY", &named)
+            .env_remove("NO_PROXY")
+            .env_remove("no_proxy")
+            .output()
+            .unwrap();
+        assert!(
+            helper.status.success(),
+            "{}",
+            String::from_utf8_lossy(&helper.stdout)
+        );
+        let control = format!("POST http://127.0.0.1:{port}/control HTTP/1.1");
+        assert_eq!(*crate::lock(&taken), vec![(control, String::new())]);
+        let line = "POST /otlp/v1/traces HTTP/1.1".to_owned();
+        assert_eq!(*crate::lock(&sent), vec![(line, "Bearer k".to_owned())]);
+    }
+
+    /// The process [`a_proxy_the_environment_names_is_passed_for_this_machine`] starts.
+    #[test]
+    #[ignore = "started by a_proxy_the_environment_names_is_passed_for_this_machine"]
+    fn proxy_environment_helper() {
+        let Ok(port) = std::env::var("TELMONI_PROXY_HELPER") else {
+            return;
+        };
+        // reqwest's own client takes the environment's proxy, for this machine too.
+        let _ = reqwest::blocking::Client::new()
+            .post(format!("http://127.0.0.1:{port}/control"))
+            .body("{}")
+            .send();
+        let key = [("Authorization".to_owned(), "Bearer k".to_owned())];
+        let url = format!("http://LOCALHOST:{port}/otlp/v1/traces");
+        let answer = Reqwest::default().send(&url, &key, b"{}").unwrap();
+        assert_eq!(answer.status, 200);
+    }
 
     /// A loopback server's URL that answers one export with `status`, `size` bytes declared
     /// and `sent` sent, one every `gap` unless it is zero, before it hangs up.
@@ -387,7 +514,7 @@ mod tests {
     fn an_answer_sent_slowly_is_given_up_at_the_deadline_as_far_as_it_came() {
         let url = answering(200, 100, 100, Duration::from_millis(50));
         let response = Reqwest::default()
-            .client()
+            .client(&url)
             .unwrap()
             .post(url)
             .body("{}")

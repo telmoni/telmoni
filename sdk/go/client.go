@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"time"
 
@@ -102,6 +103,25 @@ type Client struct {
 // Telmoni is a convenience alias for Client.
 type Telmoni = Client
 
+// defaultClient is net/http's, through any proxy the environment names, and to
+// this machine through none (bypassesProxy): its default transport cloned with no
+// Proxy and a dialer of its own, since an application may dial through one, SOCKS
+// from ALL_PROXY say.
+func defaultClient(endpoint string) *http.Client {
+	client := &http.Client{Timeout: requestTimeout, CheckRedirect: noRedirect}
+	if bypassesProxy(endpoint) {
+		direct := new(http.Transport)
+		if base, ok := http.DefaultTransport.(*http.Transport); ok {
+			direct = base.Clone()
+		}
+		direct.Proxy = nil
+		direct.DialContext = (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+		direct.Dial, direct.DialTLS, direct.DialTLSContext = nil, nil, nil
+		client.Transport = direct
+	}
+	return client
+}
+
 // New builds a client from cfg. It fails on a SampleRate outside (0, 1], and on
 // an endpoint no export could use or that would carry the key in the clear.
 func New(cfg Config, opts ...Option) (*Client, error) {
@@ -113,7 +133,7 @@ func New(cfg Config, opts ...Option) (*Client, error) {
 		return nil, err
 	}
 	o := options{
-		transport: (&http.Client{Timeout: requestTimeout, CheckRedirect: noRedirect}).Do,
+		transport: defaultClient(cfg.Endpoint).Do,
 		sleep:     time.Sleep,
 		logger:    slog.Default(),
 		random:    rand.Float64,

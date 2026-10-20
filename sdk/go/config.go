@@ -194,6 +194,15 @@ func isThisMachine(host string) bool {
 	return host == "localhost" || strings.HasSuffix(host, ".localhost")
 }
 
+// bypassesProxy is whether endpoint goes straight to this machine, past any proxy
+// the environment names: a proxy would take plain HTTP's key off it in the clear,
+// and one on another machine cannot reach this one's ports anyway. net/http's
+// spares an exact localhost and a loopback IP alone.
+func bypassesProxy(endpoint string) bool {
+	host, ok := hostOf(endpoint)
+	return ok && isThisMachine(host)
+}
+
 // endpointOf is the endpoint as the CLI reads one: a host without a scheme
 // gets https://, or http:// for this machine.
 func endpointOf(given string) string {

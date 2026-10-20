@@ -216,8 +216,10 @@ start goes at once) and sent as OTLP/JSON to `POST {endpoint}/otlp/v1/traces`
 over HTTPS: a plain-HTTP endpoint is refused with a `TypeError` unless its host
 is this machine — `localhost`, a name under it, 127.0.0.0/8 or `::1`, an
 IPv4-mapped address read as its IPv4 — and no redirect is followed, since every
-export carries the key. An endpoint without a scheme gets `https://`, or
-`http://` for this machine, as the CLI reads one; any other scheme is refused
+export carries the key. A request to this machine goes through no proxy, even
+under `NODE_USE_ENV_PROXY`: it is sent with Node's own `http`. An endpoint
+without a scheme gets `https://`, or `http://` for this machine, as the CLI
+reads one; any other scheme is refused
 with a `TypeError`, as is one the four SDKs could read two ways: one not in
 printable ASCII, or holding credentials, an escape, a query, a fragment, a dot
 segment or a character a URL parser would escape, or a port of 0 or past

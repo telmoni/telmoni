@@ -161,6 +161,14 @@ def _this_machine(host: str) -> bool:
     return name == "localhost" or name.endswith(".localhost")
 
 
+def bypasses_proxy(url: str) -> bool:
+    """Whether ``url`` goes straight to this machine, past any proxy the environment
+    names: a proxy would take plain HTTP's key off it in the clear, and one on
+    another machine cannot reach this one's ports anyway."""
+    host = _host_of(url)
+    return host is not None and _this_machine(host)
+
+
 def endpoint_of(given: str | None) -> str:
     """The endpoint as the CLI reads one: a host without a scheme gets
     ``https://``, or ``http://`` for this machine."""

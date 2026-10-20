@@ -7,8 +7,11 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"regexp"
 	"slices"
 	"strings"
@@ -374,5 +377,93 @@ func TestFlushAndShutdownTakeANilContextAsRunDoes(t *testing.T) {
 	}
 	if err := client.Shutdown(nil); err != nil {
 		t.Errorf("Shutdown(nil) = %v", err)
+	}
+}
+
+// This machine is reached through no proxy: one would take plain HTTP's key off
+// it in the clear. Another host keeps net/http's own, the environment's.
+func TestThisMachineIsReachedThroughNoProxy(t *testing.T) {
+	for _, endpoint := range []string{
+		"http://localhost:7100", "http://LOCALHOST:7100", "http://api.localhost:7100",
+		"http://127.0.0.2:7100", "http://[::1]:7100", "http://[::ffff:127.0.0.1]:7100", "https://localhost",
+	} {
+		direct, ok := telmoni.DefaultClient(endpoint).Transport.(*http.Transport)
+		if !ok || direct.Proxy != nil {
+			t.Errorf("%s may go through a proxy", endpoint)
+		}
+	}
+	if transport := telmoni.DefaultClient("https://api.telmoni.com").Transport; transport != nil {
+		t.Errorf("another host is sent through %T, not net/http's default", transport)
+	}
+}
+
+// A proxy the environment names, which net/http's own client takes for a name
+// under localhost, or one the application dials through, never stands between an
+// export and this machine.
+func TestAProxyTheEnvironmentNamesIsPassedForThisMachine(t *testing.T) {
+	var mu sync.Mutex
+	var taken, keys []string
+	answer := func(seen *[]string, what func(*http.Request) string) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			mu.Lock()
+			*seen = append(*seen, what(r))
+			mu.Unlock()
+			_, _ = w.Write([]byte("{}"))
+		})
+	}
+	proxy := httptest.NewServer(answer(&taken, func(r *http.Request) string { return r.URL.String() }))
+	defer proxy.Close()
+	server := httptest.NewServer(answer(&keys, func(r *http.Request) string { return r.Header.Get("Authorization") }))
+	defer server.Close()
+	port := server.URL[strings.LastIndex(server.URL, ":")+1:]
+	// A process of its own, which reads the environment afresh.
+	helper := exec.Command(os.Args[0], "-test.run=^TestProxyEnvironmentHelper$")
+	helper.Env = append(os.Environ(), "TELMONI_PROXY_HELPER="+port, "TELMONI_PROXY_DIAL="+proxy.Listener.Addr().String(),
+		"HTTP_PROXY="+proxy.URL, "http_proxy="+proxy.URL, "NO_PROXY=", "no_proxy=")
+	if out, err := helper.CombinedOutput(); err != nil {
+		t.Fatalf("the helper: %v\n%s", err, out)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if want := []string{"http://api.localhost:" + port + "/control"}; !slices.Equal(taken, want) {
+		t.Errorf("the proxy was given %q, want %q", taken, want)
+	}
+	if len(keys) == 0 {
+		t.Fatal("nothing reached the server")
+	}
+	for _, key := range keys {
+		if key != "Bearer "+testKey {
+			t.Errorf("the server was sent %q", key)
+		}
+	}
+}
+
+// TestProxyEnvironmentHelper is the process TestAProxyTheEnvironmentNamesIsPassedForThisMachine starts.
+func TestProxyEnvironmentHelper(t *testing.T) {
+	port := os.Getenv("TELMONI_PROXY_HELPER")
+	if port == "" {
+		t.Skip("started by TestAProxyTheEnvironmentNamesIsPassedForThisMachine")
+	}
+	if resp, err := http.Post("http://api.localhost:"+port+"/control", "application/json", strings.NewReader("{}")); err == nil {
+		_ = resp.Body.Close()
+	}
+	// And an application that dials every connection through it, as a SOCKS dialer does.
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		dialer := &net.Dialer{}
+		base.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return dialer.DialContext(ctx, network, os.Getenv("TELMONI_PROXY_DIAL"))
+		}
+	}
+	client, err := telmoni.New(telmoni.Config{Endpoint: "http://LOCALHOST:" + port, APIKey: testKey})
+	if err != nil {
+		t.Fatalf("building the client: %v", err)
+	}
+	_, run := client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	run.End()
+	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
+	defer cancel()
+	if err := client.Shutdown(ctx); err != nil {
+		t.Fatalf("shutting down: %v", err)
 	}
 }
