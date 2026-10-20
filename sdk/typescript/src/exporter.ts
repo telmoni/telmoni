@@ -139,6 +139,8 @@ export const directTransport: Transport = (url, init) =>
     );
     // The timeout's own error, as `fetch` gives it, rather than the abort it causes.
     request.on('error', (error) => reject(signal.aborted ? signal.reason : error));
+    // An upgrade nobody asked for closes it unanswered, which would otherwise never settle.
+    request.on('close', () => reject(new Error('the connection closed before an answer')));
     request.end(body);
   });
 

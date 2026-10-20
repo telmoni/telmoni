@@ -528,6 +528,53 @@ func TestAnAnswerWhoseHeadIsCutIsSentAgain(t *testing.T) {
 	}
 }
 
+// The answer is read past every 1xx before it, as in every SDK, and an upgrade
+// nobody asked for is a refusal, as in Python and Rust: its connection, which
+// stays open, closed unread rather than waited on.
+func TestTheAnswerIsReadPastEvery1xxBeforeItButA101(t *testing.T) {
+	for _, c := range []struct {
+		reply  string
+		warned []string
+	}{
+		{"HTTP/1.1 103 Early Hints\r\nLink: </x>\r\n\r\nHTTP/1.1 102 Processing\r\n\r\n" +
+			"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}", nil},
+		{"HTTP/1.1 101 Switching Protocols\r\nUpgrade: x\r\nConnection: Upgrade\r\n\r\n",
+			[]string{"telmoni: export refused with 101 ; the batch was dropped"}},
+	} {
+		release := make(chan struct{})
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.ReadAll(r.Body)
+			conn, sent, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			_, _ = sent.WriteString(c.reply)
+			_ = sent.Flush()
+			<-release
+		}))
+		logs := &logSink{}
+		client, err := telmoni.New(telmoni.Config{Endpoint: server.URL, APIKey: testKey},
+			telmoni.WithSleep((&sleepLog{}).sleep), telmoni.WithLogger(slog.New(logs)))
+		if err != nil {
+			t.Fatalf("building the client: %v", err)
+		}
+		_, run := client.Run(context.Background(), "bot", telmoni.RunOptions{})
+		run.End()
+		ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
+		if err := client.Flush(ctx); err != nil {
+			t.Errorf("%.12q: the flush waited on the answer: %v", c.reply, err)
+		}
+		if got := logs.warnings(); !slices.Equal(got, c.warned) {
+			t.Errorf("%.12q: warnings %q, want %q", c.reply, got, c.warned)
+		}
+		close(release)
+		_ = client.Shutdown(ctx)
+		cancel()
+		server.Close()
+	}
+}
+
 // A float of NaN or an infinity, which JSON cannot carry, is sent as null, as
 // in every SDK: that attribute lost at ingest, never the export it rides in.
 func TestANonFiniteFloatIsSentAsNullWithTheRestOfItsExport(t *testing.T) {

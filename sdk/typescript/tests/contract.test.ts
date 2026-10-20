@@ -242,6 +242,28 @@ describe.each([
       await server.close();
     }
   });
+
+  it('reads the answer past every 1xx before it', async () => {
+    const server = await raw(
+      'HTTP/1.1 103 Early Hints\r\nLink: </x>\r\n\r\nHTTP/1.1 102 Processing\r\n\r\n' +
+        'HTTP/1.1 200 OK\r\nTelmoni-Content-Mode: on\r\nContent-Length: 2\r\n\r\n{}',
+    );
+    try {
+      const answer = await transport(server.url, { method: 'POST', headers: {}, body: '{}' });
+      expect([answer.status, answer.headers.get('Telmoni-Content-Mode'), await answer.text()]).toEqual([200, 'on', '{}']);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('takes an upgrade nobody asked for as no answer, rather than wait on it', async () => {
+    const server = await raw('HTTP/1.1 101 Switching Protocols\r\nUpgrade: x\r\nConnection: Upgrade\r\n\r\n');
+    try {
+      await expect(transport(server.url, { method: 'POST', headers: {}, body: '{}' })).rejects.toThrow();
+    } finally {
+      await server.close();
+    }
+  });
 });
 
 describe('the exporter, sending to this machine', () => {

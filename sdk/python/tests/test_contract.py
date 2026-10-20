@@ -156,6 +156,25 @@ class _Answering(http.server.BaseHTTPRequestHandler):
             # A status line and half a header, then the close.
             self.wfile.write(b"HTTP/1.1 413 Payload Too Large\r\nContent-Ty")
             return
+        if self.path in ("/early-hints", "/early-hints-cut"):
+            # Two answers of the 1xx a proxy may send ahead, then the answer itself.
+            self.wfile.write(
+                b"HTTP/1.1 103 Early Hints\r\nLink: </x>\r\n\r\n"
+                b"HTTP/1.1 102 Processing\r\n\r\nHTTP/1.1 200 OK\r\n"
+            )
+            if self.path == "/early-hints":
+                self.wfile.write(
+                    b"Telmoni-Content-Mode: on\r\nContent-Length: 2\r\n\r\n{}"
+                )
+            else:
+                self.wfile.write(b"Content-Ty")
+            return
+        if self.path == "/upgrade":
+            # An upgrade nobody asked for.
+            self.wfile.write(
+                b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: x\r\nConnection: Upgrade\r\n\r\n"
+            )
+            return
         if self.path == "/slow-headers":
             # The status line at once, then its headers a byte every 50 ms.
             self.wfile.write(b"HTTP/1.1 200 OK\r\n")
@@ -280,6 +299,19 @@ def test_a_head_cut_before_its_blank_line_is_no_answer_and_sent_again(
             "the batch was dropped"
         )
     ]
+
+
+def test_the_answer_is_read_past_every_1xx_before_it_but_a_101(answering: str) -> None:
+    """As in the other SDKs, where ``http.client`` passes a 100 alone."""
+    answer = _urllib_transport(answering + "/early-hints", {}, b"{}")
+    assert (answer.status, answer.header("Telmoni-Content-Mode"), answer.body) == (
+        200,
+        "on",
+        b"{}",
+    )
+    with pytest.raises(http.client.RemoteDisconnected):
+        _urllib_transport(answering + "/early-hints-cut", {}, b"{}")
+    assert _urllib_transport(answering + "/upgrade", {}, b"{}").status == 101
 
 
 def test_a_first_line_that_is_no_status_is_no_answer_and_sent_again(

@@ -223,10 +223,15 @@ impl Reqwest {
             return Ok(client.clone());
         }
         // No redirect is followed: followed, one would resend the bearer to
-        // wherever it points; the 3xx comes back as the answer it is.
+        // wherever it points; the 3xx comes back as the answer it is. Nor is
+        // an answer decoded, whatever features the application turns on.
         let mut builder = reqwest::blocking::Client::builder()
             .timeout(REQUEST_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none());
+            .redirect(reqwest::redirect::Policy::none())
+            .no_gzip()
+            .no_brotli()
+            .no_deflate()
+            .no_zstd();
         if direct {
             builder = builder.no_proxy();
         }
@@ -457,6 +462,38 @@ mod tests {
             let _ = stream.write_all(b"HTTP/1.1 413 Payload Too Large\r\nContent-Ty");
         });
         assert!(Reqwest::default().send(&url, &[], b"{}").is_err());
+    }
+
+    /// The answer past every 1xx before it, as in every SDK, and an upgrade nobody
+    /// asked for a refusal, as in Python and Go.
+    #[test]
+    fn the_answer_is_read_past_every_1xx_before_it_but_a_101() {
+        for (reply, status, mode) in [
+            (
+                "HTTP/1.1 103 Early Hints\r\nLink: </x>\r\n\r\nHTTP/1.1 102 Processing\r\n\r\n\
+                 HTTP/1.1 200 OK\r\nTelmoni-Content-Mode: on\r\nContent-Length: 2\r\n\r\n{}",
+                200,
+                Some("on"),
+            ),
+            (
+                "HTTP/1.1 101 Switching Protocols\r\nUpgrade: x\r\nConnection: Upgrade\r\n\r\n",
+                101,
+                None,
+            ),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!("http://{}/otlp/v1/traces", listener.local_addr().unwrap());
+            thread::spawn(move || {
+                let (stream, _) = listener.accept().unwrap();
+                let (_, _, mut stream) = request(stream);
+                let _ = stream.write_all(reply.as_bytes());
+            });
+            let answer = Reqwest::default().send(&url, &[], b"{}").unwrap();
+            assert_eq!(
+                (answer.status, answer.header("Telmoni-Content-Mode")),
+                (status, mode)
+            );
+        }
     }
 
     /// A loopback server's URL that answers one export with `status`, `size` bytes declared

@@ -152,8 +152,8 @@ class _Lines:
 
 
 class _WholeHead(http.client.HTTPResponse):
-    """An answer whose head counts only whole, as the other SDKs read one: a head
-    the connection's close or the deadline cuts before its blank line is no answer."""
+    """An answer past every 1xx before it but a 101, as Go and Rust read one, its head
+    whole: one the connection's close or the deadline cuts short is no answer."""
 
     def begin(self) -> None:
         lines = _Lines(self.fp)
@@ -161,6 +161,10 @@ class _WholeHead(http.client.HTTPResponse):
         self.fp = cast(Any, lines)
         try:
             super().begin()
+            # `http.client` passes a 100 alone, and reads again only once it holds no headers.
+            while 101 < self.status < 200 and lines.last != b"":
+                self.headers = self.msg = cast(Any, None)
+                super().begin()
         finally:
             # Unless `http.client` closed it, as it does before a bad status line.
             if cast(Any, self.fp) is lines:

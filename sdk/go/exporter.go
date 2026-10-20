@@ -205,7 +205,10 @@ func (e *exporter) send(body []byte) (answer, error) {
 	got := answer{status: resp.StatusCode, header: resp.Header}
 	if resp.Body != nil {
 		defer resp.Body.Close()
-		got.body, _ = io.ReadAll(io.LimitReader(resp.Body, answerMax))
+		// A 101's body is its connection, which no timeout covers: closed unread.
+		if resp.StatusCode != http.StatusSwitchingProtocols {
+			got.body, _ = io.ReadAll(io.LimitReader(resp.Body, answerMax))
+		}
 	}
 	return got, nil
 }
