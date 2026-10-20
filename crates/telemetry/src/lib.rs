@@ -218,7 +218,8 @@ pub fn router(state: Arc<AppState>) -> Router {
 /// refusing as the lane answers, in OTLP's shape, once the body is read out
 /// ([`handler::ingest::refuse_unread`]). The lane's own limit, per project,
 /// runs in its handler once the key is known, so the door meters it by
-/// address alone.
+/// address alone. A stray path or method is answered in the same shape, and
+/// as late, outside the gate, costing no key lookup.
 pub fn otlp_router(state: Arc<AppState>) -> Router {
     let gate = ApiKeyGate {
         auth: state.auth.clone(),
@@ -228,6 +229,8 @@ pub fn otlp_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/v1/traces", post(handler::ingest::export))
         .route_layer(middleware::from_fn_with_state(gate, require_api_key))
+        .method_not_allowed_fallback(handler::ingest::method_not_allowed)
+        .fallback(handler::ingest::not_found)
         .with_state(state)
 }
 

@@ -128,7 +128,8 @@ impl Door {
     /// `Status` in the request's encoding with `Retry-After`, so an exporter
     /// retries it as it retries the lane's own.
     pub fn otlp(self: &Arc<Self>, lanes: Router) -> Router {
-        lanes.layer(middleware::from_fn_with_state(
+        // The route alone: an SDK's logs and metrics, sent beside it, cost no lookup.
+        lanes.route_layer(middleware::from_fn_with_state(
             (self.clone(), Lane::Otlp),
             admit,
         ))

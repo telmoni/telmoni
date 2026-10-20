@@ -29,7 +29,8 @@ use serde_json::json;
 
 use telmoni_shared::acting::ActingKey;
 use telmoni_shared::db::tenant_session::project_scope;
-use telmoni_shared::{ContentMode, ProjectId, TelemetryError, TelmoniError};
+use telmoni_shared::middleware::problem;
+use telmoni_shared::{ContentMode, ProblemDetails, ProjectId, TelemetryError, TelmoniError};
 
 use crate::contract::{self, BATCH_MAX_BYTES, BATCH_SPANS_MAX};
 use crate::ingest::batch::{self, BatchError, SenderClock};
@@ -341,10 +342,37 @@ fn answer(encoding: Encoding, content_mode: ContentMode, body: Vec<u8>) -> Respo
 /// gate refuses through here as well, so a bad key reads the same.
 pub fn refuse(error: TelmoniError, headers: &HeaderMap) -> Response {
     let problem = error.to_problem_details();
-    let status = StatusCode::from_u16(problem.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-    if status.is_server_error() {
+    if problem.status >= 500 {
         tracing::error!(error = %error, status = problem.status, "ingest: refused on our side");
     }
+    refusal(&problem, headers)
+}
+
+/// A path under `/otlp` no lane serves — `/v1/logs` and `/v1/metrics`, from
+/// an exporter given `…/otlp` whole — answered as the lane answers, once the
+/// body is read out.
+pub async fn not_found(request: Request) -> Response {
+    let headers = read_out_all(request).await;
+    refusal(
+        &problem::not_found_details("no such lane under /otlp; traces go to /otlp/v1/traces"),
+        &headers,
+    )
+}
+
+/// A method the lane does not take: `405` with `Allow`, as the lane answers,
+/// once the body is read out.
+pub async fn method_not_allowed(request: Request) -> Response {
+    let headers = read_out_all(request).await;
+    let mut response = refusal(&problem::method_not_allowed_details("POST"), &headers);
+    response
+        .headers_mut()
+        .insert(header::ALLOW, HeaderValue::from_static("POST"));
+    response
+}
+
+/// [`refuse`]'s answer, for any problem document.
+fn refusal(problem: &ProblemDetails, headers: &HeaderMap) -> Response {
+    let status = StatusCode::from_u16(problem.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
     let encoding = header(headers, &header::CONTENT_TYPE)
         .and_then(Encoding::of_content_type)
         .unwrap_or(Encoding::Json);
@@ -378,9 +406,14 @@ pub fn refuse(error: TelmoniError, headers: &HeaderMap) -> Response {
 /// [`refuse`] for a request whose body is unread, once it is read out: the
 /// key gate's refusals and the door's.
 pub async fn refuse_unread(error: TelmoniError, request: Request) -> Response {
+    refuse(error, &read_out_all(request).await)
+}
+
+/// The request's headers, its body read out first.
+async fn read_out_all(request: Request) -> HeaderMap {
     let (parts, body) = request.into_parts();
     read_out(&parts, body, BODY_WAIT).await;
-    refuse(error, &parts.headers)
+    parts.headers
 }
 
 /// Reads out a body a refusal leaves unread, to the cap and within `wait`:
@@ -433,7 +466,8 @@ struct RpcStatus {
     message: String,
 }
 
-/// The gRPC code an HTTP status maps to, as OTLP's own mapping has it.
+/// The gRPC code an HTTP status maps to, after grpc-gateway's mappings; OTLP
+/// reads no code, its clients acting on the status alone.
 const fn rpc_code(status: StatusCode) -> i32 {
     match status {
         StatusCode::BAD_REQUEST => 3,
@@ -443,6 +477,7 @@ const fn rpc_code(status: StatusCode) -> i32 {
         StatusCode::PAYMENT_REQUIRED => 9,
         StatusCode::FORBIDDEN => 7,
         StatusCode::NOT_FOUND => 5,
+        StatusCode::METHOD_NOT_ALLOWED => 12,
         StatusCode::PAYLOAD_TOO_LARGE | StatusCode::TOO_MANY_REQUESTS => 8,
         StatusCode::SERVICE_UNAVAILABLE => 14,
         _ => 13,
@@ -592,12 +627,51 @@ mod tests {
         assert_eq!(sender_clock(&HeaderMap::new(), arrived), None);
     }
 
+    /// A stray path or method is answered in the lane's shape: a `Status`
+    /// naming the problem, in the request's encoding, `Allow` on a `405`.
+    #[tokio::test]
+    async fn a_stray_path_or_method_is_answered_as_the_lane_answers() {
+        let request = |method: &str, content_type: &str| {
+            Request::builder()
+                .method(method)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from("{}"))
+                .unwrap()
+        };
+        let body = |response: Response| async {
+            to_bytes(response.into_body(), usize::MAX).await.unwrap()
+        };
+
+        let missing = not_found(request("POST", "application/json")).await;
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            missing.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
+        assert_eq!(
+            body(missing).await,
+            r#"{"code":5,"message":"/errors/not-found: no such lane under /otlp; traces go to /otlp/v1/traces"}"#
+        );
+
+        let wrong = method_not_allowed(request("PUT", "application/x-protobuf")).await;
+        assert_eq!(wrong.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(wrong.headers().get(header::ALLOW).unwrap(), "POST");
+        let status = RpcStatus::decode(body(wrong).await).unwrap();
+        assert_eq!(status.code, 12);
+        assert_eq!(
+            status.message,
+            "/errors/method-not-allowed: this lane takes POST"
+        );
+    }
+
     #[test]
     fn http_statuses_map_to_grpc_codes() {
         assert_eq!(rpc_code(StatusCode::BAD_REQUEST), 3);
         assert_eq!(rpc_code(StatusCode::UNAUTHORIZED), 16);
         assert_eq!(rpc_code(StatusCode::PAYMENT_REQUIRED), 9);
         assert_eq!(rpc_code(StatusCode::FORBIDDEN), 7);
+        assert_eq!(rpc_code(StatusCode::NOT_FOUND), 5);
+        assert_eq!(rpc_code(StatusCode::METHOD_NOT_ALLOWED), 12);
         assert_eq!(rpc_code(StatusCode::PAYLOAD_TOO_LARGE), 8);
         assert_eq!(rpc_code(StatusCode::TOO_MANY_REQUESTS), 8);
         assert_eq!(rpc_code(StatusCode::SERVICE_UNAVAILABLE), 14);

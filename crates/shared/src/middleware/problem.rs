@@ -17,13 +17,7 @@ use crate::error_schema::ProblemDetails;
 /// tell a missing lane from a missing row.
 #[must_use]
 pub fn not_found(detail: &str) -> Response {
-    problem(
-        StatusCode::NOT_FOUND,
-        "/errors/not-found",
-        "not found",
-        detail,
-        &[],
-    )
+    problem(not_found_details(detail), &[])
 }
 
 /// A method no lane at this path takes: `405`, with `Allow` naming the
@@ -31,29 +25,47 @@ pub fn not_found(detail: &str) -> Response {
 #[must_use]
 pub fn method_not_allowed(allow: &'static str) -> Response {
     problem(
-        StatusCode::METHOD_NOT_ALLOWED,
-        "/errors/method-not-allowed",
-        "method not allowed",
-        &format!("this lane takes {allow}"),
+        method_not_allowed_details(allow),
         &[(header::ALLOW, HeaderValue::from_static(allow))],
     )
 }
 
-fn problem(
-    status: StatusCode,
-    type_uri: &str,
-    title: &str,
-    detail: &str,
-    headers: &[(header::HeaderName, HeaderValue)],
-) -> Response {
-    let body = ProblemDetails {
+/// [`not_found`]'s problem, for a lane that answers in a shape of its own.
+#[must_use]
+pub fn not_found_details(detail: &str) -> ProblemDetails {
+    details(
+        StatusCode::NOT_FOUND,
+        "/errors/not-found",
+        "not found",
+        detail,
+    )
+}
+
+/// [`method_not_allowed`]'s problem, for a lane that answers in a shape of
+/// its own; `Allow` is the lane's to send.
+#[must_use]
+pub fn method_not_allowed_details(allow: &str) -> ProblemDetails {
+    details(
+        StatusCode::METHOD_NOT_ALLOWED,
+        "/errors/method-not-allowed",
+        "method not allowed",
+        &format!("this lane takes {allow}"),
+    )
+}
+
+fn details(status: StatusCode, type_uri: &str, title: &str, detail: &str) -> ProblemDetails {
+    ProblemDetails {
         type_uri: type_uri.into(),
         title: title.into(),
         status: status.as_u16(),
         detail: Some(detail.into()),
         instance: None,
         extensions: serde_json::Map::new(),
-    };
+    }
+}
+
+fn problem(body: ProblemDetails, headers: &[(header::HeaderName, HeaderValue)]) -> Response {
+    let status = StatusCode::from_u16(body.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
     let mut response = (status, Json(body)).into_response();
     response.headers_mut().insert(
         header::CONTENT_TYPE,

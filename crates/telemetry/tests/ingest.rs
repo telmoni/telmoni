@@ -934,6 +934,42 @@ async fn a_refusal_before_the_body_is_read_waits_for_the_body(pool: PgPool) {
     }
 }
 
+/// A path or a method the lane does not serve is answered in OTLP's shape
+/// once the body is in, and before any key is asked for.
+#[sqlx::test]
+async fn a_stray_path_or_method_is_answered_after_its_body(pool: PgPool) {
+    let state = common::state(&pool, AuthStub::new());
+    for (request, status, shape) in [
+        (
+            "POST /otlp/v1/logs HTTP/1.1\r\ncontent-type: application/json\r\n",
+            "404",
+            r#"{"code":5,"message":"/errors/not-found: no such lane under /otlp; traces go to /otlp/v1/traces"}"#,
+        ),
+        (
+            "POST /otlp/v1/metrics HTTP/1.1\r\ncontent-type: application/x-protobuf\r\n",
+            "404",
+            "content-type: application/x-protobuf",
+        ),
+        (
+            "PUT /otlp/v1/traces HTTP/1.1\r\ncontent-type: application/json\r\n",
+            "405",
+            r#"{"code":12,"message":"/errors/method-not-allowed: this lane takes POST"}"#,
+        ),
+    ] {
+        let answer = answered_after_its_body(
+            state.clone(),
+            &format!("{request}host: localhost\r\n"),
+            600_000,
+        )
+        .await;
+        assert!(
+            answer.starts_with(&format!("HTTP/1.1 {status} ")),
+            "{answer}"
+        );
+        assert!(answer.contains(shape), "{answer}");
+    }
+}
+
 /// A body that has not arrived within the wait (a fifth of a second here, a
 /// minute on every binary) is refused `invalid-batch`, and nothing written.
 #[sqlx::test]

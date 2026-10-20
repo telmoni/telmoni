@@ -493,6 +493,56 @@ async fn the_door_meters_ingest_by_address_before_its_key() {
     );
 }
 
+/// What ingest does not serve, `/otlp/` too, is the lane's to answer in OTLP's
+/// shape, and a stray path spends none of the address's allowance, so an
+/// SDK's logs and metrics, sent beside its traces, never cost them their room.
+#[tokio::test]
+async fn ingest_answers_what_it_does_not_serve_outside_the_doors_allowance() {
+    let app = app();
+    let router = app.router();
+    let send = |method: &str, path: &str| {
+        router.clone().oneshot(
+            Request::builder()
+                .method(method)
+                .uri(path)
+                .header("content-type", "application/json")
+                .header("x-forwarded-for", "203.0.113.11, 35.191.0.1")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+    };
+    for path in ["/otlp", "/otlp/", "/otlp/v1/logs", "/otlp/v1/metrics"] {
+        let missing = send("POST", path).await.expect("router responds");
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND, "{path}");
+        assert_eq!(otlp_status(missing).await["code"], 5, "{path}");
+    }
+    let wrong = send("PUT", "/otlp/v1/traces")
+        .await
+        .expect("router responds");
+    assert_eq!(wrong.status(), StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(header(&wrong, "allow"), Some("POST"));
+    assert_eq!(otlp_status(wrong).await["code"], 12);
+
+    for n in 0..1_300 {
+        assert_eq!(
+            send("POST", "/otlp/v1/logs")
+                .await
+                .expect("router responds")
+                .status(),
+            StatusCode::NOT_FOUND,
+            "stray export {n} is never metered"
+        );
+    }
+    assert_eq!(
+        send("POST", "/otlp/v1/traces")
+            .await
+            .expect("router responds")
+            .status(),
+        StatusCode::UNAUTHORIZED,
+        "the traces' allowance is whole"
+    );
+}
+
 /// The door's refusal of an export waits for its body, as the lane's own do:
 /// hyper's close over one still coming breaks the upload, which an exporter
 /// takes for no answer.

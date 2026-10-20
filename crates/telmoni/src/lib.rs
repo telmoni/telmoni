@@ -373,9 +373,10 @@ impl App {
             ));
         // The machine lanes behind the door, each named, then versioned: the
         // read API at `/v1`, the CLI's at `/cli/v1`, pings at `/ping/v1`, and
-        // ingest at `/otlp`, whose `/v1/traces` is OTLP's own. Each lane
-        // gates its own, by key, bearer, device code or the key in a ping's
-        // path. The probes are the platform's, and carry no version.
+        // ingest at `/otlp`, whose `/v1/traces` is OTLP's own, nested whole so
+        // `/otlp/` is its to answer too. Each lane gates its own, by key,
+        // bearer, device code or the key in a ping's path. The probes are the
+        // platform's, and carry no version.
         let core = Router::new()
             .merge(probes)
             .merge(log_level)
@@ -393,7 +394,7 @@ impl App {
                 self.door
                     .ping(telmoni_telemetry::ping_router(self.telemetry.clone())),
             )
-            .nest(
+            .nest_service(
                 "/otlp",
                 self.door
                     .otlp(telmoni_telemetry::otlp_router(self.telemetry.clone())),
