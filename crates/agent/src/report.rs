@@ -111,10 +111,19 @@ pub(crate) fn run_record(record: &TurnRecord) -> RunRecord {
     }
 }
 
+/// The model of a call whose stream and configuration both named none: the
+/// SDK refuses a whole record for a model named nothing.
+const UNNAMED_MODEL: &str = "unknown";
+
 /// One model call as the SDK records it: its model and provider, its tokens
 /// as the conventions count them, and its error's type when it failed.
 fn model_call(generation: &Generation) -> ModelCallRecord {
     let (start, end) = span(generation.started_at, generation.ended_at);
+    let model = if generation.model.is_empty() {
+        UNNAMED_MODEL.to_owned()
+    } else {
+        generation.model.clone()
+    };
     ModelCallRecord {
         provider: Some(generation.provider.to_owned()),
         usage: generation.usage.map(|usage| Usage {
@@ -124,7 +133,7 @@ fn model_call(generation: &Generation) -> ModelCallRecord {
             cache_write_input_tokens: Some(count(usage.cache_write_tokens)),
         }),
         error_type: generation.error.clone(),
-        ..ModelCallRecord::new(generation.model.clone(), start, end)
+        ..ModelCallRecord::new(model, start, end)
     }
 }
 
@@ -425,6 +434,19 @@ mod tests {
         let run = run_record(&turn);
         let tool = tool_call_of(&run.inside[1]);
         assert_eq!(tool.end, tool.start);
+    }
+
+    /// A call whose model nothing named is sent as `unknown`, so the question is kept.
+    #[test]
+    fn a_call_whose_model_was_named_nowhere_is_sent_as_unknown_not_refused() {
+        let mut turn = record(TurnEnding::Answered {
+            stopped_short: None,
+        });
+        if let Step::Generation(generation) = &mut turn.steps[0] {
+            generation.model.clear();
+        }
+        let run = run_record(&turn);
+        assert_eq!(model_call_of(&run.inside[0]).model, UNNAMED_MODEL);
     }
 
     /// The export is OTLP's JSON to the door under the key, its spans named
