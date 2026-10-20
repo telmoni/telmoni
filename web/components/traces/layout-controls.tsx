@@ -160,30 +160,21 @@ function CustomizeMenu({ layout, from }: { layout: Layout; from: string }) {
             {isEdited && <span aria-hidden="true">*</span>}
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-64">
-          <DropdownMenuLabel>How far a trace opens</DropdownMenuLabel>
-          <DropdownMenuRadioGroup
+        <DropdownMenuContent align="end" className="w-80">
+          <ChoiceSub
+            label="How far a trace opens"
+            labels={DEPTH_LABEL}
             value={options.depth}
-            onValueChange={(depth) => setOptions({ depth: depth as LayoutDepth })}
-          >
-            {(Object.values(LayoutDepth) as LayoutDepth[]).map((depth) => (
-              <DropdownMenuRadioItem key={depth} value={depth} onSelect={keep}>
-                {DEPTH_LABEL[depth]}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuLabel>Which start open</DropdownMenuLabel>
-          <DropdownMenuRadioGroup
+            onChange={(depth) => setOptions({ depth })}
+            onSelect={keep}
+          />
+          <ChoiceSub
+            label="Which start open"
+            labels={OPEN_LABEL}
             value={options.open}
-            onValueChange={(open) => setOptions({ open: open as LayoutOpen })}
-          >
-            {(Object.values(LayoutOpen) as LayoutOpen[]).map((open) => (
-              <DropdownMenuRadioItem key={open} value={open} onSelect={keep}>
-                {OPEN_LABEL[open]}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
+            onChange={(open) => setOptions({ open })}
+            onSelect={keep}
+          />
           <DropdownMenuSeparator />
           <HintedItem
             hint="Each span's bar on the trace's own line of time."
@@ -195,8 +186,8 @@ function CustomizeMenu({ layout, from }: { layout: Layout; from: string }) {
           </HintedItem>
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
-              Columns
-              <span className="ml-auto pl-2 text-xs tabular-nums text-muted-foreground">
+              <span className="flex-1 truncate">Columns</span>
+              <span className="shrink-0 pl-2 text-xs tabular-nums text-muted-foreground">
                 {options.columns.length + 1}/{TRACE_COLUMNS.length + 1}
               </span>
             </DropdownMenuSubTrigger>
@@ -269,6 +260,41 @@ function CustomizeMenu({ layout, from }: { layout: Layout; from: string }) {
         onSave={(filter) => setOptions({ filter })}
       />
     </>
+  );
+}
+
+/** One option of a few, picked in a sub-menu whose row names the one picked,
+ *  which keeps the menu short. */
+function ChoiceSub<T extends string>({
+  label,
+  labels,
+  value,
+  onChange,
+  onSelect,
+}: {
+  label: string;
+  /** Each option's name, in the order shown. */
+  labels: Record<T, string>;
+  value: T;
+  onChange: (value: T) => void;
+  onSelect: (event: Event) => void;
+}) {
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>
+        <span className="flex-1 truncate">{label}</span>
+        <span className="shrink-0 pl-2 text-xs text-muted-foreground">{labels[value]}</span>
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="w-56">
+        <DropdownMenuRadioGroup value={value} onValueChange={(option) => onChange(option as T)}>
+          {(Object.keys(labels) as T[]).map((option) => (
+            <DropdownMenuRadioItem key={option} value={option} onSelect={onSelect}>
+              {labels[option]}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
   );
 }
 

@@ -342,9 +342,12 @@ describe("TracePage", () => {
     expect(within(tree).getAllByRole("treeitem")).toHaveLength(1);
     // The run's own span, chosen, still reads with the whole trace's sums.
     expect(within(chosen()).getByText(/1 step, 2 calls/)).toBeInTheDocument();
-    // Customized to its steps, the layout is named as changed. The menu opens
-    // from the keyboard, as Radix opens one in a document with no pointer.
+    // Customized to its steps, the layout is named as changed. The menu and its
+    // sub-menu open from the keyboard, as Radix opens them with no pointer.
     fireEvent.keyDown(screen.getByRole("button", { name: "Customize the layout" }), { key: "Enter" });
+    fireEvent.keyDown(await screen.findByRole("menuitem", { name: /^How far a trace opens/ }), {
+      key: "ArrowRight",
+    });
     fireEvent.click(await screen.findByRole("menuitemradio", { name: "Its steps" }));
     expect(within(screen.getByRole("tree", { name: "Spans" })).getAllByRole("treeitem")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Customize the layout, changed" })).toBeInTheDocument();
