@@ -474,6 +474,59 @@ func TestProxyEnvironmentHelper(t *testing.T) {
 	}
 }
 
+// An answer whose head is cut before its blank line is no answer, sent three
+// times as in every SDK: a status line alone decides nothing.
+func TestAnAnswerWhoseHeadIsCutIsSentAgain(t *testing.T) {
+	var mu sync.Mutex
+	tries := map[string]int{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		tries[string(body)]++
+		mu.Unlock()
+		conn, sent, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = sent.WriteString("HTTP/1.1 413 Payload Too Large\r\nContent-Ty")
+		_ = sent.Flush()
+	}))
+	defer server.Close()
+	sleeps, logs := &sleepLog{}, &logSink{}
+	client, err := telmoni.New(telmoni.Config{Endpoint: server.URL, APIKey: testKey},
+		telmoni.WithSleep(sleeps.sleep), telmoni.WithLogger(slog.New(logs)))
+	if err != nil {
+		t.Fatalf("building the client: %v", err)
+	}
+	_, run := client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	run.End()
+	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
+	defer cancel()
+	if err := client.Shutdown(ctx); err != nil {
+		t.Errorf("shutting down: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(tries) == 0 {
+		t.Fatal("nothing was sent")
+	}
+	var want []time.Duration
+	for body, n := range tries {
+		if n != 3 {
+			t.Errorf("a batch was sent %d times, want 3: %.40s", n, body)
+		}
+		want = append(want, time.Second, 2*time.Second)
+	}
+	if got := sleeps.all(); !slices.Equal(got, want) {
+		t.Errorf("waited %v, want %v", got, want)
+	}
+	warned := logs.warnings()
+	if len(warned) != 1 || !regexp.MustCompile(`^telmoni: export failed after 3 attempts \(\S+\); the batch was dropped$`).MatchString(warned[0]) {
+		t.Errorf("warnings %q", warned)
+	}
+}
+
 // bigSpans is a span named s<n> for each size, an attribute of that many bytes
 // beside one of a few.
 func bigSpans(sizes ...int) []sdktrace.ReadOnlySpan {

@@ -1,3 +1,4 @@
+import collections
 import contextlib
 import http.client
 import http.server
@@ -147,6 +148,22 @@ class _Answering(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"%x\r\n%s\r\n" % (len(_PROBLEM), _PROBLEM))
             return
+        if self.path == "/no-status":
+            # A first line that is no HTTP status, as another protocol answers.
+            self.wfile.write(b"garbage\r\n\r\n")
+            return
+        if self.path == "/cut-head":
+            # A status line and half a header, then the close.
+            self.wfile.write(b"HTTP/1.1 413 Payload Too Large\r\nContent-Ty")
+            return
+        if self.path == "/slow-headers":
+            # The status line at once, then its headers a byte every 50 ms.
+            self.wfile.write(b"HTTP/1.1 200 OK\r\n")
+            with contextlib.suppress(OSError):
+                for byte in b"Content-Length: 2\r\n\r\n{}":
+                    self.wfile.write(bytes([byte]))
+                    time.sleep(0.05)
+            return
         if self.path in ("/slow-head", "/slow-body"):
             # A byte every 50 ms, each read's own timeout never reached.
             head = b"HTTP/1.1 200 OK\r\nContent-Length: 40\r\n\r\n"
@@ -236,6 +253,63 @@ def test_an_answer_whose_head_comes_slowly_is_given_up_at_the_requests_deadline(
         pytest.raises(TimeoutError),
     ):
         _urllib_transport(answering + "/slow-head", {}, b"{}")
+    assert time.monotonic() - started < 1.5
+
+
+def test_a_head_cut_before_its_blank_line_is_no_answer_and_sent_again(
+    answering: str, sleeps: list[float], caplog: pytest.LogCaptureFixture
+) -> None:
+    """As in the other SDKs: a status line alone decides nothing."""
+    with pytest.raises(http.client.RemoteDisconnected):
+        _urllib_transport(answering + "/cut-head", {}, b"{}")
+    _SENT.clear()
+    client = Telmoni(Config(endpoint=answering + "/cut-head", api_key="k"))
+    client.exporter._sleep = sleeps.append
+    try:
+        with client.run("bot"):
+            pass
+    finally:
+        client.shutdown()
+    tries = collections.Counter(_SENT)
+    assert tries and set(tries.values()) == {3}, tries.values()
+    assert sleeps == [1, 2] * len(tries)
+    warned = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warned == [
+        (
+            "telmoni: export failed after 3 attempts (RemoteDisconnected); "
+            "the batch was dropped"
+        )
+    ]
+
+
+def test_a_first_line_that_is_no_status_is_no_answer_and_sent_again(
+    answering: str, sleeps: list[float]
+) -> None:
+    """A failure to retry, as before: the reader ``http.client`` closed stays shut."""
+    with pytest.raises(http.client.BadStatusLine):
+        _urllib_transport(answering + "/no-status", {}, b"{}")
+    _SENT.clear()
+    client = Telmoni(Config(endpoint=answering + "/no-status", api_key="k"))
+    client.exporter._sleep = sleeps.append
+    try:
+        with client.run("bot"):
+            pass
+    finally:
+        client.shutdown()
+    tries = collections.Counter(_SENT)
+    assert tries and set(tries.values()) == {3}, tries.values()
+
+
+def test_a_head_whose_headers_trickle_past_the_deadline_is_given_up(
+    answering: str,
+) -> None:
+    """Its status line came, but the head never ended: no answer, as in the others."""
+    started = time.monotonic()
+    with (
+        mock.patch("telmoni.exporter.REQUEST_TIMEOUT_S", 0.5),
+        pytest.raises(TimeoutError),
+    ):
+        _urllib_transport(answering + "/slow-headers", {}, b"{}")
     assert time.monotonic() - started < 1.5
 
 

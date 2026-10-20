@@ -24,7 +24,7 @@ import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from importlib import metadata
-from typing import Any
+from typing import Any, cast
 
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.trace import SpanKind, StatusCode
@@ -136,10 +136,45 @@ def _shut(sock: socket.socket) -> None:
         sock.shutdown(socket.SHUT_RDWR)
 
 
+class _Lines:
+    """A connection's reader, the last line it gave kept."""
+
+    def __init__(self, fp: Any) -> None:
+        self.fp = fp
+        self.last: bytes | None = None
+
+    def readline(self, limit: int = -1) -> bytes:
+        self.last = self.fp.readline(limit)
+        return self.last
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.fp, name)
+
+
+class _WholeHead(http.client.HTTPResponse):
+    """An answer whose head counts only whole, as the other SDKs read one: a head
+    the connection's close or the deadline cuts before its blank line is no answer."""
+
+    def begin(self) -> None:
+        lines = _Lines(self.fp)
+        # The head is read through it alone; the body, after, from the reader itself.
+        self.fp = cast(Any, lines)
+        try:
+            super().begin()
+        finally:
+            # Unless `http.client` closed it, as it does before a bad status line.
+            if cast(Any, self.fp) is lines:
+                self.fp = lines.fp
+        if lines.last == b"":
+            raise http.client.RemoteDisconnected("the answer's head was cut short")
+
+
 def _watched(
     base: type[http.client.HTTPConnection], deadline: _Deadline
 ) -> type[http.client.HTTPConnection]:
     class Watched(base):  # type: ignore[valid-type,misc]
+        response_class = _WholeHead
+
         def connect(self) -> None:
             super().connect()
             deadline.watch(self.sock)

@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import { createServer as createNetServer, type AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { inspect } from 'node:util';
 
@@ -167,6 +167,27 @@ const breaking = async (status: number) => {
   return { bodies, close, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` };
 };
 
+// A server answering each request, read whole, with `reply` as it stands, then the close.
+const raw = async (reply: string) => {
+  const bodies: string[] = [];
+  const server = createNetServer((socket) => {
+    let seen = Buffer.alloc(0);
+    socket.on('error', () => {});
+    socket.on('data', (chunk: Buffer) => {
+      seen = Buffer.concat([seen, chunk]);
+      const end = seen.indexOf('\r\n\r\n');
+      if (end < 0) return;
+      const length = Number(/content-length:\s*(\d+)/i.exec(seen.subarray(0, end).toString())?.[1] ?? 0);
+      if (seen.length < end + 4 + length) return;
+      bodies.push(seen.subarray(end + 4, end + 4 + length).toString());
+      socket.end(reply);
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const close = () => new Promise((resolve) => server.close(resolve));
+  return { bodies, close, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` };
+};
+
 describe.each([
   ['fetch', fetchTransport],
   ['direct', directTransport],
@@ -212,6 +233,15 @@ describe.each([
       }
     }
   });
+
+  it('takes a head cut before its blank line for no answer', async () => {
+    const server = await raw('HTTP/1.1 413 Payload Too Large\r\nContent-Ty');
+    try {
+      await expect(transport(server.url, { method: 'POST', headers: {}, body: '{}' })).rejects.toThrow();
+    } finally {
+      await server.close();
+    }
+  });
 });
 
 describe('the exporter, sending to this machine', () => {
@@ -239,6 +269,35 @@ describe('the exporter, sending to this machine', () => {
     expect(new Set(server.bodies).size).toBe(server.bodies.length);
     expect(sleeps).toEqual([]);
     expect(warnings).toEqual(['telmoni: export refused with 413 /errors/batch-too-large; the batch was dropped']);
+  });
+
+  it('sends an answer whose head is cut three times, as no answer', async () => {
+    const server = await raw('HTTP/1.1 413 Payload Too Large\r\nContent-Ty');
+    const sleeps: number[] = [];
+    const warnings: string[] = [];
+    try {
+      const telmoni = new Telmoni(
+        { endpoint: server.url, apiKey: 'k' },
+        {
+          sleep: (seconds) => {
+            sleeps.push(seconds);
+            return Promise.resolve();
+          },
+          warn: (message) => warnings.push(message),
+        },
+      );
+      telmoni.run('bot', () => undefined);
+      await telmoni.shutdown();
+    } finally {
+      await server.close();
+    }
+    const tries = new Map<string, number>();
+    for (const body of server.bodies) tries.set(body, (tries.get(body) ?? 0) + 1);
+    expect(tries.size).toBeGreaterThan(0);
+    expect(new Set(tries.values())).toEqual(new Set([3]));
+    expect(sleeps).toEqual(Array.from({ length: tries.size }, () => [1, 2]).flat());
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/^telmoni: export failed after 3 attempts \(\w+\); the batch was dropped$/);
   });
 
   it('reaches this machine past any proxy the environment or the application names', async () => {

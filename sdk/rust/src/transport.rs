@@ -445,6 +445,20 @@ mod tests {
         assert_eq!(answer.status, 200);
     }
 
+    /// As in every SDK: a status line alone, its head cut before the blank line
+    /// that ends it, decides nothing.
+    #[test]
+    fn a_head_cut_before_its_blank_line_is_no_answer() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/otlp/v1/traces", listener.local_addr().unwrap());
+        thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let (_, _, mut stream) = request(stream);
+            let _ = stream.write_all(b"HTTP/1.1 413 Payload Too Large\r\nContent-Ty");
+        });
+        assert!(Reqwest::default().send(&url, &[], b"{}").is_err());
+    }
+
     /// A loopback server's URL that answers one export with `status`, `size` bytes declared
     /// and `sent` sent, one every `gap` unless it is zero, before it hangs up.
     fn answering(status: u16, size: usize, sent: usize, gap: Duration) -> String {
