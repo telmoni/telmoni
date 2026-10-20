@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+import weakref
 from collections import deque
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -68,10 +69,15 @@ class Processor(SpanProcessor):
             target=self._work, name="telmoni-exporter", daemon=True
         )
         self._thread.start()
-        # A forked child inherits no thread: gunicorn's and celery's prefork
-        # workers, or `multiprocessing`, would queue spans nobody sends.
+        # A forked child inherits no worker; held weakly, as no fork hook is removed.
         if hasattr(os, "register_at_fork"):
-            os.register_at_fork(after_in_child=self._after_fork)
+            weak_after_fork = weakref.WeakMethod(self._after_fork)
+
+            def _after_in_child() -> None:
+                if after_fork := weak_after_fork():
+                    after_fork()
+
+            os.register_at_fork(after_in_child=_after_in_child)
 
     def _after_fork(self) -> None:
         """The child of a fork: the parent's worker is not in it, and its lock

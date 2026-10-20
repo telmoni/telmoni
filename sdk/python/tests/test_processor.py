@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import gc
 import logging
 import os
+import weakref
 
 import pytest
 
@@ -138,3 +140,14 @@ def test_a_forked_child_gets_a_worker_of_its_own(transport: FakeTransport) -> No
         assert os.waitstatus_to_exitcode(status) == 0, "the child sent nothing"
     finally:
         client.shutdown()
+
+
+def test_a_client_shut_down_is_not_held_by_its_fork_hook(
+    transport: FakeTransport,
+) -> None:
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    processor = weakref.ref(client.processor)
+    client.shutdown()
+    del client
+    gc.collect()
+    assert processor() is None, "the processor, its exporter and the key outlive it"
