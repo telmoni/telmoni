@@ -1,7 +1,5 @@
-//! What an export is told about itself: OTLP's partial success, unset when
-//! every span was kept as sent, and otherwise counting the spans refused and
-//! naming each span refused and each attribute dropped, with why, and the
-//! one thing that lifts it — its first 4 KiB, then a count of the rest.
+//! OTLP's partial success: unset when nothing was refused or dropped, else the
+//! spans refused counted, and each refusal and drop named with why, to 4 KiB.
 
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTracePartialSuccess;
 
@@ -21,13 +19,13 @@ pub struct Report {
 }
 
 impl Report {
-    /// Whether every span was kept as sent.
+    /// Whether no span was refused and no attribute dropped.
     #[must_use]
     pub fn is_clean(&self) -> bool {
         self.refused.is_empty() && self.dropped.is_empty()
     }
 
-    /// OTLP's `partial_success`: `None` when the export was kept as sent.
+    /// OTLP's `partial_success`: `None` when nothing was refused or dropped.
     #[must_use]
     pub fn partial_success(&self, content_mode: ContentMode) -> Option<ExportTracePartialSuccess> {
         if self.is_clean() {

@@ -262,10 +262,10 @@ pub struct SpanRow {
     pub kind: SpanKind,
     /// The agent's name on a run, the tool's on a tool call, its own on the rest.
     pub name: String,
-    /// When it started, by the sender's clock.
+    /// When it started, by the sender's clock, moved back where that ran far ahead.
     #[serde(with = "clickhouse::serde::chrono::datetime64::micros")]
     pub started_at: DateTime<Utc>,
-    /// When it ended, by the sender's clock.
+    /// When it ended, by the sender's clock, moved back where that ran far ahead.
     #[serde(with = "clickhouse::serde::chrono::datetime64::micros")]
     pub ended_at: DateTime<Utc>,
     /// How it ended.

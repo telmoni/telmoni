@@ -36,6 +36,9 @@ pub const CLAIM_PENDING_SECS: u64 = 60;
 /// How long a written body's retry is answered, not written: an exporter's
 /// retry follows a lost answer within minutes.
 pub const CLAIM_ANSWER_SECS: u64 = 60 * 60;
+/// How long after its export arrived a trace's last span may end: later, its
+/// clock is a zone or a date out rather than drifting, and the trace moves back.
+pub const CLOCK_AHEAD_MAX_SECS: i64 = 55 * 60;
 
 // ── The ping lane ────────────────────────────────────────────────────────────
 

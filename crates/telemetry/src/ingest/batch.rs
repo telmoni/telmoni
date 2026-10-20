@@ -1,12 +1,14 @@
 //! Every span of one export, read under the key's project into rows of
 //! `spans` and a report of what was lost on the way.
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 
 use telmoni_shared::ProjectId;
 
-use crate::contract::BATCH_SPANS_MAX;
+use crate::contract::{BATCH_SPANS_MAX, CLOCK_AHEAD_MAX_SECS};
 use crate::ingest::report::Report;
 use crate::ingest::span::{self, Context};
 use crate::store::SpanRow;
@@ -57,6 +59,7 @@ pub fn read(
 
     let mut batch = Batch::default();
     for resource_spans in &request.resource_spans {
+        let first = batch.rows.len();
         let resource = span::read_resource(resource_spans.resource.as_ref());
         for scope_spans in &resource_spans.scope_spans {
             let context = Context {
@@ -86,8 +89,38 @@ pub fn read(
                 }
             }
         }
+        // One resource is one process, so one clock.
+        if let Some(rows) = batch.rows.get_mut(first..) {
+            arrived(rows, received_at);
+        }
     }
     Ok(batch)
+}
+
+/// Each trace among `rows` ending past [`CLOCK_AHEAD_MAX_SECS`] after arrival,
+/// moved back as one to end then: spans are sent once ended, so its clock is ahead.
+fn arrived(rows: &mut [SpanRow], received_at: DateTime<Utc>) {
+    let mut last_end: HashMap<&str, DateTime<Utc>> = HashMap::new();
+    for row in &*rows {
+        let end = last_end.entry(&row.trace_id).or_insert(row.ended_at);
+        *end = (*end).max(row.ended_at);
+    }
+    let allowed = chrono::Duration::seconds(CLOCK_AHEAD_MAX_SECS);
+    let moves: Vec<Option<chrono::Duration>> = rows
+        .iter()
+        .map(|row| {
+            last_end
+                .get(row.trace_id.as_str())
+                .map(|end| *end - received_at)
+                .filter(|ahead| *ahead > allowed)
+        })
+        .collect();
+    for (row, ahead) in rows.iter_mut().zip(moves) {
+        if let Some(ahead) = ahead {
+            row.started_at -= ahead;
+            row.ended_at -= ahead;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -225,6 +258,72 @@ mod tests {
             "{:?}",
             batch.report.dropped
         );
+    }
+
+    /// A trace from a clock ahead moves back as one; another trace, or another resource's, stays.
+    #[test]
+    fn a_trace_from_a_clock_ahead_is_moved_back_as_one() {
+        const SECOND: u64 = 1_000_000_000;
+        const SENT: u64 = 1_760_000_000 * SECOND;
+        let arrival = SENT + 300_000_000 - 365 * 24 * 60 * 60 * SECOND;
+        let timed = |n: u8, trace: u8, start: u64, end: u64| Span {
+            trace_id: vec![trace; 16],
+            start_time_unix_nano: start,
+            end_time_unix_nano: end,
+            ..ours(n, None)
+        };
+        let request = ExportTraceServiceRequest {
+            resource_spans: vec![
+                ResourceSpans {
+                    scope_spans: vec![scoped(
+                        contract::SCOPE,
+                        vec![
+                            ours(1, Some("invoke_agent")),
+                            timed(2, 0x4b, SENT + 50_000_000, SENT + 300_000_000),
+                            timed(3, 0x5c, arrival - SECOND, arrival - 700_000_000),
+                        ],
+                    )],
+                    ..ResourceSpans::default()
+                },
+                ResourceSpans {
+                    scope_spans: vec![scoped(
+                        contract::SCOPE,
+                        vec![timed(4, 0x4b, arrival - 500_000_000, arrival - 200_000_000)],
+                    )],
+                    ..ResourceSpans::default()
+                },
+            ],
+        };
+        let at = |nanos: u64| DateTime::from_timestamp_nanos(i64::try_from(nanos).expect("an i64"));
+        let sent = [
+            (at(SENT), at(SENT + 100_000_000)),
+            (at(SENT + 50_000_000), at(SENT + 300_000_000)),
+            (at(arrival - SECOND), at(arrival - 700_000_000)),
+            (at(arrival - 500_000_000), at(arrival - 200_000_000)),
+        ];
+        let project = ProjectId::new();
+        let keep = |id: &str| id.to_owned();
+        let times = |received_at| -> Vec<_> {
+            read(&request, &project, received_at, &keep)
+                .expect("spans")
+                .rows
+                .iter()
+                .map(|row| (row.started_at, row.ended_at))
+                .collect()
+        };
+
+        let year = chrono::Duration::days(365);
+        assert_eq!(
+            times(at(arrival)),
+            [
+                (sent[0].0 - year, sent[0].1 - year),
+                (sent[1].0 - year, at(arrival)),
+                sent[2],
+                sent[3],
+            ]
+        );
+        let allowed = chrono::Duration::seconds(CLOCK_AHEAD_MAX_SECS);
+        assert_eq!(times(at(SENT + 300_000_000) - allowed), sent);
     }
 
     #[test]
