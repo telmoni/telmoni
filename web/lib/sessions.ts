@@ -102,6 +102,10 @@ export function sessionSums(traces: readonly SessionTrace[]): {
     steps: traces.reduce((sum, t) => sum + t.steps, 0),
     inputTokens: traces.reduce((sum, t) => sum + t.input_tokens, 0),
     outputTokens: traces.reduce((sum, t) => sum + t.output_tokens, 0),
-    lastEnded: traces.reduce((latest, t) => (t.ended_at > latest ? t.ended_at : latest), ""),
+    // As times, never as text: `…:00Z` sorts after `…:00.250Z` as text.
+    lastEnded: traces.reduce(
+      (latest, t) => (latest === "" || Date.parse(t.ended_at) > Date.parse(latest) ? t.ended_at : latest),
+      "",
+    ),
   };
 }
