@@ -615,20 +615,22 @@ export function formatCount(n: number): string {
   return COUNT.format(n);
 }
 
-/** A duration in milliseconds, in the unit a person reads it in: `340 ms`,
- *  `1.2 s`, `2 min 3 s`, `1 h 4 min`. */
+/** A duration in milliseconds, in the unit a person reads it in (`340 ms`, `1.2 s`,
+ *  `2 min 3 s`, `1 h 4 min`), rounded before the unit is chosen: never `60 s`. */
 export function formatDuration(ms: number): string {
   if (ms < 0) ms = 0;
-  if (ms < 1_000) return `${Math.round(ms)} ms`;
-  const seconds = ms / 1_000;
-  if (seconds < 60) return `${(Math.round(seconds * 10) / 10).toString()} s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) {
-    const rest = Math.round(seconds - minutes * 60);
+  if (Math.round(ms) < 1_000) return `${Math.round(ms)} ms`;
+  const tenths = Math.round(ms / 100);
+  if (tenths < 600) return `${(tenths / 10).toString()} s`;
+  const seconds = Math.round(ms / 1_000);
+  if (seconds < 3_600) {
+    const minutes = Math.floor(seconds / 60);
+    const rest = seconds % 60;
     return rest ? `${minutes} min ${rest} s` : `${minutes} min`;
   }
+  const minutes = Math.round(ms / 60_000);
   const hours = Math.floor(minutes / 60);
-  const rest = minutes - hours * 60;
+  const rest = minutes % 60;
   return rest ? `${hours} h ${rest} min` : `${hours} h`;
 }
 

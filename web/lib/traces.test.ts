@@ -356,6 +356,14 @@ describe("numbers into words", () => {
     expect(formatDuration(-5)).toBe("0 ms");
   });
 
+  it("rounds a duration before it chooses the unit, so none reads as 60 of one", () => {
+    expect(formatDuration(999.6)).toBe("1 s");
+    expect(formatDuration(59_960)).toBe("1 min");
+    expect(formatDuration(119_600)).toBe("2 min");
+    expect(formatDuration(3_599_600)).toBe("1 h");
+    expect(formatDuration(7_199_999)).toBe("2 h");
+  });
+
   it("shortens an id to eight characters", () => {
     expect(shortId("5d4f5c68-0000-4000-8000-000000000001")).toBe("5d4f5c68");
   });
