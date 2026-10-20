@@ -303,6 +303,8 @@ In production, place Telmoni behind a reverse proxy that terminates TLS and forw
 
 The console's live updates (server-sent events) and the agent's streamed answers are marked `X-Accel-Buffering: no`, so Nginx passes them through unbuffered. The console uses no WebSockets.
 
+The server speaks HTTP/1.1 alone, and gives each connection 620 seconds from its accept or its last answer to send a request's head, then closes it, so a client that never finishes one holds nothing for long. A proxy or load balancer that keeps idle connections to it must close them sooner, as Caddy, Nginx and Google's load balancer do by default, or a request it sends on one the server is closing fails.
+
 <Tabs items={['Caddy (Recommended)', 'Nginx']}>
   <Tab value="Caddy (Recommended)">
     Caddy automatically provisions and renews Let's Encrypt / ZeroSSL certificates:
