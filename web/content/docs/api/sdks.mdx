@@ -213,12 +213,13 @@ holding the **ingest** scope.
     `Fail(err)` marks the span failed with the error's Go type, never its
     message, and marks it cancelled for `context.Canceled`;
     `FailWith("TimeoutError")` and `Cancel()` do the same by hand. The SDK
-    never panics: a blank agent name opens a run that does nothing, and of
-    what Telmoni would refuse, these are left off with one warning — a
-    `StallAfterS` or `MaxSteps` past 4294967295 or below 0, a `MaxCostUSD`
-    that is no finite number above 0 (0 leaves any of the three unset), a
-    token count below 0, a tag whose key is not 1 to 64 characters or whose
-    value is past 256, and the tags past the first 32 kept, by key. Text past
+    never panics: a `Client` not from `New`, the nil a failed `New` returns
+    among them, sends nothing; a blank agent name opens a run that does
+    nothing, and of what Telmoni would refuse, these are left off with one
+    warning — a `StallAfterS` or `MaxSteps` past 4294967295 or below 0, a
+    `MaxCostUSD` that is no finite number above 0 (0 leaves any of the three
+    unset), a token count below 0, a tag whose key is not 1 to 64 characters
+    or whose value is past 256, and the tags past the first 32 kept, by key. Text past
     the caps [below](#a-run-recorded-after-it-ended), and a step or model
     named nothing, still go as given, and Telmoni refuses the span they are
     on, or the whole run for its agent, user or session.
