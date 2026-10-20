@@ -503,7 +503,8 @@ pub const INVENTORY: &[InventoryRow] = &[
     row(
         AGENT,
         ReadOn::EverySpan,
-        "the column agent, and a run's name where gen_ai.agent.name is unset",
+        "the column agent, and a run's name where gen_ai.agent.name and gen_ai.workflow.name are \
+         unset",
         Needs::AnyMode,
         "1 to 128 characters; a span without it is refused",
     ),
