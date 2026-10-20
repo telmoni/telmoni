@@ -667,8 +667,10 @@ decided by its status, read as far as it came. A batch whose body would pass the
 1 MiB [ingest](/docs/api/ingest#refusals) takes is sent in halves, each within
 it, and a span that alone passes the 1 MiB is sent without the attributes ingest
 drops for their length — a key past 128 characters, a value past 1,024 — with
-one warning. Each attempt carries `Telmoni-Sent-At`, the agent's clock as it
-leaves, so [ingest](/docs/api/ingest#what-is-kept) can move
+one warning. A number attribute JSON cannot carry, `NaN` or an infinity, is sent
+as no value, and so dropped, and a whole number past 64 bits as its text or a
+double, never costing its batch. Each attempt carries `Telmoni-Sent-At`, the
+agent's clock as it leaves, so [ingest](/docs/api/ingest#what-is-kept) can move
 a run from a clock a time zone or a date out as one. A flush waits up to 30 seconds. An attribute the
 server drops is logged once: content with the project's content mode, which
 decides the drop, and a link to [what is dropped at the
