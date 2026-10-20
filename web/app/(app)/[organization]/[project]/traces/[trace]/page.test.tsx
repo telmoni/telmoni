@@ -350,6 +350,14 @@ describe("TracePage", () => {
     expect(screen.getByRole("button", { name: "Customize the layout, changed" })).toBeInTheDocument();
   });
 
+  it("describes each option of the layout's menu by what it means, for a screen reader as for a pointer", async () => {
+    mockSetting = { view_id: null };
+    render(await TracePage({ params: PARAMS }));
+    fireEvent.keyDown(screen.getByRole("button", { name: "Customize the layout" }), { key: "Enter" });
+    const timeline = await screen.findByRole("menuitemcheckbox", { name: "Timeline" });
+    expect(timeline).toHaveAccessibleDescription("Each span's bar on the trace's own line of time.");
+  });
+
   it("opens a saved layout from a link, its pinned spans above the tree, chosen at a press", async () => {
     mockSearch = `view=${LAYOUT_ID}`;
     render(await TracePage({ params: PARAMS }));

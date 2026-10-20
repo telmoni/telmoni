@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState, useTransition, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useState, useTransition, type ReactNode } from "react";
 import {
   ChartColumnIcon,
   ChevronDownIcon,
@@ -339,10 +339,12 @@ function ColumnItem({
   onToggle?: () => void;
   inset?: boolean;
 }) {
+  const hintId = useId();
   return (
     <DropdownMenuItem
       role="menuitemcheckbox"
       aria-checked={checked}
+      aria-describedby={hint ? hintId : undefined}
       disabled={disabled}
       className={cn(inset && "pl-7")}
       onSelect={(event) => {
@@ -358,24 +360,30 @@ function ColumnItem({
         className="pointer-events-none"
       />
       <span className="flex-1 truncate">{label}</span>
-      {hint && <Hint text={hint} />}
+      {hint && <Hint id={hintId} text={hint} />}
     </DropdownMenuItem>
   );
 }
 
-/** What a column means, on hover, beside its name. */
-function Hint({ text }: { text: string }): ReactNode {
+/** What a column means: on hover beside its name, and as the copy `id` names,
+ *  which describes its item to a screen reader. */
+function Hint({ id, text }: { id: string; text: string }): ReactNode {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="pointer-events-auto text-muted-foreground" aria-label={text}>
-          <InfoIcon className="size-3.5" />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="right" className="max-w-56">
+    <>
+      <span id={id} hidden>
         {text}
-      </TooltipContent>
-    </Tooltip>
+      </span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="pointer-events-auto text-muted-foreground" aria-hidden="true">
+            <InfoIcon className="size-3.5" />
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="right" className="max-w-56">
+          {text}
+        </TooltipContent>
+      </Tooltip>
+    </>
   );
 }
 

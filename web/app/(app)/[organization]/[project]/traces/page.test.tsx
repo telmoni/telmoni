@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/page-header", () => ({
@@ -383,6 +383,13 @@ describe("TracesPage", () => {
     expect(screen.getByTestId("charts")).toBeInTheDocument();
     expect(screen.queryByRole("table")).toBeNull();
     expect(screen.getByRole("tab", { name: /Chart/ })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("describes each column in its menu by what it means, for a screen reader as for a pointer", async () => {
+    render(await TracesPage({ params: PARAMS }));
+    fireEvent.keyDown(screen.getByRole("button", { name: /^Columns/ }), { key: "Enter" });
+    const trace = await screen.findByRole("menuitemcheckbox", { name: "Trace ID" });
+    expect(trace).toHaveAccessibleDescription("The run's id, which opens its trace. Always shown.");
   });
 
   it("names the project's saved views, and the one the page was opened from", async () => {

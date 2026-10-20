@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, useTransition, type ReactNode } from "react";
+import { useId, useState, useTransition, type ComponentProps, type ReactNode } from "react";
 import {
   BookmarkIcon,
   CheckIcon,
@@ -185,14 +185,14 @@ function CustomizeMenu({ layout, from }: { layout: Layout; from: string }) {
             ))}
           </DropdownMenuRadioGroup>
           <DropdownMenuSeparator />
-          <DropdownMenuCheckboxItem
+          <HintedItem
+            hint="Each span's bar on the trace's own line of time."
             checked={options.timeline}
             onCheckedChange={(on) => setOptions({ timeline: on === true })}
             onSelect={keep}
           >
             Timeline
-            <Hint text="Each span's bar on the trace's own line of time." />
-          </DropdownMenuCheckboxItem>
+          </HintedItem>
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
               Columns
@@ -205,15 +205,15 @@ function CustomizeMenu({ layout, from }: { layout: Layout; from: string }) {
                 {TRACE_ID_COLUMN.label}
               </DropdownMenuCheckboxItem>
               {TRACE_COLUMNS.map((column) => (
-                <DropdownMenuCheckboxItem
+                <HintedItem
                   key={column.key}
+                  hint={column.hint}
                   checked={shown(column.key)}
                   onCheckedChange={() => flip(column.key)}
                   onSelect={keep}
                 >
                   <span className="flex-1 truncate">{column.label}</span>
-                  {column.hint && <Hint text={column.hint} />}
-                </DropdownMenuCheckboxItem>
+                </HintedItem>
               ))}
             </DropdownMenuSubContent>
           </DropdownMenuSub>
@@ -232,22 +232,22 @@ function CustomizeMenu({ layout, from }: { layout: Layout; from: string }) {
             )}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuCheckboxItem
+          <HintedItem
+            hint="The run's own input and output as the turn's two messages, shown once the project keeps content."
             checked={options.messages}
             onCheckedChange={(on) => setOptions({ messages: on === true })}
             onSelect={keep}
           >
             Messages
-            <Hint text="The run's own input and output as the turn's two messages, shown once the project keeps content." />
-          </DropdownMenuCheckboxItem>
-          <DropdownMenuCheckboxItem
+          </HintedItem>
+          <HintedItem
+            hint="The trace's scores beside it, shown once traces are scored."
             checked={options.scores}
             onCheckedChange={(on) => setOptions({ scores: on === true })}
             onSelect={keep}
           >
             Scores
-            <Hint text="The trace's scores beside it, shown once traces are scored." />
-          </DropdownMenuCheckboxItem>
+          </HintedItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem disabled={!isEdited} onSelect={reset}>
             Back to {from}
@@ -272,19 +272,35 @@ function CustomizeMenu({ layout, from }: { layout: Layout; from: string }) {
   );
 }
 
-/** What an option means, on hover, beside its name. */
-function Hint({ text }: { text: string }): ReactNode {
+/** A checkbox item described by what it means, which a screen reader reads,
+ *  the ⓘ beside its name showing it on hover. */
+function HintedItem({
+  hint,
+  children,
+  ...props
+}: ComponentProps<typeof DropdownMenuCheckboxItem> & { hint?: string | undefined }): ReactNode {
+  const id = useId();
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="pointer-events-auto ml-auto pl-2 text-muted-foreground" aria-label={text}>
-          <InfoIcon className="size-3.5" />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="right" className="max-w-56">
-        {text}
-      </TooltipContent>
-    </Tooltip>
+    <DropdownMenuCheckboxItem aria-describedby={hint ? id : undefined} {...props}>
+      {children}
+      {hint && (
+        <>
+          <span id={id} hidden>
+            {hint}
+          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="pointer-events-auto ml-auto pl-2 text-muted-foreground" aria-hidden="true">
+                <InfoIcon className="size-3.5" />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="right" className="max-w-56">
+              {hint}
+            </TooltipContent>
+          </Tooltip>
+        </>
+      )}
+    </DropdownMenuCheckboxItem>
   );
 }
 
