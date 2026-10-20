@@ -95,10 +95,11 @@ export function ConsoleHeader({
             collapsed && "md:hidden",
           )}
         >
-          <TelmoniMark className="size-6 shrink-0" />
-          {/* `pt-0.5`: the word has no descender, so at `leading-none` its
-              ink sits 1.5px above the mark's centre; 2px down, its baseline
-              lands on a whole pixel with its caps and ascenders centred. */}
+          {/* `-top-[2.5px]` stands the mark on the word's baseline, its `t`
+              rising past the caps as a tall letter's would: centred by its
+              box, its feet sit below it. `pt-0.5` centres the word's caps on
+              the bar, level with the toggle, since the word has no descender. */}
+          <TelmoniMark className="relative -top-[2.5px] size-6 shrink-0" />
           <span className="truncate pt-0.5">{PRODUCT_NAME}</span>
         </Link>
         {collapsed ? (
