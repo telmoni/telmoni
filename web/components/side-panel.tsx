@@ -195,8 +195,8 @@ export function SidePanel({
   );
 }
 
-/** The panel's head: what it shows, named beside its glyph, its buttons at
- *  the right ending on Close, and a line under it summing it up. */
+/** The panel's head: what it shows, named beside its glyph, its buttons ending on Close, a
+ *  line summing it up, and a rule inset as the rows' rules are. */
 export function SidePanelHeader({
   icon: Icon,
   titleId,
@@ -204,6 +204,7 @@ export function SidePanelHeader({
   beside,
   actions,
   onClose,
+  flush = false,
   children,
 }: {
   icon: LucideIcon;
@@ -214,25 +215,29 @@ export function SidePanelHeader({
   /** Before Close. */
   actions?: ReactNode;
   onClose: () => void;
+  /** Its rule edge to edge, over panes whose own rules run so. */
+  flush?: boolean;
   /** The line under the title. */
   children?: ReactNode;
 }) {
   return (
-    <div className="grid shrink-0 gap-1.5 border-b border-border p-3.5">
-      <div className="flex min-h-9 min-w-0 items-center gap-2">
-        <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <h2 id={titleId} className="min-w-0 truncate text-base font-medium">
-          {title}
-        </h2>
-        {beside}
-        <div className="ml-auto flex shrink-0 items-center gap-0.5">
-          {actions}
-          <PanelAction label="Close" onClick={onClose}>
-            <XIcon />
-          </PanelAction>
+    <div className={cn("shrink-0 px-3.5", flush && "border-b border-border")}>
+      <div className={cn("grid gap-1.5 py-3.5", !flush && "border-b border-border")}>
+        <div className="flex min-h-9 min-w-0 items-center gap-2">
+          <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <h2 id={titleId} className="min-w-0 truncate text-base font-medium">
+            {title}
+          </h2>
+          {beside}
+          <div className="ml-auto flex shrink-0 items-center gap-0.5">
+            {actions}
+            <PanelAction label="Close" onClick={onClose}>
+              <XIcon />
+            </PanelAction>
+          </div>
         </div>
+        {children}
       </div>
-      {children}
     </div>
   );
 }

@@ -197,6 +197,7 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
       <SidePanelHeader
         icon={ListTree}
         titleId={titleId}
+        flush
         title={summary ? summary.root.agent : "Trace"}
         beside={
           <>
