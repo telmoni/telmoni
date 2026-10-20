@@ -47,8 +47,9 @@ or `invoke_workflow` is the run itself; `chat`, `generate_content`,
 any other span opened under the `telmoni` instrumentation scope a step, and
 one opened elsewhere a plain span. A run is named by `gen_ai.agent.name` (or
 `gen_ai.workflow.name`), a tool call by `gen_ai.tool.name`, and every other
-span by its own name, 1 to 128 characters. The span named `telmoni.run.start`,
-which opens a run, is never a row.
+span by its own name, 1 to 145 characters: room for a model call's
+`<operation> <model>`, the longest operation and a model at its cap. The span
+named `telmoni.run.start`, which opens a run, is never a row.
 
 ## What is kept
 

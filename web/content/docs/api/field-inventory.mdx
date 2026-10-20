@@ -73,9 +73,9 @@ commas. It is kept as any tag is.
 | Attribute | On | Kept as | Needs | Rule |
 |---|---|---|---|---|
 | `gen_ai.operation.name` | every span | the column `kind` | any | `invoke_agent` or `invoke_workflow` is the run; `chat`, `generate_content`, `text_completion` or `embeddings` a model call; `execute_tool` a tool call; any other span a step under the `telmoni` scope, a plain span elsewhere |
-| `gen_ai.agent.name` | the run | the column `name` | any | 1 to 128 characters |
-| `gen_ai.workflow.name` | the run | the column `name`, where `gen_ai.agent.name` is unset | any | 1 to 128 characters |
-| `gen_ai.tool.name` | a tool call | the column `name` | any | 1 to 128 characters |
+| `gen_ai.agent.name` | the run | the column `name` | any | 1 to 145 characters |
+| `gen_ai.workflow.name` | the run | the column `name`, where `gen_ai.agent.name` is unset | any | 1 to 145 characters |
+| `gen_ai.tool.name` | a tool call | the column `name` | any | 1 to 145 characters |
 | `error.type` | any span | the column `error_type` | any | 1 to 128 characters: the exception's class, never its message |
 | `gen_ai.response.model` | a model call | the column `model` | any | 1 to 128 characters, as the provider spells it |
 | `gen_ai.request.model` | a model call | the column `model`, where the response names none | any | 1 to 128 characters, as the provider spells it |
