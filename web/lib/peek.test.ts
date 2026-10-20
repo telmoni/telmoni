@@ -154,6 +154,17 @@ describe("the peek in the browser's history", () => {
     expect(followEntry(null)).toBeNull();
   });
 
+  // Else Close goes back over the fragment's entry to the peek's, still open: a second press.
+  it("lets go of the entry a fragment typed over it made, and leaves it unmarked", () => {
+    openPeek(RUN_A);
+    const entry = pushedEntry();
+    window.history.pushState(null, "", `/acme/web/traces?status=error&days=30&peek=${RUN_A}#typed`);
+    expect(followEntry(entry)).toBeNull();
+    expect(window.history.state).toBeNull();
+    closePeek(false);
+    expect(window.location.search).toBe("?status=error&days=30");
+  });
+
   // Else Close, rewriting in place, would leave the duplicate it goes back to spare.
   it("takes its entry back where Back returns to it from the list moved on", async () => {
     openPeek(RUN_A);

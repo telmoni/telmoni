@@ -77,9 +77,10 @@ function spelled(address: string, view = true): string {
   return `${url.pathname}?${url.searchParams}`;
 }
 
-/** The page's address as an entry is told by. */
+/** The page's address as an entry is told by, its fragment too: one typed over the peek is an
+ *  entry of its own, not the peek's. */
 function here(): string {
-  return `${window.location.pathname}${window.location.search}`;
+  return `${window.location.pathname}${window.location.search}${window.location.hash}`;
 }
 
 /** The address of the entry the peek pushed, if the one in front is it, or

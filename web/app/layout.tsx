@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import "./globals.css";
 import { ACCESSIBILITY_BOOT_SCRIPT } from "@/lib/accessibility";
 import { CORNERS_BOOT_SCRIPT } from "@/lib/corners";
+import { FragmentEntries } from "@/components/fragment-entries";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { env } from "@/lib/env";
@@ -67,6 +68,7 @@ export default async function RootLayout({
         >
           {children}
           <Toaster />
+          <FragmentEntries />
         </ThemeProvider>
       </body>
     </html>
