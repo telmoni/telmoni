@@ -34,7 +34,7 @@
 Telmoni is an **open-source telemetry platform for AI agents**. Its SDKs record every **run** of an agent, and the **steps**, **model calls** and **tool calls** inside it, with their **tokens, timings and errors**, as OpenTelemetry spans. The console reads them back as **traces, sessions and users**. Everything is kept as **metadata**: prompts and completions come off a span before it leaves your process, and ingest drops any that arrive anyway. Telmoni is **one Rust binary** and **a Next.js console** on PostgreSQL, ClickHouse and Redis, and you can **self-host it** with Docker Compose or Kubernetes.
 
 > [!NOTE]
-> **Telmoni hasn't launched yet, and it's built in the open.** What runs today is the foundation (organizations and roles, API keys, the audit log, notifications and the console agent) and the first of the telemetry on it: the SDKs, ingest, and the console's traces, sessions and users. Monitors come next: the server already keeps each agent's schedule and bounds, and the checks that alert when an agent breaks them, cost tracking, and the console's monitor pages are being built. [Where it goes next](ARCHITECTURE.md#where-it-goes-next) lists what's settled but not built yet.
+> **Telmoni hasn't launched yet, and it's built in the open.** What runs today is the foundation (organizations and roles, API keys, the audit log, notifications and the console agent) and the first of the telemetry on it: the SDKs, ingest, and the console's traces, sessions and users. Monitors come next: the server already keeps each agent's schedule and bounds and marks a monitor late, failed or stalled when one is broken; the alerts that follow, cost tracking, and the console's monitor pages are being built. [Where it goes next](ARCHITECTURE.md#where-it-goes-next) lists what's settled but not built yet.
 
 ## ✨ Core features
 
@@ -44,7 +44,7 @@ Telmoni is an **open-source telemetry platform for AI agents**. Its SDKs record 
 - **[Organizations and audit](https://telmoni.com/docs/workspace/audit-log)**: Organizations and projects with owner, admin and member roles, invitations, transfers and scoped API keys, and sign-in by password or through any OIDC provider. Every change lands in an audit log that's hash-chained per organization and can be exported.
 - **[Notifications](https://telmoni.com/docs/integrations/notifications)**: An in-app feed, Slack, and webhooks signed with HMAC-SHA256, sent through a delivery queue that retries.
 - **[Console agent](https://telmoni.com/docs/self-host/agent)**: Ask questions in plain language. A read-only agent searches the docs, the audit log and the notification feed and cites its sources, running on Anthropic or any OpenAI-compatible model server, such as Ollama, vLLM or OpenRouter.
-- **Monitors and alerts** *(in progress)*: A contract for each agent: a crontab schedule in its own time zone, a grace period, a stall timeout, a step cap and a cost cap, with a ping lane for cron jobs. Alerting when an agent breaks one is the next milestone.
+- **Monitors and alerts** *(in progress)*: A contract for each agent: a crontab schedule in its own time zone, a grace period, a stall timeout, a step cap and a cost cap, with a ping lane for cron jobs, and a check every few seconds that marks a monitor late, failed or stalled when its agent breaks the contract. Alerting when that happens is the next milestone.
 
 ## 🚀 Quickstart
 
@@ -159,9 +159,9 @@ crates/
   notifications/  the feed, the Slack and webhook connectors, delivery
   agent/          the console agent: models, embeddings, the index and its hybrid search, read-only tools
   telemetry/      ingest at /otlp/v1/traces and the ping lane at /ping/v1, each project's settings,
-                  monitors, ping keys and open runs, the outbox, the spans and their hourly totals
-                  in ClickHouse, its ClickHouse file and nightly purge, ClickHouse's configuration
-                  and local users
+                  monitors and the ticker that watches them, ping keys and open runs, the outbox,
+                  the spans and their hourly totals in ClickHouse, its ClickHouse file and nightly
+                  purge, ClickHouse's configuration and local users
   migrator/       the migration runner, grants, role hardening, the audit schema;
                   runs telemetry's ClickHouse file and purge
   shared/         errors, RBAC, tenancy, the seams between modules

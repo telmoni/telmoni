@@ -969,6 +969,25 @@ pub(crate) fn state_waiting_out_moves(
     })
 }
 
+/// [`state_with_notices`], its ticker looking every `tick_secs` rather than
+/// the five seconds it takes unset.
+pub(crate) fn state_ticking_every(
+    pool: &PgPool,
+    auth: Arc<dyn Auth>,
+    tick_secs: u64,
+) -> Arc<AppState> {
+    let mut module = module_at(
+        pool,
+        auth,
+        "http://telemetry:telemetry@127.0.0.1:1",
+        "redis://127.0.0.1:1",
+        Arc::new(NoLimits),
+        NoticeLog::new(),
+    );
+    module.config.tick_secs = tick_secs;
+    Arc::new(module)
+}
+
 /// The module over no store a suite can reach, refusing an export whose body
 /// has not arrived within `body_wait`, where the module waits a minute.
 pub(crate) fn state_waiting_bodies(
@@ -1036,6 +1055,7 @@ fn module_at(
         kms_api_base: "http://127.0.0.1:1".into(),
         metadata_api_base: "http://127.0.0.1:1".into(),
         redis_url: redis_url.into(),
+        tick_secs: 5,
     };
     telmoni_telemetry::boot::state(
         config,

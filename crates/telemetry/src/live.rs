@@ -128,16 +128,16 @@ pub fn spans_ingested(
     }
 }
 
-/// Tell the organization's open consoles that a ping landed on one of
-/// `project_id`'s monitors, once the ping is in; the ping's answer is never
-/// held for Redis (`publish`).
+/// Tell the organization's open consoles that one of `project_id`'s monitors
+/// or runs changed — a ping landed, or the ticker moved one — once the
+/// change is in; the caller is never held for Redis (`publish`).
 pub fn monitors_changed(state: Arc<AppState>, organization_id: &str, project_id: &str) {
     match monitors_message(organization_id, project_id) {
         Ok(message) => publish(
             state,
             organization_id,
             message,
-            "telling the console of a ping",
+            "telling the console of monitors changed",
         ),
         Err(error) => tracing::debug!(
             project_id = %project_id,

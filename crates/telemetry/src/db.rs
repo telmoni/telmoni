@@ -737,6 +737,120 @@ pub async fn monitor_to_settle(
     .await
 }
 
+/// One of the project's monitors, by its id, read plainly.
+pub async fn monitor_by_id<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    id: Uuid,
+) -> sqlx::Result<Option<MonitorRow>> {
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {MONITOR_COLUMNS} FROM telemetry.monitors WHERE project_id = $1 AND id = $2"
+    )))
+    .bind(project_id)
+    .bind(id)
+    .fetch_optional(tx.conn())
+    .await
+}
+
+/// The database's clock, to the microsecond it keeps: for a decision that
+/// must agree with a read the database made by its own `now()`.
+pub async fn clock<B: HasProject>(tx: &mut Scoped<'_, B>) -> sqlx::Result<DateTime<Utc>> {
+    sqlx::query_scalar("SELECT now()")
+        .fetch_one(tx.conn())
+        .await
+}
+
+/// One of the project's monitors, by its id, as the ticker holds it before
+/// it ends any run of the monitor's: shared (`FOR KEY SHARE`), as a ping
+/// holds its own from its read, so a delete waits for the ticker holding
+/// nothing it wants. `None` where the project has no monitor by that id, or
+/// where a delete or a purge holds it now, which the ticker leaves to its
+/// next tick rather than wait on (`SKIP LOCKED`).
+pub async fn hold_monitor_by_id<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    id: Uuid,
+) -> sqlx::Result<Option<MonitorRow>> {
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {MONITOR_COLUMNS} FROM telemetry.monitors
+          WHERE project_id = $1 AND id = $2
+            FOR KEY SHARE SKIP LOCKED"
+    )))
+    .bind(project_id)
+    .bind(id)
+    .fetch_optional(tx.conn())
+    .await
+}
+
+/// One of the project's monitors, by its id, locked as the ticker's write
+/// holds it (`FOR NO KEY UPDATE`), so the ticker moves the monitor as it
+/// stands, not as its tick read it: a pause, a save or a ping's settling may
+/// have committed since. `None` where the project has no monitor by that id,
+/// or where a ping's settling or the console's change holds it now, which
+/// the ticker leaves to its next tick rather than wait on (`SKIP LOCKED`).
+pub async fn monitor_to_tick(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    id: Uuid,
+) -> sqlx::Result<Option<MonitorRow>> {
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {MONITOR_COLUMNS} FROM telemetry.monitors
+          WHERE project_id = $1 AND id = $2
+            FOR NO KEY UPDATE SKIP LOCKED"
+    )))
+    .bind(project_id)
+    .bind(id)
+    .fetch_optional(tx.conn())
+    .await
+}
+
+/// Every monitor the ticker has something to do for, across every tenant,
+/// by its project and its id in that order, a page of `limit` at most: one
+/// due past its grace, or due and `healthy`, the one state that moves
+/// inside the grace; one with a run past its ceiling; and one with a run
+/// quiet past its stall timeout, unless stalled, failed, paused or `new`
+/// already, which a quiet run moves nowhere. What each needs is decided
+/// again from the rows as they stand, under the locks the ticker takes. The
+/// due read is the partial index's, since a monitor past its grace is found
+/// again and leaves it.
+pub async fn monitors_with_work(
+    tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
+    limit: i64,
+) -> sqlx::Result<Vec<(ProjectId, Uuid)>> {
+    let unmoved_by_a_quiet_run: Vec<&str> = [
+        MonitorState::Stalled,
+        MonitorState::Failed,
+        MonitorState::Paused,
+        MonitorState::New,
+    ]
+    .iter()
+    .map(|s| s.as_str())
+    .collect();
+    sqlx::query_as(
+        "SELECT project_id, id FROM telemetry.monitors
+          WHERE next_due_at IS NOT NULL AND next_due_at < now()
+            AND (state = $2
+                 OR next_due_at + make_interval(secs => COALESCE(grace_s, 0)) < now())
+         UNION
+         SELECT project_id, monitor_id FROM telemetry.open_runs
+          WHERE ends_by < now()
+         UNION
+         SELECT r.project_id, r.monitor_id
+           FROM telemetry.open_runs r
+           JOIN telemetry.monitors m ON m.id = r.monitor_id
+          WHERE r.stall_after_s IS NOT NULL
+            AND r.last_heard_at + make_interval(secs => r.stall_after_s) < now()
+            AND m.state <> ALL($3::text[])
+         ORDER BY project_id, id
+         LIMIT $1",
+    )
+    .bind(limit)
+    .bind(MonitorState::Healthy)
+    .bind(unmoved_by_a_quiet_run)
+    .fetch_all(tx.conn())
+    .await
+}
+
 /// One of the project's monitors, by its id, after a run of its was heard:
 /// put in `state`, its `state_changed_at` moved only where that differs
 /// from the state it was in, and its next due time set to `next_due_at`,
@@ -1198,6 +1312,22 @@ const OPEN_RUN_COLUMNS: &str = "id, monitor_id, agent, source, ping_key_id, star
      last_heard_at, ends_by, steps, input_tokens, output_tokens, cost_usd, stall_after_s, \
      max_steps, max_cost_usd";
 
+/// A run a statement heard or ended: its row as the statement left it, or
+/// as it was removed, and whether it was quiet past its stall timeout as
+/// the statement found it — by the database's clock, the one the ticker
+/// judges quiet by, so a ping and a tick never disagree on the same row.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct RunWritten {
+    #[sqlx(flatten)]
+    pub run: OpenRunRow,
+    pub was_quiet: bool,
+}
+
+/// Whether a row of `open_runs` is quiet past its stall timeout now, as a
+/// `RETURNING` clause asks of the row it hands back.
+const RUN_WAS_QUIET: &str =
+    "stall_after_s IS NOT NULL AND last_heard_at + make_interval(secs => stall_after_s) < now()";
+
 /// What opening a run writes.
 #[derive(Debug, Clone, Copy)]
 pub struct OpenRunWrite<'a> {
@@ -1286,38 +1416,45 @@ pub async fn insert_open_run(
     .await
 }
 
-/// One of the project's open runs heard at `heard_at`, its stall timeout
-/// starting again, with its steps and spend so far where a checkpoint
-/// reported more than the run holds: each is a total so far, which never
-/// falls, so an older checkpoint sent again moves neither back; and its
-/// last hearing never moves back either, since a ping's clock is read as
-/// it arrives and its write may land after a later ping's — one racing the
-/// ping that opened the run would have it heard before it started. `None`
-/// where the project has no open run by that id under `monitor_id`, the
-/// monitor it was read under, so a run another monitor opened under the id
-/// once this one ended is never taken for it.
+/// One of the project's open runs heard now, its stall timeout starting
+/// again, with its steps and spend so far where a checkpoint reported more
+/// than the run holds: each is a total so far, which never falls, so an
+/// older checkpoint sent again moves neither back. The hearing is stamped
+/// by the database's clock, the one every quiet verdict reads by — this
+/// statement's, the ticker's and the read's — so a run just heard never
+/// reads as quiet, whatever the server's clock says or however long the
+/// ping waited before it wrote; and it never moves back, since a ping's
+/// write may land after a later ping's. `None` where the project has no
+/// open run by that id under `monitor_id`, the monitor it was read under,
+/// so a run another monitor opened under the id once this one ended is
+/// never taken for it. Whether the run was quiet before it was heard is
+/// read from the row as the statement found it, which the sub-select sees,
+/// the statement's own write not yet in its snapshot; where the statement
+/// waited on another hearing of the run, the sub-select still reads the
+/// older version, so it can say quiet of a run just heard, never the other
+/// way round, and the caller then locks and asks again for nothing.
 pub async fn hear_open_run<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
     id: Uuid,
     monitor_id: Uuid,
-    heard_at: DateTime<Utc>,
     steps: Option<i32>,
     cost_usd: Option<f64>,
-) -> sqlx::Result<Option<OpenRunRow>> {
+) -> sqlx::Result<Option<RunWritten>> {
     // `GREATEST` passes over a NULL, so a total the ping did not send stands.
     sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE telemetry.open_runs
-            SET last_heard_at = GREATEST($4, last_heard_at),
-                steps = GREATEST($5, steps),
-                cost_usd = GREATEST($6, cost_usd)
+            SET last_heard_at = GREATEST(statement_timestamp(), last_heard_at),
+                steps = GREATEST($4, steps),
+                cost_usd = GREATEST($5, cost_usd)
           WHERE project_id = $1 AND id = $2 AND monitor_id = $3
-         RETURNING {OPEN_RUN_COLUMNS}"
+         RETURNING {OPEN_RUN_COLUMNS},
+                   (SELECT {RUN_WAS_QUIET} FROM telemetry.open_runs
+                     WHERE project_id = $1 AND id = $2) AS was_quiet"
     )))
     .bind(project_id)
     .bind(id)
     .bind(monitor_id)
-    .bind(heard_at)
     .bind(steps)
     .bind(cost_usd)
     .fetch_optional(tx.conn())
@@ -1325,16 +1462,17 @@ pub async fn hear_open_run<B: HasProject>(
 }
 
 /// One of the project's open runs, ended: its row gone, and answered as it
-/// was; `None` where the project has no open run by that id.
+/// was, with whether it was quiet; `None` where the project has no open
+/// run by that id.
 pub async fn close_open_run<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
     id: Uuid,
-) -> sqlx::Result<Option<OpenRunRow>> {
+) -> sqlx::Result<Option<RunWritten>> {
     sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "DELETE FROM telemetry.open_runs
           WHERE project_id = $1 AND id = $2
-         RETURNING {OPEN_RUN_COLUMNS}"
+         RETURNING {OPEN_RUN_COLUMNS}, ({RUN_WAS_QUIET}) AS was_quiet"
     )))
     .bind(project_id)
     .bind(id)
@@ -1343,22 +1481,68 @@ pub async fn close_open_run<B: HasProject>(
 }
 
 /// Every open run of the monitor's, ended: their rows gone, and answered as
-/// they were, in no order. What a `/start` naming no run finds open, and
-/// what an end ping naming none finds beside the run it means: the one the
-/// ping means and runs that never said they ended.
+/// they were, each with whether it was quiet, in no order. What a `/start`
+/// naming no run finds open, and what an end ping naming none finds beside
+/// the run it means: the one the ping means and runs that never said they
+/// ended.
 pub async fn close_open_runs<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
     monitor_id: Uuid,
-) -> sqlx::Result<Vec<OpenRunRow>> {
+) -> sqlx::Result<Vec<RunWritten>> {
     sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "DELETE FROM telemetry.open_runs
           WHERE project_id = $1 AND monitor_id = $2
-         RETURNING {OPEN_RUN_COLUMNS}"
+         RETURNING {OPEN_RUN_COLUMNS}, ({RUN_WAS_QUIET}) AS was_quiet"
     )))
     .bind(project_id)
     .bind(monitor_id)
     .fetch_all(tx.conn())
+    .await
+}
+
+/// The monitor's open runs past their ceiling (`ends_by`), oldest first and
+/// `limit` at most, each held for the ticker to end (`FOR UPDATE`): one a
+/// ping holds now, to end it itself, is left to it (`SKIP LOCKED`), so the
+/// ticker waits on no ping.
+pub async fn runs_past_ceiling<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    monitor_id: Uuid,
+    limit: i64,
+) -> sqlx::Result<Vec<OpenRunRow>> {
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {OPEN_RUN_COLUMNS}
+           FROM telemetry.open_runs
+          WHERE project_id = $1 AND monitor_id = $2 AND ends_by < now()
+          ORDER BY started_at, id
+          LIMIT $3
+            FOR UPDATE SKIP LOCKED"
+    )))
+    .bind(project_id)
+    .bind(monitor_id)
+    .bind(limit)
+    .fetch_all(tx.conn())
+    .await
+}
+
+/// Whether one of the monitor's open runs is quiet past its stall timeout,
+/// as the rows stand now: asked with the monitor held as the write holds
+/// it, so a checkpoint committed since the caller's read is seen, and a run
+/// the caller heard or ended in its own transaction is not quiet, or gone.
+pub async fn has_stalled_run<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    monitor_id: Uuid,
+) -> sqlx::Result<bool> {
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT EXISTS (
+            SELECT 1 FROM telemetry.open_runs
+             WHERE project_id = $1 AND monitor_id = $2 AND {RUN_WAS_QUIET})"
+    )))
+    .bind(project_id)
+    .bind(monitor_id)
+    .fetch_one(tx.conn())
     .await
 }
 

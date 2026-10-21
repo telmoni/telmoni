@@ -21,7 +21,9 @@
 //! through the ping lane, `/ping/v1/{ping_key}/{slug}` ([`ping_router`]).
 //! The [`outbox`] carries what a ping ends to ClickHouse and what it
 //! discovers to the feed; [`rotation`] retires a replaced key a week after
-//! its last ping; the [`sweep`] finishes a purge auth's call could not.
+//! its last ping; the [`ticker`] marks a monitor late, failed or stalled and
+//! ends a run past its ceiling; the [`sweep`] finishes a purge auth's call
+//! could not.
 //!
 //! ⚠ **Its readiness reads Postgres alone.** The server is one process for
 //! every module: a ClickHouse outage must leave sign-in, and every console
@@ -63,6 +65,7 @@ pub mod seam;
 pub mod sessions;
 pub mod store;
 pub mod sweep;
+pub mod ticker;
 pub mod traces;
 pub mod users;
 

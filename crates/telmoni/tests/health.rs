@@ -78,6 +78,7 @@ fn assemble() -> App {
             kms_api_base: "http://127.0.0.1:1".into(),
             metadata_api_base: "http://127.0.0.1:1".into(),
             redis_url: "redis://127.0.0.1:1".into(),
+            tick_secs: 5,
         },
         telemetry_pool: unreachable_pool(),
         agent: None,

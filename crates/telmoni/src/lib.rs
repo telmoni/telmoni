@@ -3,8 +3,9 @@
 //! Auth, notifications, telemetry and the agent are libraries. This crate
 //! links them, hands each the others through the seams in
 //! [`telmoni_shared::seam`], mounts their routers under one listener, and
-//! runs their background loops — the delivery loop, telemetry's outbox loop
-//! and its ping keys' rotation, the retention sweeps, the agent's indexer,
+//! runs their background loops — the delivery loop, telemetry's outbox loop,
+//! its ping keys' rotation and its monitors' ticker, the retention sweeps,
+//! the agent's indexer,
 //! the deletion sweep and the nightly audit walk — as tasks of the same
 //! process. Each module still connects as its own database
 //! role, so row-level security and the grants stand exactly as they did
@@ -447,6 +448,7 @@ impl App {
         ));
         let outbox = tokio::spawn(telmoni_telemetry::outbox::run(self.telemetry.clone()));
         let rotation = tokio::spawn(telmoni_telemetry::rotation::run(self.telemetry.clone()));
+        let ticker = tokio::spawn(telmoni_telemetry::ticker::run(self.telemetry.clone()));
         let purges = tokio::spawn(telmoni_telemetry::sweep::run(self.telemetry.clone()));
         if env_parse("RUN_SWEEPS", true)? {
             sweeps::spawn(self.auth.clone());
@@ -477,8 +479,8 @@ impl App {
         );
         // ⚠ These loops are raced against the server: a dead one would leave
         // a Ready pod that quietly stops delivering, writing pings, retiring
-        // keys or finishing purges, so the process exits and the restart is
-        // the recovery.
+        // keys, calling monitors late or finishing purges, so the process
+        // exits and the restart is the recovery.
         tokio::select! {
             () = serve => {},
             ended = delivery => match ended {
@@ -492,6 +494,10 @@ impl App {
             ended = rotation => match ended {
                 Ok(()) => anyhow::bail!("the ping keys' rotation exited; restarting the process"),
                 Err(e) => anyhow::bail!("the ping keys' rotation died: {e}"),
+            },
+            ended = ticker => match ended {
+                Ok(()) => anyhow::bail!("the monitors' ticker exited; restarting the process"),
+                Err(e) => anyhow::bail!("the monitors' ticker died: {e}"),
             },
             ended = purges => match ended {
                 Ok(()) => anyhow::bail!("telemetry's purge sweep exited; restarting the process"),

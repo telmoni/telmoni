@@ -1795,22 +1795,14 @@ async fn a_ping_whose_run_ends_beside_it_changes_nothing(pool: PgPool) {
     let mut tx = telmoni_shared::db::tenant_session::project_scope(&pool, &p.project)
         .await
         .expect("a scope");
-    let heard = db::hear_open_run(
-        &mut tx,
-        &p.project,
-        namesake,
-        hourly,
-        Utc::now(),
-        None,
-        None,
-    )
-    .await
-    .expect("a write");
+    let heard = db::hear_open_run(&mut tx, &p.project, namesake, hourly, None, None)
+        .await
+        .expect("a write");
     assert!(
         heard.is_none(),
         "another monitor's run was heard as this one's"
     );
-    let heard = db::hear_open_run(&mut tx, &p.project, namesake, other, Utc::now(), None, None)
+    let heard = db::hear_open_run(&mut tx, &p.project, namesake, other, None, None)
         .await
         .expect("a write");
     assert!(
@@ -2910,10 +2902,9 @@ async fn a_ping_racing_its_runs_first_ping_hears_the_run(pool: PgPool) {
     let (started, heard) = clocks_of(&pool, &p.project, &retried).await;
     assert!(heard > started, "the copy did not hear the run");
 
-    // A ping's clock is read as it arrives and its write may land after a
-    // later ping's, as a copy's does after the run's first: a hearing at an
-    // earlier moment leaves the run's last one standing. The gap cannot be
-    // held open from outside, so the clock is put to the write itself.
+    // A hearing is stamped by the database's clock as it is written, so a
+    // copy's write that lands after a later ping's never moves the run's
+    // last hearing back, and its start, the server's clock, stands.
     let hourly = Uuid::parse_str(
         p.monitor("hourly-sync").await["id"]
             .as_str()
@@ -2928,7 +2919,6 @@ async fn a_ping_racing_its_runs_first_ping_hears_the_run(pool: PgPool) {
         &p.project,
         Uuid::parse_str(&retried).expect("a run's id"),
         hourly,
-        started - chrono::Duration::seconds(1),
         None,
         None,
     )
@@ -2936,11 +2926,9 @@ async fn a_ping_racing_its_runs_first_ping_hears_the_run(pool: PgPool) {
     .expect("a write")
     .expect("the run");
     tx.commit().await.expect("committed");
-    assert_eq!(
-        clocks_of(&pool, &p.project, &retried).await,
-        (started, heard),
-        "an earlier clock moved the run's last hearing back"
-    );
+    let (started_again, heard_again) = clocks_of(&pool, &p.project, &retried).await;
+    assert_eq!(started_again, started, "the start moved");
+    assert!(heard_again >= heard, "the run's last hearing moved back");
     p.ping_ok(&format!("/{key}/hourly-sync?rid={retried}"))
         .await;
 
