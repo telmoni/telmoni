@@ -71,10 +71,9 @@ export function KeyboardShortcuts() {
   // it as a dependency would re-add a document-level listener on every render.
   // Ref-sync effect with no dependency array, as in realtime-listener.tsx.
   const pageActionRef = useRef(pageAction);
-  // Every sequence but `g O` is a row of the rail you stand in, so where you
-  // ARE decides where `g k` goes. Through a ref for the same reason as the
-  // page action: naming the path as a dependency re-binds a document listener
-  // on every navigation, and this one has to survive them.
+  // Where you ARE decides where `g k` goes, since every sequence but `g O`
+  // and `g n` is a row of the rail you stand in. Through a ref, as the page
+  // action: the path as a dependency would re-bind the listener each move.
   const placeRef = useRef({ pathname, organization, flags });
   useEffect(() => {
     pageActionRef.current = pageAction;

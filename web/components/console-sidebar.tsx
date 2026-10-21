@@ -13,8 +13,10 @@ import {
   type ConsoleNavItem,
 } from "@/lib/console-nav";
 import { resolveReturnUrl } from "@/lib/console-trail";
+import { sequenceHint } from "@/lib/keys";
 import { PRODUCT_NAME } from "@/lib/site";
 import { useFlags } from "@/lib/store";
+import { useLetterKeys } from "@/lib/use-accessibility";
 import { useConsoleTrail, useLiveResources } from "@/lib/use-console-trail";
 import { cn } from "@/lib/utils";
 import { useSidebar } from "./sidebar-context";
@@ -37,6 +39,9 @@ function NavRow({
   // The drawer closes on `onNavigate`, not a click: a ⌘-click to a new tab
   // navigates nothing here, so it leaves the drawer open.
   const { closeOnMobile } = useSidebar();
+  const letterKeys = useLetterKeys();
+  // Its `g` sequence under the pointer, while letter keys work at all.
+  const hint = letterKeys && item.key ? `${item.title} (${sequenceHint(item.key)})` : undefined;
   // No title is written here: the tab's title is each page's `metadata`, which
   // Next sets as the page lands. Written on the click as well, it went up
   // before the page came, and wrong on the overviews: the row says Overview
@@ -57,7 +62,7 @@ function NavRow({
         href={item.url}
         onNavigate={closeOnMobile}
         aria-label={item.title}
-        title={item.title}
+        title={hint ?? item.title}
         aria-current={item.isActive ? "page" : undefined}
         {...(step ? { ["data-rail-step"]: "" } : {})}
         className={cn(
@@ -96,7 +101,7 @@ function NavRow({
       href={item.url}
       onNavigate={closeOnMobile}
       aria-label={short ? item.title : undefined}
-      title={short ? item.title : undefined}
+      title={hint ?? (short ? item.title : undefined)}
       aria-current={item.isActive ? "page" : undefined}
       {...(step ? { ["data-rail-step"]: "" } : {})}
       className={rowClass}

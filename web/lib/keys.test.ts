@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { buildConsoleNav } from "./console-nav";
 import {
+  NOTIFICATIONS_KEY,
   ORGANIZATION_KEY,
   PAGE_ACTION_KEY,
   goSequences,
   pressedKey,
   resolveSequence,
+  sequenceHint,
 } from "./keys";
 
 // One path on each rail: a project's, an organization's, the person's.
@@ -24,7 +26,7 @@ describe("the go sequences", () => {
       }
       const urls = new Set(rows.map((r) => r.url));
       for (const s of goSequences(pathname, "acme")) {
-        if (s.key === ORGANIZATION_KEY) continue;
+        if (s.key === ORGANIZATION_KEY || s.key === NOTIFICATIONS_KEY) continue;
         expect(urls.has(s.href), `g ${s.key} promises ${s.href} off the rail`).toBe(true);
       }
     }
@@ -73,10 +75,27 @@ describe("the go sequences", () => {
     expect(resolveSequence("O", "/account/settings", null)).toBeNull();
   });
 
+  it("goes to Notifications from every page of the console, once on Account's rail", () => {
+    for (const pathname of ["/acme/web", "/acme/web/traces", "/acme", "/acme/members", ...RAILS]) {
+      expect(resolveSequence("n", pathname, "acme"), pathname).toBe("/account/notifications");
+      const notifications = goSequences(pathname, "acme").filter((s) => s.key === "n");
+      expect(notifications, pathname).toEqual([
+        { key: "n", label: "Notifications", href: "/account/notifications" },
+      ]);
+    }
+  });
+
+  it("names a sequence in a tooltip as the sheet's keys read", () => {
+    expect(sequenceHint("t")).toBe("G then T");
+    expect(sequenceHint(NOTIFICATIONS_KEY)).toBe("G then N");
+    expect(sequenceHint(",")).toBe("G then ,");
+    expect(sequenceHint(ORGANIZATION_KEY)).toBe("G then ⇧ O");
+  });
+
   // ⚠ The corner that once shipped a 404: with nowhere to stand, a bare
   // project-relative href read as an organization of that name. Off the
   // console's paths the rail is empty, so nothing but `g O` resolves.
-  it.each(["k", "c", "m", "l", ",", "o", "t", "p"])("refuses %s where no rail stands", (k) => {
+  it.each(["k", "c", "m", "l", ",", "o", "t", "p", "n"])("refuses %s where no rail stands", (k) => {
     expect(resolveSequence(k, "/")).toBeNull();
     expect(resolveSequence(k, "/", "acme")).toBeNull();
     expect(resolveSequence(k, "/console", "acme")).toBeNull();

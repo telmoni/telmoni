@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { exportSummary } from "@/lib/audit-exports";
 import { NOTIFICATIONS_HREF } from "@/lib/console-nav";
+import { NOTIFICATIONS_KEY, sequenceHint } from "@/lib/keys";
 import {
   badgeCount,
   bellLabel,
@@ -38,6 +39,7 @@ import {
   useProjectOffers,
   useRemoveIncomingInvite,
 } from "@/lib/store";
+import { useLetterKeys } from "@/lib/use-accessibility";
 import { isBuilding, isWaiting, type AuditExport } from "@/lib/types/audit-export";
 import type { IncomingInvite } from "@/lib/types/incoming-invite";
 import { cn } from "@/lib/utils";
@@ -66,12 +68,14 @@ export function NotificationsBell() {
   const count =
     invites.length + offers.length + projectOffers.length + exportsWaiting.length;
   const badge = badgeCount(count);
+  const letterKeys = useLetterKeys();
 
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger
         data-testid="notifications-bell"
         aria-label={bellLabel(count)}
+        title={letterKeys ? `Notifications (${sequenceHint(NOTIFICATIONS_KEY)})` : "Notifications"}
         className={cn(
           "relative flex size-9 shrink-0 items-center justify-center",
           "rounded-md text-muted-foreground hover:text-foreground",

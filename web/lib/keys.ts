@@ -1,4 +1,9 @@
-import { buildConsoleNav, consolePlace, type ConsoleNavItem } from "./console-nav";
+import {
+  NOTIFICATIONS_HREF,
+  buildConsoleNav,
+  consolePlace,
+  type ConsoleNavItem,
+} from "./console-nav";
 import type { FlagSet } from "./flags";
 import { organizationPath } from "./slug";
 
@@ -55,8 +60,12 @@ export const PREVIOUS_KEY = "k";
 export const OPEN_KEY = "o";
 
 /** `g` then this reaches the organization's overview from anywhere, Account
- *  included: the one sequence that is not a row of the rail you stand in. */
+ *  included. */
 export const ORGANIZATION_KEY = "O";
+
+/** `g` then this reaches Notifications, the bell's page, from anywhere in the
+ *  console, as GitHub's `g n` does. */
+export const NOTIFICATIONS_KEY = "n";
 
 export interface GoSequence {
   key: string;
@@ -64,15 +73,13 @@ export interface GoSequence {
   href: string;
 }
 
-// The `g` sequences are the rail's rows: each row that carries a `key` in
-// `lib/console-nav.ts` is reached by `g` and that key, so a row added to the
-// rail — a console built on this one adds its own through
-// `lib/extension/nav.ts` — is reached the day it lands, and the sheet lists
-// exactly the rail you stand in, which keeps a sequence from ever promising
-// a page the rail does not have. Account's rows are reached the same way.
-// `c` is also `PAGE_ACTION_KEY`, and that is safe rather than a collision:
-// the handler takes the pending-`g` branch and returns before it ever reaches
-// the page-action check, so the two readings of the key never meet.
+// The `g` sequences are the rail's rows: a row with a `key` in
+// `lib/console-nav.ts`, or one a console built on this one adds through
+// `lib/extension/nav.ts`, is reached by `g` and that key the day it lands,
+// and the sheet lists exactly the rail you stand in, so no sequence promises
+// a page the rail lacks; only `g O` and `g n` reach their page from anywhere.
+// `c` is also `PAGE_ACTION_KEY`, safely: the pending-`g` branch returns
+// before the page-action check, so the two readings never meet.
 //
 // ⚠ **A sequence with nowhere to go must do nothing.** A bare project-relative
 // href — `/api-keys` — reads as an organization of that name and 404s. Off
@@ -88,6 +95,9 @@ export function goSequences(
     .filter((item): item is ConsoleNavItem & { key: string } => item.key !== undefined)
     .map((item) => ({ key: item.key, label: item.title, href: item.url }));
   const place = consolePlace(pathname);
+  if (place !== null && !rows.some((s) => s.key === NOTIFICATIONS_KEY)) {
+    rows.push({ key: NOTIFICATIONS_KEY, label: "Notifications", href: NOTIFICATIONS_HREF });
+  }
   const slug = place !== null && place.kind !== "account" ? place.organization : organization;
   if (slug) {
     rows.push({
@@ -97,6 +107,11 @@ export function goSequences(
     });
   }
   return rows;
+}
+
+/** A sequence as a tooltip names it, in the shortcut sheet's own keys. */
+export function sequenceHint(key: string): string {
+  return `G then ${/^[A-Z]$/.test(key) ? `⇧ ${key}` : key.toUpperCase()}`;
 }
 
 /** Where `g` and `key` go from `pathname`; `null` is nowhere, and nothing. */

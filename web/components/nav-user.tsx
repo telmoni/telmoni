@@ -38,6 +38,7 @@ import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { CORNERS_DEFAULT, type Corners } from "@/lib/corners";
 import { setCorners, useCorners } from "@/lib/use-corners";
 import { ACCOUNT_MENU_EVENT, pressedKey } from "@/lib/keys";
+import { useIsMac } from "@/lib/use-platform";
 import { DOCS_URL, REPO_URL, STATUS_URL } from "@/lib/site";
 import { useUser } from "@/lib/store";
 import { displayName } from "@/lib/user-display";
@@ -76,6 +77,7 @@ export function NavUser() {
   const corners = useCorners();
   const { openShortcuts } = useConsoleUi();
   const [open, setOpen] = useState(false);
+  const isMac = useIsMac();
 
   useEffect(() => {
     const onAsk = () => setOpen(true);
@@ -104,6 +106,7 @@ export function NavUser() {
   if (!user) return null;
 
   const name = displayName(user);
+  const chord = isMac ? "⌘⇧K" : "Ctrl Shift K";
 
   return (
     <>
@@ -113,7 +116,7 @@ export function NavUser() {
             variant="ghost"
             aria-label={`Account: ${name}`}
             aria-keyshortcuts="Control+Shift+K Meta+Shift+K"
-            title={name}
+            title={`${name} (${chord})`}
             size={null}
             className="size-9 shrink-0 rounded-md text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground"
           >

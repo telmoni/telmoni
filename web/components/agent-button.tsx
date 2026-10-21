@@ -3,6 +3,8 @@
 import { Bot } from "lucide-react";
 
 import { useConsoleUi } from "@/components/console-ui-context";
+import { AGENT_MODIFIER_KEY } from "@/lib/keys";
+import { useIsMac } from "@/lib/use-platform";
 import { cn } from "@/lib/utils";
 
 /**
@@ -11,6 +13,8 @@ import { cn } from "@/lib/utils";
  */
 export function AgentButton() {
   const { agentOpen, toggleAgent } = useConsoleUi();
+  const isMac = useIsMac();
+  const key = AGENT_MODIFIER_KEY.toUpperCase();
   return (
     <button
       type="button"
@@ -18,7 +22,8 @@ export function AgentButton() {
       aria-label="Agent"
       aria-controls="agent-panel"
       aria-expanded={agentOpen}
-      title="Agent (⌘J)"
+      aria-keyshortcuts={isMac ? `Meta+${key}` : `Control+${key}`}
+      title={`Agent (${isMac ? "⌘" : "Ctrl "}${key})`}
       onClick={toggleAgent}
       className={cn(
         "relative flex size-9 shrink-0 items-center justify-center",

@@ -3,6 +3,8 @@
 import { Search } from "lucide-react";
 
 import { useConsoleUi } from "@/components/console-ui-context";
+import { SEARCH_KEY } from "@/lib/keys";
+import { useLetterKeys } from "@/lib/use-accessibility";
 import { useIsMac } from "@/lib/use-platform";
 import { cn } from "@/lib/utils";
 
@@ -10,6 +12,7 @@ import { cn } from "@/lib/utils";
 // chord opens the same dialog (`console-search.tsx`) from anywhere.
 export function SearchButton() {
   const isMac = useIsMac();
+  const letterKeys = useLetterKeys();
   const { openSearch } = useConsoleUi();
   const chord = isMac ? "⌘K" : "Ctrl K";
   return (
@@ -18,7 +21,7 @@ export function SearchButton() {
       data-testid="search-button"
       aria-label="Search"
       aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"}
-      title={`Search (${chord})`}
+      title={letterKeys ? `Search (${chord} or ${SEARCH_KEY})` : `Search (${chord})`}
       onClick={openSearch}
       className={cn(
         "flex size-9 shrink-0 items-center justify-center",
