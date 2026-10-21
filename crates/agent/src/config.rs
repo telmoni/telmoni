@@ -31,10 +31,10 @@ const DEFAULT_PORT: &str = "8082";
 /// of the hosted service, so a server never calls another on its own.
 /// `endpoint` and `port` are the raw variables; `sdk` is what the SDK read.
 fn reporting(
-    mut sdk: telmoni_sdk::Config,
+    mut sdk: telmoni::Config,
     endpoint: Option<&str>,
     port: Option<&str>,
-) -> anyhow::Result<telmoni_sdk::Config> {
+) -> anyhow::Result<telmoni::Config> {
     if endpoint.is_none() {
         sdk.endpoint = format!("http://127.0.0.1:{}", port.unwrap_or(DEFAULT_PORT));
     }
@@ -151,7 +151,7 @@ pub struct Config {
     /// project the way any agent reports its runs (`report.rs`): on while
     /// `TELMONI_API_KEY` holds an ingest key of that project; unset, nothing
     /// records them.
-    pub telmoni: Option<telmoni_sdk::Config>,
+    pub telmoni: Option<telmoni::Config>,
 }
 
 impl Config {
@@ -178,7 +178,7 @@ impl Config {
         let telmoni = match optional("TELMONI_API_KEY") {
             None => None,
             Some(_) => Some(reporting(
-                telmoni_sdk::Config::from_env(),
+                telmoni::Config::from_env(),
                 optional("TELMONI_ENDPOINT").as_deref(),
                 optional("PORT").as_deref(),
             )?),
@@ -298,21 +298,21 @@ mod tests {
     /// no URL refuses boot.
     #[test]
     fn the_runs_go_to_this_server_unless_an_endpoint_is_set() {
-        let sdk = || telmoni_sdk::Config::new("", None, Some("telmoni_key".into()));
-        assert_eq!(sdk().endpoint, telmoni_sdk::DEFAULT_ENDPOINT);
+        let sdk = || telmoni::Config::new("", None, Some("telmoni_key".into()));
+        assert_eq!(sdk().endpoint, telmoni::DEFAULT_ENDPOINT);
         let own = reporting(sdk(), None, Some("8083")).unwrap();
         assert_eq!(own.endpoint, "http://127.0.0.1:8083");
         let default_port = reporting(sdk(), None, None).unwrap();
         assert_eq!(default_port.endpoint, "http://127.0.0.1:8082");
         let set = reporting(
-            telmoni_sdk::Config::new("https://api.example.com/", None, Some("telmoni_key".into())),
+            telmoni::Config::new("https://api.example.com/", None, Some("telmoni_key".into())),
             Some("https://api.example.com/"),
             None,
         )
         .unwrap();
         assert_eq!(set.endpoint, "https://api.example.com");
         assert_eq!(own.api_key.as_deref(), Some("telmoni_key"));
-        let bad = telmoni_sdk::Config {
+        let bad = telmoni::Config {
             endpoint: "not a url".into(),
             ..sdk()
         };

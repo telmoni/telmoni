@@ -5,7 +5,7 @@ mod common;
 
 use common::{Harness, Outcome, attributes_of, name_of, named, only};
 use serde_json::json;
-use telmoni_sdk::RunOptions;
+use telmoni::RunOptions;
 
 #[test]
 fn a_step_nests_under_its_run_and_carries_its_ids() -> Outcome {

@@ -14,8 +14,8 @@ use axum::{Router, routing};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tower::ServiceExt;
 
-use telmoni::{App, Module, Parts};
 use telmoni_auth::test_provider::test_issuer;
+use telmoni_server::{App, Module, Parts};
 use telmoni_shared::middleware::http::is_request_id;
 use telmoni_shared::test_util::{captured_logs, unreachable_pool};
 use telmoni_shared::types::{PING_KEY_PREFIX, mint_ping_key};

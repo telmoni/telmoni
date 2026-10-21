@@ -219,7 +219,7 @@ up-preflight: env-scaffold env-check port-check deps-check docker-up db-wait cli
 .PHONY: up
 up: up-preflight book
 	@echo "building the server (so it boots alongside web, not a minute after)…"
-	cargo build -p telmoni --quiet
+	cargo build -p telmoni-server --quiet
 	SERVER_PORT=$(SERVER_PORT) DOCS_DIR=$(DOCS_DIR) $(if $(LIVE_REFRESH_HOLD_SECS),LIVE_REFRESH_HOLD_SECS=$(LIVE_REFRESH_HOLD_SECS)) bash scripts/up.sh
 
 .PHONY: local
@@ -268,16 +268,16 @@ book:
 
 .PHONY: server-dev
 server-dev:
-	PORT=$(SERVER_PORT) cargo run -p telmoni -- serve
+	PORT=$(SERVER_PORT) cargo run -p telmoni-server -- serve
 
 .PHONY: sweep
 sweep:
 	@test -n "$(SWEEP)" || { echo "usage: make sweep SWEEP=<deletion|audit-verify|retention|agent-reindex|audit-exports>"; exit 2; }
-	cargo run -p telmoni -- sweep $(SWEEP)
+	cargo run -p telmoni-server -- sweep $(SWEEP)
 
 .PHONY: release-outbox
 release-outbox:
-	cargo run -p telmoni -- release outbox
+	cargo run -p telmoni-server -- release outbox
 
 # ── Quality & Verification ─────────────────────────────────────
 
@@ -327,7 +327,7 @@ test: docker-up db-wait clickhouse-wait book
 
 .PHONY: e2e
 e2e: deps-check docker-up db-wait clickhouse-wait schema-check book
-	cargo build -p telmoni
+	cargo build -p telmoni-server
 	cd $(WEB_DIR) && npm run test:e2e
 
 .PHONY: contract
@@ -338,7 +338,7 @@ contract:
 
 .PHONY: test-svc
 test-svc: book
-	cargo test -p $(if $(filter telmoni,$(SVC)),telmoni,telmoni-$(SVC)) $(if $(TEST_BIN),--test $(TEST_BIN)) --no-fail-fast -- --test-threads=$(TEST_THREADS) $(TEST_FILTER)
+	cargo test -p telmoni-$(SVC) $(if $(TEST_BIN),--test $(TEST_BIN)) --no-fail-fast -- --test-threads=$(TEST_THREADS) $(TEST_FILTER)
 
 .PHONY: deny
 deny:
@@ -357,7 +357,7 @@ sdk-check:
 	cd sdk/typescript && npm run verify
 	cd sdk/go && test -z "$$(gofmt -l .)" && go vet ./... && go test -race ./...
 	cd sdk/python && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/mypy && .venv/bin/pytest
-	cargo test -p telmoni-sdk --locked
+	cargo test -p telmoni --locked
 
 .PHONY: fmt
 fmt:
@@ -388,11 +388,11 @@ roles-check:
 
 .PHONY: db-rotate
 db-rotate:
-	cargo run -p telmoni -- rotate
+	cargo run -p telmoni-server -- rotate
 
 .PHONY: db-migrate
 db-migrate: roles-check
-	MIGRATION_SETS="$(MIGRATION_SETS)" cargo run -p telmoni -- migrate
+	MIGRATION_SETS="$(MIGRATION_SETS)" cargo run -p telmoni-server -- migrate
 
 .PHONY: db-dev-setup
 db-dev-setup:

@@ -58,11 +58,10 @@ Sign in to the console and create a project. On the project's **API keys** page,
 
 ### 3️⃣ Record a run
 
-The SDKs aren't on a package registry yet, so install them from this repository. A `telmoni` package on PyPI, npm or crates.io isn't ours.
+Each SDK is `telmoni` on its registry: `pip install telmoni`, `npm install telmoni` or `cargo add telmoni`, and for Go, `go get github.com/telmoni/telmoni/sdk/go`.
 
 ```console
-git clone https://github.com/telmoni/telmoni.git
-pip install ./telmoni/sdk/python openai
+pip install telmoni openai
 export TELMONI_ENDPOINT=http://localhost:8082   # your server; plain HTTP is refused unless it's this machine
 export TELMONI_API_KEY=...                      # the ingest key from step 2
 ```
@@ -136,7 +135,7 @@ The `telmoni` binary runs every module (auth, notifications, telemetry and the c
 
 ## 🧩 Extending Telmoni
 
-A deployment that needs more builds on these crates instead of forking them: `telmoni::App::assemble` takes its own identity provider, mail transport and purge hook; a `telmoni::Module` mounts beside the built-in ones; a console built on this one replaces the slot files under `web/lib/extension/` and `web/components/extension/`, and imports the core only through `lib/extension/ui.ts` and `lib/extension/server.ts`. [ARCHITECTURE.md](ARCHITECTURE.md#extending-the-core) describes the seams.
+A deployment that needs more builds on these crates instead of forking them: `telmoni_server::App::assemble` takes its own identity provider, mail transport and purge hook; a `telmoni_server::Module` mounts beside the built-in ones; a console built on this one replaces the slot files under `web/lib/extension/` and `web/components/extension/`, and imports the core only through `lib/extension/ui.ts` and `lib/extension/server.ts`. [ARCHITECTURE.md](ARCHITECTURE.md#extending-the-core) describes the seams.
 
 ## 🔧 Developing
 

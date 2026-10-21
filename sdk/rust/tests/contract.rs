@@ -4,7 +4,7 @@
 mod common;
 
 use common::{Outcome, in_child, is_child};
-use telmoni_sdk::{Config, DEFAULT_ENDPOINT, Telmoni, VERSION};
+use telmoni::{Config, DEFAULT_ENDPOINT, Telmoni, VERSION};
 
 #[test]
 fn the_default_endpoint_is_the_machine_host() {
@@ -184,7 +184,7 @@ fn an_endpoint_variable_that_is_no_unicode_is_refused() -> Outcome {
         let harness = common::Harness::with(Config::from_env())?;
         harness
             .telmoni
-            .run("bot", telmoni_sdk::RunOptions::default())?
+            .run("bot", telmoni::RunOptions::default())?
             .end();
         harness.flush()?;
         harness.telmoni.shutdown();
@@ -256,7 +256,7 @@ fn one_run(given: &str) -> Result<(usize, Vec<String>), common::Failure> {
     let harness = common::Harness::with(Config::new(given, None, Some("telmoni_k".to_owned())))?;
     harness
         .telmoni
-        .run("bot", telmoni_sdk::RunOptions::default())?
+        .run("bot", telmoni::RunOptions::default())?
         .end();
     harness.flush()?;
     harness.telmoni.shutdown();

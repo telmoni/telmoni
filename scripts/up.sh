@@ -27,7 +27,7 @@ cd "$ROOT" || exit 2
 
 BINARY=target/debug/telmoni
 if [ ! -x "$BINARY" ]; then
-    echo "✗ up: $BINARY is missing; \`make up\` builds it, or: cargo build -p telmoni" >&2
+    echo "✗ up: $BINARY is missing; \`make up\` builds it, or: cargo build -p telmoni-server" >&2
     exit 2
 fi
 SERVER_PORT="${SERVER_PORT:-8082}"

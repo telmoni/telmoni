@@ -245,9 +245,9 @@ impl Telmoni {
     /// ```no_run
     /// use std::time::{Duration, SystemTime};
     ///
-    /// use telmoni_sdk::{Config, ModelCallRecord, RunRecord, Telmoni, ToolCallRecord, Usage};
+    /// use telmoni::{Config, ModelCallRecord, RunRecord, Telmoni, ToolCallRecord, Usage};
     ///
-    /// # fn main() -> Result<(), telmoni_sdk::Error> {
+    /// # fn main() -> Result<(), telmoni::Error> {
     /// let telmoni = Telmoni::new(Config::from_env());
     /// // 2026-10-12T09:00:00Z, and what came after it.
     /// let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_791_795_600);

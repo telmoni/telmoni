@@ -14,12 +14,12 @@
 //! and the sweeps need each module's DSN, telemetry's ClickHouse URL and key
 //! (`TELEMETRY_KEK`), Redis (`REDIS_URL`) and the service secret; `migrate`
 //! and `rotate` need the migrator's Postgres DSN and its ClickHouse URL. The
-//! commands themselves are [`telmoni::run`]; this binary hands it the process
-//! as the environment describes it. A deployment's own binary hands it its
-//! own.
+//! commands themselves are [`telmoni_server::run`]; this binary hands it the
+//! process as the environment describes it. A deployment's own binary hands it
+//! its own.
 
-use telmoni::App;
-use telmoni::cli::Command;
+use telmoni_server::App;
+use telmoni_server::cli::Command;
 
 // The image is a static musl build, whose malloc serializes threads on one lock.
 #[global_allocator]
@@ -33,5 +33,5 @@ async fn main() -> anyhow::Result<()> {
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     let command = Command::parse(&args)?;
-    telmoni::run(command, App::from_env).await
+    telmoni_server::run(command, App::from_env).await
 }

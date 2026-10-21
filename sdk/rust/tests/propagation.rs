@@ -13,7 +13,7 @@ use common::{
 };
 use opentelemetry::trace::TraceContextExt as _;
 use serde_json::Value;
-use telmoni_sdk::{Config, Hooks, ModelCallOptions, RunOptions, Telmoni, ToolCallOptions};
+use telmoni::{Config, Hooks, ModelCallOptions, RunOptions, Telmoni, ToolCallOptions};
 
 type Headers = HashMap<String, String>;
 

@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use telmoni_sdk::Telmoni;
+use telmoni::Telmoni;
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::seam::{Auth, Entitlements, Notifications};
 

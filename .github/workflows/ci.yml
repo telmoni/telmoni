@@ -149,7 +149,7 @@ jobs:
       - name: Install extensions (mirrors compose's init script)
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f crates/migrator/sql/dev_extensions.sql
       - name: Run migrations (every schema, as make db-migrate runs them)
-        run: MIGRATOR_DATABASE_URL="$DATABASE_URL" MIGRATION_SETS="$(make -s migration-sets)" cargo run --locked -p telmoni -- migrate
+        run: MIGRATOR_DATABASE_URL="$DATABASE_URL" MIGRATION_SETS="$(make -s migration-sets)" cargo run --locked -p telmoni-server -- migrate
       - name: Pin dev-role search_path (mirrors make db-dev-setup)
         run: psql "$DATABASE_URL" -c "ALTER ROLE telmoni SET search_path = auth, notifications, agent, telemetry, audit, public;"
       - name: cargo test

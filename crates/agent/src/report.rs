@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::time::SystemTime;
 
 use chrono::{DateTime, Utc};
-use telmoni_sdk::{ModelCallRecord, RunRecord, Telmoni, ToolCallRecord, Usage};
+use telmoni::{ModelCallRecord, RunRecord, Telmoni, ToolCallRecord, Usage};
 
 use crate::observe::{Generation, Step, ToolUse, TurnEnding, TurnRecord};
 
@@ -167,8 +167,8 @@ pub(crate) mod testing {
     use std::time::Duration;
 
     use serde_json::Value;
-    use telmoni_sdk::transport::{Answer, Transport, TransportError};
-    use telmoni_sdk::{Config, Hooks, Telmoni};
+    use telmoni::transport::{Answer, Transport, TransportError};
+    use telmoni::{Config, Hooks, Telmoni};
 
     /// One export as the SDK handed it to the transport: its URL, its
     /// headers and its body.
@@ -258,7 +258,7 @@ mod tests {
 
     use chrono::SubsecRound as _;
     use serde_json::Value;
-    use telmoni_sdk::RecordItem;
+    use telmoni::RecordItem;
     use telmoni_shared::{OrganizationId, ProjectId};
     use uuid::Uuid;
 

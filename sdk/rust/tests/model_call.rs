@@ -7,8 +7,8 @@ use std::collections::BTreeSet;
 
 use common::{Failure, Harness, Outcome, attributes_of, keyed, name_of, only, starting_with};
 use serde_json::{Map, Value, json};
-use telmoni_sdk::transport::Answer;
-use telmoni_sdk::{Config, Content, ModelCallOptions, Reply, RunOptions, Usage};
+use telmoni::transport::Answer;
+use telmoni::{Config, Content, ModelCallOptions, Reply, RunOptions, Usage};
 
 #[test]
 fn a_model_call_carries_the_conventions_names() -> Outcome {

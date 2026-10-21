@@ -1,6 +1,6 @@
 # Telmoni Rust SDK
 
-`telmoni-sdk`: an agent's runs, steps, model calls and tool calls as
+`telmoni`: an agent's runs, steps, model calls and tool calls as
 OpenTelemetry spans, sent to Telmoni and nowhere else. The client owns a
 tracer provider of its own, built part by part so no `OTEL_*` variable reaches
 it, and runs beside whatever OpenTelemetry the application already has: a run
@@ -12,7 +12,7 @@ application's spans stay with the application's exporter.
 Rust 1.99.1 or later:
 
 ```console
-cargo add telmoni-sdk
+cargo add telmoni
 ```
 
 The hosted service at `https://api.telmoni.com`, the SDK's default endpoint,
@@ -24,9 +24,9 @@ point `TELMONI_ENDPOINT` at its machine host; the docs read in
 ## Quick start
 
 ```rust
-use telmoni_sdk::{Config, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage};
+use telmoni::{Config, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage};
 
-fn main() -> Result<(), telmoni_sdk::Error> {
+fn main() -> Result<(), telmoni::Error> {
     // Reads TELMONI_ENDPOINT, TELMONI_API_KEY and TELMONI_ORG.
     let telmoni = Telmoni::new(Config::from_env());
 
@@ -107,7 +107,7 @@ over, hands the finished run to `record_run` as data:
 ```rust
 use std::time::{Duration, SystemTime};
 
-use telmoni_sdk::{ModelCallRecord, RunRecord, ToolCallRecord, Usage};
+use telmoni::{ModelCallRecord, RunRecord, ToolCallRecord, Usage};
 
 // 2026-10-12T09:00:00Z, and what came after it.
 let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_791_795_600);

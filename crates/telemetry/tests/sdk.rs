@@ -21,7 +21,7 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use common::{AuthStub, SECRET, clickhouse_or_skip, state_with_stores};
-use telmoni_sdk::{Config, ModelCallRecord, RunRecord, Telmoni, ToolCallRecord, Usage};
+use telmoni::{Config, ModelCallRecord, RunRecord, Telmoni, ToolCallRecord, Usage};
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::{ApiKeyScope, OrganizationId, OrganizationRole, ProjectId, Role};
 use telmoni_telemetry::hashing::HASH_BYTES;

@@ -16,7 +16,7 @@ use std::sync::{Mutex, PoisonError};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use telmoni_sdk::Telmoni;
+use telmoni::Telmoni;
 use telmoni_shared::acting::Acting;
 use telmoni_shared::{OrganizationId, ProjectId, TelmoniError};
 use uuid::Uuid;

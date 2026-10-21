@@ -16,7 +16,7 @@ use opentelemetry::trace::{Link, SpanKind, TraceContextExt as _, TraceId};
 use opentelemetry::{Context, KeyValue};
 use opentelemetry_sdk::trace::{SamplingDecision, SamplingResult, ShouldSample};
 use serde_json::{Value, json};
-use telmoni_sdk::{
+use telmoni::{
     Batching, CallRecord, Config, Error, ModelCallRecord, RecordItem, RunOptions, RunRecord,
     StepRecord, Telmoni, ToolCallRecord, Usage,
 };

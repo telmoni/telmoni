@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use common::{FakeTransport, Harness, Outcome, Sleeps, Warnings, client, hooks, keyed, name_of};
-use telmoni_sdk::{Batching, RunOptions, Telmoni};
+use telmoni::{Batching, RunOptions, Telmoni};
 
 #[test]
 fn the_queue_is_bounded_and_drops_are_counted_once() -> Outcome {

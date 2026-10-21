@@ -136,7 +136,7 @@ async fn every_project_scoped_table_is_forced_and_isolated() {
         "partial database — {} of {} app schemas are missing: {missing:?}.\n  \
          This suite asserts tenant isolation across EVERY service schema; over a \
          partial catalog it would pass while saying nothing about the missing ones.\n  \
-         Run the workspace migrations (`cargo run -p telmoni -- migrate`) before testing.",
+         Run the workspace migrations (`cargo run -p telmoni-server -- migrate`) before testing.",
         missing.len(),
         APP_SCHEMAS.len(),
     );

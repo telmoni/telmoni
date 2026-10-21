@@ -17,7 +17,7 @@ telmoni-shared = { path = "../shared" }
 # keeps its copies of those rows to, so the two cannot drift.
 # Its own questions, reported as runs the way any agent reports them
 # (`report.rs`): the SDK, as a customer installs it.
-telmoni-sdk    = { path = "../../sdk/rust" }
+telmoni        = { path = "../../sdk/rust" }
 
 axum        = { workspace = true }
 tokio       = { workspace = true }

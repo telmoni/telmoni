@@ -26,7 +26,7 @@ use opentelemetry_sdk::trace::{
     SpanExporter,
 };
 use serde_json::json;
-use telmoni_sdk::{Config, RunOptions};
+use telmoni::{Config, RunOptions};
 
 /// The application's exporter: what its provider sent, kept in memory.
 #[derive(Debug, Clone, Default)]

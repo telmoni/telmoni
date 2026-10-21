@@ -1,5 +1,5 @@
 [package]
-name        = "telmoni"
+name        = "telmoni-server"
 description = "The Telmoni server: auth, notifications, telemetry and the agent as modules of one process, with the migrator and the sweeps as subcommands of the same binary."
 version.workspace      = true
 edition.workspace      = true
@@ -11,12 +11,14 @@ publish                = false
 # it with its own identity provider, transport and modules. The binary is
 # the command line over it.
 [lib]
-name = "telmoni"
+name = "telmoni_server"
 path = "src/lib.rs"
 
+# Undocumented: its rustdoc would land where the SDK's, the crate `telmoni`, does.
 [[bin]]
 name = "telmoni"
 path = "src/main.rs"
+doc  = false
 
 [dependencies]
 telmoni-shared        = { path = "../shared" }

@@ -14,8 +14,8 @@ use common::{
     is_uuid_v4, keyed, load_fixture, name_of, spans_of, text,
 };
 use serde_json::{Value, json};
-use telmoni_sdk::transport::TransportError;
-use telmoni_sdk::{
+use telmoni::transport::TransportError;
+use telmoni::{
     Bounds, Config, Hooks, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage,
 };
 

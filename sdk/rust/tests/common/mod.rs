@@ -12,8 +12,8 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use serde_json::{Map, Value, json};
-use telmoni_sdk::transport::{Answer, Transport, TransportError};
-use telmoni_sdk::{Config, DEFAULT_ENDPOINT, Hooks, Telmoni};
+use telmoni::transport::{Answer, Transport, TransportError};
+use telmoni::{Config, DEFAULT_ENDPOINT, Hooks, Telmoni};
 
 pub(crate) type Failure = Box<dyn Error>;
 pub(crate) type Outcome = Result<(), Failure>;

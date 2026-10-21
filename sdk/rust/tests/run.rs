@@ -13,7 +13,7 @@ use common::{
     lock, name_of, named, only, run_span, starting_with, tags,
 };
 use serde_json::{Value, json};
-use telmoni_sdk::{Bounds, Config, Error, ModelCall, Run, RunOptions, Step, Telmoni, ToolCall};
+use telmoni::{Bounds, Config, Error, ModelCall, Run, RunOptions, Step, Telmoni, ToolCall};
 
 /// An application's error, with the SDK's own among its causes so
 /// `try_run_with` can hand a run that did not open back as one of these.

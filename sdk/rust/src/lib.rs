@@ -9,9 +9,9 @@
 //! only.
 //!
 //! ```no_run
-//! use telmoni_sdk::{Config, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage};
+//! use telmoni::{Config, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage};
 //!
-//! # fn main() -> Result<(), telmoni_sdk::Error> {
+//! # fn main() -> Result<(), telmoni::Error> {
 //! // Reads TELMONI_ENDPOINT, TELMONI_API_KEY and TELMONI_ORG.
 //! let telmoni = Telmoni::new(Config::from_env());
 //!

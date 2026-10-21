@@ -63,7 +63,7 @@ pub struct AppState {
     pub reranker: Option<Arc<rerank::Reranker>>,
     /// The SDK each question is reported with as it ends, as any agent
     /// reports its runs; `None` while `TELMONI_API_KEY` is unset.
-    pub telmoni: Option<telmoni_sdk::Telmoni>,
+    pub telmoni: Option<telmoni::Telmoni>,
 }
 
 impl AppState {

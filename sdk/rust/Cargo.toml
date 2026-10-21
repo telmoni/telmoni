@@ -1,5 +1,5 @@
 [package]
-name = "telmoni-sdk"
+name = "telmoni"
 # The SDKs' version, the same in all four and tagged `sdk/v…` (PACKAGES.md in
 # telmoni-cloud); the workspace's `0.0.0` is the server's, and never this crate's.
 version = "0.1.0"

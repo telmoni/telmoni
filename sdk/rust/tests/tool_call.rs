@@ -5,7 +5,7 @@ mod common;
 
 use common::{Harness, Outcome, attributes_of, named, only, starting_with};
 use serde_json::json;
-use telmoni_sdk::{ModelCallOptions, RunOptions, ToolCallOptions};
+use telmoni::{ModelCallOptions, RunOptions, ToolCallOptions};
 
 #[test]
 fn a_tool_call_carries_the_conventions_names() -> Outcome {
