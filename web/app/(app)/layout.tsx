@@ -10,6 +10,7 @@ import { CreatePanels } from "@/components/create-panels";
 import { KeyboardShortcuts } from "@/components/keyboard-shortcuts";
 import { SkipLink } from "@/components/skip-link";
 import { NAV_COLLAPSED_COOKIE } from "@/lib/console-nav";
+import { LOCAL_TIME_COOKIE, parseReader } from "@/lib/local-time";
 import { PagePrimaryActionProvider } from "@/components/page-action";
 import { SidebarProvider } from "@/components/sidebar-context";
 import { ProjectBanner } from "@/components/project-banner";
@@ -17,6 +18,7 @@ import { ExtensionBanner } from "@/components/extension/banner";
 import { ExtensionCreateOrganizationNotice } from "@/components/extension/create-organization-notice";
 import { ExtensionOrganizationBadge } from "@/components/extension/organization-badge";
 import { InviteToastNotifier } from "@/components/invite-toast-notifier";
+import { LocalTimeReader } from "@/components/local-time";
 import { OrganizationSync } from "@/components/organization-sync";
 import { RealtimeListener } from "@/components/realtime-listener";
 import {
@@ -50,6 +52,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   if (!session || !seed) redirect("/auth/logout");
 
+  const jar = await cookies();
+  const reader = parseReader(jar.get(LOCAL_TIME_COOKIE)?.value);
+
   // The listener runs in the browser and reads no environment of its own; it
   // opens its stream again when the projects the person reads change.
   const liveHoldMs = env.LIVE_REFRESH_HOLD_SECS * 1_000;
@@ -62,92 +67,95 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     // privacy page, which this screen stands in for, with the settings page.
     const sessions = await fetchActiveSessions();
     return (
-      <StoreProvider
-        user={seed.user}
-        organizations={ctx.organizations}
-        incomingInvites={ctx.incomingInvites}
-        projectOffers={ctx.projectOffers}
-        activeOrganizationId={null}
-        flags={ctx.flags}
-        roles={{}}
-        projects={[]}
-        projectsElsewhere={[]}
-      >
-        {/* The screen promises that an invitation shows up here: the listener
-            refreshes it from the person's channel, so it does without a
-            reload. */}
-        <RealtimeListener liveHoldMs={liveHoldMs} readingKey={reading} />
-        <AccountOnly
-          email={session.email}
-          authMethod={session.authMethod}
-          analyticsOptIn={ctx.person.analyticsOptIn}
-          signupsOpen={flagOn(ctx.flags, Flag.Signup)}
-          invites={ctx.incomingInvites}
-          ownedOrganizations={ownedOrganizationCount(ctx.organizations)}
-          sessions={sessions}
-          currentSessionId={session.sessionRowId}
-          expiresAt={session.expiresAt}
-        />
-      </StoreProvider>
+      <LocalTimeReader reader={reader}>
+        <StoreProvider
+          user={seed.user}
+          organizations={ctx.organizations}
+          incomingInvites={ctx.incomingInvites}
+          projectOffers={ctx.projectOffers}
+          activeOrganizationId={null}
+          flags={ctx.flags}
+          roles={{}}
+          projects={[]}
+          projectsElsewhere={[]}
+        >
+          {/* The screen promises that an invitation shows up here: the listener
+              refreshes it from the person's channel, so it does without a
+              reload. */}
+          <RealtimeListener liveHoldMs={liveHoldMs} readingKey={reading} />
+          <AccountOnly
+            email={session.email}
+            authMethod={session.authMethod}
+            analyticsOptIn={ctx.person.analyticsOptIn}
+            signupsOpen={flagOn(ctx.flags, Flag.Signup)}
+            invites={ctx.incomingInvites}
+            ownedOrganizations={ownedOrganizationCount(ctx.organizations)}
+            sessions={sessions}
+            currentSessionId={session.sessionRowId}
+            expiresAt={session.expiresAt}
+          />
+        </StoreProvider>
+      </LocalTimeReader>
     );
   }
 
-  const jar = await cookies();
   const initialCollapsed = jar.get(NAV_COLLAPSED_COOKIE)?.value === "1";
 
   return (
     <div className="group/console theme-console flex h-svh flex-col">
       <SessionHeartbeat expiresAt={session.expiresAt} />
       <ConsoleTrailRecorder />
-      <StoreProvider {...seed}>
-        <OrganizationSync rendered={(ctx && activeOrganization(ctx)?.slug) ?? null} />
-        <RealtimeListener liveHoldMs={liveHoldMs} readingKey={reading} />
-        <InviteToastNotifier />
-        <ConsoleUiProvider>
-          <PagePrimaryActionProvider>
-            <SidebarProvider initialCollapsed={initialCollapsed}>
-              <SkipLink />
-              <KeyboardShortcuts />
-              <ConsoleSearch />
-              <ProjectBanner notification={projectAnnouncement} />
-              {/* The two slots a console built on this one fills may read
-                  what they need themselves, after this layout's reads; each
-                  streams in on its own rather than holding the shell back. */}
-              <Suspense fallback={null}>
-                <ExtensionBanner />
-              </Suspense>
-              {/* The badge beside the organization's name, and what New
-                  organization says, are slots, filled by a console built on
-                  this one; the console's host goes ahead of a new
-                  organization's URL, as its Settings show it. */}
-              <ConsoleHeader
-                organizationBadge={
-                  <Suspense fallback={null}>
-                    <ExtensionOrganizationBadge />
-                  </Suspense>
-                }
-              />
-              <div className="flex min-h-0 flex-1">
-                <ConsoleSidebar version={VERSION} />
-                <ConsoleShell
-                  panels={
-                    <CreatePanels
-                      host={new URL(env.AUTH_URL).host}
-                      notice={
-                        <Suspense fallback={null}>
-                          <ExtensionCreateOrganizationNotice />
-                        </Suspense>
-                      }
-                    />
+      <LocalTimeReader reader={reader}>
+        <StoreProvider {...seed}>
+          <OrganizationSync rendered={(ctx && activeOrganization(ctx)?.slug) ?? null} />
+          <RealtimeListener liveHoldMs={liveHoldMs} readingKey={reading} />
+          <InviteToastNotifier />
+          <ConsoleUiProvider>
+            <PagePrimaryActionProvider>
+              <SidebarProvider initialCollapsed={initialCollapsed}>
+                <SkipLink />
+                <KeyboardShortcuts />
+                <ConsoleSearch />
+                <ProjectBanner notification={projectAnnouncement} />
+                {/* The two slots a console built on this one fills may read
+                    what they need themselves, after this layout's reads; each
+                    streams in on its own rather than holding the shell back. */}
+                <Suspense fallback={null}>
+                  <ExtensionBanner />
+                </Suspense>
+                {/* The badge beside the organization's name, and what New
+                    organization says, are slots, filled by a console built on
+                    this one; the console's host goes ahead of a new
+                    organization's URL, as its Settings show it. */}
+                <ConsoleHeader
+                  organizationBadge={
+                    <Suspense fallback={null}>
+                      <ExtensionOrganizationBadge />
+                    </Suspense>
                   }
-                >
-                  {children}
-                </ConsoleShell>
-              </div>
-            </SidebarProvider>
-          </PagePrimaryActionProvider>
-        </ConsoleUiProvider>
-      </StoreProvider>
+                />
+                <div className="flex min-h-0 flex-1">
+                  <ConsoleSidebar version={VERSION} />
+                  <ConsoleShell
+                    panels={
+                      <CreatePanels
+                        host={new URL(env.AUTH_URL).host}
+                        notice={
+                          <Suspense fallback={null}>
+                            <ExtensionCreateOrganizationNotice />
+                          </Suspense>
+                        }
+                      />
+                    }
+                  >
+                    {children}
+                  </ConsoleShell>
+                </div>
+              </SidebarProvider>
+            </PagePrimaryActionProvider>
+          </ConsoleUiProvider>
+        </StoreProvider>
+      </LocalTimeReader>
     </div>
   );
 }
