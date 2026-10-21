@@ -15,6 +15,7 @@ import {
   STANDARD_CONTRAST_CLASS,
 } from "@/lib/accessibility";
 import {
+  bootAccessibility,
   letterKeysOn,
   setContrast,
   setFocusRings,
@@ -145,5 +146,56 @@ describe("another tab's choice", () => {
     });
     expect(result.current).toBe("system");
     expect(has(REDUCE_MOTION_CLASS)).toBe(false);
+  });
+});
+
+// A 404 Next answers from a layout's `notFound()` is rendered from scratch in
+// the browser, where the `<head>` script never runs: `bootAccessibility` is
+// its stand-in there, and must do exactly what it does.
+describe("a page the boot script never ran on", () => {
+  it("restores every saved choice as the script would, and tells the hooks", () => {
+    window.localStorage.setItem(MOTION_STORAGE_KEY, "reduce");
+    window.localStorage.setItem(CONTRAST_STORAGE_KEY, "more");
+    window.localStorage.setItem(LETTER_KEYS_STORAGE_KEY, "1");
+    window.localStorage.setItem("telmoni-focus-rings", "1");
+    const letters = renderHook(() => useLetterKeys());
+    const motion = renderHook(() => useMotion());
+    expect(letters.result.current).toBe(true);
+
+    act(() => bootAccessibility());
+
+    expect(letters.result.current).toBe(false);
+    expect(motion.result.current).toBe("reduce");
+    expect(document.documentElement.classList.contains(MORE_CONTRAST_CLASS)).toBe(true);
+    expect(document.documentElement.classList.contains(FOCUS_RINGS_CLASS)).toBe(true);
+  });
+
+  it("agrees with the boot script for every combination storage may hold", () => {
+    const after = (saved: Record<string, string | null>, run: () => void) => {
+      document.documentElement.classList.remove(...CLASSES);
+      window.localStorage.clear();
+      for (const [key, value] of Object.entries(saved)) {
+        if (value !== null) window.localStorage.setItem(key, value);
+      }
+      run();
+      return [...document.documentElement.classList].filter((c) => CLASSES.includes(c)).sort();
+    };
+    for (const motion of ["reduce", "allow", "system", "nonsense", null]) {
+      for (const contrast of ["more", "standard", "nonsense", null]) {
+        for (const letters of ["1", "0", null]) {
+          for (const focus of ["1", "yes", null]) {
+            const saved = {
+              [MOTION_STORAGE_KEY]: motion,
+              [CONTRAST_STORAGE_KEY]: contrast,
+              [LETTER_KEYS_STORAGE_KEY]: letters,
+              "telmoni-focus-rings": focus,
+            };
+            expect(after(saved, bootAccessibility), JSON.stringify(saved)).toEqual(
+              after(saved, boot),
+            );
+          }
+        }
+      }
+    }
   });
 });

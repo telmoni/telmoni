@@ -3,7 +3,7 @@ import { renderHook, act } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { CORNERS_BOOT_SCRIPT, SHARP_CLASS } from "@/lib/corners";
-import { setCorners, useCorners } from "@/lib/use-corners";
+import { bootCorners, setCorners, useCorners } from "@/lib/use-corners";
 
 afterEach(() => {
   document.documentElement.classList.remove(SHARP_CLASS);
@@ -97,6 +97,44 @@ describe("a second tab", () => {
       ),
     );
 
+    expect(result.current).toBe("sharp");
+  });
+});
+
+// A 404 Next answers from a layout's `notFound()` is rendered from scratch in
+// the browser, where the `<head>` script never runs: `bootCorners` is its
+// stand-in there, and must do exactly what it does.
+describe("a page the boot script never ran on", () => {
+  it("restores the saved choice as the script would, and tells the hook", () => {
+    window.localStorage.setItem("telmoni-corners", "sharp");
+    const { result } = renderHook(() => useCorners());
+    expect(result.current).toBe("rounded");
+
+    act(() => bootCorners());
+
+    expect(document.documentElement.classList.contains(SHARP_CLASS)).toBe(true);
+    expect(result.current).toBe("sharp");
+  });
+
+  it("agrees with the boot script for every value storage may hold", () => {
+    const after = (saved: string | null, run: () => void) => {
+      document.documentElement.classList.remove(SHARP_CLASS);
+      window.localStorage.clear();
+      if (saved !== null) window.localStorage.setItem("telmoni-corners", saved);
+      run();
+      return document.documentElement.classList.contains(SHARP_CLASS);
+    };
+    for (const saved of ["sharp", "rounded", "nonsense", null]) {
+      expect(after(saved, bootCorners), String(saved)).toBe(after(saved, boot));
+    }
+  });
+
+  it("changes nothing on a page the script ran on", () => {
+    window.localStorage.setItem("telmoni-corners", "sharp");
+    boot();
+    const { result } = renderHook(() => useCorners());
+    act(() => bootCorners());
+    expect(document.documentElement.classList.contains(SHARP_CLASS)).toBe(true);
     expect(result.current).toBe("sharp");
   });
 });

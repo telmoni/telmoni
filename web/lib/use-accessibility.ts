@@ -79,6 +79,28 @@ function store(key: string, value: string | null) {
   } catch {}
 }
 
+/** The classes as storage has them, on a page the boot script never ran on
+ *  — a 404 the browser renders from Next's error shell, where no inline
+ *  script runs (`components/settings-boot.tsx`); the script's own rules, so
+ *  the two agree. On a page it ran on, nothing changes and nothing is told. */
+export function bootAccessibility() {
+  const read = (key: string) => {
+    try {
+      return window.localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  };
+  const before = root().value;
+  const motion = read(MOTION_STORAGE_KEY);
+  applyMotion(motion === "reduce" || motion === "allow" ? motion : "system");
+  const contrast = read(CONTRAST_STORAGE_KEY);
+  applyContrast(contrast === "more" || contrast === "standard" ? contrast : "system");
+  root().toggle(LETTER_KEYS_OFF_CLASS, read(LETTER_KEYS_STORAGE_KEY) === "1");
+  root().toggle(FOCUS_RINGS_CLASS, read(FOCUS_RINGS_STORAGE_KEY) === "1");
+  if (root().value !== before) emit();
+}
+
 export function setMotion(choice: MotionChoice) {
   applyMotion(choice);
   store(MOTION_STORAGE_KEY, choice === "system" ? null : choice);

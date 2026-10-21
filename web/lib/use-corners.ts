@@ -60,6 +60,23 @@ function getServerSnapshot(): Corners {
   return CORNERS_DEFAULT;
 }
 
+/** The class as storage has it, on a page the boot script never ran on — a
+ *  404 the browser renders from Next's error shell, where no inline script
+ *  runs (`components/settings-boot.tsx`); the script's own rule, so the two
+ *  agree. On a page it ran on, nothing changes and nothing is told. */
+export function bootCorners() {
+  let saved: string | null = null;
+  try {
+    saved = window.localStorage.getItem(CORNERS_STORAGE_KEY);
+  } catch {
+    // Storage disabled: nothing to restore, as the boot script finds.
+  }
+  const next: Corners = saved === "sharp" ? "sharp" : CORNERS_DEFAULT;
+  if (getSnapshot() === next) return;
+  document.documentElement.classList.toggle(SHARP_CLASS, next === "sharp");
+  emit();
+}
+
 export function setCorners(next: Corners) {
   document.documentElement.classList.toggle(SHARP_CLASS, next === "sharp");
   try {
