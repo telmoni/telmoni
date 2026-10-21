@@ -55,13 +55,13 @@ pub(crate) async fn rotate(options: &sqlx::postgres::PgConnectOptions) -> Result
 
         let mut created = 0usize;
         for m in months_to_create(now, BUFFER_MONTHS) {
-            sqlx::query(&create_ddl(t, m))
+            sqlx::query(sqlx::AssertSqlSafe(create_ddl(t, m)))
                 .execute(&pool)
                 .await
                 .with_context(|| {
                     format!("rotate: create {}.{}_{}", t.schema, t.table, m.suffix())
                 })?;
-            sqlx::query(&harden_child_ddl(t, m))
+            sqlx::query(sqlx::AssertSqlSafe(harden_child_ddl(t, m)))
                 .execute(&pool)
                 .await
                 .with_context(|| {
@@ -79,7 +79,7 @@ pub(crate) async fn rotate(options: &sqlx::postgres::PgConnectOptions) -> Result
                 if let Some(m) = parse_child(t.table, &child)
                     && is_expired(t, m, now)
                 {
-                    sqlx::query(&drop_ddl(t, m))
+                    sqlx::query(sqlx::AssertSqlSafe(drop_ddl(t, m)))
                         .execute(&pool)
                         .await
                         .with_context(|| format!("rotate: drop {}.{}", t.schema, child))?;

@@ -17,14 +17,14 @@ pub async fn list(
     tx: &mut Scoped<'_, Project>,
     project_id: &ProjectId,
 ) -> sqlx::Result<Vec<ApiToken>> {
-    sqlx::query_as::<_, ApiToken>(&format!(
+    sqlx::query_as::<_, ApiToken>(sqlx::AssertSqlSafe(format!(
         "SELECT {TOKEN_COLUMNS}
            FROM auth.api_tokens
           WHERE project_id = $1
             AND (revoked_at IS NULL OR revoked_at > now())
             AND (expires_at IS NULL OR expires_at > now())
           ORDER BY created_at DESC, id DESC",
-    ))
+    )))
     .bind(project_id)
     .fetch_all(tx.conn())
     .await
@@ -47,13 +47,13 @@ pub async fn create(
     expires_at: Option<DateTime<Utc>>,
     token_hash: &str,
 ) -> sqlx::Result<ApiToken> {
-    sqlx::query_as::<_, ApiToken>(&format!(
+    sqlx::query_as::<_, ApiToken>(sqlx::AssertSqlSafe(format!(
         "INSERT INTO auth.api_tokens
              (id, organization_id, project_id, name, description, token_hash,
               created_by, scopes, expires_at, shard_key)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING {TOKEN_COLUMNS}",
-    ))
+    )))
     .bind(Uuid::now_v7())
     .bind(organization_id)
     .bind(project_id)

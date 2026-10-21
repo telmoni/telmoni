@@ -955,9 +955,9 @@ async fn the_purge_auth_calls_removes_every_trace_of_the_organization(pool: PgPo
 
     for table in ["feed"] {
         let mut tx = project_scope(&pool, &pid(organization)).await.unwrap();
-        let left: i64 = sqlx::query_scalar(&format!(
+        let left: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT count(*) FROM notifications.{table} WHERE project_id = $1"
-        ))
+        )))
         .bind(pid(organization))
         .fetch_one(&mut *tx)
         .await

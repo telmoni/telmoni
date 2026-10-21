@@ -51,7 +51,7 @@ async fn pool_or_skip() -> Option<PgPool> {
         format!("GRANT SELECT, INSERT, DELETE ON auth.organization_flags TO {PROBE_ROLE}"),
         format!("GRANT SELECT, INSERT ON audit.events TO {PROBE_ROLE}"),
     ] {
-        sqlx::query(&stmt)
+        sqlx::query(sqlx::AssertSqlSafe(stmt))
             .execute(&mut *tx)
             .await
             .expect("fixture grant");
@@ -135,7 +135,7 @@ async fn a_refused_audit_row_takes_the_mutation_down_with_it() {
     seed_organization(&pool, &mine_org).await;
 
     let mut tx = organization_scope(&pool, &mine_org).await.expect("scope");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("assume the probe role");
@@ -166,7 +166,7 @@ async fn a_row_and_its_audit_commit_together() {
     seed_organization(&pool, &mine_org).await;
 
     let mut tx = organization_scope(&pool, &mine_org).await.expect("scope");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("assume the probe role");

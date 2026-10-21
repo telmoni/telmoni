@@ -126,11 +126,13 @@ pub async fn purge_organization(
     hold_alone(tx, &named).await?;
     let mut purged = 0;
     for table in PURGED_TABLES {
-        purged += sqlx::query(&format!("DELETE FROM {table} WHERE organization_id = $1"))
-            .bind(organization_id)
-            .execute(tx.conn())
-            .await?
-            .rows_affected();
+        purged += sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM {table} WHERE organization_id = $1"
+        )))
+        .bind(organization_id)
+        .execute(tx.conn())
+        .await?
+        .rows_affected();
     }
     let views = sqlx::query(
         "DELETE FROM telemetry.trace_views
@@ -247,11 +249,13 @@ pub async fn purge_project(
     hold_alone(tx, std::slice::from_ref(project_id)).await?;
     let mut purged = 0;
     for table in PURGED_TABLES {
-        purged += sqlx::query(&format!("DELETE FROM {table} WHERE project_id = $1"))
-            .bind(project_id)
-            .execute(tx.conn())
-            .await?
-            .rows_affected();
+        purged += sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM {table} WHERE project_id = $1"
+        )))
+        .bind(project_id)
+        .execute(tx.conn())
+        .await?
+        .rows_affected();
     }
     let views = sqlx::query("DELETE FROM telemetry.trace_views WHERE project_id = $1")
         .bind(project_id)
@@ -297,12 +301,12 @@ pub async fn views<B: HasProject>(
     project_id: &ProjectId,
     kind: ViewKind,
 ) -> sqlx::Result<Vec<ViewRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {VIEW_COLUMNS}
            FROM telemetry.trace_views
           WHERE project_id = $1 AND kind = $2
           ORDER BY lower(name), id"
-    ))
+    )))
     .bind(project_id)
     .bind(kind)
     .fetch_all(tx.conn())
@@ -333,11 +337,11 @@ pub async fn insert_view(
     kind: ViewKind,
     view: ViewWrite<'_>,
 ) -> sqlx::Result<ViewRow> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO telemetry.trace_views (id, project_id, kind, name, query, columns)
          VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING {VIEW_COLUMNS}"
-    ))
+    )))
     .bind(id)
     .bind(project_id)
     .bind(kind)
@@ -357,12 +361,12 @@ pub async fn update_view<B: HasProject>(
     kind: ViewKind,
     view: ViewWrite<'_>,
 ) -> sqlx::Result<Option<ViewRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE telemetry.trace_views
             SET name = $4, query = $5, columns = $6, updated_at = now()
           WHERE project_id = $1 AND id = $2 AND kind = $3
          RETURNING {VIEW_COLUMNS}"
-    ))
+    )))
     .bind(project_id)
     .bind(id)
     .bind(kind)
@@ -503,12 +507,12 @@ pub async fn monitors<B: HasProject>(
     project_id: &ProjectId,
 ) -> sqlx::Result<Vec<MonitorRow>> {
     let order: Vec<&str> = MonitorState::all().iter().map(|s| s.as_str()).collect();
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {MONITOR_COLUMNS}
            FROM telemetry.monitors
           WHERE project_id = $1
           ORDER BY array_position($2::text[], state), lower(name), slug"
-    ))
+    )))
     .bind(project_id)
     .bind(order)
     .fetch_all(tx.conn())
@@ -521,9 +525,9 @@ pub async fn monitor<B: HasProject>(
     project_id: &ProjectId,
     slug: &str,
 ) -> sqlx::Result<Option<MonitorRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {MONITOR_COLUMNS} FROM telemetry.monitors WHERE project_id = $1 AND slug = $2"
-    ))
+    )))
     .bind(project_id)
     .bind(slug)
     .fetch_optional(tx.conn())
@@ -539,11 +543,11 @@ pub async fn monitor_to_change<B: HasProject>(
     project_id: &ProjectId,
     slug: &str,
 ) -> sqlx::Result<Option<MonitorRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {MONITOR_COLUMNS} FROM telemetry.monitors
           WHERE project_id = $1 AND slug = $2
             FOR NO KEY UPDATE"
-    ))
+    )))
     .bind(project_id)
     .bind(slug)
     .fetch_optional(tx.conn())
@@ -561,11 +565,11 @@ pub async fn hold_monitor<B: HasProject>(
     project_id: &ProjectId,
     slug: &str,
 ) -> sqlx::Result<Option<MonitorRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {MONITOR_COLUMNS} FROM telemetry.monitors
           WHERE project_id = $1 AND slug = $2
             FOR KEY SHARE"
-    ))
+    )))
     .bind(project_id)
     .bind(slug)
     .fetch_optional(tx.conn())
@@ -612,13 +616,13 @@ pub async fn insert_monitor(
     state: MonitorState,
     monitor: MonitorWrite<'_>,
 ) -> sqlx::Result<MonitorRow> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO telemetry.monitors (id, project_id, organization_id, slug, name, agent, \
              schedule, interval_s, timezone, grace_s, expected_duration_s, stall_after_s, \
              max_steps, max_cost_usd, state, next_due_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
          RETURNING {MONITOR_COLUMNS}"
-    ))
+    )))
     .bind(id)
     .bind(project_id)
     .bind(organization_id)
@@ -654,7 +658,7 @@ pub async fn update_monitor(
     keep_due: bool,
     state: Option<MonitorState>,
 ) -> sqlx::Result<Option<MonitorRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE telemetry.monitors
             SET name = $3, agent = $4, schedule = $5, interval_s = $6, timezone = $7,
                 grace_s = $8, expected_duration_s = $9, stall_after_s = $10, max_steps = $11,
@@ -668,7 +672,7 @@ pub async fn update_monitor(
                 updated_at = GREATEST(now(), updated_at)
           WHERE project_id = $1 AND slug = $2
          RETURNING {MONITOR_COLUMNS}"
-    ))
+    )))
     .bind(project_id)
     .bind(slug)
     .bind(monitor.name)
@@ -698,13 +702,13 @@ pub async fn set_monitor_state(
     state: MonitorState,
     next_due_at: Option<DateTime<Utc>>,
 ) -> sqlx::Result<Option<MonitorRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE telemetry.monitors
             SET state = $3, state_changed_at = GREATEST(now(), state_changed_at),
                 next_due_at = $4, updated_at = GREATEST(now(), updated_at)
           WHERE project_id = $1 AND slug = $2
          RETURNING {MONITOR_COLUMNS}"
-    ))
+    )))
     .bind(project_id)
     .bind(slug)
     .bind(state)
@@ -722,11 +726,11 @@ pub async fn monitor_to_settle(
     project_id: &ProjectId,
     id: Uuid,
 ) -> sqlx::Result<Option<MonitorRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {MONITOR_COLUMNS} FROM telemetry.monitors
           WHERE project_id = $1 AND id = $2
             FOR NO KEY UPDATE"
-    ))
+    )))
     .bind(project_id)
     .bind(id)
     .fetch_optional(tx.conn())
@@ -746,7 +750,7 @@ pub async fn settle_monitor_run(
     state: MonitorState,
     next_due_at: Option<DateTime<Utc>>,
 ) -> sqlx::Result<Option<MonitorRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE telemetry.monitors
             SET state = $3,
                 state_changed_at = CASE WHEN state = $3 THEN state_changed_at
@@ -755,7 +759,7 @@ pub async fn settle_monitor_run(
                 updated_at = statement_timestamp()
           WHERE project_id = $1 AND id = $2
          RETURNING {MONITOR_COLUMNS}"
-    ))
+    )))
     .bind(project_id)
     .bind(id)
     .bind(state)
@@ -805,9 +809,9 @@ pub async fn move_project(
         .execute(tx.conn())
         .await?;
     for table in MOVED_TABLES {
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "UPDATE {table} SET organization_id = $2 WHERE project_id = $1"
-        ))
+        )))
         .bind(project_id)
         .bind(organization_id)
         .execute(tx.conn())
@@ -973,12 +977,12 @@ pub async fn ping_keys<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
 ) -> sqlx::Result<Vec<PingKeyRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {PING_KEY_COLUMNS}
            FROM telemetry.ping_keys
           WHERE project_id = $1
           ORDER BY (retired_at IS NOT NULL), created_at DESC"
-    ))
+    )))
     .bind(project_id)
     .fetch_all(tx.conn())
     .await
@@ -990,9 +994,9 @@ pub async fn ping_key<B: HasProject>(
     project_id: &ProjectId,
     id: Uuid,
 ) -> sqlx::Result<Option<PingKeyRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {PING_KEY_COLUMNS} FROM telemetry.ping_keys WHERE project_id = $1 AND id = $2"
-    ))
+    )))
     .bind(project_id)
     .bind(id)
     .fetch_optional(tx.conn())
@@ -1021,11 +1025,11 @@ pub async fn insert_ping_key(
     key_hash: &str,
     prefix: &str,
 ) -> sqlx::Result<PingKeyRow> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO telemetry.ping_keys (id, project_id, organization_id, key_hash, prefix)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING {PING_KEY_COLUMNS}"
-    ))
+    )))
     .bind(id)
     .bind(project_id)
     .bind(organization_id)
@@ -1043,12 +1047,12 @@ pub async fn retire_ping_key(
     project_id: &ProjectId,
     id: Uuid,
 ) -> sqlx::Result<Option<PingKeyRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE telemetry.ping_keys
             SET retired_at = now()
           WHERE project_id = $1 AND id = $2 AND retired_at IS NULL
          RETURNING {PING_KEY_COLUMNS}"
-    ))
+    )))
     .bind(project_id)
     .bind(id)
     .fetch_optional(tx.conn())
@@ -1126,13 +1130,13 @@ pub async fn stale_ping_keys(
     replaced_after_s: i64,
     limit: i64,
 ) -> sqlx::Result<Vec<ResolvedPingKey>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT k.id, k.project_id, k.organization_id, k.prefix
            FROM telemetry.ping_keys k
           WHERE k.retired_at IS NULL
             AND {STALE_KEY}
           LIMIT $2"
-    ))
+    )))
     .bind(replaced_after_s)
     .bind(limit)
     .fetch_all(tx.conn())
@@ -1149,13 +1153,13 @@ pub async fn retire_stale_ping_key(
     id: Uuid,
     replaced_after_s: i64,
 ) -> sqlx::Result<Option<PingKeyRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE telemetry.ping_keys k
             SET retired_at = now()
           WHERE k.project_id = $2 AND k.id = $3 AND k.retired_at IS NULL
             AND {STALE_KEY}
          RETURNING {PING_KEY_COLUMNS}"
-    ))
+    )))
     .bind(replaced_after_s)
     .bind(project_id)
     .bind(id)
@@ -1216,9 +1220,9 @@ pub async fn open_run<B: HasProject>(
     project_id: &ProjectId,
     id: Uuid,
 ) -> sqlx::Result<Option<OpenRunRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {OPEN_RUN_COLUMNS} FROM telemetry.open_runs WHERE project_id = $1 AND id = $2"
-    ))
+    )))
     .bind(project_id)
     .bind(id)
     .fetch_optional(tx.conn())
@@ -1231,13 +1235,13 @@ pub async fn newest_open_run<B: HasProject>(
     project_id: &ProjectId,
     monitor_id: Uuid,
 ) -> sqlx::Result<Option<OpenRunRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {OPEN_RUN_COLUMNS}
            FROM telemetry.open_runs
           WHERE project_id = $1 AND monitor_id = $2
           ORDER BY started_at DESC, id
           LIMIT 1"
-    ))
+    )))
     .bind(project_id)
     .bind(monitor_id)
     .fetch_optional(tx.conn())
@@ -1256,14 +1260,14 @@ pub async fn insert_open_run(
     id: Uuid,
     run: OpenRunWrite<'_>,
 ) -> sqlx::Result<Option<OpenRunRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO telemetry.open_runs (id, project_id, organization_id, monitor_id, agent, \
              source, ping_key_id, started_at, last_heard_at, ends_by, steps, cost_usd, \
              stall_after_s, max_steps, max_cost_usd)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, $13, $14)
          ON CONFLICT (project_id, id) DO NOTHING
          RETURNING {OPEN_RUN_COLUMNS}"
-    ))
+    )))
     .bind(id)
     .bind(project_id)
     .bind(organization_id)
@@ -1302,14 +1306,14 @@ pub async fn hear_open_run<B: HasProject>(
     cost_usd: Option<f64>,
 ) -> sqlx::Result<Option<OpenRunRow>> {
     // `GREATEST` passes over a NULL, so a total the ping did not send stands.
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE telemetry.open_runs
             SET last_heard_at = GREATEST($4, last_heard_at),
                 steps = GREATEST($5, steps),
                 cost_usd = GREATEST($6, cost_usd)
           WHERE project_id = $1 AND id = $2 AND monitor_id = $3
          RETURNING {OPEN_RUN_COLUMNS}"
-    ))
+    )))
     .bind(project_id)
     .bind(id)
     .bind(monitor_id)
@@ -1327,11 +1331,11 @@ pub async fn close_open_run<B: HasProject>(
     project_id: &ProjectId,
     id: Uuid,
 ) -> sqlx::Result<Option<OpenRunRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "DELETE FROM telemetry.open_runs
           WHERE project_id = $1 AND id = $2
          RETURNING {OPEN_RUN_COLUMNS}"
-    ))
+    )))
     .bind(project_id)
     .bind(id)
     .fetch_optional(tx.conn())
@@ -1347,11 +1351,11 @@ pub async fn close_open_runs<B: HasProject>(
     project_id: &ProjectId,
     monitor_id: Uuid,
 ) -> sqlx::Result<Vec<OpenRunRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "DELETE FROM telemetry.open_runs
           WHERE project_id = $1 AND monitor_id = $2
          RETURNING {OPEN_RUN_COLUMNS}"
-    ))
+    )))
     .bind(project_id)
     .bind(monitor_id)
     .fetch_all(tx.conn())
@@ -1413,7 +1417,7 @@ pub async fn lease_outbox(
     lease_secs: i64,
     max_attempts: i32,
 ) -> sqlx::Result<Vec<OutboxRow>> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "WITH candidate AS (
             SELECT o.id FROM telemetry.outbox o
              WHERE (o.lease_until IS NULL OR o.lease_until < now())
@@ -1427,7 +1431,7 @@ pub async fn lease_outbox(
            FROM candidate c
           WHERE o.id = c.id
       RETURNING {OUTBOX_LEASED_COLUMNS}"
-    ))
+    )))
     .bind(limit)
     .bind(lease_secs)
     .bind(max_attempts)

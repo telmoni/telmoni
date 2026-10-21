@@ -459,10 +459,12 @@ impl Project {
             .fetch_one(&mut *holder)
             .await
             .expect("the holder's session");
-        sqlx::query(&format!("LOCK TABLE telemetry.{table} IN SHARE MODE"))
-            .execute(&mut *holder)
-            .await
-            .expect("hold the table");
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "LOCK TABLE telemetry.{table} IN SHARE MODE"
+        )))
+        .execute(&mut *holder)
+        .await
+        .expect("hold the table");
         tokio::join!(self.ping(path), async {
             waiting_on(pool, holder_pid, "the ping waits to write its run").await;
             let mut changed = Vec::new();
@@ -821,19 +823,19 @@ impl Project {
             }
             Lock::Rows(table) => (
                 table,
-                sqlx::query(&format!(
+                sqlx::query(sqlx::AssertSqlSafe(format!(
                     "UPDATE telemetry.{table} SET organization_id = organization_id
                       WHERE project_id = $1"
-                ))
+                )))
                 .bind(&self.project)
                 .execute(writer)
                 .await,
             ),
             Lock::Purged(table) => (
                 table,
-                sqlx::query(&format!(
+                sqlx::query(sqlx::AssertSqlSafe(format!(
                     "DELETE FROM telemetry.{table} WHERE project_id = $1"
-                ))
+                )))
                 .bind(&self.project)
                 .execute(writer)
                 .await,
@@ -990,9 +992,9 @@ async fn recorded(pool: &PgPool, organization: &OrganizationId) -> Vec<(String, 
 
 /// The organizations a project's rows in a table are filed under.
 async fn filed_under(pool: &PgPool, table: &str, project: &ProjectId) -> Vec<String> {
-    sqlx::query_scalar(&format!(
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT organization_id FROM telemetry.{table} WHERE project_id = $1"
-    ))
+    )))
     .bind(project)
     .fetch_all(pool)
     .await
@@ -1031,10 +1033,12 @@ async fn holding(pool: &PgPool, table: &str) -> (sqlx::Transaction<'static, sqlx
         .fetch_one(&mut *holder)
         .await
         .expect("a holder's session");
-    sqlx::query(&format!("LOCK TABLE {table} IN SHARE MODE"))
-        .execute(&mut *holder)
-        .await
-        .expect("hold the table");
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "LOCK TABLE {table} IN SHARE MODE"
+    )))
+    .execute(&mut *holder)
+    .await
+    .expect("hold the table");
     (holder, pid)
 }
 
@@ -1084,9 +1088,9 @@ async fn left_of(pool: &PgPool, project: &ProjectId) -> Vec<&'static str> {
         "outbox",
         "project_settings",
     ] {
-        let rows: i64 = sqlx::query_scalar(&format!(
+        let rows: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT count(*) FROM telemetry.{table} WHERE project_id = $1"
-        ))
+        )))
         .bind(project)
         .fetch_one(pool)
         .await
@@ -4581,9 +4585,9 @@ async fn the_purges_and_a_move_take_the_keys_runs_and_outbox_rows_with_the_proje
     );
     tx.commit().await.expect("committed");
     for table in ["ping_keys", "open_runs", "outbox", "monitors"] {
-        let organizations: Vec<String> = sqlx::query_scalar(&format!(
+        let organizations: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT DISTINCT organization_id FROM telemetry.{table} WHERE project_id = $1"
-        ))
+        )))
         .bind(&p.project)
         .fetch_all(&pool)
         .await
@@ -4611,9 +4615,9 @@ async fn the_purges_and_a_move_take_the_keys_runs_and_outbox_rows_with_the_proje
         "monitors",
         "project_settings",
     ] {
-        let left: i64 = sqlx::query_scalar(&format!(
+        let left: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT count(*) FROM telemetry.{table} WHERE project_id = $1"
-        ))
+        )))
         .bind(&p.project)
         .fetch_one(&pool)
         .await
@@ -5057,9 +5061,9 @@ async fn an_organizations_purge_holds_every_project_its_rows_name(pool: PgPool) 
         p.make(hourly()).await;
         p.ping_ok(&format!("/{key}/hourly-sync")).await;
         for table in tables.iter().filter(|table| **table != named_by) {
-            let refiled = sqlx::query(&format!(
+            let refiled = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "UPDATE telemetry.{table} SET organization_id = $2 WHERE project_id = $1"
-            ))
+            )))
             .bind(&p.project)
             .bind(&elsewhere)
             .execute(&pool)

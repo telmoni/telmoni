@@ -79,12 +79,12 @@ pub async fn create(
     range_from: Option<DateTime<Utc>>,
     range_to: DateTime<Utc>,
 ) -> sqlx::Result<ExportEntry> {
-    sqlx::query_as::<_, ExportEntry>(&format!(
+    sqlx::query_as::<_, ExportEntry>(sqlx::AssertSqlSafe(format!(
         "INSERT INTO auth.audit_exports
                 (id, organization_id, user_id, format, range_from, range_to)
          VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING {ENTRY}"
-    ))
+    )))
     .bind(id)
     .bind(organization_id)
     .bind(user_id)
@@ -147,13 +147,13 @@ pub async fn list(
     user_id: &UserId,
     limit: i64,
 ) -> sqlx::Result<Vec<ExportEntry>> {
-    sqlx::query_as::<_, ExportEntry>(&format!(
+    sqlx::query_as::<_, ExportEntry>(sqlx::AssertSqlSafe(format!(
         "SELECT {ENTRY} FROM auth.audit_exports
           WHERE organization_id = $1 AND user_id = $2
             AND (expires_at IS NULL OR expires_at > now())
           ORDER BY created_at DESC, id DESC
           LIMIT $3"
-    ))
+    )))
     .bind(organization_id)
     .bind(user_id)
     .bind(limit)

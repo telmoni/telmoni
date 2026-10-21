@@ -11,12 +11,16 @@ const AUDIT_MIGRATIONS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../migrator
 async fn apply_migrations(pool: &PgPool, sets: &[(&str, &str)]) {
     let mut conn = pool.acquire().await.unwrap();
     for (schema, dir) in sets {
-        conn.execute(format!("CREATE SCHEMA IF NOT EXISTS {schema}").as_str())
-            .await
-            .unwrap();
-        conn.execute(format!("SET search_path = {schema}, public").as_str())
-            .await
-            .unwrap();
+        conn.execute(sqlx::AssertSqlSafe(format!(
+            "CREATE SCHEMA IF NOT EXISTS {schema}"
+        )))
+        .await
+        .unwrap();
+        conn.execute(sqlx::AssertSqlSafe(format!(
+            "SET search_path = {schema}, public"
+        )))
+        .await
+        .unwrap();
         sqlx::migrate::Migrator::new(std::path::Path::new(dir))
             .await
             .unwrap()

@@ -113,7 +113,7 @@ async fn pool_or_skip() -> Option<PgPool> {
             "GRANT SELECT, INSERT, DELETE ON auth.identities, auth.accounts, auth.sessions, auth.confirmation_codes TO {PROBE_ROLE}, {MEMBER_PROBE_ROLE}"
         ),
     ] {
-        sqlx::query(&ddl)
+        sqlx::query(sqlx::AssertSqlSafe(ddl))
             .execute(&mut *tx)
             .await
             .expect("probe role DDL");
@@ -178,7 +178,7 @@ async fn policies_scope_probe_reads_and_fail_closed_without_an_org() {
     let mut tx = organization_scope(&pool, &oid(&org_a))
         .await
         .expect("scope A");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -193,7 +193,7 @@ async fn policies_scope_probe_reads_and_fail_closed_without_an_org() {
     tx.rollback().await.expect("rollback");
 
     let mut tx = pool.begin().await.expect("begin");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -247,7 +247,7 @@ async fn feed_policy_scopes_reads_and_fails_closed() {
     seed_feed(&pool, &org_a, &org_b).await;
 
     let mut tx = project_scope(&pool, &pid(&org_a)).await.expect("scope A");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -265,7 +265,7 @@ async fn feed_policy_scopes_reads_and_fails_closed() {
     tx.rollback().await.expect("rollback");
 
     let mut tx = project_scope(&pool, &pid(&org_a)).await.expect("scope A");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -284,7 +284,7 @@ async fn feed_policy_scopes_reads_and_fails_closed() {
     drop(tx);
 
     let mut tx = pool.begin().await.expect("begin");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -316,7 +316,7 @@ async fn with_check_refuses_cross_org_writes() {
     let mut tx = organization_scope(&pool, &oid(&org_a))
         .await
         .expect("scope A");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -407,10 +407,12 @@ async fn a_maintenance_lane_cannot_reach_a_sibling_services_schema() {
         (MaintenanceLane::Telemetry, "agent.chunks"),
     ] {
         let mut tx = enter(&pool, lane).await.expect("enter the lane");
-        let denied = sqlx::query(&format!("SELECT count(*) FROM {foreign}"))
-            .execute(&mut *tx)
-            .await
-            .expect_err("a lane must not read a sibling's table");
+        let denied = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT count(*) FROM {foreign}"
+        )))
+        .execute(&mut *tx)
+        .await
+        .expect_err("a lane must not read a sibling's table");
         assert!(
             denied.to_string().contains("permission denied"),
             "{} read {foreign}: {denied}",
@@ -432,10 +434,12 @@ async fn maintenance_membership_alone_does_not_widen_a_project_scope() {
     let mut tx = organization_scope(&pool, &oid(&org_a))
         .await
         .expect("scope A");
-    sqlx::query(&format!("SET LOCAL ROLE {MEMBER_PROBE_ROLE}"))
-        .execute(&mut *tx)
-        .await
-        .expect("set member probe role");
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SET LOCAL ROLE {MEMBER_PROBE_ROLE}"
+    )))
+    .execute(&mut *tx)
+    .await
+    .expect("set member probe role");
     let visible: Vec<String> = sqlx::query_scalar(
         "SELECT organization_id FROM auth.organization_flags WHERE organization_id = ANY($1) ORDER BY 1",
     )
@@ -455,10 +459,12 @@ async fn maintenance_membership_alone_does_not_widen_a_project_scope() {
     let mut tx = organization_scope(&pool, &oid(&org_a))
         .await
         .expect("scope A");
-    sqlx::query(&format!("SET LOCAL ROLE {MEMBER_PROBE_ROLE}"))
-        .execute(&mut *tx)
-        .await
-        .expect("set member probe role");
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SET LOCAL ROLE {MEMBER_PROBE_ROLE}"
+    )))
+    .execute(&mut *tx)
+    .await
+    .expect("set member probe role");
     let denied = sqlx::query(
         "INSERT INTO auth.organization_flags (organization_id, key, enabled, note, actor)
          VALUES ($1, 'members', false, 'sneak', 'operator')",
@@ -550,7 +556,7 @@ async fn membership_policy_distinguishes_owner_and_stranger() {
     let mut tx = project_scope(&pool, &pid(&organization))
         .await
         .expect("owner scope");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -568,7 +574,7 @@ async fn membership_policy_distinguishes_owner_and_stranger() {
     let mut tx = project_scope(&pool, &pid(&stranger_project))
         .await
         .expect("stranger scope");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -587,7 +593,7 @@ async fn membership_policy_distinguishes_owner_and_stranger() {
     let mut tx = person_scope(&pool, &uid(&member))
         .await
         .expect("member scope");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -614,7 +620,7 @@ async fn membership_policy_distinguishes_owner_and_stranger() {
     let mut tx = project_scope(&pool, &pid(&stranger_project))
         .await
         .expect("stranger scope");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -692,9 +698,9 @@ async fn a_person_reads_only_their_own_rows_and_a_roster_only_its_people() {
     let both = vec![member.clone(), outsider.clone()];
 
     async fn read(tx: &mut sqlx::PgConnection, table: &str, people: &[String]) -> Vec<String> {
-        sqlx::query_scalar::<_, String>(&format!(
+        sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
             "SELECT user_id FROM auth.{table} WHERE user_id = ANY($1) ORDER BY user_id"
-        ))
+        )))
         .bind(people)
         .fetch_all(tx)
         .await
@@ -702,7 +708,7 @@ async fn a_person_reads_only_their_own_rows_and_a_roster_only_its_people() {
     }
 
     let mut tx = person_scope(&pool, &uid(&member)).await.expect("scope");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -735,7 +741,7 @@ async fn a_person_reads_only_their_own_rows_and_a_roster_only_its_people() {
     let mut tx = organization_scope(&pool, &oid(&organization))
         .await
         .expect("scope");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -760,7 +766,7 @@ async fn a_person_reads_only_their_own_rows_and_a_roster_only_its_people() {
     tx.rollback().await.expect("rollback");
 
     let mut tx = pool.begin().await.expect("begin");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -838,7 +844,7 @@ async fn the_tenant_root_is_seen_only_by_its_own_scopes() {
     let mut tx = organization_scope(&pool, &oid(&org_a))
         .await
         .expect("scope");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -858,7 +864,7 @@ async fn the_tenant_root_is_seen_only_by_its_own_scopes() {
 
     for (who, expected) in [(&member, vec![org_a.clone()]), (&stranger, vec![])] {
         let mut tx = person_scope(&pool, &uid(who)).await.expect("scope");
-        sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+        sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
             .execute(&mut *tx)
             .await
             .expect("set probe role");
@@ -879,7 +885,7 @@ async fn the_tenant_root_is_seen_only_by_its_own_scopes() {
     }
 
     let mut tx = project_scope(&pool, &pid(&org_a)).await.expect("scope");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -891,7 +897,7 @@ async fn the_tenant_root_is_seen_only_by_its_own_scopes() {
     tx.rollback().await.expect("rollback");
 
     let mut tx = pool.begin().await.expect("begin");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -983,7 +989,7 @@ async fn flag_overrides_scope_reads_and_fail_closed() {
     let mut tx = organization_scope(&pool, &oid(&org_a))
         .await
         .expect("scope A");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -1004,7 +1010,7 @@ async fn flag_overrides_scope_reads_and_fail_closed() {
     let mut tx = organization_scope(&pool, &oid(&org_a))
         .await
         .expect("scope A");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -1023,7 +1029,7 @@ async fn flag_overrides_scope_reads_and_fail_closed() {
     drop(tx);
 
     let mut tx = pool.begin().await.expect("begin");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -1067,7 +1073,7 @@ async fn the_admin_membership_lookup_reads_under_the_person_guc() {
     let mut tx = person_scope(&pool, &uid(&admin))
         .await
         .expect("scope admin");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -1089,7 +1095,7 @@ async fn the_admin_membership_lookup_reads_under_the_person_guc() {
     let mut tx = project_scope(&pool, &pid(&organization))
         .await
         .expect("scope project");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -1169,9 +1175,9 @@ async fn connection_policies_scope_by_project_widen_by_organization_and_fail_clo
     let all_projects = vec![project_a1.clone(), project_a2.clone(), project_b.clone()];
 
     async fn visible(tx: &mut sqlx::PgConnection, table: &str, projects: &[String]) -> Vec<String> {
-        sqlx::query_scalar::<_, String>(&format!(
+        sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
             "SELECT project_id FROM notifications.{table} WHERE project_id = ANY($1) ORDER BY project_id"
-        ))
+        )))
         .bind(projects)
         .fetch_all(tx)
         .await
@@ -1181,7 +1187,7 @@ async fn connection_policies_scope_by_project_widen_by_organization_and_fail_clo
     let mut tx = project_scope(&pool, &pid(&project_a1))
         .await
         .expect("scope");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -1203,7 +1209,7 @@ async fn connection_policies_scope_by_project_widen_by_organization_and_fail_clo
     let mut tx = organization_scope(&pool, &oid(&org_a))
         .await
         .expect("scope");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -1288,7 +1294,7 @@ async fn connection_policies_scope_by_project_widen_by_organization_and_fail_clo
     let mut tx = project_scope(&pool, &pid(&project_a1))
         .await
         .expect("scope");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");
@@ -1312,7 +1318,7 @@ async fn connection_policies_scope_by_project_widen_by_organization_and_fail_clo
     drop(tx);
 
     let mut tx = pool.begin().await.expect("begin");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");

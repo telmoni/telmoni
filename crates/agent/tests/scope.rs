@@ -407,7 +407,7 @@ async fn another_persons_conversations_do_not_exist(pool: PgPool) {
     tx.rollback().await.unwrap();
 }
 
-async fn count(pool: &PgPool, sql: &str) -> i64 {
+async fn count(pool: &PgPool, sql: &'static str) -> i64 {
     sqlx::query_scalar(sql).fetch_one(pool).await.unwrap()
 }
 

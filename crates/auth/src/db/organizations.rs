@@ -22,9 +22,9 @@ pub async fn get<B: Binding>(
     tx: &mut Scoped<'_, B>,
     external_id: &OrganizationId,
 ) -> sqlx::Result<Option<Organization>> {
-    sqlx::query_as::<_, Organization>(&format!(
+    sqlx::query_as::<_, Organization>(sqlx::AssertSqlSafe(format!(
         "SELECT {ORGANIZATION_COLUMNS} FROM auth.organizations WHERE external_id = $1"
-    ))
+    )))
     .bind(external_id)
     .fetch_optional(tx.conn())
     .await
@@ -79,13 +79,13 @@ pub async fn create<B: HasOrganization>(
     name: &str,
     slug: &str,
 ) -> sqlx::Result<Option<Organization>> {
-    sqlx::query_as::<_, Organization>(&format!(
+    sqlx::query_as::<_, Organization>(sqlx::AssertSqlSafe(format!(
         "INSERT INTO auth.organizations
              (id, external_id, slug, name, shard_key, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, now(), now())
          ON CONFLICT ON CONSTRAINT organizations_slug_key DO NOTHING
          RETURNING {ORGANIZATION_COLUMNS}"
-    ))
+    )))
     .bind(Uuid::now_v7())
     .bind(external_id)
     .bind(slug)

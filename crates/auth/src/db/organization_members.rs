@@ -115,7 +115,7 @@ pub async fn list_for_organization(
     tx: &mut Scoped<'_, Organization>,
     organization_id: &OrganizationId,
 ) -> sqlx::Result<Vec<OrganizationMember>> {
-    sqlx::query_as::<_, OrganizationMember>(&format!(
+    sqlx::query_as::<_, OrganizationMember>(sqlx::AssertSqlSafe(format!(
         "SELECT m.id, m.user_id AS member_id, i.email, i.display_name, m.role,
                 m.created_at, m.role = 'owner' AS is_owner,
                 {OFFER_EXPIRES_AT} AS ownership_offer_expires_at
@@ -123,7 +123,7 @@ pub async fn list_for_organization(
            JOIN auth.identities i ON i.user_id = m.user_id
           WHERE m.organization_id = $1
           ORDER BY (m.role = 'owner') DESC, m.created_at DESC, m.id DESC"
-    ))
+    )))
     .bind(organization_id)
     .bind(OFFER_TTL_DAYS)
     .fetch_all(tx.conn())
@@ -751,7 +751,7 @@ pub async fn organizations_of(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     user_id: &UserId,
 ) -> sqlx::Result<Vec<OrganizationMembership>> {
-    sqlx::query_as::<_, OrganizationMembership>(&format!(
+    sqlx::query_as::<_, OrganizationMembership>(sqlx::AssertSqlSafe(format!(
         "SELECT m.organization_id, o.slug, o.name,
                 owner_identity.email AS owner_email,
                 owner_identity.display_name AS owner_display_name,
@@ -767,7 +767,7 @@ pub async fn organizations_of(
                   ON owner_identity.user_id = owner_row.user_id
           WHERE m.user_id = $1
           ORDER BY m.created_at ASC, m.id ASC"
-    ))
+    )))
     .bind(user_id)
     .bind(OFFER_TTL_DAYS)
     .fetch_all(tx.conn())

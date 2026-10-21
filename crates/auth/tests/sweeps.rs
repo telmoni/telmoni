@@ -412,7 +412,10 @@ async fn the_audit_walk_reports_a_forged_chain_and_verifies_the_rest(pool: PgPoo
           WHERE organization_id = 'org_forged' AND metadata->>'n' = '1'",
         "UPDATE", "audit", "events"
     );
-    sqlx::query(&forge).execute(&pool).await.unwrap();
+    sqlx::query(sqlx::AssertSqlSafe(forge))
+        .execute(&pool)
+        .await
+        .unwrap();
 
     let err = sweep::audit_verify(&state)
         .await

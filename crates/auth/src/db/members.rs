@@ -130,7 +130,7 @@ pub async fn list_for_project(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
 ) -> sqlx::Result<Vec<Member>> {
-    sqlx::query_as::<_, Member>(&format!(
+    sqlx::query_as::<_, Member>(sqlx::AssertSqlSafe(format!(
         "SELECT o.id, o.user_id AS member_id, i.email, i.display_name,
                 'owner'::text AS role, p.created_at, true AS is_owner,
                 NULL::timestamptz AS transfer_offer_expires_at
@@ -152,7 +152,7 @@ pub async fn list_for_project(
                  WHERE o.organization_id = p.organization_id
                    AND o.user_id = m.user_id AND o.role = 'owner')
           ORDER BY is_owner DESC, created_at DESC, id DESC"
-    ))
+    )))
     .bind(project_id)
     .bind(OFFER_TTL_DAYS)
     .fetch_all(tx.conn())

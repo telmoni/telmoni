@@ -101,7 +101,7 @@ fn role_pool(pool: &PgPool, role: &str, sibling: Option<SiblingRole>) -> PgPool 
             let set_role = set_role.clone();
             Box::pin(async move {
                 prepare(conn, &database, sibling).await;
-                conn.execute(set_role.as_str())
+                conn.execute(sqlx::AssertSqlSafe(set_role))
                     .await
                     .expect("SET ROLE to the service role");
                 Ok(())
@@ -145,7 +145,7 @@ async fn prepare(conn: &mut sqlx::PgConnection, database: &str, sibling: Option<
             // As the role hardening grants it: its own lane only, and never
             // inherited.
             let membership = format!("GRANT {lane} TO {role} WITH INHERIT FALSE, SET TRUE");
-            conn.execute(membership.as_str())
+            conn.execute(sqlx::AssertSqlSafe(membership))
                 .await
                 .expect("grant a maintenance lane membership");
         }
@@ -162,7 +162,7 @@ async fn prepare(conn: &mut sqlx::PgConnection, database: &str, sibling: Option<
                 "GRANT {lane} TO {role} WITH INHERIT FALSE, SET TRUE",
                 role = sibling.role
             );
-            conn.execute(membership.as_str())
+            conn.execute(sqlx::AssertSqlSafe(membership))
                 .await
                 .expect("grant the sibling's lane membership");
         }
@@ -190,7 +190,7 @@ async fn create_role(conn: &mut sqlx::PgConnection, role: &str) {
            END IF; \
          EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END $$"
     );
-    conn.execute(sql.as_str())
+    conn.execute(sqlx::AssertSqlSafe(sql))
         .await
         .expect("create a service role");
 }

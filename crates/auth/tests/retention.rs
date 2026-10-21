@@ -108,7 +108,7 @@ async fn seed_invitations(pool: &PgPool) {
             } else {
                 ("organization_id", ORGANIZATION, "member")
             };
-            sqlx::query(&format!(
+            sqlx::query(sqlx::AssertSqlSafe(format!(
                 "INSERT INTO auth.{table}
                      (id, {owner}, email, role, token_hash, invited_by, expires_at,
                       revoked_at, accepted_at, accepted_by)
@@ -117,7 +117,7 @@ async fn seed_invitations(pool: &PgPool) {
                          now() + $5::interval,
                          CASE WHEN $6 THEN now() - interval '40 days' END,
                          CASE WHEN $6 THEN 'u_acceptor' END)"
-            ))
+            )))
             .bind(owner_id)
             .bind(format!("{email}@example.test"))
             .bind(role)

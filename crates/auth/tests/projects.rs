@@ -537,12 +537,13 @@ async fn deleting_a_project_takes_its_keys_and_its_seats(pool: PgPool) {
         ("auth.project_members", "project_id"),
         ("auth.api_tokens", "project_id"),
     ] {
-        let left: i64 =
-            sqlx::query_scalar(&format!("SELECT count(*) FROM {table} WHERE {column} = $1"))
-                .bind(&project_id)
-                .fetch_one(&pool)
-                .await
-                .expect("count");
+        let left: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT count(*) FROM {table} WHERE {column} = $1"
+        )))
+        .bind(&project_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count");
         assert_eq!(left, 0, "{table} still holds rows for the deleted project");
     }
 }

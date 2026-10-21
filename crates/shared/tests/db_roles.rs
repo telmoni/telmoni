@@ -701,7 +701,7 @@ async fn create_roles(conn: &mut sqlx::PgConnection) -> Result<(), sqlx::Error> 
                END IF; \
              EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END $$"
         );
-        conn.execute(sql.as_str()).await?;
+        conn.execute(sqlx::AssertSqlSafe(sql)).await?;
     }
     Ok(())
 }
@@ -719,7 +719,7 @@ async fn revoke_service_privileges(conn: &mut sqlx::PgConnection) -> Result<(), 
             format!("REVOKE ALL ON ALL SEQUENCES IN SCHEMA {schema} FROM {roles}"),
             format!("REVOKE ALL ON SCHEMA {schema} FROM {roles}"),
         ] {
-            conn.execute(stmt.as_str()).await?;
+            conn.execute(sqlx::AssertSqlSafe(stmt)).await?;
         }
     }
     Ok(())

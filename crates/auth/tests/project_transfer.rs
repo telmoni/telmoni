@@ -1898,9 +1898,9 @@ async fn a_transfer_kept_waiting_by_a_ping_is_a_conflict(pool: PgPool) {
         .fetch_one(&pool)
         .await
         .expect("the suite's database");
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         "ALTER DATABASE \"{database}\" SET lock_timeout = '1s'"
-    ))
+    )))
     .execute(&pool)
     .await
     .expect("a lock_timeout for every new connection");
@@ -2750,9 +2750,9 @@ async fn lock_timeout_of_a_tier(pool: &PgPool) {
         .fetch_one(pool)
         .await
         .unwrap();
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         "ALTER DATABASE \"{database}\" SET lock_timeout = '1s'"
-    ))
+    )))
     .execute(pool)
     .await
     .unwrap();

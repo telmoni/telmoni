@@ -389,10 +389,10 @@ pub async fn purge_organization_connections(
     tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
     organization_id: &OrganizationId,
 ) -> sqlx::Result<Purged> {
-    let connections = sqlx::query_as::<_, SealedConnection>(&format!(
+    let connections = sqlx::query_as::<_, SealedConnection>(sqlx::AssertSqlSafe(format!(
         "DELETE FROM notifications.connections WHERE organization_id = $1
          RETURNING {SEALED_COLUMNS}"
-    ))
+    )))
     .bind(organization_id)
     .fetch_all(tx.conn())
     .await?;
@@ -535,9 +535,9 @@ pub async fn purge_project_connections(
     tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
     project_id: &ProjectId,
 ) -> sqlx::Result<Purged> {
-    let connections = sqlx::query_as::<_, SealedConnection>(&format!(
+    let connections = sqlx::query_as::<_, SealedConnection>(sqlx::AssertSqlSafe(format!(
         "DELETE FROM notifications.connections WHERE project_id = $1 RETURNING {SEALED_COLUMNS}"
-    ))
+    )))
     .bind(project_id)
     .fetch_all(tx.conn())
     .await?;
@@ -579,11 +579,11 @@ pub async fn list_connections(
     tx: &mut Scoped<'_, Project>,
     project_id: &ProjectId,
 ) -> sqlx::Result<Vec<ConnectionSummary>> {
-    sqlx::query_as::<_, ConnectionSummary>(&format!(
+    sqlx::query_as::<_, ConnectionSummary>(sqlx::AssertSqlSafe(format!(
         "SELECT {SUMMARY_COLUMNS} FROM notifications.connections
           WHERE project_id = $1
           ORDER BY created_at DESC, id DESC"
-    ))
+    )))
     .bind(project_id)
     .fetch_all(tx.conn())
     .await
@@ -686,9 +686,9 @@ pub async fn sealed_connection<B: Binding>(
     project_id: &ProjectId,
     id: Uuid,
 ) -> sqlx::Result<Option<SealedConnection>> {
-    sqlx::query_as::<_, SealedConnection>(&format!(
+    sqlx::query_as::<_, SealedConnection>(sqlx::AssertSqlSafe(format!(
         "SELECT {SEALED_COLUMNS} FROM notifications.connections WHERE project_id = $1 AND id = $2"
-    ))
+    )))
     .bind(project_id)
     .bind(id)
     .fetch_optional(tx.conn())
@@ -700,9 +700,9 @@ pub async fn sealed_connections(
     tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
     ids: &[Uuid],
 ) -> sqlx::Result<Vec<SealedConnection>> {
-    sqlx::query_as::<_, SealedConnection>(&format!(
+    sqlx::query_as::<_, SealedConnection>(sqlx::AssertSqlSafe(format!(
         "SELECT {SEALED_COLUMNS} FROM notifications.connections WHERE id = ANY($1)"
-    ))
+    )))
     .bind(ids)
     .fetch_all(tx.conn())
     .await
@@ -762,7 +762,7 @@ pub async fn insert_connection<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     c: &NewConnection<'_>,
 ) -> sqlx::Result<ConnectionSummary> {
-    sqlx::query_as::<_, ConnectionSummary>(&format!(
+    sqlx::query_as::<_, ConnectionSummary>(sqlx::AssertSqlSafe(format!(
         "INSERT INTO notifications.connections
              (id, project_id, organization_id, provider, external_workspace_id,
               external_workspace_name, channel_id, channel_name,
@@ -771,7 +771,7 @@ pub async fn insert_connection<B: HasProject>(
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
                  $18)
          RETURNING {SUMMARY_COLUMNS}"
-    ))
+    )))
     .bind(c.id)
     .bind(c.project_id)
     .bind(c.organization_id)
@@ -803,12 +803,12 @@ pub async fn set_event_kinds(
     id: Uuid,
     event_kinds: Option<&[NotificationKind]>,
 ) -> sqlx::Result<Option<ConnectionSummary>> {
-    sqlx::query_as::<_, ConnectionSummary>(&format!(
+    sqlx::query_as::<_, ConnectionSummary>(sqlx::AssertSqlSafe(format!(
         "UPDATE notifications.connections
             SET event_kinds = $4
           WHERE id = $1 AND project_id = $2 AND provider = $3
       RETURNING {SUMMARY_COLUMNS}"
-    ))
+    )))
     .bind(id)
     .bind(project_id)
     .bind(Provider::Webhook)
@@ -822,7 +822,7 @@ pub async fn reconnect_connection(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     c: &NewConnection<'_>,
 ) -> sqlx::Result<ConnectionSummary> {
-    sqlx::query_as::<_, ConnectionSummary>(&format!(
+    sqlx::query_as::<_, ConnectionSummary>(sqlx::AssertSqlSafe(format!(
         "UPDATE notifications.connections
             SET external_workspace_name = $2, channel_name = $3,
                 target_ciphertext = $4, target_nonce = $5, key_version = $6,
@@ -832,7 +832,7 @@ pub async fn reconnect_connection(
                 consecutive_failures = 0
           WHERE id = $1
       RETURNING {SUMMARY_COLUMNS}"
-    ))
+    )))
     .bind(c.id)
     .bind(c.external_workspace_name)
     .bind(c.channel_name)
@@ -856,10 +856,10 @@ pub async fn delete_connection(
     project_id: &ProjectId,
     id: Uuid,
 ) -> sqlx::Result<Option<SealedConnection>> {
-    sqlx::query_as::<_, SealedConnection>(&format!(
+    sqlx::query_as::<_, SealedConnection>(sqlx::AssertSqlSafe(format!(
         "DELETE FROM notifications.connections WHERE project_id = $1 AND id = $2
          RETURNING {SEALED_COLUMNS}"
-    ))
+    )))
     .bind(project_id)
     .bind(id)
     .fetch_optional(tx.conn())
@@ -1067,12 +1067,12 @@ pub async fn uninstalls_due(
     filed_secs: i64,
     limit: i64,
 ) -> sqlx::Result<Vec<Uninstall>> {
-    sqlx::query_as::<_, Uninstall>(&format!(
+    sqlx::query_as::<_, Uninstall>(sqlx::AssertSqlSafe(format!(
         "SELECT {UNINSTALL_COLUMNS} FROM notifications.uninstalls
           WHERE created_at < now() - make_interval(secs => $1::bigint)
           ORDER BY created_at, id
           LIMIT $2"
-    ))
+    )))
     .bind(filed_secs)
     .bind(limit)
     .fetch_all(tx.conn())
@@ -1085,11 +1085,11 @@ pub async fn give_up_uninstalls(
     tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
     filed_secs: i64,
 ) -> sqlx::Result<Vec<Uninstall>> {
-    sqlx::query_as::<_, Uninstall>(&format!(
+    sqlx::query_as::<_, Uninstall>(sqlx::AssertSqlSafe(format!(
         "DELETE FROM notifications.uninstalls
           WHERE created_at < now() - make_interval(secs => $1::bigint)
       RETURNING {UNINSTALL_COLUMNS}"
-    ))
+    )))
     .bind(filed_secs)
     .fetch_all(tx.conn())
     .await
@@ -1119,13 +1119,13 @@ pub async fn retire_connection(
     status: ConnectionStatus,
     reason: &str,
 ) -> sqlx::Result<Option<RetiredConnection>> {
-    sqlx::query_as::<_, RetiredConnection>(&format!(
+    sqlx::query_as::<_, RetiredConnection>(sqlx::AssertSqlSafe(format!(
         "UPDATE notifications.connections
             SET status = $2, last_error = $3,
                 revoked_at = CASE WHEN $2 = $4 THEN now() ELSE revoked_at END
           WHERE id = $1 AND status = $5
       RETURNING {RETIRED_COLUMNS}"
-    ))
+    )))
     .bind(id)
     .bind(status)
     .bind(telmoni_shared::text::truncate_on_char_boundary(
@@ -1147,13 +1147,13 @@ pub async fn revoke_workspace(
     organizations: &[String],
     reason: &str,
 ) -> sqlx::Result<Vec<RetiredConnection>> {
-    sqlx::query_as::<_, RetiredConnection>(&format!(
+    sqlx::query_as::<_, RetiredConnection>(sqlx::AssertSqlSafe(format!(
         "UPDATE notifications.connections
             SET status = $4, last_error = $3, revoked_at = now()
           WHERE provider = $1 AND external_workspace_id = $2 AND status <> $4
             AND organization_id = ANY($5)
       RETURNING {RETIRED_COLUMNS}"
-    ))
+    )))
     .bind(provider)
     .bind(external_workspace_id)
     .bind(telmoni_shared::text::truncate_on_char_boundary(
@@ -1236,7 +1236,7 @@ pub async fn reseal_webhook_secret(
     token: &Sealed,
     keep_prior_hours: i32,
 ) -> sqlx::Result<Option<ConnectionSummary>> {
-    sqlx::query_as::<_, ConnectionSummary>(&format!(
+    sqlx::query_as::<_, ConnectionSummary>(sqlx::AssertSqlSafe(format!(
         "UPDATE notifications.connections
             SET token_ciphertext = $5, token_nonce = $6,
                 prior_token_ciphertext = CASE WHEN $8 > 0 THEN $4 END,
@@ -1247,7 +1247,7 @@ pub async fn reseal_webhook_secret(
                 consecutive_failures = 0
           WHERE id = $1 AND project_id = $2 AND provider = $3 AND token_ciphertext = $4
       RETURNING {SUMMARY_COLUMNS}"
-    ))
+    )))
     .bind(id)
     .bind(project_id)
     .bind(Provider::Webhook)
@@ -1389,7 +1389,7 @@ pub async fn lease_deliveries(
     limit: i64,
     lease_secs: i64,
 ) -> sqlx::Result<Vec<LeasedDelivery>> {
-    sqlx::query_as::<_, LeasedDelivery>(&format!(
+    sqlx::query_as::<_, LeasedDelivery>(sqlx::AssertSqlSafe(format!(
         "WITH candidate AS (
             SELECT d.id FROM notifications.deliveries d
              WHERE d.status = 'pending'
@@ -1405,7 +1405,7 @@ pub async fn lease_deliveries(
            FROM candidate c
           WHERE d.id = c.id
       RETURNING {LEASED_COLUMNS}"
-    ))
+    )))
     .bind(limit)
     .bind(lease_secs)
     .fetch_all(tx.conn())
@@ -1419,7 +1419,7 @@ pub async fn lease_delivery(
     id: Uuid,
     lease_secs: i64,
 ) -> sqlx::Result<Option<LeasedDelivery>> {
-    sqlx::query_as::<_, LeasedDelivery>(&format!(
+    sqlx::query_as::<_, LeasedDelivery>(sqlx::AssertSqlSafe(format!(
         "UPDATE notifications.deliveries d
             SET attempts = d.attempts + 1,
                 lease_until = now() + make_interval(secs => $2::bigint),
@@ -1432,7 +1432,7 @@ pub async fn lease_delivery(
                  WHERE c.id = d.connection_id AND c.status = $3
             )
       RETURNING {LEASED_COLUMNS}"
-    ))
+    )))
     .bind(id)
     .bind(lease_secs)
     .bind(ConnectionStatus::Active)

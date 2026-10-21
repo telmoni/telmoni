@@ -98,13 +98,9 @@ pub async fn create_pool_for_service(
         .after_connect(move |conn, _meta| {
             let schema = schema.clone();
             Box::pin(async move {
-                conn.execute(
-                    format!(
-                        "SET search_path = {schema}, public; \
-                     SET application_name = '{schema}'"
-                    )
-                    .as_str(),
-                )
+                conn.execute(sqlx::AssertSqlSafe(format!(
+                    "SET search_path = {schema}, public; SET application_name = '{schema}'"
+                )))
                 .await?;
                 Ok(())
             })

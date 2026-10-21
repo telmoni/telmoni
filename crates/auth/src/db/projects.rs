@@ -47,13 +47,13 @@ pub async fn create<B: ProjectCreate>(
     owner: &OrganizationId,
     name: &str,
 ) -> sqlx::Result<Option<String>> {
-    sqlx::query_scalar(&format!(
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "INSERT INTO auth.projects
              (id, external_id, organization_id, name, slug, shard_key)
          VALUES ($4, $1, $2, $5, ({FIRST_FREE_SLUG}), $6)
          ON CONFLICT (external_id) DO NOTHING
          RETURNING slug"
-    ))
+    )))
     .bind(project_id)
     .bind(owner)
     .bind(slugs_for(name))
@@ -95,7 +95,7 @@ pub async fn list_for_organization_user(
     organization_id: &OrganizationId,
     user_id: &UserId,
 ) -> sqlx::Result<Vec<ProjectSummary>> {
-    sqlx::query_as::<_, ProjectSummary>(&format!(
+    sqlx::query_as::<_, ProjectSummary>(sqlx::AssertSqlSafe(format!(
         "SELECT t.external_id AS id, t.slug, t.name, {ROLE_ON_PROJECT} AS role
            FROM auth.projects t
            JOIN auth.organizations o
@@ -107,7 +107,7 @@ pub async fn list_for_organization_user(
           WHERE t.organization_id = $1
             AND (om.role IN ('owner', 'admin') OR tm.user_id IS NOT NULL)
           ORDER BY t.name"
-    ))
+    )))
     .bind(organization_id)
     .bind(user_id)
     .fetch_all(tx.conn())
@@ -282,12 +282,12 @@ pub async fn move_to_organization(
     to: &OrganizationId,
     name: &str,
 ) -> sqlx::Result<Option<String>> {
-    sqlx::query_scalar(&format!(
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "UPDATE auth.projects
             SET organization_id = $2, name = $5, slug = ({FIRST_FREE_SLUG}), updated_at = now()
           WHERE external_id = $1 AND organization_id = $4
       RETURNING slug"
-    ))
+    )))
     .bind(project_id)
     .bind(to)
     .bind(slugs_for(name))
@@ -308,12 +308,12 @@ pub async fn update_name(
     project_id: &ProjectId,
     name: &str,
 ) -> sqlx::Result<Option<String>> {
-    sqlx::query_scalar(&format!(
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "UPDATE auth.projects
             SET name = $4, slug = COALESCE(({FIRST_FREE_SLUG}), slug), updated_at = now()
           WHERE external_id = $1 AND organization_id = $2
       RETURNING slug"
-    ))
+    )))
     .bind(project_id)
     .bind(organization_id)
     .bind(slug::candidates(slug::Scope::Project, name))
@@ -365,7 +365,7 @@ pub async fn list_everywhere_for_user(
     // Starts from the person's two membership indexes, not from every project:
     // an OR across two LEFT JOINs cannot be driven by either and walked every
     // tenant's projects on every page.
-    sqlx::query_as::<_, ProjectEverywhere>(&format!(
+    sqlx::query_as::<_, ProjectEverywhere>(sqlx::AssertSqlSafe(format!(
         "WITH reachable AS (
             SELECT t.external_id
               FROM auth.organization_members om
@@ -387,7 +387,7 @@ pub async fn list_everywhere_for_user(
            LEFT JOIN auth.organization_members om
                   ON om.organization_id = t.organization_id AND om.user_id = $1
           ORDER BY a.name, t.organization_id, t.name"
-    ))
+    )))
     .bind(user_id)
     .fetch_all(tx.conn())
     .await

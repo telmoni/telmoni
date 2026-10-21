@@ -49,9 +49,9 @@ const LIVE_INVITE: &str = "accepted_at IS NULL AND revoked_at IS NULL AND expire
 /// literal from this file, or a `format!` of this file's constants
 /// (`AUDIT_LIMIT`, `LIVE_INVITE`); the value is always bound.
 async fn rows(tx: &mut sqlx::PgConnection, sql: &str, bind: &str) -> Result<Value, TelmoniError> {
-    let value: Value = sqlx::query_scalar(&format!(
+    let value: Value = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM ({sql}) t"
-    ))
+    )))
     .bind(bind)
     .fetch_one(tx)
     .await?;

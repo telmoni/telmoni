@@ -242,12 +242,16 @@ async fn run_migrations(
         .after_connect(move |conn, _meta| {
             let schema = schema_for_hook.clone();
             Box::pin(async move {
-                sqlx::query(&format!("CREATE SCHEMA IF NOT EXISTS {schema}"))
-                    .execute(&mut *conn)
-                    .await?;
-                sqlx::query(&format!("SET search_path TO {schema}, public"))
-                    .execute(&mut *conn)
-                    .await?;
+                sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "CREATE SCHEMA IF NOT EXISTS {schema}"
+                )))
+                .execute(&mut *conn)
+                .await?;
+                sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "SET search_path TO {schema}, public"
+                )))
+                .execute(&mut *conn)
+                .await?;
                 Ok(())
             })
         })
@@ -313,7 +317,9 @@ async fn apply_object_grants(options: &sqlx::postgres::PgConnectOptions) -> anyh
             );
             continue;
         }
-        sqlx::raw_sql(&sql).execute(&pool).await?;
+        sqlx::raw_sql(sqlx::AssertSqlSafe(sql))
+            .execute(&pool)
+            .await?;
         tracing::info!(file, "grants file applied");
     }
     Ok(())

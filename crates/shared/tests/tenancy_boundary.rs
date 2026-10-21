@@ -475,17 +475,19 @@ async fn a_foreign_row_is_invisible_even_by_exact_id() {
          EXCEPTION WHEN duplicate_object THEN NULL;
          END $$;"
     );
-    sqlx::query(&bootstrap)
+    sqlx::query(sqlx::AssertSqlSafe(bootstrap))
         .execute(&pool)
         .await
         .expect("create the probe role");
-    sqlx::query(&format!("GRANT USAGE ON SCHEMA auth TO {PROBE_ROLE}"))
-        .execute(&pool)
-        .await
-        .expect("grant schema usage to the probe role");
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "GRANT USAGE ON SCHEMA auth TO {PROBE_ROLE}"
+    )))
+    .execute(&pool)
+    .await
+    .expect("grant schema usage to the probe role");
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         "GRANT SELECT ON auth.organization_flags TO {PROBE_ROLE}"
-    ))
+    )))
     .execute(&pool)
     .await
     .expect("grant the probe table to the probe role");
@@ -528,7 +530,7 @@ async fn a_foreign_row_is_invisible_even_by_exact_id() {
     )
     .await
     .expect("scope A");
-    sqlx::query(&format!("SET LOCAL ROLE {PROBE_ROLE}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("SET LOCAL ROLE {PROBE_ROLE}")))
         .execute(&mut *tx)
         .await
         .expect("set probe role");

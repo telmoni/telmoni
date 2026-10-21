@@ -73,10 +73,10 @@ fn audit_events() -> String {
 }
 
 async fn row_ids(pool: &PgPool, org: &str) -> Vec<Uuid> {
-    sqlx::query_scalar::<_, Uuid>(&format!(
+    sqlx::query_scalar::<_, Uuid>(sqlx::AssertSqlSafe(format!(
         "SELECT id FROM {} WHERE organization_id = $1 ORDER BY seq ASC",
         audit_events()
-    ))
+    )))
     .bind(org)
     .fetch_all(pool)
     .await
@@ -170,7 +170,7 @@ async fn tampered_row_fails_verify(pool: PgPool) {
         "UPDATE",
         audit_events()
     );
-    sqlx::query(&stmt)
+    sqlx::query(sqlx::AssertSqlSafe(stmt))
         .bind(ids[1])
         .execute(&pool)
         .await
@@ -204,7 +204,7 @@ async fn moving_a_row_to_another_organization_fails_verify(pool: PgPool) {
         "UPDATE",
         audit_events()
     );
-    sqlx::query(&stmt)
+    sqlx::query(sqlx::AssertSqlSafe(stmt))
         .bind(ids[1])
         .bind(&target)
         .execute(&pool)
@@ -229,7 +229,7 @@ async fn deleted_middle_row_breaks_the_link(pool: PgPool) {
     let ids = row_ids(&pool, &org).await;
 
     let stmt = format!("{} {} WHERE id = $1", "DELETE FROM", audit_events());
-    sqlx::query(&stmt)
+    sqlx::query(sqlx::AssertSqlSafe(stmt))
         .bind(ids[1])
         .execute(&pool)
         .await
@@ -249,14 +249,15 @@ async fn windowed_verify_from_midchain_is_not_a_false_break(pool: PgPool) {
         emit_one(&pool, &org, &format!("g{i}"), serde_json::json!({ "i": i })).await;
     }
 
-    let created = sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>(&format!(
-        "SELECT created_at FROM {} WHERE organization_id = $1 ORDER BY seq ASC",
-        audit_events()
-    ))
-    .bind(&org)
-    .fetch_all(&pool)
-    .await
-    .expect("created_at");
+    let created =
+        sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>(sqlx::AssertSqlSafe(format!(
+            "SELECT created_at FROM {} WHERE organization_id = $1 ORDER BY seq ASC",
+            audit_events()
+        )))
+        .bind(&org)
+        .fetch_all(&pool)
+        .await
+        .expect("created_at");
     let from = created[2];
 
     let report = verify(&pool, &org, Some(from)).await;
@@ -319,7 +320,7 @@ async fn moving_a_row_to_another_project_fails_verify(pool: PgPool) {
         "UPDATE",
         audit_events()
     );
-    sqlx::query(&stmt)
+    sqlx::query(sqlx::AssertSqlSafe(stmt))
         .bind(ids[1])
         .execute(&pool)
         .await
@@ -336,7 +337,7 @@ async fn moving_a_row_to_another_project_fails_verify(pool: PgPool) {
         "UPDATE",
         audit_events()
     );
-    sqlx::query(&stmt)
+    sqlx::query(sqlx::AssertSqlSafe(stmt))
         .bind(ids[1])
         .execute(&pool)
         .await

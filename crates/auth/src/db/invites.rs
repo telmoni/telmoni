@@ -455,11 +455,15 @@ pub async fn delete_stale(tx: &mut Scoped<'_, Maintenance<AuthLane>>) -> sqlx::R
     const WHERE: &str = "WHERE accepted_at IS NULL
                            AND (revoked_at < now() - interval '30 days'
                                 OR expires_at < now() - interval '30 days')";
-    let seats = sqlx::query(&format!("DELETE FROM auth.member_invites {WHERE}"))
-        .execute(tx.conn())
-        .await?;
-    let organizations = sqlx::query(&format!("DELETE FROM auth.organization_invites {WHERE}"))
-        .execute(tx.conn())
-        .await?;
+    let seats = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "DELETE FROM auth.member_invites {WHERE}"
+    )))
+    .execute(tx.conn())
+    .await?;
+    let organizations = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "DELETE FROM auth.organization_invites {WHERE}"
+    )))
+    .execute(tx.conn())
+    .await?;
     Ok(seats.rows_affected() + organizations.rows_affected())
 }

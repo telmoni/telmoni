@@ -1500,10 +1500,12 @@ async fn an_install_whose_kek_will_not_wrap_is_refused_with_nothing_stored(pool:
     assert!(!body.to_string().contains("neverstored"), "{body}");
 
     for table in ["connections", "deliveries"] {
-        let rows: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM notifications.{table}"))
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let rows: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT count(*) FROM notifications.{table}"
+        )))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(rows, 0, "{table}");
     }
     assert!(feed_titles(&pool, ORGANIZATION).await.is_empty());
@@ -2171,10 +2173,12 @@ async fn the_purge_tears_down_the_grants_and_removes_every_row(pool: PgPool) {
         ("oauth_states", 0),
         ("uninstalls", 0),
     ] {
-        let left: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM notifications.{table}"))
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let left: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT count(*) FROM notifications.{table}"
+        )))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(left, expect, "{table}");
     }
     let _ = shared;
@@ -2254,9 +2258,9 @@ async fn rows_of_project(pool: &PgPool, organization: &str) -> Vec<i64> {
     let mut counts = Vec::new();
     for table in ["connections", "deliveries", "oauth_states", "feed"] {
         counts.push(
-            sqlx::query_scalar(&format!(
+            sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                 "SELECT count(*) FROM notifications.{table} WHERE project_id = $1"
-            ))
+            )))
             .bind(project_of(organization))
             .fetch_one(pool)
             .await
@@ -2613,9 +2617,9 @@ async fn holding(
     id: Uuid,
 ) -> sqlx::Transaction<'static, sqlx::Postgres> {
     let mut holder = pool.begin().await.unwrap();
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT 1 FROM notifications.{table} WHERE id = $1 FOR UPDATE"
-    ))
+    )))
     .bind(id)
     .execute(&mut *holder)
     .await
@@ -4251,10 +4255,12 @@ async fn a_webhook_registration_is_https_only_and_never_a_private_or_local_host(
         assert!(body.to_string().contains(why), "{url}: {body}");
     }
     for table in ["connections", "deliveries"] {
-        let rows: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM notifications.{table}"))
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let rows: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT count(*) FROM notifications.{table}"
+        )))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(rows, 0, "{table}");
     }
     let audit: i64 = sqlx::query_scalar("SELECT count(*) FROM audit.events")
