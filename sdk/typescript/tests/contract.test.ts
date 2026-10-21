@@ -325,15 +325,22 @@ describe('the exporter, sending to this machine', () => {
   it('reaches this machine past any proxy the environment or the application names', async () => {
     const built = fileURLToPath(new URL('../dist/index.mjs', import.meta.url));
     expect(existsSync(built), 'build the SDK first: npm run build').toBe(true);
-    // What the proxy was given, and the keys the server itself was sent.
+    // The host the proxy was asked for, by a request or a tunnel, and the keys the
+    // server itself was sent for the export.
     const taken: string[] = [];
     const keys: string[] = [];
     const proxy = createServer((request, response) => {
-      taken.push(request.url ?? '');
+      taken.push(new URL(request.url ?? '', 'http://unasked').host);
       request.resume().on('end', () => response.end('{}'));
     });
+    // Node 22's fetch tunnels to the environment's proxy with CONNECT, and dials again
+    // for as long as one goes unanswered: refused here, it fails at once.
+    proxy.on('connect', (request, socket) => {
+      taken.push(request.url ?? '');
+      socket.end('HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n');
+    });
     const server = createServer((request, response) => {
-      keys.push(request.headers.authorization ?? '');
+      if (request.url === '/otlp/v1/traces') keys.push(request.headers.authorization ?? '');
       request.resume().on('end', () => response.end('{}'));
     });
     const port = async (listening: Server) => {
@@ -379,10 +386,11 @@ describe('the exporter, sending to this machine', () => {
       }
     }
     // Node's own http went through the application's proxy, and its fetch through the
-    // environment's where this Node honours the variable.
+    // environment's where this Node honours the variable, as a tunnel or in the clear.
     const [major = 0, minor = 0] = process.versions.node.split('.').map(Number);
     const honoured = major >= 25 || (major === 24 && minor >= 5) || (major === 22 && minor >= 21);
-    expect(taken).toEqual([...(honoured ? [`${at}/fetch`] : []), `${at}/http`]);
+    const host = new URL(at).host;
+    expect(taken).toEqual(honoured ? [host, host] : [host]);
     expect(keys.length).toBeGreaterThan(0);
     expect(new Set(keys)).toEqual(new Set(['Bearer k']));
   });
