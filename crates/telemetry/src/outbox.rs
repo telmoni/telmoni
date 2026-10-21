@@ -34,7 +34,7 @@ use telmoni_shared::{
 };
 
 use crate::contract::{EXIT_CODE, RUN_COST_USD, RUN_STEPS};
-use crate::db::{self, OutboxRow, TelemetryLane};
+use crate::db::{self, LastRun, OutboxRow, TelemetryLane};
 use crate::live;
 use crate::store::SpanRow;
 use crate::{AppState, store};
@@ -114,6 +114,19 @@ pub struct FinishedRun {
 }
 
 impl FinishedRun {
+    /// What its monitor keeps of it as its last run.
+    #[must_use]
+    pub fn last_run(&self) -> LastRun {
+        LastRun {
+            run_id: self.run_id,
+            started_at: self.started_at,
+            ended_at: self.ended_at,
+            status: self.status,
+            steps: self.steps,
+            cost_usd: self.cost_usd,
+        }
+    }
+
     /// The run's row of `spans`: the span of kind `run`, named for its agent,
     /// its ids from its run id — the trace's the id's bytes, the span's the
     /// last eight — since a ping's run is in no trace of a sender's; its

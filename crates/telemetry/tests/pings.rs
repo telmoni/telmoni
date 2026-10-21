@@ -1583,6 +1583,118 @@ async fn a_run_is_opened_heard_and_ended_by_its_pings(pool: PgPool) {
     assert!(at(&failed["state_changed_at"]) > at(&monitor["state_changed_at"]));
 }
 
+/// A monitor keeps its last run as it ends — the run an end ping meant,
+/// one of no duration, or one a `/start` or a bare end ping found never
+/// ended — with its verdict and what its checkpoints reported, as the span
+/// has them; a run ended late, when it was last heard, never replaces one
+/// that ended since.
+#[sqlx::test]
+async fn a_monitor_keeps_the_run_that_ended_last(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    let made = p.make(hourly()).await;
+    assert_eq!(made["last_run"], Value::Null, "none until one has ended");
+
+    // A run from `/start` to its end: kept with what its checkpoints said.
+    let run = rid();
+    p.ping_ok(&format!("/{key}/hourly-sync/start?rid={run}"))
+        .await;
+    p.ping_ok(&format!(
+        "/{key}/hourly-sync/checkpoint?rid={run}&steps=2&cost=0.5"
+    ))
+    .await;
+    assert_eq!(
+        p.monitor("hourly-sync").await["last_run"],
+        Value::Null,
+        "still going"
+    );
+    p.ping_ok(&format!("/{key}/hourly-sync?rid={run}")).await;
+    let monitor = p.monitor("hourly-sync").await;
+    let last = &monitor["last_run"];
+    assert_eq!(last["run_id"].as_str(), Some(run.as_str()), "{monitor}");
+    assert_eq!(last["status"], "ok");
+    assert_eq!(last["steps"], 2);
+    assert_eq!(last["cost_usd"], 0.5);
+    assert!(at(&last["started_at"]) < at(&last["ended_at"]));
+    let finished = finished_runs(&pool, &p.project).await;
+    assert_eq!(last["started_at"], finished[0]["started_at"]);
+    assert_eq!(
+        last["ended_at"], finished[0]["ended_at"],
+        "as the span has it"
+    );
+
+    // A `/fail` naming a run not open: one of no duration, ended error with
+    // nothing reported, is the last.
+    let fresh = rid();
+    let older = rid();
+    p.ping_ok(&format!("/{key}/hourly-sync/start?rid={older}"))
+        .await;
+    p.ping_ok(&format!(
+        "/{key}/hourly-sync/checkpoint?rid={older}&steps=1"
+    ))
+    .await;
+    p.ping_ok(&format!("/{key}/hourly-sync/fail?rid={fresh}&exit_code=3"))
+        .await;
+    let last = p.monitor("hourly-sync").await["last_run"].clone();
+    assert_eq!(last["run_id"].as_str(), Some(fresh.as_str()), "{last}");
+    assert_eq!(last["status"], "error");
+    assert_eq!(last["started_at"], last["ended_at"]);
+    assert!(last["steps"].is_null());
+    assert!(last["cost_usd"].is_null());
+
+    // A bare `/start` ends the older run, which never said it ended, at
+    // the moment it was last heard — before the run of no duration ended —
+    // so the run kept stands; the run opened is not kept until it ends.
+    p.ping_ok(&format!("/{key}/hourly-sync/start")).await;
+    let monitor = p.monitor("hourly-sync").await;
+    assert_eq!(monitor["state"], "running", "{monitor}");
+    assert_eq!(
+        monitor["last_run"], last,
+        "a run ended late replaces nothing"
+    );
+    let finished = finished_runs(&pool, &p.project).await;
+    assert_eq!(finished.len(), 3);
+    assert_eq!(finished[2]["run_id"].as_str(), Some(older.as_str()));
+    assert!(at(&finished[2]["ended_at"]) < at(&last["ended_at"]));
+
+    // A bare end ping ends the newest run with its verdict, now, and the
+    // rest as `error` when last heard: the newest is the last.
+    let newest = rid();
+    p.ping_ok(&format!("/{key}/hourly-sync/start?rid={newest}"))
+        .await;
+    assert_eq!(open_runs(&pool, &p.project).await.len(), 2);
+    p.ping_ok(&format!("/{key}/hourly-sync")).await;
+    let monitor = p.monitor("hourly-sync").await;
+    assert_eq!(monitor["state"], "healthy", "{monitor}");
+    assert_eq!(
+        monitor["last_run"]["run_id"].as_str(),
+        Some(newest.as_str()),
+        "{monitor}"
+    );
+    assert_eq!(monitor["last_run"]["status"], "ok");
+    assert_eq!(finished_runs(&pool, &p.project).await.len(), 5);
+
+    // A paused monitor keeps its runs, so it keeps its last run too.
+    let (status, paused) = p
+        .send(p.request("POST", &format!("{MONITORS}/hourly-sync/pause"), None))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{paused}");
+    let while_paused = rid();
+    p.ping_ok(&format!("/{key}/hourly-sync/start?rid={while_paused}"))
+        .await;
+    p.ping_ok(&format!("/{key}/hourly-sync/fail?rid={while_paused}"))
+        .await;
+    let monitor = p.monitor("hourly-sync").await;
+    assert_eq!(monitor["state"], "paused", "{monitor}");
+    assert_eq!(
+        monitor["last_run"]["run_id"].as_str(),
+        Some(while_paused.as_str()),
+        "{monitor}"
+    );
+    assert_eq!(monitor["last_run"]["status"], "error");
+}
+
 /// A checkpoint's steps and spend are totals so far, which never fall: one
 /// lower than the run holds — an older checkpoint sent again, a retried
 /// curl — leaves it where it stands, each total on its own, so the run ends

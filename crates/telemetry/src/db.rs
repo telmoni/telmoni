@@ -4,13 +4,14 @@
 //! transaction has committed.
 
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use uuid::Uuid;
 
 use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::{
     HasProject, Lane, Maintenance, MaintenanceLane, ProjectAndOrganization, Scoped,
 };
-use telmoni_shared::{ContentMode, MonitorState, OrganizationId, ProjectId, ViewKind};
+use telmoni_shared::{ContentMode, MonitorState, OrganizationId, ProjectId, SpanStatus, ViewKind};
 
 /// This module's cross-tenant lane: the one declaration, so a sibling's lane
 /// is unnameable here. See `tenant_session::Lane`.
@@ -474,14 +475,64 @@ pub struct MonitorRow {
     pub state: MonitorState,
     pub state_changed_at: DateTime<Utc>,
     pub next_due_at: Option<DateTime<Utc>>,
+    /// Its last run that ended, as [`LastRun`] reads it: none until one has.
+    pub last_run_id: Option<Uuid>,
+    pub last_run_started_at: Option<DateTime<Utc>>,
+    pub last_run_ended_at: Option<DateTime<Utc>>,
+    pub last_run_status: Option<SpanStatus>,
+    pub last_run_steps: Option<i32>,
+    pub last_run_cost_usd: Option<f64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl MonitorRow {
+    /// Its last run that ended, where one has: the four columns the table
+    /// holds together, and the steps and spend it reported, if any.
+    #[must_use]
+    pub fn last_run(&self) -> Option<LastRun> {
+        Some(LastRun {
+            run_id: self.last_run_id?,
+            started_at: self.last_run_started_at?,
+            ended_at: self.last_run_ended_at?,
+            status: self.last_run_status?,
+            steps: self.last_run_steps,
+            cost_usd: self.last_run_cost_usd,
+        })
+    }
+}
+
+/// A monitor's last run that ended, as its row keeps it and the lanes answer
+/// it: which run, when, how it ended, and its steps and spend where it
+/// reported any.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct LastRun {
+    pub run_id: Uuid,
+    pub started_at: DateTime<Utc>,
+    pub ended_at: DateTime<Utc>,
+    pub status: SpanStatus,
+    pub steps: Option<i32>,
+    pub cost_usd: Option<f64>,
+}
+
+impl LastRun {
+    /// Whichever of this and `other` ended later; this, where they ended at
+    /// once.
+    #[must_use]
+    pub fn later(self, other: Self) -> Self {
+        if other.ended_at > self.ended_at {
+            other
+        } else {
+            self
+        }
+    }
 }
 
 /// The columns a [`MonitorRow`] is read from, in its order.
 const MONITOR_COLUMNS: &str = "id, slug, name, agent, schedule, interval_s, timezone, grace_s, \
      expected_duration_s, stall_after_s, max_steps, max_cost_usd, state, state_changed_at, \
-     next_due_at, created_at, updated_at";
+     next_due_at, last_run_id, last_run_started_at, last_run_ended_at, last_run_status, \
+     last_run_steps, last_run_cost_usd, created_at, updated_at";
 
 /// What making or changing a monitor writes: its definition, checked by the
 /// lane, and when its next run is due under it.
@@ -880,6 +931,39 @@ pub async fn settle_monitor_run(
     .bind(next_due_at)
     .fetch_optional(tx.conn())
     .await
+}
+
+/// One of the project's monitors given `run` as its last run that ended,
+/// unless the one it keeps ended later — a run ended late, by the ping after
+/// it or by the ticker, never replaces a run that ended since — under the
+/// lock its caller holds on the row, as a settling holds it. Answers whether
+/// it was written.
+pub async fn note_last_run(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    id: Uuid,
+    run: &LastRun,
+) -> sqlx::Result<bool> {
+    Ok(sqlx::query(
+        "UPDATE telemetry.monitors
+            SET last_run_id = $3, last_run_started_at = $4, last_run_ended_at = $5,
+                last_run_status = $6, last_run_steps = $7, last_run_cost_usd = $8,
+                updated_at = GREATEST(statement_timestamp(), updated_at)
+          WHERE project_id = $1 AND id = $2
+            AND (last_run_ended_at IS NULL OR last_run_ended_at <= $5)",
+    )
+    .bind(project_id)
+    .bind(id)
+    .bind(run.run_id)
+    .bind(run.started_at)
+    .bind(run.ended_at)
+    .bind(run.status)
+    .bind(run.steps)
+    .bind(run.cost_usd)
+    .execute(tx.conn())
+    .await?
+    .rows_affected()
+        > 0)
 }
 
 /// One of the project's monitors, removed, its open runs with it by the

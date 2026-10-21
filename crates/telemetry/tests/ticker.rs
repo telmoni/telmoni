@@ -555,15 +555,27 @@ async fn a_run_past_its_ceiling_is_ended_as_error_and_fails_its_monitor(pool: Pg
     let failed = p.monitor("hourly-sync").await;
     assert_eq!(failed["state"], "failed", "{failed}");
     assert!(at(&failed["next_due_at"]) > Utc::now(), "{failed}");
+    let last = &failed["last_run"];
+    assert_eq!(last["run_id"].as_str(), Some(first.as_str()), "{failed}");
+    assert_eq!(last["status"], "error");
+    assert_eq!(last["steps"], 2);
+    assert_eq!(last["cost_usd"], 0.5);
+    assert_eq!(at(&last["ended_at"]), heard, "kept as the span has it");
     assert_eq!(p.tick().await, ticked(0, 0));
 
     // The second's checkpoint puts the monitor back to running; its end
-    // ends it well.
+    // ends it well, and is the last run then.
     p.ping_ok(&format!("/{key}/hourly-sync/checkpoint?rid={second}"))
         .await;
     assert_eq!(p.monitor("hourly-sync").await["state"], "running");
     p.ping_ok(&format!("/{key}/hourly-sync?rid={second}")).await;
-    assert_eq!(p.monitor("hourly-sync").await["state"], "healthy");
+    let healthy = p.monitor("hourly-sync").await;
+    assert_eq!(healthy["state"], "healthy");
+    assert_eq!(
+        healthy["last_run"]["run_id"].as_str(),
+        Some(second.as_str())
+    );
+    assert_eq!(healthy["last_run"]["status"], "ok");
     assert_eq!(finished_runs(&pool, &p.project).await.len(), 2);
 
     // A paused monitor's run past its ceiling is ended, and the monitor
@@ -579,15 +591,19 @@ async fn a_run_past_its_ceiling_is_ended_as_error_and_fails_its_monitor(pool: Pg
     past_ceiling(&pool, &p.project, &found).await;
     assert_eq!(p.tick().await, ticked(0, 2));
     assert!(open_runs(&pool, &p.project).await.is_empty());
-    let paused = p.monitor("hourly-sync").await;
-    assert_eq!(paused["state"], "paused", "{paused}");
-    assert!(
-        paused["next_due_at"].is_null(),
-        "due though paused: {paused}"
+    let kept = p.monitor("hourly-sync").await;
+    assert_eq!(kept["state"], "paused", "{kept}");
+    assert!(kept["next_due_at"].is_null(), "due though paused: {kept}");
+    assert_eq!(
+        kept["last_run"]["run_id"].as_str(),
+        Some(paused.as_str()),
+        "its last run kept though paused: {kept}"
     );
     let new = p.monitor("nightly-job").await;
     assert_eq!(new["state"], "new", "{new}");
     assert!(new["next_due_at"].is_null(), "due though new: {new}");
+    assert_eq!(new["last_run"]["run_id"].as_str(), Some(found.as_str()));
+    assert_eq!(new["last_run"]["status"], "error");
     // Visited by id, so the two end in either order.
     let finished = finished_runs(&pool, &p.project).await;
     assert_eq!(finished.len(), 4);
@@ -601,6 +617,40 @@ async fn a_run_past_its_ceiling_is_ended_as_error_and_fails_its_monitor(pool: Pg
         assert_eq!(run["status"], "error", "{run}");
         assert!(run["steps"].is_null(), "{run}");
     }
+}
+
+/// A run the ticker ends at its ceiling ended when it was last heard, which
+/// may be before a run that ended since: the monitor keeps the one that
+/// ended last.
+#[sqlx::test]
+async fn a_run_ended_late_never_replaces_the_run_that_ended_since(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.make(hourly("hourly-sync")).await;
+    let (older, newer) = (rid(), rid());
+    p.ping_ok(&format!("/{key}/hourly-sync/start?rid={older}"))
+        .await;
+    p.ping_ok(&format!(
+        "/{key}/hourly-sync/checkpoint?rid={older}&steps=2"
+    ))
+    .await;
+    p.ping_ok(&format!("/{key}/hourly-sync/start?rid={newer}"))
+        .await;
+    p.ping_ok(&format!("/{key}/hourly-sync?rid={newer}")).await;
+    let kept = p.monitor("hourly-sync").await["last_run"].clone();
+    assert_eq!(kept["run_id"].as_str(), Some(newer.as_str()), "{kept}");
+    assert_eq!(kept["status"], "ok");
+
+    past_ceiling(&pool, &p.project, &older).await;
+    assert_eq!(p.tick().await, ticked(1, 1));
+    let monitor = p.monitor("hourly-sync").await;
+    assert_eq!(monitor["state"], "failed", "{monitor}");
+    assert_eq!(monitor["last_run"], kept, "the run that ended since stays");
+    let finished = finished_runs(&pool, &p.project).await;
+    assert_eq!(finished.len(), 2);
+    assert_eq!(finished[1]["run_id"].as_str(), Some(older.as_str()));
+    assert!(at(&finished[1]["ended_at"]) < at(&kept["ended_at"]));
 }
 
 /// A saved timing the ticker cannot read is logged, once, and leaves its

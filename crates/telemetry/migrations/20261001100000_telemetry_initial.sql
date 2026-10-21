@@ -188,6 +188,18 @@ CREATE TABLE telemetry.monitors (
     -- When the next run is expected, in UTC; none for a monitor with no
     -- schedule, and none while it is paused.
     next_due_at         TIMESTAMPTZ,
+    -- Its last run that ended, written as the run ends — by the ping that
+    -- ended it, the ping after one that never said it ended, or the ticker
+    -- — so the project's board reads a row and sums nothing: which run,
+    -- when, how it ended (`SpanStatus`'s word), and its steps and spend
+    -- where it reported any. A run that ended before the one kept never
+    -- replaces it.
+    last_run_id         UUID,
+    last_run_started_at TIMESTAMPTZ,
+    last_run_ended_at   TIMESTAMPTZ,
+    last_run_status     TEXT,
+    last_run_steps      INTEGER,
+    last_run_cost_usd   DOUBLE PRECISION,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT monitors_slug_check CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND char_length(slug) <= 48),
@@ -202,7 +214,11 @@ CREATE TABLE telemetry.monitors (
     CONSTRAINT monitors_stall_check CHECK (stall_after_s IS NULL OR stall_after_s > 0),
     CONSTRAINT monitors_steps_check CHECK (max_steps IS NULL OR max_steps > 0),
     CONSTRAINT monitors_cost_check CHECK (max_cost_usd IS NULL OR max_cost_usd > 0),
-    CONSTRAINT monitors_state_check CHECK (state IN ('failed', 'stalled', 'over_bound', 'late', 'running', 'new', 'paused', 'healthy'))
+    CONSTRAINT monitors_state_check CHECK (state IN ('failed', 'stalled', 'over_bound', 'late', 'running', 'new', 'paused', 'healthy')),
+    CONSTRAINT monitors_last_run_check CHECK (num_nulls(last_run_id, last_run_started_at, last_run_ended_at, last_run_status) IN (0, 4)),
+    CONSTRAINT monitors_last_run_status_check CHECK (last_run_status IN ('ok', 'error', 'cancelled')),
+    CONSTRAINT monitors_last_run_steps_check CHECK (last_run_steps IS NULL OR (last_run_id IS NOT NULL AND last_run_steps >= 0)),
+    CONSTRAINT monitors_last_run_cost_check CHECK (last_run_cost_usd IS NULL OR (last_run_id IS NOT NULL AND last_run_cost_usd >= 0))
 );
 
 -- One slug and one agent per monitor in a project: the slug is what a ping

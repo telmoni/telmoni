@@ -236,6 +236,7 @@ async fn every_role_reads_the_monitors_and_owners_and_admins_make_them(pool: PgP
     );
     assert_eq!(made["state"], "healthy");
     assert!(made["next_due_at"].is_string(), "due under its schedule");
+    assert_eq!(made["last_run"], Value::Null, "none until a run has ended");
     assert_eq!(
         p.auth.chain_held(),
         [true],

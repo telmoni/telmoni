@@ -31,7 +31,7 @@ use telmoni_shared::{
 
 use crate::AppState;
 use crate::contract;
-use crate::db::{self, MonitorRow, MonitorWrite};
+use crate::db::{self, LastRun, MonitorRow, MonitorWrite};
 use crate::handler::chain;
 use crate::schedule::{Fault, PERIOD_MAX_S, PREVIEW, Schedule};
 
@@ -362,6 +362,8 @@ pub struct Monitor {
     pub state: MonitorState,
     pub state_changed_at: DateTime<Utc>,
     pub next_due_at: Option<DateTime<Utc>>,
+    /// Its last run that ended, kept as it ended; none until one has.
+    pub last_run: Option<LastRun>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -369,6 +371,7 @@ pub struct Monitor {
 impl From<MonitorRow> for Monitor {
     fn from(row: MonitorRow) -> Self {
         Self {
+            last_run: row.last_run(),
             id: row.id,
             slug: row.slug,
             name: row.name,

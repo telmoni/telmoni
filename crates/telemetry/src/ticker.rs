@@ -7,9 +7,10 @@
 //! is `late` while its grace runs and `failed` once it has run out, its next
 //! due time found again; a run quiet past its stall timeout makes its
 //! monitor `stalled`; a run past its ceiling (`ends_by`) is ended as `error`
-//! and its monitor `failed`. A `new` or paused monitor is left as it is, its
-//! runs still ended at their ceiling; one with a run going is never late.
-//! The ping lane recovers what the ticker marks.
+//! and its monitor `failed`. A `new` or paused monitor keeps its state, its
+//! runs still ended at their ceiling and the last of them kept on it; one
+//! with a run going is never late. The ping lane recovers what the ticker
+//! marks.
 //!
 //! The ticker waits on nobody: a project, monitor or run another writer
 //! holds is left to the next tick (`SKIP LOCKED`), so it stands in no circle
@@ -33,7 +34,7 @@ use telmoni_shared::db::tenant_session::{
 use telmoni_shared::{MonitorState, OrganizationId, ProjectId, SpanStatus, TelmoniError};
 
 use crate::AppState;
-use crate::db::{self, MonitorRow, TelemetryLane};
+use crate::db::{self, LastRun, MonitorRow, TelemetryLane};
 use crate::handler::chain;
 use crate::handler::monitors::due_after;
 use crate::live;
@@ -219,9 +220,9 @@ async fn visit(
 /// The visit itself, inside the transaction [`visit`] opened: the monitor
 /// held before any of its runs ([`db::hold_monitor_by_id`]), its runs past
 /// their ceiling ended, then the monitor locked as the write holds it
-/// ([`db::monitor_to_tick`]) and what the tick finds decided from that row
-/// — a monitor another writer holds now left, the runs' end rolling back
-/// with it, for the next tick.
+/// ([`db::monitor_to_tick`]), the last of the runs ended noted on it, and
+/// what the tick finds decided from that row — a monitor another writer
+/// holds now left, the runs' end rolling back with it, for the next tick.
 async fn visit_held(
     project_id: &ProjectId,
     organization_id: &OrganizationId,
@@ -243,7 +244,7 @@ async fn visit_held(
             Visited::Nothing
         });
     };
-    let ended = end_runs_past_ceiling(project_id, organization_id, &read, now, tx).await?;
+    let (ended, last) = end_runs_past_ceiling(project_id, organization_id, &read, now, tx).await?;
     let Some(held) = db::monitor_to_tick(tx, project_id, id).await? else {
         tracing::debug!(
             project_id = %project_id,
@@ -252,6 +253,9 @@ async fn visit_held(
         );
         return Ok(Visited::Left);
     };
+    if let Some(last) = &last {
+        db::note_last_run(tx, project_id, id, last).await?;
+    }
     let stalled = db::has_stalled_run(tx, project_id, id).await?;
     let due = Due::of(&held, now);
     // The row untouched: a run ended still changed the project's runs.
@@ -310,15 +314,17 @@ async fn visit_held(
 /// The monitor's runs past their ceiling, each ended as `error` with no exit
 /// code and handed to the outbox as a finished span that ends when the run
 /// was last heard, as a ping ends a run that never said it ended; one a
-/// ping holds now is left to it. Answers how many were ended.
+/// ping holds now is left to it. Answers how many were ended, and the one
+/// that ended last, for the monitor to keep.
 async fn end_runs_past_ceiling(
     project_id: &ProjectId,
     organization_id: &OrganizationId,
     monitor: &MonitorRow,
     now: DateTime<Utc>,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
-) -> Result<u32, TelmoniError> {
+) -> Result<(u32, Option<LastRun>), TelmoniError> {
     let mut ended = 0;
+    let mut last: Option<LastRun> = None;
     for past in db::runs_past_ceiling(tx, project_id, monitor.id, RUNS_PER_VISIT).await? {
         let Some(closed) = db::close_open_run(tx, project_id, past.id).await? else {
             continue;
@@ -346,8 +352,10 @@ async fn end_runs_past_ceiling(
              else would end it"
         );
         ended += 1;
+        let this = finished.last_run();
+        last = Some(last.map_or(this, |last| last.later(this)));
     }
-    Ok(ended)
+    Ok((ended, last))
 }
 
 /// Whether a monitor is due by a tick's clock, and how far.
@@ -466,6 +474,12 @@ mod tests {
             state,
             state_changed_at: now,
             next_due_at: due,
+            last_run_id: None,
+            last_run_started_at: None,
+            last_run_ended_at: None,
+            last_run_status: None,
+            last_run_steps: None,
+            last_run_cost_usd: None,
             created_at: now,
             updated_at: now,
         }

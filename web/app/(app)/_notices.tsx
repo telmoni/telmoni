@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { LocalTime } from "@/components/local-time";
 import { Row, Rows } from "@/components/rows";
 import { eventKindLabel } from "@/lib/notification-kinds";
@@ -8,12 +10,22 @@ import { cn } from "@/lib/utils";
 // sends them, each unread one bold until somebody marks the feed read. The
 // organization's own notices and a project's are different sets the server
 // answers by scope, so each overview reads its own and hands it here, and
-// the two read alike.
-export function Notices({ label, feed }: { label: string; feed: NotificationFeed }) {
+// the two read alike. `action` is the feed's own, Mark read, in its heading
+// row beside what it clears.
+export function Notices({
+  label,
+  feed,
+  action,
+}: {
+  label: string;
+  feed: NotificationFeed;
+  action?: ReactNode;
+}) {
   return (
     <section className="grid gap-3" aria-label={label}>
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-sm font-medium">{label}</h2>
+        {action}
       </div>
       <Rows>
         {feed.items.map((item) => (

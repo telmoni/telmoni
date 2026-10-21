@@ -42,7 +42,8 @@ use telmoni_shared::{
 use crate::AppState;
 use crate::contract::PING_BODY_MAX_BYTES;
 use crate::db::{
-    self, MonitorRow, MonitorWrite, OpenRunRow, OpenRunWrite, ResolvedPingKey, TelemetryLane,
+    self, LastRun, MonitorRow, MonitorWrite, OpenRunRow, OpenRunWrite, ResolvedPingKey,
+    TelemetryLane,
 };
 use crate::handler::chain;
 use crate::handler::monitors::{
@@ -737,15 +738,17 @@ enum RunEvent {
 }
 
 /// What a ping did to its run ([`record`]): the run, what happened to it,
-/// and whether a run it heard or ended was quiet past its stall timeout as
-/// the statement found it — by the database's clock, the ticker's — one the
+/// whether a run it heard or ended was quiet past its stall timeout as the
+/// statement found it — by the database's clock, the ticker's — one the
 /// ticker may be stalling the monitor for beside the ping, which must then
 /// settle the monitor from the row as it stands though the run changes
-/// nothing of what the ping read.
+/// nothing of what the ping read; and, of the runs it ended, the one that
+/// ended last, for the monitor to keep.
 struct Recorded {
     run_id: Uuid,
     event: RunEvent,
     revived: bool,
+    ended: Option<LastRun>,
 }
 
 /// The run recorded: opened, heard, or ended and handed to the outbox as a
@@ -793,18 +796,20 @@ async fn record(
                         .as_ref()
                         .map_or(RunEvent::Gone, |heard| hearing(&heard.run)),
                     revived: heard.as_ref().is_some_and(|heard| heard.was_quiet),
+                    ended: None,
                 })
             }
             (_, rid) => {
                 // The monitor's next run: whatever it still has open never
                 // said it ended.
-                let mut revived = false;
-                if rid.is_none() {
+                let (revived, ended) = if rid.is_none() {
                     let stale = db::close_open_runs(tx, project_id, monitor.id).await?;
-                    revived = stale.iter().any(|stale| stale.was_quiet);
+                    let revived = stale.iter().any(|stale| stale.was_quiet);
                     let stale = stale.into_iter().map(|stale| stale.run).collect();
-                    abandon(key, monitor, stale, now, tx).await?;
-                }
+                    (revived, abandon(key, monitor, stale, now, tx).await?)
+                } else {
+                    (false, None)
+                };
                 let id = rid.unwrap_or_else(Uuid::new_v4);
                 let event = match open_run(key, monitor, id, now, None, None, tx).await? {
                     Opening::Opened(_) => RunEvent::Opened,
@@ -815,6 +820,7 @@ async fn record(
                     run_id: id,
                     event,
                     revived,
+                    ended,
                 })
             }
         },
@@ -840,6 +846,7 @@ async fn record(
                             run_id: run.id,
                             event: RunEvent::Gone,
                             revived: false,
+                            ended: None,
                         });
                     }
                 },
@@ -858,6 +865,7 @@ async fn record(
                                 run_id: id,
                                 event: RunEvent::Gone,
                                 revived: false,
+                                ended: None,
                             });
                         }
                     }
@@ -867,6 +875,7 @@ async fn record(
                 run_id: run.id,
                 event: hearing(&run),
                 revived,
+                ended: None,
             })
         }
         Report::Success | Report::Fail => {
@@ -875,53 +884,64 @@ async fn record(
             } else {
                 SpanStatus::Error
             };
-            let (run_id, started_at, steps, cost_usd, revived) = match (open, progress.rid) {
-                // The row's delete is the one record of the run's end: a
-                // second end ping racing this one finds the row gone, files
-                // no second run and leaves the monitor as the first left it.
-                (Some(run), Some(_)) => match db::close_open_run(tx, project_id, run.id).await? {
-                    Some(closed) => {
-                        let (run_id, started_at, steps, cost_usd) = ended(closed.run);
-                        (run_id, started_at, steps, cost_usd, closed.was_quiet)
-                    }
-                    None => {
-                        return Ok(Recorded {
-                            run_id: run.id,
-                            event: RunEvent::Gone,
-                            revived: false,
+            let (run_id, started_at, steps, cost_usd, revived, abandoned) =
+                match (open, progress.rid) {
+                    // The row's delete is the one record of the run's end: a
+                    // second end ping racing this one finds the row gone, files
+                    // no second run and leaves the monitor as the first left it.
+                    (Some(run), Some(_)) => match db::close_open_run(tx, project_id, run.id).await?
+                    {
+                        Some(closed) => {
+                            let (run_id, started_at, steps, cost_usd) = ended(closed.run);
+                            (run_id, started_at, steps, cost_usd, closed.was_quiet, None)
+                        }
+                        None => {
+                            return Ok(Recorded {
+                                run_id: run.id,
+                                event: RunEvent::Gone,
+                                revived: false,
+                                ended: None,
+                            });
+                        }
+                    },
+                    // The newest is the run this ping means; the rest never said
+                    // they ended.
+                    (Some(run), None) => {
+                        let mut closed = db::close_open_runs(tx, project_id, monitor.id).await?;
+                        closed.sort_by(|a, b| {
+                            b.run
+                                .started_at
+                                .cmp(&a.run.started_at)
+                                .then(a.run.id.cmp(&b.run.id))
                         });
+                        if closed.is_empty() {
+                            return Ok(Recorded {
+                                run_id: run.id,
+                                event: RunEvent::Gone,
+                                revived: false,
+                                ended: None,
+                            });
+                        }
+                        let revived = closed.iter().any(|closed| closed.was_quiet);
+                        let newest = closed.remove(0).run;
+                        let stale = closed.into_iter().map(|closed| closed.run).collect();
+                        let abandoned = abandon(key, monitor, stale, now, tx).await?;
+                        let (run_id, started_at, steps, cost_usd) = ended(newest);
+                        (run_id, started_at, steps, cost_usd, revived, abandoned)
                     }
-                },
-                // The newest is the run this ping means; the rest never said
-                // they ended.
-                (Some(run), None) => {
-                    let mut closed = db::close_open_runs(tx, project_id, monitor.id).await?;
-                    closed.sort_by(|a, b| {
-                        b.run
-                            .started_at
-                            .cmp(&a.run.started_at)
-                            .then(a.run.id.cmp(&b.run.id))
-                    });
-                    if closed.is_empty() {
-                        return Ok(Recorded {
-                            run_id: run.id,
-                            event: RunEvent::Gone,
-                            revived: false,
-                        });
-                    }
-                    let revived = closed.iter().any(|closed| closed.was_quiet);
-                    let newest = closed.remove(0).run;
-                    let stale = closed.into_iter().map(|closed| closed.run).collect();
-                    abandon(key, monitor, stale, now, tx).await?;
-                    let (run_id, started_at, steps, cost_usd) = ended(newest);
-                    (run_id, started_at, steps, cost_usd, revived)
-                }
-                // No run open: one of no duration is recorded, under the
-                // `rid` given, so a retried end ping whose first copy got
-                // through files a second run of the same id — which the
-                // outbox drops before it reaches `spans`.
-                (None, rid) => (rid.unwrap_or_else(Uuid::new_v4), now, None, None, false),
-            };
+                    // No run open: one of no duration is recorded, under the
+                    // `rid` given, so a retried end ping whose first copy got
+                    // through files a second run of the same id — which the
+                    // outbox drops before it reaches `spans`.
+                    (None, rid) => (
+                        rid.unwrap_or_else(Uuid::new_v4),
+                        now,
+                        None,
+                        None,
+                        false,
+                        None,
+                    ),
+                };
             let finished = FinishedRun {
                 run_id,
                 agent: monitor.agent.clone(),
@@ -939,10 +959,14 @@ async fn record(
             } else {
                 RunEvent::EndedError
             };
+            // The run this ping meant ends now, the abandoned ones when they
+            // were last heard: the later of them is the monitor's last.
+            let last = finished.last_run();
             Ok(Recorded {
                 run_id,
                 event,
                 revived,
+                ended: Some(abandoned.map_or(last, |abandoned| last.later(abandoned))),
             })
         }
     }
@@ -965,14 +989,16 @@ fn ended(run: OpenRunRow) -> (Uuid, DateTime<Utc>, Option<i32>, Option<f64>) {
 /// the run was last heard, oldest first; their rows are gone already.
 /// Nothing else in the lane would end them: the ticker's scans, for
 /// silence and for a run past its ceiling ([`ends_by`]), are the backstop.
+/// Answers the one that ended last, for the monitor to keep.
 async fn abandon(
     key: &ResolvedPingKey,
     monitor: &MonitorRow,
     mut runs: Vec<OpenRunRow>,
     now: DateTime<Utc>,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
-) -> Result<(), TelmoniError> {
+) -> Result<Option<LastRun>, TelmoniError> {
     runs.sort_by(|a, b| a.started_at.cmp(&b.started_at).then(a.id.cmp(&b.id)));
+    let mut last: Option<LastRun> = None;
     for run in runs {
         // Heard by the database's clock, started by the server's: never
         // ended before it started.
@@ -996,8 +1022,10 @@ async fn abandon(
             run_id = %run_id,
             "ping: a run that never said it ended is ended as error by the ping after it"
         );
+        let this = finished.last_run();
+        last = Some(last.map_or(this, |last| last.later(this)));
     }
-    Ok(())
+    Ok(last)
 }
 
 /// What a ping that went to open its run came to.
@@ -1106,7 +1134,9 @@ fn hearing(run: &OpenRunRow) -> RunEvent {
 /// monitor's still quiet stalls it whatever its other runs do, as the
 /// ticker would a tick later — but for one failed, which a run's progress
 /// leaves failed and only a run's end moves — so runs that overlap never
-/// trade the state, and the lane says of a row what the ticker says.
+/// trade the state, and the lane says of a row what the ticker says. A run
+/// the ping ended is kept on the monitor as its last, whatever its state,
+/// under the same lock ([`db::note_last_run`]).
 async fn settle(
     project_id: &ProjectId,
     monitor: &MonitorRow,
@@ -1116,12 +1146,15 @@ async fn settle(
 ) -> Result<(), TelmoniError> {
     let event = recorded.event;
     let found = settled(project_id, monitor, event, now);
-    if found.is_none() && !recorded.revived {
+    if found.is_none() && !recorded.revived && recorded.ended.is_none() {
         return Ok(());
     }
     let Some(held) = db::monitor_to_settle(tx, project_id, monitor.id).await? else {
         return Ok(());
     };
+    if let Some(ended) = &recorded.ended {
+        db::note_last_run(tx, project_id, held.id, ended).await?;
+    }
     // Worked out again only where the row moved, so a bad timing is logged
     // once.
     let settling = if same_settling(monitor, &held) {
