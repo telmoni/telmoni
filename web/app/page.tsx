@@ -1,3 +1,4 @@
+import { Minus, Plus } from "lucide-react";
 import Link from "next/link";
 
 import { JsonLd } from "@/components/json-ld";
@@ -707,10 +708,8 @@ export default async function SplashPage() {
               <details key={entry.question} className="group border-b border-border">
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-4 py-5 text-[15px] font-medium text-foreground [&::-webkit-details-marker]:hidden">
                   {entry.question}
-                  <span
-                    aria-hidden="true"
-                    className="relative size-4 shrink-0 text-muted-foreground before:absolute before:left-0 before:top-1/2 before:h-px before:w-4 before:-translate-y-1/2 before:bg-current after:absolute after:left-1/2 after:top-0 after:h-4 after:w-px after:-translate-x-1/2 after:bg-current after:transition-transform group-open:after:scale-y-0"
-                  />
+                  <Plus aria-hidden="true" className="size-4 shrink-0 text-muted-foreground group-open:hidden" />
+                  <Minus aria-hidden="true" className="hidden size-4 shrink-0 text-muted-foreground group-open:block" />
                 </summary>
                 <p className="max-w-[64ch] pb-5 text-sm leading-[1.5] text-muted-foreground">
                   {entry.answer}
