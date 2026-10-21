@@ -30,15 +30,18 @@ skip = [
     # rand 0.9, opentelemetry_sdk's, beside sqlx-postgres's 0.10, each with its
     # own rand_core and getrandom, and ring's getrandom 0.2.
     "getrandom:0.2", "getrandom:0.3", "rand:0.9", "rand_core:0.9",
-    # base64 0.23 for lettre; 0.22 for sqlx, reqwest, hyper-util,
+    # base64 0.23 for lettre and hyper-util; 0.22 for sqlx, reqwest,
     # opentelemetry-proto, auth and shared.
     "base64:0.22",
     # hashbrown 0.16 for sqlx-core and its hashlink; 0.17 for indexmap and
     # clickhouse.
     "hashbrown:0.16",
-    # One platform's alone: ring's windows-sys 0.52 on Windows, getrandom 0.3's
-    # r-efi 5 on UEFI, and getrandom 0.4's wasip3, with wit-bindgen 0.51, on WASI.
-    "r-efi:5", "windows-sys:0.52", "wit-bindgen:0.51",
+    # syn 3 for the macros of serde, thiserror, tokio and async-trait; syn 2
+    # for those of sqlx, axum, prost, tracing and the rest.
+    "syn:2",
+    # One platform's alone: ring's windows-sys 0.52 on Windows, and getrandom
+    # 0.3's r-efi 5 on UEFI.
+    "r-efi:5", "windows-sys:0.52",
 ]
 # Deny wildcard dependencies (e.g. foo = "*") — they break reproducibility.
 # Cargo workspace `path` deps carry no version by design; they resolve to
