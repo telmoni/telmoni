@@ -9,11 +9,11 @@ members  = ["crates/*", "sdk/rust"]
 # roadmap phase is green. Everything until then is a `0.0.x` pre-release.
 version = "0.0.0"
 edition = "2024"
-# Rust 1.98.1. resolver "3" needs >=1.84. `rust-toolchain.toml` pins this exact
+# Rust 1.99.1. resolver "3" needs >=1.84. `rust-toolchain.toml` pins this exact
 # compiler so the workspace builds the same everywhere; rustup auto-installs it
 # on first cargo invocation. Nothing in the tree requires this exact floor —
 # it is the pinned compiler. Bump deliberately, in step with the pin.
-rust-version = "1.98.1"
+rust-version = "1.99.1"
 license      = "Apache-2.0"
 publish      = false
 

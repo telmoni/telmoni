@@ -184,7 +184,7 @@ pub fn map(
         ..Fields::default()
     };
     for kv in &span.attributes {
-        fields.read(kv, &span_id, dropped).map_err(&refuse)?;
+        fields.read(kv, &span_id, dropped).map_err(refuse)?;
     }
 
     let (Some(run_id), Some(agent)) = (fields.run_id, fields.agent.take()) else {
