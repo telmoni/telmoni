@@ -15,7 +15,7 @@ You need Rust at the version `rust-toolchain.toml` pins (`rustup` installs it on
 $ git clone https://github.com/telmoni/docs.git ../docs
 ```
 
-For `make ci` you also need `cargo install cargo-deny typos-cli`. `make doctor` checks that Rust, Node and npm, Docker with Compose and a running daemon, `rsync` and `gh` are installed and that both env files and the docs beside the platform exist; it checks no versions, and not `cargo-deny` or `typos`. The SDK suites want Node 22.12, 24, or 26 or later, which the TypeScript suite's vitest requires though the SDK itself runs on Node 18.19 or later, and npm (TypeScript, after `npm ci --prefix sdk/typescript`), Go 1.26 or later, and for Python (3.10 or later) a venv: `python3 -m venv sdk/python/.venv && sdk/python/.venv/bin/pip install -e "sdk/python[dev]"`.
+For `make ci` you also need `cargo install cargo-deny typos-cli`. `make doctor` checks that Rust, Node and npm, Docker with Compose and a running daemon, `rsync` and `gh` are installed and that both env files and the docs beside the platform exist; it checks no versions, and not `cargo-deny` or `typos`. The SDK suites want Node 22.18, 24.11, or 26 or later, which the TypeScript suite's tsup requires though the SDK itself runs on Node 18.19 or later, and npm (TypeScript, after `npm ci --prefix sdk/typescript`), Go 1.26 or later, and for Python (3.10 or later) a venv: `python3 -m venv sdk/python/.venv && sdk/python/.venv/bin/pip install -e "sdk/python[dev]"`.
 
 ```console
 $ make first-run
