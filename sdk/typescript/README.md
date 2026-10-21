@@ -5,16 +5,15 @@ sent to Telmoni and nowhere else. Node 18.19 or 20.6 and later.
 
 ## Installation
 
-Not published yet. Build it from a checkout of this repository, then depend on
-it by path:
-
 ```console
-cd sdk/typescript && npm ci && npm run build
+npm install telmoni
 ```
 
-```json
-{ "dependencies": { "telmoni": "file:../telmoni/sdk/typescript" } }
-```
+The hosted service at `https://api.telmoni.com`, the SDK's default endpoint,
+is not open yet, nor are the docs at telmoni.com/docs. Until they are,
+[run Telmoni yourself](https://github.com/telmoni/telmoni#-self-hosting) and
+point `TELMONI_ENDPOINT` at its machine host; the docs read in
+[`telmoni/docs`](https://github.com/telmoni/docs/tree/main/content).
 
 ## Quick Start
 

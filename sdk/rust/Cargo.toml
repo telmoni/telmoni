@@ -10,7 +10,9 @@ repository = "https://github.com/telmoni/telmoni"
 authors = ["Kendrick Lawton"]
 license.workspace = true
 readme = "README.md"
-publish = false
+keywords = ["telmoni", "sdk", "opentelemetry", "agents"]
+# The library alone: its tests read the fixtures beside it, outside the crate.
+include = ["/src", "/README.md", "/LICENSE"]
 
 [dependencies]
 opentelemetry = { workspace = true }

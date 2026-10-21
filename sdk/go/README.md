@@ -9,11 +9,15 @@ unless you ask and the project allows. Go 1.26 or later.
 
 ## Installation
 
-Not published as a tagged module yet. Use it from this repository:
-
 ```console
 go get github.com/telmoni/telmoni/sdk/go
 ```
+
+The hosted service at `https://api.telmoni.com`, the SDK's default endpoint,
+is not open yet, nor are the docs at telmoni.com/docs. Until they are,
+[run Telmoni yourself](https://github.com/telmoni/telmoni#-self-hosting) and
+point `TELMONI_ENDPOINT` at its machine host; the docs read in
+[`telmoni/docs`](https://github.com/telmoni/docs/tree/main/content).
 
 ## Quick start
 
