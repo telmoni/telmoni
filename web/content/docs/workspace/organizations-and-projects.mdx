@@ -77,8 +77,9 @@ URL](#name-and-url)). On these pages,
   `/{organization}/audit-log`, and `/{organization}/settings`, with
   `/{organization}/billing` on the hosted service.
 - **Project pages** sit under the organization: `/{organization}/{project}` is
-  the project's overview, titled by the project's name and showing its notices
-  to anyone on the project when there are any, with [`/traces`](/docs/workspace/traces) — every run
+  the project's overview, titled by the project's name: its
+  [status board](#a-projects-overview), and its notices to anyone on the
+  project when there are any, with [`/traces`](/docs/workspace/traces) — every run
   of the project's agents, and a page for each —
   [`/sessions`](/docs/workspace/sessions) — its runs grouped by
   session, and a page for each — [`/users`](/docs/workspace/users) — by
@@ -203,6 +204,21 @@ in the header, to see its shortcut. With letter-key shortcuts off, only the
 The foot of the sidebar shows the version of Telmoni the console runs.
 
 ## Projects
+
+### A project's overview
+
+A project opens on its **Overview**, `/{organization}/{project}`: its status
+board, then its notices. The board is the project's monitors as they stand,
+drawn again as they change: first the monitors that need someone — failed,
+stalled, over a bound or late, the worst first — then those with a run going,
+each with its state, since when, and its last run: when it ended, how it
+ended, how long it took, and its steps and spend against the monitor's caps,
+"OK · 4 min 2 s · 12 / 40 steps · $0.08". Every other monitor is counted in
+one line, "2 new · 12 healthy". It is a board of runs and their bounds: no
+uptime grid and no percentage. A project with no monitor yet is told what one
+is. Under the board, the project's notices — a member joining or leaving, a
+channel connected or lost, a monitor its first ping made — newest first, each
+unread one bold, with **Mark read** beside them.
 
 ### Creating a project
 
