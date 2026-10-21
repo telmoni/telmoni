@@ -17,13 +17,13 @@ leaves the process unless you ask and the project's content mode allows.
 | **Go** | `github.com/telmoni/telmoni/sdk/go` | Go 1.26 or later | [`sdk/go`](https://github.com/telmoni/telmoni/tree/main/sdk/go) |
 | **Rust** | `telmoni-sdk` | Rust 1.99.1 or later | [`sdk/rust`](https://github.com/telmoni/telmoni/tree/main/sdk/rust) |
 
-None is published to a package registry yet, so each installs from the
-platform's repository, [`telmoni/telmoni`](https://github.com/telmoni/telmoni),
-which holds them beside the ingest they send to; a `telmoni` package found on
-npm, PyPI or crates.io is not Telmoni's. Each is built on its language's
-OpenTelemetry SDK and sends with the language's own HTTP client, Rust with
-reqwest. Python, TypeScript and Go carry nothing else; Rust also carries serde,
-serde_json, tracing and uuid.
+Their source is the platform's repository,
+[`telmoni/telmoni`](https://github.com/telmoni/telmoni), which holds them
+beside the ingest they send to, and each installs with its language's own
+tool, below. On crates.io the SDK is `telmoni-sdk`: a crate named `telmoni` is
+not Telmoni's. Each is built on its language's OpenTelemetry SDK and sends with
+the language's own HTTP client, Rust with reqwest. Python, TypeScript and Go
+carry nothing else; Rust also carries serde, serde_json, tracing and uuid.
 
 ---
 
@@ -32,17 +32,12 @@ serde_json, tracing and uuid.
 <Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
   <Tab value="Python">
     ```console
-    $ git clone https://github.com/telmoni/telmoni.git
-    $ pip install ./telmoni/sdk/python
+    $ pip install telmoni
     ```
   </Tab>
   <Tab value="TypeScript">
-    Build it in a checkout of the repository, then add that directory to your project's dependencies:
-
     ```console
-    $ git clone https://github.com/telmoni/telmoni.git
-    $ cd telmoni/sdk/typescript
-    $ npm ci && npm run build
+    $ npm install telmoni
     ```
   </Tab>
   <Tab value="Go">
@@ -51,11 +46,8 @@ serde_json, tracing and uuid.
     ```
   </Tab>
   <Tab value="Rust">
-    Depend on it from the repository in `Cargo.toml`:
-
-    ```toml
-    [dependencies]
-    telmoni-sdk = { git = "https://github.com/telmoni/telmoni" }
+    ```console
+    $ cargo add telmoni-sdk
     ```
   </Tab>
 </Tabs>

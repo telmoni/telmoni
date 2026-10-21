@@ -19,7 +19,7 @@ The Telmoni CLI (`telmoni`) is the official command-line interface for interacti
     The installer downloads the release archive for your platform, checks it against the release's `SHA256SUMS`, and installs `telmoni` into `/usr/local/bin` when that directory is writable or the installer runs as root, and into `~/.local/bin` otherwise. `https://telmoni.com/install.sh` redirects to the latest release's copy of the same script. `TELMONI_INSTALL_DRY_RUN=1` prints the download, extract, mkdir, mv and chmod commands instead of running them. To pin a version or choose the directory, set `TELMONI_VERSION` or `TELMONI_INSTALL_DIR`. The installer goes through `sudo` or `doas` to create a directory that does not exist yet, the default `~/.local/bin` included, and to write into one your user cannot write to:
 
     ```console
-    $ curl -fsSL https://raw.githubusercontent.com/telmoni/telmoni-cli/main/install.sh | TELMONI_VERSION=0.0.1 TELMONI_INSTALL_DIR=/usr/local/bin sh
+    $ curl -fsSL https://raw.githubusercontent.com/telmoni/telmoni-cli/main/install.sh | TELMONI_VERSION=0.1.0 TELMONI_INSTALL_DIR=/usr/local/bin sh
     ```
 
     Release binaries are built for Apple silicon macOS and x86_64 Linux; the Linux binary links against glibc. On an Intel Mac or ARM64 Linux the installer stops, and on a musl-based system such as Alpine its binary does not run, so you build from source instead.
@@ -31,10 +31,10 @@ The Telmoni CLI (`telmoni`) is the official command-line interface for interacti
     ```
   </Tab>
   <Tab value="From source (Rust / Cargo)">
-    Compile and install with the Rust toolchain (Rust 1.99.1 or later). The repository holds more than one package, so the command names the CLI's:
+    Compile and install it from crates.io with the Rust toolchain (Rust 1.99.1 or later). The crate is `telmoni-cli`: a crate named `telmoni` is not Telmoni's.
 
     ```console
-    $ cargo install --git https://github.com/telmoni/telmoni-cli.git --locked telmoni-cli
+    $ cargo install --locked telmoni-cli
     ```
 
     Or from a local clone of the repository:
@@ -50,7 +50,7 @@ Verify the installation by checking the version:
 
 ```console
 $ telmoni --version
-telmoni 0.0.1
+telmoni 0.1.0
 ```
 
 ---
