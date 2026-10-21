@@ -11,9 +11,9 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use chrono::Utc;
-use sha2::{Digest, Sha256};
 use telmoni_shared::TelmoniError;
 use telmoni_shared::db::tenant_session::maintenance_scope;
+use telmoni_shared::digest::sha256_hex;
 
 use super::{Entry, Passage, chunk, holding, lease, prepare, release, store};
 use crate::AppState;
@@ -35,7 +35,7 @@ pub async fn refresh(state: &AppState) -> Result<(), TelmoniError> {
     };
     let embedder = state.embedder()?;
     let corpus = fetch(url).await?;
-    let digest = format!("{:x}", Sha256::digest(corpus.as_bytes()));
+    let digest = sha256_hex(corpus.as_bytes());
     let entries = entries(&corpus, &site_of(url));
     // ⚠ A corpus with no pages is not a docs site that emptied: it is a moved
     // URL answering some other page, or an empty file. Indexing it would drop

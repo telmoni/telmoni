@@ -2,6 +2,7 @@
 //! decides whether a passage needs embedding again.
 
 use sha2::{Digest, Sha256};
+use telmoni_shared::digest::hex_lower;
 
 use crate::db::Visibility;
 
@@ -129,7 +130,7 @@ pub fn content_hash(title: &str, body: &str, url: Option<&str>, visibility: Visi
         hasher.update(part.len().to_le_bytes());
         hasher.update(part.as_bytes());
     }
-    format!("{:x}", hasher.finalize())
+    hex_lower(&hasher.finalize())
 }
 
 #[cfg(test)]

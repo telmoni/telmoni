@@ -19,7 +19,7 @@
 //! is `410 Gone`; every other dead endpoint is ended by the breaker.
 
 use async_trait::async_trait;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use reqwest::Url;
 use ring::rand::SecureRandom as _;
 use serde_json::{Value, json};
@@ -127,7 +127,7 @@ pub fn sign(secret: &str, body: &[u8], timestamp: i64) -> String {
 pub fn sign_all(secrets: &[&str], body: &[u8], timestamp: i64) -> String {
     let mut header = format!("t={timestamp}");
     for secret in secrets {
-        let Ok(mut mac) = <HmacSha256 as Mac>::new_from_slice(secret.as_bytes()) else {
+        let Ok(mut mac) = <HmacSha256 as KeyInit>::new_from_slice(secret.as_bytes()) else {
             continue;
         };
         mac.update(timestamp.to_string().as_bytes());
@@ -263,7 +263,7 @@ mod tests {
             return false;
         };
         candidates.iter().any(|candidate| {
-            let mut mac = <HmacSha256 as Mac>::new_from_slice(secret.as_bytes()).unwrap();
+            let mut mac = <HmacSha256 as KeyInit>::new_from_slice(secret.as_bytes()).unwrap();
             mac.update(t.to_string().as_bytes());
             mac.update(b".");
             mac.update(body);

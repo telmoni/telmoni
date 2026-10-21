@@ -9,8 +9,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use sha2::{Digest as _, Sha256};
-
+use telmoni_shared::digest::sha256_hex;
 use telmoni_shared::{TelmoniError, TenantError};
 
 use crate::replica::Redis;
@@ -62,7 +61,7 @@ impl RateLimit {
     /// 32 hex characters of its SHA-256.
     #[must_use]
     pub fn digest(credential: &str) -> String {
-        let mut hex = format!("{:x}", Sha256::digest(credential.as_bytes()));
+        let mut hex = sha256_hex(credential.as_bytes());
         hex.truncate(32);
         hex
     }

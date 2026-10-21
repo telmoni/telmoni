@@ -18,6 +18,7 @@
 
 use anyhow::Context;
 use sha2::{Digest, Sha256};
+use telmoni_shared::digest::hex_lower;
 
 use crate::store::within;
 
@@ -150,7 +151,7 @@ pub fn digest(statements: &[String]) -> String {
         }
         hash.update(b";\n");
     }
-    format!("{:x}", hash.finalize())
+    hex_lower(&hash.finalize())
 }
 
 /// The statements of a file of them, in order: `--` comments removed, each

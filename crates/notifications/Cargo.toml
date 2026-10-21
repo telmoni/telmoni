@@ -35,7 +35,7 @@ reqwest    = { workspace = true }
 # Slack signs its events with HMAC-SHA256 over `v0:{ts}:{body}`, verified by
 # hand rather than through a vendor SDK. The signed webhook GENERATES the same
 # kind of MAC over `{t}.{body}`.
-hmac = "0.12"
+hmac = "0.13"
 sha2 = { workspace = true }
 hex  = "0.4"
 # The OS randomness behind the OAuth `state`. The AES-256-GCM over the grants

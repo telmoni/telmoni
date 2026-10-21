@@ -417,7 +417,7 @@ async fn seed_webhook(pool: &PgPool, organization: &str, url: &str, secret: &str
 /// Any `v1` that verifies is enough, which is what keeps a receiver working
 /// through a rotation's overlap.
 fn verify_signature(secret: &str, header: &str, body: &[u8]) -> bool {
-    use hmac::Mac as _;
+    use hmac::{KeyInit as _, Mac as _};
     let mut t: Option<i64> = None;
     let mut candidates: Vec<Vec<u8>> = Vec::new();
     for part in header.split(',') {
@@ -1624,7 +1624,7 @@ async fn emit_fans_out_to_active_connections_at_the_right_level(pool: PgPool) {
 }
 
 fn sign(ts: &str, body: &str) -> String {
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, KeyInit, Mac};
     let mut mac = Hmac::<sha2::Sha256>::new_from_slice(SIGNING_SECRET.as_bytes()).unwrap();
     mac.update(format!("v0:{ts}:{body}").as_bytes());
     format!("v0={}", hex::encode(mac.finalize().into_bytes()))
