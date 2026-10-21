@@ -11,24 +11,21 @@ tool's input or output, a command, a file's path or the folder you work in.
 
 | Agent | Plugin | Package | Runs as |
 |---|---|---|---|
-| **Claude Code** | [`telmoni/claude-observability-plugin`](https://github.com/telmoni/claude-observability-plugin) | `telmoni-claude-observability-plugin` | `claude-code` |
-| **Codex** | [`telmoni/codex-observability-plugin`](https://github.com/telmoni/codex-observability-plugin) | `telmoni-codex-observability-plugin` | `codex` |
-| **OpenCode** | [`telmoni/opencode-observability-plugin`](https://github.com/telmoni/opencode-observability-plugin) | `telmoni-opencode-observability-plugin` | `opencode` |
-| **Cursor** | [`telmoni/cursor-observability-plugin`](https://github.com/telmoni/cursor-observability-plugin) | `telmoni-cursor-observability-plugin` | `cursor` |
+| **Claude Code** | [`telmoni/claude-observability-plugin`](https://github.com/telmoni/claude-observability-plugin) | `@telmoni/claude-observability-plugin` | `claude-code` |
+| **Codex** | [`telmoni/codex-observability-plugin`](https://github.com/telmoni/codex-observability-plugin) | `@telmoni/codex-observability-plugin` | `codex` |
+| **OpenCode** | [`telmoni/opencode-observability-plugin`](https://github.com/telmoni/opencode-observability-plugin) | `@telmoni/opencode-observability-plugin` | `opencode` |
+| **Cursor** | [`telmoni/cursor-observability-plugin`](https://github.com/telmoni/cursor-observability-plugin) | `@telmoni/cursor-observability-plugin` | `cursor` |
 
 Each plugin is built on the [TypeScript SDK](/docs/api/sdks), which it carries
 inside its own package, and sends what the SDKs send, under a
 [project API key](/docs/api/api-keys) holding only the **ingest** scope (**Send
 spans**). The Claude Code, Codex and Cursor plugins need Node.js 22 or later,
 with npm on your `PATH`; the OpenCode plugin runs inside OpenCode, which
-installs it itself. None is published to npm yet: until it is, a plugin runs
-from a checkout of its repository, built beside a checkout of the platform,
-whose TypeScript SDK it is built on:
+installs it itself. Each installs from its npm package, as below; to run one
+from a checkout instead, build it in its repository:
 
 ```sh
-git clone https://github.com/telmoni/telmoni.git
 git clone https://github.com/telmoni/claude-observability-plugin.git   # or the codex-, opencode- or cursor-observability-plugin
-(cd telmoni/sdk/typescript && npm install && npm run build)
 (cd claude-observability-plugin && npm install && npm run build)
 ```
 
@@ -87,20 +84,19 @@ as Node has started.
 
 ## Claude Code
 
-From a checkout, start Claude Code with the plugin and your key in its
-environment:
-
-```sh
-TELMONI_API_KEY=telmoni_… claude --plugin-dir ./claude-observability-plugin
-```
-
-Once published, it installs from its own marketplace, added sparse so that only
-the manifests and the repository's root files are fetched, never its source or
-tests:
+It installs from its own marketplace, added sparse so that only the manifests
+and the repository's root files are fetched, never its source or tests:
 
 ```sh
 claude plugin marketplace add telmoni/claude-observability-plugin --sparse .claude-plugin
 claude plugin install telmoni-observability@telmoni-plugins
+```
+
+From a checkout, start Claude Code with the plugin and your key in its
+environment instead:
+
+```sh
+TELMONI_API_KEY=telmoni_… claude --plugin-dir ./claude-observability-plugin
 ```
 
 In a Claude Code session, set the key with
@@ -125,8 +121,8 @@ conversations.
 
 ## Codex
 
-You need Codex 0.143 or later. Once published, the plugin installs from its own
-marketplace, added sparse, and Codex enables it in `~/.codex/config.toml`:
+You need Codex 0.143 or later. The plugin installs from its own marketplace,
+added sparse, and Codex enables it in `~/.codex/config.toml`:
 
 ```sh
 codex plugin marketplace add telmoni/codex-observability-plugin --sparse .agents/plugins
@@ -136,8 +132,8 @@ codex plugin add telmoni-observability@telmoni-plugins
 Codex runs no plugin's hooks until you trust them: restart Codex and trust the
 plugin's hooks — at `Stop`, `SubagentStop`, `Interrupt` (from Codex 0.150) and
 `SessionEnd` (from 0.145) — when Codex asks, or in `/hooks`. `codex exec` asks
-nothing, so trust them once in Codex itself. Until the package is published,
-its repository's README says how to run it from a checkout.
+nothing, so trust them once in Codex itself. Its repository's README says how
+to run it from a checkout.
 
 The key goes in `telmoni.json` in Codex's folder — `~/.codex`, or `CODEX_HOME`
 where you set one — readable by you alone (`chmod 600`), as
@@ -158,36 +154,35 @@ command that failed is recorded as one that ran.
 ## OpenCode
 
 You need OpenCode 1.18.29 or later, or OpenCode 2, whose plugin systems differ;
-the one package serves both. Once published, add it to your `opencode.json`
-under `plugin` on OpenCode 1:
+the one package serves both. Add it to your `opencode.json` under `plugin` on
+OpenCode 1:
 
 ```json
-{ "plugin": ["telmoni-opencode-observability-plugin"] }
+{ "plugin": ["@telmoni/opencode-observability-plugin"] }
 ```
 
 or have OpenCode add it to the global configuration:
 
 ```sh
-opencode plugin telmoni-opencode-observability-plugin -g
+opencode plugin @telmoni/opencode-observability-plugin -g
 ```
 
 On OpenCode 2, the list is `plugins`:
 
 ```json
-{ "plugins": ["telmoni-opencode-observability-plugin"] }
+{ "plugins": ["@telmoni/opencode-observability-plugin"] }
 ```
 
 or:
 
 ```sh
-opencode plugin add telmoni-opencode-observability-plugin
+opencode plugin add @telmoni/opencode-observability-plugin
 ```
 
 One key is enough: OpenCode 2 reads an OpenCode 1 `plugin` list too, and sets
-the plugin up once even where it is named under both. Until it is published,
-name the checkout's build by its absolute path instead of the package: its
-`dist/index.mjs` on OpenCode 1, and its `dist` folder on OpenCode 2, which
-takes no file there.
+the plugin up once even where it is named under both. A checkout's build is
+named by its absolute path in place of the package: its `dist/index.mjs` on
+OpenCode 1, and its `dist` folder on OpenCode 2, which takes no file there.
 
 The key goes in `telmoni.json` beside your OpenCode configuration
 (`~/.config/opencode/telmoni.json`, or in `OPENCODE_CONFIG_DIR` or under
@@ -207,12 +202,12 @@ most for what is still to send.
 
 ## Cursor
 
-From a checkout, wire the build into Cursor; once published, the package
-installs with npm and brings the same command:
+The package installs with npm and brings the command that wires it into
+Cursor; a checkout's build runs the same command:
 
 ```sh
+npm install -g @telmoni/cursor-observability-plugin && telmoni-cursor-observability setup
 node ./cursor-observability-plugin/dist/telmoni-cursor-observability.mjs setup   # from a checkout
-npm install -g telmoni-cursor-observability-plugin && telmoni-cursor-observability setup   # once published
 ```
 
 `setup` asks for the key, or takes `TELMONI_API_KEY`, checks that it is shaped
@@ -228,9 +223,9 @@ Node. Its log is `~/.cursor/telmoni/hook.log`.
 
 Cursor's cloud agents read the repository's hooks alone:
 `telmoni-cursor-observability setup --project` writes `.cursor/hooks.json` there, to commit,
-with the package installed in the agents' environment, once it is published
-(the install step of `.cursor/environment.json`), and the key as the Cloud
-Agents secret `TELMONI_API_KEY`. Those hooks run on your teammates' machines
+with the package installed in the agents' environment (the install step of
+`.cursor/environment.json`), and the key as the Cloud Agents secret
+`TELMONI_API_KEY`. Those hooks run on your teammates' machines
 too, and send nothing there until a teammate runs `setup`. On a machine where
 both are set up, the repository's hooks record its conversations and your own
 stand aside.
