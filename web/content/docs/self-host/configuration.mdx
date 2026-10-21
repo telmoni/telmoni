@@ -20,6 +20,7 @@ These variables configure the Rust backend service (`telmoni serve`).
 | `ALLOW_TEST_SESSION` | `false` | When `true`, exposes the `POST /internal/v1/test/session` route for end-to-end testing. Refused at boot in a Kubernetes pod. |
 | `DELETION_TAIL_BUDGET_MS` | `8000` | How long, in milliseconds, a deletion request runs its purges inline before the deletion sweep takes over the rest. An organization's deletion answers `202 Accepted` either way, with `purged: false` when the purge did not finish in time; an account's answers `200` when the person was erased in time and `202` otherwise. |
 | `RUN_SWEEPS` | `true` | Runs the deletion, retention, audit-verification and audit-export sweeps inside `telmoni serve`. `false` leaves them to `telmoni sweep <name>` runs you schedule yourself. |
+| `TELEMETRY_TICK_SECS` | `5` | How often, in seconds, each server replica checks the monitors for a run that is overdue, has gone quiet or never ended, and marks the monitor late, failed or stalled, so it is marked within about this long of its moment. From 1 to 60; anything else refuses boot. The check runs whatever `RUN_SWEEPS` says. |
 | `LOG_LEVEL` | `info` | The log filter, in `RUST_LOG` syntax (`debug`, `telmoni_auth=debug`). `RUST_LOG` is read first when both are set. The console reads the same variable as a plain level (`trace`, `debug`, `info`, `warn`, `error`, `fatal` or `silent`) and stops at start on anything else, such as `telmoni_auth=debug`; the Helm chart gives both containers its `config.logLevel`, so set a plain level there. |
 
 ---
