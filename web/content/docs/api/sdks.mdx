@@ -15,13 +15,12 @@ leaves the process unless you ask and the project's content mode allows.
 | **Python** | `telmoni` | Python 3.10 or later | [`sdk/python`](https://github.com/telmoni/telmoni/tree/main/sdk/python) |
 | **TypeScript / JavaScript** | `telmoni` | Node.js 18.19 or 20.6 or later | [`sdk/typescript`](https://github.com/telmoni/telmoni/tree/main/sdk/typescript) |
 | **Go** | `github.com/telmoni/telmoni/sdk/go` | Go 1.26 or later | [`sdk/go`](https://github.com/telmoni/telmoni/tree/main/sdk/go) |
-| **Rust** | `telmoni-sdk` | Rust 1.99.1 or later | [`sdk/rust`](https://github.com/telmoni/telmoni/tree/main/sdk/rust) |
+| **Rust** | `telmoni` | Rust 1.99.1 or later | [`sdk/rust`](https://github.com/telmoni/telmoni/tree/main/sdk/rust) |
 
 Their source is the platform's repository,
 [`telmoni/telmoni`](https://github.com/telmoni/telmoni), which holds them
 beside the ingest they send to, and each installs with its language's own
-tool, below. On crates.io the SDK is `telmoni-sdk`: a crate named `telmoni` is
-not Telmoni's. Each is built on its language's OpenTelemetry SDK and sends with
+tool, below. Each is built on its language's OpenTelemetry SDK and sends with
 the language's own HTTP client, Rust with reqwest. Python, TypeScript and Go
 carry nothing else; Rust also carries serde, serde_json, tracing and uuid.
 
@@ -47,7 +46,7 @@ carry nothing else; Rust also carries serde, serde_json, tracing and uuid.
   </Tab>
   <Tab value="Rust">
     ```console
-    $ cargo add telmoni-sdk
+    $ cargo add telmoni
     ```
   </Tab>
 </Tabs>
@@ -231,7 +230,7 @@ holding the **ingest** scope.
   </Tab>
   <Tab value="Rust">
     ```rust
-    use telmoni_sdk::{Bounds, Config, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage};
+    use telmoni::{Bounds, Config, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage};
 
     let telmoni = Telmoni::new(Config::from_env());
 
@@ -428,7 +427,7 @@ by as much, so time a record by the clock that sends it.
     ```rust
     use std::time::{Duration, SystemTime};
 
-    use telmoni_sdk::{ModelCallRecord, RunRecord, ToolCallRecord, Usage};
+    use telmoni::{ModelCallRecord, RunRecord, ToolCallRecord, Usage};
 
     // 2026-10-12T09:00:00Z, and what came after it.
     let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_791_795_600);
@@ -748,7 +747,7 @@ log, a warning or an error.
   </Tab>
   <Tab value="Rust">
     ```rust
-    use telmoni_sdk::{Config, Telmoni};
+    use telmoni::{Config, Telmoni};
 
     let telmoni = Telmoni::new(Config {
         endpoint: "https://api.telmoni.com".into(),
