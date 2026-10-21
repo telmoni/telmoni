@@ -67,8 +67,10 @@
 
   --brand-positive: oklch(0.56 0.17 145);
   --brand-negative: oklch(0.55 0.22 25);
-  --highlight: oklch(0.95 0.19 105);
-  --highlight-foreground: oklch(0.22 0.02 100);
+  /* The marker is the monogram's cyan: here lightened at its hue, on a dark
+     page the mark's own; the words on it keep the mark's dark ink in both. */
+  --highlight: oklch(0.9 0.067 223);
+  --highlight-foreground: #1f2937;
 
   /* The mark's colours as the brand pack spells them: darker shades on a
      light surface, lighter on a dark one. */
@@ -120,8 +122,8 @@
 
   --brand-positive: oklch(0.65 0.17 145);
   --brand-negative: oklch(0.65 0.22 25);
-  --highlight: oklch(0.9 0.18 105);
-  --highlight-foreground: oklch(0.2 0.02 100);
+  --highlight: #22d3ee;
+  --highlight-foreground: #1f2937;
 
   --mark-ink: #e6e8ea;
   --mark-cyan: #22d3ee;
