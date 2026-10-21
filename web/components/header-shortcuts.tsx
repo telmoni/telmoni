@@ -29,6 +29,7 @@ export function HeaderShortcuts({ signedIn }: { signedIn: boolean }) {
       const key = pressedKey(e).toLowerCase();
       // `/auth/signup` is a Route Handler, which only a full load reaches;
       // `/console` is a page, which the router reaches as the button does.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
       if (!signedIn && key === "s") window.location.assign("/auth/signup");
       if (signedIn && key === "c") router.push("/console");
     };
