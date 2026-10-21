@@ -536,8 +536,10 @@ func TestTheAnswerIsReadPastEvery1xxBeforeItButA101(t *testing.T) {
 		reply  string
 		warned []string
 	}{
+		// The 200 closes its connection: the run's start goes ahead in an export of
+		// its own, and a kept connection the handler no longer serves would hold the next.
 		{"HTTP/1.1 103 Early Hints\r\nLink: </x>\r\n\r\nHTTP/1.1 102 Processing\r\n\r\n" +
-			"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}", nil},
+			"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{}", nil},
 		{"HTTP/1.1 101 Switching Protocols\r\nUpgrade: x\r\nConnection: Upgrade\r\n\r\n",
 			[]string{"telmoni: export refused with 101 ; the batch was dropped"}},
 	} {
