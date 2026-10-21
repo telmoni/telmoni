@@ -84,11 +84,13 @@ as Node has started.
 
 ## Claude Code
 
-It installs from its own marketplace, added sparse so that only the manifests
-and the repository's root files are fetched, never its source or tests:
+It installs from Telmoni's marketplace,
+[`telmoni/plugins`](https://github.com/telmoni/plugins), which names each
+plugin by its npm package, so only the plugin as built is fetched, never its
+source or tests:
 
 ```sh
-claude plugin marketplace add telmoni/claude-observability-plugin --sparse .claude-plugin
+claude plugin marketplace add telmoni/plugins
 claude plugin install telmoni-observability@telmoni-plugins
 ```
 
@@ -121,11 +123,11 @@ conversations.
 
 ## Codex
 
-You need Codex 0.143 or later. The plugin installs from its own marketplace,
-added sparse, and Codex enables it in `~/.codex/config.toml`:
+You need Codex 0.143 or later. The plugin installs from the same marketplace,
+`telmoni/plugins`, and Codex enables it in `~/.codex/config.toml`:
 
 ```sh
-codex plugin marketplace add telmoni/codex-observability-plugin --sparse .agents/plugins
+codex plugin marketplace add telmoni/plugins
 codex plugin add telmoni-observability@telmoni-plugins
 ```
 
