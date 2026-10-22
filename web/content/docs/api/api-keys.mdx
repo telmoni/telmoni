@@ -49,8 +49,8 @@ live key without the scope a lane needs is refused with `403`
 `/errors/authz/forbidden`.
 
 The [Telmoni CLI](/docs/api/cli) uses it from the `TELMONI_API_KEY` environment
-variable, for each command and without saving it, or saves it with
-`telmoni login --with-key`, which reads it from standard input:
+variable, for each command and without saving it, asking first at a terminal,
+or saves it with `telmoni login --with-key`, which reads it from standard input:
 
 ```console
 $ telmoni status          # with TELMONI_API_KEY set to a key holding read
