@@ -86,14 +86,20 @@ export async function downloadExport(
       return "failed";
     }
     if (!res.ok) {
+      // The organization's day of data out, as against this person's hour.
+      const spent =
+        res.status === 429 &&
+        ((await res.json().catch(() => null)) as { error?: string } | null)?.error === "spent";
       toast.error(
         res.status === 404
           ? "That export is no longer kept. Start a new one."
           : res.status === 403
             ? "Only an owner or admin can download the audit log."
-            : res.status === 429
-              ? "You’ve downloaded a lot of exports this hour. Try again a little later."
-              : "The export could not be downloaded. Try again in a moment.",
+            : spent
+              ? "This organization has downloaded all its plan holds today. Try again after midnight UTC."
+              : res.status === 429
+                ? "You’ve downloaded a lot of exports this hour. Try again a little later."
+                : "The export could not be downloaded. Try again in a moment.",
       );
       return res.status === 404 ? "gone" : "failed";
     }

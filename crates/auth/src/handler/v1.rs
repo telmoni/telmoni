@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use axum::{
     Router,
+    body::HttpBody,
     extract::{Request, State},
     http::{HeaderMap, HeaderValue, Method as HttpMethod, StatusCode, header},
     middleware::{self, Next},
@@ -24,7 +25,7 @@ use telmoni_shared::extract::Json;
 use telmoni_shared::middleware::api_key::{ApiKeyGate, Refusal, require_api_key};
 use telmoni_shared::middleware::problem;
 use telmoni_shared::openapi::{Answer, Method, Route};
-use telmoni_shared::types::{API_TOKEN_PREFIX, ApiKeyScope};
+use telmoni_shared::types::{API_TOKEN_PREFIX, ApiKeyScope, CONNECTION_BYTES};
 use telmoni_shared::{AuthError, Flag, TelmoniError, TenantError};
 
 use crate::AppState;
@@ -137,12 +138,16 @@ pub fn router(state: Arc<AppState>) -> Router {
         scope: ApiKeyScope::Read,
         refuse,
     };
-    // Layers apply outermost-last: the key is checked first, and the switch
-    // is read for a key that passed.
+    // Layers apply outermost-last: the key is checked first, the switch is
+    // read for a key that passed, and the day's data out last.
     let keyed = V1_LANES
         .iter()
         .filter(|lane| lane.route.bearer)
         .fold(Router::new(), mount)
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            meter_data_out,
+        ))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             require_public_api,
@@ -211,6 +216,39 @@ async fn require_public_api(
         .into_response(),
         Err(e) => unavailable(&e, "v1: flag resolution failed"),
     }
+}
+
+/// The organization's data out, held to the day its plan sets: refused, a
+/// 429 until midnight UTC, once the day is spent, and each answer counted
+/// against it with what its connection costs.
+async fn meter_data_out(
+    State(state): State<Arc<AppState>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let Some(key) = request.extensions().get::<ActingKey>().cloned() else {
+        return TelmoniError::Internal("v1: the request carries no key".into()).into_response();
+    };
+    let Some(telemetry) = state.siblings.telemetry.clone() else {
+        return next.run(request).await;
+    };
+    if let Err(refused) = telemetry.admit_data_out(&key.organization_id).await {
+        return refused.into_response();
+    }
+    // A HEAD's body is dropped past this layer, so only its connection costs.
+    let head = request.method() == HttpMethod::HEAD;
+    let response = next.run(request).await;
+    // Every answer here is a whole JSON document, its length known.
+    let sent = HttpBody::size_hint(response.body());
+    let bytes = if head {
+        0
+    } else {
+        sent.exact().unwrap_or_else(|| sent.lower())
+    };
+    telemetry
+        .spend_data_out(&key.organization_id, bytes.saturating_add(CONNECTION_BYTES))
+        .await;
+    response
 }
 
 /// The `telmoni_` key a request's `authorization` presents as its bearer,

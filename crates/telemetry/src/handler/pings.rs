@@ -40,6 +40,7 @@ use telmoni_shared::{
 };
 
 use crate::AppState;
+use crate::ceilings;
 use crate::contract::PING_BODY_MAX_BYTES;
 use crate::db::{
     self, LastRun, MonitorRow, MonitorWrite, OpenRunRow, OpenRunWrite, ResolvedPingKey,
@@ -329,7 +330,8 @@ fn answer(outcome: Result<Heard, TelmoniError>) -> Response {
 
 /// The lane's order: the path's two words ([`named`]), the key and whether
 /// its organization is open, the slug, the query, whether the organization
-/// is paused, the body, and only then the project's scope
+/// is paused, its plan's pings a minute, the body, and only then the
+/// project's scope
 /// ([`held_in_place`]). A key that opens nothing is a 404 whatever else the
 /// request says, so a scanner learns nothing.
 async fn handle(
@@ -350,6 +352,7 @@ async fn handle(
     // A paused organization keeps what it holds and takes in nothing new: a
     // 402, as ingest answers one.
     seam::admit_new(state.entitlements.as_ref(), &key.organization_id).await?;
+    ceilings::admit_ping(state, &key).await?;
     let body_dropped = dropped(headers, body).await;
     let now = Utc::now().trunc_subsecs(6);
 
@@ -359,6 +362,17 @@ async fn handle(
             Ok(ids) => ids,
             Err(refused) => {
                 chain::rolled_back(tx.rollback().await, &key.project_id, "ping");
+                // The plan's monitors refused the slug: counted once the chain
+                // lock is let go, since the count waits on Redis.
+                if matches!(refused, TelmoniError::Plan(_)) {
+                    ceilings::refused(
+                        state,
+                        &key.organization_id,
+                        ceilings::Lane::Monitors,
+                        Some(slug),
+                    )
+                    .await;
+                }
                 return Err(refused);
             }
         };

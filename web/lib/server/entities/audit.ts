@@ -83,6 +83,8 @@ export type AuditExportFile =
   | { kind: "forbidden" }
   /** Not the caller's, never finished, or past its week. */
   | { kind: "gone" }
+  /** The organization's data out for the day is spent: until `retryAfter`. */
+  | { kind: "spent"; retryAfter: string | null }
   | { kind: "unavailable" };
 
 /** A file is read whole before it is handed on, so the whole of it must
@@ -184,6 +186,7 @@ export async function auditExportFile(id: string): Promise<AuditExportFile> {
     );
     if (res.status === 403) return { kind: "forbidden" };
     if (res.status === 404 || res.status === 400) return { kind: "gone" };
+    if (res.status === 429) return { kind: "spent", retryAfter: res.headers.get("retry-after") };
     if (!res.ok) return { kind: "unavailable" };
     return {
       kind: "ok",

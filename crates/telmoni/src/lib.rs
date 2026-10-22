@@ -450,6 +450,7 @@ impl App {
         let rotation = tokio::spawn(telmoni_telemetry::rotation::run(self.telemetry.clone()));
         let ticker = tokio::spawn(telmoni_telemetry::ticker::run(self.telemetry.clone()));
         let purges = tokio::spawn(telmoni_telemetry::sweep::run(self.telemetry.clone()));
+        let refusals = tokio::spawn(telmoni_telemetry::ceilings::run(self.telemetry.clone()));
         if env_parse("RUN_SWEEPS", true)? {
             sweeps::spawn(self.auth.clone());
         } else {
@@ -479,8 +480,9 @@ impl App {
         );
         // ⚠ These loops are raced against the server: a dead one would leave
         // a Ready pod that quietly stops delivering, writing pings, retiring
-        // keys, calling monitors late or finishing purges, so the process
-        // exits and the restart is the recovery.
+        // keys, calling monitors late, finishing purges or telling owners of
+        // their plan's refusals, so the process exits and the restart is the
+        // recovery.
         tokio::select! {
             () = serve => {},
             ended = delivery => match ended {
@@ -502,6 +504,10 @@ impl App {
             ended = purges => match ended {
                 Ok(()) => anyhow::bail!("telemetry's purge sweep exited; restarting the process"),
                 Err(e) => anyhow::bail!("telemetry's purge sweep died: {e}"),
+            },
+            ended = refusals => match ended {
+                Ok(()) => anyhow::bail!("the plan refusals' notices exited; restarting the process"),
+                Err(e) => anyhow::bail!("the plan refusals' notices died: {e}"),
             },
         }
         Ok(())

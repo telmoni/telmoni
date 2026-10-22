@@ -50,6 +50,12 @@ export async function GET(
   if (result.kind === "gone") {
     return NextResponse.json({ error: "gone" }, { status: 404 });
   }
+  if (result.kind === "spent") {
+    return NextResponse.json(
+      { error: "spent" },
+      { status: 429, headers: result.retryAfter ? { "Retry-After": result.retryAfter } : {} },
+    );
+  }
   if (result.kind === "unavailable") {
     return NextResponse.json({ error: "unavailable" }, { status: 503 });
   }

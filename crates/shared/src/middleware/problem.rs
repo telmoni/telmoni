@@ -100,8 +100,11 @@ impl IntoResponse for TelmoniError {
 
         let retry_after = if matches!(
             &self,
-            Self::Tenant(TenantError::RateLimited { .. } | TenantError::FeatureOff { .. })
-                | Self::AgentRateLimited { .. }
+            Self::Tenant(
+                TenantError::RateLimited { .. }
+                    | TenantError::PastCeiling { .. }
+                    | TenantError::FeatureOff { .. }
+            ) | Self::AgentRateLimited { .. }
         ) {
             pd.extensions
                 .get("retry_after_secs")
@@ -197,6 +200,23 @@ mod tests {
                 .get("retry_after_secs")
                 .and_then(serde_json::Value::as_u64),
             Some(42)
+        );
+    }
+
+    /// A plan's ceiling says when it lifts in the header too, as a rate limit does.
+    #[tokio::test]
+    async fn past_a_ceiling_lifts_retry_after_header() {
+        let resp = TelmoniError::from(TenantError::PastCeiling {
+            detail: "the day's data out is spent".into(),
+            retry_after_secs: 3_600,
+        })
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            resp.headers()
+                .get(header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok()),
+            Some("3600")
         );
     }
 

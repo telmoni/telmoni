@@ -25,11 +25,12 @@ use telmoni_shared::extract::{Json, correlation_id};
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam;
 use telmoni_shared::{
-    AuditAction, AuthError, MonitorCeiling, MonitorState, ProjectId, TelmoniError,
+    AuditAction, AuthError, LaneCeilings, MonitorCeiling, MonitorState, ProjectId, TelmoniError,
     TelmoniResourceKind, slug,
 };
 
 use crate::AppState;
+use crate::ceilings;
 use crate::contract;
 use crate::db::{self, LastRun, MonitorRow, MonitorWrite};
 use crate::handler::chain;
@@ -555,9 +556,13 @@ pub async fn create_monitor(
         .clone();
     let monitor = input.checked(None)?;
     seam::admit_new(state.entitlements.as_ref(), &acting.organization_id).await?;
-    // The plan's ceiling, read before a transaction is opened and the lock
-    // taken: only the count under the lock needs it.
+    // The plan's ceilings, read before a transaction is opened and the lock
+    // taken: only the counts under the lock need them.
     let ceiling = chain::ceiling(state.entitlements.as_ref(), &acting.organization_id).await;
+    let lanes = state
+        .ceilings
+        .of(state.entitlements.as_ref(), &acting.organization_id)
+        .await;
     let mut tx = chain::scoped(&state.db, &acting, &project_id).await?;
     let row = match make_monitor(
         &state,
@@ -566,7 +571,7 @@ pub async fn create_monitor(
         &mut tx,
         &headers,
         &monitor,
-        ceiling.as_ref(),
+        (ceiling.as_ref(), lanes.as_ref()),
     )
     .await
     {
@@ -584,8 +589,9 @@ pub async fn create_monitor(
 /// The making itself, inside the transaction [`create_monitor`] opened:
 /// under the organization's chain lock, the role checked again on auth's
 /// second answer, the project's settings row made or re-filed, the
-/// organization's count held to the plan's `ceiling` the caller read before
-/// the lock, and the monitor written and recorded.
+/// organization's count held to the plan's monitor `ceiling` and its
+/// schedules to the pings its `lanes` hold, both read before the lock, and
+/// the monitor written and recorded.
 async fn make_monitor(
     state: &AppState,
     acting: &Acting,
@@ -593,7 +599,7 @@ async fn make_monitor(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     headers: &HeaderMap,
     monitor: &Checked,
-    ceiling: Option<&MonitorCeiling>,
+    (ceiling, lanes): (Option<&MonitorCeiling>, Option<&LaneCeilings>),
 ) -> Result<MonitorRow, TelmoniError> {
     let organization_id = &acting.organization_id;
     let now = chain::hold(&*state.auth, acting, project_id, tx).await?;
@@ -604,6 +610,7 @@ async fn make_monitor(
         // A negative count, which no table gives, fails closed.
         ceiling.admit(u64::try_from(held).unwrap_or(u64::MAX))?;
     }
+    ceilings::admit_schedules(tx, organization_id, lanes, None, &monitor.timing.read).await?;
     let next_due_at = monitor.timing.read.next_due(Utc::now()).map_err(fault)?;
     let row = db::insert_monitor(
         tx,
@@ -675,6 +682,10 @@ pub async fn update_monitor(
         .clone();
     let slug = monitor_slug(&slug)?;
     let monitor = input.checked(Some(&slug))?;
+    let lanes = state
+        .ceilings
+        .of(state.entitlements.as_ref(), &acting.organization_id)
+        .await;
     let mut tx = chain::scoped(&state.db, &acting, &project_id).await?;
     let row = match change_monitor(
         &state,
@@ -682,8 +693,8 @@ pub async fn update_monitor(
         &project_id,
         &mut tx,
         &headers,
-        &slug,
-        &monitor,
+        (&slug, &monitor),
+        lanes.as_ref(),
     )
     .await
     {
@@ -699,18 +710,27 @@ pub async fn update_monitor(
 }
 
 /// The change itself, inside the transaction [`update_monitor`] opened:
-/// under the organization's chain lock, written over the row as it stands,
-/// and recorded where it changes something.
+/// under the organization's chain lock, its schedules held to the pings
+/// the plan's `lanes` hold, written over the row as it stands, and recorded
+/// where it changes something.
 async fn change_monitor(
     state: &AppState,
     acting: &Acting,
     project_id: &ProjectId,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     headers: &HeaderMap,
-    slug: &str,
-    monitor: &Checked,
+    (slug, monitor): (&str, &Checked),
+    lanes: Option<&LaneCeilings>,
 ) -> Result<MonitorRow, TelmoniError> {
     let before = held(state, acting, project_id, tx, Verb::Update, slug).await?;
+    ceilings::admit_schedules(
+        tx,
+        &acting.organization_id,
+        lanes,
+        Some(before.id),
+        &monitor.timing.read,
+    )
+    .await?;
     let starts = before.state == MonitorState::New;
     // Searched whenever it is sent, changed or not and paused or not, so a
     // line that never comes is refused as a make refuses it, and no timing is

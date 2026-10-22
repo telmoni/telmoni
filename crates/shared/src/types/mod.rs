@@ -29,7 +29,10 @@ pub use api_key_scope::ApiKeyScope;
 pub use audit_action::AuditAction;
 pub use content_mode::ContentMode;
 pub use flag::{Flag, FlagSet};
-pub use grants::{Grants, MemberCeiling, MonitorCeiling, Paused};
+pub use grants::{
+    CONNECTION_BYTES, Grants, LaneCeilings, MICRO_PINGS, MemberCeiling, MonitorCeiling,
+    PING_BURST_MINUTES, Paused,
+};
 pub use layout_depth::LayoutDepth;
 pub use layout_open::LayoutOpen;
 pub use monitor_state::MonitorState;

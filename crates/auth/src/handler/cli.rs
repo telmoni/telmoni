@@ -23,6 +23,7 @@ use uuid::Uuid;
 use telmoni_shared::extract::Json;
 use telmoni_shared::middleware::problem;
 use telmoni_shared::person_token::Principal;
+use telmoni_shared::types::CONNECTION_BYTES;
 use telmoni_shared::{AuthzError, TelmoniError};
 
 use crate::AppState;
@@ -81,9 +82,24 @@ pub async fn me(
         .and_then(|v| v.to_str().ok())
         .map(str::trim)
         .filter(|v| !v.is_empty());
-    me::answer(&state, principal, &headers, user_agent)
-        .await
-        .map(Json)
+    let answer = me::answer(&state, principal, &headers, user_agent).await?;
+    // Counted against the organization it acted in, never refused: the day's
+    // ceiling stops a script on the read API, not a person's terminal.
+    if let (Some(organization_id), Some(telemetry)) = (
+        answer.active_organization_id.as_ref(),
+        state.siblings.telemetry.as_ref(),
+    ) {
+        let bytes = serde_json::to_vec(&answer).map_or(0, |body| body.len());
+        telemetry
+            .spend_data_out(
+                organization_id,
+                u64::try_from(bytes)
+                    .unwrap_or(u64::MAX)
+                    .saturating_add(CONNECTION_BYTES),
+            )
+            .await;
+    }
+    Ok(Json(answer))
 }
 
 /// A body is read up to [`BODY_CAP_BYTES`] and handed on whole; one past the

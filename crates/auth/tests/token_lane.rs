@@ -9,8 +9,10 @@
     reason = "a panicking helper is a failing test"
 )]
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
+use async_trait::async_trait;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
@@ -21,13 +23,21 @@ use tower::ServiceExt;
 
 use telmoni_auth::test_provider::{ScriptedProvider, as_person, full_router};
 use telmoni_auth::{AppState, Config};
+use telmoni_shared::seam::Telemetry;
 use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, seed_identity, service_pool};
+use telmoni_shared::types::CONNECTION_BYTES;
+use telmoni_shared::{OrganizationId, ProjectId, TelmoniError, TenantError};
 
 const SERVICE_SECRET: &str = "test-service-secret";
 const USER: &str = "user_token_lane";
 const EMAIL: &str = "lane@example.test";
 
 fn app(pool: PgPool) -> Router {
+    app_with(pool, telmoni_auth::Siblings::default())
+}
+
+/// The router over `siblings`, as a deployment wires them.
+fn app_with(pool: PgPool, siblings: telmoni_auth::Siblings) -> Router {
     let config = Config {
         database_url: String::new(),
         service_secret: SERVICE_SECRET.into(),
@@ -48,13 +58,66 @@ fn app(pool: PgPool) -> Router {
         ))),
         db,
         config,
-        siblings: telmoni_auth::Siblings::default(),
+        siblings,
         mailer: Arc::new(telmoni_auth::mailer::ComposingMailer::new(Arc::new(
             telmoni_shared::mail::NoopSender,
         ))),
         exchange_cache: telmoni_auth::ExchangeCache::new(),
     });
     full_router(state)
+}
+
+/// Telemetry as the read API meters through it: a day of `day` bytes, every
+/// spend kept, the day refused once spent.
+struct Meter {
+    day: u64,
+    spent: Mutex<HashMap<OrganizationId, u64>>,
+}
+
+impl Meter {
+    fn of(&self, organization_id: &OrganizationId) -> u64 {
+        self.spent
+            .lock()
+            .unwrap()
+            .get(organization_id)
+            .copied()
+            .unwrap_or(0)
+    }
+}
+
+#[async_trait]
+impl Telemetry for Meter {
+    async fn purge_organization(&self, _: &OrganizationId) -> Result<u64, TelmoniError> {
+        Ok(0)
+    }
+
+    async fn purge_project(&self, _: &ProjectId) -> Result<u64, TelmoniError> {
+        Ok(0)
+    }
+
+    async fn admit_data_out(&self, organization_id: &OrganizationId) -> Result<(), TelmoniError> {
+        if self.of(organization_id) < self.day {
+            return Ok(());
+        }
+        Err(TenantError::PastCeiling {
+            detail: "the day's data out is spent".into(),
+            retry_after_secs: 60,
+        }
+        .into())
+    }
+
+    async fn spend_data_out(&self, organization_id: &OrganizationId, bytes: u64) {
+        *self
+            .spent
+            .lock()
+            .unwrap()
+            .entry(organization_id.clone())
+            .or_default() += bytes;
+    }
+
+    async fn move_project(&self, _: &ProjectId, _: &OrganizationId) -> Result<(), TelmoniError> {
+        Ok(())
+    }
 }
 
 async fn json_body(resp: axum::response::Response) -> Value {
@@ -443,4 +506,58 @@ async fn a_token_route_without_the_project_header_is_refused(pool: PgPool) {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+/// The read API holds an organization to its plan's data out a day: each
+/// answer is counted with what its connection costs, and once the day is
+/// spent the next is refused, a 429 that says when it lifts.
+#[sqlx::test]
+async fn the_read_api_counts_each_answer_and_refuses_past_the_day(pool: PgPool) {
+    let fixture = token(&pool).await;
+    let organization = OrganizationId::try_new(fixture.organization.as_str()).unwrap();
+    // A day one answer spends, its connection alone.
+    let meter = Arc::new(Meter {
+        day: CONNECTION_BYTES,
+        spent: Mutex::new(HashMap::new()),
+    });
+    let read = || {
+        app_with(
+            pool.clone(),
+            telmoni_auth::Siblings {
+                telemetry: Some(meter.clone()),
+                ..telmoni_auth::Siblings::default()
+            },
+        )
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/organization")
+                .header("x-service-secret", SERVICE_SECRET)
+                .header(header::AUTHORIZATION, format!("Bearer {}", fixture.raw))
+                .body(Body::empty())
+                .unwrap(),
+        )
+    };
+
+    let resp = read().await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let answer = resp.into_body().collect().await.unwrap().to_bytes();
+    let answered = u64::try_from(answer.len()).unwrap();
+    assert_eq!(meter.of(&organization), answered + CONNECTION_BYTES);
+
+    let resp = read().await.unwrap();
+    assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        resp.headers()
+            .get(header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok()),
+        Some("60")
+    );
+    let body = json_body(resp).await;
+    assert_eq!(body["type"], "/errors/tenant/rate-limited", "{body}");
+    assert_eq!(
+        meter.of(&organization),
+        answered + CONNECTION_BYTES,
+        "a refusal is not counted"
+    );
 }

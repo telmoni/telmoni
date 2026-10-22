@@ -46,6 +46,7 @@ use telmoni_shared::middleware::api_key::{ApiKeyGate, require_api_key};
 use telmoni_shared::middleware::service_auth::{ServiceSecrets, require_service_secret};
 
 pub mod boot;
+pub mod ceilings;
 pub mod config;
 pub mod contract;
 pub mod db;
@@ -109,6 +110,9 @@ pub struct AppState {
     pub redis: replica::Redis,
     /// Ingest's rate limit, per project.
     pub rate_limit: rate_limit::RateLimit,
+    /// The machine lanes' ceilings each organization's plan sets, and the
+    /// day's counts held to them ([`ceilings`]).
+    pub ceilings: ceilings::Ceilings,
     /// How long a ping waits out a move or a purge of its project
     /// (`handler::pings::MOVE_WAIT`); a field so a suite can wait longer.
     pub move_wait: std::time::Duration,

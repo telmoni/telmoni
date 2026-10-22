@@ -55,6 +55,8 @@ pub const MAX_KEPT: i64 = 10;
 /// The guard behind [`MAX_ROWS`] for rows with large details. A file is
 /// assembled in memory, then copied once more to be stored, inside a server
 /// that also runs every other module: this keeps two builds well inside it.
+/// Smaller where the organization's plan holds its data out to less a day,
+/// so a file can always be taken ([`cap_for`]).
 const MAX_BYTES: usize = 24 * 1024 * 1024;
 
 /// Rows read per query while a file is built.
@@ -424,6 +426,19 @@ async fn hand_back(
     Ok(())
 }
 
+/// The most bytes one of the organization's files may hold: [`MAX_BYTES`],
+/// or its plan's data out a day where that is less, so a file is never too
+/// large to download, and a long log comes a day's worth at a time.
+async fn cap_for(state: &AppState, organization_id: &OrganizationId) -> usize {
+    let Some(entitlements) = state.siblings.entitlements.as_deref() else {
+        return MAX_BYTES;
+    };
+    telmoni_shared::seam::lane_ceilings(entitlements, organization_id)
+        .await
+        .and_then(|ceilings| usize::try_from(ceilings.data_out_per_day).ok())
+        .map_or(MAX_BYTES, |day| day.min(MAX_BYTES))
+}
+
 /// The build proper, once claimed.
 async fn write_and_store(
     state: &AppState,
@@ -443,6 +458,7 @@ async fn write_and_store(
         claimed.range_to,
     )
     .await?;
+    let cap = cap_for(state, organization_id).await;
     let mut file = FileWriter::new(claimed.format, organization_id, claimed)?;
     let mut too_large = false;
     if let Some((first, last)) = bounds {
@@ -457,7 +473,7 @@ async fn write_and_store(
                 for row in &page {
                     file.row(row)?;
                 }
-                if file.len() > MAX_BYTES {
+                if file.len() > cap {
                     too_large = true;
                     break;
                 }

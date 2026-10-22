@@ -81,6 +81,7 @@ pub fn state(
         hashing_keys: hashing::Cache::default(),
         redis,
         rate_limit: RateLimit::new("telemetry:ingest:limit", EXPORTS_PER_MINUTE),
+        ceilings: crate::ceilings::Ceilings::default(),
         move_wait: MOVE_WAIT,
         body_wait: BODY_WAIT,
     })

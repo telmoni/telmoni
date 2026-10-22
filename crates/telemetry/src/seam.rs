@@ -95,6 +95,14 @@ impl Telemetry for TelemetrySeam {
         purge_project(&self.0, project_id).await
     }
 
+    async fn admit_data_out(&self, organization_id: &OrganizationId) -> Result<(), TelmoniError> {
+        crate::ceilings::admit_data_out(&self.0, organization_id).await
+    }
+
+    async fn spend_data_out(&self, organization_id: &OrganizationId, bytes: u64) {
+        crate::ceilings::spend_data_out(&self.0, organization_id, bytes).await;
+    }
+
     async fn move_project(
         &self,
         project_id: &ProjectId,

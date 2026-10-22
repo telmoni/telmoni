@@ -24,6 +24,14 @@ pub const CRON_LINE_MAX: usize = 100;
 /// How many due times a schedule is shown as, as it is typed.
 pub const PREVIEW: usize = 3;
 
+/// How far ahead a cron line is searched for its shortest gap: two weeks and
+/// a day, so a weekly line shows two runs wherever the search starts.
+pub const GAP_WINDOW_S: i64 = 15 * 24 * 60 * 60;
+
+/// The most runs searched for it: a line that runs this often has shown its
+/// shortest gap long before, since a crontab's fields repeat within a day.
+const GAP_RUNS_MAX: usize = 400;
+
 /// What a timing could not be read as, named by its field and never by its
 /// value: the sentence a 400 carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,6 +140,37 @@ impl Schedule {
         }
     }
 
+    /// The shortest wait between two runs it expects, in seconds, from
+    /// `from`: an interval's own, a cron line's within [`GAP_WINDOW_S`], and
+    /// `None` for a monitor that expects none. A line due once in the window
+    /// is counted as one due once a window, the most it could be.
+    pub fn shortest_gap_s(&self, from: DateTime<Utc>) -> Result<Option<i64>, Fault> {
+        match &self.timing {
+            Timing::Never => Ok(None),
+            Timing::Every(every) => Ok(Some(i64::from(*every))),
+            Timing::Cron(_) => {
+                let end = from + Duration::seconds(GAP_WINDOW_S);
+                let (mut at, mut previous, mut shortest) =
+                    (from, None::<DateTime<Utc>>, None::<i64>);
+                for _ in 0..GAP_RUNS_MAX {
+                    let Some(next) = self.next_due(at)? else {
+                        break;
+                    };
+                    if next > end {
+                        break;
+                    }
+                    if let Some(previous) = previous {
+                        let gap = (next - previous).num_seconds();
+                        shortest = Some(shortest.map_or(gap, |s| s.min(gap)));
+                    }
+                    previous = Some(next);
+                    at = next;
+                }
+                Ok(Some(shortest.unwrap_or(GAP_WINDOW_S)))
+            }
+        }
+    }
+
     /// The next `count` due times after `after`: none for a monitor that
     /// expects no run.
     pub fn next_due_times(
@@ -180,6 +219,26 @@ mod tests {
         DateTime::parse_from_rfc3339(rfc3339)
             .expect("a time")
             .with_timezone(&Utc)
+    }
+
+    /// A schedule's shortest gap is what its pings are counted by: an
+    /// interval's own, a line's tightest pair of runs, a weekly line's week.
+    #[test]
+    fn the_shortest_gap_is_the_tightest_pair_of_runs() {
+        let from = at("2026-10-22T08:00:00Z");
+        let gap = |schedule: Option<&str>, interval: Option<i32>| {
+            Schedule::read(schedule, interval, "Europe/London")
+                .expect("a timing")
+                .shortest_gap_s(from)
+                .expect("searched")
+        };
+        assert_eq!(gap(Some("*/5 * * * *"), None), Some(300));
+        assert_eq!(gap(Some("0,1,30 * * * *"), None), Some(60));
+        assert_eq!(gap(Some("0 9-17 * * MON-FRI"), None), Some(3_600));
+        assert_eq!(gap(Some("0 0 * * 1"), None), Some(7 * 24 * 3_600));
+        assert_eq!(gap(Some("0 0 1 JAN *"), None), Some(GAP_WINDOW_S));
+        assert_eq!(gap(None, Some(90)), Some(90));
+        assert_eq!(gap(None, None), None);
     }
 
     /// What a crontab takes, this takes: five fields, lists, steps, names and

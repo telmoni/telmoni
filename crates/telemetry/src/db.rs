@@ -643,6 +643,30 @@ pub async fn monitor_count(
         .await
 }
 
+/// A monitor's timing as its row keeps it, for what its schedule needs.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct TimingRow {
+    pub id: Uuid,
+    pub schedule: Option<String>,
+    pub interval_s: Option<i32>,
+    pub timezone: String,
+}
+
+/// Every timing across the organization's projects, which the pings its
+/// plan holds are shared by.
+pub async fn organization_timings(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    organization_id: &OrganizationId,
+) -> sqlx::Result<Vec<TimingRow>> {
+    sqlx::query_as(
+        "SELECT id, schedule, interval_s, timezone FROM telemetry.monitors \
+          WHERE organization_id = $1 AND (schedule IS NOT NULL OR interval_s IS NOT NULL)",
+    )
+    .bind(organization_id)
+    .fetch_all(tx.conn())
+    .await
+}
+
 /// How many of the project's monitors its first pings made and nobody has
 /// set up yet — in `new` — which a ping that would make one more is held
 /// to.

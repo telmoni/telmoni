@@ -30,6 +30,7 @@ use telmoni_shared::audit::{Actor, AuditEvent};
 use telmoni_shared::db::tenant_session::person_scope;
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
+use telmoni_shared::types::CONNECTION_BYTES;
 use telmoni_shared::{AuditAction, AuthzError, TelmoniError, TelmoniResourceKind};
 
 use crate::{
@@ -80,6 +81,11 @@ pub async fn export_organization(
             "only the organization's owner or an admin can export it".into(),
         )
         .into());
+    }
+    // An export waits for the next day once the organization's data out is
+    // spent, as every export is.
+    if let Some(telemetry) = state.siblings.telemetry.as_ref() {
+        telemetry.admit_data_out(&organization).await?;
     }
 
     let organization_row = rows(
@@ -196,7 +202,7 @@ pub async fn export_organization(
 
     tx.commit().await?;
 
-    Ok(Json(json!({
+    let export = json!({
         "exported_at": chrono::Utc::now(),
         "organization": organization_row,
         "projects": projects,
@@ -206,7 +212,19 @@ pub async fn export_organization(
         "audit_events": audit_events,
         "audit_truncated": audit_truncated,
         "audit_limit": AUDIT_LIMIT,
-    })))
+    });
+    if let Some(telemetry) = state.siblings.telemetry.as_ref() {
+        let bytes = serde_json::to_vec(&export).map_or(0, |body| body.len());
+        telemetry
+            .spend_data_out(
+                &organization,
+                u64::try_from(bytes)
+                    .unwrap_or(u64::MAX)
+                    .saturating_add(CONNECTION_BYTES),
+            )
+            .await;
+    }
+    Ok(Json(export))
 }
 
 #[cfg(test)]

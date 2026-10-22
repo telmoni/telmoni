@@ -22,6 +22,7 @@ use telmoni_shared::error::TelmoniError;
 use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::rbac::{Resource, Verb, can};
+use telmoni_shared::types::CONNECTION_BYTES;
 use telmoni_shared::{AuditAction, AuthError, AuthzError, OrganizationId, TelmoniResourceKind};
 
 use crate::AppState;
@@ -307,9 +308,20 @@ pub async fn download_audit_export(
     else {
         return Err(AuthError::NotFound("no such export, or no longer kept".into()).into());
     };
+    // A file waits for the next day once the organization's is spent; it is
+    // counted each time it is handed over.
+    if let Some(telemetry) = state.siblings.telemetry.as_ref() {
+        telemetry.admit_data_out(&organization_id).await?;
+    }
     audit_exports::mark_downloaded(&mut tx, export_id, &organization_id, &principal.user_id)
         .await?;
     tx.commit().await?;
+    if let Some(telemetry) = state.siblings.telemetry.as_ref() {
+        let bytes = u64::try_from(file.file.len()).unwrap_or(u64::MAX);
+        telemetry
+            .spend_data_out(&organization_id, bytes.saturating_add(CONNECTION_BYTES))
+            .await;
+    }
 
     Ok((
         [(header::CONTENT_TYPE, file.format.content_type())],

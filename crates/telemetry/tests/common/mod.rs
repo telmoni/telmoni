@@ -25,9 +25,9 @@ use telmoni_shared::seam::{
 };
 use telmoni_shared::test_util::{ServiceRole, chain_lock_held, service_pool};
 use telmoni_shared::{
-    ApiKeyScope, AuthError, AuthzError, FlagSet, Grants, MonitorCeiling, NotificationKind,
-    OrganizationId, OrganizationRole, OrganizationStatus, Paused, ProjectId, Role, SpanKind,
-    SpanStatus, TelmoniError, UserId,
+    ApiKeyScope, AuthError, AuthzError, FlagSet, Grants, LaneCeilings, MonitorCeiling,
+    NotificationKind, OrganizationId, OrganizationRole, OrganizationStatus, Paused, ProjectId,
+    Role, SpanKind, SpanStatus, TelmoniError, UserId,
 };
 use telmoni_telemetry::store::{self, SpanRow, Store};
 use telmoni_telemetry::{AppState, Config};
@@ -738,6 +738,58 @@ impl Entitlements for Ceiling {
     }
 }
 
+/// A plan's lane ceilings, and where given its monitors: what billing
+/// answers for an organization on a plan, the numbers as a suite needs them.
+pub(crate) struct PlanLanes {
+    pub(crate) pings_per_minute: u32,
+    pub(crate) data_out_per_day: u64,
+    pub(crate) monitors: Option<u32>,
+}
+
+impl PlanLanes {
+    /// Hobby's numbers: two pings a minute, 5 MB a day, five monitors.
+    pub(crate) const fn hobby() -> Self {
+        Self {
+            pings_per_minute: 2,
+            data_out_per_day: 5_000_000,
+            monitors: Some(5),
+        }
+    }
+}
+
+#[async_trait]
+impl Entitlements for PlanLanes {
+    async fn grants(&self, organization_id: &OrganizationId) -> Result<Grants, TelmoniError> {
+        let _ = organization_id;
+        Ok(Grants::unlimited())
+    }
+
+    async fn monitor_ceiling(
+        &self,
+        organization_id: &OrganizationId,
+    ) -> Result<Option<MonitorCeiling>, TelmoniError> {
+        let _ = organization_id;
+        Ok(self.monitors.map(|limit| MonitorCeiling {
+            limit,
+            entitlement: "pro".into(),
+            detail: "Move to Pro for more monitors.".into(),
+        }))
+    }
+
+    async fn lane_ceilings(
+        &self,
+        organization_id: &OrganizationId,
+    ) -> Result<Option<LaneCeilings>, TelmoniError> {
+        let _ = organization_id;
+        Ok(Some(LaneCeilings {
+            pings_per_minute: self.pings_per_minute,
+            data_out_per_day: self.data_out_per_day,
+            entitlement: "pro".into(),
+            detail: "Move to Pro for more pings.".into(),
+        }))
+    }
+}
+
 /// One notice as the module handed it through the seam.
 #[derive(Debug, Clone)]
 pub(crate) struct LoggedNotice {
@@ -939,6 +991,24 @@ pub(crate) fn state_with_redis_and_notices(
         "http://telemetry:telemetry@127.0.0.1:1",
         &redis_url(),
         Arc::new(NoLimits),
+        notices,
+    ))
+}
+
+/// [`state_with_notices`] over Redis as `REDIS_URL` names it, or the compose
+/// file's: a plan's ceilings counted where a tier counts them.
+pub(crate) fn state_with_redis_under(
+    pool: &PgPool,
+    auth: Arc<dyn Auth>,
+    entitlements: Arc<dyn Entitlements>,
+    notices: Arc<NoticeLog>,
+) -> Arc<AppState> {
+    Arc::new(module_at(
+        pool,
+        auth,
+        "http://telemetry:telemetry@127.0.0.1:1",
+        &redis_url(),
+        entitlements,
         notices,
     ))
 }

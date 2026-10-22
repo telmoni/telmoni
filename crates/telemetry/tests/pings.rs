@@ -23,7 +23,9 @@ use tokio::net::TcpStream;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use common::{Answer, AuthStub, Ceiling, NoticeLog, PausedOrganization, SECRET, StandingAsked};
+use common::{
+    Answer, AuthStub, Ceiling, NoticeLog, PausedOrganization, PlanLanes, SECRET, StandingAsked,
+};
 use telmoni_shared::audit::lock_chain;
 use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
@@ -35,6 +37,7 @@ use telmoni_shared::{
     MonitorState, NotificationKind, OrganizationId, OrganizationRole, OrganizationStatus,
     ProjectId, SpanKind, TelmoniError,
 };
+use telmoni_telemetry::ceilings;
 use telmoni_telemetry::db::{self, MonitorRow, TelemetryLane};
 use telmoni_telemetry::handler::pings::NEW_MONITORS_MAX;
 use telmoni_telemetry::outbox::{self, FinishedRun, Settled};
@@ -3842,8 +3845,7 @@ async fn a_path_that_does_not_decode_is_refused_as_the_lane_refuses(pool: PgPool
 /// Past the plan's limit a ping to a slug no monitor has is refused with the
 /// ceiling's own 402 — what `curl -f` turns into cron's mail — naming what
 /// lifts it and never the key; nothing is made or recorded, and no notice is
-/// raised for it: the answer is the message, and the owner's digest is the
-/// limiter's (roadmap 2.10).
+/// raised for it: the answer is the message, and the owner's is the day's.
 #[sqlx::test]
 async fn past_the_plans_limit_a_ping_is_refused_with_the_ceilings_words(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -5734,4 +5736,285 @@ async fn exchange(stream: &mut TcpStream, request: &[u8]) -> Option<(String, Str
     })
     .await
     .expect("answered, or ended, within ten seconds")
+}
+
+/// The organization-wide notices a suite's ceilings raised, oldest first.
+fn organization_alerts(p: &Project) -> Vec<common::LoggedNotice> {
+    p.notices
+        .notices()
+        .into_iter()
+        .filter(|notice| notice.kind == NotificationKind::OrganizationAlert)
+        .collect()
+}
+
+/// A plan's pings a minute hold its organization's monitors together: six
+/// minutes' worth goes through at once, the next is refused with how long
+/// to wait and recorded nowhere, and the owner is told once that day.
+#[sqlx::test]
+async fn pings_past_the_plans_ceiling_are_refused_unrecorded_and_told_once(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project_under(&pool, OrganizationId::new(), Arc::new(PlanLanes::hobby()));
+    let key = p.mint().await;
+    p.make(hourly()).await;
+    for n in 0..12 {
+        let (status, body) = p.ping(&format!("/{key}/hourly-sync?rid={}", rid())).await;
+        assert_eq!(status, StatusCode::OK, "ping {n} of the burst: {body}");
+    }
+    let before = p.monitor("hourly-sync").await["last_run"].clone();
+    let (status, media_type, body) = p
+        .send_ping(
+            "GET",
+            &format!("/{key}/hourly-sync?rid={}", rid()),
+            &[],
+            Body::empty(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
+    assert!(
+        media_type.starts_with("application/problem+json"),
+        "{media_type}"
+    );
+    let problem: Value = serde_json::from_str(&body).expect("a problem document");
+    assert_eq!(problem["type"], "/errors/tenant/rate-limited");
+    assert!(
+        problem["detail"]
+            .as_str()
+            .is_some_and(|d| d.contains("2 a minute")),
+        "{problem}"
+    );
+    assert!(
+        problem["retry_after_secs"]
+            .as_u64()
+            .is_some_and(|s| (1..=30).contains(&s))
+    );
+    assert_eq!(
+        p.monitor("hourly-sync").await["last_run"],
+        before,
+        "a refused ping is recorded nowhere"
+    );
+
+    ceilings::tell(&p.state).await;
+    ceilings::tell(&p.state).await;
+    let told = organization_alerts(&p);
+    assert_eq!(told.len(), 1, "told once a day: {told:?}");
+    assert_eq!(told[0].organization_id, p.organization);
+    assert_eq!(told[0].project_id, None, "on the organization's feed");
+    assert_eq!(told[0].metadata["lane"], "pings");
+    assert_eq!(told[0].metadata["refused"], 1);
+    assert!(told[0].body.contains("refused once"), "{}", told[0].body);
+}
+
+/// A plan's pings hold its schedules too, two pings a run: a monitor whose
+/// schedule would take the organization's past them is refused, a 402 naming
+/// what lifts them, one that expects no run needs none, and a schedule may
+/// always come down.
+#[sqlx::test]
+async fn a_schedule_past_the_plans_pings_is_refused_and_one_may_come_down(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    // No monitor ceiling, so what refuses the sixth is the pings alone.
+    let lanes = PlanLanes {
+        monitors: None,
+        ..PlanLanes::hobby()
+    };
+    let p = project_under(&pool, OrganizationId::new(), Arc::new(lanes));
+    for n in 0..5 {
+        p.make(json!({ "name": format!("Job {n}"), "schedule": "*/5 * * * *", "grace_s": 60 }))
+            .await;
+    }
+    let (status, body) = p
+        .send(p.request(
+            "POST",
+            MONITORS,
+            Some(json!({ "name": "Job 5", "schedule": "*/5 * * * *", "grace_s": 60 })),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
+    assert_eq!(body["type"], "/errors/plan/limit-reached");
+    assert_eq!(body["entitlement"], "pro");
+    assert_eq!(body["detail"], "Move to Pro for more pings.");
+    p.make(json!({ "name": "On demand" })).await;
+
+    let (status, body) = p
+        .send(p.request(
+            "PUT",
+            &format!("{MONITORS}/job-0"),
+            Some(json!({ "name": "Job 0", "schedule": "* * * * *", "grace_s": 60 })),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
+    let (status, body) = p
+        .send(p.request(
+            "PUT",
+            &format!("{MONITORS}/job-0"),
+            Some(json!({ "name": "Job 0", "schedule": "*/10 * * * *", "grace_s": 60 })),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    p.make(json!({ "name": "Job 5", "interval_s": 600, "grace_s": 60 }))
+        .await;
+
+    // Past the ceiling once the plan holds fewer, a schedule may still come
+    // down, and none may go up.
+    let auth = AuthStub::probing(&pool);
+    auth.seat(
+        OWNER,
+        &p.organization,
+        &p.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let fewer = PlanLanes {
+        pings_per_minute: 1,
+        monitors: None,
+        ..PlanLanes::hobby()
+    };
+    let notices = NoticeLog::new();
+    let state = common::state_with_notices(&pool, auth, Arc::new(fewer), notices.clone());
+    let q = Project::over(state, notices, p.organization.clone(), p.project.clone());
+    let (status, body) = q
+        .send(q.request(
+            "PUT",
+            &format!("{MONITORS}/job-1"),
+            Some(json!({ "name": "Job 1", "schedule": "*/15 * * * *", "grace_s": 60 })),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = q
+        .send(q.request(
+            "PUT",
+            &format!("{MONITORS}/job-2"),
+            Some(json!({ "name": "Job 2", "schedule": "*/4 * * * *", "grace_s": 60 })),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
+}
+
+/// A ping naming a monitor the plan has no room for is refused as before,
+/// and counted for the owner's notice of the day with the slug it named.
+#[sqlx::test]
+async fn a_ping_refused_for_the_plans_monitors_is_told_with_its_slug(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let lanes = PlanLanes {
+        monitors: Some(0),
+        ..PlanLanes::hobby()
+    };
+    let p = project_under(&pool, OrganizationId::new(), Arc::new(lanes));
+    let key = p.mint().await;
+    let (status, body) = p.ping(&format!("/{key}/nightly-sync")).await;
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
+
+    ceilings::tell(&p.state).await;
+    let told = organization_alerts(&p);
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert_eq!(told[0].metadata["lane"], "monitors");
+    assert!(told[0].body.contains("nightly-sync"), "{}", told[0].body);
+}
+
+/// The day's data out is counted where an organization is sent bytes, and
+/// refused once spent, a 429 until midnight UTC; a binary that sells nothing
+/// counts nothing.
+#[sqlx::test]
+async fn data_out_past_the_day_is_refused_until_midnight(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project_under(&pool, OrganizationId::new(), Arc::new(PlanLanes::hobby()));
+    let seam = TelemetrySeam(p.state.clone());
+    assert!(seam.admit_data_out(&p.organization).await.is_ok());
+    seam.spend_data_out(&p.organization, 4_999_999).await;
+    assert!(seam.admit_data_out(&p.organization).await.is_ok());
+    seam.spend_data_out(&p.organization, 1).await;
+    let problem = seam
+        .admit_data_out(&p.organization)
+        .await
+        .expect_err("the day is spent")
+        .to_problem_details();
+    assert_eq!(problem.type_uri, "/errors/tenant/rate-limited");
+    assert_eq!(problem.status, 429);
+    let detail = problem.detail.unwrap_or_default();
+    assert!(
+        detail.contains("5 MB") && detail.contains("midnight UTC"),
+        "{detail}"
+    );
+    assert!(
+        problem
+            .extensions
+            .get("retry_after_secs")
+            .and_then(Value::as_u64)
+            .is_some_and(|s| (1..=86_400).contains(&s))
+    );
+    ceilings::tell(&p.state).await;
+    let told = organization_alerts(&p);
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert_eq!(told[0].metadata["lane"], "data_out");
+
+    let q = project(&pool);
+    let seam = TelemetrySeam(q.state.clone());
+    seam.spend_data_out(&q.organization, u64::MAX).await;
+    assert!(
+        seam.admit_data_out(&q.organization).await.is_ok(),
+        "nothing is counted without a plan"
+    );
+}
+
+/// The plan's ceilings over Redis, as a tier counts them: pings past the
+/// burst refused, the slugs a day's notice names kept to ten however many
+/// are refused, the day's data out spent, and each lane told once.
+#[sqlx::test]
+async fn the_ceilings_hold_over_redis_as_on_a_tier(pool: PgPool) {
+    use redis::AsyncCommands as _;
+    apply_audit_migrations(&pool).await;
+    let (organization, project) = (OrganizationId::new(), ProjectId::new());
+    let auth = AuthStub::probing(&pool);
+    auth.seat(
+        OWNER,
+        &organization,
+        &project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let lanes = PlanLanes {
+        monitors: Some(0),
+        ..PlanLanes::hobby()
+    };
+    let notices = NoticeLog::new();
+    let state = common::state_with_redis_under(&pool, auth, Arc::new(lanes), notices.clone());
+    let Some(mut redis) = state.redis.connection().await else {
+        eprintln!(
+            "skipping {}: Redis is not reachable (REDIS_URL, or the compose file's)",
+            module_path!()
+        );
+        return;
+    };
+    let p = Project::over(state, notices, organization, project);
+    let key = p.mint().await;
+    for n in 0..12 {
+        let (status, body) = p.ping(&format!("/{key}/sync-{n}")).await;
+        assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "ping {n}: {body}");
+    }
+    let (status, body) = p.ping(&format!("/{key}/sync-12")).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
+    let day = chrono::Utc::now().date_naive();
+    let slugs: u64 = redis
+        .scard(format!("telemetry:refused:{day}:{}:slugs", p.organization))
+        .await
+        .expect("the day's slugs");
+    assert_eq!(slugs, 10);
+
+    let seam = TelemetrySeam(p.state.clone());
+    seam.spend_data_out(&p.organization, 5_000_000).await;
+    assert!(seam.admit_data_out(&p.organization).await.is_err());
+
+    ceilings::tell(&p.state).await;
+    ceilings::tell(&p.state).await;
+    let mut told: Vec<String> = organization_alerts(&p)
+        .iter()
+        .filter(|notice| notice.organization_id == p.organization)
+        .map(|notice| {
+            notice.metadata["lane"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned()
+        })
+        .collect();
+    told.sort();
+    assert_eq!(told, ["data_out", "monitors", "pings"]);
 }

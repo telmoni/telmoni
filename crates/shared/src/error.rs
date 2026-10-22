@@ -545,6 +545,17 @@ pub enum TenantError {
         retry_after_secs: u64,
     },
 
+    /// Past a ceiling the organization's plan sets on a machine lane — pings
+    /// a minute, data out a day — never sold on its own, so the refusal says
+    /// when it lifts. Maps to 429 (carries `Retry-After`), as a rate limit.
+    #[error("past the plan's ceiling; retry after {retry_after_secs}s")]
+    PastCeiling {
+        /// The sentence the caller reads: which ceiling, and when it lifts.
+        detail: String,
+        /// Seconds until it lifts.
+        retry_after_secs: u64,
+    },
+
     /// Action would cross an project boundary that isn't permitted. Maps to 403.
     #[error("cross-tenant access denied")]
     CrossTenantDenied,
@@ -569,6 +580,23 @@ impl TenantError {
                     title: "rate limited".into(),
                     status: 429,
                     detail: Some(format!("retry after {retry_after_secs}s")),
+                    ..Default::default()
+                };
+                pd.extensions.insert(
+                    "retry_after_secs".into(),
+                    serde_json::Value::Number((*retry_after_secs).into()),
+                );
+                pd
+            }
+            Self::PastCeiling {
+                detail,
+                retry_after_secs,
+            } => {
+                let mut pd = ProblemDetails {
+                    type_uri: "/errors/tenant/rate-limited".into(),
+                    title: "rate limited".into(),
+                    status: 429,
+                    detail: Some(detail.clone()),
                     ..Default::default()
                 };
                 pd.extensions.insert(
@@ -796,6 +824,28 @@ mod tests {
                 .get("retry_after_secs")
                 .and_then(serde_json::Value::as_u64),
             Some(30)
+        );
+    }
+
+    /// A plan's ceiling is refused as a rate limit is, saying which and when it lifts.
+    #[test]
+    fn past_a_ceiling_is_a_rate_limit_with_its_own_sentence() {
+        let pd = TenantError::PastCeiling {
+            detail: "This organization's data out for the day is spent.".into(),
+            retry_after_secs: 3_600,
+        }
+        .to_problem_details();
+        assert_eq!(pd.type_uri, "/errors/tenant/rate-limited");
+        assert_eq!(pd.status, 429);
+        assert_eq!(
+            pd.detail.as_deref(),
+            Some("This organization's data out for the day is spent.")
+        );
+        assert_eq!(
+            pd.extensions
+                .get("retry_after_secs")
+                .and_then(serde_json::Value::as_u64),
+            Some(3_600)
         );
     }
 

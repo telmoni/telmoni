@@ -42,8 +42,8 @@ pub use error::{
 pub use error_schema::ProblemDetails;
 pub use extract::correlation_id;
 pub use types::{
-    ApiKeyScope, AuditAction, ContentMode, Flag, FlagSet, Grants, LayoutDepth, LayoutOpen,
-    MemberCeiling, MonitorCeiling, MonitorState, NotificationKind, OrganizationId,
+    ApiKeyScope, AuditAction, ContentMode, Flag, FlagSet, Grants, LaneCeilings, LayoutDepth,
+    LayoutOpen, MemberCeiling, MonitorCeiling, MonitorState, NotificationKind, OrganizationId,
     OrganizationIdError, OrganizationRole, OrganizationStatus, ParseEnumError, Paused, ProjectId,
     ProjectIdError, Redacted, Role, SessionSort, SortDirection, SpanKind, SpanStatus,
     TelmoniResourceKind, TraceColumn, TraceSort, UserId, UserIdError, UserSort, ViewKind,

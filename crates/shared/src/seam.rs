@@ -16,8 +16,8 @@ use uuid::Uuid;
 
 use crate::acting::{Acting, ActingKey};
 use crate::{
-    AuditAction, FlagSet, Grants, MemberCeiling, MonitorCeiling, NotificationKind, OrganizationId,
-    OrganizationStatus, ProjectId, TelmoniError, UserId,
+    AuditAction, FlagSet, Grants, LaneCeilings, MemberCeiling, MonitorCeiling, NotificationKind,
+    OrganizationId, OrganizationStatus, ProjectId, TelmoniError, UserId,
 };
 
 /// Who may read a document the agent indexes, beyond the tenant its keys
@@ -467,6 +467,21 @@ pub trait Telemetry: Send + Sync {
     /// is retried by the module's own sweep, so the caller only logs it.
     async fn purge_project(&self, project_id: &ProjectId) -> Result<u64, TelmoniError>;
 
+    /// Whether the organization's machines may be sent more today: its read
+    /// API and its exports refused, a 429 until midnight UTC, once its plan's
+    /// data out for the day is spent; the CLI's answers are counted, never
+    /// asked. Room by default, and wherever the day's count cannot be read.
+    async fn admit_data_out(&self, organization_id: &OrganizationId) -> Result<(), TelmoniError> {
+        let _ = organization_id;
+        Ok(())
+    }
+
+    /// `bytes` sent to the organization's machines, or downloaded from one of
+    /// its exports, counted against its day. Nothing by default.
+    async fn spend_data_out(&self, organization_id: &OrganizationId, bytes: u64) {
+        let _ = (organization_id, bytes);
+    }
+
     /// A project handed to another organization: its settings — its content
     /// mode among them — go with it, so the new organization's purge, and
     /// never the old one's, is what removes them.
@@ -599,6 +614,18 @@ pub trait Entitlements: Send + Sync {
         let _ = organization_id;
         Ok(None)
     }
+
+    /// The machine lanes' ceilings the organization's plan sets — pings a
+    /// minute and data out a day; `None` is none. Asked on every ping and
+    /// every answer the read API gives, so its callers keep the answer a
+    /// minute ([`lane_ceilings`]), and it may read the deployment's own rows.
+    async fn lane_ceilings(
+        &self,
+        organization_id: &OrganizationId,
+    ) -> Result<Option<LaneCeilings>, TelmoniError> {
+        let _ = organization_id;
+        Ok(None)
+    }
 }
 
 /// A binary that sells nothing: every organization holds everything.
@@ -646,6 +673,23 @@ pub async fn member_ceiling(
         Err(e) => {
             tracing::warn!(organization_id = %organization_id, error = %e,
                 "the member ceiling could not be read; none is held");
+            None
+        }
+    }
+}
+
+/// What a machine lane asks before it lets a ping, an answer or an export
+/// through: the organization's lane ceilings. An answer that cannot be had is
+/// no ceiling, logged, as [`admit_new`] lets in what it cannot decide.
+pub async fn lane_ceilings(
+    entitlements: &dyn Entitlements,
+    organization_id: &OrganizationId,
+) -> Option<LaneCeilings> {
+    match entitlements.lane_ceilings(organization_id).await {
+        Ok(ceilings) => ceilings,
+        Err(e) => {
+            tracing::warn!(organization_id = %organization_id, error = %e,
+                "the lane ceilings could not be read; none is held");
             None
         }
     }

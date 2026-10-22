@@ -1,9 +1,10 @@
 //! Rate limits over Redis: GCRA on one timestamp per subject — the time its
 //! next request is theoretically allowed — so a limit of 600 a minute costs
 //! one key, not 600 entries; held in this process, per subject, while Redis
-//! does not answer. Ingest holds one per project, and the door the binary
-//! puts in front of the machine lanes holds one per source and one per
-//! credential, each a [`RateLimit`] of its own.
+//! does not answer. Ingest holds one per project, the door the binary puts
+//! in front of the machine lanes one per source and one per credential, and
+//! the ping lane one per organization at the rate its plan sets
+//! ([`RateLimit::wait_at`]), each a [`RateLimit`].
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -71,31 +72,45 @@ impl RateLimit {
         format!("{}:{subject}", self.prefix)
     }
 
-    /// Between two requests at the sustained rate, in milliseconds.
-    fn emission_interval_ms(&self) -> u64 {
-        60_000 / u64::from(self.per_minute)
-    }
-
-    /// How far ahead of now the theoretical arrival time may run: a minute's
-    /// worth of requests at once.
-    fn burst_ms(&self) -> u64 {
-        self.emission_interval_ms() * u64::from(self.per_minute)
-    }
-
     /// Let `subject`'s request in, or refuse it with how long to wait.
     ///
     /// # Errors
     ///
     /// `/errors/tenant/rate-limited`, with `Retry-After`.
     pub async fn admit(&self, redis: &Redis, subject: &str) -> Result<(), TelmoniError> {
+        match self
+            .wait_at(redis, subject, self.per_minute, self.per_minute)
+            .await
+        {
+            None => Ok(()),
+            Some(wait_ms) => Err(TenantError::RateLimited {
+                retry_after_secs: wait_ms.div_ceil(1_000).max(1),
+            }
+            .into()),
+        }
+    }
+
+    /// `subject`'s request against `per_minute` a minute, `burst` of them at
+    /// once, rather than the limit's own: `None` to let it in, or how long
+    /// to wait, in milliseconds. For a rate each subject has its own of, as
+    /// each organization's plan sets its pings.
+    pub async fn wait_at(
+        &self,
+        redis: &Redis,
+        subject: &str,
+        per_minute: u32,
+        burst: u32,
+    ) -> Option<u64> {
+        let interval = emission_interval_ms(per_minute);
+        let burst = interval * u64::from(burst.max(1));
         let now = now_ms();
         let decision = match redis.connection().await {
             Some(mut connection) => {
                 let answer: Result<(i64, i64), redis::RedisError> = self
                     .script
                     .key(self.key(subject))
-                    .arg(self.emission_interval_ms())
-                    .arg(self.burst_ms())
+                    .arg(interval)
+                    .arg(burst)
                     .arg(now)
                     .invoke_async(&mut connection)
                     .await;
@@ -104,29 +119,26 @@ impl RateLimit {
                     Ok((_, wait_ms)) => Decision::Wait(u64::try_from(wait_ms).unwrap_or(0)),
                     Err(error) => {
                         redis.stood_in("a rate limit", &error);
-                        self.admit_locally(subject, now)
+                        self.admit_locally(subject, now, interval, burst)
                     }
                 }
             }
-            None => self.admit_locally(subject, now),
+            None => self.admit_locally(subject, now, interval, burst),
         };
         match decision {
-            Decision::Admit => Ok(()),
-            Decision::Wait(wait_ms) => Err(TenantError::RateLimited {
-                retry_after_secs: wait_ms.div_ceil(1_000).max(1),
-            }
-            .into()),
+            Decision::Admit => None,
+            Decision::Wait(wait_ms) => Some(wait_ms),
         }
     }
 
     /// The same decision, from this process's own timestamps.
-    fn admit_locally(&self, subject: &str, now: u64) -> Decision {
+    fn admit_locally(&self, subject: &str, now: u64, interval: u64, burst: u64) -> Decision {
         let mut local = self
             .local
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let tat = local.get(subject).copied().unwrap_or(now);
-        let (decision, new_tat) = gcra(tat, now, self.emission_interval_ms(), self.burst_ms());
+        let (decision, new_tat) = gcra(tat, now, interval, burst);
         if let Some(new_tat) = new_tat {
             local.insert(subject.to_owned(), new_tat);
         }
@@ -137,6 +149,12 @@ impl RateLimit {
         }
         decision
     }
+}
+
+/// Between two requests at `per_minute` a minute, in milliseconds; a rate of
+/// nothing a minute would admit nothing ever, so it is one.
+fn emission_interval_ms(per_minute: u32) -> u64 {
+    60_000 / u64::from(per_minute.max(1))
 }
 
 /// What the limit said.
@@ -183,8 +201,8 @@ mod tests {
     /// emission interval, and a minute later the burst is whole again.
     #[test]
     fn gcra_admits_a_burst_then_meters() {
-        let limit = limit();
-        let (interval, burst) = (limit.emission_interval_ms(), limit.burst_ms());
+        let interval = emission_interval_ms(PER_MINUTE);
+        let burst = interval * u64::from(PER_MINUTE);
         let now = 1_000_000;
         let mut tat = now;
         for n in 0..PER_MINUTE {
@@ -204,23 +222,50 @@ mod tests {
     fn the_local_map_refuses_as_the_script_would_and_names_whole_seconds() {
         let limit = limit();
         let now = now_ms();
+        let interval = emission_interval_ms(PER_MINUTE);
+        let burst = interval * u64::from(PER_MINUTE);
         for _ in 0..PER_MINUTE {
-            assert_eq!(limit.admit_locally("one", now), Decision::Admit);
+            assert_eq!(
+                limit.admit_locally("one", now, interval, burst),
+                Decision::Admit
+            );
         }
-        let Decision::Wait(wait_ms) = limit.admit_locally("one", now) else {
+        let Decision::Wait(wait_ms) = limit.admit_locally("one", now, interval, burst) else {
             panic!("the burst was not spent");
         };
-        assert_eq!(wait_ms, limit.emission_interval_ms());
+        assert_eq!(wait_ms, interval);
         assert_eq!(
             wait_ms.div_ceil(1_000).max(1),
             1,
             "told to retry after a second"
         );
         assert_eq!(
-            limit.admit_locally("another", now),
+            limit.admit_locally("another", now, interval, burst),
             Decision::Admit,
             "another subject's limit is its own"
         );
+    }
+
+    /// A plan's rate with a burst of its own: two a minute, twelve at once,
+    /// then one each thirty seconds.
+    #[test]
+    fn a_rate_and_burst_of_the_subjects_own_meter_as_given() {
+        let limit = RateLimit::new("test:plan", 600);
+        let interval = emission_interval_ms(2);
+        let burst = interval * 12;
+        let now = now_ms();
+        for n in 0..12 {
+            assert_eq!(
+                limit.admit_locally("org", now, interval, burst),
+                Decision::Admit,
+                "ping {n} of the burst"
+            );
+        }
+        assert_eq!(
+            limit.admit_locally("org", now, interval, burst),
+            Decision::Wait(30_000)
+        );
+        assert_eq!(emission_interval_ms(0), 60_000, "nothing a minute is one");
     }
 
     /// A smaller limit meters sooner, and two limits on one subject keep
@@ -229,9 +274,19 @@ mod tests {
     fn each_limit_has_its_own_rate_and_keys() {
         let small = RateLimit::new("test:small", 2);
         let now = now_ms();
-        assert_eq!(small.admit_locally("s", now), Decision::Admit);
-        assert_eq!(small.admit_locally("s", now), Decision::Admit);
-        assert!(matches!(small.admit_locally("s", now), Decision::Wait(_)));
+        let (interval, burst) = (emission_interval_ms(2), emission_interval_ms(2) * 2);
+        assert_eq!(
+            small.admit_locally("s", now, interval, burst),
+            Decision::Admit
+        );
+        assert_eq!(
+            small.admit_locally("s", now, interval, burst),
+            Decision::Admit
+        );
+        assert!(matches!(
+            small.admit_locally("s", now, interval, burst),
+            Decision::Wait(_)
+        ));
         assert_ne!(small.key("s"), limit().key("s"));
         assert_eq!(
             RateLimit::new("x", 0).per_minute,
