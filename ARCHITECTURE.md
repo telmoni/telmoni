@@ -106,7 +106,7 @@ flowchart LR
 | Party | What it is to the core | What crosses |
 |---|---|---|
 | **People** | An organization's owner, admins and members, in a browser | Pages, Server Actions and the console's reads under `/api/v1`, under a sealed session cookie |
-| **The CLI** | `telmoni/telmoni-cli`, signed in by a device grant | The `/cli/v1` lanes: start, poll, refresh, `/me`, sign-out |
+| **The CLI** | `telmoni/telmoni-cli`, signed in by a device grant; `telmoni run`, holding a project's ping key | The `/cli/v1` lanes: start, poll, refresh, `/me`, sign-out; `/ping/v1`, a run's start and its end |
 | **Scripts** | Whoever holds a project's API key | `/v1`, read-only today |
 | **The SDKs** | `sdk/`: Python, TypeScript, Go and Rust, linked into an agent's own process (*The SDKs*) | `/otlp/v1/traces` on the server: a run's spans as OTLP JSON, content taken off, under a project API key with the `ingest` scope |
 | **Slack's events** | Slack telling the core an app was removed or its tokens revoked | Signed events, verified by the server |
@@ -187,7 +187,7 @@ Every way in:
 | A page, a Server Action or a read under `/api/v1` | Browser → console → the server's `/internal/v1` lanes | The sealed cookie, then the service secret and the bearer, then the matrix, then RLS |
 | `/v1` | A script → the machine host → the server's door → auth's lanes | The door's limits by address and key; the API key's `read` scope; the organization's switch |
 | `/cli/v1` | The CLI → the machine host → the server's door → auth's lanes | The door's limits by address and bearer; the device code, or the bearer; never a browser |
-| `/ping/v1` | A crontab line → the machine host → the server's door → the ping lane | The door's limits by address and key, the key taken as minted; the key in the path, or a 404, as for one whose organization's deletion is marked; the organization not paused |
+| `/ping/v1` | A crontab line, or `telmoni run` → the machine host → the server's door → the ping lane | The door's limits by address and key, the key taken as minted; the key in the path, or a 404, as for one whose organization's deletion is marked; the organization not paused |
 | Ingest | An SDK, or any OTLP exporter → the machine host → the server's door → `/otlp/v1/traces` | The door's limit by address, keyed or not, on that route alone, so the logs and metrics an SDK sends beside its traces cost them nothing; the API key's `ingest` scope; the project's own limit; then the contract: a span outside a run refused, content dropped |
 | Slack's events | Slack → the machine host → `POST /webhooks/v1/slack` | Slack's signature |
 | An agent turn | The agent's window → `POST /api/v1/agent/turns` → the server, streamed back | The session, then a turn as the asker, re-resolved as it runs |
