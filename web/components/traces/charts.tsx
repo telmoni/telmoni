@@ -216,7 +216,8 @@ export function TraceHistogramStrip({ histogram }: { histogram: TraceHistogram }
     <section className="grid gap-1" aria-label="Over the window">
       <div className="flex items-center gap-2">
         <Select value={metric} onValueChange={(next) => setMetric(next as Metric)}>
-          <SelectTrigger size="sm" className="h-8 border-none px-2 shadow-none" aria-label="What the chart shows">
+          {/* The console's control height, so its row centers on the Filters heading beside it. */}
+          <SelectTrigger size="sm" className="border-none px-2 shadow-none" aria-label="What the chart shows">
             <SelectValue />
           </SelectTrigger>
           <SelectContent position="popper" align="start">

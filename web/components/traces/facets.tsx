@@ -90,10 +90,11 @@ export function TraceFacetsPanel({ organization, slug, query, ui, facets }: Prop
   });
 
   // As wide as the console's rail rows ("the sidebar apps", `--spacing-sidebar-inner`),
-  // and that width whether the rail is open or closed.
+  // and that width whether the rail is open or closed; `gap-3` is the page's own
+  // above it, so the toggle has as much room under it as over it.
   return (
     <aside
-      className="grid w-full shrink-0 content-start gap-2 md:w-sidebar-inner"
+      className="grid w-full shrink-0 content-start gap-3 md:w-sidebar-inner"
       aria-label="Filters"
       aria-busy={pending}
       data-pending={pending ? "" : undefined}
