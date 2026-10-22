@@ -131,12 +131,16 @@ An Owner or Admin can change a member's role or remove them from the
 
 - Anyone but the Owner can leave an organization from its **Overview** page
   (`/{organization}`), which also removes them from every project in it.
-- A project seat is given up with **Leave** on the organization's **Projects**
-  page (`/{organization}/projects`), which opens only for the organization's
-  Owner and Admins; they keep their access to the project through their
-  organization role. An organization Member who holds a project's Admin seat
-  can remove themselves on the project's **Members** page; one with a Member
-  seat leaves a project only by leaving the organization.
+- A project seat is given up with **Leave** on your own row of the project's
+  **Members** page, whether the seat was accepted from an invitation or given
+  from the organization's roster, and whatever its role; you stay on the
+  organization's roster, and an Owner or Admin can add you back. An
+  organization Admin who still holds a seat on a project, from before they
+  were made an Admin, also finds **Leave** beside it on the organization's
+  **Projects** page (`/{organization}/projects`), which opens for the Owner
+  and Admins alone; they keep their access to the project through their
+  organization role. The Owner, who holds every project outright, is offered
+  no Leave anywhere.
 - The Owner cannot leave until ownership is transferred to an Admin or the
   organization is deleted.
 

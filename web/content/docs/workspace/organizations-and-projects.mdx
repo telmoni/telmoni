@@ -321,7 +321,9 @@ An organization Owner can hand a project to one of the project's Admins:
      organization's Owner to change.
    - Project seats and pending invitations stay on the project, and everyone
      seated is enrolled on the new organization's roster as a **Member**, as a
-     project invitation would enrol them. The accepting Admin's own seat is
+     project invitation would enrol them — a seat given from the old
+     organization's roster among them, and one its holder had not yet seen
+     leaves their bell with the move. The accepting Admin's own seat is
      folded into their ownership.
    - The former owner stays on the project as an **Admin**, joins the new
      organization as a **Member**, and is emailed that the project moved.
@@ -439,13 +441,14 @@ self-hosted instance) goes the same way.
   organization's **Overview** page (`/{organization}`), with **Leave
   organization**. Leaving removes you from the organization and from every
   project in it.
-- **Leaving a project**: The organization's **Projects** page
-  (`/{organization}/projects`) offers **Leave** on each project you hold a
-  seat on. That page opens only for the organization's Owner and Admins, and
-  leaving gives up the seat alone: they keep their access to every project
-  through their organization role. An organization Member cannot open the
-  page: with a project's Admin seat, they can remove themselves on the
-  project's **Members** page, and with a Member seat they leave a project only
-  by leaving the organization.
+- **Leaving a project**: Your own row of the project's **Members** page
+  (`/{organization}/{project}/members`) offers **Leave**, whatever your seat's
+  role and however it came, by invitation or from the organization's roster.
+  Leaving gives up the seat alone: you stay on the organization's roster, and
+  an Owner or Admin can add you back. The organization's **Projects** page
+  (`/{organization}/projects`), which opens only for the organization's Owner
+  and Admins, offers an Admin **Leave** beside each project they still hold a
+  seat on; they keep their access to every project through their organization
+  role, and the Owner, who holds every project outright, is offered none.
 - The **Owner cannot leave** an active organization. To leave, the Owner must
   either transfer ownership to an Admin or delete the organization.
