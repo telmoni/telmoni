@@ -23,7 +23,7 @@ transaction commits.
 | `ping_key_retired` | The rotation retires one of the project's ping keys: a newer key stands, and this one has not pinged in over a week, or was minted over a week ago and never used, so a line still using it is refused from then on |
 | `incident_opened` | One of the project's monitors needs someone: it failed, stalled, crossed a bound or is late. One incident stands open per monitor however many runs fail under it, so the notice comes once per spell of trouble; a monitor that flips in and out of trouble more than six times in an hour is flapping, and its notice says so |
 | `incident_resolved` | The monitor is healthy again, or its owner paused it, and the incident closed; the notice says how long it stood. A flapping monitor's incident closes once it has held one state for an hour |
-| `organization_alert` | A notice for the organization's Owner and Admins, posted to the organization rather than a project; the open core raises none |
+| `organization_alert` | A notice for the organization's Owner and Admins, posted to the organization rather than a project. The hosted service raises one a day for each ceiling of the plan that refused the organization while it lasts: its monitors' pings past the minute's ceiling, its data out past the day's, or a monitor a ping or a run would have made past the plan's monitors, with the count and when it began; a self-hosted deployment raises none |
 
 ## Where you read them
 

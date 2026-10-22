@@ -178,7 +178,7 @@ change applies from the next notice. The body's `kind` is one of:
 | `ping_key_retired` | The rotation retired one of the project's ping keys, unused for over a week — since its last ping, or its minting where it never pinged — while a newer key stood; a line still using it is refused. |
 | `incident_opened` | One of the project's monitors needs someone: it failed, stalled, crossed a bound or is late. Once per incident; its `metadata` names the monitor, the cause and what moved it, and whether the monitor is flapping. |
 | `incident_resolved` | The monitor is healthy again, or was paused, and its incident closed; `metadata` says how it closed and how long it stood. |
-| `organization_alert` | A notice for the organization's Owner and Admins, posted to the organization rather than a project; the open core raises none. One goes to every connection in the organization that takes the kind. |
+| `organization_alert` | A notice for the organization's Owner and Admins, posted to the organization rather than a project: on the hosted service, once a day for each ceiling of the plan that refused the organization, its `metadata` naming the `lane` (`pings`, `data_out` or `monitors`), the count `refused` and `since` when; a self-hosted deployment raises none. One goes to every connection in the organization that takes the kind. |
 
 Slack channels always receive every kind.
 

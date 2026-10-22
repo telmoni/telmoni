@@ -92,8 +92,10 @@ downloadable again until it expires.
   the organization is deleted or you delete your account.
 - You keep your ten newest exports in an organization: starting another
   deletes your oldest finished one.
-- One file holds up to 25,000 events and 24 MiB. An export of a range that
-  holds more fails and says so; export a shorter range instead.
+- One file holds up to 25,000 events and 24 MiB, and on the hosted service no
+  more than the organization's plan lets it download in a day, each download
+  counted toward that day. An export of a range that holds more fails and
+  says so; export a shorter range instead.
 - You can have up to three exports building at once in an organization, and,
   across every organization, start up to 20 and download up to 10 in an hour.
 - Each file is recorded in the log itself when it is built, after the events
