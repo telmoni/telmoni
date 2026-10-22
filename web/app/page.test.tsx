@@ -18,9 +18,42 @@ import SplashPage from "./page";
 
 beforeEach(() => {
   mockSession = null;
+  window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 describe("the splash page", () => {
+  describe("where the console's trails are kept", () => {
+    function keepTrails() {
+      window.localStorage.setItem(
+        "telmoni-recent-visits",
+        JSON.stringify({ owner: "user_1", visits: [{ href: "/acme", label: "Acme", at: 0 }] }),
+      );
+      window.sessionStorage.setItem("telmoni-console-trail", JSON.stringify(["/acme"]));
+      window.localStorage.setItem("theme", "dark");
+    }
+
+    it("forgets them for a signed-out visitor, where every sign-out lands, and keeps the preferences", async () => {
+      keepTrails();
+
+      render(await SplashPage());
+
+      expect(window.localStorage.getItem("telmoni-recent-visits")).toBeNull();
+      expect(window.sessionStorage.getItem("telmoni-console-trail")).toBeNull();
+      expect(window.localStorage.getItem("theme")).toBe("dark");
+    });
+
+    it("leaves a member's alone", async () => {
+      mockSession = { userId: "user_1" };
+      keepTrails();
+
+      render(await SplashPage());
+
+      expect(window.localStorage.getItem("telmoni-recent-visits")).not.toBeNull();
+      expect(window.sessionStorage.getItem("telmoni-console-trail")).not.toBeNull();
+    });
+  });
+
   it("makes its claim as the one heading, and sends a visitor to sign up or to the docs", async () => {
     render(await SplashPage());
 

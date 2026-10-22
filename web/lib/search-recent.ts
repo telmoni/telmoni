@@ -4,23 +4,42 @@ const STORAGE_KEY = "telmoni-recent-visits";
 
 export const RECENT_LIMIT = 5;
 
+// Storage is the browser's to change, so a link read back is followed only if
+// it stays on this origin, which `//`, `/\` and a tab inside a path all escape.
+const OWN_ORIGIN = "https://console.invalid";
+
+function isOwnPath(href: string): boolean {
+  if (!href.startsWith("/")) return false;
+  try {
+    return new URL(href, OWN_ORIGIN).origin === OWN_ORIGIN;
+  } catch {
+    return false;
+  }
+}
+
 const VisitSchema = z.object({
-  href: z.string(),
+  href: z.string().refine(isOwnPath),
   label: z.string(),
   hint: z.string().optional(),
   at: z.number(),
 });
 
-const TrailSchema = z.array(VisitSchema);
+// Kept with the person who made it, so nobody signing in after them sees it.
+const TrailSchema = z.object({
+  owner: z.string(),
+  visits: z.array(VisitSchema),
+});
+
+type Trail = z.infer<typeof TrailSchema>;
 
 export type RecentVisit = z.infer<typeof VisitSchema>;
 
-export function readRecent(): RecentVisit[] {
+export function readRecent(owner: string): RecentVisit[] {
   let raw: string | null;
   try {
     raw = window.localStorage.getItem(STORAGE_KEY);
   } catch {
-    return memory;
+    return memory?.owner === owner ? memory.visits : [];
   }
   if (!raw) return [];
   let body: unknown;
@@ -30,26 +49,28 @@ export function readRecent(): RecentVisit[] {
     return [];
   }
   const parsed = TrailSchema.safeParse(body);
-  if (!parsed.success) return [];
-  return parsed.data.slice(0, RECENT_LIMIT);
+  if (!parsed.success || parsed.data.owner !== owner) return [];
+  return parsed.data.visits.slice(0, RECENT_LIMIT);
 }
 
-export function recordVisit(visit: Omit<RecentVisit, "at">): void {
-  const trail = [
+export function recordVisit(owner: string, visit: Omit<RecentVisit, "at">): void {
+  if (!isOwnPath(visit.href)) return;
+  const visits = [
     { ...visit, at: Date.now() },
-    ...readRecent().filter((v) => v.href !== visit.href),
+    ...readRecent(owner).filter((v) => v.href !== visit.href),
   ].slice(0, RECENT_LIMIT);
-  memory = trail;
+  memory = { owner, visits };
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(trail));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(memory));
   } catch {
   }
 }
 
-let memory: RecentVisit[] = [];
+let memory: Trail | null = null;
 
-export function clearRecentForTest(): void {
-  memory = [];
+/** Forgets every visit: a person signed out leaves nothing for the next. */
+export function forgetRecent(): void {
+  memory = null;
   try {
     window.localStorage.removeItem(STORAGE_KEY);
   } catch {

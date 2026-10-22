@@ -45,7 +45,8 @@ function useIsMobile(): boolean | null {
 const SidebarContext = createContext<SidebarContextValue | null>(null);
 
 function persistCollapsed(collapsed: boolean) {
-  document.cookie = `${NAV_COLLAPSED_COOKIE}=${collapsed ? "1" : "0"}; path=/; max-age=31536000; samesite=lax`;
+  const secure = window.location.protocol === "https:" ? "; secure" : "";
+  document.cookie = `${NAV_COLLAPSED_COOKIE}=${collapsed ? "1" : "0"}; path=/; max-age=31536000; samesite=lax${secure}`;
 }
 
 export function SidebarProvider({

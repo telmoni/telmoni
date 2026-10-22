@@ -108,6 +108,17 @@ export function useRecordConsolePath(pathname: string): void {
   }, [pathname]);
 }
 
+/** Forgets this tab's trail: a person signed out leaves nothing for the next. */
+export function forgetTrail(): void {
+  cache = null;
+  try {
+    window.sessionStorage.removeItem(CONSOLE_TRAIL_KEY);
+  } catch {
+    // Storage disabled: nothing was kept to forget.
+  }
+  emit();
+}
+
 /** Test seam: the module-level cache outlives a `window.sessionStorage.clear()`. */
 export function clearTrailForTest(): void {
   cache = null;

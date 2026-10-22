@@ -28,7 +28,7 @@ import {
 
 import { consolePlace, projectAt } from "@/lib/console-nav";
 import { projectPath } from "@/lib/slug";
-import { useActiveOrganization, useProjects } from "@/lib/store";
+import { useActiveOrganization, useProjects, useUser } from "@/lib/store";
 import { SEARCH_MODIFIER_KEY, pressedKey } from "@/lib/keys";
 import {
   GROUP_LABELS,
@@ -68,6 +68,7 @@ export function ConsoleSearch() {
     if (!open) setQuery("");
   }
   const [recent, setRecent] = useState<RecentVisit[]>([]);
+  const owner = useUser()?.id;
   const { index, indexError, loading } = useSearchIndex(open, projectId);
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -75,12 +76,12 @@ export function ConsoleSearch() {
   useEffect(() => {
     if (!open) return;
     const frame = requestAnimationFrame(() => {
-      setRecent(readRecent());
+      setRecent(owner ? readRecent(owner) : []);
       setActive(0);
       inputRef.current?.focus();
     });
     return () => cancelAnimationFrame(frame);
-  }, [open]);
+  }, [open, owner]);
 
   // ⚠ **The chord lives with the thing it opens.** `keyboard-shortcuts.tsx`
   // returns early on any modifier, so a ⌘ chord cannot be added there without

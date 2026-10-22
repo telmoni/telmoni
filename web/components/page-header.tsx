@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { recordVisit } from "@/lib/search-recent";
+import { useUser } from "@/lib/store";
 
 export function PageHeader({
   title,
@@ -33,11 +34,12 @@ export function PageHeader({
   backLabel?: string;
 }) {
   const pathname = usePathname();
+  const owner = useUser()?.id;
   useEffect(() => {
     // Not the tab's title, which is each page's `metadata` alone: written here
     // as well, it was one more change after Next's own.
-    if (title) recordVisit({ href: pathname, label: title });
-  }, [title, pathname]);
+    if (title && owner) recordVisit(owner, { href: pathname, label: title });
+  }, [title, pathname, owner]);
 
   // A page that came after its loading state finds the focus where the
   // console shell parked it, on the main region, as no heading stood there

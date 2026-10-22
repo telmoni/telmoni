@@ -3,58 +3,104 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   RECENT_LIMIT,
-  clearRecentForTest,
+  forgetRecent,
   readRecent,
   recordVisit,
 } from "./search-recent";
 
 const KEY = "telmoni-recent-visits";
+const ME = "user_1";
 
 beforeEach(() => {
   window.localStorage.clear();
-  clearRecentForTest();
+  forgetRecent();
 });
 
 describe("the recent-visit trail", () => {
   it("is empty before anything is visited", () => {
-    expect(readRecent()).toEqual([]);
+    expect(readRecent(ME)).toEqual([]);
   });
 
   it("puts the newest first", () => {
-    recordVisit({ href: "/t/api-keys", label: "API keys" });
-    recordVisit({ href: "/t/members", label: "Members" });
-    expect(readRecent().map((v) => v.label)).toEqual(["Members", "API keys"]);
+    recordVisit(ME, { href: "/t/api-keys", label: "API keys" });
+    recordVisit(ME, { href: "/t/members", label: "Members" });
+    expect(readRecent(ME).map((v) => v.label)).toEqual(["Members", "API keys"]);
   });
 
   it("moves a revisited page up instead of listing it twice", () => {
-    recordVisit({ href: "/t/api-keys", label: "API keys" });
-    recordVisit({ href: "/t/members", label: "Members" });
-    recordVisit({ href: "/t/api-keys", label: "API keys" });
+    recordVisit(ME, { href: "/t/api-keys", label: "API keys" });
+    recordVisit(ME, { href: "/t/members", label: "Members" });
+    recordVisit(ME, { href: "/t/api-keys", label: "API keys" });
 
-    const trail = readRecent();
+    const trail = readRecent(ME);
     expect(trail.map((v) => v.label)).toEqual(["API keys", "Members"]);
     expect(trail).toHaveLength(2);
   });
 
   it(`keeps ${RECENT_LIMIT} and drops the oldest`, () => {
     for (let i = 0; i < RECENT_LIMIT + 3; i++) {
-      recordVisit({ href: `/t/p${i}`, label: `Page ${i}` });
+      recordVisit(ME, { href: `/t/p${i}`, label: `Page ${i}` });
     }
-    const trail = readRecent();
+    const trail = readRecent(ME);
     expect(trail).toHaveLength(RECENT_LIMIT);
     expect(trail[0]?.label).toBe(`Page ${RECENT_LIMIT + 2}`);
     expect(trail.at(-1)?.label).toBe(`Page 3`);
   });
 
+  describe("another person's trail", () => {
+    it("is never shown", () => {
+      recordVisit(ME, { href: "/t/members", label: "Members" });
+      expect(readRecent("user_2")).toEqual([]);
+    });
+
+    it("is replaced by the next person's first visit, not joined", () => {
+      recordVisit(ME, { href: "/t/members", label: "Members" });
+      recordVisit("user_2", { href: "/u/api-keys", label: "API keys" });
+
+      expect(readRecent("user_2").map((v) => v.label)).toEqual(["API keys"]);
+      expect(readRecent(ME)).toEqual([]);
+    });
+  });
+
+  it("is forgotten whole, storage and all", () => {
+    recordVisit(ME, { href: "/t/members", label: "Members" });
+    forgetRecent();
+
+    expect(readRecent(ME)).toEqual([]);
+    expect(window.localStorage.getItem(KEY)).toBeNull();
+  });
+
+  describe("a link that leaves the console", () => {
+    it.each([
+      ["another origin", "https://evil.example/"],
+      ["a protocol-relative one", "//evil.example/"],
+      ["a backslash the parser reads as a slash", "/\\evil.example/"],
+      ["a tab the parser drops", "/\t/evil.example/"],
+      ["a script", "javascript:alert(1)"],
+    ])("is never read back: %s", (_, href) => {
+      window.localStorage.setItem(
+        KEY,
+        JSON.stringify({ owner: ME, visits: [{ href, label: "Members", at: 0 }] }),
+      );
+      expect(readRecent(ME)).toEqual([]);
+    });
+
+    it("is never recorded", () => {
+      recordVisit(ME, { href: "//evil.example/", label: "Members" });
+      expect(readRecent(ME)).toEqual([]);
+      expect(window.localStorage.getItem(KEY)).toBeNull();
+    });
+  });
+
   describe("a trail it cannot read", () => {
     it.each([
       ["text that is not JSON", "{not json"],
-      ["JSON that is not an array", '{"href":"/x"}'],
-      ["rows missing their fields", '[{"href":"/x"}]'],
-      ["a row whose href is not a string", '[{"href":1,"label":"x","at":0}]'],
+      ["a trail with no owner", '[{"href":"/x","label":"x","at":0}]'],
+      ["visits missing their fields", '{"owner":"user_1","visits":[{"href":"/x"}]}'],
+      ["a visit whose href is not a string", '{"owner":"user_1","visits":[{"href":1,"label":"x","at":0}]}'],
     ])("drops %s rather than half-trusting it", (_, raw) => {
       window.localStorage.setItem(KEY, raw);
-      expect(readRecent()).toEqual([]);
+      expect(readRecent(ME)).toEqual([]);
     });
   });
 
@@ -74,17 +120,18 @@ describe("the recent-visit trail", () => {
       }
     }
 
-    it("still remembers the visits made in this session", () => {
+    it("still remembers the visits made in this session, for their person alone", () => {
       withBlockedStorage(() => {
-        expect(() => recordVisit({ href: "/t/api-keys", label: "API keys" })).not.toThrow();
-        expect(readRecent().map((v) => v.label)).toEqual(["API keys"]);
+        expect(() => recordVisit(ME, { href: "/t/api-keys", label: "API keys" })).not.toThrow();
+        expect(readRecent(ME).map((v) => v.label)).toEqual(["API keys"]);
+        expect(readRecent("user_2")).toEqual([]);
       });
     });
 
     it("reads as empty rather than throwing out of a render", () => {
       withBlockedStorage(() => {
-        expect(() => readRecent()).not.toThrow();
-        expect(readRecent()).toEqual([]);
+        expect(() => readRecent(ME)).not.toThrow();
+        expect(readRecent(ME)).toEqual([]);
       });
     });
   });

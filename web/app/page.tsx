@@ -10,6 +10,8 @@ import { getServerSession } from "@/lib/server/session";
 import { DOCS_URL, SECURITY_POLICY_URL, SKILLS_URL } from "@/lib/site";
 import { cn } from "@/lib/utils";
 
+import { ForgetPersonalStorage } from "./_forget-personal-storage";
+
 // No `metadata` here on purpose. `layout.tsx` templates a page title as
 // `%s · Telmoni`, so a string set on the home route renders the product name
 // twice; its `default` is already PRODUCT_NAME, which is what this route wants.
@@ -487,6 +489,7 @@ export default async function SplashPage() {
           request: in the root layout it would also reach the 404 page, which
           is built once with no origin to read. */}
       <JsonLd />
+      {signedIn ? null : <ForgetPersonalStorage />}
       {/* The same container as `/plans`, so the two public pages line up. */}
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-16 px-3.5 py-8 sm:gap-20">
         {/* ⚠ **The sentence IS the `<h1>`**, drawn by the hero beside the run
