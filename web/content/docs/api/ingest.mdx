@@ -53,6 +53,28 @@ span by its own name, 1 to 145 characters: room for a model call's
 `<operation> <model>`, the longest operation and a model at its cap. The span
 named `telmoni.run.start`, which opens a run, is never a row.
 
+## A run while it goes
+
+A run is watched by the project's monitor of its agent: the monitor whose
+agent is the run's `telmoni.agent`, made, paused as new, the first time a run
+names an agent no monitor has, as a ping's unknown slug makes one — unless the
+console could not save it as one (an agent with a control character, or a
+space at either end) or another agent's monitor holds the slug the name
+makes, which the answer names. From its
+`telmoni.run.start`, or its first span to arrive where none came, the run is
+held open: each export adds its steps and its tokens, the run is held to the
+tighter of its own bounds (`telmoni.bound.*`, on its start and on the run
+itself) and its monitor's, and a step past the cap marks the monitor past its
+bound. The run's own span ends it, and its monitor keeps it as its last run,
+its steps counted across every export. A run that falls silent past its stall
+timeout stalls its monitor, and one still open a day after it was first
+heard, or four times its monitor's expected duration where that is longer, is
+ended as an error, as a run reported by pings is; a run first heard late is
+heard from then, not taken as silent since it began. Runs that end in one
+export reach their monitor in the order they ended, so the monitor stands as
+the latest left it. A span of a run that came after the run's own span, from
+another service, say, opens nothing again.
+
 ## What is kept
 
 Each field below is a column, read from the attribute named, and the names
@@ -123,10 +145,12 @@ kept.
 `200` with OTLP's `ExportTraceServiceResponse` in the request's encoding, once
 the rows are stored, and the header `Telmoni-Content-Mode` naming the
 project's mode. `partialSuccess` is `null` in JSON, and absent in protobuf,
-when no span was refused and no attribute dropped;
+when no span was refused, no attribute dropped and every run has a monitor;
 otherwise `rejectedSpans` counts the spans refused whole, and `errorMessage`
-names each span refused and each attribute dropped, with why — its first 4 KiB,
-then a count of the rest:
+names each span refused and each attribute dropped, with why, and once for
+each agent whose runs were kept but which no monitor watches — an agent no
+monitor could be made for, past the plan's monitors on the hosted service,
+say — its first 4 KiB, then a count of the rest:
 
 ```json
 {

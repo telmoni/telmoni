@@ -174,7 +174,7 @@ change applies from the next notice. The body's `kind` is one of:
 | `member_left` | Someone left or was removed from the project. |
 | `connector_connected` | A destination was connected to the project. |
 | `connector_disconnected` | A destination stopped accepting notices. |
-| `monitor_discovered` | A ping under one of the project's ping keys named a monitor the project did not have; the monitor was made, paused as new until someone sets it up. |
+| `monitor_discovered` | A ping under one of the project's ping keys named a monitor the project did not have, or a run an SDK sent named an agent no monitor had; the monitor was made, paused as new until someone sets it up. |
 | `ping_key_retired` | The rotation retired one of the project's ping keys, unused for over a week — since its last ping, or its minting where it never pinged — while a newer key stood; a line still using it is refused. |
 | `incident_opened` | One of the project's monitors needs someone: it failed, stalled, crossed a bound or is late. Once per incident; its `metadata` names the monitor, the cause and what moved it, and whether the monitor is flapping. |
 | `incident_resolved` | The monitor is healthy again, or was paused, and its incident closed; `metadata` says how it closed and how long it stood. |
