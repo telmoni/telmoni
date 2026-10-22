@@ -263,7 +263,7 @@ function ColumnsMenu() {
           </Badge>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="max-h-96 w-64">
+      <DropdownMenuContent align="end" className="w-64">
         <ColumnItem label={TRACE_ID_COLUMN.label} hint={TRACE_ID_COLUMN.hint} checked disabled />
         {COLUMN_MENU.map((block) => {
           if (block.kind === "column") {

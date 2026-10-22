@@ -191,7 +191,7 @@ function CustomizeMenu({ layout, from }: { layout: Layout; from: string }) {
                 {options.columns.length + 1}/{TRACE_COLUMNS.length + 1}
               </span>
             </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="max-h-96 w-56 overflow-y-auto">
+            <DropdownMenuSubContent className="w-56">
               <DropdownMenuCheckboxItem checked disabled>
                 {TRACE_ID_COLUMN.label}
               </DropdownMenuCheckboxItem>
