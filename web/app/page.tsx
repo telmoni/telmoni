@@ -51,7 +51,7 @@ const GOALS = [
     points: [
       "A schedule, a stall timeout, a step cap, a cost cap",
       "Alerts with routing, severity, deduplication and maintenance windows",
-      "Slack, webhooks, mail and PagerDuty",
+      "Slack, webhooks and PagerDuty",
     ],
   },
   {

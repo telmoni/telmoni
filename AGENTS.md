@@ -13,7 +13,7 @@ The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni
 |---|---|
 | `crates/telmoni` | The binary: `serve` (every module on `PORT` 8082, the sweeps and the agent's indexer on timers) and one-shot admin subcommands (`cli.rs`). `App::assemble` is what a deployment's own binary calls. |
 | `crates/auth` | Sign-in (password form, OIDC), identities, organizations, projects, members, invitations, transfers, API keys, sessions, flags, export and deletion, `/v1`. |
-| `crates/notifications` | The in-app feed, Slack/Discord/webhook connectors, the delivery queue. |
+| `crates/notifications` | The in-app feed, the Slack and webhook connectors, the delivery queue. |
 | `crates/agent` | The console agent, read-only: model adapters, embeddings, the index, hybrid search, tools. Needs the `vector` extension, which a superuser installs. Off until `AGENT_MODEL_PROVIDER` is set. |
 | `crates/telemetry` | Each project's settings and content mode in Postgres, the mode read and set through the console's lane under `/internal/v1/telemetry` (`handler/`); the spans and their hourly totals in ClickHouse, which the module reads and writes only through `store.rs`, each read naming its projects. `clickhouse/` holds ClickHouse's one migration file, which `migrate` applies (`schema.rs`), its settings and its local users; `rotate` drops the expired days and months (`retention.rs`), both as the migrator's user. |
 | `crates/shared` | `TelmoniError`, RBAC (`rbac.rs`), tenancy scopes, the seams between modules (`seam.rs`), audit, `Redacted`. `tests/` holds the cross-module suites. |
