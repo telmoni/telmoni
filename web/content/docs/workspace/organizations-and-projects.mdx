@@ -165,7 +165,8 @@ Windows and Linux):
   page, the documentation, the keyboard shortcuts sheet, theme and corners,
   the platform's GitHub repository, and sign out.
 - **Primary action (`c`)**: Triggers the primary action of the current page:
-  **New project**, **Mint key**, **Invite member** (on a project's **Members**
+  **New project**, **New monitor**, **Edit** on a monitor's page, **Mint key**,
+  **Invite member** (on a project's **Members**
   page, **Add member**), or **Export** on the organization's audit log; on the
   hosted service's **Billing** page,
   **Plans** or **Manage billing**.
@@ -178,6 +179,7 @@ Windows and Linux):
   you are in has one, and the sheet (`?`) lists the rows of that sidebar. On a
   project's pages:
   - `g` `o`: Overview
+  - `g` `r`: Monitors, its radar, since `g` `n` is Notifications from anywhere
   - `g` `t`: Traces, `g` `s`: Sessions, `g` `u`: Users, `g` `a`: Alerts,
     `g` `d`: Dashboards
   - `g` `k`: API keys, `g` `c`: Connectors, `g` `m`: Members, `g` `l`: Audit log,
@@ -214,10 +216,11 @@ drawn again as they change: first the monitors that need someone — failed,
 stalled, over a bound or late, the worst first — then those with a run going,
 each with its state, since when, and its last run: when it ended, how it
 ended, how long it took, and its steps and spend against the monitor's caps,
-"OK · 4 min 2 s · 12 / 40 steps · $0.08". Every other monitor is counted in
-one line, "2 new · 12 healthy". It is a board of runs and their bounds: no
-uptime grid and no percentage. A project with no monitor yet is told what one
-is. Under the board, the project's notices — a member joining or leaving, a
+"OK · 4 min 2 s · 12 / 40 steps · $0.08", and its name opening [its
+page](/docs/workspace/monitors#a-monitors-page). Every other monitor is
+counted in one line, "2 new · 12 healthy". It is a board of runs and their
+bounds: no uptime grid and no percentage. A project with no monitor yet is
+told what one is. Under the board, the project's notices — a member joining or leaving, a
 channel connected or lost, a monitor its first ping made, an incident opened
 or resolved — newest first, each unread one bold, with **Mark read** beside
 them.

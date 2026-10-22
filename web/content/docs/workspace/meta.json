@@ -3,6 +3,7 @@
   "defaultOpen": true,
   "pages": [
     "organizations-and-projects",
+    "monitors",
     "traces",
     "sessions",
     "users",

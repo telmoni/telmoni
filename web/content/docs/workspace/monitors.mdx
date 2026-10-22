@@ -1,0 +1,150 @@
+---
+title: "Monitors"
+description: "A project's monitors: each an agent's contract — when its runs are expected, how long one may go quiet, how many steps it may take — its states, making one, the three ways its runs are reported, the project's ping key, and a monitor's own page."
+---
+
+A **monitor** watches one agent's runs, and says when they go wrong: a run
+that never came, one that ended in error, went quiet or took too many steps.
+It is the agent's contract:
+
+- **When its runs are expected**: on a five-field cron line in a timezone
+  (`0 2 * * *`, Europe/London), every so often (every 15 minutes), or never,
+  for an agent that runs when it is asked.
+- **Its grace period**: how long past its time a run may start before the
+  monitor is late.
+- **Its expected duration**, if you set one: a run still open four times this
+  long, or a day where none is set, is ended as failed.
+- **Its bounds**: how long a run may go quiet before it is stalled (the
+  **stall timeout**), and how many steps it may take (the **step cap**). A run
+  is held to the tighter of each bound set here and one its own code sets
+  through an SDK.
+
+A monitor goes by a **slug**, which every ping names in its URL and so is
+fixed once saved, and watches one **agent**, the `telmoni.agent` its runs
+carry: the slug, unless you name another. A project has one monitor a slug
+and one an agent.
+
+## Its states
+
+The worst first, the order the Monitors page lists them in:
+
+| State | What it means |
+|---|---|
+| **Failed** | Its last run ended in error, or a run it expected never came within its grace |
+| **Stalled** | A run of its went quiet past its stall timeout |
+| **Over a bound** | A run of its crossed its step cap, or its cost cap |
+| **Late** | A run it expected has not started, and its grace is running |
+| **Running** | A run of its is going |
+| **New** | Made by its first ping or run, before anyone set it up; paused until then |
+| **Paused** | Paused by an owner or an admin: never late, its runs still kept |
+| **Healthy** | Its last run ended well, and nothing it expects is missing |
+
+Failed, stalled, over a bound and late each open an
+[incident](/docs/integrations/notifications), one a monitor however many runs
+fail under it, which a run ending well resolves.
+
+## The Monitors page
+
+A project's **Monitors** page (`g` `r`) lists every monitor, the worst state
+first and then by name, with its agent, its schedule in words ("every day at
+02:00, Europe/London", "every 15 minutes", "no schedule"), its state, its last
+run — when it ended, how, how long it took, and its steps and spend against
+the monitor's caps — when it is next due, and its bounds in brief ("stall
+10 min · 40 steps"). **State** narrows the list to the states you pick, each
+counted, and the search box to the monitors whose names hold the words you
+type; both are in the page's URL, so a link holds the view. The page is drawn
+again as its monitors change, never on a timer.
+
+## Making a monitor
+
+The project's **Owner** and **Admins** make monitors with **New monitor**
+(`c`), which opens over the page:
+
+1. **Name** it. Its **slug** is made from the name as you type, and you may
+   change it until you save.
+2. Name its **agent**, if its runs carry another than the slug.
+3. Set its **schedule**: a cron line and its timezone, which lists the zones
+   by name with your browser's own first; an interval in minutes or hours; or
+   none. The next three times a run would be due show as you type.
+4. Set its **grace period** and, if you like, its **expected duration**, its
+   **stall timeout** and its **step cap**.
+
+Saved, the panel says how its runs are reported. A monitor is made, too, by
+the first ping to a slug the project has no monitor by, or the first run of an
+agent no monitor watches: it starts **New**, its runs kept and counted, and the
+project is told, until someone sets it up with **Edit**. A deployment may cap
+how many monitors an organization holds; past the cap a new one is refused
+with `/errors/plan/limit-reached`.
+
+## Reporting its runs
+
+Any of three ways, each line on the monitor's page and on the panel that made
+it, ready to copy:
+
+1. **Pings**, from a crontab or any script, with `curl` and nothing else:
+
+   ```sh
+   curl -fsS -m 10 "$TELMONI_ENDPOINT/ping/v1/$TELMONI_PING_KEY/nightly-report/start"
+   # ... the job ...
+   curl -fsS -m 10 "$TELMONI_ENDPOINT/ping/v1/$TELMONI_PING_KEY/nightly-report"
+   ```
+
+   A bare ping is a run that ended well, its `/fail` one that failed
+   (`?exit_code=3` says how), and its `/start` the start of one; a
+   `/checkpoint?steps=12&cost=0.08` between them reports how far it has got,
+   and holds its stall timeout off. `?rid=` with a UUID names the run, so two
+   at once are told apart and a ping sent again is heard as the one it
+   repeats. `TELMONI_ENDPOINT` is your deployment's machine host
+   (`https://api.telmoni.com` on the hosted service), and `TELMONI_PING_KEY`
+   the project's ping key, below.
+2. **The CLI**, which sends the same pings around a command and passes its
+   exit code on: `telmoni run --monitor nightly-report -- ./report.sh`
+   ([Running a job under a monitor](/docs/api/cli#running-a-job-under-a-monitor)).
+3. **An SDK**, whose runs name the agent, under a project
+   [API key](/docs/api/api-keys) with the **ingest** scope: their steps, model
+   and tool calls land as the run's trace, and the bounds its code sets hold
+   beside the monitor's ([SDKs](/docs/api/sdks)).
+
+## The ping key
+
+A project's pings carry its **ping key** in their URL: `telmoniping_` and 32
+letters and digits, which can fake a ping and do nothing else. Its **Owner**
+and **Admins** hold it from the **Ping key** menu on the Monitors page, which
+names each key by its first characters, when it was made and its last ping:
+
+- **Mint the ping key**: the key is shown once, as an API key is, and kept
+  only as its hash, so nothing shows it again; a lost key is replaced by
+  rotating.
+- **Rotate**: a second key, made beside the first, so your crontab lines move
+  over one at a time. The older retires a week after its last ping, and the
+  project is told.
+- **Retire the older key now**, once every line carries the newer: its pings
+  are refused from then on.
+
+## A monitor's page
+
+Each monitor's name opens its page, `/{organization}/{project}/monitors/{slug}`:
+
+- Its **state** and since when, its **schedule** in words, when it is **next
+  due**, and its **last success**: when its last run that ended well ended,
+  however many have failed since.
+- **Running now**, while a run is going: when it started and was last heard,
+  when it is over whatever it says, and its steps, tokens and spend, each
+  against the bound it is held to.
+- Its **last runs**: its last 50 in the last 90 days, a bar each, as tall as
+  the run was long and coloured as it ended, its expected duration a line
+  across; and under them the same runs as the [Traces](/docs/workspace/traces)
+  list's table, each opening its trace beside the page.
+- Its **incidents**: the open one first, then the last ten resolved, each with
+  what crossed, when it opened, and how and when it closed.
+- Its **definition**: its schedule, timezone, grace period and expected
+  duration, and each bound with where it came from — the monitor, or the
+  running run's own code where that is tighter.
+- How to **report its runs**, as above.
+- Its **recent changes**, for the project's Owner and Admins, who read its
+  [audit log](/docs/workspace/audit-log).
+
+The Owner and Admins also **Edit** it, its slug fixed; **Pause** it — never
+late, its runs still kept — and **Resume** it; and **Delete** it, typing its
+slug to confirm. A deleted monitor's finished runs stay, as traces of its
+agent; a run still open goes with it.
