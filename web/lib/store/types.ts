@@ -2,6 +2,7 @@ import type { FlagSet } from "@/lib/flags";
 import type { AuditExport } from "@/lib/types/audit-export";
 import type { AuthUser } from "@/lib/types/domain";
 import type { Role } from "@/lib/types/enums";
+import type { GivenSeat } from "@/lib/types/given-seat";
 import type { Project, ProjectEverywhere } from "@/lib/server/entities/projects";
 import type {
   IncomingInvite,
@@ -21,6 +22,9 @@ export interface Seed {
   /// organization.
   organizations: readonly OrganizationEntry[];
   incomingInvites: readonly IncomingInvite[];
+  /// Seats given to the person from a roster and not seen yet, which the bell
+  /// counts beside the invitations until each project is opened or dismissed.
+  givenSeats: readonly GivenSeat[];
   /// The projects offered to the person and still open, which the bell
   /// counts beside the invitations and the organization offers.
   projectOffers: readonly ProjectOffer[];
@@ -46,6 +50,8 @@ export interface IdentitySlice extends Seed {
   addIncomingInvite: (invite: IncomingInvite) => void;
 
   removeIncomingInvite: (id: string) => void;
+
+  removeGivenSeat: (projectId: string) => void;
 
   /// Reconcile with a fresh server payload. Writes only the fields that moved
   /// since the last one, and nothing at all when none did.
@@ -94,6 +100,7 @@ export interface StoreInitial {
   user: AuthUser | null;
   organizations?: readonly OrganizationEntry[];
   incomingInvites?: readonly IncomingInvite[];
+  givenSeats?: readonly GivenSeat[];
   projectOffers?: readonly ProjectOffer[];
   activeOrganizationId?: string | null;
   flags: FlagSet;

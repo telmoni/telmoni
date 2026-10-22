@@ -311,6 +311,11 @@ CREATE TABLE auth.project_members (
     -- organization's roster: the seat carries it, so removing or demoting the
     -- admin ends it with no bookkeeping of its own.
     transfer_offered_at TIMESTAMPTZ,
+    -- When the holder saw a seat given to them from the organization's
+    -- roster: NULL until they open or dismiss it in the console. A seat a
+    -- person took themselves, by an invitation or a handover, is seen as
+    -- it is written.
+    seen_at             TIMESTAMPTZ DEFAULT now(),
     shard_key           UUID        NOT NULL DEFAULT gen_random_uuid(),
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT project_members_role_check CHECK (role IN ('admin', 'member')),

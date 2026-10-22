@@ -1,3 +1,4 @@
+import type { GivenSeat } from "@/lib/types/given-seat";
 import type { IncomingInvite } from "@/lib/types/incoming-invite";
 import { roleLabel } from "@/lib/role-label";
 
@@ -35,4 +36,18 @@ export function inviterText(invite: IncomingInvite): string {
   const name = invite.inviterDisplayName;
   if (!invite.inviterEmail) return name ?? invite.targetName;
   return name && name !== invite.inviterEmail ? name : invite.inviterEmail;
+}
+
+// What a seat given is, in one line: the organization its project is in, and
+// the role it grants there.
+export function seatSubtitle(seat: GivenSeat): string {
+  return `${seat.organizationName} · ${roleLabel(seat.role)}`;
+}
+
+// Who gave the seat, as `inviterText` names a sender; one who has since
+// deleted their account leaves the organization's name.
+export function giverText(seat: GivenSeat): string {
+  const name = seat.giverDisplayName;
+  if (!seat.giverEmail) return name ?? seat.organizationName;
+  return name && name !== seat.giverEmail ? name : seat.giverEmail;
 }

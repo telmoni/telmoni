@@ -494,14 +494,20 @@ async fn seat_project_member(
         None => admit_seat(&mut tx, organization, ceiling).await?,
     }
 
+    // A seat already held — given from the roster since the link was read,
+    // which withdrew this invitation too — is said so, not as a used link.
+    if members::role_on(&mut tx, invite.project_id, actor)
+        .await?
+        .is_some()
+    {
+        return Err(AuthError::Conflict("you are already a member of this project".into()).into());
+    }
     if !invites::mark_accepted(&mut tx, invite.id, actor).await? {
         return Err(AuthError::Conflict("this invitation was already used".into()).into());
     }
-
-    match members::insert(&mut tx, invite.project_id, actor, invite.role, actor).await {
-        Ok(_) => {}
-        Err(e) if members::already_a_member(&e) => {}
-        Err(e) => return Err(e.into()),
+    // Never the plain insert: a duplicate would abort the rest of the transaction.
+    if !members::insert_if_absent(&mut tx, invite.project_id, actor, invite.role, actor).await? {
+        return Err(AuthError::Conflict("you are already a member of this project".into()).into());
     }
 
     // Every seat holder is on the owning organization's roster: that is what

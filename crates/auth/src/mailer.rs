@@ -73,6 +73,18 @@ pub trait Mailer: Send + Sync {
         link: &str,
     ) -> Result<(), MailError>;
 
+    /// Tell a member of the organization they were given a seat on one of its
+    /// projects: by whom, at what role, and the way to it.
+    async fn send_project_seat(
+        &self,
+        to: &str,
+        giver: &str,
+        project: &str,
+        organization: &str,
+        role: Role,
+        link: &str,
+    ) -> Result<(), MailError>;
+
     /// Tell an admin their organization's owner has offered them the
     /// organization. Nothing changes until they accept in the console.
     async fn send_ownership_offer(
@@ -211,6 +223,29 @@ impl ComposingMailer {
     }
 }
 
+/// What a seat or a roster row at `level` lets its holder do, in a sentence.
+fn what_the_level_allows(level: InvitedTo) -> &'static str {
+    match level {
+        InvitedTo::Project(Role::Member) => {
+            "A member has read-only access to the project: its members, API keys and connectors."
+        }
+        InvitedTo::Project(Role::Admin) => {
+            "An admin manages the project: its members, API keys and connectors, with its audit log to read; only the organization's owner can delete or hand over the project."
+        }
+        InvitedTo::Organization(OrganizationRole::Admin) => {
+            "An admin can create projects, manage the organization's members and settings, and work in every project as an admin; only its owner can delete the organization or its projects, or hand either over."
+        }
+        InvitedTo::Organization(OrganizationRole::Member) => {
+            "A member sees the projects they are given access to, and nothing else."
+        }
+        // No invitation makes an owner, who is made only by a handover they
+        // accept; were one sent, it would claim no access it cannot describe.
+        InvitedTo::Project(Role::Owner) | InvitedTo::Organization(OrganizationRole::Owner) => {
+            "Your access would be whatever that role allows."
+        }
+    }
+}
+
 #[async_trait]
 impl Mailer for ComposingMailer {
     async fn send_organization_deletion_code(
@@ -320,28 +355,37 @@ impl Mailer for ComposingMailer {
                  If you do not know {inviter}, do nothing and the \
                  invitation expires. To tell us it was unwanted, write to \
                  {contact}.",
-                can = match level {
-                    InvitedTo::Project(Role::Member) => {
-                        "A member has read-only access to the project: its members, API keys and connectors."
-                    }
-                    InvitedTo::Project(Role::Admin) => {
-                        "An admin manages the project: its members, API keys and connectors, with its audit log to read; only the organization's owner can delete or hand over the project."
-                    }
-                    InvitedTo::Organization(OrganizationRole::Admin) => {
-                        "An admin can create projects, manage the organization's members and settings, and work in every project as an admin; only its owner can delete the organization or its projects, or hand either over."
-                    }
-                    InvitedTo::Organization(OrganizationRole::Member) => {
-                        "A member sees the projects they are given access to, and nothing else."
-                    }
-                    // No invitation makes an owner, who is made only by a
-                    // handover they accept; were one sent, it would claim no
-                    // access it cannot describe.
-                    InvitedTo::Project(Role::Owner)
-                    | InvitedTo::Organization(OrganizationRole::Owner) => {
-                        "Your access would be whatever that role allows."
-                    }
-                },
+                can = what_the_level_allows(level),
                 days = crate::handler::invite::INVITE_TTL_DAYS,
+                contact = self.contact(),
+            ),
+        )
+        .await
+    }
+
+    async fn send_project_seat(
+        &self,
+        to: &str,
+        giver: &str,
+        project: &str,
+        organization: &str,
+        role: Role,
+        link: &str,
+    ) -> Result<(), MailError> {
+        let product = telmoni_shared::PRODUCT_NAME;
+        self.send(
+            to,
+            format!("{giver} added you to {project} on {product}"),
+            format!(
+                "{giver} added you to {project}, a project of {organization}, \
+                 on {product} as {role}. There is nothing to accept: you are a \
+                 member of {organization}, and this is one of its projects. {can}\n\n\
+                 Open it here:\n{link}\n\n\
+                 If you did not expect this, ask {giver} or the organization's \
+                 owner to take you off the project; leaving {organization} from \
+                 its Overview leaves every project in it. To tell us it was \
+                 unwanted, write to {contact}.",
+                can = what_the_level_allows(InvitedTo::Project(role)),
                 contact = self.contact(),
             ),
         )
@@ -895,6 +939,52 @@ mod tests {
             mail.text
         );
         assert_eq!(mail.to, "ada@example.com");
+    }
+
+    /// A seat given asks for nothing: the mail names who gave it, the project
+    /// and its organization, what the role allows, and leads straight there.
+    #[tokio::test]
+    async fn the_seat_mail_names_who_gave_it_and_leads_to_the_project() {
+        let mail = composed(async |m| {
+            m.send_project_seat(
+                "dana@example.com",
+                "Ada Lovelace",
+                "Support agent",
+                "Acme",
+                Role::Member,
+                "https://app.example.com/acme/support-agent",
+            )
+            .await
+            .expect("recorded");
+        })
+        .await;
+
+        assert_eq!(mail.to, "dana@example.com");
+        assert!(
+            mail.subject
+                .contains("Ada Lovelace added you to Support agent"),
+            "{}",
+            mail.subject
+        );
+        for needle in [
+            "a project of Acme",
+            "as member",
+            "read-only access",
+            "nothing to accept",
+            "https://app.example.com/acme/support-agent",
+            SUPPORT,
+        ] {
+            assert!(
+                mail.text.contains(needle),
+                "missing {needle:?}: {}",
+                mail.text
+            );
+        }
+        assert!(
+            !mail.text.contains("Accept here") && !mail.text.contains("expires"),
+            "a seat given is no invitation: {}",
+            mail.text
+        );
     }
 
     /// The mail has one job beyond breaking the news: make the next step

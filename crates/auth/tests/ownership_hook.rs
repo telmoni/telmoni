@@ -804,6 +804,72 @@ async fn a_paused_organization_sends_no_invitation(pool: PgPool) {
     assert_eq!(body["ceiling"], Value::Null, "a ceiling nobody set: {body}");
 }
 
+/// A paused organization gives no seat from its roster, as it sends no
+/// invitation: the seat takes nobody new in, and still the pause stands.
+#[sqlx::test]
+async fn a_paused_organization_gives_no_seat(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let deployment = Deployment::default();
+    let organization = deployment.sign_in(&pool, OWNER).await;
+    let project = deployment.project(&pool, &organization, "Payments").await;
+    let member = "user_member";
+    deployment.enrol(&pool, &organization, member).await;
+    deployment
+        .entitlements
+        .paused
+        .lock()
+        .unwrap()
+        .insert(organization.clone());
+
+    let (status, body) = deployment
+        .call(
+            &pool,
+            "POST",
+            &format!("/internal/v1/projects/{project}/members"),
+            OWNER,
+            Some(&organization),
+            Some(json!({ "memberId": member, "role": "member" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
+    assert_eq!(body["type"], "/errors/plan/limit-reached");
+    let seats: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM auth.project_members WHERE project_id = $1 AND user_id = $2",
+    )
+    .bind(&project)
+    .bind(member)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(seats, 0, "a refused seat was written");
+}
+
+/// At its member ceiling an organization still seats one of its members on a
+/// project: the roster the ceiling counts gains nobody, so it is not asked.
+#[sqlx::test]
+async fn an_organization_at_its_ceiling_still_seats_its_members(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let deployment = Deployment::default();
+    let organization = deployment.sign_in(&pool, OWNER).await;
+    let project = deployment.project(&pool, &organization, "Payments").await;
+    let member = "user_member";
+    deployment.enrol(&pool, &organization, member).await;
+    deployment.entitlements.hold(&organization, 1);
+
+    let (status, body) = deployment
+        .call(
+            &pool,
+            "POST",
+            &format!("/internal/v1/projects/{project}/members"),
+            OWNER,
+            Some(&organization),
+            Some(json!({ "memberId": member, "role": "member" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(seated(&pool, &organization).await, 2, "the roster grew");
+}
+
 /// How many people the organization holds, read straight from the roster.
 async fn seated(pool: &PgPool, organization: &str) -> i64 {
     sqlx::query_scalar("SELECT count(*) FROM auth.organization_members WHERE organization_id = $1")
@@ -873,6 +939,19 @@ impl Deployment {
             Some(json!({ "email": email, "role": "member" })),
         )
         .await
+    }
+
+    /// `user` signed in and on the organization's roster as a Member, by its
+    /// invitation accepted.
+    async fn enrol(&self, pool: &PgPool, organization: &str, user: &str) {
+        self.sign_in(pool, user).await;
+        let (status, body) = self
+            .invite(pool, organization, &format!("{user}@example.test"))
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        let invite = body["id"].as_str().unwrap().to_owned();
+        let (status, body) = self.accept(pool, user, &invite).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
     }
 
     /// `user` accepts the invitation `invite` from the console's bell.

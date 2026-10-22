@@ -217,6 +217,28 @@ describe("what getServerContext asks /me to resolve", () => {
     expect((await getServerContext())?.projectOffers).toEqual([]);
   });
 
+  // A seat given is auth's row too, listed beside the invitations until the
+  // person has seen it; an answer that carries none reads as none.
+  it("reads the seats given to the person and not yet seen, and none as none", async () => {
+    const given = {
+      projectId: "project_2",
+      projectName: "Support agent",
+      projectSlug: "support-agent",
+      organizationId: "org_2",
+      organizationName: "Analytical Engines",
+      organizationSlug: "analytical-engines",
+      role: "member",
+      giverEmail: null,
+      giverDisplayName: null,
+      createdAt: "2026-10-21T00:00:00Z",
+    };
+    meAnswers(me({ givenSeats: [given] }));
+    expect((await getServerContext())?.givenSeats).toEqual([given]);
+
+    meAnswers(me());
+    expect((await getServerContext())?.givenSeats).toEqual([]);
+  });
+
   it("floors an unknown role spelling to null rather than passing it through", async () => {
     meAnswers(
       me({
@@ -296,6 +318,7 @@ describe("defaultOrganization", () => {
       organizationNotFound: false,
       memberships: [],
       incomingInvites: [],
+      givenSeats: [],
       projectOffers: [],
       flags: {},
     }) as ServerContext;
@@ -326,6 +349,7 @@ describe("activeOrganization", () => {
       organizationNotFound: false,
       memberships: [],
       incomingInvites: [],
+      givenSeats: [],
       projectOffers: [],
       flags: {},
     }) as ServerContext;

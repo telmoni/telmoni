@@ -67,6 +67,7 @@ function me(activeOrganizationId: string): ServerContext {
     organizationNotFound: false,
     memberships: [],
     incomingInvites: [],
+    givenSeats: [],
     projectOffers: [],
     flags: {},
   };

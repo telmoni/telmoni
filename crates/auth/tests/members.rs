@@ -19,14 +19,16 @@ use serde_json::{Value, json};
 use sqlx::PgPool;
 use tower::ServiceExt;
 
-use telmoni_auth::test_provider::{ScriptedProvider, as_person};
+use telmoni_auth::test_provider::{
+    RecordingNotifications, ScriptedProvider, SiblingCall, SiblingCalls, as_person,
+};
 use telmoni_auth::{AppState, Config, db::members, router};
 use telmoni_shared::db::tenant_session::project_scope;
 use telmoni_shared::test_util::{
     ServiceRole, apply_audit_migrations, holding_chain, seed_identity, service_pool,
     until_queued_on_advisory_locks,
 };
-use telmoni_shared::{OrganizationId, ProjectId, Role, UserId};
+use telmoni_shared::{NotificationKind, OrganizationId, ProjectId, Role, UserId};
 
 const SERVICE_SECRET: &str = "test-service-secret";
 
@@ -55,6 +57,25 @@ fn app_recording_mail(pool: PgPool) -> (Router, Arc<Recorder>) {
 }
 
 fn app_with_mail(pool: PgPool, sender: Arc<dyn telmoni_shared::mail::MailSender>) -> Router {
+    app_with(pool, sender, telmoni_auth::Siblings::default())
+}
+
+/// An app recording both the mail it sends and the notices it hands notifications.
+fn app_recording(pool: PgPool) -> (Router, Arc<Recorder>, SiblingCalls) {
+    let calls = SiblingCalls::default();
+    let siblings = telmoni_auth::Siblings {
+        notifications: Some(Arc::new(RecordingNotifications::new(calls.clone()))),
+        ..telmoni_auth::Siblings::default()
+    };
+    let recorder = Arc::new(Recorder::default());
+    (app_with(pool, recorder.clone(), siblings), recorder, calls)
+}
+
+fn app_with(
+    pool: PgPool,
+    sender: Arc<dyn telmoni_shared::mail::MailSender>,
+    siblings: telmoni_auth::Siblings,
+) -> Router {
     let config = Config {
         database_url: String::new(),
         service_secret: SERVICE_SECRET.into(),
@@ -75,7 +96,7 @@ fn app_with_mail(pool: PgPool, sender: Arc<dyn telmoni_shared::mail::MailSender>
         ))),
         db,
         config,
-        siblings: telmoni_auth::Siblings::default(),
+        siblings,
         mailer: Arc::new(telmoni_auth::mailer::ComposingMailer::new(sender)),
         exchange_cache: telmoni_auth::ExchangeCache::new(),
     });
@@ -274,10 +295,987 @@ async fn owner_and_member(pool: &PgPool, role: &str) -> (String, String) {
     (owner.to_string(), member.to_string())
 }
 
+/// Put `member` on `owner`'s organization roster as a Member, by an
+/// organization invitation accepted.
+async fn enrol(pool: &PgPool, owner: &str, member: &str) {
+    let (status, offer) = call(
+        pool,
+        "POST",
+        "/internal/v1/organization/invites",
+        owner,
+        Some(json!({ "email": address_of(member), "role": "member" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "organization invite: {offer}");
+    let secret = secret_of(offer["link"].as_str().expect("the link"));
+    let (status, body) = accept(pool, member, &secret).await;
+    assert!(status.is_success(), "organization accept: {status} {body}");
+}
+
+/// Give `member` a seat on `project` as `giver`, from the organization's roster.
+async fn give(
+    pool: &PgPool,
+    giver: &str,
+    project: &str,
+    member: &str,
+    role: &str,
+) -> (StatusCode, Value) {
+    call_in(
+        pool,
+        "POST",
+        &format!("/internal/v1/projects/{project}/members"),
+        giver,
+        Some(project),
+        Some(json!({ "memberId": member, "role": role })),
+    )
+    .await
+}
+
+/// [`give`], through `app`.
+async fn give_through(
+    app: Router,
+    pool: &PgPool,
+    giver: &str,
+    project: &str,
+    member: &str,
+) -> (StatusCode, Value) {
+    let req = as_person(
+        Request::builder()
+            .method("POST")
+            .uri(format!("/internal/v1/projects/{project}/members"))
+            .header("x-service-secret", SERVICE_SECRET)
+            .header("x-organization-id", organization_of(pool, giver).await)
+            .header("x-project-id", project)
+            .header("content-type", "application/json"),
+        pool,
+        giver,
+    )
+    .await
+    .body(Body::from(
+        json!({ "memberId": member, "role": "member" }).to_string(),
+    ))
+    .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let status = resp.status();
+    (status, json_body(resp).await)
+}
+
+/// The seats nobody has seen yet, as (project, holder).
+async fn unseen(pool: &PgPool) -> Vec<(String, String)> {
+    sqlx::query_as(
+        "SELECT project_id, user_id FROM auth.project_members
+          WHERE seen_at IS NULL ORDER BY user_id, project_id",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+/// Make `member` a `role` of `owner`'s organization.
+async fn make(pool: &PgPool, owner: &str, member: &str, role: &str) {
+    let (status, body) = call(
+        pool,
+        "PUT",
+        &format!("/internal/v1/organization/members/{member}/role"),
+        owner,
+        Some(json!({ "role": role })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{member} made {role}: {body}");
+}
+
+/// A member of the organization is seated on one of its projects by its owner
+/// with nothing to accept: listed at once, told by mail, shown the seat in
+/// `/me` until they have seen it, and recorded on the owner's chain.
+#[sqlx::test]
+async fn an_owner_seats_a_member_of_the_organization_with_nothing_to_accept(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let (app, mail) = app_recording_mail(pool.clone());
+    sign_in(&pool, "user_owner").await;
+    sign_in(&pool, "user_member").await;
+    enrol(&pool, "user_owner", "user_member").await;
+    let project = project_of(&pool, "user_owner").await;
+    let organization = organization_of(&pool, "user_owner").await;
+    assert!(
+        mail.0.lock().unwrap().is_empty(),
+        "nothing above mails through this app"
+    );
+
+    let req = as_person(
+        Request::builder()
+            .method("POST")
+            .uri(format!("/internal/v1/projects/{project}/members"))
+            .header("x-service-secret", SERVICE_SECRET)
+            .header("x-organization-id", &organization)
+            .header("x-project-id", &project)
+            .header("content-type", "application/json"),
+        &pool,
+        "user_owner",
+    )
+    .await
+    .body(Body::from(
+        json!({ "memberId": "user_member", "role": "member" }).to_string(),
+    ))
+    .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body = json_body(resp).await;
+    assert_eq!(body["memberId"], "user_member");
+    assert_eq!(body["role"], "member");
+    assert_eq!(body["email"], address_of("user_member"));
+    assert_eq!(body["ownerOrganizationId"], organization);
+
+    let (status, roster) = call_in(
+        &pool,
+        "GET",
+        &format!("/internal/v1/projects/{project}/members"),
+        "user_owner",
+        Some(&project),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{roster}");
+    assert!(
+        roster["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["member_id"] == "user_member" && m["role"] == "member"),
+        "the seat is on the roster at once: {roster}"
+    );
+
+    let me = sign_in(&pool, "user_member").await;
+    assert!(
+        me["memberships"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["projectId"] == project && m["role"] == "member"),
+        "the member holds the seat: {me}"
+    );
+    let seats = me["givenSeats"].as_array().unwrap();
+    assert_eq!(seats.len(), 1, "the seat waits to be seen: {me}");
+    assert_eq!(seats[0]["projectId"], project);
+    assert_eq!(seats[0]["projectName"], "Platform");
+    assert_eq!(seats[0]["projectSlug"], "platform");
+    assert_eq!(seats[0]["organizationId"], organization);
+    assert_eq!(seats[0]["organizationName"], "Acme");
+    // The slug the owner's first sign-in minted, which the rename to Acme keeps.
+    let home_slug = me["organizations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["organizationId"] == organization)
+        .and_then(|o| o["slug"].as_str())
+        .expect("the member lists Acme")
+        .to_owned();
+    assert_eq!(seats[0]["organizationSlug"], home_slug);
+    assert_eq!(seats[0]["role"], "member");
+    assert_eq!(seats[0]["giverEmail"], address_of("user_owner"));
+
+    let sent = mail.0.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1, "one mail, to the member: {sent:?}");
+    assert_eq!(sent[0].to, address_of("user_member"));
+    assert!(
+        sent[0].subject.contains("added you to Platform"),
+        "{}",
+        sent[0].subject
+    );
+    assert!(
+        sent[0]
+            .text
+            .contains(&format!("http://localhost:3000/{organization}/{project}")),
+        "the mail leads to the project, by ids a rename or a move leaves alone: {}",
+        sent[0].text
+    );
+    assert!(
+        sent[0].text.contains("nothing to accept"),
+        "{}",
+        sent[0].text
+    );
+
+    let changes: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT action, metadata ->> 'kind' FROM audit.events
+          WHERE organization_id = $1 AND resource_kind = 'member' AND resource_id = $2
+            AND in_project = $3
+          ORDER BY seq",
+    )
+    .bind(&organization)
+    .bind("user_member")
+    .bind(&project)
+    .fetch_all(&pool)
+    .await
+    .expect("read the chain");
+    assert_eq!(
+        changes,
+        vec![("created".to_owned(), Some("seat_given".to_owned()))],
+        "the seat is on the owner's chain, in the project"
+    );
+
+    // Seen: the seat leaves /me, its organization named for the person's
+    // other consoles; seeing it again is nothing, and names none.
+    for expected in [json!(organization), Value::Null] {
+        let (status, body) = call(
+            &pool,
+            "POST",
+            &format!("/internal/v1/me/seats/{project}/seen"),
+            "user_member",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["organizationId"], expected);
+    }
+    let me = sign_in(&pool, "user_member").await;
+    assert!(
+        me["givenSeats"].as_array().unwrap().is_empty(),
+        "seen, the seat is no longer the bell's: {me}"
+    );
+    assert!(
+        me["memberships"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["projectId"] == project),
+        "and still held: {me}"
+    );
+}
+
+/// Who gives a seat, and to whom: the organization's owner and admins, to
+/// its members — never a project-seat admin who is only a member of the
+/// organization, nor to its owner or admins, who hold every project, nor to
+/// a stranger, nor twice.
+#[sqlx::test]
+async fn a_seat_is_given_by_the_organizations_owner_or_admins_to_its_members_alone(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    for user in [
+        "user_owner",
+        "user_member",
+        "user_cat",
+        "user_dan",
+        "user_eve",
+    ] {
+        sign_in(&pool, user).await;
+    }
+    enrol(&pool, "user_owner", "user_member").await;
+    let project = project_of(&pool, "user_owner").await;
+
+    // Cat is an admin of the organization; Dan an admin seat on the project
+    // alone, which enrols him as a member of the organization.
+    let (status, offer) = call(
+        &pool,
+        "POST",
+        "/internal/v1/organization/invites",
+        "user_owner",
+        Some(json!({ "email": address_of("user_cat"), "role": "admin" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{offer}");
+    let (status, body) = accept(
+        &pool,
+        "user_cat",
+        &secret_of(offer["link"].as_str().unwrap()),
+    )
+    .await;
+    assert!(status.is_success(), "{status} {body}");
+    let (status, offer) = invite(&pool, "user_owner", &address_of("user_dan"), "admin").await;
+    assert_eq!(status, StatusCode::CREATED, "{offer}");
+    let (status, body) = accept(
+        &pool,
+        "user_dan",
+        &secret_of(offer["link"].as_str().unwrap()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    let (status, body) = give(&pool, "user_dan", &project, "user_member", "member").await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "a project admin alone: {body}"
+    );
+    assert_eq!(
+        body["detail"],
+        "only the organization's owner or an admin can add a member from its roster"
+    );
+    let (status, _) = give(&pool, "user_member", &project, "user_eve", "member").await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "a member off the project");
+
+    let (status, body) = give(&pool, "user_owner", &project, "user_eve", "member").await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "a stranger to the organization: {body}"
+    );
+    let (status, body) = give(&pool, "user_owner", &project, "user_cat", "member").await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "an organization admin holds every project: {body}"
+    );
+    let (status, body) = give(&pool, "user_cat", &project, "user_owner", "member").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "so does the owner: {body}");
+    let (status, body) = give(&pool, "user_owner", &project, "user_member", "owner").await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "no seat makes an owner: {body}"
+    );
+
+    let (status, body) = give(&pool, "user_cat", &project, "user_member", "admin").await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "an organization admin gives the seat: {body}"
+    );
+    assert_eq!(body["role"], "admin");
+    let (status, body) = give(&pool, "user_owner", &project, "user_member", "member").await;
+    assert_eq!(status, StatusCode::CONFLICT, "a second seat: {body}");
+    assert_eq!(body["detail"], "that person is already a member");
+
+    // Nothing of the refusals wrote a seat, and the one given stands as given.
+    let roster: Vec<(String, String)> = sqlx::query_as(
+        "SELECT user_id, role FROM auth.project_members WHERE project_id = $1 ORDER BY user_id",
+    )
+    .bind(&project)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        roster,
+        vec![
+            ("user_dan".to_owned(), "admin".to_owned()),
+            ("user_member".to_owned(), "admin".to_owned()),
+        ]
+    );
+}
+
+/// A seat given as its person is removed from the organization waits for the
+/// removal, and then finds nobody on the roster to seat.
+#[sqlx::test]
+async fn a_seat_given_as_its_person_is_removed_goes_in_turn(pool: PgPool) {
+    let (owner, _) = owner_and_member(&pool, "admin").await;
+    let third = "user_third";
+    sign_in(&pool, third).await;
+    enrol(&pool, &owner, third).await;
+    let organization = OrganizationId::try_new(organization_of(&pool, &owner).await).unwrap();
+    let project = project_of(&pool, &owner).await;
+
+    let pin = holding_chain(&pool, &organization).await;
+    let removing = {
+        let (pool, owner) = (pool.clone(), owner.clone());
+        tokio::spawn(async move {
+            call(
+                &pool,
+                "DELETE",
+                &format!("/internal/v1/organization/members/{third}"),
+                &owner,
+                None,
+            )
+            .await
+        })
+    };
+    until_queued_on_advisory_locks(&pool, 1).await;
+    let giving = {
+        let (pool, owner, project) = (pool.clone(), owner.clone(), project.clone());
+        tokio::spawn(async move { give(&pool, &owner, &project, third, "member").await })
+    };
+    until_queued_on_advisory_locks(&pool, 2).await;
+    pin.rollback().await.unwrap();
+
+    let (removed, body) = removing.await.unwrap();
+    assert_eq!(removed, StatusCode::NO_CONTENT, "{body}");
+    let (given, body) = giving.await.unwrap();
+    assert_eq!(given, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["detail"], "that person is not in this organization");
+    let seats: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM auth.project_members WHERE project_id = $1 AND user_id = $2",
+    )
+    .bind(&project)
+    .bind(third)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(seats, 0, "a seat was written for somebody off the roster");
+}
+
+/// With the `members` feature switched off for the organization, no seat is
+/// given, as no invitation is sent.
+#[sqlx::test]
+async fn a_switched_off_members_feature_gives_no_seat(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    sign_in(&pool, "user_owner").await;
+    sign_in(&pool, "user_member").await;
+    enrol(&pool, "user_owner", "user_member").await;
+    let project = project_of(&pool, "user_owner").await;
+    sqlx::query(
+        "INSERT INTO auth.organization_flags (organization_id, key, enabled, note, actor)
+         VALUES ($1, 'members', false, 'test', 'test')",
+    )
+    .bind(organization_of(&pool, "user_owner").await)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = give(&pool, "user_owner", &project, "user_member", "member").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert_eq!(body["type"], "/errors/tenant/feature-off");
+    let seats: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM auth.project_members WHERE project_id = $1 AND user_id = 'user_member'",
+    )
+    .bind(&project)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(seats, 0);
+}
+
+/// An invitation to the project sent before the seat is spent by it: the seat
+/// withdraws it, and its link then answers as any withdrawn one, never a 500.
+#[sqlx::test]
+async fn a_seat_given_withdraws_the_persons_invitation_to_the_project(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    sign_in(&pool, "user_owner").await;
+    sign_in(&pool, "user_member").await;
+    enrol(&pool, "user_owner", "user_member").await;
+    let project = project_of(&pool, "user_owner").await;
+    let (status, offer) = invite(&pool, "user_owner", &address_of("user_member"), "admin").await;
+    assert_eq!(status, StatusCode::CREATED, "{offer}");
+    let secret = secret_of(offer["link"].as_str().expect("the link"));
+
+    let (status, body) = give(&pool, "user_owner", &project, "user_member", "member").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let live: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM auth.member_invites
+          WHERE project_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL",
+    )
+    .bind(&project)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(live, 0, "the invitation outlived the seat");
+    let withdrawn: i64 = sqlx::query_scalar(
+        "SELECT (metadata ->> 'invitations_withdrawn')::bigint FROM audit.events
+          WHERE in_project = $1 AND metadata ->> 'kind' = 'seat_given'",
+    )
+    .bind(&project)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(withdrawn, 1);
+
+    let (status, body) = accept(&pool, "user_member", &secret).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    let role: String = sqlx::query_scalar(
+        "SELECT role FROM auth.project_members WHERE project_id = $1 AND user_id = 'user_member'",
+    )
+    .bind(&project)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(role, "member", "the link rewrote the seat given");
+}
+
+/// An accept that finds the seat already held — taken since the link was read
+/// — is refused whole with a 409, its invitation left as it was, never a 500
+/// from a transaction the duplicate aborted.
+#[sqlx::test]
+async fn an_accept_finding_the_seat_already_held_is_refused_whole(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    sign_in(&pool, "user_owner").await;
+    sign_in(&pool, "user_member").await;
+    let project = project_of(&pool, "user_owner").await;
+    let (status, offer) = invite(&pool, "user_owner", &address_of("user_member"), "admin").await;
+    assert_eq!(status, StatusCode::CREATED, "{offer}");
+    let secret = secret_of(offer["link"].as_str().expect("the link"));
+    sqlx::query(
+        "INSERT INTO auth.project_members (project_id, user_id, role, added_by)
+         VALUES ($1, 'user_member', 'member', 'user_owner')",
+    )
+    .bind(&project)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = accept(&pool, "user_member", &secret).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["detail"], "you are already a member of this project");
+    let accepted: bool = sqlx::query_scalar(
+        "SELECT accepted_at IS NOT NULL FROM auth.member_invites WHERE project_id = $1",
+    )
+    .bind(&project)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(!accepted, "a refused accept spent the invitation");
+}
+
+/// An accept queued behind a seat given, which withdrew its invitation, is
+/// told the seat is held rather than that its link was used.
+#[sqlx::test]
+async fn an_accept_overtaken_by_a_seat_given_says_the_seat_is_held(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    sign_in(&pool, "user_owner").await;
+    sign_in(&pool, "user_member").await;
+    enrol(&pool, "user_owner", "user_member").await;
+    let organization = OrganizationId::try_new(organization_of(&pool, "user_owner").await).unwrap();
+    let project = project_of(&pool, "user_owner").await;
+    let (status, offer) = invite(&pool, "user_owner", &address_of("user_member"), "member").await;
+    assert_eq!(status, StatusCode::CREATED, "{offer}");
+    let secret = secret_of(offer["link"].as_str().expect("the link"));
+
+    // The seat waits on the chain holding the organization's lock; the accept,
+    // its invitation read live, queues on that lock behind it.
+    let pin = holding_chain(&pool, &organization).await;
+    let giving = {
+        let (pool, project) = (pool.clone(), project.clone());
+        tokio::spawn(
+            async move { give(&pool, "user_owner", &project, "user_member", "member").await },
+        )
+    };
+    until_queued_on_advisory_locks(&pool, 1).await;
+    let accepting = {
+        let pool = pool.clone();
+        tokio::spawn(async move { accept(&pool, "user_member", &secret).await })
+    };
+    until_queued_on_advisory_locks(&pool, 2).await;
+    pin.rollback().await.unwrap();
+
+    let (given, body) = giving.await.unwrap();
+    assert_eq!(given, StatusCode::CREATED, "{body}");
+    let (accepted, body) = accepting.await.unwrap();
+    assert_eq!(accepted, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["detail"], "you are already a member of this project");
+    let (seats, withdrawn): (i64, bool) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM auth.project_members
+                  WHERE project_id = $1 AND user_id = 'user_member'),
+                (SELECT revoked_at IS NOT NULL AND accepted_at IS NULL
+                   FROM auth.member_invites WHERE project_id = $1)",
+    )
+    .bind(&project)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(seats, 1);
+    assert!(withdrawn, "the invitation was spent rather than withdrawn");
+}
+
+/// The project's feed is told of a seat given, naming the member as the
+/// notice's subject, which is what lets an erasure unname them.
+#[sqlx::test]
+async fn a_seat_given_tells_the_projects_feed_naming_its_member(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let (app, _, calls) = app_recording(pool.clone());
+    sign_in(&pool, "user_owner").await;
+    sign_in(&pool, "user_member").await;
+    enrol(&pool, "user_owner", "user_member").await;
+    sqlx::query(
+        "UPDATE auth.identities SET display_name = 'Dana Scully' WHERE user_id = 'user_member'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let organization = organization_of(&pool, "user_owner").await;
+    let project = project_of(&pool, "user_owner").await;
+
+    let (status, body) = give_through(app, &pool, "user_owner", &project, "user_member").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(
+        calls.calls(),
+        [SiblingCall::Emit {
+            organization_id: organization,
+            project_id: Some(project),
+            kind: NotificationKind::MemberAdded,
+            subject_user_id: Some("user_member".into()),
+            title: "Dana Scully was added to the project".into(),
+        }]
+    );
+}
+
+/// A seat that waited while its person's account deletion was confirmed is
+/// left to the erasure: nobody is mailed, and the project's feed names nobody
+/// its last pass could miss.
+#[sqlx::test]
+async fn a_seat_given_as_its_persons_account_goes_tells_nobody(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let (app, mail, calls) = app_recording(pool.clone());
+    sign_in(&pool, "user_owner").await;
+    sign_in(&pool, "user_member").await;
+    enrol(&pool, "user_owner", "user_member").await;
+    let organization = OrganizationId::try_new(organization_of(&pool, "user_owner").await).unwrap();
+    let project = project_of(&pool, "user_owner").await;
+
+    // The seat, its person read as staying, waits on the chain; the deletion
+    // is confirmed meanwhile.
+    let pin = holding_chain(&pool, &organization).await;
+    let giving = {
+        let (pool, project) = (pool.clone(), project.clone());
+        tokio::spawn(async move {
+            give_through(app, &pool, "user_owner", &project, "user_member").await
+        })
+    };
+    until_queued_on_advisory_locks(&pool, 1).await;
+    sqlx::query(
+        "INSERT INTO auth.accounts (user_id, deletion_requested_at) VALUES ('user_member', now())
+         ON CONFLICT (user_id) DO UPDATE SET deletion_requested_at = now()",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    pin.rollback().await.unwrap();
+
+    let (status, body) = giving.await.unwrap();
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert!(
+        mail.0.lock().unwrap().is_empty(),
+        "a person whose account is going was mailed"
+    );
+    assert!(
+        calls.calls().is_empty(),
+        "the feed was told of a person whose account is going: {:?}",
+        calls.calls()
+    );
+}
+
+/// Seeing a seat marks that one alone: not the person's seat on another
+/// project, nor another person's on the same one.
+#[sqlx::test]
+async fn seeing_a_seat_marks_that_seat_alone(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    sign_in(&pool, "user_owner").await;
+    for member in ["user_member", "user_third"] {
+        sign_in(&pool, member).await;
+        enrol(&pool, "user_owner", member).await;
+    }
+    let organization = organization_of(&pool, "user_owner").await;
+    let first = project_of(&pool, "user_owner").await;
+    let (status, created) = call(
+        &pool,
+        "POST",
+        "/internal/v1/projects",
+        "user_owner",
+        Some(json!({ "name": "Billing" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let second = created["id"].as_str().unwrap().to_owned();
+    for (project, member) in [
+        (&first, "user_member"),
+        (&second, "user_member"),
+        (&first, "user_third"),
+    ] {
+        let (status, body) = give(&pool, "user_owner", project, member, "member").await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+    }
+
+    let (status, body) = call(
+        &pool,
+        "POST",
+        &format!("/internal/v1/me/seats/{first}/seen"),
+        "user_member",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["organizationId"], organization);
+    assert_eq!(
+        unseen(&pool).await,
+        [
+            (second.clone(), "user_member".to_owned()),
+            (first.clone(), "user_third".to_owned()),
+        ]
+    );
+}
+
+/// A seat seen while a move holds its row past the role's `lock_timeout` is a
+/// 409 to try again, not a 500; the move gone, it goes through.
+#[sqlx::test]
+async fn a_seat_seen_kept_waiting_on_its_row_is_a_conflict(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    sign_in(&pool, "user_owner").await;
+    sign_in(&pool, "user_member").await;
+    enrol(&pool, "user_owner", "user_member").await;
+    let organization = organization_of(&pool, "user_owner").await;
+    let project = project_of(&pool, "user_owner").await;
+    let (status, body) = give(&pool, "user_owner", &project, "user_member", "member").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    // A tier sets `lock_timeout` on the role, which the suite's `SET ROLE`
+    // skips: the database's own reaches every new connection.
+    let database: String = sqlx::query_scalar("SELECT current_database()")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "ALTER DATABASE \"{database}\" SET lock_timeout = '1s'"
+    )))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let mut moving = pool.begin().await.unwrap();
+    sqlx::query(
+        "SELECT 1 FROM auth.project_members
+          WHERE project_id = $1 AND user_id = 'user_member' FOR UPDATE",
+    )
+    .bind(&project)
+    .execute(&mut *moving)
+    .await
+    .unwrap();
+
+    let uri = format!("/internal/v1/me/seats/{project}/seen");
+    let seen = || call(&pool, "POST", &uri, "user_member", None);
+    let (status, body) = tokio::time::timeout(std::time::Duration::from_secs(10), seen())
+        .await
+        .expect("the seen lane waited past its lock_timeout");
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        body["detail"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("busy")),
+        "{body}"
+    );
+    moving.rollback().await.unwrap();
+    let (status, body) = seen().await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["organizationId"], organization);
+}
+
+/// A member made an admin while a seat for them waits is given none: their
+/// role is read under the organization's lock, and an admin holds every
+/// project already.
+#[sqlx::test]
+async fn a_member_made_an_admin_as_a_seat_waits_is_given_none(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    sign_in(&pool, "user_owner").await;
+    sign_in(&pool, "user_member").await;
+    enrol(&pool, "user_owner", "user_member").await;
+    let organization = OrganizationId::try_new(organization_of(&pool, "user_owner").await).unwrap();
+    let project = project_of(&pool, "user_owner").await;
+
+    let pin = holding_chain(&pool, &organization).await;
+    let promoting = {
+        let pool = pool.clone();
+        tokio::spawn(async move {
+            call(
+                &pool,
+                "PUT",
+                "/internal/v1/organization/members/user_member/role",
+                "user_owner",
+                Some(json!({ "role": "admin" })),
+            )
+            .await
+        })
+    };
+    until_queued_on_advisory_locks(&pool, 1).await;
+    let giving = {
+        let (pool, project) = (pool.clone(), project.clone());
+        tokio::spawn(
+            async move { give(&pool, "user_owner", &project, "user_member", "member").await },
+        )
+    };
+    until_queued_on_advisory_locks(&pool, 2).await;
+    pin.rollback().await.unwrap();
+
+    let (promoted, body) = promoting.await.unwrap();
+    assert_eq!(promoted, StatusCode::OK, "{body}");
+    let (given, body) = giving.await.unwrap();
+    assert_eq!(given, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(
+        body["detail"],
+        "the organization's owner and admins are on every project already"
+    );
+    assert!(unseen(&pool).await.is_empty(), "an admin was given a seat");
+}
+
+/// An admin demoted as they give a seat gives none, though an admin seat of
+/// their own on the project still lets them manage its members: the roster is
+/// its owner's and admins' alone.
+#[sqlx::test]
+async fn an_admin_demoted_as_they_give_a_seat_gives_none(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    sign_in(&pool, "user_owner").await;
+    for member in ["user_admin", "user_member"] {
+        sign_in(&pool, member).await;
+        enrol(&pool, "user_owner", member).await;
+    }
+    let organization = OrganizationId::try_new(organization_of(&pool, "user_owner").await).unwrap();
+    let project = project_of(&pool, "user_owner").await;
+    let (status, body) = give(&pool, "user_owner", &project, "user_admin", "admin").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    make(&pool, "user_owner", "user_admin", "admin").await;
+
+    let pin = holding_chain(&pool, &organization).await;
+    let demoting = {
+        let pool = pool.clone();
+        tokio::spawn(async move {
+            call(
+                &pool,
+                "PUT",
+                "/internal/v1/organization/members/user_admin/role",
+                "user_owner",
+                Some(json!({ "role": "member" })),
+            )
+            .await
+        })
+    };
+    until_queued_on_advisory_locks(&pool, 1).await;
+    let giving = {
+        let (pool, project) = (pool.clone(), project.clone());
+        tokio::spawn(
+            async move { give(&pool, "user_admin", &project, "user_member", "member").await },
+        )
+    };
+    until_queued_on_advisory_locks(&pool, 2).await;
+    pin.rollback().await.unwrap();
+
+    let (demoted, body) = demoting.await.unwrap();
+    assert_eq!(demoted, StatusCode::OK, "{body}");
+    let (given, body) = giving.await.unwrap();
+    assert_eq!(given, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(
+        body["detail"],
+        "only the organization's owner or an admin can add a member from its roster"
+    );
+    let seats: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM auth.project_members WHERE project_id = $1 AND user_id = 'user_member'",
+    )
+    .bind(&project)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(seats, 0, "a demoted admin gave a seat");
+}
+
+/// The bell shows a seat given while its person is a Member of an active
+/// organization alone: made an admin, they hold every project; once its
+/// deletion starts, the organization is closed. An erased giver leaves it
+/// named by its organization.
+#[sqlx::test]
+async fn the_bell_shows_a_seat_given_to_a_member_of_an_active_organization(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    sign_in(&pool, "user_owner").await;
+    for member in ["user_admin", "user_member"] {
+        sign_in(&pool, member).await;
+        enrol(&pool, "user_owner", member).await;
+    }
+    make(&pool, "user_owner", "user_admin", "admin").await;
+    let organization = organization_of(&pool, "user_owner").await;
+    let project = project_of(&pool, "user_owner").await;
+    let (status, body) = give(&pool, "user_admin", &project, "user_member", "member").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let bell = |me: Value| me["givenSeats"].as_array().unwrap().clone();
+
+    let seats = bell(sign_in(&pool, "user_member").await);
+    assert_eq!(seats.len(), 1);
+    assert_eq!(seats[0]["giverEmail"], address_of("user_admin"));
+
+    make(&pool, "user_owner", "user_member", "admin").await;
+    assert!(
+        bell(sign_in(&pool, "user_member").await).is_empty(),
+        "an admin is shown a seat they need not hold"
+    );
+    make(&pool, "user_owner", "user_member", "member").await;
+    assert_eq!(bell(sign_in(&pool, "user_member").await).len(), 1);
+
+    // What an erasure leaves of the giver: an id nobody answers to.
+    sqlx::query("UPDATE auth.project_members SET added_by = 'user_erased' WHERE project_id = $1")
+        .bind(&project)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let seats = bell(sign_in(&pool, "user_member").await);
+    assert_eq!(
+        seats.len(),
+        1,
+        "an erased giver took the seat from the bell"
+    );
+    assert_eq!(seats[0]["giverEmail"], Value::Null);
+    assert_eq!(seats[0]["giverDisplayName"], Value::Null);
+
+    sqlx::query(
+        "UPDATE auth.organizations
+            SET status = 'pending_deletion', deletion_requested_at = now(),
+                erase_after = now() + interval '15 minutes', deletion_kind = 'owner'
+          WHERE external_id = $1",
+    )
+    .bind(&organization)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(
+        bell(sign_in(&pool, "user_member").await).is_empty(),
+        "a closed organization's seat is in the bell"
+    );
+}
+
+/// A member of the organization whose account deletion is confirmed is given
+/// no seat, and the refusal reads as a stranger's.
+#[sqlx::test]
+async fn a_person_whose_account_is_going_is_given_no_seat(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    sign_in(&pool, "user_owner").await;
+    sign_in(&pool, "user_member").await;
+    enrol(&pool, "user_owner", "user_member").await;
+    let project = project_of(&pool, "user_owner").await;
+    sqlx::query(
+        "INSERT INTO auth.accounts (user_id, deletion_requested_at) VALUES ('user_member', now())
+         ON CONFLICT (user_id) DO UPDATE SET deletion_requested_at = now()",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = give(&pool, "user_owner", &project, "user_member", "member").await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["detail"], "that person is not in this organization");
+    let seats: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM auth.project_members WHERE project_id = $1 AND user_id = 'user_member'",
+    )
+    .bind(&project)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(seats, 0);
+}
+
+/// Each seat given mails its person, so a project gives at most as many a day
+/// as it sends invitations, counted off the chain: a removal does not reset it.
+#[sqlx::test]
+async fn the_seats_a_project_gives_are_capped_a_day(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    sign_in(&pool, "user_owner").await;
+    sign_in(&pool, "user_member").await;
+    enrol(&pool, "user_owner", "user_member").await;
+    let project = project_of(&pool, "user_owner").await;
+    for _ in 0..telmoni_auth::handler::invite::INVITE_DAILY_MAX {
+        let (status, body) = give(&pool, "user_owner", &project, "user_member", "member").await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        let (status, body) = call_in(
+            &pool,
+            "DELETE",
+            &format!("/internal/v1/projects/{project}/members/user_member"),
+            "user_owner",
+            Some(&project),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    }
+
+    let (status, body) = give(&pool, "user_owner", &project, "user_member", "member").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(
+        body["detail"],
+        "you have added 20 members to this project today — the rest can be added tomorrow"
+    );
+}
+
 /// The whole loop: invite by address, accept, see it on both sides, remove it.
 #[sqlx::test]
 async fn an_invitation_accepted_seats_a_member_and_both_sides_see_it(pool: PgPool) {
     let (owner, member) = owner_and_member(&pool, "admin").await;
+    // A seat its holder took is seen as it is written: the bell lists none.
+    let me = sign_in(&pool, &member).await;
+    assert_eq!(me["givenSeats"], json!([]), "{me}");
 
     let (status, body) = call(
         &pool,

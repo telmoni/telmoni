@@ -331,7 +331,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route(
             "/projects/{project_id}/members",
-            get(handler::member::list_members),
+            get(handler::member::list_members).post(handler::member::give_seat),
         )
         .route(
             "/projects/{project_id}/members/{member_id}/role",
@@ -441,6 +441,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             delete(handler::invite::revoke_invite),
         )
         .route("/invites/accept", post(handler::invite::accept_invite))
+        .route(
+            "/me/seats/{project_id}/seen",
+            post(handler::member::mark_seat_seen),
+        )
         .route(
             "/me/invites",
             get(handler::invite::list_my_incoming_invites),

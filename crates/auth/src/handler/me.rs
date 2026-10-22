@@ -86,6 +86,9 @@ pub struct MeResponse {
     pub memberships: Vec<members::Membership>,
     /// Pending invitations addressed to the person's email.
     pub incoming_invites: Vec<invites::IncomingInvite>,
+    /// Seats given to the person from an organization's roster that they have
+    /// not seen yet: the bell's to show.
+    pub given_seats: Vec<members::GivenSeat>,
     /// Projects whose owner has offered them to the person and whose offer
     /// is still open, each labelled by the organization it would leave.
     pub project_offers: Vec<members::ProjectOffer>,
@@ -208,6 +211,7 @@ pub(crate) async fn answer(
         Vec::new()
     };
     let project_offers = members::project_offers_to(&mut mtx, &user_id).await?;
+    let given_seats = members::unseen_given_to(&mut mtx, &user_id).await?;
     let requested = requested_organization(headers);
     let default = default_organization(&organizations, person.default_organization_id.as_ref());
     let active = choose_active(&organizations, requested.as_ref(), default.as_ref());
@@ -252,6 +256,7 @@ pub(crate) async fn answer(
         default_organization_id: default,
         memberships,
         incoming_invites,
+        given_seats,
         project_offers,
         flags,
         first_login,

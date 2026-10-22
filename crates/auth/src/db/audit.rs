@@ -29,6 +29,26 @@ pub struct AuditRow {
     pub in_project: Option<ProjectId>,
 }
 
+/// How many seats the organization's roster gave on a project since `since`,
+/// read off its chain: a removal takes the seat's own row away.
+pub async fn seats_given_since<B: HasOrganization>(
+    tx: &mut Scoped<'_, B>,
+    organization_id: &OrganizationId,
+    project_id: &ProjectId,
+    since: DateTime<Utc>,
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM audit.events
+          WHERE organization_id = $1 AND in_project = $2
+            AND metadata ->> 'kind' = 'seat_given' AND created_at >= $3",
+    )
+    .bind(organization_id)
+    .bind(project_id)
+    .bind(since)
+    .fetch_one(tx.conn())
+    .await
+}
+
 /// Filters for [`list`]. `cursor` paginates newest-first via the `UUIDv7` PK.
 pub struct AuditQuery<'a> {
     pub organization_id: &'a OrganizationId,

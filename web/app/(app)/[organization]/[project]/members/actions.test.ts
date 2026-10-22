@@ -60,13 +60,15 @@ vi.mock("@/lib/events/publisher", () => ({
 import { refresh, revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 
-import { tryFetchWithTimeout } from "@/lib/api/fetch";
+import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { featureOff } from "@/lib/server/flags";
 import { rateLimit } from "@/lib/api/rate-limit";
 import { identityContext, personHeaders } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
 
 import {
   acceptIncomingInviteAction,
+  addMemberAction,
   cancelProjectOfferAction,
   declineIncomingInviteAction,
   inviteMemberAction,
@@ -551,5 +553,115 @@ describe("Incoming invites server actions", () => {
       // The page is drawn again for the change that landed, not the refusal.
       expect(vi.mocked(refresh)).toHaveBeenCalledOnce();
     });
+  });
+});
+
+
+// A seat given from the organization's roster: the lane is told whom and at
+// what role, and their own console is told at the address auth answered.
+describe("addMemberAction", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getServerSession).mockResolvedValue({
+      userId: "usr_1",
+      email: "owner@example.test",
+      accessToken: "at_1",
+    } as never);
+    vi.mocked(rateLimit).mockResolvedValue(null);
+    vi.mocked(identityContext).mockResolvedValue({
+      userId: "usr_1",
+      organizationId: "org_1",
+      role: "owner",
+      accessToken: "at_1",
+    });
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "seat_1",
+          memberId: "user_dana",
+          email: "dana@example.test",
+          role: "member",
+          ownerOrganizationId: "org_1",
+        }),
+        { status: 201 },
+      ),
+    );
+  });
+
+  it("posts the member and the role to the project's members lane, and tells their console", async () => {
+    const res = await addMemberAction("project_1", "user_dana", "member");
+    expect(res).toEqual({ error: null });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://auth.test/internal/v1/projects/project_1/members",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          authorization: "Bearer at_1",
+          "x-project-id": "project_1",
+          "content-type": "application/json",
+        }),
+        body: JSON.stringify({ memberId: "user_dana", role: "member" }),
+      }),
+    );
+    expect(mockPublishEvent).toHaveBeenCalledTimes(1);
+    expect(mockPublishEvent).toHaveBeenCalledWith("bfev:user:dana@example.test", {
+      type: "membership:changed",
+      data: { organizationId: "org_1", projectId: "project_1" },
+    });
+    expect(vi.mocked(refresh)).toHaveBeenCalled();
+  });
+
+  it("refuses a role nobody can be given before any request", async () => {
+    const res = await addMemberAction("project_1", "user_dana", "owner" as never);
+    expect(res.error).toMatch(/admin or member/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses anything but a project id before any request", async () => {
+    const res = await addMemberAction("../organization", "user_dana", "member");
+    expect(res.error).toMatch(/resolve that project/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // Seated or removed since the page drew its roster: the page is drawn again,
+  // so the picker no longer offers whom auth refused.
+  it.each([
+    [409, "that person is already a member"],
+    [404, "that person is not in this organization"],
+  ])("hands back auth's %i, tells nobody, and draws the page again", async (status, detail) => {
+    vi.mocked(extractProblem).mockResolvedValueOnce({ message: detail } as never);
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ detail }), { status }));
+    const res = await addMemberAction("project_1", "user_dana", "member");
+    expect(res.error).toBe(detail);
+    expect(mockPublishEvent).not.toHaveBeenCalled();
+    expect(vi.mocked(refresh)).toHaveBeenCalledOnce();
+  });
+
+  it("leaves the page as it is on a refusal its roster has no part in", async () => {
+    vi.mocked(extractProblem).mockResolvedValueOnce({
+      message: "This organization is paused.",
+    } as never);
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ detail: "This organization is paused." }), { status: 402 }),
+    );
+    const res = await addMemberAction("project_1", "user_dana", "member");
+    expect(res.error).toBe("This organization is paused.");
+    expect(vi.mocked(refresh)).not.toHaveBeenCalled();
+  });
+
+  it("refuses before any request while the members feature is off", async () => {
+    vi.mocked(featureOff).mockResolvedValueOnce("Adding a member is switched off right now.");
+    const res = await addMemberAction("project_1", "user_dana", "member");
+    expect(res.error).toBe("Adding a member is switched off right now.");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("tells no console when auth's answer names no address, and still succeeds", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ id: "seat_1", memberId: "user_dana" }), { status: 201 }),
+    );
+    expect(await addMemberAction("project_1", "user_dana", "member")).toEqual({ error: null });
+    expect(mockPublishEvent).not.toHaveBeenCalled();
+    expect(vi.mocked(refresh)).toHaveBeenCalled();
   });
 });

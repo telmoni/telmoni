@@ -144,6 +144,7 @@ function standingAs(
     organizationNotFound: false,
     memberships: [],
     incomingInvites: [],
+    givenSeats: [],
     projectOffers: [],
     flags: {},
   });

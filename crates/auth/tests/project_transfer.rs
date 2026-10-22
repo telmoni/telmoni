@@ -387,6 +387,32 @@ async fn seat_of(pool: &PgPool, project: &str, user: &str) -> Option<(String, bo
     .unwrap()
 }
 
+/// Whether a seat still waits for its holder to see it, as a seat given from
+/// the roster does; `None` for no seat.
+async fn unseen(pool: &PgPool, project: &str, user: &str) -> Option<bool> {
+    sqlx::query_scalar(
+        "SELECT seen_at IS NULL FROM auth.project_members WHERE project_id = $1 AND user_id = $2",
+    )
+    .bind(project)
+    .bind(user)
+    .fetch_optional(pool)
+    .await
+    .unwrap()
+}
+
+/// Leave `user`'s seat waiting to be seen, as a seat given from the roster is.
+async fn given(pool: &PgPool, project: &str, user: &str) {
+    sqlx::query(
+        "UPDATE auth.project_members SET seen_at = NULL WHERE project_id = $1 AND user_id = $2",
+    )
+    .bind(project)
+    .bind(user)
+    .execute(pool)
+    .await
+    .unwrap();
+    assert_eq!(unseen(pool, project, user).await, Some(true));
+}
+
 /// A person's row on an organization's roster.
 async fn roster_role(pool: &PgPool, organization: &str, user: &str) -> Option<String> {
     sqlx::query_scalar(
@@ -542,6 +568,8 @@ async fn accepting_moves_the_project_with_its_keys_and_seats_and_both_chains_rec
         "somebody who holds no offer accepted it: {body}"
     );
 
+    given(&pool, &h.project, MEMBER).await;
+
     let (status, body) = accept(&pool, &h, ADMIN, &h.admins, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["projectId"], h.project);
@@ -549,6 +577,11 @@ async fn accepting_moves_the_project_with_its_keys_and_seats_and_both_chains_rec
     assert_eq!(body["previousOrganizationId"], h.source);
     assert_eq!(body["previousOwner"], OWNER);
     assert_eq!(body["name"], PROJECT_NAME);
+    assert_eq!(
+        unseen(&pool, &h.project, MEMBER).await,
+        Some(false),
+        "a seat the source's roster gave waits in the bell under the destination"
+    );
 
     assert_eq!(organization_of_project(&pool, &h.project).await, h.admins);
     let renamed: bool = sqlx::query_scalar(
@@ -2042,9 +2075,15 @@ async fn the_owner_moves_a_project_into_another_of_their_organizations(pool: PgP
         StatusCode::OK
     );
     let second = found(&pool, OWNER, "Second").await;
+    given(&pool, &h.project, MEMBER).await;
 
     let (status, body) = move_into(&pool, &h, OWNER, &h.source, &second).await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        unseen(&pool, &h.project, MEMBER).await,
+        Some(false),
+        "a seat the source's roster gave waits in the bell under the destination"
+    );
     assert_eq!(body["projectId"], h.project);
     assert_eq!(body["organizationId"], second);
     assert_eq!(body["previousOrganizationId"], h.source);

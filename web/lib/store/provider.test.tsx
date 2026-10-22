@@ -8,8 +8,10 @@ import {
   useActiveOrganizationId,
   useOrganizations,
   useAddIncomingInvite,
+  useGivenSeats,
   useUser,
   useIncomingInvites,
+  useRemoveGivenSeat,
   useProjects,
   useProjectsElsewhere,
   useRemoveIncomingInvite,
@@ -282,6 +284,85 @@ describe("the incoming invites slice", () => {
       fireEvent.click(screen.getByRole("button", { name: "remove" }));
     });
     expect(screen.getByTestId("invites-count").textContent).toBe("1");
+  });
+});
+
+// `StoreSeed` writes back only the fields it names: one it misses is emptied by
+// the seed's own effect right after the first render.
+describe("the seats given slice", () => {
+  const seat = (projectId: string) => ({
+    projectId,
+    projectName: "Support agent",
+    projectSlug: "support-agent",
+    organizationId: "org_alpha",
+    organizationName: "alpha",
+    organizationSlug: "alpha",
+    role: "member",
+    giverEmail: "alpha@example.test",
+    giverDisplayName: null,
+    createdAt: "2026-10-21T00:00:00Z",
+  });
+
+  function SeatCount() {
+    return <span data-testid="seats-count">{useGivenSeats().length}</span>;
+  }
+
+  function RemoveSeatButton({ projectId }: { projectId: string }) {
+    const remove = useRemoveGivenSeat();
+    return (
+      <button type="button" onClick={() => remove(projectId)}>
+        remove seat
+      </button>
+    );
+  }
+
+  const at = (seats: ReturnType<typeof seat>[], inner?: React.ReactNode) => (
+    <StoreProvider
+      organizations={[organization("alpha")]}
+      user={null}
+      flags={{}}
+      roles={{}}
+      projects={[]}
+      givenSeats={seats}
+    >
+      {inner}
+      <SeatCount />
+      <RemoveSeatButton projectId="project_a" />
+    </StoreProvider>
+  );
+
+  it("keeps the seats the layout handed over past the seed's own write", () => {
+    render(at([seat("project_a")]));
+    expect(screen.getByTestId("seats-count").textContent).toBe("1");
+  });
+
+  it("follows refreshed props, and the organization's own layout's seed", () => {
+    const view = render(at([seat("project_a")]));
+    view.rerender(at([seat("project_a"), seat("project_b")]));
+    expect(screen.getByTestId("seats-count").textContent).toBe("2");
+
+    view.rerender(
+      at(
+        [seat("project_a"), seat("project_b")],
+        <StoreSeed
+          organizations={[organization("alpha")]}
+          user={null}
+          flags={{}}
+          roles={{}}
+          projects={[]}
+          givenSeats={[]}
+        />,
+      ),
+    );
+    expect(screen.getByTestId("seats-count").textContent).toBe("0");
+  });
+
+  it("drops a seat seen at once, before the server says so", () => {
+    render(at([seat("project_a"), seat("project_b")]));
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "remove seat" }));
+    });
+    expect(screen.getByTestId("seats-count").textContent).toBe("1");
   });
 });
 

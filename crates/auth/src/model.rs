@@ -88,6 +88,9 @@ pub enum AuditKind {
     InviteDeclined,
     /// The roster row a project invitation's accept adds to its organization.
     EnrolledWithProjectInvite,
+    /// A seat the organization's owner or an admin gave one of its members,
+    /// with no invitation to accept.
+    SeatGiven,
     /// An organization invitation withdrawn.
     OrganizationInviteRevoked,
     /// An organization invitation accepted: the roster row it gave.
@@ -145,7 +148,7 @@ pub enum AuditKind {
 impl AuditKind {
     /// Every kind.
     #[must_use]
-    pub const fn all() -> [Self; 32] {
+    pub const fn all() -> [Self; 33] {
         [
             Self::AutoProvision,
             Self::OnRequest,
@@ -154,6 +157,7 @@ impl AuditKind {
             Self::InviteAccepted,
             Self::InviteDeclined,
             Self::EnrolledWithProjectInvite,
+            Self::SeatGiven,
             Self::OrganizationInviteRevoked,
             Self::OrganizationInviteAccepted,
             Self::OrganizationInviteDeclined,
@@ -193,6 +197,7 @@ impl AuditKind {
             Self::InviteAccepted => "invite_accepted",
             Self::InviteDeclined => "invite_declined",
             Self::EnrolledWithProjectInvite => "enrolled_with_project_invite",
+            Self::SeatGiven => "seat_given",
             Self::OrganizationInviteRevoked => "organization_invite_revoked",
             Self::OrganizationInviteAccepted => "organization_invite_accepted",
             Self::OrganizationInviteDeclined => "organization_invite_declined",
@@ -446,6 +451,7 @@ mod tests {
                 | AuditKind::InviteAccepted
                 | AuditKind::InviteDeclined
                 | AuditKind::EnrolledWithProjectInvite
+                | AuditKind::SeatGiven
                 | AuditKind::OrganizationInviteRevoked
                 | AuditKind::OrganizationInviteAccepted
                 | AuditKind::OrganizationInviteDeclined
@@ -490,6 +496,7 @@ mod tests {
                 "invite_accepted",
                 "invite_declined",
                 "enrolled_with_project_invite",
+                "seat_given",
                 "organization_invite_revoked",
                 "organization_invite_accepted",
                 "organization_invite_declined",

@@ -6,18 +6,20 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { MemberCeilingNotice, atCeiling } from "@/components/member-ceiling";
 import { ownerContact } from "@/lib/identity";
+import { administersOrganization } from "@/lib/organization-role";
 import { administersProject } from "@/lib/project-role";
 import { Role } from "@/lib/types/enums";
 import {
   activeOrganization,
   fetchInvites,
   fetchMembers,
+  fetchOrganizationMembers,
   fetchProjectBySlug,
   getServerContext,
 } from "@/lib/server/data";
 import { projectPath } from "@/lib/slug";
 
-import { AddMember, InviteRow, MemberRow } from "./_manage";
+import { AddMember, type Candidate, InviteRow, MemberRow } from "./_manage";
 
 export const metadata = { title: "Members" };
 
@@ -31,16 +33,21 @@ export default async function MembersPage({
   const [gate, project] = await Promise.all([getServerContext(), fetchProjectBySlug(slug)]);
   if (!gate || !project) return <ServiceUnavailable />;
 
-  const [listing, invited] = await Promise.all([
+  // The organization's roster is its owner's and admins' to seat from, so
+  // they alone are handed it; a project admin invites by email.
+  const home = activeOrganization(gate);
+  const fromRoster = home !== null && administersOrganization(home.role);
+  const [listing, invited, roster] = await Promise.all([
     fetchMembers(project.id),
     fetchInvites(project.id),
+    fromRoster ? fetchOrganizationMembers() : null,
   ]);
   if (listing.kind === "unavailable") return <ServiceUnavailable />;
   if (listing.kind === "forbidden") {
     return (
       <AccessDenied
         what="this project's roster"
-        owner={ownerContact(activeOrganization(gate))}
+        owner={ownerContact(home)}
         backHref={projectPath(organization, slug)}
       />
     );
@@ -48,16 +55,39 @@ export default async function MembersPage({
 
   const isOwner = project.role === Role.Owner;
   const canManage = administersProject(project.role);
-  // A seat here counts against the owning organization's ceiling: at it, an
-  // invitation would be refused, so the button goes and the deployment's
-  // sentence stands in its place.
+  // Who may be seated here with nothing to accept: the organization's members
+  // holding no seat on this project. Its owner and admins hold every project.
+  const seated = new Set(listing.members.map((m) => m.member_id));
+  const candidates: Candidate[] =
+    roster?.kind === "ok"
+      ? roster.members
+          .filter((m) => m.role === "member" && !seated.has(m.member_id))
+          .map((m) => ({
+            memberId: m.member_id,
+            email: m.email,
+            displayName: m.display_name ?? null,
+          }))
+      : [];
+  // An invitation counts against the owning organization's ceiling: at it,
+  // one would be refused, so the deployment's sentence stands in its place. A
+  // seat from the roster adds nobody, so it stays while there is one to give.
   const full = atCeiling(listing.ceiling);
+  const offered = canManage && (!full || candidates.length > 0);
 
   return (
     <>
       <PageHeader
         title="Members"
-        action={canManage && !full ? <AddMember projectId={project.id} /> : undefined}
+        action={
+          offered ? (
+            <AddMember
+              projectId={project.id}
+              candidates={candidates}
+              rosterUnread={fromRoster && roster?.kind !== "ok"}
+              inviteClosed={full ? listing.ceiling?.detail : undefined}
+            />
+          ) : undefined
+        }
       />
 
       <div className="grid gap-6">
@@ -109,8 +139,9 @@ export default async function MembersPage({
                   Nobody else has access to this project.
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Invite somebody by email. They get a link, and nothing
-                  changes here until they accept it.
+                  {candidates.length > 0
+                    ? "Add somebody from the organization, or invite somebody by email."
+                    : "Invite somebody by email. They get a link, and nothing changes here until they accept it."}
                 </p>
               </div>
             </Card>

@@ -81,6 +81,7 @@ function me(organizations: OrganizationEntry[], activeOrganizationId: string): S
     organizationNotFound: false,
     memberships: [],
     incomingInvites: [],
+    givenSeats: [],
     projectOffers: [],
     flags: {},
   };

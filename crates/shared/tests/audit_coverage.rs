@@ -384,6 +384,13 @@ const MUTATIONS: &[Mutation] = &[
     },
     Mutation {
         file: "crates/auth/src/handler/member.rs",
+        fn_name: "give_seat",
+        action: "Created",
+        resource_kind: "Member",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
+        file: "crates/auth/src/handler/member.rs",
         fn_name: "update_role",
         action: "Updated",
         resource_kind: "Member",

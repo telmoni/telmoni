@@ -14,6 +14,7 @@ export function normalizeSeed(initial: StoreInitial): Seed {
     user: initial.user,
     organizations: initial.organizations ?? NONE,
     incomingInvites: initial.incomingInvites ?? NONE,
+    givenSeats: initial.givenSeats ?? NONE,
     projectOffers: initial.projectOffers ?? NONE,
     activeOrganizationId: initial.activeOrganizationId ?? null,
     flags: initial.flags,
@@ -79,6 +80,11 @@ export const createIdentitySlice = (
           incomingInvites: s.incomingInvites.filter((i) => i.id !== id),
         })),
 
+      removeGivenSeat: (projectId) =>
+        set((s) => ({
+          givenSeats: s.givenSeats.filter((g) => g.projectId !== projectId),
+        })),
+
       // ⚠ **Compared against the last SEED, never against the live state.**
       // A local edit — an optimistic rename, an invite dismissed before the
       // server hears about it — moves the state and not the seed. Comparing
@@ -106,6 +112,7 @@ export const createIdentitySlice = (
           if (!same(was.incomingInvites, seed.incomingInvites)) {
             patch.incomingInvites = seed.incomingInvites;
           }
+          if (!same(was.givenSeats, seed.givenSeats)) patch.givenSeats = seed.givenSeats;
           if (!same(was.projectOffers, seed.projectOffers)) {
             patch.projectOffers = seed.projectOffers;
           }

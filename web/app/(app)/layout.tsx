@@ -72,6 +72,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           user={seed.user}
           organizations={ctx.organizations}
           incomingInvites={ctx.incomingInvites}
+          givenSeats={ctx.givenSeats}
           projectOffers={ctx.projectOffers}
           activeOrganizationId={null}
           flags={ctx.flags}

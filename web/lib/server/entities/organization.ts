@@ -13,6 +13,7 @@ import {
   type IncomingInvite,
 } from "@/lib/types/incoming-invite";
 import { type Role, asRole } from "@/lib/types/enums";
+import { type GivenSeat, GivenSeatSchema } from "@/lib/types/given-seat";
 
 import { getServerSession } from "../session";
 
@@ -112,6 +113,8 @@ export interface ServerContext {
   organizationNotFound: boolean;
   memberships: Membership[];
   incomingInvites: IncomingInvite[];
+  /// Seats given to the person from an organization's roster and not seen yet.
+  givenSeats: GivenSeat[];
   /// The projects offered to the person and still open to answer.
   projectOffers: ProjectOffer[];
   flags: FlagSet;
@@ -202,6 +205,7 @@ export const getServerContext = cache(
           defaultOrganizationId: z.string().nullable(),
           memberships:           z.array(MembershipSchema).optional(),
           incomingInvites:       z.array(IncomingInviteSchema).optional(),
+          givenSeats:            z.array(GivenSeatSchema).optional(),
           projectOffers:         z.array(ProjectOfferSchema).optional(),
           flags:                 FlagSetSchema.optional(),
         })
@@ -223,6 +227,7 @@ export const getServerContext = cache(
         organizationNotFound:  named !== null && active?.slug !== named,
         memberships:           (d.memberships ?? []).map((m) => ({ ...m, role: asRole(m.role) })),
         incomingInvites:       d.incomingInvites ?? [],
+        givenSeats:            d.givenSeats ?? [],
         projectOffers:         d.projectOffers ?? [],
         flags:                 d.flags ?? {},
       };

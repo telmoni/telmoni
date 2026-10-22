@@ -30,6 +30,13 @@ vi.mock("next/headers", () => ({
   headers: async () => new Headers(mockPath ? { "x-telmoni-path": mockPath } : {}),
 }));
 
+// The seat a project's opening marks seen, as the layout hands it over.
+vi.mock("./_given-seat-seen", () => ({
+  GivenSeatSeen: ({ projectId }: { projectId: string }) => (
+    <i data-testid="seat-seen" data-project={projectId} />
+  ),
+}));
+
 import ProjectLayout from "./layout";
 
 async function renderLayout(project: string, organization = "acme") {
@@ -68,6 +75,13 @@ describe("ProjectLayout", () => {
     expect(screen.getByTestId("page")).toBeInTheDocument();
     expect(mockRedirect).not.toHaveBeenCalled();
     expect(mockNotFound).not.toHaveBeenCalled();
+  });
+
+  // However it was reached — the mail's link, the sidebar — a seat given on
+  // the project is seen once the project is open.
+  it("hands the project it opens to what marks a seat given there seen", async () => {
+    await renderLayout("core");
+    expect(screen.getByTestId("seat-seen")).toHaveAttribute("data-project", "project_in_context");
   });
 
   it("answers 404 for a slug the organization has no project by", async () => {

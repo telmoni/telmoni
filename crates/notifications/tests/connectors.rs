@@ -4946,8 +4946,7 @@ async fn erasing_a_person_rewrites_the_deliveries_that_named_them(pool: PgPool) 
         row(queued).await,
         (
             "A former member joined the project".to_owned(),
-            "A former member accepted the invitation and is now a member on the project."
-                .to_owned(),
+            "A former member is now a member on the project.".to_owned(),
             None
         ),
         "the queued row goes out as rewritten"
@@ -4956,8 +4955,7 @@ async fn erasing_a_person_rewrites_the_deliveries_that_named_them(pool: PgPool) 
         row(delivered).await,
         (
             "A former member joined the project".to_owned(),
-            "A former member accepted the invitation and is now a member on the project."
-                .to_owned(),
+            "A former member is now a member on the project.".to_owned(),
             None
         ),
         "the delivered row keeps a redacted body a resend would carry"

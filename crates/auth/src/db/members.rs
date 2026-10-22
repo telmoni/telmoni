@@ -276,8 +276,9 @@ pub async fn role_on<B: SeatRead>(
     .await
 }
 
-/// Seat a member. Called by the invite ACCEPT and by nothing else: an owner
-/// cannot write this row directly, because the person it names has to agree.
+/// Seat a member, the constraint refusing a second seat ([`already_a_member`]
+/// names that refusal): the plain write fixtures seed with. The invite's accept
+/// writes through [`insert_if_absent`], and a seat given through [`give`].
 pub async fn insert<B: SeatInsert>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
@@ -299,6 +300,115 @@ pub async fn insert<B: SeatInsert>(
     .bind(derive_shard_key(project_id))
     .fetch_one(tx.conn())
     .await
+}
+
+/// Seat a member of the organization without their act: the row says so,
+/// `seen_at` empty, until they open or dismiss it in the console.
+pub async fn give<B: SeatInsert>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    member: &UserId,
+    role: Role,
+    given_by: &UserId,
+) -> sqlx::Result<Uuid> {
+    sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO auth.project_members
+             (id, project_id, user_id, role, added_by, shard_key, seen_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NULL)
+         RETURNING id",
+    )
+    .bind(Uuid::now_v7())
+    .bind(project_id)
+    .bind(member)
+    .bind(role)
+    .bind(given_by)
+    .bind(derive_shard_key(project_id))
+    .fetch_one(tx.conn())
+    .await
+}
+
+/// A seat given from the roster that its holder has not seen: what the bell
+/// shows them until they open the project or dismiss it.
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct GivenSeat {
+    pub project_id: ProjectId,
+    pub project_name: String,
+    pub project_slug: String,
+    pub organization_id: OrganizationId,
+    pub organization_name: String,
+    pub organization_slug: String,
+    pub role: Role,
+    /// Who gave it. `None` once they have been erased.
+    pub giver_email: Option<String>,
+    pub giver_display_name: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// The seats given to a person that they have not seen, in active
+/// organizations where they are a Member — an owner or admin holds every
+/// project, whatever the seat says — newest first. The lane: each names
+/// another organization and the person who gave it.
+pub async fn unseen_given_to(
+    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+    user_id: &UserId,
+) -> sqlx::Result<Vec<GivenSeat>> {
+    sqlx::query_as::<_, GivenSeat>(
+        "SELECT m.project_id, p.name AS project_name, p.slug AS project_slug,
+                p.organization_id, o.name AS organization_name, o.slug AS organization_slug,
+                m.role, giver.email AS giver_email, giver.display_name AS giver_display_name,
+                m.created_at
+           FROM auth.project_members m
+           JOIN auth.projects p ON p.external_id = m.project_id
+           JOIN auth.organizations o
+             ON o.external_id = p.organization_id AND o.status = 'active'
+           JOIN auth.organization_members r
+             ON r.organization_id = p.organization_id AND r.user_id = m.user_id
+            AND r.role = 'member'
+           LEFT JOIN auth.identities giver ON giver.user_id = m.added_by
+          WHERE m.user_id = $1 AND m.seen_at IS NULL
+          ORDER BY m.created_at DESC, m.id DESC",
+    )
+    .bind(user_id)
+    .fetch_all(tx.conn())
+    .await
+}
+
+/// The person has seen the seat given to them; answers the organization
+/// holding it when one was waiting. The lane: the person's own scope reads
+/// seats and writes none.
+pub async fn mark_seen(
+    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+    project_id: &ProjectId,
+    user_id: &UserId,
+) -> sqlx::Result<Option<OrganizationId>> {
+    sqlx::query_scalar::<_, OrganizationId>(
+        "UPDATE auth.project_members m SET seen_at = now()
+           FROM auth.projects p
+          WHERE m.project_id = $1 AND m.user_id = $2 AND m.seen_at IS NULL
+            AND p.external_id = m.project_id
+      RETURNING p.organization_id",
+    )
+    .bind(project_id)
+    .bind(user_id)
+    .fetch_optional(tx.conn())
+    .await
+}
+
+/// Every seat on a project counted as seen, as the project moves: the roster
+/// that gave one is not the organization it lands in.
+pub async fn mark_seen_on_project(
+    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
+    project_id: &ProjectId,
+) -> sqlx::Result<u64> {
+    let result = sqlx::query(
+        "UPDATE auth.project_members SET seen_at = now()
+          WHERE project_id = $1 AND seen_at IS NULL",
+    )
+    .bind(project_id)
+    .execute(tx.conn())
+    .await?;
+    Ok(result.rows_affected())
 }
 
 /// Seat somebody unless they already hold a seat, answering whether one was

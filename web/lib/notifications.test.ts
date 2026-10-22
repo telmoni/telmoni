@@ -5,7 +5,10 @@ import {
   bellLabel,
   inviteSubtitle,
   inviterText,
+  giverText,
+  seatSubtitle,
 } from "@/lib/notifications";
+import type { GivenSeat } from "@/lib/types/given-seat";
 import type { IncomingInvite } from "@/lib/types/incoming-invite";
 
 function invite(over: Partial<IncomingInvite> = {}): IncomingInvite {
@@ -101,5 +104,39 @@ describe("inviterText", () => {
     expect(
       inviterText(invite({ inviterEmail: null, inviterDisplayName: "Ada Lovelace" })),
     ).toBe("Ada Lovelace");
+  });
+});
+
+const SEAT: GivenSeat = {
+  projectId: "project_1",
+  projectName: "Support agent",
+  projectSlug: "support-agent",
+  organizationId: "org_1",
+  organizationName: "Acme",
+  organizationSlug: "acme",
+  role: "admin",
+  giverEmail: "ada@example.test",
+  giverDisplayName: "Ada Lovelace",
+  createdAt: "2026-10-21T00:00:00Z",
+};
+
+describe("seatSubtitle", () => {
+  it("names the organization the project is in, and the role", () => {
+    expect(seatSubtitle(SEAT)).toBe("Acme · Admin");
+  });
+});
+
+describe("giverText", () => {
+  it("prefers the giver's name", () => {
+    expect(giverText(SEAT)).toBe("Ada Lovelace");
+  });
+
+  it("falls back to the address, once, when the name is the address or absent", () => {
+    expect(giverText({ ...SEAT, giverDisplayName: null })).toBe("ada@example.test");
+    expect(giverText({ ...SEAT, giverDisplayName: "ada@example.test" })).toBe("ada@example.test");
+  });
+
+  it("credits the organization when the giver's account is gone", () => {
+    expect(giverText({ ...SEAT, giverEmail: null, giverDisplayName: null })).toBe("Acme");
   });
 });

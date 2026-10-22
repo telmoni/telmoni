@@ -16,7 +16,8 @@ pub enum NotificationKind {
     /// beside this repository's, which writes its own title and body. It lands
     /// on the organization's feed, never a project's.
     OrganizationAlert,
-    /// Somebody accepted an invitation to a project.
+    /// Somebody joined a project: accepted an invitation to it, or was given
+    /// a seat on it from the organization's roster.
     MemberAdded,
     /// A member left or was removed from a project.
     MemberLeft,

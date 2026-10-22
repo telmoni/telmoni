@@ -887,6 +887,7 @@ pub async fn accept(
         )
         .into());
     };
+    members::mark_seen_on_project(&mut tx, &project_id).await?;
     let organization_slug = organizations::slug_of(&mut tx, &destination).await?;
     // The seats that stay, read before the previous owner's is added so
     // theirs is recorded under its own kind: the new owner's is folded already.
@@ -1095,6 +1096,7 @@ pub async fn move_project(
     else {
         return Err(AuthError::Conflict("the project is no longer where it was".into()).into());
     };
+    members::mark_seen_on_project(&mut tx, &project_id).await?;
     let organization_slug = organizations::slug_of(&mut tx, &destination).await?;
     // Every seat holder on the destination's roster, as the accept enrols
     // them: `/me` lists a seat only in an organization its holder can open.

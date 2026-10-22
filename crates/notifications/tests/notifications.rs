@@ -1038,7 +1038,7 @@ async fn erasing_a_person_rewrites_every_notice_that_named_them(pool: PgPool) {
         assert_eq!(former.len(), 1, "{organization}: {body}");
         assert_eq!(
             former[0]["body"],
-            format!("A former member accepted the invitation and is now {role} on the project."),
+            format!("A former member is now {role} on the project."),
             "{organization}: the role survives the redaction, the name does not"
         );
         if organization == ORGANIZATION {

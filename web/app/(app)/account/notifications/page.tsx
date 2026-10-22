@@ -3,6 +3,7 @@ import { ServiceUnavailable } from "@/components/service-unavailable";
 import { Card } from "@/components/ui/card";
 import { getServerContext } from "@/lib/server/data";
 
+import { GivenSeatsSection } from "./_given-seats";
 import { IncomingInvitesSection } from "./_incoming-invites";
 import { OwnershipOffersSection } from "./_ownership-offers";
 import { ProjectOffersSection } from "./_project-offers";
@@ -16,8 +17,11 @@ export default async function AccountNotificationsPage() {
   const invites = gate.incomingInvites ?? [];
   const offers = gate.organizations.filter((o) => o.ownershipOfferExpiresAt);
   const projectOffers = gate.projectOffers ?? [];
+  const seats = gate.givenSeats ?? [];
   // Where an accepted project may land: the organizations the person owns.
   const owned = gate.organizations.filter((o) => o.role === "owner");
+  const nothing =
+    invites.length === 0 && offers.length === 0 && projectOffers.length === 0 && seats.length === 0;
 
   return (
     <>
@@ -25,14 +29,15 @@ export default async function AccountNotificationsPage() {
       <div className="grid gap-6">
         <OwnershipOffersSection offers={offers} />
         <ProjectOffersSection offers={projectOffers} owned={owned} />
+        <GivenSeatsSection seats={seats} />
         {invites.length > 0 && <IncomingInvitesSection invites={invites} />}
-        {invites.length === 0 && offers.length === 0 && projectOffers.length === 0 && (
+        {nothing && (
           <Card className="overflow-hidden p-0 gap-0" data-testid="notifications-empty">
             <div className="grid gap-1 p-4">
               <p className="text-sm font-medium">No notifications</p>
               <p className="text-sm text-muted-foreground">
-                Invitations to join an organization or a project, and offers
-                to take one over, show up here.
+                Invitations to join an organization or a project, offers to
+                take one over, and projects you were added to show up here.
               </p>
             </div>
           </Card>

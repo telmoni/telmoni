@@ -7,6 +7,8 @@ import {
 } from "@/lib/server/data";
 import { canonicalPath } from "@/lib/server/path";
 
+import { GivenSeatSeen } from "./_given-seat-seen";
+
 // The path's second segment names a project by its slug in the organization
 // the first one names, whose listing this is.
 export default async function ProjectLayout({
@@ -21,7 +23,15 @@ export default async function ProjectLayout({
   const listing = await fetchProjectListing();
   // Auth did not answer: each page says so itself.
   if (listing.kind !== "ok") return children;
-  if (listing.projects.some((p) => p.slug === segment)) return children;
+  const at = listing.projects.find((p) => p.slug === segment);
+  if (at) {
+    return (
+      <>
+        {children}
+        <GivenSeatSeen projectId={at.id} />
+      </>
+    );
+  }
 
   const here = listing.projects.find(
     (p) => p.id === segment || p.slug === segment.toLowerCase(),

@@ -7,6 +7,7 @@ import { unstable_rethrow } from "next/navigation";
 import { startTransition, useState, useTransition } from "react";
 import { toast } from "sonner";
 
+import { ChoiceGroup, type Choice } from "@/components/choice-group";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Td } from "@/components/data-table";
 import { LocalTime } from "@/components/local-time";
@@ -36,6 +37,7 @@ import type { Invite, Member } from "@/lib/server/data";
 import { roleLabel } from "@/lib/role-label";
 
 import {
+  addMemberAction,
   cancelProjectOfferAction,
   inviteMemberAction,
   offerProjectAction,
@@ -46,40 +48,98 @@ import {
 
 type Grantable = "admin" | "member";
 
+/// A member of the organization holding no seat on the project yet: the
+/// owner and admins may seat them here with nothing to accept.
+export type Candidate = { memberId: string; email: string; displayName: string | null };
+
+type Way = "roster" | "email";
+const WAYS: readonly Choice<Way>[] = [
+  { value: "roster", label: "From the organization" },
+  { value: "email", label: "By email" },
+];
+
 // Each of these takes the project its page rendered, by id: the actions act on
 // that one or on nothing.
-export function AddMember({ projectId }: { projectId: string }) {
+export function AddMember({
+  projectId,
+  candidates,
+  rosterUnread = false,
+  inviteClosed,
+}: {
+  projectId: string;
+  candidates: readonly Candidate[];
+  /** The organization's roster was this person's to read and could not be. */
+  rosterUnread?: boolean;
+  /** Why an invitation would be refused here — the organization's ceiling —
+   *  when it would: the roster's seats stay open. */
+  inviteClosed?: string;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <PageAction primary="Invite member" onClick={() => setOpen(true)}>
+      <PageAction primary="Add member" onClick={() => setOpen(true)}>
         <UserPlus className="size-4" />
-        Invite member
+        Add member
       </PageAction>
-      <AddDialog key={`add-${open}`} projectId={projectId} open={open} onOpenChange={setOpen} />
+      <AddDialog
+        key={`add-${open}`}
+        projectId={projectId}
+        candidates={candidates}
+        rosterUnread={rosterUnread}
+        inviteClosed={inviteClosed}
+        open={open}
+        onOpenChange={setOpen}
+      />
     </>
   );
 }
 
+// Two ways in. A member of the organization is seated at once, with nothing
+// to accept — offered while there is one left to seat, to the organization's
+// owner and admins, who alone are handed its roster. Anybody else is invited
+// by email, as before. One role serves both.
 function AddDialog({
   projectId,
+  candidates,
+  rosterUnread,
+  inviteClosed,
   open,
   onOpenChange,
 }: {
   projectId: string;
+  candidates: readonly Candidate[];
+  rosterUnread: boolean;
+  inviteClosed: string | undefined;
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
+  const [way, setWay] = useState<Way>(candidates.length > 0 ? "roster" : "email");
+  // Nobody chosen until somebody is: a seat given mails its person.
+  const [memberId, setMemberId] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Grantable>("member");
   const [error, setError] = useState<string | null>(null);
   const [link, setLink] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const chosen = candidates.find((c) => c.memberId === memberId);
+  const fromRoster = way === "roster" && candidates.length > 0;
 
   function submit() {
     setError(null);
     start(async () => {
       try {
+        if (fromRoster) {
+          if (!chosen) return;
+          const r = await addMemberAction(projectId, chosen.memberId, role);
+          if (r.error) setError(r.error);
+          else {
+            toast.success(
+              `Added ${personName(chosen)} as ${role === "admin" ? "an admin" : "a member"}.`,
+            );
+            startTransition(() => onOpenChange(false));
+          }
+          return;
+        }
         const r = await inviteMemberAction(projectId, email, role);
         if (r.error) setError(r.error);
         else {
@@ -110,24 +170,87 @@ function AddDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Invite a member</DialogTitle>
+          <DialogTitle>Add a member</DialogTitle>
         </DialogHeader>
         <DialogBody>
-          <DialogDescription>
-            By email address. They get a link, and nothing changes here until
-            they accept it — whether or not they already have an organization.
-          </DialogDescription>
-          <div className="grid gap-1.5">
-            <Label htmlFor="member-email">Email address</Label>
-            <Input
-              id="member-email"
-              type="email"
-              autoComplete="off"
-              value={email}
-              placeholder="dana@example.com"
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </div>
+          {candidates.length > 0 && (
+            <div className="grid gap-1.5">
+              <span id="member-way" className="text-sm leading-none font-medium">
+                Who
+              </span>
+              <div className="flex">
+                <ChoiceGroup
+                  labelledBy="member-way"
+                  describedBy={inviteClosed ? "member-way-closed" : undefined}
+                  options={
+                    inviteClosed
+                      ? WAYS.map((w) => (w.value === "email" ? { ...w, disabled: true } : w))
+                      : WAYS
+                  }
+                  value={way}
+                  onChange={(next) => {
+                    // Held while an add is under way: its answer is that way's.
+                    if (pending) return;
+                    setWay(next);
+                    setError(null);
+                  }}
+                />
+              </div>
+              {inviteClosed && (
+                <p id="member-way-closed" className="text-sm text-muted-foreground" role="note">
+                  {inviteClosed}
+                </p>
+              )}
+            </div>
+          )}
+          {fromRoster ? (
+            <>
+              <DialogDescription>
+                Somebody already in the organization is added at once, with
+                nothing to accept, and told by email and in their notifications.
+              </DialogDescription>
+              <div className="grid gap-1.5">
+                <Label htmlFor="member-person">Person</Label>
+                <Select value={memberId} onValueChange={setMemberId}>
+                  <SelectTrigger id="member-person" className="w-full">
+                    <SelectValue placeholder="Choose somebody" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {candidates.map((c) => (
+                      <SelectItem key={c.memberId} value={c.memberId}>
+                        {personName(c)}
+                        {personDetail(c) ? ` — ${personDetail(c)}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
+          ) : (
+            <>
+              <DialogDescription>
+                By email address. They get a link, and nothing changes here until
+                they accept it — whether or not they already have an organization.
+              </DialogDescription>
+              {rosterUnread && (
+                <p className="text-sm text-muted-foreground" role="note">
+                  The organization&rsquo;s members can&rsquo;t be read right now, so
+                  adding one of them waits; reload in a moment.
+                </p>
+              )}
+              <div className="grid gap-1.5">
+                <Label htmlFor="member-email">Email address</Label>
+                <Input
+                  id="member-email"
+                  type="email"
+                  autoComplete="off"
+                  value={email}
+                  placeholder="dana@example.com"
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
+            </>
+          )}
           <div className="grid gap-1.5">
             <Label htmlFor="member-role">Role</Label>
             <Select value={role} onValueChange={(v) => setRole(v as Grantable)}>
@@ -144,14 +267,24 @@ function AddDialog({
               </SelectContent>
             </Select>
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && (
+            <p className="text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          )}
         </DialogBody>
         <DialogFooter>
           <Button
             onClick={submit}
-            disabled={pending || email.trim().length === 0}
+            disabled={pending || (fromRoster ? !chosen : email.trim().length === 0)}
           >
-            {pending ? "Sending…" : "Send invitation"}
+            {fromRoster
+              ? pending
+                ? "Adding…"
+                : "Add"
+              : pending
+                ? "Sending…"
+                : "Send invitation"}
           </Button>
         </DialogFooter>
       </DialogContent>

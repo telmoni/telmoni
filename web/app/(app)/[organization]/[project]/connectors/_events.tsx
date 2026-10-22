@@ -19,7 +19,7 @@ import type { NotificationKind } from "@/lib/types/enums";
 // until someone says what raises it.
 const HINT = {
   organization_alert: "An alert for the organization's owner and admins.",
-  member_added: "Someone accepted an invitation to this project.",
+  member_added: "Someone joined this project: by an invitation, or added from the organization.",
   member_left: "Someone left or was removed from this project.",
   connector_connected: "A destination was connected to this project.",
   connector_disconnected: "A destination stopped accepting notices.",

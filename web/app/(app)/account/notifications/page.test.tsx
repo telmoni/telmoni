@@ -23,6 +23,11 @@ vi.mock("./_incoming-invites", () => ({
     <div data-testid="pending-invitations" data-count={invites.length} />
   ),
 }));
+// So do the seats given: their rows are tested on their own.
+vi.mock("./_given-seats", () => ({
+  GivenSeatsSection: ({ seats }: { seats: readonly unknown[] }) =>
+    seats.length > 0 ? <div data-testid="given-seats" data-count={seats.length} /> : null,
+}));
 
 const refresh = vi.hoisted(() => vi.fn());
 const push = vi.hoisted(() => vi.fn());
@@ -81,6 +86,7 @@ let mockContext: {
   activeOrganizationId: string;
   incomingInvites: unknown[];
   projectOffers?: ProjectOffer[];
+  givenSeats?: unknown[];
 } | null = null;
 vi.mock("@/lib/server/data", () => ({
   getServerContext: async () => mockContext,
@@ -143,14 +149,29 @@ function me(
   organizations: OrganizationEntry[],
   incomingInvites: unknown[] = [],
   projectOffers: ProjectOffer[] = [],
+  givenSeats: unknown[] = [],
 ) {
   mockContext = {
     organizations,
     activeOrganizationId: "org_own",
     incomingInvites,
     projectOffers,
+    givenSeats,
   };
 }
+
+const SEAT = {
+  projectId: "project_support",
+  projectName: "Support agent",
+  projectSlug: "support-agent",
+  organizationId: "org_offered",
+  organizationName: "Analytical Engines",
+  organizationSlug: "analytical-engines",
+  role: "member",
+  giverEmail: "charles@example.test",
+  giverDisplayName: "Charles Babbage",
+  createdAt: "2026-10-21T00:00:00Z",
+};
 
 const press = async (name: string) => {
   await act(async () => {
@@ -332,5 +353,25 @@ describe("AccountNotificationsPage: when there is nothing", () => {
     mockContext = null;
     render(await AccountNotificationsPage());
     expect(screen.getByTestId("outage")).toBeInTheDocument();
+  });
+});
+
+// A seat given from a roster is listed until seen; the page owes it the
+// section, and its empty words name it.
+describe("AccountNotificationsPage: seats given", () => {
+  it("lists the projects the person was added to, and no empty state beside them", async () => {
+    me([OWN], [], [], [SEAT]);
+    render(await AccountNotificationsPage());
+    expect(screen.getByTestId("given-seats")).toHaveAttribute("data-count", "1");
+    expect(screen.queryByTestId("notifications-empty")).toBeNull();
+  });
+
+  it("says, with nothing waiting, that added projects show up here too", async () => {
+    me([OWN]);
+    render(await AccountNotificationsPage());
+    expect(screen.queryByTestId("given-seats")).toBeNull();
+    expect(screen.getByTestId("notifications-empty")).toHaveTextContent(
+      "projects you were added to",
+    );
   });
 });

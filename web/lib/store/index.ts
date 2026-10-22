@@ -40,6 +40,7 @@ function useStore<T>(selector: (state: AppStore) => T): T {
 export const useUser = () => useStore((s) => s.user);
 export const useOrganizations = () => useStore((s) => s.organizations);
 export const useIncomingInvites = () => useStore((s) => s.incomingInvites);
+export const useGivenSeats = () => useStore((s) => s.givenSeats);
 export const useProjectOffers = () => useStore((s) => s.projectOffers);
 export const useActiveOrganizationId = () => useStore((s) => s.activeOrganizationId);
 /** The entry for the organization the console stands in. */
@@ -66,6 +67,7 @@ export const useAddProject = () => useStore((s) => s.addProject);
 export const useAddIncomingInvite = () => useStore((s) => s.addIncomingInvite);
 export const useRemoveIncomingInvite = () =>
   useStore((s) => s.removeIncomingInvite);
+export const useRemoveGivenSeat = () => useStore((s) => s.removeGivenSeat);
 
 export const useAuditExports = () => useStore((s) => s.auditExports);
 export const useAuditExportsStarted = () => useStore((s) => s.auditExportsStarted);

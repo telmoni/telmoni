@@ -101,6 +101,48 @@ export async function inviteMemberAction(
   return { error: null, link };
 }
 
+// A seat for a member of the organization, given with nothing to accept: the
+// lane refuses anyone off its roster, and anyone but the organization's owner
+// and admins. Their console learns of the project at the address auth
+// answered, never one the browser supplied.
+export async function addMemberAction(
+  projectId: string,
+  memberId: string,
+  role: "admin" | "member",
+): Promise<ActionResult> {
+  if (!isGivenRole(role)) return { error: NOT_A_GIVEN_ROLE };
+  const gate = await open("members:add", 30, projectId);
+  if ("error" in gate) return gate;
+  const off = await featureOff(Flag.Members);
+  if (off) return { error: off };
+
+  const res = await tryFetchWithTimeout(
+    `${gate.base}/internal/v1/projects/${encodeURIComponent(gate.projectId)}/members`,
+    {
+      method: "POST",
+      headers: { ...gate.headers, "content-type": "application/json" },
+      body: JSON.stringify({ memberId, role }),
+    },
+  );
+  if (!res?.ok) {
+    // Refused off a roster drawn before somebody seated or removed the person:
+    // the page is drawn again with what stands.
+    if (res?.status === 404 || res?.status === 409) refresh();
+    return answer(res);
+  }
+
+  const body: unknown = await res.json().catch(() => null);
+  const email = (body as { email?: unknown } | null)?.email;
+  if (typeof email === "string") {
+    await publishEvent(userChannel(email), {
+      type: "membership:changed",
+      data: { organizationId: gate.organizationId, projectId: gate.projectId },
+    });
+  }
+  refresh();
+  return { error: null };
+}
+
 export async function revokeInviteAction(
   projectId: string,
   inviteId: string,

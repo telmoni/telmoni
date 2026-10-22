@@ -7,6 +7,7 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
+use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -22,10 +23,13 @@ use telmoni_shared::{
 
 use crate::{
     AppState,
-    db::{AuthLane, members, organization_members, projects},
+    db::{
+        AuthLane, audit, flags, identities, invites, members, organization_members, organizations,
+        projects,
+    },
     handler::{
-        ActingProject, acting_project, authorize, emit_audit, hold_project, parse_project_id,
-        parse_user_id,
+        ActingProject, acting_project, authorize, emit_audit, hold_project,
+        invite::INVITE_DAILY_MAX, parse_project_id, parse_user_id, timed_out,
     },
     model::AuditKind,
 };
@@ -33,6 +37,15 @@ use crate::{
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateRoleRequest {
+    pub role: Role,
+}
+
+/// Body of `POST /internal/v1/projects/{project_id}/members`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GiveSeatRequest {
+    /// A member of the organization — their user id, as its roster lists them.
+    pub member_id: String,
     pub role: Role,
 }
 
@@ -97,6 +110,217 @@ pub async fn list_members(
     };
 
     Ok(Json(json!({ "members": rows, "ceiling": ceiling })))
+}
+
+/// `POST /internal/v1/projects/{project_id}/members` — a seat for a member of
+/// the organization, given by its owner or an admin with nothing to accept:
+/// the person agreed to the organization when they joined it. The project's
+/// feed is told, and the person by mail and in their bell (`/me`).
+pub async fn give_seat(
+    State(state): State<Arc<AppState>>,
+    Path(project_id): Path<String>,
+    principal: Principal,
+    Json(req): Json<GiveSeatRequest>,
+) -> Result<impl IntoResponse, TelmoniError> {
+    let project_id = parse_project_id(&project_id)?;
+    let member = parse_user_id(&req.member_id)?;
+    let actor = principal.user_id;
+    let role = grantable(req.role)?;
+    // Before the lane's transaction opens: a request never holds two of the
+    // pool's connections at once.
+    let going = leaving(&state, &member).await?;
+
+    let acting = acting_project(&state, &project_id, &actor).await?;
+    authorize(acting.role, Verb::Create, Resource::Member)?;
+    from_the_roster(acting.organization_role)?;
+    // A paused organization takes nothing new. Its member ceiling counts the
+    // roster, which a seat adds nobody to, so it is not asked.
+    if let Some(entitlements) = state.siblings.entitlements.as_deref() {
+        telmoni_shared::seam::admit_new(entitlements, &acting.organization).await?;
+    }
+    let acting = acting
+        .hold(&project_id, &actor, Verb::Create, Resource::Member)
+        .await?;
+    from_the_roster(acting.organization_role)?;
+
+    let mut acting = acting.enter_owner_scope().await?;
+    let organization = acting.organization.clone();
+    let flags = flags::resolve_for_organization(&mut acting.tx, &organization).await?;
+    if !flags.is_on(telmoni_shared::Flag::Members) {
+        return Err(telmoni_shared::TenantError::FeatureOff {
+            flag: telmoni_shared::Flag::Members,
+        }
+        .into());
+    }
+    match organization_members::role_on_organization(&mut acting.tx, &organization, &member).await?
+    {
+        Some(OrganizationRole::Member) => {}
+        Some(_) => {
+            return Err(AuthError::BadRequest(
+                "the organization's owner and admins are on every project already".into(),
+            )
+            .into());
+        }
+        None => return Err(not_on_the_roster()),
+    }
+    let Some(person) = identities::contact(&mut acting.tx, &member).await? else {
+        return Err(not_on_the_roster());
+    };
+    // Someone whose account is going is seated nowhere, as no invitation of
+    // theirs is accepted, and the refusal says no more than a stranger's.
+    if going {
+        return Err(not_on_the_roster());
+    }
+    // The mail each seat sends is capped as invitations are: the chain counts
+    // the seats given, which a removal takes away from the roster.
+    let since = Utc::now() - Duration::days(1);
+    if audit::seats_given_since(&mut acting.tx, &organization, &project_id, since).await?
+        >= INVITE_DAILY_MAX
+    {
+        return Err(AuthError::Conflict(format!(
+            "you have added {INVITE_DAILY_MAX} members to this project today — the rest can be added tomorrow"
+        ))
+        .into());
+    }
+    let Some(home) = organizations::get(&mut acting.tx, &organization).await? else {
+        return Err(AuthError::NotFound("organization not found".into()).into());
+    };
+    let Some(project) = projects::standing(&mut acting.tx, &project_id).await? else {
+        return Err(AuthError::NotFound("project not found".into()).into());
+    };
+    let giver = identities::contact(&mut acting.tx, &actor)
+        .await?
+        .map_or_else(|| home.name.clone(), |c| c.display());
+    let mut acting = acting.leave_owner_scope().await?;
+
+    // An invitation of theirs to this project is spent by the seat: accepted
+    // later, it would find the seat already held.
+    let withdrawn =
+        invites::revoke_live_for_email(&mut acting.tx, &project_id, &person.email).await?;
+    let seat = match members::give(&mut acting.tx, &project_id, &member, role, &actor).await {
+        Ok(id) => id,
+        Err(e) if members::already_a_member(&e) => {
+            return Err(AuthError::Conflict("that person is already a member".into()).into());
+        }
+        Err(e) => return Err(e.into()),
+    };
+    emit_audit(
+        &mut acting.tx,
+        AuditEvent {
+            organization_id: &organization,
+            in_project: Some(&project_id),
+            actor: Actor::User(actor.as_str()),
+            action: AuditAction::Created,
+            resource_kind: TelmoniResourceKind::Member,
+            resource_id: Some(member.as_str()),
+            request_id: None,
+            ip_address: None,
+            user_agent: None,
+            metadata: Some(json!({
+                "kind": AuditKind::SeatGiven,
+                "role": role,
+                "seat_id": seat,
+                "invitations_withdrawn": withdrawn,
+            })),
+        },
+    )
+    .await?;
+    acting.tx.commit().await?;
+
+    // A deletion confirmed while the seat waited leaves it to the erasure,
+    // whose last pass a notice naming the person could outrun: nobody is told.
+    let gone = leaving(&state, &member).await.unwrap_or_else(|e| {
+        tracing::warn!(project_id = %project_id, member = %member, error = %e, "seat's person not read again");
+        true
+    });
+    if gone {
+        tracing::info!(project_id = %project_id, member = %member, "member seated as their account goes; nobody told");
+    } else {
+        let name = person.display();
+        crate::notify::emit_member_seated(&state, &project_id, &organization, &member, &name, role)
+            .await;
+        // By id, which outlasts a slug: the console takes either segment as one.
+        let link = format!(
+            "{}/{organization}/{project_id}",
+            state.config.app_url.trim_end_matches('/')
+        );
+        if let Err(e) = state
+            .mailer
+            .send_project_seat(
+                &person.email,
+                &giver,
+                &project.name,
+                &home.name,
+                role,
+                &link,
+            )
+            .await
+        {
+            tracing::warn!(project_id = %project_id, member = %member, error = %e, "seat mail failed");
+        }
+    }
+
+    tracing::info!(project_id = %project_id, member = %member, %role, "member seated from the roster");
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "id": seat,
+            "memberId": member,
+            "email": person.email,
+            "role": role,
+            "ownerOrganizationId": organization,
+        })),
+    ))
+}
+
+/// The roster is the organization's: its owner and admins give seats from it.
+fn from_the_roster(role: Option<OrganizationRole>) -> Result<(), TelmoniError> {
+    match role {
+        Some(OrganizationRole::Owner | OrganizationRole::Admin) => Ok(()),
+        _ => Err(AuthzError::Forbidden(
+            "only the organization's owner or an admin can add a member from its roster".into(),
+        )
+        .into()),
+    }
+}
+
+fn not_on_the_roster() -> TelmoniError {
+    AuthError::NotFound("that person is not in this organization".into()).into()
+}
+
+/// Whether the person's account deletion is confirmed, or no account is
+/// recorded. Their account's own row is the lane's alone to read.
+async fn leaving(state: &AppState, member: &UserId) -> Result<bool, TelmoniError> {
+    let mut lane = maintenance_scope(&state.db, AuthLane).await?;
+    let person = identities::get(&mut lane, member).await?;
+    lane.commit().await?;
+    Ok(person.is_none_or(|p| p.deletion_requested_at.is_some()))
+}
+
+/// `POST /internal/v1/me/seats/{project_id}/seen` — the person has seen the
+/// seat given to them, and the bell stops showing it. Idempotent: answers the
+/// organization holding the seat when one was waiting, for the person's other
+/// consoles to be told, and `null` when none was.
+pub async fn mark_seat_seen(
+    State(state): State<Arc<AppState>>,
+    Path(project_id): Path<String>,
+    principal: Principal,
+) -> Result<impl IntoResponse, TelmoniError> {
+    let project_id = parse_project_id(&project_id)?;
+    let mut tx = maintenance_scope(&state.db, AuthLane).await?;
+    // A move marks its project's seats under its own locks: a wait the role's
+    // `lock_timeout` ends is a 409 to try again, as the lanes' lock waits are.
+    let organization = match members::mark_seen(&mut tx, &project_id, &principal.user_id).await {
+        Ok(organization) => organization,
+        Err(e) if timed_out(&e) => {
+            return Err(
+                AuthError::Conflict("the project is busy — try again in a moment".into()).into(),
+            );
+        }
+        Err(e) => return Err(e.into()),
+    };
+    tx.commit().await?;
+    Ok(Json(json!({ "organizationId": organization })))
 }
 
 /// `PUT /internal/v1/projects/{project_id}/members/{member_id}/role`.

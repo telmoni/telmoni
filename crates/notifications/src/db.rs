@@ -92,8 +92,7 @@ pub async fn insert_feed<B: Binding>(
 /// The text a `member_added` notice is left with once the person it named is
 /// erased. The role survives, from `metadata`; the name does not.
 const REDACTED_MEMBER_ADDED_TITLE: &str = "A former member joined the project";
-const REDACTED_MEMBER_ADDED_BODY_BEFORE_ROLE: &str =
-    "A former member accepted the invitation and is now ";
+const REDACTED_MEMBER_ADDED_BODY_BEFORE_ROLE: &str = "A former member is now ";
 const REDACTED_MEMBER_ADDED_BODY_AFTER_ROLE: &str = " on the project.";
 
 /// The text a `member_left` notice is left with once the person it named is

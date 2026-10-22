@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Role } from "@/lib/types/enums";
 
 const actions = vi.hoisted(() => ({
+  addMemberAction: vi.fn(async (): Promise<{ error: string | null }> => ({ error: null })),
   inviteMemberAction: vi.fn(async () => ({ error: null })),
   removeMemberAction: vi.fn(async () => ({ error: null })),
   revokeInviteAction: vi.fn(async () => ({ error: null })),
@@ -42,19 +43,54 @@ vi.mock("@/components/role-restricted", () => ({
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: () => {} }),
 }));
+vi.mock("sonner", () => ({
+  toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
+}));
+
+// Radix's listbox opens on pointer events jsdom does not dispatch; a native
+// select stands in, with the same value in and the same value out.
+vi.mock("@/components/ui/select", () => ({
+  Select: ({
+    value,
+    onValueChange,
+    disabled,
+    children,
+  }: {
+    value: string;
+    onValueChange: (v: string) => void;
+    disabled?: boolean;
+    children: React.ReactNode;
+  }) => (
+    <select value={value} disabled={disabled} onChange={(e) => onValueChange(e.target.value)}>
+      {children}
+    </select>
+  ),
+  SelectTrigger: () => null,
+  SelectValue: () => null,
+  SelectContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  SelectItem: ({ value, children }: { value: string; children: React.ReactNode }) => (
+    <option value={value}>{children}</option>
+  ),
+}));
 
 let mockContext: unknown;
 let mockMembers: unknown;
 let mockInvites: unknown;
 let mockProject: unknown;
+// The organization the page stands in, with the caller's role there: `null`
+// leaves the roster unread, as a page outside any organization would.
+let mockHome: { role: string } | null = null;
+let mockRoster: unknown = { kind: "ok", members: [] };
 const fetchMembers = vi.fn<(projectId: string) => Promise<unknown>>(async () => mockMembers);
 const fetchInvites = vi.fn<(projectId: string) => Promise<unknown>>(async () => mockInvites);
+const fetchOrganizationMembers = vi.fn(async () => mockRoster);
 
 vi.mock("@/lib/server/data", () => ({
-  activeOrganization: () => null,
+  activeOrganization: () => mockHome,
   getServerContext: async () => mockContext,
   fetchMembers: (projectId: string) => fetchMembers(projectId),
   fetchInvites: (projectId: string) => fetchInvites(projectId),
+  fetchOrganizationMembers: () => fetchOrganizationMembers(),
   fetchProjectBySlug: async () => mockProject,
 }));
 
@@ -67,6 +103,8 @@ vi.mock("@/lib/server/session", () => ({
     sessionRowId: null,
   }),
 }));
+
+import { toast } from "sonner";
 
 import MembersPage from "./page";
 
@@ -127,6 +165,190 @@ beforeEach(() => {
   };
   mockInvites = { kind: "ok", invites: [] };
   mockProject = projectAs(Role.Member);
+  mockHome = null;
+  mockRoster = { kind: "ok", members: [] };
+});
+
+// The organization's roster, as its owner reads it: the owner, the admin
+// already seated on the project, Ada, an admin of the organization who holds
+// every project already, and Dana, a member holding no seat here.
+const ROSTER = {
+  kind: "ok",
+  members: [
+    { id: "om_owner", member_id: "user_owner", email: "owner@example.com", display_name: "Owner User", role: "owner", created_at: "2026-08-01T00:00:00Z", is_owner: true },
+    { id: "om_2", member_id: "user_2", email: "admin@example.com", display_name: "Admin User", role: "member", created_at: "2026-09-01T00:00:00Z", is_owner: false },
+    { id: "om_ada", member_id: "user_ada", email: "ada@example.com", display_name: "Ada", role: "admin", created_at: "2026-09-01T00:00:00Z", is_owner: false },
+    { id: "om_3", member_id: "user_dana", email: "dana@example.com", display_name: "Dana", role: "member", created_at: "2026-09-02T00:00:00Z", is_owner: false },
+  ],
+};
+
+const press = async (name: RegExp | string) => {
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name }));
+  });
+};
+
+// A member of the organization is seated with nothing to accept, from the
+// roster only its owner and admins read; everybody else is invited by email.
+describe("MembersPage: adding from the organization", () => {
+  const asOwner = async (roster: unknown = ROSTER) => {
+    mockProject = projectAs(Role.Owner);
+    mockHome = { role: "owner" };
+    mockRoster = roster;
+    render(await MembersPage({ params: PARAMS }));
+    await press(/^Add member/);
+    return screen.getByRole("dialog");
+  };
+  const choose = async (dialog: HTMLElement, memberId: string) => {
+    const [people] = within(dialog).getAllByRole("combobox");
+    await act(async () => {
+      fireEvent.change(people!, { target: { value: memberId } });
+    });
+  };
+
+  it("offers the owner the members of the organization not yet seated here, and seats the one chosen", async () => {
+    const dialog = await asOwner();
+    expect(fetchOrganizationMembers).toHaveBeenCalled();
+    expect(within(dialog).getByRole("radio", { name: "From the organization" })).toHaveAttribute("aria-checked", "true");
+    const [people] = within(dialog).getAllByRole("combobox");
+    const names = within(people!).getAllByRole("option").map((o) => o.textContent);
+    expect(names).toEqual(["Dana — dana@example.com"]);
+
+    // Nobody is chosen for the owner: a seat given mails its person.
+    expect(within(dialog).getByRole("button", { name: "Add" })).toBeDisabled();
+    await choose(dialog, "user_dana");
+    await press("Add");
+    expect(actions.addMemberAction).toHaveBeenCalledWith(PROJECT, "user_dana", "member");
+    expect(actions.inviteMemberAction).not.toHaveBeenCalled();
+    expect(toast.success).toHaveBeenCalledWith("Added Dana as a member.");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("seats at the role chosen", async () => {
+    const dialog = await asOwner();
+    await choose(dialog, "user_dana");
+    const [, role] = within(dialog).getAllByRole("combobox");
+    await act(async () => {
+      fireEvent.change(role!, { target: { value: "admin" } });
+    });
+    await press("Add");
+    expect(actions.addMemberAction).toHaveBeenCalledWith(PROJECT, "user_dana", "admin");
+    expect(toast.success).toHaveBeenCalledWith("Added Dana as an admin.");
+  });
+
+  it("keeps the dialog open with auth's refusal", async () => {
+    actions.addMemberAction.mockResolvedValueOnce({ error: "that person is already a member" });
+    const dialog = await asOwner();
+    await choose(dialog, "user_dana");
+    await press("Add");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByRole("alert")).toHaveTextContent(
+      "that person is already a member",
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("still invites by email, once the way is switched", async () => {
+    await asOwner();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("radio", { name: "By email" }));
+    });
+    const dialog = screen.getByRole("dialog");
+    await act(async () => {
+      fireEvent.change(within(dialog).getByLabelText("Email address"), {
+        target: { value: "new@example.com" },
+      });
+    });
+    await press("Send invitation");
+    expect(actions.inviteMemberAction).toHaveBeenCalledWith(PROJECT, "new@example.com", "member");
+    expect(actions.addMemberAction).not.toHaveBeenCalled();
+  });
+
+  it("hands a project admin who is only a member of the organization the email form alone", async () => {
+    mockProject = projectAs(Role.Admin);
+    mockHome = { role: "member" };
+    mockRoster = ROSTER;
+    render(await MembersPage({ params: PARAMS }));
+    expect(fetchOrganizationMembers).not.toHaveBeenCalled();
+    await press(/^Add member/);
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).queryByRole("radiogroup")).toBeNull();
+    expect(within(dialog).getByLabelText("Email address")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Send invitation" })).toBeDisabled();
+    expect(within(dialog).queryByRole("note")).toBeNull();
+  });
+
+  it("offers the email form alone when every member of the organization holds a seat here", async () => {
+    const dialog = await asOwner({ kind: "ok", members: ROSTER.members.slice(0, 2) });
+    expect(within(dialog).queryByRole("radiogroup")).toBeNull();
+    expect(within(dialog).getByLabelText("Email address")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("note")).toBeNull();
+  });
+
+  it("forgets one way's refusal on switching to the other", async () => {
+    actions.addMemberAction.mockResolvedValueOnce({ error: "that person is already a member" });
+    const dialog = await asOwner();
+    await choose(dialog, "user_dana");
+    await press("Add");
+    expect(within(dialog).getByText("that person is already a member")).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("radio", { name: "By email" }));
+    });
+    expect(within(dialog).queryByText("that person is already a member")).toBeNull();
+  });
+
+  // The add's answer is the roster's: the way stays put until it comes.
+  it("holds the way while an add is under way", async () => {
+    actions.addMemberAction.mockReturnValueOnce(new Promise(() => {}));
+    const dialog = await asOwner();
+    await choose(dialog, "user_dana");
+    await press("Add");
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("radio", { name: "By email" }));
+    });
+    expect(within(dialog).getByRole("radio", { name: "From the organization" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(within(dialog).getByRole("button", { name: "Adding…" })).toBeDisabled();
+  });
+
+  // At the ceiling an invitation would be refused, and a seat from the roster
+  // adds nobody: the roster stays offered, and the way by email says why not.
+  it("keeps the roster open at the organization's ceiling, the invitation closed with its sentence", async () => {
+    mockMembers = {
+      ...(mockMembers as object),
+      ceiling: { limit: 1, held: 3, detail: "Hobby holds one member." },
+    };
+    const dialog = await asOwner();
+    expect(within(dialog).getByRole("radio", { name: "By email" })).toBeDisabled();
+    expect(within(dialog).getByRole("note")).toHaveTextContent("Hobby holds one member.");
+    expect(within(dialog).getByRole("radiogroup")).toHaveAccessibleDescription(
+      "Hobby holds one member.",
+    );
+    await choose(dialog, "user_dana");
+    await press("Add");
+    expect(actions.addMemberAction).toHaveBeenCalledWith(PROJECT, "user_dana", "member");
+  });
+
+  it("offers nothing at the ceiling with nobody left to seat", async () => {
+    mockProject = projectAs(Role.Owner);
+    mockHome = { role: "owner" };
+    mockRoster = { kind: "ok", members: ROSTER.members.slice(0, 2) };
+    mockMembers = {
+      ...(mockMembers as object),
+      ceiling: { limit: 1, held: 3, detail: "Hobby holds one member." },
+    };
+    render(await MembersPage({ params: PARAMS }));
+    expect(screen.queryByTestId("header-action")).toBeNull();
+    expect(screen.getByTestId("member-ceiling")).toHaveTextContent("Hobby holds one member.");
+  });
+
+  it("says so when the organization's members cannot be read, rather than offering nobody in silence", async () => {
+    const dialog = await asOwner({ kind: "unavailable" });
+    expect(within(dialog).queryByRole("radiogroup")).toBeNull();
+    expect(within(dialog).getByRole("note")).toHaveTextContent(/can’t be read right now/);
+  });
 });
 
 describe("MembersPage", () => {

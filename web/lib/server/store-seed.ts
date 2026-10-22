@@ -49,6 +49,7 @@ export const storeSeed = cache(async (): Promise<StoreInitial | null> => {
     },
     organizations: ctx?.organizations ?? [],
     incomingInvites: ctx?.incomingInvites ?? [],
+    givenSeats: ctx?.givenSeats ?? [],
     projectOffers: ctx?.projectOffers ?? [],
     activeOrganizationId,
     flags: ctx?.flags ?? {},

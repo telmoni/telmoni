@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { unstable_rethrow } from "next/navigation";
 import { Bell, Check, ChevronRight, Download, Loader2, X } from "lucide-react";
-import { useState, useTransition } from "react";
+import { useId, useRef, useState, useTransition } from "react";
 
 import { downloadExport, useAuditExportsWatcher } from "@/components/audit-exports";
 import {
@@ -15,15 +15,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { exportSummary } from "@/lib/audit-exports";
 import { NOTIFICATIONS_HREF } from "@/lib/console-nav";
 import { NOTIFICATIONS_KEY, sequenceHint } from "@/lib/keys";
 import {
   badgeCount,
   bellLabel,
+  giverText,
   inviteSubtitle,
   inviterText,
+  seatSubtitle,
 } from "@/lib/notifications";
 import { organizationLabel } from "@/lib/identity";
 import { administersOrganization } from "@/lib/organization-role";
@@ -33,6 +35,7 @@ import {
   useActiveOrganization,
   useAuditExports,
   useForgetAuditExport,
+  useGivenSeats,
   useIncomingInvites,
   useMarkAuditExportDownloaded,
   useOrganizations,
@@ -41,6 +44,7 @@ import {
 } from "@/lib/store";
 import { useLetterKeys } from "@/lib/use-accessibility";
 import { isBuilding, isWaiting, type AuditExport } from "@/lib/types/audit-export";
+import type { GivenSeat } from "@/lib/types/given-seat";
 import type { IncomingInvite } from "@/lib/types/incoming-invite";
 import { cn } from "@/lib/utils";
 
@@ -48,10 +52,12 @@ import {
   acceptIncomingInviteAction,
   declineIncomingInviteAction,
 } from "@/app/(app)/account/notifications/invite-actions";
+import { useGivenSeat } from "@/app/(app)/account/notifications/use-given-seat";
 
 export function NotificationsBell() {
   useAuditExportsWatcher();
   const invites = useIncomingInvites() ?? [];
+  const seats = useGivenSeats() ?? [];
   const offers = useOrganizations().filter((o) => o.ownershipOfferExpiresAt);
   const projectOffers = useProjectOffers() ?? [];
   // The person's audit log exports of the organization the console stands
@@ -66,12 +72,14 @@ export function NotificationsBell() {
   const exportsWaiting = exportsHere.filter(isWaiting);
   const exportsBuilding = exportsHere.filter(isBuilding);
   const count =
-    invites.length + offers.length + projectOffers.length + exportsWaiting.length;
+    invites.length + seats.length + offers.length + projectOffers.length + exportsWaiting.length;
   const badge = badgeCount(count);
   const letterKeys = useLetterKeys();
+  // Held here so a row that leads away can close the menu before it goes.
+  const [open, setOpen] = useState(false);
 
   return (
-    <DropdownMenu modal={false}>
+    <DropdownMenu modal={false} open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
         data-testid="notifications-bell"
         aria-label={bellLabel(count)}
@@ -147,6 +155,9 @@ export function NotificationsBell() {
             ))}
             {projectOffers.map((offer) => (
               <ProjectOfferRow key={offer.projectId} offer={offer} />
+            ))}
+            {seats.map((seat) => (
+              <GivenSeatRow key={seat.projectId} seat={seat} onLeave={() => setOpen(false)} />
             ))}
             {invites.map((invite) => (
               <InviteRow key={invite.id} invite={invite} />
@@ -265,6 +276,98 @@ function ProjectOfferRow({ offer }: { offer: ProjectOffer }) {
   );
 }
 
+// A project the person was added to from a roster, with nothing to answer.
+// Both buttons are menu items, so the keyboard reaches them: Open closes the
+// menu and marks the seat seen before it leads to the project; Dismiss marks
+// it and leaves the menu open, the focus moved on before the row goes.
+function GivenSeatRow({ seat, onLeave }: { seat: GivenSeat; onLeave: () => void }) {
+  const row = useRef<HTMLDivElement>(null);
+  const about = useId();
+  const { href, open, dismiss, error, pending } = useGivenSeat(seat, {
+    onLeave,
+    onGone: () => focusPast(row.current),
+  });
+  // Project names are an organization's own: two seats may share one.
+  const named = `${seat.projectName} in ${seat.organizationName}`;
+
+  return (
+    <div
+      ref={row}
+      className="grid gap-2 border-b border-border px-3 py-3 last:border-b-0"
+      data-testid="notifications-menu-seat"
+    >
+      {/* `min-w-0`, or the grid sizes the row to its longest line and a long
+          name runs past the menu instead of truncating. */}
+      <div id={about} className="grid min-w-0 gap-0.5">
+        <span className="truncate text-sm font-medium">{seat.projectName}</span>
+        <span className="truncate text-xs text-muted-foreground">
+          You were added · {seatSubtitle(seat)}
+        </span>
+        <span className="truncate text-xs text-muted-foreground/70">by {giverText(seat)}</span>
+      </div>
+
+      {error && (
+        <p className="text-xs text-destructive" role="alert">
+          {error}
+        </p>
+      )}
+
+      <div className="flex items-center gap-3">
+        <DropdownMenuItem
+          asChild
+          className={cn(
+            buttonVariants({ size: "sm" }),
+            // The icon takes the button's colour, as the Accept beside it does.
+            "h-7 flex-1 gap-1 text-xs focus:bg-primary/90 focus:text-primary-foreground [&_svg:not([class*='text-'])]:text-current",
+          )}
+        >
+          <Link
+            href={href}
+            onClick={open}
+            aria-label={`Open ${named}`}
+            aria-describedby={about}
+          >
+            <ChevronRight className="size-3.5" />
+            Open
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={pending}
+          // The menu stays open for the rows still waiting.
+          onSelect={(e) => {
+            e.preventDefault();
+            dismiss();
+          }}
+          aria-label={`Dismiss ${named}`}
+          aria-describedby={about}
+          className={cn(
+            buttonVariants({ variant: "outline", size: "sm" }),
+            "mt-0! h-7 flex-1 gap-1 text-xs text-muted-foreground hover:text-foreground focus:text-foreground [&_svg:not([class*='text-'])]:text-current",
+          )}
+        >
+          <X className="size-3.5" />
+          Dismiss
+        </DropdownMenuItem>
+      </div>
+    </div>
+  );
+}
+
+// The menu holds no focus of its own (`modal={false}`): a focused item gone
+// with its row would leave the focus on the page, out of the arrow keys'
+// reach. It moves to the next item first, or to the menu, which hands it on.
+function focusPast(row: HTMLElement | null) {
+  if (!row?.contains(document.activeElement)) return;
+  const menu = row.closest<HTMLElement>("[role='menu']");
+  const next = Array.from(menu?.querySelectorAll<HTMLElement>("[role='menuitem']") ?? []).find(
+    (item) =>
+      !row.contains(item) &&
+      !item.hasAttribute("data-disabled") &&
+      Boolean(row.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_FOLLOWING),
+  );
+  (next ?? menu)?.focus();
+}
+
 // ⚠ **A row, not a `DropdownMenuItem`.** A menu item closes the menu when it is
 // selected, and every click inside it counts — so Accept would settle one
 // invitation and then take the other three off the screen with it. A plain row
@@ -302,7 +405,7 @@ function InviteRow({ invite }: { invite: IncomingInvite }) {
       className="grid gap-2 border-b border-border px-3 py-3 last:border-b-0"
       data-testid="notifications-menu-invite"
     >
-      <div className="grid gap-0.5">
+      <div className="grid min-w-0 gap-0.5">
         <span className="truncate text-sm font-medium">
           {invite.targetName}
         </span>
