@@ -567,7 +567,7 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             &["SELECT", "DELETE"],
         ),
         // The purges delete a project's open runs with it; the ticker reads
-        // them across tenants to see one gone quiet (2.12). A run is opened,
+        // them across tenants to see one gone quiet (2.11). A run is opened,
         // heard and ended in the project's own scope. (A transfer rewrites
         // `organization_id` alone: a column grant, not this.)
         (

@@ -31,7 +31,7 @@ const V1_PER_SOURCE: u32 = 1_200;
 const CLI_PER_SOURCE: u32 = 120;
 /// How many a minute one address may make on `/ping/v1`: a host's crontab
 /// lines, each pinging its start and its end. The plan's own numbers, per
-/// organization and per key, come with the limiter (roadmap 2.11).
+/// organization and per key, come with the limiter (roadmap 2.10).
 const PING_PER_SOURCE: u32 = 1_200;
 /// How many a minute one address may make on `/otlp`, keyed or not: `/v1`'s
 /// rate, a hundred processes exporting at the batch cadence behind one

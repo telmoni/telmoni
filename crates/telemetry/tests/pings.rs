@@ -3843,7 +3843,7 @@ async fn a_path_that_does_not_decode_is_refused_as_the_lane_refuses(pool: PgPool
 /// ceiling's own 402 — what `curl -f` turns into cron's mail — naming what
 /// lifts it and never the key; nothing is made or recorded, and no notice is
 /// raised for it: the answer is the message, and the owner's digest is the
-/// limiter's (roadmap 2.11).
+/// limiter's (roadmap 2.10).
 #[sqlx::test]
 async fn past_the_plans_limit_a_ping_is_refused_with_the_ceilings_words(pool: PgPool) {
     apply_audit_migrations(&pool).await;
