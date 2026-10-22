@@ -44,7 +44,9 @@
       "connector_connected",
       "connector_disconnected",
       "monitor_discovered",
-      "ping_key_retired"
+      "ping_key_retired",
+      "incident_opened",
+      "incident_resolved"
     ],
     "OrganizationStatus": [
       "active",

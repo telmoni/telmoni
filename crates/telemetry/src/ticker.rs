@@ -37,6 +37,7 @@ use crate::AppState;
 use crate::db::{self, LastRun, MonitorRow, TelemetryLane};
 use crate::handler::chain;
 use crate::handler::monitors::due_after;
+use crate::incidents::{self, Trigger};
 use crate::live;
 use crate::outbox::{self, FinishedRun};
 
@@ -155,8 +156,9 @@ pub async fn visit_each(
 /// What became of one monitor the tick read.
 #[derive(Debug, PartialEq, Eq)]
 enum Visited {
-    /// Its state or its due time moved, or a run of its was ended: the
-    /// project's open consoles are told.
+    /// Its state or its due time moved, a run of its was ended, or a
+    /// flapping incident of its was let go of: the project's open consoles
+    /// are told.
     Changed {
         organization_id: OrganizationId,
         moved: bool,
@@ -258,57 +260,69 @@ async fn visit_held(
     }
     let stalled = db::has_stalled_run(tx, project_id, id).await?;
     let due = Due::of(&held, now);
-    // The row untouched: a run ended still changed the project's runs.
-    let unmoved = || {
-        if ended > 0 {
-            Visited::Changed {
-                organization_id: organization_id.clone(),
-                moved: false,
-                ended,
-            }
+    let mut row = held;
+    let mut moved = false;
+    // Nothing found, or its owner's to move: left as it is, its runs ended
+    // all the same. Found again where a run ended or the grace ran out,
+    // whatever else was found, so a monitor past its grace leaves the read
+    // however it stands.
+    if let Some(finding) = Finding::of(ended > 0, stalled, due)
+        && let Some(state) = state_after_tick(row.state, finding)
+    {
+        let next_due_at = if ended > 0 || due == Due::Past {
+            due_after(project_id, &row, now)
         } else {
-            Visited::Nothing
+            row.next_due_at
+        };
+        if state != row.state || next_due_at != row.next_due_at {
+            let Some(settled) =
+                db::settle_monitor_run(tx, project_id, id, state, next_due_at).await?
+            else {
+                return Ok(Visited::Nothing);
+            };
+            if settled.state == row.state {
+                tracing::debug!(
+                    project_id = %project_id,
+                    monitor_id = %id,
+                    "telemetry: the ticker found a monitor's next due time again"
+                );
+            } else {
+                tracing::info!(
+                    project_id = %project_id,
+                    monitor_id = %id,
+                    from = %row.state,
+                    to = %settled.state,
+                    finding = ?finding,
+                    "telemetry: the ticker moved a monitor"
+                );
+                incidents::on_change(
+                    tx,
+                    project_id,
+                    organization_id,
+                    &settled,
+                    row.state,
+                    Some(finding.trigger()),
+                    now,
+                )
+                .await?;
+            }
+            row = settled;
+            moved = true;
         }
-    };
-    let Some(finding) = Finding::of(ended > 0, stalled, due) else {
-        return Ok(unmoved());
-    };
-    // Its owner's to move: left as it is, its runs ended all the same.
-    let Some(state) = state_after_tick(held.state, finding) else {
-        return Ok(unmoved());
-    };
-    // Found again where a run ended or the grace ran out, whatever else was
-    // found, so a monitor past its grace leaves the read however it stands.
-    let next_due_at = if ended > 0 || due == Due::Past {
-        due_after(project_id, &held, now)
-    } else {
-        held.next_due_at
-    };
-    if state == held.state && next_due_at == held.next_due_at {
-        return Ok(unmoved());
     }
-    db::settle_monitor_run(tx, project_id, id, state, next_due_at).await?;
-    if state == held.state {
-        tracing::debug!(
-            project_id = %project_id,
-            monitor_id = %id,
-            "telemetry: the ticker found a monitor's next due time again"
-        );
+    // A flapping incident let go of once its monitor has held one state for
+    // the window, whatever else the visit did.
+    let steadied = incidents::steady(tx, project_id, organization_id, &row, now).await?
+        != incidents::Change::Nothing;
+    if moved || ended > 0 || steadied {
+        Ok(Visited::Changed {
+            organization_id: organization_id.clone(),
+            moved,
+            ended,
+        })
     } else {
-        tracing::info!(
-            project_id = %project_id,
-            monitor_id = %id,
-            from = %held.state,
-            to = %state,
-            finding = ?finding,
-            "telemetry: the ticker moved a monitor"
-        );
+        Ok(Visited::Nothing)
     }
-    Ok(Visited::Changed {
-        organization_id: organization_id.clone(),
-        moved: true,
-        ended,
-    })
 }
 
 /// The monitor's runs past their ceiling, each ended as `error` with no exit
@@ -404,6 +418,16 @@ enum Finding {
 }
 
 impl Finding {
+    /// What it says moved the monitor, for the incident its state opens.
+    const fn trigger(self) -> Trigger {
+        match self {
+            Self::Ended => Trigger::RunNeverEnded,
+            Self::Stalled => Trigger::RunStalled,
+            Self::Overdue => Trigger::RunNeverCame,
+            Self::Due => Trigger::RunLate,
+        }
+    }
+
     /// The gravest of what the tick found: whether a run was ended, whether
     /// one is quiet, and whether the monitor is due. `None` where nothing was.
     fn of(ended: bool, stalled: bool, due: Due) -> Option<Self> {

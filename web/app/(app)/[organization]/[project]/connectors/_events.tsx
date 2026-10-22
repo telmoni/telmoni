@@ -26,6 +26,8 @@ const HINT = {
   monitor_discovered: "A ping named a monitor this project did not have, so it was made and paused.",
   ping_key_retired:
     "The rotation retired a ping key, unused for over a week while a newer one stood.",
+  incident_opened: "A monitor needs someone: it failed, stalled, crossed a bound or is late.",
+  incident_resolved: "A monitor is healthy again, or was paused, and its incident closed.",
 } as const satisfies Record<NotificationKind, string>;
 
 // The picker's own state. "Selected" with nothing chosen is a state the

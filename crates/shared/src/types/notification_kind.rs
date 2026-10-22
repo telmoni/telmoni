@@ -38,12 +38,21 @@ pub enum NotificationKind {
     /// refused from then on, can be found from the feed rather than from
     /// cron's mail.
     PingKeyRetired,
+    /// An incident opened: a monitor moved into failed, stalled, over a bound
+    /// or late, and needs someone. Telemetry raises it on the project's feed,
+    /// once an incident, with the monitor, the cause and what moved it in the
+    /// metadata; a flapping monitor's says so.
+    IncidentOpened,
+    /// An incident resolved: the monitor is healthy again, or its owner
+    /// paused it. Telemetry raises it on the project's feed, once an
+    /// incident, with how it closed and how long it stood in the metadata.
+    IncidentResolved,
 }
 
 impl NotificationKind {
     /// Every kind, in wire order.
     #[must_use]
-    pub const fn all() -> [Self; 7] {
+    pub const fn all() -> [Self; 9] {
         [
             Self::OrganizationAlert,
             Self::MemberAdded,
@@ -52,6 +61,8 @@ impl NotificationKind {
             Self::ConnectorDisconnected,
             Self::MonitorDiscovered,
             Self::PingKeyRetired,
+            Self::IncidentOpened,
+            Self::IncidentResolved,
         ]
     }
 }
@@ -66,6 +77,8 @@ impl fmt::Display for NotificationKind {
             Self::ConnectorDisconnected => write!(f, "connector_disconnected"),
             Self::MonitorDiscovered => write!(f, "monitor_discovered"),
             Self::PingKeyRetired => write!(f, "ping_key_retired"),
+            Self::IncidentOpened => write!(f, "incident_opened"),
+            Self::IncidentResolved => write!(f, "incident_resolved"),
         }
     }
 }
@@ -81,10 +94,13 @@ impl FromStr for NotificationKind {
             "connector_disconnected" => Ok(Self::ConnectorDisconnected),
             "monitor_discovered" => Ok(Self::MonitorDiscovered),
             "ping_key_retired" => Ok(Self::PingKeyRetired),
+            "incident_opened" => Ok(Self::IncidentOpened),
+            "incident_resolved" => Ok(Self::IncidentResolved),
             _ => Err(ParseEnumError::new(
                 s,
                 "organization_alert, member_added, member_left, connector_connected, \
-                 connector_disconnected, monitor_discovered, ping_key_retired",
+                 connector_disconnected, monitor_discovered, ping_key_retired, \
+                 incident_opened, incident_resolved",
             )),
         }
     }
@@ -95,7 +111,7 @@ mod tests {
     use super::*;
 
     /// The vocabulary, read from the enum rather than restated here.
-    const ALL: [NotificationKind; 7] = NotificationKind::all();
+    const ALL: [NotificationKind; 9] = NotificationKind::all();
 
     /// `all()` is a hand-written array, so nothing but a `match` forces it to
     /// stay complete: a new variant fails to compile here until it is listed.
@@ -109,7 +125,9 @@ mod tests {
                 | NotificationKind::ConnectorConnected
                 | NotificationKind::ConnectorDisconnected
                 | NotificationKind::MonitorDiscovered
-                | NotificationKind::PingKeyRetired => {}
+                | NotificationKind::PingKeyRetired
+                | NotificationKind::IncidentOpened
+                | NotificationKind::IncidentResolved => {}
             }
         }
         let mut seen: Vec<String> = ALL.iter().map(ToString::to_string).collect();

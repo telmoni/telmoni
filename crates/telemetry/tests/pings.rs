@@ -1134,6 +1134,36 @@ fn rid() -> String {
     Uuid::new_v4().to_string()
 }
 
+/// The project's incidents, oldest first: id, cause, detail, how each closed
+/// if it has, and whether it is flapping.
+async fn incidents_of(
+    pool: &PgPool,
+    project: &ProjectId,
+) -> Vec<(Uuid, String, String, Option<String>, bool)> {
+    sqlx::query_as(
+        "SELECT id, cause, detail, resolution, flapping FROM telemetry.incidents
+          WHERE project_id = $1
+          ORDER BY opened_at, id",
+    )
+    .bind(project)
+    .fetch_all(pool)
+    .await
+    .expect("read a project's incidents")
+}
+
+/// The notices waiting in the project's outbox, oldest first.
+async fn notices_of(pool: &PgPool, project: &ProjectId) -> Vec<Value> {
+    sqlx::query_scalar(
+        "SELECT payload FROM telemetry.outbox
+          WHERE project_id = $1 AND kind = 'notice'
+          ORDER BY id",
+    )
+    .bind(project)
+    .fetch_all(pool)
+    .await
+    .expect("read a project's outbox")
+}
+
 /// What an answer tells a cache on the way, where it says anything.
 fn cache_control(response: &axum::response::Response) -> Option<&str> {
     response
@@ -1740,6 +1770,218 @@ async fn an_end_ping_tried_again_never_replaces_the_run_it_already_ended(pool: P
     let last = p.monitor("hourly-sync").await["last_run"].clone();
     assert_eq!(last["run_id"].as_str(), Some(other.as_str()), "{last}");
     assert_eq!(last["started_at"], last["ended_at"]);
+}
+
+/// A run ending in error opens an incident, once, saying what moved the
+/// monitor and the exit code; runs starting and failing again under it
+/// change it nothing; a run ending well resolves it, saying how long it
+/// stood; and the next failure opens another. Each notice reaches
+/// notifications through the outbox under its own dedup key.
+#[sqlx::test]
+async fn a_failing_run_opens_an_incident_and_a_run_ending_well_resolves_it(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    let made = p.make(hourly()).await;
+    let monitor_id = made["id"].as_str().expect("an id").to_owned();
+
+    p.ping_ok(&format!("/{key}/hourly-sync/start")).await;
+    p.ping_ok(&format!("/{key}/hourly-sync/fail?exit_code=3"))
+        .await;
+    assert_eq!(p.monitor("hourly-sync").await["state"], "failed");
+    let incidents = incidents_of(&pool, &p.project).await;
+    assert_eq!(incidents.len(), 1, "{incidents:?}");
+    let (id, cause, detail, resolution, flapping) = &incidents[0];
+    assert_eq!(
+        (
+            cause.as_str(),
+            detail.as_str(),
+            resolution.as_deref(),
+            *flapping
+        ),
+        ("failed", "run_failed", None, false)
+    );
+    let notices = notices_of(&pool, &p.project).await;
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    let opened = &notices[0];
+    assert_eq!(opened["kind"], "incident_opened");
+    assert_eq!(opened["title"], "hourly-sync failed");
+    assert!(
+        opened["body"]
+            .as_str()
+            .expect("a body")
+            .contains("exit code 3"),
+        "{}",
+        opened["body"]
+    );
+    assert_eq!(opened["metadata"]["incident_id"], id.to_string());
+    assert_eq!(opened["metadata"]["monitor_id"], monitor_id);
+    assert_eq!(opened["metadata"]["cause"], "failed");
+    assert_eq!(opened["metadata"]["detail"], "run_failed");
+    assert_eq!(opened["metadata"]["exit_code"], 3);
+    assert_eq!(opened["metadata"]["flapping"], false);
+    assert_eq!(
+        opened["dedup_key"],
+        format!("telemetry:incident:{id}:opened")
+    );
+
+    // Another run starting, and failing again: the same incident, told once.
+    p.ping_ok(&format!("/{key}/hourly-sync/start")).await;
+    assert_eq!(p.monitor("hourly-sync").await["state"], "running");
+    p.ping_ok(&format!("/{key}/hourly-sync/fail")).await;
+    assert_eq!(p.monitor("hourly-sync").await["state"], "failed");
+    assert_eq!(incidents_of(&pool, &p.project).await.len(), 1);
+    assert_eq!(notices_of(&pool, &p.project).await.len(), 1);
+
+    // A run ending well resolves it.
+    p.ping_ok(&format!("/{key}/hourly-sync/start")).await;
+    p.ping_ok(&format!("/{key}/hourly-sync")).await;
+    assert_eq!(p.monitor("hourly-sync").await["state"], "healthy");
+    let incidents = incidents_of(&pool, &p.project).await;
+    assert_eq!(incidents.len(), 1);
+    assert_eq!(incidents[0].3.as_deref(), Some("recovered"));
+    let notices = notices_of(&pool, &p.project).await;
+    assert_eq!(notices.len(), 2, "{notices:?}");
+    let resolved = &notices[1];
+    assert_eq!(resolved["kind"], "incident_resolved");
+    assert_eq!(resolved["title"], "hourly-sync recovered");
+    assert_eq!(resolved["metadata"]["resolution"], "recovered");
+    assert_eq!(
+        resolved["metadata"]["incident_id"],
+        opened["metadata"]["incident_id"]
+    );
+    assert!(
+        resolved["metadata"]["duration_s"]
+            .as_i64()
+            .is_some_and(|s| s >= 0),
+        "{resolved}"
+    );
+    assert_eq!(
+        resolved["dedup_key"],
+        format!("telemetry:incident:{id}:resolved")
+    );
+
+    // The next failure is an incident of its own.
+    p.ping_ok(&format!("/{key}/hourly-sync/fail?exit_code=1"))
+        .await;
+    let incidents = incidents_of(&pool, &p.project).await;
+    assert_eq!(incidents.len(), 2, "{incidents:?}");
+    assert_ne!(incidents[1].0, incidents[0].0);
+    assert!(incidents[1].3.is_none());
+
+    // Through the outbox to notifications, each once; the runs' rows wait on
+    // a store this suite has none of.
+    let settled = outbox::tick_once(&p.state).await.expect("a tick");
+    assert_eq!(settled.landed, 3, "{settled:?}");
+    let told = p.notices.notices();
+    assert_eq!(
+        told.iter().map(|n| n.kind).collect::<Vec<_>>(),
+        [
+            NotificationKind::IncidentOpened,
+            NotificationKind::IncidentResolved,
+            NotificationKind::IncidentOpened,
+        ]
+    );
+    assert!(
+        told.iter()
+            .all(|n| n.project_id.as_ref() == Some(&p.project)
+                && n.organization_id == p.organization)
+    );
+    assert_eq!(
+        told[0].dedup_key.as_deref(),
+        Some(format!("telemetry:incident:{id}:opened").as_str())
+    );
+}
+
+/// A monitor flipping in and out of trouble more than six times in an hour
+/// is flapping: the incident the seventh flip opens stays open, marked so,
+/// through the runs that follow, so the job costs one incident from then on,
+/// and the project hears of the flapping once.
+#[sqlx::test]
+async fn a_flapping_monitor_keeps_one_incident_open(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.make(hourly()).await;
+
+    // Three incidents opened and recovered: six flips.
+    for _ in 0..3 {
+        p.ping_ok(&format!("/{key}/hourly-sync/fail")).await;
+        p.ping_ok(&format!("/{key}/hourly-sync")).await;
+    }
+    let incidents = incidents_of(&pool, &p.project).await;
+    assert_eq!(incidents.len(), 3, "{incidents:?}");
+    assert!(
+        incidents
+            .iter()
+            .all(|i| i.3.as_deref() == Some("recovered") && !i.4),
+        "{incidents:?}"
+    );
+
+    // The seventh flip opens an incident flapping.
+    p.ping_ok(&format!("/{key}/hourly-sync/fail")).await;
+    let incidents = incidents_of(&pool, &p.project).await;
+    assert_eq!(incidents.len(), 4, "{incidents:?}");
+    assert!(incidents[3].3.is_none() && incidents[3].4, "{incidents:?}");
+    let notices = notices_of(&pool, &p.project).await;
+    assert_eq!(notices.len(), 7, "{notices:?}");
+    assert_eq!(notices[6]["metadata"]["flapping"], true);
+    assert!(
+        notices[6]["body"]
+            .as_str()
+            .expect("a body")
+            .contains("flipped in and out of trouble"),
+        "{}",
+        notices[6]["body"]
+    );
+
+    // Healthy and failing again, twice over: the incident stays open and
+    // nothing more is told.
+    for _ in 0..2 {
+        p.ping_ok(&format!("/{key}/hourly-sync")).await;
+        assert_eq!(p.monitor("hourly-sync").await["state"], "healthy");
+        p.ping_ok(&format!("/{key}/hourly-sync/fail")).await;
+        assert_eq!(p.monitor("hourly-sync").await["state"], "failed");
+    }
+    let incidents = incidents_of(&pool, &p.project).await;
+    assert_eq!(incidents.len(), 4, "{incidents:?}");
+    assert!(incidents[3].3.is_none() && incidents[3].4, "{incidents:?}");
+    assert_eq!(notices_of(&pool, &p.project).await.len(), 7);
+}
+
+/// A pause closes the open incident as paused, telling so, and a resume
+/// opens none: a paused monitor is its owner's.
+#[sqlx::test]
+async fn a_pause_closes_the_open_incident_as_paused(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.make(hourly()).await;
+    p.ping_ok(&format!("/{key}/hourly-sync/fail?exit_code=2"))
+        .await;
+    assert_eq!(incidents_of(&pool, &p.project).await.len(), 1);
+
+    let (status, paused) = p
+        .send(p.request("POST", &format!("{MONITORS}/hourly-sync/pause"), None))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{paused}");
+    let incidents = incidents_of(&pool, &p.project).await;
+    assert_eq!(incidents.len(), 1);
+    assert_eq!(incidents[0].3.as_deref(), Some("paused"), "{incidents:?}");
+    let notices = notices_of(&pool, &p.project).await;
+    assert_eq!(notices.len(), 2, "{notices:?}");
+    assert_eq!(notices[1]["kind"], "incident_resolved");
+    assert_eq!(notices[1]["title"], "hourly-sync paused");
+    assert_eq!(notices[1]["metadata"]["resolution"], "paused");
+    assert_eq!(notices[1]["metadata"]["cause"], "failed");
+
+    let (status, resumed) = p
+        .send(p.request("POST", &format!("{MONITORS}/hourly-sync/resume"), None))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{resumed}");
+    assert_eq!(resumed["state"], "healthy");
+    assert_eq!(incidents_of(&pool, &p.project).await.len(), 1);
+    assert_eq!(notices_of(&pool, &p.project).await.len(), 2);
 }
 
 /// A checkpoint's steps and spend are totals so far, which never fall: one

@@ -10,6 +10,8 @@ const LABELS = {
   connector_disconnected: "Channel disconnected",
   monitor_discovered: "Monitor discovered",
   ping_key_retired: "Ping key retired",
+  incident_opened: "Incident opened",
+  incident_resolved: "Incident resolved",
 } as const satisfies Record<NotificationKind, string>;
 
 export const NOTIFICATION_KINDS: readonly NotificationKind[] = Object.values(NotificationKind);

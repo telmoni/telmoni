@@ -33,6 +33,7 @@ use crate::AppState;
 use crate::contract;
 use crate::db::{self, LastRun, MonitorRow, MonitorWrite};
 use crate::handler::chain;
+use crate::incidents;
 use crate::schedule::{Fault, PERIOD_MAX_S, PREVIEW, Schedule};
 
 /// The longest a monitor's name is, in characters, as the table's CHECK has
@@ -825,6 +826,17 @@ async fn halt_monitor(
     let row = db::set_monitor_state(tx, project_id, slug, MonitorState::Paused, None)
         .await?
         .ok_or_else(not_found)?;
+    // The incident its trouble opened, if one, closed as paused.
+    incidents::on_change(
+        tx,
+        project_id,
+        &acting.organization_id,
+        &row,
+        before.state,
+        None,
+        Utc::now(),
+    )
+    .await?;
     emit_audit(
         tx,
         AuditEvent {

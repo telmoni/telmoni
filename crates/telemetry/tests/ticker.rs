@@ -289,6 +289,62 @@ fn rid() -> String {
     Uuid::new_v4().to_string()
 }
 
+/// The project's incidents, oldest first: cause, detail, how each closed if
+/// it has, and whether it is flapping.
+async fn incidents_of(
+    pool: &PgPool,
+    project: &ProjectId,
+) -> Vec<(String, String, Option<String>, bool)> {
+    sqlx::query_as(
+        "SELECT cause, detail, resolution, flapping FROM telemetry.incidents
+          WHERE project_id = $1
+          ORDER BY opened_at, id",
+    )
+    .bind(project)
+    .fetch_all(pool)
+    .await
+    .expect("read a project's incidents")
+}
+
+/// The notices waiting in the project's outbox, oldest first.
+async fn notices_of(pool: &PgPool, project: &ProjectId) -> Vec<Value> {
+    sqlx::query_scalar(
+        "SELECT payload FROM telemetry.outbox
+          WHERE project_id = $1 AND kind = 'notice'
+          ORDER BY id",
+    )
+    .bind(project)
+    .fetch_all(pool)
+    .await
+    .expect("read a project's outbox")
+}
+
+/// The project's monitors and incidents as `secs` passing would leave their
+/// clocks: each state held that much longer, each incident that much older.
+async fn aged(pool: &PgPool, project: &ProjectId, secs: i64) {
+    sqlx::query(
+        "UPDATE telemetry.monitors
+            SET state_changed_at = state_changed_at - make_interval(secs => $2)
+          WHERE project_id = $1",
+    )
+    .bind(project)
+    .bind(secs)
+    .execute(pool)
+    .await
+    .expect("age the monitors");
+    sqlx::query(
+        "UPDATE telemetry.incidents
+            SET opened_at = opened_at - make_interval(secs => $2),
+                resolved_at = resolved_at - make_interval(secs => $2)
+          WHERE project_id = $1",
+    )
+    .bind(project)
+    .bind(secs)
+    .execute(pool)
+    .await
+    .expect("age the incidents");
+}
+
 /// A monitor due is late while its grace runs, failed once it has run out
 /// — its next due time found again then — and a tick that finds nothing
 /// changed writes nothing; one late or failed already stays so at its next
@@ -1423,4 +1479,182 @@ async fn a_failed_monitor_with_a_quiet_run_stays_failed_while_another_goes(pool:
     assert_eq!(p.monitor("hourly-sync").await["state"], "healthy");
     assert!(open_runs(&pool, &p.project).await.is_empty());
     assert_eq!(p.tick().await, ticked(0, 0));
+}
+
+/// A monitor gone late opens an incident, saying so; the grace running out
+/// keeps it — failed is the same spell — and a run ending well resolves it.
+#[sqlx::test]
+async fn a_monitor_gone_late_opens_an_incident_a_run_ending_well_resolves(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.make(hourly("hourly-sync")).await;
+
+    due(&pool, &p.project, "hourly-sync", 30).await;
+    assert_eq!(p.tick().await, ticked(1, 0));
+    assert_eq!(p.monitor("hourly-sync").await["state"], "late");
+    let incidents = incidents_of(&pool, &p.project).await;
+    assert_eq!(incidents.len(), 1, "{incidents:?}");
+    assert_eq!(
+        (incidents[0].0.as_str(), incidents[0].1.as_str()),
+        ("late", "run_late")
+    );
+    let notices = notices_of(&pool, &p.project).await;
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    assert_eq!(notices[0]["kind"], "incident_opened");
+    assert_eq!(notices[0]["title"], "hourly-sync is late");
+
+    // Past its grace: failed, and the same incident.
+    due(&pool, &p.project, "hourly-sync", 120).await;
+    assert_eq!(p.tick().await, ticked(1, 0));
+    assert_eq!(p.monitor("hourly-sync").await["state"], "failed");
+    assert_eq!(incidents_of(&pool, &p.project).await.len(), 1);
+    assert_eq!(notices_of(&pool, &p.project).await.len(), 1);
+
+    // A run ending well resolves it.
+    p.ping_ok(&format!("/{key}/hourly-sync/start")).await;
+    p.ping_ok(&format!("/{key}/hourly-sync")).await;
+    let incidents = incidents_of(&pool, &p.project).await;
+    assert_eq!(
+        incidents[0].2.as_deref(),
+        Some("recovered"),
+        "{incidents:?}"
+    );
+    let notices = notices_of(&pool, &p.project).await;
+    assert_eq!(notices.len(), 2, "{notices:?}");
+    assert_eq!(notices[1]["kind"], "incident_resolved");
+    assert_eq!(notices[1]["metadata"]["detail"], "run_late");
+}
+
+/// A run never ending opens an incident saying so, as a run gone quiet does.
+#[sqlx::test]
+async fn a_run_ended_at_its_ceiling_or_gone_quiet_opens_an_incident(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.make(hourly("hourly-sync")).await;
+
+    let run = rid();
+    p.ping_ok(&format!("/{key}/hourly-sync/start?rid={run}"))
+        .await;
+    quiet(&pool, &p.project, &run, 300).await;
+    assert_eq!(p.tick().await, ticked(1, 0));
+    assert_eq!(p.monitor("hourly-sync").await["state"], "stalled");
+    let incidents = incidents_of(&pool, &p.project).await;
+    assert_eq!(incidents.len(), 1, "{incidents:?}");
+    assert_eq!(
+        (incidents[0].0.as_str(), incidents[0].1.as_str()),
+        ("stalled", "run_stalled")
+    );
+    assert_eq!(
+        notices_of(&pool, &p.project).await[0]["title"],
+        "hourly-sync stalled"
+    );
+
+    // Past its ceiling: ended as error, failed, the same incident.
+    past_ceiling(&pool, &p.project, &run).await;
+    assert_eq!(p.tick().await, ticked(1, 1));
+    assert_eq!(p.monitor("hourly-sync").await["state"], "failed");
+    assert_eq!(incidents_of(&pool, &p.project).await.len(), 1);
+
+    // Recovered, then a run never ending on its own: an incident of its own.
+    p.ping_ok(&format!("/{key}/hourly-sync")).await;
+    let other = rid();
+    p.ping_ok(&format!("/{key}/hourly-sync/start?rid={other}"))
+        .await;
+    past_ceiling(&pool, &p.project, &other).await;
+    assert_eq!(p.tick().await, ticked(1, 1));
+    let incidents = incidents_of(&pool, &p.project).await;
+    assert_eq!(incidents.len(), 2, "{incidents:?}");
+    assert_eq!(
+        (incidents[1].0.as_str(), incidents[1].1.as_str()),
+        ("failed", "run_never_ended")
+    );
+}
+
+/// A flapping incident is let go of once its monitor has held one state for
+/// an hour: resolved where it stands healthy, told so; its mark cleared where
+/// it still fails, an ordinary incident from then on, which the next run
+/// ending well resolves. The tick that does so is the one that reads for
+/// such monitors, due or not.
+#[sqlx::test]
+async fn a_flapping_incident_is_let_go_of_once_its_monitor_has_held_a_state_an_hour(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.make(hourly("hourly-sync")).await;
+
+    // Seven flips: the fourth incident opens flapping, and a run ending well
+    // leaves it open.
+    for _ in 0..3 {
+        p.ping_ok(&format!("/{key}/hourly-sync/fail")).await;
+        p.ping_ok(&format!("/{key}/hourly-sync")).await;
+    }
+    p.ping_ok(&format!("/{key}/hourly-sync/fail")).await;
+    p.ping_ok(&format!("/{key}/hourly-sync")).await;
+    assert_eq!(p.monitor("hourly-sync").await["state"], "healthy");
+    let incidents = incidents_of(&pool, &p.project).await;
+    assert_eq!(incidents.len(), 4, "{incidents:?}");
+    assert!(incidents[3].2.is_none() && incidents[3].3, "{incidents:?}");
+    assert_eq!(p.tick().await, ticked(0, 0), "not an hour yet");
+    assert!(incidents_of(&pool, &p.project).await[3].2.is_none());
+
+    // Healthy for an hour: resolved, and told.
+    aged(&pool, &p.project, 3601).await;
+    assert_eq!(p.tick().await, ticked(0, 0));
+    let incidents = incidents_of(&pool, &p.project).await;
+    assert_eq!(
+        incidents[3].2.as_deref(),
+        Some("recovered"),
+        "{incidents:?}"
+    );
+    let notices = notices_of(&pool, &p.project).await;
+    assert_eq!(notices.len(), 8, "{notices:?}");
+    assert_eq!(notices[7]["kind"], "incident_resolved");
+    assert_eq!(notices[7]["metadata"]["flapping"], true);
+    assert!(
+        notices[7]["metadata"]["duration_s"]
+            .as_i64()
+            .is_some_and(|s| s >= 3600),
+        "{}",
+        notices[7]
+    );
+
+    // The hour's flips behind it, the next failure is an ordinary incident.
+    // Flapping again — the resolution a moment ago and six more flips — the
+    // recovery that would be the seventh marks the open incident instead,
+    // and a failure under it changes nothing; failing steadily for an hour
+    // clears the mark, the incident still open, and the next run ending well
+    // resolves it as any incident.
+    for _ in 0..2 {
+        p.ping_ok(&format!("/{key}/hourly-sync/fail")).await;
+        p.ping_ok(&format!("/{key}/hourly-sync")).await;
+    }
+    p.ping_ok(&format!("/{key}/hourly-sync/fail")).await;
+    let incidents = incidents_of(&pool, &p.project).await;
+    assert_eq!(incidents.len(), 7, "{incidents:?}");
+    assert!(incidents[6].2.is_none() && !incidents[6].3, "{incidents:?}");
+    p.ping_ok(&format!("/{key}/hourly-sync")).await;
+    assert_eq!(p.monitor("hourly-sync").await["state"], "healthy");
+    let incidents = incidents_of(&pool, &p.project).await;
+    assert!(incidents[6].2.is_none() && incidents[6].3, "{incidents:?}");
+    assert_eq!(notices_of(&pool, &p.project).await.len(), 13);
+    p.ping_ok(&format!("/{key}/hourly-sync/fail")).await;
+    assert_eq!(p.monitor("hourly-sync").await["state"], "failed");
+    let incidents = incidents_of(&pool, &p.project).await;
+    assert!(incidents[6].2.is_none() && incidents[6].3, "{incidents:?}");
+    aged(&pool, &p.project, 3601).await;
+    assert_eq!(p.tick().await, ticked(0, 0));
+    let incidents = incidents_of(&pool, &p.project).await;
+    assert!(incidents[6].2.is_none() && !incidents[6].3, "{incidents:?}");
+    assert_eq!(notices_of(&pool, &p.project).await.len(), 13);
+    assert_eq!(p.tick().await, ticked(0, 0), "read for no longer");
+    p.ping_ok(&format!("/{key}/hourly-sync")).await;
+    let incidents = incidents_of(&pool, &p.project).await;
+    assert_eq!(
+        incidents[6].2.as_deref(),
+        Some("recovered"),
+        "{incidents:?}"
+    );
+    assert_eq!(notices_of(&pool, &p.project).await.len(), 14);
 }

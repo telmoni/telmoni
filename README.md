@@ -44,7 +44,7 @@ Telmoni is an **open-source telemetry platform for AI agents**. Its SDKs record 
 - **[Organizations and audit](https://telmoni.com/docs/workspace/audit-log)**: Organizations and projects with owner, admin and member roles, invitations, transfers and scoped API keys, and sign-in by password or through any OIDC provider. Every change lands in an audit log that's hash-chained per organization and can be exported.
 - **[Notifications](https://telmoni.com/docs/integrations/notifications)**: An in-app feed, Slack, and webhooks signed with HMAC-SHA256, sent through a delivery queue that retries.
 - **[Console agent](https://telmoni.com/docs/self-host/agent)**: Ask questions in plain language. A read-only agent searches the docs, the audit log and the notification feed and cites its sources, running on Anthropic or any OpenAI-compatible model server, such as Ollama, vLLM or OpenRouter.
-- **Monitors and alerts** *(in progress)*: A contract for each agent: a crontab schedule in its own time zone, a grace period, a stall timeout, a step cap and a cost cap, with a ping lane for cron jobs, and a check every few seconds that marks a monitor late, failed or stalled when its agent breaks the contract. Alerting when that happens is the next milestone.
+- **Monitors and alerts** *(in progress)*: A contract for each agent: a crontab schedule in its own time zone, a grace period, a stall timeout, a step cap and a cost cap, with a ping lane for cron jobs, and a check every few seconds that marks a monitor late, failed or stalled when its agent breaks the contract, opening an incident the project's channels hear of once, and closing it when the agent recovers. Rules and routing are the next milestone.
 
 ## 🚀 Quickstart
 
@@ -159,7 +159,7 @@ crates/
   notifications/  the feed, the Slack and webhook connectors, delivery
   agent/          the console agent: models, embeddings, the index and its hybrid search, read-only tools
   telemetry/      ingest at /otlp/v1/traces and the ping lane at /ping/v1, each project's settings,
-                  monitors and the ticker that watches them, ping keys and open runs, the outbox,
+                  monitors and the ticker that watches them, their incidents, ping keys and open runs, the outbox,
                   the spans and their hourly totals in ClickHouse, its ClickHouse file and nightly
                   purge, ClickHouse's configuration and local users
   migrator/       the migration runner, grants, role hardening, the audit schema;

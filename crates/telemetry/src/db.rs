@@ -13,6 +13,8 @@ use telmoni_shared::db::tenant_session::{
 };
 use telmoni_shared::{ContentMode, MonitorState, OrganizationId, ProjectId, SpanStatus, ViewKind};
 
+use crate::incidents::FLAP_WINDOW_SECS;
+
 /// This module's cross-tenant lane: the one declaration, so a sibling's lane
 /// is unnameable here. See `tenant_session::Lane`.
 #[derive(Debug, Clone, Copy)]
@@ -229,9 +231,10 @@ const PURGED_TABLES: [&str; 3] = [
 /// The tables a move rewrites a project's rows in, filed under its
 /// organization as well as the project, the monitors' rows last: their
 /// share is held already ([`move_project`]).
-const MOVED_TABLES: [&str; 4] = [
+const MOVED_TABLES: [&str; 5] = [
     "telemetry.outbox",
     "telemetry.open_runs",
+    "telemetry.incidents",
     "telemetry.ping_keys",
     "telemetry.monitors",
 ];
@@ -858,11 +861,13 @@ pub async fn monitor_to_tick(
 /// Every monitor the ticker has something to do for, across every tenant,
 /// by its project and its id in that order, a page of `limit` at most: one
 /// due past its grace, or due and `healthy`, the one state that moves
-/// inside the grace; one with a run past its ceiling; and one with a run
-/// quiet past its stall timeout, unless stalled, failed, paused or `new`
-/// already, which a quiet run moves nowhere. What each needs is decided
-/// again from the rows as they stand, under the locks the ticker takes. The
-/// due read is the partial index's, since a monitor past its grace is found
+/// inside the grace; one with a run past its ceiling; one with a run quiet
+/// past its stall timeout, unless stalled, failed, paused or `new` already,
+/// which a quiet run moves nowhere; and one with a flapping incident open
+/// that has held its state for the flap window, for the incident to be let
+/// go of ([`crate::incidents::steady`]). What each needs is decided again
+/// from the rows as they stand, under the locks the ticker takes. The due
+/// read is the partial index's, since a monitor past its grace is found
 /// again and leaves it.
 pub async fn monitors_with_work(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
@@ -892,12 +897,19 @@ pub async fn monitors_with_work(
           WHERE r.stall_after_s IS NOT NULL
             AND r.last_heard_at + make_interval(secs => r.stall_after_s) < now()
             AND m.state <> ALL($3::text[])
+         UNION
+         SELECT m.project_id, m.id
+           FROM telemetry.incidents i
+           JOIN telemetry.monitors m ON m.id = i.monitor_id
+          WHERE i.resolved_at IS NULL AND i.flapping
+            AND m.state_changed_at + make_interval(secs => $4) <= now()
          ORDER BY project_id, id
          LIMIT $1",
     )
     .bind(limit)
     .bind(MonitorState::Healthy)
     .bind(unmoved_by_a_quiet_run)
+    .bind(f64::from(FLAP_WINDOW_SECS))
     .fetch_all(tx.conn())
     .await
 }
@@ -963,6 +975,152 @@ pub async fn note_last_run(
     .bind(run.status)
     .bind(run.steps)
     .bind(run.cost_usd)
+    .execute(tx.conn())
+    .await?
+    .rows_affected()
+        > 0)
+}
+
+/// An incident as its row keeps it ([`crate::incidents`]).
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct IncidentRow {
+    pub id: Uuid,
+    pub monitor_id: Uuid,
+    /// The state that opened it.
+    pub cause: MonitorState,
+    /// Why, finer: `incidents::Trigger`'s word.
+    pub detail: String,
+    pub opened_at: DateTime<Utc>,
+    pub resolved_at: Option<DateTime<Utc>>,
+    /// How it closed, `recovered` or `paused`, once it has.
+    pub resolution: Option<String>,
+    pub flapping: bool,
+}
+
+/// What opening an incident writes.
+#[derive(Debug, Clone, Copy)]
+pub struct NewIncident<'a> {
+    pub monitor_id: Uuid,
+    pub cause: MonitorState,
+    pub detail: &'a str,
+    pub opened_at: DateTime<Utc>,
+    pub flapping: bool,
+}
+
+/// The columns an [`IncidentRow`] is read from, in its order.
+const INCIDENT_COLUMNS: &str =
+    "id, monitor_id, cause, detail, opened_at, resolved_at, resolution, flapping";
+
+/// The monitor's open incident, locked as its writer will write it
+/// (`FOR UPDATE`), or `None`: one at most, as the index holds.
+pub async fn open_incident(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    monitor_id: Uuid,
+) -> sqlx::Result<Option<IncidentRow>> {
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {INCIDENT_COLUMNS} FROM telemetry.incidents
+          WHERE project_id = $1 AND monitor_id = $2 AND resolved_at IS NULL
+            FOR UPDATE"
+    )))
+    .bind(project_id)
+    .bind(monitor_id)
+    .fetch_optional(tx.conn())
+    .await
+}
+
+/// How often the monitor flipped into or out of trouble since `since`: each
+/// incident opened counts one, and each resolved by recovering counts one; a
+/// pause is its owner's, not a flip.
+pub async fn flips_since(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    monitor_id: Uuid,
+    since: DateTime<Utc>,
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM (
+            SELECT opened_at AS at FROM telemetry.incidents
+             WHERE project_id = $1 AND monitor_id = $2 AND opened_at > $3
+            UNION ALL
+            SELECT resolved_at FROM telemetry.incidents
+             WHERE project_id = $1 AND monitor_id = $2 AND resolved_at > $3
+               AND resolution = 'recovered'
+         ) flips",
+    )
+    .bind(project_id)
+    .bind(monitor_id)
+    .bind(since)
+    .fetch_one(tx.conn())
+    .await
+}
+
+/// An incident opened on one of the project's monitors, filed under its
+/// organization as the monitor is.
+pub async fn insert_incident(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    organization_id: &OrganizationId,
+    new: &NewIncident<'_>,
+) -> sqlx::Result<IncidentRow> {
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "INSERT INTO telemetry.incidents
+             (id, project_id, organization_id, monitor_id, cause, detail, opened_at, flapping,
+              created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $7, $7)
+         RETURNING {INCIDENT_COLUMNS}"
+    )))
+    .bind(Uuid::now_v7())
+    .bind(project_id)
+    .bind(organization_id)
+    .bind(new.monitor_id)
+    .bind(new.cause)
+    .bind(new.detail)
+    .bind(new.opened_at)
+    .bind(new.flapping)
+    .fetch_one(tx.conn())
+    .await
+}
+
+/// The incident closed at `now`, with how; `None` where it was closed
+/// already.
+pub async fn resolve_incident(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    id: Uuid,
+    resolution: &str,
+    now: DateTime<Utc>,
+) -> sqlx::Result<Option<IncidentRow>> {
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "UPDATE telemetry.incidents
+            SET resolved_at = $3, resolution = $4, updated_at = GREATEST($3, updated_at)
+          WHERE project_id = $1 AND id = $2 AND resolved_at IS NULL
+         RETURNING {INCIDENT_COLUMNS}"
+    )))
+    .bind(project_id)
+    .bind(id)
+    .bind(now)
+    .bind(resolution)
+    .fetch_optional(tx.conn())
+    .await
+}
+
+/// The incident marked flapping, or no longer. Answers whether the mark
+/// moved.
+pub async fn set_flapping(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    id: Uuid,
+    flapping: bool,
+) -> sqlx::Result<bool> {
+    Ok(sqlx::query(
+        "UPDATE telemetry.incidents
+            SET flapping = $3, updated_at = GREATEST(statement_timestamp(), updated_at)
+          WHERE project_id = $1 AND id = $2 AND flapping <> $3",
+    )
+    .bind(project_id)
+    .bind(id)
+    .bind(flapping)
     .execute(tx.conn())
     .await?
     .rows_affected()

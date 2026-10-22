@@ -575,6 +575,16 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             "telemetry.open_runs",
             &["SELECT", "DELETE"],
         ),
+        // The purges take an incident with its monitor, by the cascade; the
+        // ticker reads them across tenants for a flapping one whose monitor
+        // has held its state an hour. An incident is opened and resolved in
+        // the project's own scope. (A transfer rewrites `organization_id`
+        // alone: a column grant, not this.)
+        (
+            "telemetry_maintenance",
+            "telemetry.incidents",
+            &["SELECT", "DELETE"],
+        ),
         // The outbox loop leases rows across tenants and deletes each once
         // it has landed; a lease is two columns, granted as columns. A row is
         // written in the project's own scope. (A transfer rewrites

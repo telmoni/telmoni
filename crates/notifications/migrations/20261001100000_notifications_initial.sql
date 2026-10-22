@@ -45,7 +45,7 @@ CREATE TABLE notifications.feed (
     CONSTRAINT feed_kind_check CHECK (kind IN (
         'organization_alert', 'member_added', 'member_left',
         'connector_connected', 'connector_disconnected', 'monitor_discovered',
-        'ping_key_retired'
+        'ping_key_retired', 'incident_opened', 'incident_resolved'
     ))
 );
 
@@ -127,7 +127,7 @@ CREATE TABLE notifications.connections (
         event_kinds IS NULL OR (cardinality(event_kinds) > 0 AND event_kinds <@ ARRAY[
             'organization_alert', 'member_added', 'member_left',
             'connector_connected', 'connector_disconnected', 'monitor_discovered',
-            'ping_key_retired'
+            'ping_key_retired', 'incident_opened', 'incident_resolved'
         ]::text[])
     ),
     CONSTRAINT connections_event_kinds_webhook_check CHECK (event_kinds IS NULL OR provider = 'webhook'),
@@ -186,7 +186,7 @@ CREATE TABLE notifications.deliveries (
     CONSTRAINT deliveries_kind_check CHECK (kind IN (
         'organization_alert', 'member_added', 'member_left',
         'connector_connected', 'connector_disconnected', 'monitor_discovered',
-        'ping_key_retired'
+        'ping_key_retired', 'incident_opened', 'incident_resolved'
     )),
     -- The whole tenant, not the id alone: the enqueue policies check only the
     -- bound key, so a delivery could otherwise carry one tenant's text to another's channel.

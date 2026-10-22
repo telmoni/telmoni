@@ -51,6 +51,7 @@ pub mod contract;
 pub mod db;
 pub mod handler;
 pub mod hashing;
+pub mod incidents;
 pub mod ingest;
 pub mod live;
 pub mod notify;
@@ -90,7 +91,8 @@ pub struct AppState {
     /// that sells nothing hands it no limits.
     pub entitlements: Arc<dyn telmoni_shared::seam::Entitlements>,
     /// Notifications, in process: where a notice of this module's goes once
-    /// the outbox hands it over — a monitor a first ping made, for now.
+    /// the outbox hands it over: a monitor a first ping made, a ping key
+    /// retired, an incident opened or resolved.
     pub notifications: Arc<dyn telmoni_shared::seam::Notifications>,
     /// The client Cloud KMS is called through, where `TELEMETRY_KEK` names a
     /// key there.

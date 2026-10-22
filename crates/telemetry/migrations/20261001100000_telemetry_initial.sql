@@ -483,3 +483,78 @@ GRANT SELECT, DELETE ON telemetry.outbox TO telemetry_maintenance;
 GRANT UPDATE (attempts, lease_until) ON telemetry.outbox TO telemetry_maintenance;
 -- A transfer moves them to the organization that now holds their project.
 GRANT UPDATE (organization_id) ON telemetry.outbox TO telemetry_maintenance;
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 7. INCIDENTS
+-- ══════════════════════════════════════════════════════════════════════════════
+-- One row per spell a monitor needed someone: opened as its state moves into
+-- failed, stalled, over a bound or late, resolved as it is healthy again or
+-- its owner pauses it, and the one table the alert rules will write too. A
+-- monitor holds one open incident at most, however many runs fail while it
+-- stands; one that flips in and out of trouble more than six times in an
+-- hour is flapping, its incident kept open and marked so until it has held
+-- one state for an hour, so a flapping job costs one incident, not hundreds
+-- (`incidents.rs`). Each opening and each resolution is a notice, through
+-- the outbox. Filed under the project and its organization both, as a
+-- monitor is; gone with its monitor.
+CREATE TABLE telemetry.incidents (
+    id              UUID        PRIMARY KEY,
+    project_id      TEXT        NOT NULL,
+    organization_id TEXT        NOT NULL,
+    monitor_id      UUID        NOT NULL REFERENCES telemetry.monitors (id) ON DELETE CASCADE,
+    -- The state that opened it, `MonitorState`'s word, and why, finer:
+    -- `incidents::Trigger`'s word.
+    cause           TEXT        NOT NULL,
+    detail          TEXT        NOT NULL,
+    opened_at       TIMESTAMPTZ NOT NULL,
+    resolved_at     TIMESTAMPTZ,
+    -- How it closed: the monitor healthy again, or paused by its owner.
+    resolution      TEXT,
+    flapping        BOOLEAN     NOT NULL DEFAULT false,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT incidents_cause_check CHECK (cause IN ('failed', 'stalled', 'over_bound', 'late')),
+    CONSTRAINT incidents_detail_check CHECK (detail IN (
+        'run_failed', 'run_never_came', 'run_never_ended', 'run_late', 'run_stalled', 'run_over_bound'
+    )),
+    CONSTRAINT incidents_resolution_check CHECK (
+        (resolution IS NULL) = (resolved_at IS NULL)
+        AND (resolution IS NULL OR resolution IN ('recovered', 'paused'))
+    )
+);
+
+-- One open incident a monitor.
+CREATE UNIQUE INDEX incidents_open_idx ON telemetry.incidents (monitor_id) WHERE resolved_at IS NULL;
+-- The flip count's read, a monitor's incidents by when they opened, and the
+-- cascade's key (the rule at `monitors_organization_idx`).
+CREATE INDEX incidents_monitor_idx ON telemetry.incidents (monitor_id, opened_at DESC);
+-- A project's incidents, newest first; and the purges' read of an
+-- organization's.
+CREATE INDEX incidents_project_idx ON telemetry.incidents (project_id, opened_at DESC);
+CREATE INDEX incidents_organization_idx ON telemetry.incidents (organization_id);
+
+ALTER TABLE telemetry.incidents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.incidents FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON telemetry.incidents
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true)
+                AND organization_id = current_setting('app.organization_id', true));
+
+-- An organization reads its projects' incidents — its health across them —
+-- and writes none: each is opened and resolved on its own project.
+CREATE POLICY organization_read ON telemetry.incidents
+    FOR SELECT
+    USING (organization_id = current_setting('app.organization_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.incidents
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- The ticker reads across tenants for a flapping incident whose monitor has
+-- held its state an hour; the purges take an incident with its monitor.
+GRANT SELECT, DELETE ON telemetry.incidents TO telemetry_maintenance;
+-- A transfer moves them to the organization that now holds their project.
+GRANT UPDATE (organization_id) ON telemetry.incidents TO telemetry_maintenance;

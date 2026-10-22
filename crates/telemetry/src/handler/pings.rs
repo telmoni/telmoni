@@ -49,6 +49,7 @@ use crate::handler::chain;
 use crate::handler::monitors::{
     DEFAULT_TIMEZONE, MAX_COST_USD_MAX, MAX_STEPS_MAX, RESERVED, due_after, refused_as_taken,
 };
+use crate::incidents::{self, Trigger};
 use crate::live;
 use crate::notify;
 use crate::outbox::{self, FinishedRun};
@@ -595,7 +596,8 @@ async fn ping(
         None => discover_monitor(state, headers, key, slug, tx).await?,
     };
     let recorded = record(key, &monitor, progress, report, now, tx).await?;
-    settle(project_id, &monitor, &recorded, now, tx).await?;
+    let exit_code = progress.exit_code.filter(|_| report == Report::Fail);
+    settle(key, &monitor, &recorded, exit_code, now, tx).await?;
     Ok((recorded.run_id, monitor.id))
 }
 
@@ -1136,14 +1138,18 @@ fn hearing(run: &OpenRunRow) -> RunEvent {
 /// leaves failed and only a run's end moves — so runs that overlap never
 /// trade the state, and the lane says of a row what the ticker says. A run
 /// the ping ended is kept on the monitor as its last, whatever its state,
-/// under the same lock ([`db::note_last_run`]).
+/// under the same lock ([`db::note_last_run`]); and the state it moved to
+/// opens or resolves the monitor's incident ([`incidents::on_change`]),
+/// `exit_code` the `/fail`'s where one came.
 async fn settle(
-    project_id: &ProjectId,
+    key: &ResolvedPingKey,
     monitor: &MonitorRow,
     recorded: &Recorded,
+    exit_code: Option<i32>,
     now: DateTime<Utc>,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
 ) -> Result<(), TelmoniError> {
+    let project_id = &key.project_id;
     let event = recorded.event;
     let found = settled(project_id, monitor, event, now);
     if found.is_none() && !recorded.revived && recorded.ended.is_none() {
@@ -1183,7 +1189,26 @@ async fn settle(
     if state == held.state && next_due_at == held.next_due_at {
         return Ok(());
     }
-    db::settle_monitor_run(tx, project_id, held.id, state, next_due_at).await?;
+    let Some(settled) = db::settle_monitor_run(tx, project_id, held.id, state, next_due_at).await?
+    else {
+        return Ok(());
+    };
+    let trigger = match settled.state {
+        MonitorState::Failed => Some(Trigger::RunFailed { exit_code }),
+        MonitorState::Stalled => Some(Trigger::RunStalled),
+        MonitorState::OverBound => Some(Trigger::RunOverBound),
+        _ => None,
+    };
+    incidents::on_change(
+        tx,
+        project_id,
+        &key.organization_id,
+        &settled,
+        held.state,
+        trigger,
+        now,
+    )
+    .await?;
     Ok(())
 }
 
