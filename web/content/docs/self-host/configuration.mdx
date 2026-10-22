@@ -13,7 +13,7 @@ These variables configure the Rust backend service (`telmoni serve`).
 | :--- | :--- | :--- |
 | `PORT` | `8082` | HTTP listen port for the backend server. |
 | `TRUSTED_PROXY_HOPS` | `2` | How many `X-Forwarded-For` entries the proxies in front of the server append, counted from the end: the machine lanes' per-address rate limits (`/v1`, `/cli`, `/ping`, `/otlp`) read the caller's address there. Google's load balancer appends two, a single reverse proxy one, and `0` is nothing in front, which reads the socket's own peer; so does a request with fewer entries than the count, which came in beside the proxies. The same count the console reads, since both sit behind the same front. |
-| `APP_URL` | *Required* | The public origin of the web console. Used to format invitation links, password reset emails, and OAuth callback URLs. |
+| `APP_URL` | *Required* | The public origin of the web console. Used to format the links mails carry — invitations, a project a member was added to, password resets — and OAuth callback URLs. |
 | `SERVICE_SECRET` | *Required* | A random secret (`openssl rand -hex 32`, for example) shared between the web console and the core server; both refuse to start without it. The console sends it as the `x-service-secret` header on every internal call, and the server compares it in constant time. |
 | `SERVICE_SECRET_NEXT` | *Optional* | A second value the server accepts beside `SERVICE_SECRET`. The console sends only its own `SERVICE_SECRET`, so to rotate: set the new value here, move the console's `SERVICE_SECRET` to it, then make it the server's `SERVICE_SECRET` and unset this one. |
 | `DATABASE_CA_CERT` | *Optional* | The PEM of the database's own CA. Required in a Kubernetes pod, optional elsewhere. When set, every connection verifies the server's certificate chain against it (`verify-ca`). |
@@ -102,7 +102,7 @@ Telmoni signs in through an OpenID Connect provider that publishes its discovery
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `SMTP_URL` | *Optional* | SMTP connection URI: `smtps://user:pass@smtp.example.com:465`, or `smtp://user:pass@smtp.example.com:587?tls=required`. In a Kubernetes pod a plain `smtp://` to a remote host is refused at boot, since the login and every code the mails carry would cross the network in the clear. If unset, nothing is sent: the server logs `mail composed, not sent` once per mail, a line that names no address, subject or contents. |
-| `MAIL_FROM` | `Telmoni <no-reply@localhost>` | RFC 5322 `From:` address for every mail the server sends: invitations, verification and reset links, confirmation codes and transfer offers. With `SMTP_URL` set, a value that is not an address is refused at boot. |
+| `MAIL_FROM` | `Telmoni <no-reply@localhost>` | RFC 5322 `From:` address for every mail the server sends: invitations, a project a member was added to, verification and reset links, confirmation codes and transfer offers. With `SMTP_URL` set, a value that is not an address is refused at boot. |
 | `SUPPORT_EMAIL` | *Optional* | The address the server's mails tell a reader to write to, such as about a code they did not ask for. Unset, the mails say "whoever runs this service". |
 
 ---

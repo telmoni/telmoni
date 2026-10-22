@@ -19,6 +19,7 @@ organization settings, invite authority, and organization-wide audit logs.
 | Delete projects | Yes | No | No |
 | Manage organization settings and rename | Yes | Yes | No |
 | Manage organization members and invites | Yes | Yes | No |
+| Add a member of the organization to a project, without an invitation | Yes | Yes | No |
 | View the organization's roster and invitations | Yes | Yes | No |
 | View rolled-up organization audit log | Yes | Yes | No |
 | Export the organization audit log | Yes | Yes | No |
@@ -34,7 +35,9 @@ organization settings, invite authority, and organization-wide audit logs.
   or delete the organization.
 - **Member**: Default role for invited members. Has no organization-wide
   management authority. Access is limited strictly to the projects they have
-  been seated in, governed by their project role.
+  been seated in, governed by their project role. A Member is also the one an
+  Owner or Admin can add to a project from the organization's roster, as an
+  Admin or a Member there, since the Owner and Admins hold every project.
 
 An organization role is a floor no project seat lowers: the Owner is Owner on
 every project, and an Admin is Admin on every project, whatever seat they also
@@ -104,13 +107,14 @@ do and the one you hold:
 Every other refusal answers `/errors/authz/forbidden`, and `detail` says what
 is refused and to whom: API keys, connectors, saved views and layouts and the audit log
 (decided by the same role matrix), an organization's name and URL, the console agent, creating
-a project, the organization's roster, its deletion and transfer, a
+a project, the organization's roster and adding a member from it to a project, which a
+project Admin who is only a Member of the organization may not, its deletion and transfer, a
 project's transfer and, on the hosted service, billing. The server checks every
 request against the caller's roles; nothing is left to the browser.
 
 On the hosted service an organization's plan can refuse too, whatever your
 role: a `402` `/errors/plan/limit-reached`, as a paused organization's
-invitations are refused
+invitations, and the members it would add to a project, are refused
 ([One Hobby organization](https://telmoni.com/docs/workspace/billing#one-hobby-organization)),
 and an invitation past Hobby's one member
 ([One member on Hobby](https://telmoni.com/docs/workspace/billing#one-member-on-hobby)).
