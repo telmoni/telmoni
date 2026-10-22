@@ -143,12 +143,15 @@ pub enum AuditKind {
     DeletionFinalize,
     /// A seat or a roster row a person's erasure removed.
     AccountDeletion,
+    /// The roster row, and the seat, a person takes in the deployment's
+    /// default organization as they are created (`TELMONI_DEFAULT_ORG_ID`).
+    DefaultOrganization,
 }
 
 impl AuditKind {
     /// Every kind.
     #[must_use]
-    pub const fn all() -> [Self; 33] {
+    pub const fn all() -> [Self; 34] {
         [
             Self::AutoProvision,
             Self::OnRequest,
@@ -183,6 +186,7 @@ impl AuditKind {
             Self::OrganizationDeletion,
             Self::DeletionFinalize,
             Self::AccountDeletion,
+            Self::DefaultOrganization,
         ]
     }
 
@@ -223,6 +227,7 @@ impl AuditKind {
             Self::OrganizationDeletion => "organization_deletion",
             Self::DeletionFinalize => "deletion_finalize",
             Self::AccountDeletion => "account_deletion",
+            Self::DefaultOrganization => "default_organization",
         }
     }
 }
@@ -476,7 +481,8 @@ mod tests {
                 | AuditKind::EmailChange
                 | AuditKind::OrganizationDeletion
                 | AuditKind::DeletionFinalize
-                | AuditKind::AccountDeletion => {}
+                | AuditKind::AccountDeletion
+                | AuditKind::DefaultOrganization => {}
             }
         }
     }
@@ -522,6 +528,7 @@ mod tests {
                 "organization_deletion",
                 "deletion_finalize",
                 "account_deletion",
+                "default_organization",
             ]
         );
         let mut unique = words.to_vec();

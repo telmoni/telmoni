@@ -211,6 +211,13 @@ services:
       VERIFY_EMAIL: ${VERIFY_EMAIL:-false}
       AUTH_DISABLE_USERNAME_PASSWORD: ${AUTH_DISABLE_USERNAME_PASSWORD:-false}
       AUTH_DOMAINS_WITH_SSO_ENFORCEMENT: ${AUTH_DOMAINS_WITH_SSO_ENFORCEMENT:-}
+      # Where every person created starts, as Langfuse's
+      # LANGFUSE_DEFAULT_ORG_ID gives one: an organization's id and one of its
+      # projects', each joined as a member unless its role is admin.
+      TELMONI_DEFAULT_ORG_ID: ${TELMONI_DEFAULT_ORG_ID:-}
+      TELMONI_DEFAULT_ORG_ROLE: ${TELMONI_DEFAULT_ORG_ROLE:-}
+      TELMONI_DEFAULT_PROJECT_ID: ${TELMONI_DEFAULT_PROJECT_ID:-}
+      TELMONI_DEFAULT_PROJECT_ROLE: ${TELMONI_DEFAULT_PROJECT_ROLE:-}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       AUTH_REDIRECT_URI: ${AUTH_REDIRECT_URI:-http://localhost:3000/auth/callback}

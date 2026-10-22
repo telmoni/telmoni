@@ -25,6 +25,8 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 
 use telmoni_auth::db::{AuthLane, refresh_tokens};
+use telmoni_auth::default_organization::DefaultOrganization;
+use telmoni_auth::issuer::Issuer;
 use telmoni_auth::mailer::{ComposingMailer, Mailer};
 use telmoni_auth::password::PasswordProvider;
 use telmoni_auth::test_provider::{full_router, test_issuer_verifying};
@@ -33,6 +35,7 @@ use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::digest::sha256_hex;
 use telmoni_shared::mail::{Mail, MailError, MailSender};
 use telmoni_shared::test_util::{ServiceRole, service_pool};
+use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, Role};
 
 const SERVICE_SECRET: &str = "test-service-secret";
 const APP_URL: &str = "http://localhost:3000";
@@ -1094,4 +1097,79 @@ async fn a_code_is_spent_only_with_its_own_verifier(pool: PgPool) {
     let resp = sign_in(&app, "ada@example.com", PASSWORD).await;
     let code = json_body(resp).await["code"].as_str().unwrap().to_owned();
     assert_eq!(exchange(&app, &code).await.status(), StatusCode::OK);
+}
+
+/// An account the form creates, and the first one seeded at boot, each join
+/// the default organization and its project.
+#[sqlx::test]
+async fn an_account_the_form_creates_joins_the_default_organization(pool: PgPool) {
+    telmoni_shared::test_util::apply_audit_migrations(&pool).await;
+    sqlx::query(
+        "INSERT INTO auth.organizations (id, external_id, slug, name, shard_key)
+         VALUES ($1, 'org_default_1', 'acme', 'Acme', $2)",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(uuid::Uuid::new_v4())
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO auth.projects (external_id, organization_id, name, slug)
+         VALUES ('project_default_1', 'org_default_1', 'Agents', 'agents')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let db = service_pool(&pool, ServiceRole::Auth);
+    let landing = DefaultOrganization {
+        organization_id: OrganizationId::try_new("org_default_1").unwrap(),
+        role: OrganizationRole::Member,
+        project: Some((
+            ProjectId::try_new("project_default_1").unwrap(),
+            Role::Member,
+        )),
+    };
+    let issuer =
+        Arc::new(Issuer::new(db.clone(), APP_URL, false).with_default_organization(Some(landing)));
+    let mailer: Arc<dyn Mailer> = Arc::new(ComposingMailer::new(Arc::new(Outbox::default())));
+    let provider = PasswordProvider::new(db, issuer, mailer, true, Vec::new());
+
+    provider
+        .sign_up("ada@example.com", PASSWORD, (Some("Ada"), None), CHALLENGE)
+        .await
+        .expect("signed up");
+    assert!(
+        provider
+            .seed_admin("admin@example.com", PASSWORD)
+            .await
+            .expect("seeded")
+    );
+
+    let joined: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT i.email, m.role, s.role
+           FROM auth.identities i
+           JOIN auth.organization_members m
+             ON m.user_id = i.user_id AND m.organization_id = 'org_default_1'
+           JOIN auth.project_members s
+             ON s.user_id = i.user_id AND s.project_id = 'project_default_1'
+          ORDER BY i.email",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        joined,
+        [
+            (
+                "ada@example.com".to_owned(),
+                "member".to_owned(),
+                "member".to_owned()
+            ),
+            (
+                "admin@example.com".to_owned(),
+                "member".to_owned(),
+                "member".to_owned()
+            ),
+        ]
+    );
 }

@@ -13,6 +13,7 @@ use telmoni_shared::db::tenant_session::{maintenance_scope, person_scope};
 use telmoni_shared::{AuthError, AuthzError, TelmoniError, UserId};
 
 use crate::db::{AuthLane, external_identities, identities, invites};
+use crate::default_organization::{self, DefaultOrganization};
 use crate::provider::{AuthProvider, Subject};
 
 /// The external provider a deployment configured, and the policy it signs
@@ -37,11 +38,13 @@ pub struct External {
 
 impl External {
     /// Which person `subject` is, linking or creating them as the policy
-    /// allows, and recording what the provider just asserted about them.
+    /// allows — one created joining `default_organization` — and recording
+    /// what the provider just asserted about them.
     pub async fn resolve_person(
         &self,
         db: &sqlx::PgPool,
         subject: &Subject,
+        default_organization: Option<&DefaultOrganization>,
     ) -> Result<UserId, TelmoniError> {
         let Some(email) = subject.email.as_deref().filter(|e| !e.trim().is_empty()) else {
             tracing::warn!("the identity provider named a person with no address; refused");
@@ -138,7 +141,10 @@ impl External {
         let mut tx = person_scope(db, &user_id).await?;
         identities::record(&mut tx, &user_id, &identity).await?;
         if external_identities::link(&mut tx, &user_id, provider, &subject.sub).await? {
-            tx.commit().await?;
+            default_organization::join(tx, &user_id, default_organization)
+                .await?
+                .commit()
+                .await?;
             tracing::info!(user_id = %user_id, "account created from an external sign-in");
             return Ok(user_id);
         }

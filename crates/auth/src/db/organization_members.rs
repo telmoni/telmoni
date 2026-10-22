@@ -27,10 +27,12 @@ impl RosterRead for PersonAndOrganization {}
 impl RosterRead for ProjectAndOrganization {}
 impl RosterRead for Maintenance<AuthLane> {}
 
-/// Bindings a member's row is written under: the organization's own, and the
-/// lane the invite accepts run in, since the invitee holds no row yet.
+/// Bindings a member's row is written under: the organization's own, the
+/// lane the invite accepts run in, since the invitee holds no row yet, and a
+/// new person's own with the default organization's beside it.
 pub trait RosterInsert: Binding {}
 impl RosterInsert for Organization {}
+impl RosterInsert for PersonAndOrganization {}
 impl RosterInsert for Maintenance<AuthLane> {}
 
 /// How long an ownership offer stands. After this it is dead: nothing lists it

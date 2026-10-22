@@ -29,6 +29,7 @@ use crate::db::{
     identities::{self, IdentityRead},
     refresh_tokens,
 };
+use crate::default_organization::DefaultOrganization;
 use crate::oidc::with_query;
 use crate::provider::{DeviceAuthorization, DevicePoll, Subject, TokenResponse};
 
@@ -66,6 +67,9 @@ pub struct Issuer {
     /// person is let in (`VERIFY_EMAIL`). Off, an address is taken at its
     /// word, as a deployment with no mail must.
     verify_email: bool,
+    /// Where every person created here starts, whichever way they came
+    /// (`TELMONI_DEFAULT_ORG_ID`).
+    default_organization: Option<DefaultOrganization>,
 }
 
 /// Two v4 UUIDs — 244 random bits — base64url: a bearer, a refresh token, a
@@ -139,7 +143,21 @@ impl Issuer {
             db,
             app_url: app_url.trim_end_matches('/').to_owned(),
             verify_email,
+            default_organization: None,
         }
+    }
+
+    /// The issuer, with every person created from now on joined to `to`.
+    #[must_use]
+    pub fn with_default_organization(mut self, to: Option<DefaultOrganization>) -> Self {
+        self.default_organization = to;
+        self
+    }
+
+    /// Where every person created here starts, if the deployment names one.
+    #[must_use]
+    pub fn default_organization(&self) -> Option<&DefaultOrganization> {
+        self.default_organization.as_ref()
     }
 
     /// The console's origin.

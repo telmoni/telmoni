@@ -510,7 +510,11 @@ pub async fn exchange(
                 )
                 .await?;
             let user_id = external
-                .resolve_person(&state.db, &authenticated.subject)
+                .resolve_person(
+                    &state.db,
+                    &authenticated.subject,
+                    state.issuer.default_organization(),
+                )
                 .await?;
             state
                 .issuer

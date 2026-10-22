@@ -126,6 +126,7 @@ pub async fn test_session(
         .map_err(|_| AuthError::BadRequest("userId is not a usable user id".into()))?;
     let email = crate::identity::validate_email(&req.email)?;
     let mut tx = person_scope(&state.db, &user_id).await?;
+    let created = identities::identity(&mut tx, &user_id).await?.is_none();
     identities::record(
         &mut tx,
         &user_id,
@@ -137,7 +138,11 @@ pub async fn test_session(
         },
     )
     .await?;
-    tx.commit().await?;
+    let joining = state.issuer.default_organization().filter(|_| created);
+    crate::default_organization::join(tx, &user_id, joining)
+        .await?
+        .commit()
+        .await?;
     let tokens = state.issuer.begin_session(&user_id, None, None).await?;
     tracing::info!(user_id = %user_id, "test session opened");
     Ok(Json(crate::handler::session::AuthnResult::from(tokens)))

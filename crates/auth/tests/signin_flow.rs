@@ -12,12 +12,15 @@ use http_body_util::BodyExt;
 use sqlx::PgPool;
 use tower::ServiceExt;
 
+use telmoni_auth::default_organization::DefaultOrganization;
+use telmoni_auth::issuer::Issuer;
 use telmoni_auth::password::PasswordProvider;
 use telmoni_auth::test_provider::{
     Call, ScriptedProvider, TEST_SUBJECT, bearer, bearer_in, full_router,
 };
 use telmoni_auth::{AppState, Config};
 use telmoni_shared::test_util::{ServiceRole, seed_identity, service_pool};
+use telmoni_shared::{OrganizationId, OrganizationRole, ProjectId, Role};
 
 const SERVICE_SECRET: &str = "test-service-secret";
 const REDIRECT_URI: &str = "http://localhost:3000/auth/callback";
@@ -38,6 +41,8 @@ struct Setup {
     /// The external provider's policy.
     allow_sign_up: bool,
     link_by_email: bool,
+    /// Where every person created starts (`TELMONI_DEFAULT_ORG_ID`).
+    default_organization: Option<DefaultOrganization>,
 }
 
 impl Default for Setup {
@@ -47,6 +52,7 @@ impl Default for Setup {
             login_form: true,
             allow_sign_up: true,
             link_by_email: false,
+            default_organization: None,
         }
     }
 }
@@ -71,7 +77,11 @@ fn app_configured(pool: PgPool, setup: Setup) -> (Router, Arc<ScriptedProvider>)
     };
     let provider = Arc::new(ScriptedProvider::new());
     let db = service_pool(&pool, ServiceRole::Auth);
-    let issuer = telmoni_auth::test_provider::test_issuer(db.clone());
+    // As `test_issuer` builds it, address verification on.
+    let issuer = Arc::new(
+        Issuer::new(db.clone(), APP_URL, true)
+            .with_default_organization(setup.default_organization),
+    );
     let mailer: Arc<dyn telmoni_auth::mailer::Mailer> = Arc::new(
         telmoni_auth::mailer::ComposingMailer::new(Arc::new(telmoni_shared::mail::NoopSender)),
     );
@@ -1115,4 +1125,267 @@ async fn an_address_links_only_to_an_account_that_proved_it(pool: PgPool) {
         linked_person(&pool, &provider, TEST_SUBJECT).await,
         Some(holder)
     );
+}
+
+/// The deployment's default organization, `org_default_1`, with its project,
+/// and another organization's project beside them.
+async fn default_home(pool: &PgPool) {
+    for (organization, project) in [
+        ("org_default_1", "project_default_1"),
+        ("org_elsewhere_1", "project_elsewhere_1"),
+    ] {
+        sqlx::query(
+            "INSERT INTO auth.organizations (id, external_id, slug, name, shard_key)
+             VALUES ($1, $2, 'org-' || md5($2), 'Acme', $3)",
+        )
+        .bind(uuid::Uuid::now_v7())
+        .bind(organization)
+        .bind(uuid::Uuid::new_v4())
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO auth.projects (external_id, organization_id, name, slug)
+             VALUES ($1, $2, 'Agents', 'agents')",
+        )
+        .bind(project)
+        .bind(organization)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+/// Everyone created joins `organization` as an admin, seated on `project`
+/// as a member.
+fn landing(organization: &str, project: &str) -> DefaultOrganization {
+    DefaultOrganization {
+        organization_id: OrganizationId::try_new(organization).unwrap(),
+        role: OrganizationRole::Admin,
+        project: Some((ProjectId::try_new(project).unwrap(), Role::Member)),
+    }
+}
+
+/// `user`'s role on the default organization's roster, and the seat they
+/// hold, wherever it is.
+async fn default_roles(pool: &PgPool, user: &str) -> (Option<String>, Option<String>) {
+    let roster = sqlx::query_scalar(
+        "SELECT role FROM auth.organization_members
+          WHERE organization_id = 'org_default_1' AND user_id = $1",
+    )
+    .bind(user)
+    .fetch_optional(pool)
+    .await
+    .unwrap();
+    let seat = sqlx::query_scalar("SELECT role FROM auth.project_members WHERE user_id = $1")
+        .bind(user)
+        .fetch_optional(pool)
+        .await
+        .unwrap();
+    (roster, seat)
+}
+
+/// A person the provider creates joins the default organization and its
+/// project as they are created, audited as the deployment's act, and owns
+/// nothing of their own; removed, they are not put back at their next
+/// sign-in.
+#[sqlx::test]
+async fn a_person_a_provider_creates_joins_the_default_organization_once(pool: PgPool) {
+    telmoni_shared::test_util::apply_audit_migrations(&pool).await;
+    default_home(&pool).await;
+    let (app, _provider) = app_configured(
+        pool.clone(),
+        Setup {
+            default_organization: Some(landing("org_default_1", "project_default_1")),
+            ..Setup::default()
+        },
+    );
+
+    let (status, body) = exchange_external(&app, "code_1").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let user_id = body["userId"].as_str().unwrap().to_owned();
+    assert_eq!(
+        default_roles(&pool, &user_id).await,
+        (Some("admin".into()), Some("member".into()))
+    );
+    let recorded: Vec<(String, Option<String>, serde_json::Value)> = sqlx::query_as(
+        "SELECT actor_id, in_project, metadata FROM audit.events
+          WHERE organization_id = 'org_default_1' AND resource_id = $1 ORDER BY seq",
+    )
+    .bind(&user_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        recorded,
+        [
+            (
+                "service:default-organization".to_owned(),
+                None,
+                serde_json::json!({ "kind": "default_organization", "role": "admin" }),
+            ),
+            (
+                "service:default-organization".to_owned(),
+                Some("project_default_1".to_owned()),
+                serde_json::json!({ "kind": "default_organization", "role": "member" }),
+            ),
+        ]
+    );
+
+    let resp = app
+        .clone()
+        .oneshot(post_me_under(body["accessToken"].as_str().unwrap()))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let me = json_body(resp).await;
+    assert_eq!(me["firstLogin"], false, "{me}");
+    assert_eq!(me["activeOrganizationId"], "org_default_1", "{me}");
+    assert_eq!(
+        me["organizations"].as_array().map(Vec::len),
+        Some(1),
+        "{me}"
+    );
+
+    for table in ["auth.project_members", "auth.organization_members"] {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM {table} WHERE user_id = $1"
+        )))
+        .bind(&user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let (status, again) = exchange_external(&app, "code_2").await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(again["userId"], body["userId"]);
+    assert_eq!(default_roles(&pool, &user_id).await, (None, None));
+}
+
+/// ⚠ An organization gone since boot, or a project no longer in it, is
+/// passed over at the joining: the sign-in stands.
+#[sqlx::test]
+async fn a_default_organization_gone_since_boot_never_refuses_a_sign_in(pool: PgPool) {
+    telmoni_shared::test_util::apply_audit_migrations(&pool).await;
+    default_home(&pool).await;
+    let (app, _provider) = app_configured(
+        pool.clone(),
+        Setup {
+            default_organization: Some(landing("org_default_1", "project_elsewhere_1")),
+            ..Setup::default()
+        },
+    );
+    let (status, body) = exchange_external(&app, "code_1").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let user_id = body["userId"].as_str().unwrap().to_owned();
+    assert_eq!(
+        default_roles(&pool, &user_id).await,
+        (Some("admin".into()), None),
+        "the roster row, and no seat on another organization's project"
+    );
+
+    let (app, provider) = app_configured(
+        pool.clone(),
+        Setup {
+            default_organization: Some(landing("org_gone_1", "project_default_1")),
+            ..Setup::default()
+        },
+    );
+    let mut grace = telmoni_auth::test_provider::authenticated("subject_grace");
+    grace.subject.email = Some("grace@example.com".into());
+    provider.on_exchange(Ok(grace));
+    let (status, body) = exchange_external(&app, "code_2").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let rows: i64 = sqlx::query_scalar(
+        "SELECT (SELECT count(*) FROM auth.organization_members WHERE user_id = $1)
+              + (SELECT count(*) FROM auth.project_members WHERE user_id = $1)",
+    )
+    .bind(body["userId"].as_str().unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(rows, 0);
+}
+
+/// The test door joins whom it creates, as the exchange it stands in for
+/// would, and nobody it only records again.
+#[sqlx::test]
+async fn the_test_door_joins_only_whom_it_creates(pool: PgPool) {
+    telmoni_shared::test_util::apply_audit_migrations(&pool).await;
+    default_home(&pool).await;
+    seed_identity(&pool, "user_already_here", "here@example.com").await;
+    let (app, _provider) = app_configured(
+        pool.clone(),
+        Setup {
+            test_door: true,
+            default_organization: Some(landing("org_default_1", "project_default_1")),
+            ..Setup::default()
+        },
+    );
+    for (user, email) in [
+        ("user_new_here", "new@example.com"),
+        ("user_already_here", "here@example.com"),
+    ] {
+        let resp = app
+            .clone()
+            .oneshot(post_json(
+                "/internal/v1/test/session",
+                serde_json::json!({ "userId": user, "email": email }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "{user}");
+    }
+    assert_eq!(
+        default_roles(&pool, "user_new_here").await,
+        (Some("admin".into()), Some("member".into()))
+    );
+    assert_eq!(
+        default_roles(&pool, "user_already_here").await,
+        (None, None)
+    );
+}
+
+/// ⚠ Boot refuses an organization that is not active, and a project that is
+/// not an active one of it.
+#[sqlx::test]
+async fn boot_refuses_a_default_it_cannot_land_anybody_in(pool: PgPool) {
+    default_home(&pool).await;
+    let db = service_pool(&pool, ServiceRole::Auth);
+    landing("org_default_1", "project_default_1")
+        .check(&db)
+        .await
+        .expect("an active organization and its project");
+    DefaultOrganization {
+        project: None,
+        ..landing("org_default_1", "project_default_1")
+    }
+    .check(&db)
+    .await
+    .expect("an organization alone");
+
+    sqlx::query(
+        "UPDATE auth.projects SET status = 'pending_deletion', deletion_requested_at = now()
+          WHERE external_id = 'project_default_1'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    for (default, variable) in [
+        (
+            landing("org_gone_1", "project_default_1"),
+            "TELMONI_DEFAULT_ORG_ID",
+        ),
+        (
+            landing("org_default_1", "project_elsewhere_1"),
+            "TELMONI_DEFAULT_PROJECT_ID",
+        ),
+        (
+            landing("org_default_1", "project_default_1"),
+            "TELMONI_DEFAULT_PROJECT_ID",
+        ),
+    ] {
+        let refused = default.check(&db).await.expect_err(variable).to_string();
+        assert!(refused.starts_with(variable), "{refused}");
+    }
 }

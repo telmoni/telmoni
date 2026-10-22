@@ -13,7 +13,10 @@
 //! address under one of `AUTH_DOMAINS_WITH_SSO_ENFORCEMENT` signs in at a
 //! provider alone; whether a new account confirms its address first is
 //! `VERIFY_EMAIL` (off), and `ADMIN_EMAIL` with `ADMIN_PASSWORD` seeds the
-//! first account at boot. Set `AUTH_CUSTOM_CLIENT_ID`, `AUTH_CUSTOM_ISSUER` and
+//! first account at boot; every account created joins the organization
+//! `TELMONI_DEFAULT_ORG_ID` names, if one, and the project
+//! `TELMONI_DEFAULT_PROJECT_ID` names in it ([`crate::default_organization`]).
+//! Set `AUTH_CUSTOM_CLIENT_ID`, `AUTH_CUSTOM_ISSUER` and
 //! `AUTH_CUSTOM_CLIENT_SECRET`, and the sign-in page offers "Continue with
 //! `AUTH_CUSTOM_NAME`" beside the form: the provider's endpoints are
 //! discovered from the issuer on first use, and an unknown subject whose
@@ -29,6 +32,7 @@ use telmoni_shared::envelope::on_deployed_tier;
 use telmoni_shared::mail::MailSender;
 use telmoni_shared::oidc::{Discovery, IdTokenVerifier, KeySetUrl, SigningAlg};
 
+use crate::default_organization::DefaultOrganization;
 use crate::external::External;
 use crate::issuer::Issuer;
 use crate::mailer::ComposingMailer;
@@ -100,7 +104,14 @@ pub async fn providers_with(
     external: Option<External>,
 ) -> anyhow::Result<Providers> {
     let verify_email: bool = env_parse("VERIFY_EMAIL", false)?;
-    let issuer = Arc::new(Issuer::new(pool.clone(), &config.app_url, verify_email));
+    let default_organization = DefaultOrganization::from_env()?;
+    if let Some(default_organization) = &default_organization {
+        default_organization.check(&pool).await?;
+    }
+    let issuer = Arc::new(
+        Issuer::new(pool.clone(), &config.app_url, verify_email)
+            .with_default_organization(default_organization),
+    );
 
     let sso_domains = sso_domains();
     if !sso_domains.is_empty() && external.is_none() {
@@ -143,6 +154,7 @@ pub async fn providers_with(
         sign_ups_open = password.as_ref().is_some_and(|p| p.allow_sign_up()),
         verify_email,
         external_provider = external.is_some(),
+        default_organization = issuer.default_organization().is_some(),
         "sign-in configured"
     );
     Ok(Providers {

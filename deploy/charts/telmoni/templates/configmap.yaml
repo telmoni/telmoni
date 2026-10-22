@@ -22,6 +22,10 @@ data:
   VERIFY_EMAIL: {{ .Values.config.verifyEmail | quote }}
   AUTH_DISABLE_USERNAME_PASSWORD: {{ .Values.config.disableUsernamePassword | quote }}
   AUTH_DOMAINS_WITH_SSO_ENFORCEMENT: {{ .Values.config.domainsWithSsoEnforcement | quote }}
+  TELMONI_DEFAULT_ORG_ID: {{ .Values.config.defaultOrgId | quote }}
+  TELMONI_DEFAULT_ORG_ROLE: {{ .Values.config.defaultOrgRole | quote }}
+  TELMONI_DEFAULT_PROJECT_ID: {{ .Values.config.defaultProjectId | quote }}
+  TELMONI_DEFAULT_PROJECT_ROLE: {{ .Values.config.defaultProjectRole | quote }}
   AUTH_CUSTOM_NAME: {{ .Values.config.customName | quote }}
   AUTH_CUSTOM_SCOPE: {{ .Values.config.customScope | quote }}
   AUTH_CUSTOM_CHECKS: {{ .Values.config.customChecks | quote }}

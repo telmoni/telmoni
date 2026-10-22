@@ -27,6 +27,15 @@ config:
   verifyEmail: false
   disableUsernamePassword: false
   domainsWithSsoEnforcement: ""
+  # Where every person created starts, as Langfuse's LANGFUSE_DEFAULT_ORG_ID
+  # gives one (TELMONI_DEFAULT_*): an organization's id, from its Settings,
+  # joined as a member unless defaultOrgRole is admin, and one of its
+  # projects, seated as a member unless defaultProjectRole is admin. Once, as
+  # they are created; empty for none.
+  defaultOrgId: ""
+  defaultOrgRole: ""
+  defaultProjectId: ""
+  defaultProjectRole: ""
   # The OpenID Connect provider's block (AUTH_CUSTOM_*), its client id,
   # secret and issuer in `server-secrets`: what the sign-in page calls it
   # ("Continue with …"); the scopes it is asked for; what each sign-in is

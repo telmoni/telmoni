@@ -128,6 +128,20 @@ pub async fn organization_of<B: Binding>(
     .await
 }
 
+/// The organization holding an active project; `None` for one being deleted,
+/// or one the binding does not see.
+pub async fn home_of_active<B: Binding>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+) -> sqlx::Result<Option<OrganizationId>> {
+    sqlx::query_scalar::<_, OrganizationId>(
+        "SELECT organization_id FROM auth.projects WHERE external_id = $1 AND status = 'active'",
+    )
+    .bind(project_id)
+    .fetch_optional(tx.conn())
+    .await
+}
+
 /// What `acting_project` decides a caller's role from: the project's
 /// organization and its status, the caller's seat on the project, and their
 /// row on the organization's roster.

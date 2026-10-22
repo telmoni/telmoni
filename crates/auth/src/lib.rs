@@ -12,6 +12,7 @@ pub mod boot;
 pub mod config;
 #[expect(missing_docs, reason = "internal wiring exposed for integration tests")]
 pub mod db;
+pub mod default_organization;
 pub mod external;
 #[expect(missing_docs, reason = "internal wiring exposed for integration tests")]
 pub mod handler;

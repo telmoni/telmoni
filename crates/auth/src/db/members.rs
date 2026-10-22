@@ -25,10 +25,12 @@ pub trait OrganizationSeatsRead: Binding {}
 impl OrganizationSeatsRead for PersonAndOrganization {}
 impl OrganizationSeatsRead for Maintenance<AuthLane> {}
 
-/// Bindings a seat is written under: the project's own, and the lane the
-/// invite accept runs in, since the invitee holds nothing in the project yet.
+/// Bindings a seat is written under: the project's own, the lane the invite
+/// accept runs in, since the invitee holds nothing in the project yet, and a
+/// new person's own with the default project's beside it.
 pub trait SeatInsert: Binding {}
 impl SeatInsert for Project {}
+impl SeatInsert for PersonOrganizationProject {}
 impl SeatInsert for Maintenance<AuthLane> {}
 
 /// Bindings a seat is removed under: the project's own, the ownership accept

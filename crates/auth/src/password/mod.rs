@@ -37,6 +37,7 @@ use crate::db::{
     confirmation_codes::{self, Act, Purpose},
     credentials, identities, invites, locks, refresh_tokens, sessions,
 };
+use crate::default_organization;
 use crate::issuer::{Issuer, secret};
 use crate::mailer::Mailer;
 use crate::oidc::with_query;
@@ -204,6 +205,8 @@ impl PasswordProvider {
             )
             .into());
         }
+        let mut tx =
+            default_organization::join(tx, &user_id, self.issuer.default_organization()).await?;
         if !verify {
             let code = self
                 .issuer
@@ -258,7 +261,10 @@ impl PasswordProvider {
             tx.rollback().await?;
             return Ok(false);
         }
-        tx.commit().await?;
+        default_organization::join(tx, &user_id, self.issuer.default_organization())
+            .await?
+            .commit()
+            .await?;
         tracing::info!(user_id = %user_id, "admin account created from ADMIN_EMAIL");
         Ok(true)
     }
