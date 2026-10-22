@@ -6,9 +6,10 @@
 //! each find one monitor; a field the lane cannot take is a 400 that names
 //! it and echoes none of it; a paused monitor is resumed whatever its saved
 //! timing, and saves none that never comes; what a schedule means is
-//! answered without saving; a project reads its own monitors and no other's;
-//! and the purges take a project's monitors with it, as a move takes them
-//! along.
+//! answered without saving, and so are the zones a monitor may be in; a
+//! project reads its own monitors and no other's, one with its runs still
+//! going and its incidents; and the purges take a project's monitors with
+//! it, as a move takes them along.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
 mod common;
@@ -803,4 +804,132 @@ async fn the_ceiling_is_read_before_the_chain_lock(pool: PgPool) {
         .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     assert_eq!(quick.asked(), [true, false]);
+}
+
+/// One monitor is answered with its runs still going, each held to the
+/// tighter bounds, and its incidents: the open one first, then the last ten
+/// resolved, newest first; another monitor's are not its.
+#[sqlx::test]
+async fn a_monitor_is_read_with_its_open_runs_and_incidents(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let (status, made) = p
+        .send(p.request("POST", LANE, ADMIN, Some(nightly())))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    let mut other = nightly();
+    other["name"] = json!("Weekly digest");
+    let (status, weekly) = p.send(p.request("POST", LANE, ADMIN, Some(other))).await;
+    assert_eq!(status, StatusCode::CREATED, "{weekly}");
+    let one = format!("{LANE}/nightly-report");
+    let (status, got) = p.send(p.request("GET", &one, MEMBER, None)).await;
+    assert_eq!(status, StatusCode::OK, "{got}");
+    assert_eq!(got["open_runs"], json!([]));
+    assert_eq!(got["incidents"], json!([]));
+    assert_eq!(got["last_success_at"], Value::Null);
+
+    let run = uuid::Uuid::new_v4();
+    for (monitor, id, agent) in [
+        (&made, run, "nightly-report"),
+        (&weekly, uuid::Uuid::new_v4(), "weekly-digest"),
+    ] {
+        sqlx::query(
+            "INSERT INTO telemetry.open_runs (id, project_id, organization_id, monitor_id, agent,
+                 source, started_at, last_heard_at, ends_by, steps, input_tokens, output_tokens,
+                 cost_usd, stall_after_s, max_steps, max_cost_usd)
+             VALUES ($1, $2, $3, $4::uuid, $5, 'ingest', now() - interval '5 minutes',
+                 now() - interval '1 minute', now() + interval '1 hour', 12, 1000, 200, 0.25,
+                 60, 40, NULL)",
+        )
+        .bind(id)
+        .bind(&p.project)
+        .bind(&p.organization)
+        .bind(monitor["id"].as_str().expect("an id"))
+        .bind(agent)
+        .execute(&pool)
+        .await
+        .expect("open a run");
+    }
+    // Twelve resolved, an hour apart, and one open; and the other monitor's.
+    for (monitor, hours_ago, resolved) in (1..=12)
+        .map(|n| (&made, n * 2, true))
+        .chain([(&made, 0, false), (&weekly, 0, false)])
+    {
+        sqlx::query(
+            "INSERT INTO telemetry.incidents (id, project_id, organization_id, monitor_id, cause,
+                 detail, opened_at, resolved_at, resolution)
+             VALUES ($1, $2, $3, $4::uuid, 'failed', 'run_failed',
+                 now() - make_interval(hours => $5 + 1),
+                 CASE WHEN $6 THEN now() - make_interval(hours => $5) END,
+                 CASE WHEN $6 THEN 'recovered' END)",
+        )
+        .bind(uuid::Uuid::new_v4())
+        .bind(&p.project)
+        .bind(&p.organization)
+        .bind(monitor["id"].as_str().expect("an id"))
+        .bind(hours_ago)
+        .bind(resolved)
+        .execute(&pool)
+        .await
+        .expect("open an incident");
+    }
+
+    let (status, got) = p.send(p.request("GET", &one, MEMBER, None)).await;
+    assert_eq!(status, StatusCode::OK, "{got}");
+    let open = got["open_runs"].as_array().expect("open runs");
+    assert_eq!(open.len(), 1, "{got}");
+    assert_eq!(open[0]["run_id"].as_str(), Some(run.to_string().as_str()));
+    assert_eq!(open[0]["source"], "ingest");
+    assert_eq!(open[0]["steps"], 12);
+    assert_eq!(open[0]["input_tokens"], 1000);
+    assert_eq!(open[0]["cost_usd"], 0.25);
+    assert_eq!(
+        open[0]["bounds"],
+        json!({ "stall_after_s": 60, "max_steps": 40, "max_cost_usd": null })
+    );
+    let incidents = got["incidents"].as_array().expect("incidents");
+    assert_eq!(incidents.len(), 11, "the open one and ten resolved: {got}");
+    assert_eq!(
+        incidents[0]["resolved_at"],
+        Value::Null,
+        "the open one first"
+    );
+    assert_eq!(incidents[0]["cause"], "failed");
+    assert_eq!(incidents[0]["detail"], "run_failed");
+    assert_eq!(incidents[0]["resolution"], Value::Null);
+    assert!(
+        incidents[1..]
+            .iter()
+            .all(|i| i["resolution"] == "recovered")
+    );
+    let resolved: Vec<&str> = incidents[1..]
+        .iter()
+        .map(|i| i["resolved_at"].as_str().expect("resolved"))
+        .collect();
+    assert!(
+        resolved.windows(2).all(|w| w[0] > w[1]),
+        "newest first: {resolved:?}"
+    );
+}
+
+/// Every zone a monitor may be in is read by every role on the project,
+/// sorted, and by nobody off it.
+#[sqlx::test]
+async fn the_zones_a_monitor_may_be_in_are_read_by_every_role(pool: PgPool) {
+    let p = project(&pool);
+    let lane = "/internal/v1/telemetry/timezones";
+    for user in [OWNER, ADMIN, MEMBER] {
+        let (status, body) = p.send(p.request("GET", lane, user, None)).await;
+        assert_eq!(status, StatusCode::OK, "{user}: {body}");
+        let zones: Vec<&str> = body["zones"]
+            .as_array()
+            .expect("zones")
+            .iter()
+            .map(|z| z.as_str().expect("a name"))
+            .collect();
+        assert!(zones.contains(&"UTC") && zones.contains(&"Europe/London"));
+        assert!(zones.windows(2).all(|w| w[0] < w[1]), "sorted");
+    }
+    let (status, _) = p.send(p.request("GET", lane, STRANGER, None)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }

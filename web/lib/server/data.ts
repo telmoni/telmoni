@@ -100,8 +100,17 @@ export type {
   ViewQuery,
 } from "./entities/traces";
 
-export { fetchMonitors } from "./entities/monitors";
-export type { Monitor, MonitorsAccess } from "./entities/monitors";
+export { fetchMonitor, fetchMonitors, fetchPingKeys, fetchTimezones } from "./entities/monitors";
+export type {
+  Bounds,
+  Monitor,
+  MonitorAccess,
+  MonitorDetail,
+  MonitorsAccess,
+  OpenRun,
+  PingKey,
+  PingKeysAccess,
+} from "./entities/monitors";
 
 export { fetchSessionLayout } from "./entities/session-layout";
 export type { SessionLayoutSetting } from "./entities/session-layout";
@@ -134,6 +143,7 @@ export {
   auditExportFile,
   fetchAuditEvents,
   fetchOrganizationAudit,
+  fetchResourceAudit,
   listAuditExports,
   startAuditExport,
 } from "./entities/audit";

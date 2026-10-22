@@ -28,9 +28,9 @@ export async function generateMetadata({
 export default async function OverviewPage({
   params,
 }: {
-  params: Promise<{ project: string }>;
+  params: Promise<{ organization: string; project: string }>;
 }) {
-  const { project: slug } = await params;
+  const { organization, project: slug } = await params;
   const project = await fetchProjectBySlug(slug);
   if (!project) return <ServiceUnavailable />;
   const [monitors, notices] = await Promise.all([
@@ -45,7 +45,7 @@ export default async function OverviewPage({
       title={project.name}
       sections={
         <>
-          <StatusBoard monitors={monitors} />
+          <StatusBoard monitors={monitors} organization={organization} project={slug} />
           {notices && notices.items.length > 0 && (
             <Notices
               label="Project notices"

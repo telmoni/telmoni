@@ -4,10 +4,11 @@
 //! and `GET /monitors/{slug}`, which every role on the project reads; `POST`,
 //! `PUT /monitors/{slug}`, `DELETE`, `POST /monitors/{slug}/pause` and
 //! `/resume`, which its owners and admins send; and `POST /monitors/schedule`,
-//! which answers what a schedule means and saves nothing. A monitor is made
-//! under the organization's chain lock and held to its plan's ceiling, and
-//! every change to one is audited as [`TelmoniResourceKind::Monitor`], since
-//! a monitor is what pages somebody, or stops paging them.
+//! which answers what a schedule means and saves nothing, and `GET
+//! /timezones`, the zones a monitor may be in. A monitor is made under the
+//! organization's chain lock and held to its plan's ceiling, and every
+//! change to one is audited as [`TelmoniResourceKind::Monitor`], since a
+//! monitor is what pages somebody, or stops paging them.
 
 use std::sync::Arc;
 
@@ -25,17 +26,17 @@ use telmoni_shared::extract::{Json, correlation_id};
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam;
 use telmoni_shared::{
-    AuditAction, AuthError, LaneCeilings, MonitorCeiling, MonitorState, ProjectId, TelmoniError,
-    TelmoniResourceKind, slug,
+    AuditAction, AuthError, IncidentDetail, IncidentResolution, LaneCeilings, MonitorCeiling,
+    MonitorState, ProjectId, TelmoniError, TelmoniResourceKind, slug,
 };
 
 use crate::AppState;
 use crate::ceilings;
 use crate::contract;
-use crate::db::{self, LastRun, MonitorRow, MonitorWrite};
+use crate::db::{self, IncidentRow, LastRun, MonitorRow, MonitorWrite, OpenRunRow};
 use crate::handler::chain;
 use crate::incidents;
-use crate::schedule::{Fault, PERIOD_MAX_S, PREVIEW, Schedule};
+use crate::schedule::{self, Fault, PERIOD_MAX_S, PREVIEW, Schedule};
 
 /// The longest a monitor's name is, in characters, as the table's CHECK has
 /// it.
@@ -51,6 +52,10 @@ pub const MAX_COST_USD_MAX: f64 = 1_000_000.0;
 /// Words no monitor goes by: the lane beside `/monitors/{slug}` and the page
 /// beside the monitor's own, each of which a monitor so named would shadow.
 pub const RESERVED: &[&str] = &["new", "schedule"];
+/// How many of a monitor's runs still going its page is answered, and how
+/// many of its resolved incidents.
+pub const OPEN_RUNS_SHOWN: i64 = 10;
+pub const RESOLVED_SHOWN: i64 = 10;
 /// The unique indexes a second monitor of one slug, or of one agent, runs
 /// into, whichever lane writes it ([`refused_as_taken`]).
 const SLUG_TAKEN: &str = "monitors_project_slug_idx";
@@ -366,6 +371,8 @@ pub struct Monitor {
     pub next_due_at: Option<DateTime<Utc>>,
     /// Its last run that ended, kept as it ended; none until one has.
     pub last_run: Option<LastRun>,
+    /// When its last run that ended well ended; none until one has.
+    pub last_success_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -374,6 +381,7 @@ impl From<MonitorRow> for Monitor {
     fn from(row: MonitorRow) -> Self {
         Self {
             last_run: row.last_run(),
+            last_success_at: row.last_success_at,
             id: row.id,
             slug: row.slug,
             name: row.name,
@@ -402,6 +410,96 @@ impl From<MonitorRow> for Monitor {
 pub struct MonitorList {
     /// The project's monitors, the worst state first, then by name.
     pub monitors: Vec<Monitor>,
+}
+
+/// A run of the monitor's still going: its counts so far, and the bounds it
+/// is held to, each the tighter of the monitor's and the run's own.
+#[derive(Debug, Serialize)]
+pub struct OpenRun {
+    pub run_id: Uuid,
+    /// `ping` for a run its pings report, `ingest` for one an SDK sends.
+    pub source: String,
+    pub started_at: DateTime<Utc>,
+    pub last_heard_at: DateTime<Utc>,
+    /// When it is over whatever it says, past which the ticker ends it.
+    pub ends_by: DateTime<Utc>,
+    pub steps: i32,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cost_usd: f64,
+    pub bounds: Bounds,
+}
+
+impl From<OpenRunRow> for OpenRun {
+    fn from(row: OpenRunRow) -> Self {
+        Self {
+            run_id: row.id,
+            source: row.source,
+            started_at: row.started_at,
+            last_heard_at: row.last_heard_at,
+            ends_by: row.ends_by,
+            steps: row.steps,
+            input_tokens: row.input_tokens,
+            output_tokens: row.output_tokens,
+            cost_usd: row.cost_usd,
+            bounds: Bounds {
+                stall_after_s: row.stall_after_s,
+                max_steps: row.max_steps,
+                max_cost_usd: row.max_cost_usd,
+            },
+        }
+    }
+}
+
+/// One of the monitor's incidents: the state that opened it and why, when,
+/// and how it closed.
+#[derive(Debug, Serialize)]
+pub struct Incident {
+    pub id: Uuid,
+    pub cause: MonitorState,
+    pub detail: IncidentDetail,
+    pub opened_at: DateTime<Utc>,
+    pub resolved_at: Option<DateTime<Utc>>,
+    pub resolution: Option<IncidentResolution>,
+    pub flapping: bool,
+}
+
+impl TryFrom<IncidentRow> for Incident {
+    type Error = TelmoniError;
+
+    /// A word the table's CHECK would never take is the database's fault.
+    fn try_from(row: IncidentRow) -> Result<Self, Self::Error> {
+        let unreadable =
+            || TelmoniError::Internal("an incident's row holds a word the lane cannot read".into());
+        Ok(Self {
+            id: row.id,
+            cause: row.cause,
+            detail: row.detail.parse().map_err(|_| unreadable())?,
+            opened_at: row.opened_at,
+            resolved_at: row.resolved_at,
+            resolution: row
+                .resolution
+                .map(|word| word.parse().map_err(|_| unreadable()))
+                .transpose()?,
+            flapping: row.flapping,
+        })
+    }
+}
+
+/// One monitor as its page reads it: the monitor, its runs still going and
+/// its incidents, the open one first.
+#[derive(Debug, Serialize)]
+pub struct MonitorDetail {
+    #[serde(flatten)]
+    pub monitor: Monitor,
+    pub open_runs: Vec<OpenRun>,
+    pub incidents: Vec<Incident>,
+}
+
+/// What the timezones lane answers: every zone a monitor may be in.
+#[derive(Debug, Serialize)]
+pub struct Timezones {
+    pub zones: Vec<&'static str>,
 }
 
 /// A refusal of a timing, as a 400 naming its field.
@@ -502,21 +600,48 @@ pub async fn list_monitors(
 }
 
 /// `GET /internal/v1/telemetry/monitors/{slug}` — one of the project's
-/// monitors.
+/// monitors, with its runs still going and its incidents: the open one and
+/// the last [`RESOLVED_SHOWN`] resolved.
 pub async fn get_monitor(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(slug): Path<String>,
-) -> Result<Json<Monitor>, TelmoniError> {
+) -> Result<Json<MonitorDetail>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
         .require_project(Verb::Read, Resource::Monitor)?
         .project_id;
     let slug = monitor_slug(&slug)?;
     let mut tx = project_scope(&state.db, project_id).await?;
-    let row = db::monitor(&mut tx, project_id, &slug).await?;
+    let Some(row) = db::monitor(&mut tx, project_id, &slug).await? else {
+        tx.commit().await?;
+        return Err(not_found());
+    };
+    let open_runs = db::open_runs_of(&mut tx, project_id, row.id, OPEN_RUNS_SHOWN).await?;
+    let incidents = db::incidents_of(&mut tx, project_id, row.id, RESOLVED_SHOWN).await?;
     tx.commit().await?;
-    row.map(Monitor::from).map(Json).ok_or_else(not_found)
+    Ok(Json(MonitorDetail {
+        monitor: Monitor::from(row),
+        open_runs: open_runs.into_iter().map(OpenRun::from).collect(),
+        incidents: incidents
+            .into_iter()
+            .map(Incident::try_from)
+            .collect::<Result<_, _>>()?,
+    }))
+}
+
+/// `GET /internal/v1/telemetry/timezones` — every zone a monitor may be in,
+/// for its form's picker; every role on the project may ask, as the
+/// schedule's preview does.
+pub async fn list_timezones(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<Timezones>, TelmoniError> {
+    let acting = state.auth.resolve(&headers).await?;
+    acting.require_project(Verb::Read, Resource::Monitor)?;
+    Ok(Json(Timezones {
+        zones: schedule::zones(),
+    }))
 }
 
 /// `POST /internal/v1/telemetry/monitors/schedule` — what a schedule means: the

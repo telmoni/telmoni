@@ -53,6 +53,7 @@ type Monitor = {
     steps: number | null;
     cost_usd: number | null;
   } | null;
+  last_success_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -117,6 +118,7 @@ function monitor(state: string, name: string, last_run: Monitor["last_run"] = EN
     state_changed_at: "2026-10-21T03:12:00Z",
     next_due_at: "2026-10-21T04:00:00Z",
     last_run,
+    last_success_at: null,
     created_at: "2026-10-01T00:00:00Z",
     updated_at: "2026-10-21T03:12:00Z",
   };
@@ -131,7 +133,7 @@ const ENDED: Monitor["last_run"] = {
 };
 
 async function renderAt(project: string) {
-  render(await OverviewPage({ params: Promise.resolve({ project }) }));
+  render(await OverviewPage({ params: Promise.resolve({ organization: "acme", project }) }));
 }
 
 function board() {
@@ -167,7 +169,8 @@ describe("OverviewPage", () => {
   });
 
   // The board: the monitors that need someone, the worst first, then those
-  // running, each with its last run; every other counted in one line.
+  // running, each with its last run and a link to its page; every other
+  // counted in one line.
   it("lists the monitors that need someone, then those running, and counts the rest", async () => {
     mockMonitors = {
       kind: "ok",
@@ -196,7 +199,15 @@ describe("OverviewPage", () => {
     expect(board()).toHaveTextContent("1 new · 2 healthy");
     expect(within(board()).queryByText("weekly-digest")).toBeNull();
     expect(within(board()).queryByText("found-by-ping")).toBeNull();
-    expect(screen.queryAllByRole("link")).toHaveLength(0);
+    expect(
+      within(board())
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href")),
+    ).toEqual([
+      `/acme/${SLUG}/monitors/nightly-report`,
+      `/acme/${SLUG}/monitors/hourly-sync`,
+      `/acme/${SLUG}/monitors/support-bot`,
+    ]);
   });
 
   it("says nothing needs anyone when every monitor is healthy", async () => {

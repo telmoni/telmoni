@@ -11,7 +11,7 @@
 
 use chrono::{DateTime, Duration, Utc};
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped};
-use telmoni_shared::{MonitorState, OrganizationId, ProjectId, TelmoniError};
+use telmoni_shared::{IncidentDetail, MonitorState, OrganizationId, ProjectId, TelmoniError};
 
 use crate::db::{self, IncidentRow, MonitorRow, NewIncident};
 use crate::notify;
@@ -40,29 +40,34 @@ pub enum Trigger {
 }
 
 impl Trigger {
+    /// What the row keeps of it, on the wire contract.
+    #[must_use]
+    pub const fn detail(self) -> IncidentDetail {
+        match self {
+            Self::RunFailed { .. } => IncidentDetail::RunFailed,
+            Self::RunNeverCame => IncidentDetail::RunNeverCame,
+            Self::RunNeverEnded => IncidentDetail::RunNeverEnded,
+            Self::RunLate => IncidentDetail::RunLate,
+            Self::RunStalled => IncidentDetail::RunStalled,
+            Self::RunOverBound => IncidentDetail::RunOverBound,
+        }
+    }
+
     /// The word the row keeps, and the notice's `detail`.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::RunFailed { .. } => "run_failed",
-            Self::RunNeverCame => "run_never_came",
-            Self::RunNeverEnded => "run_never_ended",
-            Self::RunLate => "run_late",
-            Self::RunStalled => "run_stalled",
-            Self::RunOverBound => "run_over_bound",
-        }
+        self.detail().as_str()
     }
 
     /// The trigger a kept word names, its exit code gone with the row.
     pub(crate) fn from_word(word: &str) -> Option<Self> {
-        Some(match word {
-            "run_failed" => Self::RunFailed { exit_code: None },
-            "run_never_came" => Self::RunNeverCame,
-            "run_never_ended" => Self::RunNeverEnded,
-            "run_late" => Self::RunLate,
-            "run_stalled" => Self::RunStalled,
-            "run_over_bound" => Self::RunOverBound,
-            _ => return None,
+        Some(match word.parse::<IncidentDetail>().ok()? {
+            IncidentDetail::RunFailed => Self::RunFailed { exit_code: None },
+            IncidentDetail::RunNeverCame => Self::RunNeverCame,
+            IncidentDetail::RunNeverEnded => Self::RunNeverEnded,
+            IncidentDetail::RunLate => Self::RunLate,
+            IncidentDetail::RunStalled => Self::RunStalled,
+            IncidentDetail::RunOverBound => Self::RunOverBound,
         })
     }
 
@@ -105,25 +110,8 @@ pub const fn alerting(state: MonitorState) -> bool {
     )
 }
 
-/// How an incident closed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Resolution {
-    /// The monitor is healthy again.
-    Recovered,
-    /// Its owner paused it.
-    Paused,
-}
-
-impl Resolution {
-    /// The word the row keeps, and the notice's `resolution`.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Recovered => "recovered",
-            Self::Paused => "paused",
-        }
-    }
-}
+/// How an incident closed, its word the row's and the notice's `resolution`.
+pub use telmoni_shared::IncidentResolution as Resolution;
 
 /// What a state change, or a tick, did to the monitor's incident.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

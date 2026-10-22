@@ -194,6 +194,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(handler::monitors::preview_schedule),
         )
         .route(
+            "/telemetry/timezones",
+            get(handler::monitors::list_timezones),
+        )
+        .route(
             "/telemetry/monitors/{slug}",
             get(handler::monitors::get_monitor)
                 .put(handler::monitors::update_monitor)

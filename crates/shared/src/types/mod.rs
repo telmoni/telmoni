@@ -5,6 +5,7 @@ pub mod audit_action;
 pub mod content_mode;
 pub mod flag;
 pub mod grants;
+pub mod incident;
 pub mod layout_depth;
 pub mod layout_open;
 pub mod monitor_state;
@@ -33,6 +34,7 @@ pub use grants::{
     CONNECTION_BYTES, Grants, LaneCeilings, MICRO_PINGS, MemberCeiling, MonitorCeiling,
     PING_BURST_MINUTES, Paused,
 };
+pub use incident::{IncidentDetail, IncidentResolution};
 pub use layout_depth::LayoutDepth;
 pub use layout_open::LayoutOpen;
 pub use monitor_state::MonitorState;

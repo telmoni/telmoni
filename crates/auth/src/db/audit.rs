@@ -61,6 +61,7 @@ pub struct AuditQuery<'a> {
     /// must never give wrongly. The enum makes the typo a 400.
     pub action: Option<AuditAction>,
     pub resource_kind: Option<TelmoniResourceKind>,
+    pub resource_id: Option<&'a str>,
     pub cursor: Option<Uuid>,
     pub limit: i64,
 }
@@ -125,6 +126,9 @@ pub async fn list<B: HasOrganization>(
     }
     if let Some(kind) = q.resource_kind {
         sql.push(" AND resource_kind = ").push_bind(kind);
+    }
+    if let Some(id) = q.resource_id {
+        sql.push(" AND resource_id = ").push_bind(id);
     }
     if let Some(cursor) = q.cursor {
         sql.push(" AND id < ").push_bind(cursor);

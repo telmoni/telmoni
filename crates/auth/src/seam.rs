@@ -269,6 +269,7 @@ impl Auth for AppState {
                 actor: query.actor.as_deref(),
                 action: query.action,
                 resource_kind: None,
+                resource_id: None,
                 cursor: None,
                 limit: query.limit.clamp(1, AUDIT_TOOL_MAX),
             },

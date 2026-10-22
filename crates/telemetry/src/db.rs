@@ -485,6 +485,8 @@ pub struct MonitorRow {
     pub last_run_status: Option<SpanStatus>,
     pub last_run_steps: Option<i32>,
     pub last_run_cost_usd: Option<f64>,
+    /// When its last run that ended well ended.
+    pub last_success_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -535,7 +537,7 @@ impl LastRun {
 const MONITOR_COLUMNS: &str = "id, slug, name, agent, schedule, interval_s, timezone, grace_s, \
      expected_duration_s, stall_after_s, max_steps, max_cost_usd, state, state_changed_at, \
      next_due_at, last_run_id, last_run_started_at, last_run_ended_at, last_run_status, \
-     last_run_steps, last_run_cost_usd, created_at, updated_at";
+     last_run_steps, last_run_cost_usd, last_success_at, created_at, updated_at";
 
 /// What making or changing a monitor writes: its definition, checked by the
 /// lane, and when its next run is due under it.
@@ -993,15 +995,30 @@ pub async fn settle_monitor_run(
 /// unless the one it keeps ended later — a run ended late, by the ping after
 /// it or by the ticker, never replaces a run that ended since — or is the
 /// same run: an end ping tried again files a second record of it, of no
-/// duration, which the outbox drops and the monitor must not keep. Under the
-/// lock its caller holds on the row, as a settling holds it. Answers whether
-/// it was written.
+/// duration, which the outbox drops and the monitor must not keep. A run
+/// that ended well moves its last success forward, a late one too, when it
+/// is not the run kept already. Under the lock its caller holds on the row,
+/// as a settling holds it. Answers whether the last run was written.
 pub async fn note_last_run(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
     id: Uuid,
     run: &LastRun,
 ) -> sqlx::Result<bool> {
+    if run.status == SpanStatus::Ok {
+        sqlx::query(
+            "UPDATE telemetry.monitors SET last_success_at = $4
+              WHERE project_id = $1 AND id = $2
+                AND last_run_id IS DISTINCT FROM $3
+                AND (last_success_at IS NULL OR last_success_at < $4)",
+        )
+        .bind(project_id)
+        .bind(id)
+        .bind(run.run_id)
+        .bind(run.ended_at)
+        .execute(tx.conn())
+        .await?;
+    }
     Ok(sqlx::query(
         "UPDATE telemetry.monitors
             SET last_run_id = $3, last_run_started_at = $4, last_run_ended_at = $5,
@@ -1054,6 +1071,33 @@ pub struct NewIncident<'a> {
 /// The columns an [`IncidentRow`] is read from, in its order.
 const INCIDENT_COLUMNS: &str =
     "id, monitor_id, cause, detail, opened_at, resolved_at, resolution, flapping";
+
+/// The monitor's open incident, if one, then the last `resolved` it
+/// resolved, newest first: what its page lists.
+pub async fn incidents_of<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    monitor_id: Uuid,
+    resolved: i64,
+) -> sqlx::Result<Vec<IncidentRow>> {
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {INCIDENT_COLUMNS} FROM (
+             SELECT {INCIDENT_COLUMNS} FROM telemetry.incidents
+              WHERE project_id = $1 AND monitor_id = $2 AND resolved_at IS NULL
+             UNION ALL
+             (SELECT {INCIDENT_COLUMNS} FROM telemetry.incidents
+               WHERE project_id = $1 AND monitor_id = $2 AND resolved_at IS NOT NULL
+               ORDER BY resolved_at DESC, id
+               LIMIT $3)
+         ) incidents
+         ORDER BY resolved_at IS NOT NULL, resolved_at DESC, opened_at DESC, id"
+    )))
+    .bind(project_id)
+    .bind(monitor_id)
+    .bind(resolved)
+    .fetch_all(tx.conn())
+    .await
+}
 
 /// The monitor's open incident, locked as its writer will write it
 /// (`FOR UPDATE`), or `None`: one at most, as the index holds.
@@ -1669,6 +1713,28 @@ pub async fn newest_open_run<B: HasProject>(
     .bind(project_id)
     .bind(monitor_id)
     .fetch_optional(tx.conn())
+    .await
+}
+
+/// The monitor's open runs, the newest first, at most `limit`: what its page
+/// shows while it runs.
+pub async fn open_runs_of<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    monitor_id: Uuid,
+    limit: i64,
+) -> sqlx::Result<Vec<OpenRunRow>> {
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {OPEN_RUN_COLUMNS}
+           FROM telemetry.open_runs
+          WHERE project_id = $1 AND monitor_id = $2
+          ORDER BY started_at DESC, id
+          LIMIT $3"
+    )))
+    .bind(project_id)
+    .bind(monitor_id)
+    .bind(limit)
+    .fetch_all(tx.conn())
     .await
 }
 

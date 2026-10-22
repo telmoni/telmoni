@@ -17,6 +17,18 @@
       "members",
       "signup"
     ],
+    "IncidentDetail": [
+      "run_failed",
+      "run_never_came",
+      "run_never_ended",
+      "run_late",
+      "run_stalled",
+      "run_over_bound"
+    ],
+    "IncidentResolution": [
+      "recovered",
+      "paused"
+    ],
     "LayoutDepth": [
       "trace",
       "steps",

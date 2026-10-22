@@ -1,21 +1,30 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 
 import { LocalTime } from "@/components/local-time";
 import { MonitorStateBadge } from "@/components/monitors/state-badge";
 import { Row, Rows } from "@/components/rows";
 import { Card } from "@/components/ui/card";
-import { boardOf, countedLine, lastRunLine } from "@/lib/monitors";
+import { boardOf, countedLine, lastRunLine, monitorHref } from "@/lib/monitors";
 import type { Monitor, MonitorsAccess } from "@/lib/server/data";
 
 // The project's home: the monitors that need someone, the worst first, then
-// those running, each with its last run, and every other counted in one
-// line. Read from Postgres alone, each monitor keeping its last run as the
+// those running, each with its last run and opening its own page, and every
+// other counted in one line. Read from Postgres alone, each monitor keeping its last run as the
 // run ends, so nothing is summed as the page is drawn; drawn again on the
 // ping lane's nudge (`realtime-listener.tsx`), never on a timer. A board of
 // runs and their bounds: no uptime grid and no percentage. Telemetry
 // unreadable is said, never hidden: a board gone quiet would read as every
 // monitor well.
-export function StatusBoard({ monitors }: { monitors: MonitorsAccess }) {
+export function StatusBoard({
+  monitors,
+  organization,
+  project,
+}: {
+  monitors: MonitorsAccess;
+  organization: string;
+  project: string;
+}) {
   if (monitors.kind === "forbidden") {
     return (
       <Section>
@@ -55,7 +64,11 @@ export function StatusBoard({ monitors }: { monitors: MonitorsAccess }) {
       ) : (
         <Rows>
           {rows.map((monitor) => (
-            <MonitorRow key={monitor.id} monitor={monitor} />
+            <MonitorRow
+              key={monitor.id}
+              monitor={monitor}
+              href={monitorHref(organization, project, monitor.slug)}
+            />
           ))}
         </Rows>
       )}
@@ -80,14 +93,16 @@ function Note({ children }: { children: ReactNode }) {
   return <Card className="gap-0 p-4 text-sm text-muted-foreground">{children}</Card>;
 }
 
-function MonitorRow({ monitor }: { monitor: Monitor }) {
+function MonitorRow({ monitor, href }: { monitor: Monitor; href: string }) {
   const run = monitor.last_run;
   const line = lastRunLine(monitor);
   return (
     <Row
       label={
         <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate">{monitor.name}</span>
+          <Link href={href} className="truncate underline-offset-4 hover:underline">
+            {monitor.name}
+          </Link>
           <MonitorStateBadge state={monitor.state} />
         </span>
       }

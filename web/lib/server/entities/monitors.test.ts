@@ -14,7 +14,7 @@ vi.mock("./identity-context", () => ({
     "x-project-id": projectId,
   }),
 }));
-import { fetchMonitors } from "./monitors";
+import { fetchMonitor, fetchMonitors, fetchPingKeys, fetchTimezones } from "./monitors";
 
 const PROJECT = "project_1";
 
@@ -40,8 +40,38 @@ const MONITOR = {
     steps: 12,
     cost_usd: 0.08,
   },
+  last_success_at: "2026-10-20T02:03:11Z",
   created_at: "2026-10-01T00:00:00Z",
   updated_at: "2026-10-21T02:10:00Z",
+};
+
+const DETAIL = {
+  ...MONITOR,
+  open_runs: [
+    {
+      run_id: "5d4f5c68-0000-4000-8000-000000000002",
+      source: "ingest",
+      started_at: "2026-10-21T03:00:00Z",
+      last_heard_at: "2026-10-21T03:01:00Z",
+      ends_by: "2026-10-21T04:20:00Z",
+      steps: 4,
+      input_tokens: 1200,
+      output_tokens: 85,
+      cost_usd: 0,
+      bounds: { stall_after_s: 60, max_steps: 40, max_cost_usd: null },
+    },
+  ],
+  incidents: [
+    {
+      id: "7a1c0000-0000-4000-8000-000000000001",
+      cause: "failed",
+      detail: "run_failed",
+      opened_at: "2026-10-21T02:04:02Z",
+      resolved_at: null,
+      resolution: null,
+      flapping: false,
+    },
+  ],
 };
 
 function answer(status: number, body: unknown) {
@@ -89,5 +119,62 @@ describe("fetchMonitors", () => {
     identityContext.mockResolvedValue(null);
     expect(await fetchMonitors(PROJECT)).toEqual({ kind: "unavailable" });
     expect(fetchWithTimeout).not.toHaveBeenCalled();
+  });
+});
+
+describe("fetchMonitor", () => {
+  it("reads one monitor by its slug, with its runs still going and its incidents", async () => {
+    answer(200, DETAIL);
+    expect(await fetchMonitor(PROJECT, "nightly-report")).toEqual({ kind: "ok", monitor: DETAIL });
+    expect(fetchWithTimeout.mock.calls[0][0]).toBe(
+      "http://server/internal/v1/telemetry/monitors/nightly-report",
+    );
+  });
+
+  it("is missing on a 404, and for a slug of no monitor's shape asks nothing", async () => {
+    answer(404, { title: "Not Found" });
+    expect(await fetchMonitor(PROJECT, "nightly-report")).toEqual({ kind: "missing" });
+    fetchWithTimeout.mockClear();
+    for (const slug of ["Nightly", "../settings", "a b", ""]) {
+      expect(await fetchMonitor(PROJECT, slug), slug).toEqual({ kind: "missing" });
+    }
+    expect(fetchWithTimeout).not.toHaveBeenCalled();
+  });
+
+  it("is forbidden on a 403, and unavailable on an answer it cannot read", async () => {
+    answer(403, { title: "Forbidden" });
+    expect(await fetchMonitor(PROJECT, "nightly-report")).toEqual({ kind: "forbidden" });
+    answer(200, { ...DETAIL, incidents: [{ ...DETAIL.incidents[0], detail: "run_lost" }] });
+    expect(await fetchMonitor(PROJECT, "nightly-report")).toEqual({ kind: "unavailable" });
+  });
+});
+
+describe("fetchTimezones", () => {
+  it("reads the zones a monitor may be in, and nothing it cannot read", async () => {
+    answer(200, { zones: ["Europe/London", "UTC"] });
+    expect(await fetchTimezones(PROJECT)).toEqual(["Europe/London", "UTC"]);
+    expect(fetchWithTimeout.mock.calls[0][0]).toBe("http://server/internal/v1/telemetry/timezones");
+    answer(503, {});
+    expect(await fetchTimezones(PROJECT)).toBeNull();
+  });
+});
+
+describe("fetchPingKeys", () => {
+  const KEY = {
+    id: "1b2c0000-0000-4000-8000-000000000001",
+    prefix: "telmoniping_Ab3dE6gH",
+    created_at: "2026-10-14T09:00:00Z",
+    last_ping_at: null,
+    retired_at: null,
+  };
+
+  it("reads the project's ping keys, never a key itself", async () => {
+    answer(200, { keys: [KEY] });
+    expect(await fetchPingKeys(PROJECT)).toEqual({ kind: "ok", keys: [KEY] });
+    expect(fetchWithTimeout.mock.calls[0][0]).toBe("http://server/internal/v1/telemetry/ping-keys");
+    answer(403, {});
+    expect(await fetchPingKeys(PROJECT)).toEqual({ kind: "forbidden" });
+    answer(404, {});
+    expect(await fetchPingKeys(PROJECT)).toEqual({ kind: "unavailable" });
   });
 });

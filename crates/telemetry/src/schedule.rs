@@ -196,6 +196,17 @@ pub fn parse_zone(name: &str) -> Result<Tz, Fault> {
     name.parse().map_err(|_| Fault::Timezone)
 }
 
+/// Every zone [`parse_zone`] takes, by name, sorted: what a monitor may be in.
+#[must_use]
+pub fn zones() -> Vec<&'static str> {
+    let mut zones: Vec<&'static str> = chrono_tz::TZ_VARIANTS
+        .iter()
+        .map(|zone| zone.name())
+        .collect();
+    zones.sort_unstable();
+    zones
+}
+
 /// A five-field cron line, as Vixie cron reads it: no seconds and no year,
 /// day-of-month or day-of-week where both are set, the `@daily` nicknames,
 /// and the ranges a crontab takes.

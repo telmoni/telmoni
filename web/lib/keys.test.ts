@@ -48,6 +48,8 @@ describe("the go sequences", () => {
   it("reads the rail you stand in", () => {
     expect(resolveSequence("k", "/acme/web")).toBe("/acme/web/api-keys");
     expect(resolveSequence("t", "/acme/web/members")).toBe("/acme/web/traces");
+    expect(resolveSequence("r", "/acme/web/traces")).toBe("/acme/web/monitors");
+    expect(resolveSequence("r", "/acme/settings")).toBeNull();
     expect(resolveSequence("d", "/acme/web")).toBe("/acme/web/dashboards");
     expect(resolveSequence(",", "/acme/web")).toBe("/acme/web/settings");
     expect(resolveSequence("p", "/acme/web")).toBe("/acme/web/privacy");

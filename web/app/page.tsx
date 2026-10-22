@@ -31,7 +31,7 @@ const PITCH =
 
 // True today; it moves as the roadmap does, and says what is not built yet.
 const STATUS =
-  "What runs today is the foundation — organizations and roles, API keys, the audit log, notifications and the console agent — and the first of the telemetry on it: SDKs in four languages that record an agent's runs, ingest that keeps them as metadata, and a console that reads them as traces, sessions and users. Monitors and alerts are next, built in the open.";
+  "What runs today is the foundation — organizations and roles, API keys, the audit log, notifications and the console agent — and the first of the telemetry on it: SDKs in four languages that record an agent's runs, ingest that keeps them as metadata, and a console that reads them as traces, sessions and users and holds each agent to its monitor. Alerts are next, built in the open.";
 
 // What the product is for, one cell per goal, in the order they are built:
 // a small motion that says it, a line, then three points.

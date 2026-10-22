@@ -40,6 +40,24 @@ export const MonitorState = {
 } as const;
 export type MonitorState = typeof MonitorState[keyof typeof MonitorState];
 
+/** Wire vocabulary of the Rust `IncidentDetail`: what opened an incident. */
+export const IncidentDetail = {
+  RunFailed:     "run_failed",
+  RunNeverCame:  "run_never_came",
+  RunNeverEnded: "run_never_ended",
+  RunLate:       "run_late",
+  RunStalled:    "run_stalled",
+  RunOverBound:  "run_over_bound",
+} as const;
+export type IncidentDetail = typeof IncidentDetail[keyof typeof IncidentDetail];
+
+/** Wire vocabulary of the Rust `IncidentResolution`: how an incident closed. */
+export const IncidentResolution = {
+  Recovered: "recovered",
+  Paused:    "paused",
+} as const;
+export type IncidentResolution = typeof IncidentResolution[keyof typeof IncidentResolution];
+
 /** Wire vocabulary of the Rust `NotificationKind`. */
 export const NotificationKind = {
   OrganizationAlert:     "organization_alert",

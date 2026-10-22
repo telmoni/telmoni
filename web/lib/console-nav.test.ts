@@ -96,6 +96,7 @@ describe("buildConsoleNav", () => {
     const [project] = buildConsoleNav("/acme/web/api-keys");
     expect(project?.items.map((i) => i.url)).toEqual([
       "/acme/web",
+      "/acme/web/monitors",
       "/acme/web/traces",
       "/acme/web/sessions",
       "/acme/web/users",
@@ -200,6 +201,7 @@ describe("buildConsoleNav", () => {
     );
     expect(project).toEqual([
       "/acme/web",
+      "/acme/web/monitors",
       "/acme/web/traces",
       "/acme/web/sessions",
       "/acme/web/users",
@@ -241,7 +243,7 @@ describe("the blocks of a run", () => {
       navBlocks(project?.items ?? []).map((b) => [b.heading, b.items.map((i) => i.title)]),
     ).toEqual([
       [undefined, ["Overview"]],
-      ["Observability", ["Traces", "Sessions", "Users", "Alerts", "Dashboards"]],
+      ["Observability", ["Monitors", "Traces", "Sessions", "Users", "Alerts", "Dashboards"]],
       ["Project", ["API keys", "Connectors", "Members", "Audit log", "Privacy", "Settings"]],
     ]);
     const [organization] = buildConsoleNav("/acme/settings");
@@ -294,6 +296,7 @@ describe("the whole destination set", () => {
       ].flatMap((g) => g.items.map((i) => i.url)),
     ).toEqual([
       "/acme/web",
+      "/acme/web/monitors",
       "/acme/web/traces",
       "/acme/web/sessions",
       "/acme/web/users",

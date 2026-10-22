@@ -195,12 +195,18 @@ impl Project {
         body
     }
 
-    /// One of the project's monitors, as the console reads it.
+    /// One of the project's monitors, as the console reads it, without what
+    /// its page reads beside it — its open runs and incidents, which
+    /// `monitors.rs` holds — so it compares with a change's answer.
     async fn monitor(&self, slug: &str) -> Value {
-        let (status, body) = self
+        let (status, mut body) = self
             .send(self.request("GET", &format!("{MONITORS}/{slug}"), None))
             .await;
         assert_eq!(status, StatusCode::OK, "{body}");
+        let page = body.as_object_mut().expect("a monitor");
+        for field in ["open_runs", "incidents"] {
+            assert!(page.remove(field).is_some(), "{field} on its page");
+        }
         body
     }
 
@@ -1726,6 +1732,52 @@ async fn a_monitor_keeps_the_run_that_ended_last(pool: PgPool) {
         "{monitor}"
     );
     assert_eq!(monitor["last_run"]["status"], "error");
+}
+
+/// A run that ends well is the monitor's last success, kept through the
+/// failures after it; an end ping tried again moves it nothing, and the next
+/// run that ends well moves it on.
+#[sqlx::test]
+async fn a_monitor_keeps_its_last_success_through_failures(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    let made = p.make(hourly()).await;
+    assert_eq!(made["last_success_at"], Value::Null, "none until one has");
+
+    let first = rid();
+    p.ping_ok(&format!("/{key}/hourly-sync?rid={first}")).await;
+    let monitor = p.monitor("hourly-sync").await;
+    let success = monitor["last_success_at"].clone();
+    assert_eq!(success, monitor["last_run"]["ended_at"], "{monitor}");
+    p.ping_ok(&format!("/{key}/hourly-sync?rid={first}")).await;
+    assert_eq!(
+        p.monitor("hourly-sync").await["last_success_at"],
+        success,
+        "a copy moves it nothing"
+    );
+
+    for _ in 0..2 {
+        p.ping_ok(&format!("/{key}/hourly-sync/fail?rid={}", rid()))
+            .await;
+    }
+    let monitor = p.monitor("hourly-sync").await;
+    assert_eq!(monitor["last_run"]["status"], "error", "{monitor}");
+    assert_eq!(
+        monitor["last_success_at"], success,
+        "a failure moves nothing"
+    );
+
+    let later = rid();
+    p.ping_ok(&format!("/{key}/hourly-sync?rid={later}")).await;
+    let monitor = p.monitor("hourly-sync").await;
+    assert_eq!(
+        monitor["last_run"]["run_id"].as_str(),
+        Some(later.as_str()),
+        "{monitor}"
+    );
+    assert_eq!(monitor["last_success_at"], monitor["last_run"]["ended_at"]);
+    assert!(at(&monitor["last_success_at"]) > at(&success));
 }
 
 /// An end ping tried again — `telmoni run` repeats one that got no answer —

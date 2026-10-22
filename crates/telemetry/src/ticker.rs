@@ -504,6 +504,7 @@ mod tests {
             last_run_status: None,
             last_run_steps: None,
             last_run_cost_usd: None,
+            last_success_at: None,
             created_at: now,
             updated_at: now,
         }

@@ -200,6 +200,10 @@ CREATE TABLE telemetry.monitors (
     last_run_status     TEXT,
     last_run_steps      INTEGER,
     last_run_cost_usd   DOUBLE PRECISION,
+    -- When its last run that ended well ended, written beside the last run
+    -- and never moved back, so the monitor's page names its last success
+    -- however many runs have failed since.
+    last_success_at     TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT monitors_slug_check CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND char_length(slug) <= 48),
