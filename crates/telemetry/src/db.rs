@@ -935,7 +935,9 @@ pub async fn settle_monitor_run(
 
 /// One of the project's monitors given `run` as its last run that ended,
 /// unless the one it keeps ended later — a run ended late, by the ping after
-/// it or by the ticker, never replaces a run that ended since — under the
+/// it or by the ticker, never replaces a run that ended since — or is the
+/// same run: an end ping tried again files a second record of it, of no
+/// duration, which the outbox drops and the monitor must not keep. Under the
 /// lock its caller holds on the row, as a settling holds it. Answers whether
 /// it was written.
 pub async fn note_last_run(
@@ -950,7 +952,8 @@ pub async fn note_last_run(
                 last_run_status = $6, last_run_steps = $7, last_run_cost_usd = $8,
                 updated_at = GREATEST(statement_timestamp(), updated_at)
           WHERE project_id = $1 AND id = $2
-            AND (last_run_ended_at IS NULL OR last_run_ended_at <= $5)",
+            AND (last_run_ended_at IS NULL OR last_run_ended_at <= $5)
+            AND last_run_id IS DISTINCT FROM $3",
     )
     .bind(project_id)
     .bind(id)

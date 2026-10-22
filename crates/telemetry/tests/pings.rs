@@ -1695,6 +1695,53 @@ async fn a_monitor_keeps_the_run_that_ended_last(pool: PgPool) {
     assert_eq!(monitor["last_run"]["status"], "error");
 }
 
+/// An end ping tried again — `telmoni run` repeats one that got no answer —
+/// finds its run ended already and files a run of no duration under the same
+/// id, which the outbox drops; the monitor keeps the record the first ping
+/// left, never the copy, while a run of another id is the last as before.
+#[sqlx::test]
+async fn an_end_ping_tried_again_never_replaces_the_run_it_already_ended(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let p = project(&pool);
+    let key = p.mint().await;
+    p.make(hourly()).await;
+    let run = rid();
+    p.ping_ok(&format!("/{key}/hourly-sync/start?rid={run}"))
+        .await;
+    p.ping_ok(&format!(
+        "/{key}/hourly-sync/checkpoint?rid={run}&steps=2&cost=0.5"
+    ))
+    .await;
+    p.ping_ok(&format!("/{key}/hourly-sync/fail?rid={run}&exit_code=3"))
+        .await;
+    let first = p.monitor("hourly-sync").await["last_run"].clone();
+    assert_eq!(first["run_id"].as_str(), Some(run.as_str()), "{first}");
+    assert_eq!(first["status"], "error");
+    assert_eq!(first["steps"], 2);
+    assert!(at(&first["started_at"]) < at(&first["ended_at"]));
+
+    p.ping_ok(&format!("/{key}/hourly-sync/fail?rid={run}&exit_code=3"))
+        .await;
+    assert_eq!(
+        p.monitor("hourly-sync").await["last_run"],
+        first,
+        "a copy replaces nothing"
+    );
+    p.ping_ok(&format!("/{key}/hourly-sync?rid={run}")).await;
+    let monitor = p.monitor("hourly-sync").await;
+    assert_eq!(monitor["last_run"], first, "{monitor}");
+    assert_eq!(
+        monitor["state"], "healthy",
+        "the state follows the ping as before"
+    );
+
+    let other = rid();
+    p.ping_ok(&format!("/{key}/hourly-sync?rid={other}")).await;
+    let last = p.monitor("hourly-sync").await["last_run"].clone();
+    assert_eq!(last["run_id"].as_str(), Some(other.as_str()), "{last}");
+    assert_eq!(last["started_at"], last["ended_at"]);
+}
+
 /// A checkpoint's steps and spend are totals so far, which never fall: one
 /// lower than the run holds — an older checkpoint sent again, a retried
 /// curl — leaves it where it stands, each total on its own, so the run ends
