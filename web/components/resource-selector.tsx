@@ -49,6 +49,11 @@ const CHEVRON =
 // short of the header's bottom edge, so a menu opens right under the rule,
 // like the bell's and the account's.
 const MENU_OFFSET = 12.5;
+// Along the bar a menu starts where its trigger's name does, the trigger's
+// own padding (`px-2`, `px-2.5`) in from its unseen edge, so the
+// organization's stands on the content's padding line, with the page's title.
+const ORGANIZATIONS_MENU_ALIGN = 8;
+const PROJECTS_MENU_ALIGN = 10;
 
 type Row = {
   key: string;
@@ -247,6 +252,7 @@ export function ResourceSelector({
         <DropdownMenuContent
           className="w-72 animate-none!"
           align="start"
+          alignOffset={ORGANIZATIONS_MENU_ALIGN}
           side="bottom"
           sideOffset={MENU_OFFSET}
           onCloseAutoFocus={keepFocusForPanel}
@@ -319,6 +325,7 @@ export function ResourceSelector({
             <DropdownMenuContent
               className="w-72 animate-none!"
               align="start"
+              alignOffset={PROJECTS_MENU_ALIGN}
               side="bottom"
               sideOffset={MENU_OFFSET}
               onCloseAutoFocus={keepFocusForPanel}
