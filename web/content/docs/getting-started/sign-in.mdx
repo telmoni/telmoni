@@ -14,9 +14,9 @@ through device authorization on either.
 
 On standalone and self-hosted instances using Telmoni's built-in authentication:
 
-- **Sign up**: Offered where the operator allows it (`ALLOW_SIGN_UP=true`; it
-  is off by default, and then only an address holding an invitation can
-  register). Enter your email address, a password (8 characters at least,
+- **Sign up**: Offered where the operator allows it (`AUTH_DISABLE_SIGNUP=false`;
+  sign-ups are closed by default, and then only an address holding an invitation
+  can register). Enter your email address, a password (8 characters at least,
   256 bytes at most), and, optionally, your first and last name. When the
   deployment sets `VERIFY_EMAIL=true`, Telmoni emails a confirmation link that
   expires in 24 hours, and the account cannot sign in until you have opened it
@@ -31,26 +31,44 @@ On standalone and self-hosted instances using Telmoni's built-in authentication:
   Using the link terminates all active sessions and records the address as
   verified, since the link came from it.
 
+An address at a domain the operator holds to single sign-on
+(`AUTH_DOMAINS_WITH_SSO_ENFORCEMENT`) cannot use the password form: signing
+in, signing up and resetting a password refuse it, and the sign-in page shows
+the identity provider's **Continue with** button in place of the form.
+
 Passwords are salted and hashed using Argon2id.
 
 ## Identity providers (OIDC)
 
 A deployment can configure an external OpenID Connect identity provider
-(`OIDC_ISSUER`): one that publishes its discovery document at
-`{issuer}/.well-known/openid-configuration` and signs ID tokens with RS256.
-Telmoni sends you to the provider to sign in, verifies the ID token it returns
-(its signature, issuer, audience and expiry), and creates or links the local
-account; a password, if the provider asks for one, is entered at the provider.
+(`AUTH_CUSTOM_CLIENT_ID`, with its issuer and secret): one that publishes its
+discovery document at `{issuer}/.well-known/openid-configuration` and signs ID
+tokens with RS256, unless the operator names another algorithm
+(`AUTH_CUSTOM_ID_TOKEN_SIGNED_RESPONSE_ALG`). Telmoni sends you to the
+provider to sign in, verifies the ID token it returns (its signature, issuer,
+audience, expiry and nonce), and creates or links the local account; a
+password, if the provider asks for one, is entered at the provider. Each
+sign-in, there or at the password form, is bound to the browser that began it
+with PKCE, so a code stolen on its way back to the console opens nothing; the
+operator turns PKCE off (`AUTH_CUSTOM_CHECKS`) only for a provider that
+refuses it.
 
 Beside the password form, the sign-in page shows **Continue with** and the
-provider's name (`OIDC_NAME`, "single sign-on" unless set); with
-`DISABLE_LOGIN_FORM=true`, signing in goes straight to the provider. Telmoni
-asks the provider for the `openid`, `profile` and `email` scopes, and takes your name, and whether your address is
-verified, from what it answers; a sign-in the provider shares no address for is
-refused. A first sign-in creates your account while
-`OIDC_ALLOW_SIGN_UP` is on; an address that already holds an account here is
-refused unless the operator has set
-`OIDC_ALLOW_INSECURE_EMAIL_LOOKUP` (see
+provider's name (`AUTH_CUSTOM_NAME`, "single sign-on" unless set); with
+`AUTH_DISABLE_USERNAME_PASSWORD=true`, signing in goes straight to the
+provider, and **Sign up**, or **Create an account** on an invitation's page,
+opens the provider's own sign-up screen when its discovery document lists
+`create` in `prompt_values_supported`, or its sign-in page otherwise. Telmoni asks the
+provider for the `openid`, `profile` and `email` scopes unless the operator
+names others (`AUTH_CUSTOM_SCOPE`), and takes your name, and whether your
+address is verified, from what it answers; a sign-in the provider shares no
+address for is refused. A first sign-in creates your account while sign-ups
+are open (`AUTH_DISABLE_SIGNUP=false`), or, while they are closed, when an
+invitation is waiting for your address and the provider says it is verified
+(`email_verified: true`). An address that already holds an account here is
+refused unless the operator has set `AUTH_CUSTOM_ALLOW_ACCOUNT_LINKING`, the
+provider says the address is verified, and the account here proved it too,
+by a confirmation or reset link (see
 [Production](/docs/self-host/production#identity--authentication-production-oidc-hardening)).
 
 ## Verified addresses
@@ -112,7 +130,9 @@ first: you can rename the organization, or change its URL, on its
 Your name is the one your sign-in supplies. On the hosted service, that is the
 first and last name on your profile at its identity provider. On a self-hosted
 deployment, it is the first and last name you gave the sign-up form, or the
-given and family names your OpenID Connect provider sends. The administrator
+given and family names your OpenID Connect provider sends, or its `name` claim
+when it sends neither (as Microsoft Entra ID does until its optional claims are
+configured). The administrator
 a deployment seeds from `ADMIN_EMAIL` has no name, so their organization is
 "My organization", at `/my-organization` unless another organization already
 holds that URL.
@@ -132,16 +152,18 @@ organizations at once: ones you own, including any you
 [create](/docs/workspace/organizations-and-projects#creating-an-organization), and
 ones you were invited to.
 
-## When an operator closes sign-ups
+## When sign-ups are closed
 
-Three switches are involved, and they do different things:
+Two switches are involved, and they do different things:
 
-- **New accounts.** `ALLOW_SIGN_UP=false` closes the password form to new
-  accounts, and `OIDC_ALLOW_SIGN_UP=false` closes first-time sign-in through
-  the identity provider. Existing accounts sign in normally. An invitation
-  still brings a new person in through the password form; with
-  `OIDC_ALLOW_SIGN_UP=false` the identity provider admits nobody new, invited
-  or not.
+- **New accounts.** `AUTH_DISABLE_SIGNUP`, `true` unless the operator sets it
+  to `false`, closes the password form and first-time sign-in through the
+  identity provider alike to new accounts. Existing accounts sign in normally.
+  An invitation still brings a new person in: through the password form, or
+  through the identity provider when it says the invited address is verified
+  (`email_verified: true`). Anyone else who signs in at the provider comes
+  back to a page saying the deployment admits new people by invitation, with
+  a way to try again, as does an address an account here already holds.
 - **New organizations.** The `signup` feature flag, a row an operator writes
   in the server's database (see [closing new
   organizations](/docs/self-host/production#closing-new-organizations)), stops

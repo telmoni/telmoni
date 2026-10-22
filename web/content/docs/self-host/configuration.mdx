@@ -73,27 +73,70 @@ In simple deployments, all the PostgreSQL variables can point to the same connec
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `ALLOW_SIGN_UP` | `false` | When `false`, the password form registers no new accounts except for an address holding an invitation from an organization Owner or Admin, or a project Admin. Sign-in through an identity provider is governed by `OIDC_ALLOW_SIGN_UP` below, and making a new organization — provisioning one at first sign-in, or creating one from the switcher — by the `signup` feature flag (see [closing new organizations](/docs/self-host/production#closing-new-organizations)). |
+| `AUTH_DISABLE_SIGNUP` | `true` | When `true`, nobody new creates an account, at the password form or through the identity provider, except an address holding an invitation from an organization Owner or Admin, or a project Admin: at the form, and through the provider when it says the address is verified (`email_verified: true`). `false` lets anybody new create an account at either. Making a new organization — provisioning one at first sign-in, or creating one from the switcher — is governed by the `signup` feature flag (see [closing new organizations](/docs/self-host/production#closing-new-organizations)). |
 | `VERIFY_EMAIL` | `false` | When `true`, newly registered users must verify their email address via a confirmation link before accessing the console. The link needs `SMTP_URL` to be sent: the server starts without it, and then sends none. When `false`, a password sign-up's address is taken at its word for signing in but is not recorded as verified (an identity provider's `email_verified` claim, the seeded `ADMIN_EMAIL` and an address confirmed through an email change are), so an invitation to such an address is accepted only from the link in the invitation email — the console's **Accept** needs a verified address — and a password sign-up for an invited address cannot claim the invitation on its own. With an identity provider, `true` refuses a sign-in unless the address is verified, by that sign-in's `email_verified: true` or by an earlier proof of the same address (an earlier such sign-in, a confirmation or reset link, or an email change), and sends no link. |
-| `DISABLE_LOGIN_FORM` | `false` | Disables the email and password form, so that every sign-in goes through OpenID Connect (SSO). Set without `OIDC_ISSUER`, it is refused at boot. |
-| `ADMIN_EMAIL` | *Optional* | Seeds the first administrator's account when the server starts, once (a later start with another `ADMIN_PASSWORD` leaves the account as it was); it is an ordinary password account, and while the `signup` feature flag is on, its organization is provisioned at its first sign-in, as "My organization", since the seeded account has no name. Set together with `ADMIN_PASSWORD` or not at all: one without the other, or either with `DISABLE_LOGIN_FORM=true`, is refused at boot. An `ADMIN_EMAIL` that is not an address, or an `ADMIN_PASSWORD` under 8 characters or over 256 bytes, is refused at every boot, even once the account exists. |
+| `AUTH_DISABLE_USERNAME_PASSWORD` | `false` | Disables the email and password form, so that every sign-in goes through OpenID Connect (SSO). Set with no provider configured (`AUTH_CUSTOM_CLIENT_ID`), it is refused at boot. With sign-ups closed, the default, a new deployment's first person comes in only with `AUTH_DISABLE_SIGNUP=false`, or through the form and `ADMIN_EMAIL` before it is turned off, since nobody is there yet to invite them. |
+| `AUTH_DOMAINS_WITH_SSO_ENFORCEMENT` | *Optional* | A comma-separated list of domains whose addresses may not use the password form: signing in, signing up and resetting a password refuse such an address with `/errors/auth/sso-required` (403), and the sign-in page then shows the provider's **Continue with** button in place of the form. Set with no provider configured, it is refused at boot, and so is an `ADMIN_EMAIL` at one of those domains. Each domain is held exactly as listed, so a subdomain is listed on its own. The hold applies from an address's next sign-in: a session already open runs to its end, but an account at a held domain can neither move its address off it nor be mailed a reset link. |
+| `ADMIN_EMAIL` | *Optional* | Seeds the first administrator's account when the server starts, once (a later start with another `ADMIN_PASSWORD` leaves the account as it was); it is an ordinary password account, and while the `signup` feature flag is on, its organization is provisioned at its first sign-in, as "My organization", since the seeded account has no name. Set together with `ADMIN_PASSWORD` or not at all: one without the other, or either with `AUTH_DISABLE_USERNAME_PASSWORD=true`, is refused at boot, as is an `ADMIN_EMAIL` at a domain `AUTH_DOMAINS_WITH_SSO_ENFORCEMENT` names. An `ADMIN_EMAIL` that is not an address, or an `ADMIN_PASSWORD` under 8 characters or over 256 bytes, is refused at every boot, even once the account exists. |
 | `ADMIN_PASSWORD` | *Optional* | Password for the initial administrator account. |
 
 ---
 
 ## Single Sign-On (OpenID Connect / OIDC)
 
-Telmoni signs in through an OpenID Connect provider that publishes its discovery document at `{issuer}/.well-known/openid-configuration` and signs ID tokens with RS256:
+Telmoni signs in through an OpenID Connect provider that publishes its discovery document at `{issuer}/.well-known/openid-configuration`. Every sign-in uses PKCE (S256) and an OpenID Connect nonce, as [RFC 9700 § 2.1.1](https://www.rfc-editor.org/rfc/rfc9700#section-2.1.1) asks: the console seals a fresh 32-byte verifier and nonce in its sign-in cookie, the code is redeemed with the verifier, and an ID token whose `nonce` is not the one sent is refused; the password form's own one-time codes are bound the same way, so a code stolen on its way to the callback opens nothing. The provider must support PKCE, as RFC 9700 requires of every authorization server, unless `AUTH_CUSTOM_CHECKS` drops it:
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `OIDC_ISSUER` | *Optional* | The base discovery URL of your OIDC provider (must serve `/.well-known/openid-configuration`). In a Kubernetes pod it must be `https://`. |
-| `OIDC_CLIENT_ID` | *Required with `OIDC_ISSUER`* | The registered OAuth2 client identifier. |
-| `OIDC_CLIENT_SECRET` | *Required with `OIDC_ISSUER`* | The registered OAuth2 client secret. |
-| `OIDC_REDIRECT_URI` | `http://localhost:3000/auth/callback` | The callback URL registered with your identity provider. |
-| `OIDC_NAME` | `"single sign-on"` | The provider's name on the login button (`"Continue with Okta"`). |
-| `OIDC_ALLOW_SIGN_UP` | `true` | Allows first-time OIDC sign-ins to automatically provision a user account. |
-| `OIDC_ALLOW_INSECURE_EMAIL_LOOKUP` | `false` | When `true`, links an OIDC identity to an existing account if the email matches, even if the account was created with a password. |
+| `AUTH_CUSTOM_CLIENT_ID` | *Optional* | The registered OAuth2 client identifier. Setting it turns the provider on; `AUTH_CUSTOM_ISSUER` or `AUTH_CUSTOM_CLIENT_SECRET` set without it is refused at boot. |
+| `AUTH_CUSTOM_ISSUER` | *Required with `AUTH_CUSTOM_CLIENT_ID`* | The base discovery URL of your OIDC provider (must serve `/.well-known/openid-configuration`). In a Kubernetes pod it must be `https://`. |
+| `AUTH_CUSTOM_CLIENT_SECRET` | *Required with `AUTH_CUSTOM_CLIENT_ID`* | The registered OAuth2 client secret. |
+| `AUTH_REDIRECT_URI` | `http://localhost:3000/auth/callback` | The callback URL registered with your identity provider. |
+| `AUTH_CUSTOM_NAME` | `"single sign-on"` | The provider's name on the login button (`"Continue with Okta"`). |
+| `AUTH_CUSTOM_SCOPE` | `openid email profile` | The scopes each sign-in asks for, space separated. A list without `openid` is refused at boot. |
+| `AUTH_CUSTOM_CHECKS` | `pkce,nonce,state` | What each sign-in is held to: a comma-separated list of `pkce`, `nonce` and `state`. `state` is never dropped, since the callback is built on it: a list without it, or `none`, is refused at boot. Drop `pkce` or `nonce` only for a provider that refuses them. |
+| `AUTH_CUSTOM_ID_TOKEN_SIGNED_RESPONSE_ALG` | `RS256` | The one algorithm the provider's ID tokens may carry: `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `ES256` or `ES384`. Keys the provider publishes for another algorithm are never used. `ES512` is refused at boot, since P-521 is not supported, and so is every `HS*`: an HMAC-signed ID token is signed with the client secret, so anyone holding the secret could mint one. |
+| `AUTH_CUSTOM_FETCH_USERINFO` | `false` | For a provider that keeps the address or the name out of its ID tokens. When `true`, the access token the provider answers with reads its userinfo endpoint, whose claims are taken over the ID token's; an answer whose `sub` is not the ID token's is dropped whole. |
+| `AUTH_CUSTOM_ALLOW_ACCOUNT_LINKING` | `false` | When `true`, an identity the provider brings here for the first time, whose address an account here already holds, is linked to that account, but only when this sign-in's ID token (or userinfo) says the provider verified the address (`email_verified: true`) and the account here proved it too: the seeded administrator's has, and a password account's has once it used a confirmation or reset link. Otherwise such a sign-in is refused (`409`, "an account here already holds that address"), since an account made under someone else's address before they arrived would keep its password into theirs. |
+
+### An example: Dex
+
+The core's development stack runs [Dex](https://dexidp.io) as an example provider, held to PKCE, and its end-to-end suite signs in through it ([Developing](/docs/contributing/developing#signing-in-through-a-provider)). Any provider is registered the same way: a confidential client of the authorization-code flow, with `AUTH_REDIRECT_URI` as its redirect URI, the `openid`, `email` and `profile` scopes, and PKCE with S256. Dex's client and Telmoni's settings, side by side:
+
+```yaml
+# Dex's config.yaml
+issuer: https://dex.example.com/dex
+oauth2:
+  skipApprovalScreen: true
+  pkce:
+    enforce: true
+staticClients:
+  - id: telmoni
+    name: Telmoni
+    secret: <a long random secret>
+    redirectURIs:
+      - https://telmoni.example.com/auth/callback
+```
+
+```sh
+AUTH_CUSTOM_ISSUER=https://dex.example.com/dex
+AUTH_CUSTOM_CLIENT_ID=telmoni
+AUTH_CUSTOM_CLIENT_SECRET=<the same secret>
+AUTH_CUSTOM_NAME=Dex
+AUTH_REDIRECT_URI=https://telmoni.example.com/auth/callback
+```
+
+`AUTH_CUSTOM_ISSUER` is the `issuer` the provider's discovery document names (a trailing slash makes no difference), and an ID token from any other issuer is refused:
+
+| Provider | `AUTH_CUSTOM_ISSUER` |
+| :--- | :--- |
+| Keycloak | `https://<host>/realms/<realm>` |
+| Microsoft Entra ID | `https://login.microsoftonline.com/<tenant-id>/v2.0` |
+| Okta | `https://<your-org>.okta.com`, or `https://<your-org>.okta.com/oauth2/default` for its default authorization server |
+| Google | `https://accounts.google.com` |
+| Authentik | `https://<host>/application/o/<application-slug>/` |
+| Auth0 | `https://<your-auth0-domain>/` |
+| Dex | its `issuer` setting |
 
 ---
 

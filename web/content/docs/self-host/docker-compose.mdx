@@ -91,12 +91,14 @@ CLICKHOUSE_USER=telmoni
 # Bootstrap initial administrator account (quickstart / setup only)
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=your_super_secret_admin_password
-ALLOW_SIGN_UP=false
+AUTH_DISABLE_SIGNUP=true
 VERIFY_EMAIL=false
 ```
 
+The compose file also passes the server these sign-in settings from this file, each with its default when left out: `AUTH_DISABLE_SIGNUP` (`true`, so that only an invited address can sign up; `false` opens sign-ups), `AUTH_DISABLE_USERNAME_PASSWORD` (`false`), `AUTH_DOMAINS_WITH_SSO_ENFORCEMENT` (empty), `AUTH_REDIRECT_URI` (`http://localhost:3000/auth/callback`), and the identity provider's `AUTH_CUSTOM_*` settings, with the defaults the [configuration reference](/docs/self-host/configuration#single-sign-on-openid-connect--oidc) gives.
+
 <Callout type="info">
-`ADMIN_EMAIL` and `ADMIN_PASSWORD` are intended **only for initial bootstrapping, local evaluation, and offline setups**. For production environments, we strongly recommend configuring an **OpenID Connect (OIDC)** identity provider and, once you have removed `ADMIN_EMAIL` and `ADMIN_PASSWORD`, disabling username/password logins via `DISABLE_LOGIN_FORM=true`. See [Production Hardening & OIDC](/docs/self-host/production#identity--authentication-production-oidc-hardening).
+`ADMIN_EMAIL` and `ADMIN_PASSWORD` are intended **only for initial bootstrapping, local evaluation, and offline setups**. For production environments, we strongly recommend configuring an **OpenID Connect (OIDC)** identity provider and, once you have removed `ADMIN_EMAIL` and `ADMIN_PASSWORD`, disabling username/password logins via `AUTH_DISABLE_USERNAME_PASSWORD=true`. See [Production Hardening & OIDC](/docs/self-host/production#identity--authentication-production-oidc-hardening).
 </Callout>
 </Step>
 

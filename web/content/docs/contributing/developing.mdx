@@ -24,11 +24,25 @@ $ make up
 
 `make first-run` runs once: it copies `.env` and `web/.env.local` from their examples, mints the service secret into both and a local `TELEMETRY_KEK` into `.env` where they are blank, installs dependencies, starts Postgres and ClickHouse and runs the migrations. `make up` runs the stack: Postgres, ClickHouse, Redis, Mailpit, the server on `:8082` and the console on `:3000`. `COMPOSE_PROFILES=ollama` in `.env` starts Ollama with it, and `make server-dev` and `make web-dev` run either process alone.
 
-- The console is at http://localhost:3000. Sign in with the password form; no identity provider is needed, and `OIDC_*` in `.env` adds one.
+- The console is at http://localhost:3000. Sign in with the password form; no identity provider is needed, and `AUTH_CUSTOM_*` in `.env` adds one (*Signing in through a provider*, below).
 - The server is at http://localhost:8082.
 - Mailpit is at http://localhost:8025, where every mail the server sends lands.
 
 `ALLOW_TEST_SESSION=true` also mounts `POST /internal/v1/test/session`, which is how the end-to-end tests sign in; a Kubernetes pod refuses to start with it.
+
+### Signing in through a provider
+
+`COMPOSE_PROFILES=oidc` in `.env` starts [Dex](https://dexidp.io), an OpenID Connect provider, beside the stack at http://127.0.0.1:5556/dex, with a client for the console and two people, `ada@example.com` and `grace@example.com`, each with the password `password` (`crates/auth/dex/dev-config.yaml`). It refuses any sign-in without PKCE, as a careful provider may. Point the server at it in `.env`:
+
+```sh
+COMPOSE_PROFILES=oidc
+AUTH_CUSTOM_CLIENT_ID=telmoni-local
+AUTH_CUSTOM_CLIENT_SECRET=telmoni-local-dex-secret
+AUTH_CUSTOM_ISSUER=http://127.0.0.1:5556/dex
+AUTH_CUSTOM_NAME=Dex
+```
+
+Then `make up` and **Continue with Dex** on the sign-in page. Sign in as Ada: Grace is the end-to-end suite's stranger, whom a deployment with sign-ups closed turns away, so an account of hers in your database fails that test. The suite's `web/e2e/oidc.spec.ts` signs in through the same Dex — `make e2e` starts it — and holds the round trip, the refusal page a closed deployment answers a stranger with, and an address held to single sign-on.
 
 `.env` configures the server and `web/.env.local` the console; their examples, `.env.example` and `web/.env.local.example`, document the variables you set there. The checks:
 

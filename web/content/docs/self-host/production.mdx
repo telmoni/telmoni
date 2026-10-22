@@ -7,15 +7,15 @@ A production deployment of Telmoni separates the database roles, keeps audit par
 
 ## Identity & Authentication: Production OIDC Hardening
 
-When first launching Telmoni, you can seed an initial account with `ADMIN_EMAIL` and `ADMIN_PASSWORD`. It signs in through the login form (an email address and a password that Telmoni holds), which is on unless `DISABLE_LOGIN_FORM=true`.
+When first launching Telmoni, you can seed an initial account with `ADMIN_EMAIL` and `ADMIN_PASSWORD`. It signs in through the login form (an email address and a password that Telmoni holds), which is on unless `AUTH_DISABLE_USERNAME_PASSWORD=true`.
 
-In a production deployment, **we strongly recommend connecting an OpenID Connect (OIDC) identity provider**, one that publishes its discovery document at `{issuer}/.well-known/openid-configuration` and signs ID tokens with RS256, and disabling the login form entirely.
+In a production deployment, **we strongly recommend connecting an OpenID Connect (OIDC) identity provider**, one that publishes its discovery document at `{issuer}/.well-known/openid-configuration` and signs ID tokens with RS256 or the algorithm `AUTH_CUSTOM_ID_TOKEN_SIGNED_RESPONSE_ALG` names, and disabling the login form entirely.
 
 ### Why use OIDC in production?
 
 1. **Centralized lifecycle**: When an employee leaves your company, deprovisioning them in your IdP stops their next sign-in to Telmoni. A session already open is Telmoni's own and lasts until it expires or is signed out, so remove them from your organizations as well. Telmoni reads no group or role claim, so their roles here change only in Telmoni.
 2. **Your provider's MFA**: Telmoni has no second factor of its own and reads no `acr` or `amr` claim; a sign-in through the provider carries whatever factors the provider requires.
-3. **No password lanes**: With `DISABLE_LOGIN_FORM=true` the server mounts none of the password lanes: sign-in, sign-up, verification, forgot and reset.
+3. **No password lanes**: With `AUTH_DISABLE_USERNAME_PASSWORD=true` the server mounts none of the password lanes: sign-in, sign-up, verification, forgot and reset.
 
 ### Step-by-step transition to OIDC
 
@@ -29,6 +29,7 @@ Register Telmoni in your Identity Provider (IdP) with the following parameters:
 - **Allowed Redirect URI**: `https://telmoni.example.com/auth/callback`
 - **Allowed post-logout redirect URI**: `https://telmoni.example.com/` (when the provider publishes an `end_session_endpoint`, signing out of a session that began there sends the browser to it with `id_token_hint`, and it comes back here, to `AUTH_URL` and `/`)
 - **Scopes**: `openid`, `email`, `profile`
+- **PKCE**: `S256`, which every sign-in uses (for a provider that refuses it, set `AUTH_CUSTOM_CHECKS=nonce,state`)
 
 </Step>
 
@@ -36,15 +37,15 @@ Register Telmoni in your Identity Provider (IdP) with the following parameters:
 
 **Add OIDC variables to your environment**
 
-Configure the provider details in your `.env` or Kubernetes secret:
+Configure the provider details in your `.env`; with the chart, the first three go in `server-secrets`, and the other two are `config.redirectUri` and `config.customName`:
 
 ```sh
 # Identity Provider Discovery URL (must serve /.well-known/openid-configuration)
-OIDC_ISSUER=https://idp.example.com/realms/production
-OIDC_CLIENT_ID=telmoni-client-id
-OIDC_CLIENT_SECRET=telmoni-client-secret
-OIDC_REDIRECT_URI=https://telmoni.example.com/auth/callback
-OIDC_NAME="Corporate SSO"
+AUTH_CUSTOM_ISSUER=https://idp.example.com/realms/production
+AUTH_CUSTOM_CLIENT_ID=telmoni-client-id
+AUTH_CUSTOM_CLIENT_SECRET=telmoni-client-secret
+AUTH_REDIRECT_URI=https://telmoni.example.com/auth/callback
+AUTH_CUSTOM_NAME="Corporate SSO"
 ```
 
 The console needs one variable of its own, `AUTH_PROVIDER_ORIGINS`: the provider's origins, space separated. Signing out from the account menu is a form post that ends in a redirect to the provider, and the console's Content Security Policy lets the browser follow it only to these origins and to the console itself, so without it signing out through the provider is blocked (sign-in is a link, which the policy does not govern). Each entry must be a bare origin, or a wildcard subdomain such as `https://*.idp.example`; an entry with a path, such as the issuer URL, is ignored. With Compose it is set in the same `.env` and passed to the `web` container; with the chart it is `config.authProviderOrigins`.
@@ -59,7 +60,7 @@ AUTH_PROVIDER_ORIGINS=https://idp.example.com
 
 **Verify OIDC sign-in**
 
-Recreate the server and web containers (`docker compose -f deploy/compose/docker-compose.yml up -d`, or roll both deployments on the chart; a plain restart keeps the old environment) and sign in with the new **"Continue with Corporate SSO"** button. A first sign-in through the provider creates your account while `OIDC_ALLOW_SIGN_UP` is on, its default. An address that already holds an account here (the seeded administrator's, say) is refused when the provider sends it back (the browser returns to the sign-in page, and the server logs that `OIDC_ALLOW_INSECURE_EMAIL_LOOKUP=true` would link them) unless `OIDC_ALLOW_INSECURE_EMAIL_LOOKUP=true`, which links the two: set it for that one sign-in, then turn it off again. Signing in with a different address instead makes a new person with a new organization, and the seeded administrator's organization would keep an owner who can no longer sign in once step 4 closes the form. Confirm you land in the console.
+Recreate the server and web containers (`docker compose -f deploy/compose/docker-compose.yml up -d`, or roll both deployments on the chart; a plain restart keeps the old environment) and sign in with the new **"Continue with Corporate SSO"** button. An address that already holds an account here (the seeded administrator's, say) is refused when the provider sends it back (the browser returns to the sign-in page, and the server's log says whether linking was on and whether the provider verified the address) unless `AUTH_CUSTOM_ALLOW_ACCOUNT_LINKING=true`, the provider says the address is verified (`email_verified: true`) and the account here proved it too — the seeded administrator's has, and a password account's has once it used a confirmation or reset link — which links the two: set it for that one sign-in, then turn it off again. A different address, one no invitation is waiting for, is refused too while sign-ups are closed, their default; with `AUTH_DISABLE_SIGNUP=false` it makes a new person with a new organization, and the seeded administrator's organization would keep an owner who can no longer sign in once step 4 closes the form. Confirm you land in the console.
 
 </Step>
 
@@ -70,17 +71,18 @@ Recreate the server and web containers (`docker compose -f deploy/compose/docker
 Once every administrator has signed in through the provider, remove `ADMIN_EMAIL` and `ADMIN_PASSWORD` from your environment and set:
 
 ```sh
-DISABLE_LOGIN_FORM=true
-OIDC_ALLOW_SIGN_UP=false
-ALLOW_SIGN_UP=false
+AUTH_DISABLE_USERNAME_PASSWORD=true
+AUTH_DISABLE_SIGNUP=true
 ```
 
-From then on nobody new signs in, invited or not: with the password form off there is no sign-up for an invitation to open, and `OIDC_ALLOW_SIGN_UP=false` turns away every identity the provider has not already brought here. For an invitation-only deployment, leave `OIDC_ALLOW_SIGN_UP` on and turn the `signup` feature flag off instead (see [closing new organizations](#closing-new-organizations) below): a newcomer's first sign-in makes an account but no organization, and an invitation is what seats them in one.
+From then on nobody new signs in but an address an invitation is waiting for, and only when the provider says it is verified (`email_verified: true`): `AUTH_DISABLE_SIGNUP=true`, the default, turns away every other identity the provider has not already brought here, and `false` would let in anybody the provider admits. For an invitation-only deployment, turn the `signup` feature flag off as well (see [closing new organizations](#closing-new-organizations) below): a newcomer's first sign-in then makes an account but no organization, and the invitation is what seats them in one.
+
+To keep the password form for other addresses while your own domains sign in through the provider alone, set `AUTH_DOMAINS_WITH_SSO_ENFORCEMENT` to those domains (`example.com,example.org`) in place of `AUTH_DISABLE_USERNAME_PASSWORD=true`.
 
 <Callout type="warn">
 The Telmoni server performs sanity checks at boot:
-- If `DISABLE_LOGIN_FORM=true` is set without a configured `OIDC_ISSUER`, the server halts immediately because nobody could sign in.
-- If `ADMIN_EMAIL` or `ADMIN_PASSWORD` is set alongside `DISABLE_LOGIN_FORM=true`, the server halts because a password account could never log in. Remove both before enabling `DISABLE_LOGIN_FORM`.
+- If `AUTH_DISABLE_USERNAME_PASSWORD=true` is set without a configured provider (`AUTH_CUSTOM_CLIENT_ID`), the server halts immediately because nobody could sign in.
+- If `ADMIN_EMAIL` or `ADMIN_PASSWORD` is set alongside `AUTH_DISABLE_USERNAME_PASSWORD=true`, the server halts because a password account could never log in. Remove both before enabling `AUTH_DISABLE_USERNAME_PASSWORD`.
 </Callout>
 </Step>
 
@@ -282,16 +284,16 @@ telmoni release outbox
 
 `telmoni serve` reads its environment once and stops, with the reason in its log, rather than run with a setting that would fail later or weaken the deployment:
 
-- `DISABLE_LOGIN_FORM=true` without `OIDC_ISSUER`: nobody could sign in.
-- `ADMIN_EMAIL` or `ADMIN_PASSWORD` with `DISABLE_LOGIN_FORM=true`: the seeded account could never sign in. The two are also refused one without the other, and at every boot an `ADMIN_EMAIL` that is not an address or an `ADMIN_PASSWORD` under 8 characters or over 256 bytes, even once the account exists.
-- `OIDC_ISSUER` without `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`.
+- `AUTH_DISABLE_USERNAME_PASSWORD=true` or `AUTH_DOMAINS_WITH_SSO_ENFORCEMENT` with no provider configured (no `AUTH_CUSTOM_CLIENT_ID`): nobody, or nobody at those domains, could sign in.
+- `ADMIN_EMAIL` or `ADMIN_PASSWORD` with `AUTH_DISABLE_USERNAME_PASSWORD=true`, or an `ADMIN_EMAIL` at a domain `AUTH_DOMAINS_WITH_SSO_ENFORCEMENT` names: the seeded account could never sign in. The two are also refused one without the other, and at every boot an `ADMIN_EMAIL` that is not an address or an `ADMIN_PASSWORD` under 8 characters or over 256 bytes, even once the account exists.
+- `AUTH_CUSTOM_CLIENT_ID` without `AUTH_CUSTOM_ISSUER` or `AUTH_CUSTOM_CLIENT_SECRET`, or either of those without it; an `AUTH_CUSTOM_SCOPE` without `openid`; an `AUTH_CUSTOM_CHECKS` without `state`, or `none`; and an `AUTH_CUSTOM_ID_TOKEN_SIGNED_RESPONSE_ALG` of `ES512` or any `HS*`.
 - `SLACK_CLIENT_ID` without `SLACK_SIGNING_SECRET`; either of `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` without the other; Slack credentials without `CONNECTOR_KEK`; and a `CONNECTOR_KEK` that is neither `local:` with 64 hex characters nor a Cloud KMS key name (a key version is refused too).
 - `TELEMETRY_KEK` unset, or neither `local:` with 64 hex characters nor a Cloud KMS key name, as for `CONNECTOR_KEK`; `REDIS_URL` unset or not a Redis URL; `TELEMETRY_TICK_SECS` outside 1 to 60; and, with `TELMONI_API_KEY` set, a `TELMONI_ENDPOINT` that is not a URL.
 - An `SMTP_URL` that is not a connection URL, or, with `SMTP_URL` set, a `MAIL_FROM` that is not an address.
 - `AGENT_MODEL_PROVIDER` without `AGENT_DATABASE_URL`, or with a value other than `anthropic` and `openai`; `openai` without `AGENT_MODEL`; `RERANK_URL` without `RERANK_MODEL`; a hosted `AGENT_MODEL_URL` or `EMBEDDINGS_URL` without its key; `AGENT_MODEL_TIMEOUT_SECS` outside 1 to 100; an embeddings endpoint that answers with a width other than 768 (one not answering yet is allowed, and checked at its first answer).
 - A set value that does not parse (`PORT=eight`), or a count below its minimum: the `NOTIFICATIONS_DELIVERY_*` settings, `AGENT_MESSAGES_PER_HOUR` and `AGENT_MAX_TOKENS` must be at least 1, except `NOTIFICATIONS_DELIVERY_BACKOFF_SECS`, which may be 0. A blank value reads as unset and takes the default.
 - A `TELEMETRY_CLICKHOUSE_URL` that is not an `http` or `https` URL with a host, or that carries a query string or a fragment: settings are the server's to choose, never the URL's. The reason names the fault, never the URL, which holds a password. ClickHouse itself being down is no refusal: the server starts, and reaches it at the first read or write of a span.
-- In a Kubernetes pod only: an `OIDC_ISSUER` that is not `https://`, an `SMTP_URL` that is neither TLS nor loopback, a `local:` `CONNECTOR_KEK` or `TELEMETRY_KEK`, `ALLOW_TEST_SESSION`, a missing `DATABASE_CA_CERT`, and a ClickHouse URL over plain `http` to anything but loopback or a Service's name with its namespace (`clickhouse.<namespace>.svc`, `….svc.cluster.local`), which `telmoni migrate` and `telmoni rotate` refuse too.
+- In a Kubernetes pod only: an `AUTH_CUSTOM_ISSUER` that is not `https://`, an `SMTP_URL` that is neither TLS nor loopback, a `local:` `CONNECTOR_KEK` or `TELEMETRY_KEK`, `ALLOW_TEST_SESSION`, a missing `DATABASE_CA_CERT`, and a ClickHouse URL over plain `http` to anything but loopback or a Service's name with its namespace (`clickhouse.<namespace>.svc`, `….svc.cluster.local`), which `telmoni migrate` and `telmoni rotate` refuse too.
 
 ---
 
