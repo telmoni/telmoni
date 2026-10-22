@@ -37,7 +37,7 @@ Sign-ins, signing out of the console, password changes, project renames, changes
 
 Every audit log entry carries:
 
-- **Actor**: The user ID of the person who acted. The platform's own routines act as `service:operator` (an operator's termination of an organization) or `service:deletion-saga` (the memberships an account deletion removes), and a change made from Slack's side as `external:slack`.
+- **Actor**: The user ID of the person who acted. The platform's own routines act as `service:operator` (an operator's termination of an organization), `service:deletion-saga` (the memberships an account deletion removes) or `service:default-organization` (a self-hosted deployment's [default organization](/docs/self-host/configuration#a-default-organization-and-project), joined by a person as they were created), and a change made from Slack's side as `external:slack`.
 - **Action**: One of `created`, `updated`, `deleted`, or `exported`, which records an export. Its details name what was exported under `export`: `audit_log`, with the file's format, range and number of events.
 - **Resource**: The kind of thing acted on (`organization`, `project`, `member`, `token`, which the console shows as **API key**, `session`, or `connector`) and its identifier, and the project it was written inside, if any.
 - **Details**: Metadata specific to the event, such as the name given, the role granted or a content mode's change, from and to. The console's **Details** switch shows it under **Changed**, with the project the event was written inside, the request's id when one was recorded, and the row's hash.

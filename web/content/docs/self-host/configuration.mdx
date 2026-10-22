@@ -80,6 +80,17 @@ In simple deployments, all the PostgreSQL variables can point to the same connec
 | `ADMIN_EMAIL` | *Optional* | Seeds the first administrator's account when the server starts, once (a later start with another `ADMIN_PASSWORD` leaves the account as it was); it is an ordinary password account, and while the `signup` feature flag is on, its organization is provisioned at its first sign-in, as "My organization", since the seeded account has no name. Set together with `ADMIN_PASSWORD` or not at all: one without the other, or either with `AUTH_DISABLE_USERNAME_PASSWORD=true`, is refused at boot, as is an `ADMIN_EMAIL` at a domain `AUTH_DOMAINS_WITH_SSO_ENFORCEMENT` names. An `ADMIN_EMAIL` that is not an address, or an `ADMIN_PASSWORD` under 8 characters or over 256 bytes, is refused at every boot, even once the account exists. |
 | `ADMIN_PASSWORD` | *Optional* | Password for the initial administrator account. |
 
+### A default organization and project
+
+Every person created while `TELMONI_DEFAULT_ORG_ID` is set joins that organization, and the project `TELMONI_DEFAULT_PROJECT_ID` names in it, as Langfuse's `LANGFUSE_DEFAULT_ORG_ID` does: whether they signed up at the password form, came in through the identity provider or were the seeded `ADMIN_EMAIL`. They join once, as they are created, so somebody removed from the organization is not put back at their next sign-in, and they are given no organization of their own, since they already belong to one. Each roster row and seat is recorded in the organization's [audit log](/docs/workspace/audit-log) as the deployment's act, `service:default-organization`. Copy the ids from the organization's and the project's **Settings**.
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `TELMONI_DEFAULT_ORG_ID` | *Optional* | The organization every new person joins. At boot it must name an active organization, or the server refuses to start; one deleted later stops the joining, with an error in the server's log, and never refuses a sign-in. |
+| `TELMONI_DEFAULT_ORG_ROLE` | `member` | Their role in it: `member`, the read-only role, or `admin`. `owner` is refused at boot, since an organization has one owner, and so are Langfuse's `VIEWER` and `NONE`, which have no role here: `member` is the read-only one, and leaving `TELMONI_DEFAULT_ORG_ID` unset joins nobody. Read in any case, so Langfuse's `ADMIN` works. |
+| `TELMONI_DEFAULT_PROJECT_ID` | *Optional* | A project of that organization every new person is seated on. Set without `TELMONI_DEFAULT_ORG_ID`, or naming no active project of its organization, it is refused at boot; a project deleted or moved later is passed over, with an error in the log. |
+| `TELMONI_DEFAULT_PROJECT_ROLE` | `member` | Their role on the project: `member` or `admin`, as for the organization. |
+
 ---
 
 ## Single Sign-On (OpenID Connect / OIDC)

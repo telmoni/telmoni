@@ -192,7 +192,7 @@ migrator:
   rotateSchedule: "0 2 * * *" # Daily partition rotation
 ```
 
-The sign-in settings are values under `config` as well, each the `AUTH_*` variable of the same name in the [configuration reference](/docs/self-host/configuration), with its default: `disableSignup` (`true`, so that only an invited address can sign up), `disableUsernamePassword`, `domainsWithSsoEnforcement` and `redirectUri`, and the provider's `customName`, `customScope`, `customChecks`, `customIdTokenSignedResponseAlg`, `customFetchUserinfo` and `customAllowAccountLinking`, whose client id, secret and issuer are the `server-secrets` keys above.
+The sign-in settings are values under `config` as well, each the `AUTH_*` variable of the same name in the [configuration reference](/docs/self-host/configuration), with its default: `disableSignup` (`true`, so that only an invited address can sign up), `disableUsernamePassword`, `domainsWithSsoEnforcement` and `redirectUri`, and the provider's `customName`, `customScope`, `customChecks`, `customIdTokenSignedResponseAlg`, `customFetchUserinfo` and `customAllowAccountLinking`, whose client id, secret and issuer are the `server-secrets` keys above. Where every new person starts is `defaultOrgId`, `defaultOrgRole`, `defaultProjectId` and `defaultProjectRole`, the `TELMONI_DEFAULT_*` variables of the [default organization](/docs/self-host/configuration#a-default-organization-and-project), all empty unless set.
 
 Enabling `highAvailability.enabled` creates a `HorizontalPodAutoscaler` and a `PodDisruptionBudget` for both `web` and `server` (`deploy/charts/telmoni/templates/high-availability.yaml`).
 
