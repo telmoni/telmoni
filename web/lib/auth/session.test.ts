@@ -14,6 +14,8 @@ beforeEach(() => {
 
 const pkcePayload = {
   state: "random-state-xyz",
+  verifier: "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+  nonce: "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
   returnTo: "/runs",
 };
 
@@ -83,7 +85,7 @@ describe("sealConnect / unsealConnect", () => {
   it("refuses a sealed PKCE cookie presented as a handshake", async () => {
     // Both are sealed under one secret; only the shape tells them apart, and
     // a callback that accepted a PKCE payload would have no project to act on.
-    const sealed = await sealPkce({ state: "st8", returnTo: "/console" });
+    const sealed = await sealPkce({ state: "st8", verifier: "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv", nonce: "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn", returnTo: "/console" });
     expect(await unsealConnect(sealed)).toBeNull();
   });
 });
@@ -109,5 +111,13 @@ describe("sealSession", () => {
     });
     expect(recovered.userId).toBe(sessionPayload.userId);
     expect(recovered.email).toBe(sessionPayload.email);
+  });
+});
+
+// A cookie sealed before PKCE carries no verifier, and no sign-in can be finished from it.
+describe("a sign-in cookie without its proof", () => {
+  it("does not unseal", async () => {
+    const sealed = await sealPkce({ state: "st8", returnTo: "/console" } as never);
+    expect(await unsealPkce(sealed)).toBeNull();
   });
 });

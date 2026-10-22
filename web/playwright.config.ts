@@ -45,12 +45,19 @@ export default defineConfig({
         TELEMETRY_CLICKHOUSE_URL: TELEMETRY_CLICKHOUSE,
         PORT: "8082",
         SERVICE_SECRET,
-        // Never reached: every e2e person is signed in through the test door.
-        // The provider's endpoints are discovered on first use, so a dead
-        // issuer costs nothing until something signs in through it.
-        OIDC_ISSUER: "http://127.0.0.1:1",
-        OIDC_CLIENT_ID: "client_e2e_never_called",
-        OIDC_CLIENT_SECRET: "e2e_never_called",
+        // Dex, the compose file's `oidc` profile, which `make e2e` starts:
+        // `oidc.spec.ts` signs in through it, every other spec through the
+        // test door. Its endpoints are discovered on first use, so the other
+        // specs never reach it.
+        AUTH_CUSTOM_ISSUER: "http://127.0.0.1:5556/dex",
+        AUTH_CUSTOM_CLIENT_ID: "telmoni-local",
+        AUTH_CUSTOM_CLIENT_SECRET: "telmoni-local-dex-secret",
+        AUTH_CUSTOM_NAME: "Dex",
+        AUTH_DOMAINS_WITH_SSO_ENFORCEMENT: "sso.example",
+        // As a deployment starts, whatever .env says: the form on, sign-ups
+        // closed. The test door opens accounts either way.
+        AUTH_DISABLE_USERNAME_PASSWORD: "false",
+        AUTH_DISABLE_SIGNUP: "true",
         APP_URL: "http://localhost:3000",
         // Auth's half of the test door, which mints the sessions the
         // console's half seals. Refused in a pod.

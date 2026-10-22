@@ -16,6 +16,7 @@ import {
   refreshTokens,
   revokeSession,
 } from "./oidc";
+import { ExchangeRefused } from "./refusal";
 
 const ok = (body: unknown) =>
   new Response(JSON.stringify(body), {
@@ -24,6 +25,9 @@ const ok = (body: unknown) =>
   });
 
 beforeEach(() => fetchWithTimeout.mockReset());
+
+const PROOF = { codeChallenge: "challenge_1", nonce: "nonce_1" };
+const SPENT = { codeVerifier: "verifier_1", nonce: "nonce_1" };
 
 // ⚠ Both values are handed straight to `NextResponse.redirect`, which throws
 // on anything it cannot parse as a URL. The schemas typed them `z.string()`,
@@ -34,7 +38,7 @@ describe("the two URLs that become redirects", () => {
     fetchWithTimeout.mockResolvedValue(
       ok({ authorizeUrl: "https://idp.example/authorize?x=1" }),
     );
-    await expect(getAuthorizeUrl("state_1")).resolves.toBe(
+    await expect(getAuthorizeUrl("state_1", PROOF)).resolves.toBe(
       "https://idp.example/authorize?x=1",
     );
   });
@@ -47,7 +51,7 @@ describe("the two URLs that become redirects", () => {
     "refuses %p as an authorize URL, so the route answers its 503",
     async (authorizeUrl) => {
       fetchWithTimeout.mockResolvedValue(ok({ authorizeUrl }));
-      await expect(getAuthorizeUrl("state_1")).rejects.toThrow(
+      await expect(getAuthorizeUrl("state_1", PROOF)).rejects.toThrow(
         "auth start: malformed response",
       );
     },
@@ -200,17 +204,53 @@ describe("exchangeCode", () => {
 
   it("names the external provider when told, and nothing otherwise", async () => {
     fetchWithTimeout.mockResolvedValue(signedIn());
-    const result = await exchangeCode("c0de", "external");
+    const result = await exchangeCode("c0de", SPENT, "external");
     expect(result.idToken).toBe("id.token.x");
     expect(result.sessionId).toBe("ses_1");
     const [url, init] = fetchWithTimeout.mock.calls[0]!;
     expect(url).toBe("http://auth.test/internal/v1/auth/exchange");
-    expect(JSON.parse(init.body)).toEqual({ code: "c0de", provider: "external" });
+    expect(JSON.parse(init.body)).toEqual({
+      code: "c0de",
+      codeVerifier: "verifier_1",
+      nonce: "nonce_1",
+      provider: "external",
+    });
 
     fetchWithTimeout.mockResolvedValue(signedIn());
-    await exchangeCode("c0de");
+    await exchangeCode("c0de", SPENT);
     const [, local] = fetchWithTimeout.mock.calls[1]!;
-    expect(JSON.parse(local.body)).toEqual({ code: "c0de" });
+    expect(JSON.parse(local.body)).toEqual({
+      code: "c0de",
+      codeVerifier: "verifier_1",
+      nonce: "nonce_1",
+    });
+  });
+
+  // A refusal keeps its status and its problem's type, which the callback
+  // turns into the reason the person reads.
+  it("throws a refusal with its status and type", async () => {
+    fetchWithTimeout.mockResolvedValue(
+      new Response(JSON.stringify({ type: "/errors/auth/sign-up-closed", title: "sign-ups closed", status: 403 }), {
+        status: 403,
+        headers: { "content-type": "application/problem+json" },
+      }),
+    );
+    const refused = await exchangeCode("c0de", SPENT, "external").catch((err: unknown) => err);
+    expect(refused).toBeInstanceOf(ExchangeRefused);
+    expect(refused).toMatchObject({ status: 403, type: "/errors/auth/sign-up-closed" });
+  });
+
+  // The challenge and the nonce ride with the state, so the code is bound to this sign-in.
+  it("hands auth the challenge and the nonce with the state", async () => {
+    fetchWithTimeout.mockResolvedValue(ok({ authorizeUrl: "https://idp.example/authorize" }));
+    await getAuthorizeUrl("state_1", { ...PROOF, signUp: true });
+    const [, init] = fetchWithTimeout.mock.calls[0]!;
+    expect(JSON.parse(init.body)).toEqual({
+      state: "state_1",
+      codeChallenge: "challenge_1",
+      nonce: "nonce_1",
+      signUp: true,
+    });
   });
 });
 

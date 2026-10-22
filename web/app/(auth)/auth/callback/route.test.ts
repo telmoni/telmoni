@@ -36,11 +36,12 @@ vi.mock("@/lib/auth/session", () => ({
   cookieOpts: () => ({ httpOnly: true, path: "/" }),
   getSession,
   sealSession,
-  unsealPkce: vi.fn(async () => ({ state: "st8", returnTo: "/runs" })),
+  unsealPkce: vi.fn(async () => ({ state: "st8", verifier: "v_1", nonce: "n_1", returnTo: "/runs" })),
 }));
 
 import { NextRequest } from "next/server";
 
+import { ExchangeRefused } from "@/lib/auth/refusal";
 import { unsealPkce } from "@/lib/auth/session";
 
 import { GET } from "./route";
@@ -178,6 +179,8 @@ describe("GET /auth/callback and a closed sign-up", () => {
   it("spends the code at the provider the pending sign-in named, and seals its id token", async () => {
     vi.mocked(unsealPkce).mockResolvedValueOnce({
       state: "st8",
+      verifier: "v_1",
+      nonce: "n_1",
       returnTo: "/runs",
       provider: "external",
     });
@@ -196,7 +199,7 @@ describe("GET /auth/callback and a closed sign-up", () => {
     fetchWithTimeout.mockResolvedValue(new Response("{}", { status: 200 }));
 
     await GET(callback());
-    expect(exchangeCode).toHaveBeenCalledWith("c0de", "external");
+    expect(exchangeCode).toHaveBeenCalledWith("c0de", { codeVerifier: "v_1", nonce: "n_1" }, "external");
     expect(sealSession).toHaveBeenCalledWith(expect.objectContaining({ idToken: "id.token.x" }));
   });
 
@@ -204,7 +207,7 @@ describe("GET /auth/callback and a closed sign-up", () => {
     fetchWithTimeout.mockResolvedValue(new Response("{}", { status: 200 }));
 
     await GET(callback());
-    expect(exchangeCode).toHaveBeenCalledWith("c0de", undefined);
+    expect(exchangeCode).toHaveBeenCalledWith("c0de", { codeVerifier: "v_1", nonce: "n_1" }, undefined);
     expect(sealSession).toHaveBeenCalledWith(expect.objectContaining({ idToken: null }));
   });
 
@@ -313,5 +316,55 @@ describe("GET /auth/callback under the per-source ceiling", () => {
     expect(res.status).toBe(307);
     expect(rateLimitRetryAfter).not.toHaveBeenCalled();
     expect(exchangeCode).not.toHaveBeenCalled();
+  });
+});
+
+// ⚠ A sign-in that ends with no session is told why on a page that starts no
+// other, never sent back to `/auth/login`, which would begin again at once.
+describe("GET /auth/callback when the sign-in is refused", () => {
+  it.each([
+    [new ExchangeRefused(403, "/errors/auth/sign-up-closed"), "closed"],
+    [new ExchangeRefused(409, "/errors/auth/conflict"), "taken"],
+    [new ExchangeRefused(502, null), "failed"],
+  ])("names why the exchange refused it", async (refusal, reason) => {
+    exchangeCode.mockRejectedValueOnce(refusal);
+    const res = await GET(callback());
+    expect(res.headers.get("location")).toBe(`https://app.example/auth/refused?reason=${reason}`);
+    expect(res.headers.get("set-cookie")).toContain("telmoni_pkce=;");
+    expect(sealSession).not.toHaveBeenCalled();
+  });
+
+  it("names a provider's own error, and a state that is not the pending one", async () => {
+    const declined = new NextRequest(
+      "https://app.example/auth/callback?error=access_denied&state=st8",
+      { headers: { cookie: "telmoni_pkce=sealed-pkce" } },
+    );
+    expect((await GET(declined)).headers.get("location")).toBe(
+      "https://app.example/auth/refused?reason=provider",
+    );
+    const elsewhere = new NextRequest("https://app.example/auth/callback?code=c0de&state=other", {
+      headers: { cookie: "telmoni_pkce=sealed-pkce" },
+    });
+    expect((await GET(elsewhere)).headers.get("location")).toBe(
+      "https://app.example/auth/refused?reason=expired",
+    );
+    expect(exchangeCode).not.toHaveBeenCalled();
+  });
+
+  it("names an address the deployment needs verified", async () => {
+    exchangeCode.mockResolvedValueOnce({
+      userId: "user_new",
+      email: "new@example.test",
+      firstName: null,
+      lastName: null,
+      emailVerified: false,
+      accessToken: "at",
+      sessionId: "ses_new",
+      refreshToken: "rt",
+      expiresIn: 3600,
+    });
+    const res = await GET(callback());
+    expect(res.headers.get("location")).toBe("https://app.example/auth/refused?reason=unverified");
+    expect(sealSession).not.toHaveBeenCalled();
   });
 });

@@ -320,7 +320,7 @@ impl App {
     }
 
     /// The process as the environment describes it: each module's pool as its
-    /// own role, auth's providers from the `OIDC_*` and `SMTP_URL` variables
+    /// own role, auth's providers from the `AUTH_*` and `SMTP_URL` variables
     /// ([`telmoni_auth::boot`]), and no hook of a deployment's own: nothing
     /// purged beside the core's modules, nothing asked of a handover, and no
     /// limits.

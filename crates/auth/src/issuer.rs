@@ -219,11 +219,13 @@ impl Issuer {
 
     /// A sign-in proved out of band — a right password — earns the one-time
     /// code the console's callback spends at [`Issuer::exchange_code`],
-    /// exactly as it spends an external provider's.
+    /// exactly as it spends an external provider's, bound to the sign-in's
+    /// S256 `code_challenge`.
     pub(crate) async fn mint_code(
         &self,
         tx: &mut Scoped<'_, Person>,
         user_id: &UserId,
+        code_challenge: &str,
     ) -> Result<String, TelmoniError> {
         let code = secret();
         authorization_codes::create(
@@ -231,21 +233,34 @@ impl Issuer {
             user_id,
             &mint_sid(),
             &hash(&code),
+            code_challenge,
             Utc::now() + Duration::seconds(CODE_TTL_SECS),
         )
         .await?;
         Ok(code)
     }
 
-    /// Spend a code a sign-in minted here, for the session's tokens.
-    pub async fn exchange_code(&self, code: &str) -> Result<TokenResponse, TelmoniError> {
+    /// Spend a code a sign-in minted here, for the session's tokens: only
+    /// with the verifier its challenge was made from, so a code stolen on
+    /// its way to the callback opens nothing in its thief's own sign-in.
+    pub async fn exchange_code(
+        &self,
+        code: &str,
+        code_verifier: &str,
+    ) -> Result<TokenResponse, TelmoniError> {
         let mut mtx = maintenance_scope(&self.db, AuthLane).await?;
         let spent = authorization_codes::spend(&mut mtx, &hash(code)).await?;
         mtx.commit().await?;
-        let Some((user_id, sid)) = spent else {
+        let Some((user_id, sid, challenge)) = spent else {
             tracing::warn!("exchange of a code that is unknown, spent or expired");
             return Err(AuthError::InvalidToken.into());
         };
+        if !telmoni_shared::pkce::answers(code_verifier, &challenge) {
+            tracing::warn!(
+                "exchange of a code with a verifier that is not its own; the code is spent"
+            );
+            return Err(AuthError::InvalidToken.into());
+        }
         let mut tx = person_scope(&self.db, &user_id).await?;
         let tokens = self
             .issue_tokens(&mut tx, &user_id, &sid, Some("password"), None)

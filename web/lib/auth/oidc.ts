@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import { env } from "@/lib/env";
 import { fetchWithTimeout } from "@/lib/api/fetch";
+import { Problem } from "@/lib/api/problem";
+import { ExchangeRefused } from "@/lib/auth/refusal";
 import { logger } from "@/lib/logger";
 
 const AuthnResultSchema = z.object({
@@ -53,10 +55,16 @@ const serviceHeaders = (): Record<string, string> => ({
 
 // Where the browser goes to sign in: the console's own page while the login
 // form is on, the external provider's when it is off or when `provider`
-// asks for it.
+// asks for it. The challenge and the nonce bind the code to this sign-in.
 export async function getAuthorizeUrl(
   state: string,
-  opts: { signUp?: boolean; loginHint?: string; provider?: SignInProvider } = {},
+  opts: {
+    codeChallenge: string;
+    nonce: string;
+    signUp?: boolean;
+    loginHint?: string;
+    provider?: SignInProvider;
+  },
 ): Promise<string> {
   const res = await fetchWithTimeout(
     `${env.SERVER_URL}/internal/v1/auth/start`,
@@ -65,6 +73,8 @@ export async function getAuthorizeUrl(
       headers: serviceHeaders(),
       body: JSON.stringify({
         state,
+        codeChallenge: opts.codeChallenge,
+        nonce: opts.nonce,
         ...(opts.signUp ? { signUp: true } : {}),
         ...(opts.loginHint ? { loginHint: opts.loginHint } : {}),
         ...(opts.provider ? { provider: opts.provider } : {}),
@@ -77,10 +87,12 @@ export async function getAuthorizeUrl(
   return parsed.data.authorizeUrl;
 }
 
-// Spend the code the sign-in earned. `provider` says whose code it is: the
-// external provider's, or absent, one auth's own sign-in minted.
+// Spend the code the sign-in earned, with the verifier and the nonce its
+// cookie sealed. `provider` says whose code it is: the external provider's,
+// or absent, one auth's own sign-in minted.
 export async function exchangeCode(
   code: string,
+  proof: { codeVerifier: string; nonce: string },
   provider?: SignInProvider,
 ): Promise<AuthnResult> {
   const res = await fetchWithTimeout(
@@ -88,10 +100,19 @@ export async function exchangeCode(
     {
       method: "POST",
       headers: serviceHeaders(),
-      body: JSON.stringify({ code, ...(provider ? { provider } : {}) }),
+      body: JSON.stringify({
+        code,
+        codeVerifier: proof.codeVerifier,
+        nonce: proof.nonce,
+        ...(provider ? { provider } : {}),
+      }),
     },
   );
-  if (!res.ok) throw new Error(`auth exchange failed: ${res.status}`);
+  if (!res.ok) {
+    // The problem's type is what tells the person why, on `/auth/refused`.
+    const problem = Problem.safeParse(await res.json().catch(() => null));
+    throw new ExchangeRefused(res.status, problem.success ? (problem.data.type ?? null) : null);
+  }
   return AuthnResultSchema.parse(await res.json());
 }
 

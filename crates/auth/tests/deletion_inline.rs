@@ -383,11 +383,12 @@ impl AuthProvider for Hung {
         &self,
         redirect_uri: &str,
         state: &str,
+        binding: telmoni_auth::provider::Binding<'_>,
         sign_up: bool,
         login_hint: Option<&str>,
     ) -> Result<String, TelmoniError> {
         self.inner
-            .authorize_url(redirect_uri, state, sign_up, login_hint)
+            .authorize_url(redirect_uri, state, binding, sign_up, login_hint)
             .await
     }
 
@@ -395,8 +396,9 @@ impl AuthProvider for Hung {
         &self,
         code: &str,
         redirect_uri: &str,
+        proof: telmoni_auth::provider::Proof<'_>,
     ) -> Result<Authenticated, TelmoniError> {
-        self.inner.exchange_code(code, redirect_uri).await
+        self.inner.exchange_code(code, redirect_uri, proof).await
     }
 
     async fn logout_url(&self, id_token: Option<&str>, return_to: &str) -> String {

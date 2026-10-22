@@ -17,13 +17,17 @@ data:
   LIVE_REFRESH_HOLD_SECS: {{ .Values.web.liveRefreshHoldSeconds | quote }}
   APP_URL: {{ .Values.config.appUrl | quote }}
   AUTH_URL: {{ .Values.config.authUrl | quote }}
-  OIDC_REDIRECT_URI: {{ .Values.config.oidcRedirectUri | quote }}
-  ALLOW_SIGN_UP: {{ .Values.config.allowSignUp | quote }}
+  AUTH_REDIRECT_URI: {{ .Values.config.redirectUri | quote }}
+  AUTH_DISABLE_SIGNUP: {{ .Values.config.disableSignup | quote }}
   VERIFY_EMAIL: {{ .Values.config.verifyEmail | quote }}
-  DISABLE_LOGIN_FORM: {{ .Values.config.disableLoginForm | quote }}
-  OIDC_NAME: {{ .Values.config.oidcName | quote }}
-  OIDC_ALLOW_SIGN_UP: {{ .Values.config.oidcAllowSignUp | quote }}
-  OIDC_ALLOW_INSECURE_EMAIL_LOOKUP: {{ .Values.config.oidcAllowInsecureEmailLookup | quote }}
+  AUTH_DISABLE_USERNAME_PASSWORD: {{ .Values.config.disableUsernamePassword | quote }}
+  AUTH_DOMAINS_WITH_SSO_ENFORCEMENT: {{ .Values.config.domainsWithSsoEnforcement | quote }}
+  AUTH_CUSTOM_NAME: {{ .Values.config.customName | quote }}
+  AUTH_CUSTOM_SCOPE: {{ .Values.config.customScope | quote }}
+  AUTH_CUSTOM_CHECKS: {{ .Values.config.customChecks | quote }}
+  AUTH_CUSTOM_ID_TOKEN_SIGNED_RESPONSE_ALG: {{ .Values.config.customIdTokenSignedResponseAlg | quote }}
+  AUTH_CUSTOM_FETCH_USERINFO: {{ .Values.config.customFetchUserinfo | quote }}
+  AUTH_CUSTOM_ALLOW_ACCOUNT_LINKING: {{ .Values.config.customAllowAccountLinking | quote }}
   AUTH_PROVIDER_ORIGINS: {{ .Values.config.authProviderOrigins | quote }}
   COMPANY_NAME: {{ .Values.config.companyName | quote }}
   SUPPORT_EMAIL: {{ .Values.config.supportEmail | quote }}

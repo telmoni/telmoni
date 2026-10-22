@@ -65,7 +65,7 @@ pub struct Providers {
     /// person signed in, and the CLI's device grant.
     pub issuer: Arc<issuer::Issuer>,
     /// The accounts held here — the login form. `None` when the form is off
-    /// (`DISABLE_LOGIN_FORM`), which leaves the external provider the one
+    /// (`AUTH_DISABLE_USERNAME_PASSWORD`), which leaves the external provider the one
     /// way in.
     pub password: Option<Arc<password::PasswordProvider>>,
     /// An external identity provider beside the form: this crate's

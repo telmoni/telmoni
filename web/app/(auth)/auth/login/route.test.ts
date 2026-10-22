@@ -38,7 +38,10 @@ describe("GET /auth/login", () => {
 
   it("redirects an unauthenticated visitor to the provider's authorize URL with CSRF state", async () => {
     const res = await GET(req("http://localhost:3000/auth/login"));
-    expect(authorizeMock).toHaveBeenCalledWith(expect.any(String), {});
+    expect(authorizeMock).toHaveBeenCalledWith(expect.any(String), {
+      codeChallenge: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+      nonce: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+    });
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe("https://idp.example/authorize");
     expect(res.headers.get("cache-control")).toBe("no-store, max-age=0");

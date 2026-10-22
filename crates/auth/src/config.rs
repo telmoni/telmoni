@@ -17,8 +17,8 @@ pub struct Config {
     /// boot in a Kubernetes pod.
     pub allow_test_session: bool,
     /// The web callback the authorization code flow returns to
-    /// (`OIDC_REDIRECT_URI`). Must match a redirect URI registered at the
-    /// identity provider.
+    /// (`AUTH_REDIRECT_URI`), one for every provider. Must match a redirect
+    /// URI registered at the identity provider.
     pub redirect_uri: String,
     /// Public base URL of the web portal; invite links point here.
     pub app_url: String,
@@ -43,7 +43,7 @@ impl Config {
             service_secret: require("SERVICE_SECRET")?.into(),
             service_secret_next: optional("SERVICE_SECRET_NEXT").map(Into::into),
             allow_test_session: env_parse("ALLOW_TEST_SESSION", false)?,
-            redirect_uri: optional("OIDC_REDIRECT_URI")
+            redirect_uri: optional("AUTH_REDIRECT_URI")
                 .unwrap_or_else(|| "http://localhost:3000/auth/callback".to_owned()),
             app_url: optional("APP_URL").unwrap_or_else(|| "http://localhost:3000".to_owned()),
             mail_from: optional("MAIL_FROM").unwrap_or_else(telmoni_shared::mail::default_from),

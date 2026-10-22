@@ -198,25 +198,31 @@ services:
       TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-1}
       SERVICE_SECRET: ${SERVICE_SECRET}
       APP_URL: ${APP_URL:-http://localhost:3000}
-      # The login form is on unless DISABLE_LOGIN_FORM; password sign-ups are
-      # closed unless ALLOW_SIGN_UP (an invited address may still sign up);
-      # ADMIN_EMAIL and ADMIN_PASSWORD seed the first account. An OpenID
-      # Connect provider sits beside the form when OIDC_ISSUER names one, and
-      # its first sign-ins make accounts while OIDC_ALLOW_SIGN_UP is on.
-      # Whether a new person gets an organization, and whether anyone may
-      # create another, is the `signup` feature flag.
-      ALLOW_SIGN_UP: ${ALLOW_SIGN_UP:-false}
+      # Langfuse's names. The login form is on unless
+      # AUTH_DISABLE_USERNAME_PASSWORD; nobody new signs up, at the form or
+      # at a provider, unless AUTH_DISABLE_SIGNUP=false (an invited address
+      # always may); ADMIN_EMAIL and ADMIN_PASSWORD seed the first account.
+      # An OpenID Connect provider sits beside the form when
+      # AUTH_CUSTOM_CLIENT_ID names one, and addresses at the domains of
+      # AUTH_DOMAINS_WITH_SSO_ENFORCEMENT sign in there alone. Whether a new
+      # person gets an organization, and whether anyone may create another,
+      # is the `signup` feature flag.
+      AUTH_DISABLE_SIGNUP: ${AUTH_DISABLE_SIGNUP:-true}
       VERIFY_EMAIL: ${VERIFY_EMAIL:-false}
-      DISABLE_LOGIN_FORM: ${DISABLE_LOGIN_FORM:-false}
+      AUTH_DISABLE_USERNAME_PASSWORD: ${AUTH_DISABLE_USERNAME_PASSWORD:-false}
+      AUTH_DOMAINS_WITH_SSO_ENFORCEMENT: ${AUTH_DOMAINS_WITH_SSO_ENFORCEMENT:-}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      OIDC_ISSUER: ${OIDC_ISSUER:-}
-      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
-      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
-      OIDC_NAME: ${OIDC_NAME:-}
-      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-http://localhost:3000/auth/callback}
-      OIDC_ALLOW_SIGN_UP: ${OIDC_ALLOW_SIGN_UP:-true}
-      OIDC_ALLOW_INSECURE_EMAIL_LOOKUP: ${OIDC_ALLOW_INSECURE_EMAIL_LOOKUP:-false}
+      AUTH_REDIRECT_URI: ${AUTH_REDIRECT_URI:-http://localhost:3000/auth/callback}
+      AUTH_CUSTOM_CLIENT_ID: ${AUTH_CUSTOM_CLIENT_ID:-}
+      AUTH_CUSTOM_CLIENT_SECRET: ${AUTH_CUSTOM_CLIENT_SECRET:-}
+      AUTH_CUSTOM_ISSUER: ${AUTH_CUSTOM_ISSUER:-}
+      AUTH_CUSTOM_NAME: ${AUTH_CUSTOM_NAME:-}
+      AUTH_CUSTOM_SCOPE: ${AUTH_CUSTOM_SCOPE:-openid email profile}
+      AUTH_CUSTOM_CHECKS: ${AUTH_CUSTOM_CHECKS:-pkce,nonce,state}
+      AUTH_CUSTOM_ID_TOKEN_SIGNED_RESPONSE_ALG: ${AUTH_CUSTOM_ID_TOKEN_SIGNED_RESPONSE_ALG:-RS256}
+      AUTH_CUSTOM_FETCH_USERINFO: ${AUTH_CUSTOM_FETCH_USERINFO:-false}
+      AUTH_CUSTOM_ALLOW_ACCOUNT_LINKING: ${AUTH_CUSTOM_ALLOW_ACCOUNT_LINKING:-false}
       # Where mail leaves by; unset, nothing is sent: one log line per mail, without its contents.
       SMTP_URL: ${SMTP_URL:-}
       MAIL_FROM: ${MAIL_FROM:-Telmoni <no-reply@localhost>}

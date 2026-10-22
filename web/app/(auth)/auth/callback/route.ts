@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { exchangeCode } from "@/lib/auth/oidc";
+import { refusalOf, refusedUrl, type Refusal } from "@/lib/auth/refusal";
 import { fetchWithTimeout } from "@/lib/api/fetch";
 import { clientKey, rateLimitRetryAfter } from "@/lib/api/rate-limit";
 import { track } from "@/lib/analytics";
@@ -19,6 +20,14 @@ import {
 } from "@/lib/auth/session";
 
 const CALLBACK_CEILING = { limit: 30, windowMs: 60_000 };
+
+// A sign-in that ended with no session, told why on a page that starts no
+// other: `/auth/login` would begin again at once, round the provider and back.
+function refused(reason: Refusal): NextResponse {
+  const response = NextResponse.redirect(refusedUrl(reason, env.AUTH_URL));
+  response.cookies.delete(PKCE_COOKIE);
+  return response;
+}
 
 export async function GET(request: NextRequest) {
   const pkceValue = request.cookies.get(PKCE_COOKIE)?.value;
@@ -43,9 +52,7 @@ export async function GET(request: NextRequest) {
 
   const returnedState = request.nextUrl.searchParams.get("state");
   if (!returnedState || returnedState !== pkce.state) {
-    return NextResponse.redirect(
-      new URL("/auth/login?error=callback", env.AUTH_URL),
-    );
+    return refused("expired");
   }
 
   const code = request.nextUrl.searchParams.get("code");
@@ -58,9 +65,8 @@ export async function GET(request: NextRequest) {
       response.cookies.delete(PKCE_COOKIE);
       return response;
     }
-    return NextResponse.redirect(
-      new URL("/auth/login?error=callback", env.AUTH_URL),
-    );
+    // The provider's own `error`, such as a person who cancelled there.
+    return refused("provider");
   }
 
   // Every branch above answers from the cookie alone; this is the first one
@@ -86,8 +92,12 @@ export async function GET(request: NextRequest) {
   // minted — is what the pending sign-in recorded when the browser left.
   let result;
   try {
-    result = await exchangeCode(code, pkce.provider);
-  } catch {
+    result = await exchangeCode(
+      code,
+      { codeVerifier: pkce.verifier, nonce: pkce.nonce },
+      pkce.provider,
+    );
+  } catch (err) {
     const existing = await getSession();
     if (existing) {
       const response = NextResponse.redirect(
@@ -96,15 +106,11 @@ export async function GET(request: NextRequest) {
       response.cookies.delete(PKCE_COOKIE);
       return response;
     }
-    return NextResponse.redirect(
-      new URL("/auth/login?error=callback", env.AUTH_URL),
-    );
+    return refused(refusalOf(err));
   }
 
   if (!result.emailVerified) {
-    return NextResponse.redirect(
-      new URL("/auth/login?error=email-unverified", env.AUTH_URL),
-    );
+    return refused("unverified");
   }
 
   const sessionData: SessionData = {

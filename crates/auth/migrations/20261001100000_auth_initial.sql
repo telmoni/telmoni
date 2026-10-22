@@ -581,13 +581,17 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON auth.refresh_tokens TO auth_maintenance;
 -- The one-time code a sign-in hands the console, which the console's callback
 -- spends within seconds for the session's tokens. Spent by deletion.
 CREATE TABLE auth.authorization_codes (
-    id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id    TEXT        NOT NULL REFERENCES auth.identities (user_id) ON DELETE CASCADE,
-    sid        TEXT        NOT NULL,
-    code_hash  TEXT        NOT NULL UNIQUE,
-    expires_at TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    shard_key  UUID        NOT NULL DEFAULT gen_random_uuid()
+    id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id        TEXT        NOT NULL REFERENCES auth.identities (user_id) ON DELETE CASCADE,
+    sid            TEXT        NOT NULL,
+    code_hash      TEXT        NOT NULL UNIQUE,
+    -- RFC 7636's S256 challenge: the code is spent only with its verifier,
+    -- which the console that started the sign-in alone holds.
+    code_challenge TEXT        NOT NULL,
+    expires_at     TIMESTAMPTZ NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    shard_key      UUID        NOT NULL DEFAULT gen_random_uuid(),
+    CONSTRAINT authorization_codes_challenge_check CHECK (code_challenge ~ '^[A-Za-z0-9_-]{43}$')
 );
 
 CREATE INDEX authorization_codes_reap_idx      ON auth.authorization_codes (expires_at);

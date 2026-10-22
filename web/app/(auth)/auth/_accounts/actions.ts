@@ -1,9 +1,11 @@
 "use server";
 
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { z } from "zod";
 
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
+import { challengeOf } from "@/lib/auth/pkce";
+import { PKCE_COOKIE, unsealPkce } from "@/lib/auth/session";
 import { clientKeyFromHeaders, rateLimit, sessionKey } from "@/lib/api/rate-limit";
 import { env } from "@/lib/env";
 import { personHeaders } from "@/lib/server/entities/identity-context";
@@ -50,6 +52,22 @@ async function refusal(res: Response, fallback?: string): Promise<string> {
   return problem?.detail || fallback || message;
 }
 
+// The domain's addresses sign in through the identity provider alone.
+const SSO_REQUIRED = "/errors/auth/sso-required";
+
+const EXPIRED = "This sign-in has expired. Start again.";
+
+// The challenge of the verifier the door sealed for this sign-in, which
+// auth keeps with the code it mints so the callback alone can spend it;
+// none where no sign-in is pending under `state`, or where "Continue with…"
+// took it over, whose callback would hand this code to the provider.
+async function pendingChallenge(state: string): Promise<string | null> {
+  const sealed = (await cookies()).get(PKCE_COOKIE)?.value;
+  const pkce = sealed ? await unsealPkce(sealed) : null;
+  if (!pkce || pkce.state !== state || pkce.provider) return null;
+  return challengeOf(pkce.verifier);
+}
+
 async function post(path: string, body: unknown, extra: Record<string, string> = {}) {
   return tryFetchWithTimeout(`${env.SERVER_URL}${path}`, {
     method: "POST",
@@ -65,7 +83,7 @@ export async function signInAction(input: {
   email: string;
   password: string;
   state: string;
-}): Promise<Result & { next?: string }> {
+}): Promise<Result & { next?: string; sso?: true }> {
   const parsed = z
     .object({ email, password: z.string().min(1).max(256), state: z.string().min(1).max(200) })
     .safeParse(input);
@@ -74,10 +92,13 @@ export async function signInAction(input: {
   if (await limitedByAddress("accounts:sign-in", { limit: 10, windowMs: 60_000 })) {
     return { error: "Too many attempts. Try again in a minute." };
   }
+  const codeChallenge = await pendingChallenge(parsed.data.state);
+  if (!codeChallenge) return { error: EXPIRED };
 
   const res = await post("/internal/v1/auth/password/sign-in", {
     email: parsed.data.email,
     password: parsed.data.password,
+    codeChallenge,
   });
   if (!res) return { error: UNAVAILABLE };
   if (res.status === 401) return { error: "Wrong email address or password." };
@@ -87,7 +108,14 @@ export async function signInAction(input: {
   if (res.status === 429) {
     return { error: "Too many wrong passwords. Try again in a few minutes." };
   }
-  if (!res.ok) return { error: await refusal(res) };
+  if (!res.ok) {
+    // The form gives way to the provider's button for a domain held to it.
+    const { message, problem } = await extractProblem(res);
+    if (problem?.type === SSO_REQUIRED) {
+      return { error: "Your organization signs you in through its identity provider.", sso: true };
+    }
+    return { error: problem?.detail || message };
+  }
 
   const body = z.object({ code: z.string().min(1) }).safeParse(await res.json().catch(() => null));
   if (!body.success) return { error: UNAVAILABLE };
@@ -125,8 +153,11 @@ export async function signUpAction(input: {
   }
 
   const { givenName, familyName, state, ...rest } = parsed.data;
+  const codeChallenge = await pendingChallenge(state);
+  if (!codeChallenge) return { error: EXPIRED };
   const res = await post("/internal/v1/auth/password/sign-up", {
     ...rest,
+    codeChallenge,
     ...(givenName ? { givenName } : {}),
     ...(familyName ? { familyName } : {}),
   });

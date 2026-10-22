@@ -11,7 +11,7 @@
 pub mod id_token;
 pub mod jwks;
 
-pub use id_token::IdTokenVerifier;
+pub use id_token::{IdTokenVerifier, SigningAlg};
 pub use jwks::KeySetUrl;
 
 use tokio::sync::OnceCell;
@@ -47,6 +47,15 @@ pub struct Endpoints {
     /// (RFC 6749 § 2.3.1).
     #[serde(default)]
     pub token_endpoint_auth_methods_supported: Option<Vec<String>>,
+    /// Where the claims about a person are read with an access token (Core
+    /// § 5.3), for a provider that keeps the address or the name out of its
+    /// id tokens.
+    #[serde(default)]
+    pub userinfo_endpoint: Option<String>,
+    /// The `prompt` values the provider takes; `create` among them is its
+    /// sign-up screen (Initiating User Registration 1.0).
+    #[serde(default)]
+    pub prompt_values_supported: Option<Vec<String>>,
 }
 
 /// The discovery document for one issuer, fetched once.
@@ -235,6 +244,8 @@ mod tests {
             end_session_endpoint: None,
             revocation_endpoint: None,
             token_endpoint_auth_methods_supported: None,
+            userinfo_endpoint: None,
+            prompt_values_supported: None,
         });
         assert_eq!(discovery.issuer(), "http://127.0.0.1:1");
         assert!(discovery.endpoints().await.is_ok());

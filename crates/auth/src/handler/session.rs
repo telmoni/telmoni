@@ -20,7 +20,7 @@ use telmoni_shared::{AuthError, TelmoniError};
 
 use crate::AppState;
 use crate::db::AuthLane;
-use crate::provider::{DevicePoll, TokenResponse};
+use crate::provider::{Binding, DevicePoll, Proof, TokenResponse};
 
 /// The one provider a caller may name beside the accounts held here. Any
 /// other name is refused as the body is read, before anything is asked of a
@@ -39,6 +39,11 @@ pub enum SignInProvider {
 pub struct StartRequest {
     /// Opaque CSRF/state value, generated + stored by the BFF.
     pub state: String,
+    /// The S256 challenge of the verifier the BFF sealed beside the state,
+    /// which binds the code the sign-in earns to it.
+    pub code_challenge: String,
+    /// The nonce sealed beside it, which the provider's id token must carry.
+    pub nonce: String,
     /// Open the create-account screen rather than sign-in, for
     /// `/auth/signup` and for an invite link.
     #[serde(default)]
@@ -65,10 +70,14 @@ pub struct StartResponse {
 /// `POST /internal/v1/auth/exchange` request — the `?code=...` the sign-in
 /// redirected back to the BFF's callback with.
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExchangeRequest {
     /// Authorization code from the redirect.
     pub code: String,
+    /// The verifier the code's challenge was made from.
+    pub code_verifier: String,
+    /// The nonce the sign-in sent.
+    pub nonce: String,
     /// `external` when the code is the external provider's; absent, it is
     /// one a sign-in here minted.
     #[serde(default)]
@@ -79,6 +88,8 @@ impl std::fmt::Debug for ExchangeRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExchangeRequest")
             .field("code", &"***")
+            .field("code_verifier", &"***")
+            .field("nonce", &self.nonce)
             .field("provider", &self.provider)
             .finish()
     }
@@ -340,6 +351,12 @@ pub async fn start(
     State(state): State<Arc<AppState>>,
     Json(req): Json<StartRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
+    if !telmoni_shared::pkce::is_challenge(&req.code_challenge) || !is_nonce(&req.nonce) {
+        return Err(AuthError::BadRequest(
+            "codeChallenge is an S256 challenge, and nonce 16 to 128 URL-safe characters".into(),
+        )
+        .into());
+    }
     let external = req.provider == Some(SignInProvider::External);
     let url = match (&state.password, &state.external) {
         (Some(_), _) if !external => {
@@ -360,6 +377,10 @@ pub async fn start(
                 .authorize_url(
                     &state.config.redirect_uri,
                     &req.state,
+                    Binding {
+                        code_challenge: &req.code_challenge,
+                        nonce: &req.nonce,
+                    },
                     req.sign_up,
                     req.login_hint.as_deref(),
                 )
@@ -459,7 +480,15 @@ pub async fn exchange(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ExchangeRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
-    let code = req.code.clone();
+    if !telmoni_shared::pkce::is_verifier(&req.code_verifier) || !is_nonce(&req.nonce) {
+        return Err(AuthError::BadRequest(
+            "codeVerifier is an RFC 7636 verifier, and nonce 16 to 128 URL-safe characters".into(),
+        )
+        .into());
+    }
+    // A retry is answered from the cache only with the verifier the first
+    // presentation spent the code with: a stolen code is no key to it.
+    let code = format!("{}\n{}", req.code, req.code_verifier);
     // As `start` decides: with the login form off the browser went to the
     // external provider unasked, and the console's cookie names no provider.
     // Only the form mints codes here, so without it every code is the
@@ -471,7 +500,14 @@ pub async fn exchange(
         let grant = async {
             let authenticated = external
                 .provider
-                .exchange_code(&req.code, &state.config.redirect_uri)
+                .exchange_code(
+                    &req.code,
+                    &state.config.redirect_uri,
+                    Proof {
+                        code_verifier: &req.code_verifier,
+                        nonce: &req.nonce,
+                    },
+                )
                 .await?;
             let user_id = external
                 .resolve_person(&state.db, &authenticated.subject)
@@ -487,8 +523,16 @@ pub async fn exchange(
         };
         return exchange_once(&state, code, grant).await.map(Json);
     }
-    let grant = state.issuer.exchange_code(&req.code);
+    let grant = state.issuer.exchange_code(&req.code, &req.code_verifier);
     exchange_once(&state, code, grant).await.map(Json)
+}
+
+/// Whether `nonce` is one the console mints: 16 to 128 URL-safe characters.
+fn is_nonce(nonce: &str) -> bool {
+    (16..=128).contains(&nonce.len())
+        && nonce
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// Spend `code` at most once: the first caller runs `grant`, a concurrent
@@ -645,6 +689,8 @@ mod tests {
             "{:?} {:?} {:?}",
             ExchangeRequest {
                 code: "live_auth_code".into(),
+                code_verifier: "live_verifier".into(),
+                nonce: "nonce_1".into(),
                 provider: None,
             },
             RefreshRequest {
@@ -657,7 +703,12 @@ mod tests {
                 return_to: "https://app/".into(),
             },
         );
-        for leaked in ["live_auth_code", "live_refresh", "live_id_token"] {
+        for leaked in [
+            "live_auth_code",
+            "live_verifier",
+            "live_refresh",
+            "live_id_token",
+        ] {
             assert!(!rendered.contains(leaked), "leaked {leaked}: {rendered}");
         }
         assert!(rendered.contains("sess_1"));
@@ -678,31 +729,33 @@ mod tests {
     /// body refused as it is read, which the lane answers with a 400.
     #[test]
     fn only_the_external_provider_may_be_named() {
-        let start = serde_json::from_value::<StartRequest>;
-        let exchange = serde_json::from_value::<ExchangeRequest>;
-        assert_eq!(start(json!({ "state": "s" })).unwrap().provider, None);
-        assert_eq!(exchange(json!({ "code": "c" })).unwrap().provider, None);
+        let start = |provider: Option<&str>| {
+            let mut body = json!({ "state": "s", "codeChallenge": "c", "nonce": "n" });
+            if let Some(name) = provider {
+                body["provider"] = json!(name);
+            }
+            serde_json::from_value::<StartRequest>(body)
+        };
+        let exchange = |provider: Option<&str>| {
+            let mut body = json!({ "code": "c", "codeVerifier": "v", "nonce": "n" });
+            if let Some(name) = provider {
+                body["provider"] = json!(name);
+            }
+            serde_json::from_value::<ExchangeRequest>(body)
+        };
+        assert_eq!(start(None).unwrap().provider, None);
+        assert_eq!(exchange(None).unwrap().provider, None);
         assert_eq!(
-            start(json!({ "state": "s", "provider": "external" }))
-                .unwrap()
-                .provider,
+            start(Some("external")).unwrap().provider,
             Some(SignInProvider::External)
         );
         assert_eq!(
-            exchange(json!({ "code": "c", "provider": "external" }))
-                .unwrap()
-                .provider,
+            exchange(Some("external")).unwrap().provider,
             Some(SignInProvider::External)
         );
         for name in ["google", "External", ""] {
-            assert!(
-                start(json!({ "state": "s", "provider": name })).is_err(),
-                "{name:?}"
-            );
-            assert!(
-                exchange(json!({ "code": "c", "provider": name })).is_err(),
-                "{name:?}"
-            );
+            assert!(start(Some(name)).is_err(), "{name:?}");
+            assert!(exchange(Some(name)).is_err(), "{name:?}");
         }
     }
 

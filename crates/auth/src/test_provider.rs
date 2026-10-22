@@ -25,7 +25,8 @@ use telmoni_shared::{NotificationKind, OrganizationId, ProjectId, TelmoniError, 
 use crate::db::access_tokens;
 use crate::issuer::{BEARER_TTL_SECS, Issuer, hash, secret};
 use crate::provider::{
-    AuthProvider, Authenticated, ConfirmedEmail, EmailChangeChallenge, PasswordResetLink, Subject,
+    AuthProvider, Authenticated, Binding, ConfirmedEmail, EmailChangeChallenge, PasswordResetLink,
+    Proof, Subject,
 };
 
 /// Every lane the binary mounts for this module, through one router, for the
@@ -672,6 +673,10 @@ pub enum Call {
         redirect_uri: String,
         /// The CSRF state.
         state: String,
+        /// The S256 challenge the code is bound to.
+        code_challenge: String,
+        /// The nonce its id token must carry.
+        nonce: String,
         /// Whether the sign-up screen was asked for.
         sign_up: bool,
         /// The address to pre-fill, when one was collected.
@@ -681,6 +686,10 @@ pub enum Call {
     Exchange {
         /// The authorization code.
         code: String,
+        /// The verifier it was redeemed with.
+        code_verifier: String,
+        /// The nonce handed back.
+        nonce: String,
     },
     /// `logout_url`.
     LogoutUrl {
@@ -845,12 +854,15 @@ impl AuthProvider for ScriptedProvider {
         &self,
         redirect_uri: &str,
         state: &str,
+        binding: Binding<'_>,
         sign_up: bool,
         login_hint: Option<&str>,
     ) -> Result<String, TelmoniError> {
         self.record(Call::AuthorizeUrl {
             redirect_uri: redirect_uri.to_owned(),
             state: state.to_owned(),
+            code_challenge: binding.code_challenge.to_owned(),
+            nonce: binding.nonce.to_owned(),
             sign_up,
             login_hint: login_hint.map(str::to_owned),
         });
@@ -872,9 +884,12 @@ impl AuthProvider for ScriptedProvider {
         &self,
         code: &str,
         _redirect_uri: &str,
+        proof: Proof<'_>,
     ) -> Result<Authenticated, TelmoniError> {
         self.record(Call::Exchange {
             code: code.to_owned(),
+            code_verifier: proof.code_verifier.to_owned(),
+            nonce: proof.nonce.to_owned(),
         });
         self.script(|s| s.exchange.pop_front())
             .unwrap_or_else(|| Ok(authenticated(TEST_SUBJECT)))

@@ -96,7 +96,7 @@ async function seed(request: APIRequestContext, user: TestUser, projectSlug: str
 
   const minted = await request.post(`${SERVER}/internal/v1/tokens`, {
     headers: project,
-    data: { name: "e2e layout key", created_by: user.userId },
+    data: { name: "e2e layout key", created_by: user.userId, scopes: ["read"] },
   });
   expect(minted.ok(), await minted.text()).toBeTruthy();
 }

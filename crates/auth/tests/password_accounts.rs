@@ -103,12 +103,15 @@ impl Outbox {
 struct Policy {
     allow_sign_up: bool,
     verify_email: bool,
+    /// The domains held to single sign-on.
+    sso_domains: &'static [&'static str],
 }
 
 /// Sign-ups open, addresses confirmed from a mail: what most tests assume.
 const OPEN_AND_VERIFIED: Policy = Policy {
     allow_sign_up: true,
     verify_email: true,
+    sso_domains: &[],
 };
 
 fn config() -> Config {
@@ -139,6 +142,7 @@ fn password_provider(
         Arc::clone(&issuer),
         mailer,
         policy.allow_sign_up,
+        policy.sso_domains.iter().map(|d| (*d).to_owned()).collect(),
     ));
     (provider, issuer)
 }
@@ -188,11 +192,20 @@ async fn json_body(resp: axum::response::Response) -> serde_json::Value {
     serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
 }
 
+/// RFC 7636's own example pair, as the console's door seals and sends it.
+const CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+
 /// The sign-up request every test sends.
 fn sign_up_request(email: &str) -> Request<Body> {
     post_json(
         "/internal/v1/auth/password/sign-up",
-        serde_json::json!({ "email": email, "password": PASSWORD, "givenName": "Ada" }),
+        serde_json::json!({
+            "email": email,
+            "password": PASSWORD,
+            "givenName": "Ada",
+            "codeChallenge": CHALLENGE,
+        }),
     )
 }
 
@@ -225,7 +238,7 @@ async fn sign_in(app: &Router, email: &str, password: &str) -> axum::response::R
     app.clone()
         .oneshot(post_json(
             "/internal/v1/auth/password/sign-in",
-            serde_json::json!({ "email": email, "password": password }),
+            serde_json::json!({ "email": email, "password": password, "codeChallenge": CHALLENGE }),
         ))
         .await
         .unwrap()
@@ -236,7 +249,7 @@ async fn exchange(app: &Router, code: &str) -> axum::response::Response {
     app.clone()
         .oneshot(post_json(
             "/internal/v1/auth/exchange",
-            serde_json::json!({ "code": code }),
+            serde_json::json!({ "code": code, "codeVerifier": VERIFIER, "nonce": "nonce_0123456789abcdef" }),
         ))
         .await
         .unwrap()
@@ -356,6 +369,7 @@ async fn with_verification_off_a_sign_up_signs_in_at_once(pool: PgPool) {
         Policy {
             allow_sign_up: true,
             verify_email: false,
+            sso_domains: &[],
         },
     );
 
@@ -384,7 +398,7 @@ async fn with_verification_off_a_sign_up_signs_in_at_once(pool: PgPool) {
     );
 }
 
-/// With `ALLOW_SIGN_UP` off, an invitation is the way in: a sign-up for an
+/// With sign-ups closed (`AUTH_DISABLE_SIGNUP`), an invitation is the way in: a sign-up for an
 /// address nobody invited is refused, and one an organization invited goes
 /// through.
 #[sqlx::test]
@@ -395,6 +409,7 @@ async fn sign_ups_closed_admit_the_invited_alone(pool: PgPool) {
         Policy {
             allow_sign_up: false,
             verify_email: true,
+            sso_domains: &[],
         },
     );
 
@@ -448,6 +463,7 @@ async fn the_admin_account_is_seeded_once_and_signs_in(pool: PgPool) {
         Policy {
             allow_sign_up: false,
             verify_email: true,
+            sso_domains: &[],
         },
     );
     let sender: Arc<dyn MailSender> = outbox.clone();
@@ -456,6 +472,7 @@ async fn the_admin_account_is_seeded_once_and_signs_in(pool: PgPool) {
         Policy {
             allow_sign_up: false,
             verify_email: true,
+            sso_domains: &[],
         },
         sender,
     );
@@ -602,7 +619,11 @@ async fn a_second_sign_up_for_an_address_is_refused(pool: PgPool) {
         .clone()
         .oneshot(post_json(
             "/internal/v1/auth/password/sign-up",
-            serde_json::json!({ "email": "ada@example.com", "password": "another password" }),
+            serde_json::json!({
+                "email": "ada@example.com",
+                "password": "another password",
+                "codeChallenge": CHALLENGE,
+            }),
         ))
         .await
         .unwrap();
@@ -911,4 +932,166 @@ async fn the_config_lane_describes_the_form(pool: PgPool) {
             "external": null,
         })
     );
+}
+
+/// An address at a domain held to single sign-on never uses the form: its
+/// sign-up, sign-in and forgotten password are each refused with their own
+/// type, which the sign-in page answers with the provider's button, while
+/// every other domain goes on as before.
+#[sqlx::test]
+async fn a_domain_held_to_sso_is_refused_the_form_and_told_why(pool: PgPool) {
+    telmoni_shared::test_util::apply_audit_migrations(&pool).await;
+    let (app, outbox) = app_under(
+        pool.clone(),
+        Policy {
+            allow_sign_up: true,
+            verify_email: false,
+            sso_domains: &["corp.example"],
+        },
+    );
+    for request in [
+        sign_up_request("Ada@Corp.Example"),
+        post_json(
+            "/internal/v1/auth/password/sign-in",
+            serde_json::json!({ "email": "ada@corp.example", "password": PASSWORD, "codeChallenge": CHALLENGE }),
+        ),
+        post_json(
+            "/internal/v1/auth/password/forgot",
+            serde_json::json!({ "email": "ada@corp.example" }),
+        ),
+    ] {
+        let resp = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let body = json_body(resp).await;
+        assert_eq!(body["type"], "/errors/auth/sso-required", "{body}");
+    }
+    assert!(
+        outbox.all().is_empty(),
+        "nothing is mailed to a held address"
+    );
+
+    let resp = app
+        .clone()
+        .oneshot(sign_up_request("ada@elsewhere.example"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "another domain signs up");
+}
+
+/// A password made before its domain was held opens no way back to the
+/// form: the account may neither move its address off the domain nor be
+/// mailed a reset link.
+#[sqlx::test]
+async fn a_held_address_keeps_no_way_back_to_the_form(pool: PgPool) {
+    telmoni_shared::test_util::apply_audit_migrations(&pool).await;
+    let before = Policy {
+        allow_sign_up: true,
+        verify_email: false,
+        sso_domains: &[],
+    };
+    let (app, _) = app_under(pool.clone(), before);
+    let resp = app
+        .clone()
+        .oneshot(sign_up_request("ada@corp.example"))
+        .await
+        .unwrap();
+    let code = json_body(resp).await["code"].as_str().unwrap().to_owned();
+    let tokens = json_body(exchange(&app, &code).await).await;
+    let bearer = tokens["accessToken"].as_str().unwrap().to_owned();
+
+    let (held, outbox) = app_under(
+        pool,
+        Policy {
+            sso_domains: &["corp.example"],
+            ..before
+        },
+    );
+    for request in [
+        post_as(
+            "/internal/v1/me/email-change",
+            &bearer,
+            serde_json::json!({ "newEmail": "ada@elsewhere.example" }),
+        ),
+        post_as(
+            "/internal/v1/me/password-reset",
+            &bearer,
+            serde_json::json!({}),
+        ),
+    ] {
+        let resp = held.clone().oneshot(request).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let body = json_body(resp).await;
+        assert_eq!(body["type"], "/errors/auth/sso-required", "{body}");
+    }
+    assert!(outbox.all().is_empty(), "nothing is mailed");
+}
+
+/// With sign-ups closed, a sign-up for an address that holds an account is
+/// refused as one for a stranger's, so the lane names no account.
+#[sqlx::test]
+async fn a_closed_sign_up_says_nothing_of_who_holds_an_address(pool: PgPool) {
+    telmoni_shared::test_util::apply_audit_migrations(&pool).await;
+    telmoni_shared::test_util::seed_identity(&pool, "user_held_1", "held@example.com").await;
+    let (app, _) = app_under(
+        pool,
+        Policy {
+            allow_sign_up: false,
+            verify_email: false,
+            sso_domains: &[],
+        },
+    );
+    let mut answers = Vec::new();
+    for email in ["held@example.com", "stranger@example.com"] {
+        let resp = app.clone().oneshot(sign_up_request(email)).await.unwrap();
+        answers.push((resp.status(), json_body(resp).await));
+    }
+    assert_eq!(answers[0].0, StatusCode::FORBIDDEN);
+    assert_eq!(answers[0].1["type"], "/errors/auth/sign-up-closed");
+    assert_eq!(answers[0], answers[1]);
+}
+
+/// ⚠ A code the form minted is spent only with the verifier its challenge
+/// was made from: a stolen one, presented with another, opens nothing and is
+/// burned, so the right verifier finds it gone too.
+#[sqlx::test]
+async fn a_code_is_spent_only_with_its_own_verifier(pool: PgPool) {
+    telmoni_shared::test_util::apply_audit_migrations(&pool).await;
+    let (app, _outbox) = app_under(
+        pool.clone(),
+        Policy {
+            allow_sign_up: true,
+            verify_email: false,
+            sso_domains: &[],
+        },
+    );
+    let resp = app
+        .clone()
+        .oneshot(sign_up_request("ada@example.com"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let code = json_body(resp).await["code"].as_str().unwrap().to_owned();
+
+    let stolen = app
+        .clone()
+        .oneshot(post_json(
+            "/internal/v1/auth/exchange",
+            serde_json::json!({
+                "code": code,
+                "codeVerifier": "a-different-verifier-a-thief-would-hold-0000",
+                "nonce": "nonce_0123456789abcdef",
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(stolen.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        exchange(&app, &code).await.status(),
+        StatusCode::UNAUTHORIZED,
+        "burned"
+    );
+
+    let resp = sign_in(&app, "ada@example.com", PASSWORD).await;
+    let code = json_body(resp).await["code"].as_str().unwrap().to_owned();
+    assert_eq!(exchange(&app, &code).await.status(), StatusCode::OK);
 }

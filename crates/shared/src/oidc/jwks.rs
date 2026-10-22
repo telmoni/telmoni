@@ -16,6 +16,8 @@ use tokio::sync::{Mutex, RwLock};
 
 use crate::error::{AuthError, TelmoniError};
 
+use super::id_token::SigningAlg;
+
 /// How long a fetched set is trusted before a routine refresh.
 const TTL: Duration = Duration::from_secs(600);
 
@@ -24,27 +26,70 @@ const TTL: Duration = Duration::from_secs(600);
 /// the provider.
 const RETRY_EVERY: Duration = Duration::from_secs(60);
 
-/// One RSA public key as the set publishes it: big-endian `n` and `e`, which
-/// is exactly what `ring` verifies against, no DER in between.
-pub struct RsaKey {
-    n: Vec<u8>,
-    e: Vec<u8>,
+/// One public key as the set publishes it, in the shape `ring` verifies
+/// against with no DER in between: an RSA key's big-endian `n` and `e`, or
+/// an EC key's uncompressed point on its curve; and the one algorithm the
+/// set says it is for, where it says one.
+pub struct PublicKey {
+    material: Material,
+    alg: Option<String>,
 }
 
-impl RsaKey {
-    /// RS256: RSASSA-PKCS1-v1_5 over SHA-256, the only algorithm taken.
+enum Material {
+    Rsa { n: Vec<u8>, e: Vec<u8> },
+    Ec { curve: Curve, point: Vec<u8> },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Curve {
+    P256,
+    P384,
+}
+
+impl PublicKey {
+    /// Whether `signature` over `message` verifies under this key by `alg`:
+    /// never where the key is of another kind or curve, or where the set
+    /// published it for another algorithm.
     #[must_use]
-    pub fn verifies(&self, message: &[u8], signature: &[u8]) -> bool {
-        ring::signature::RsaPublicKeyComponents {
-            n: &self.n[..],
-            e: &self.e[..],
+    pub fn verifies(&self, alg: SigningAlg, message: &[u8], signature: &[u8]) -> bool {
+        use ring::signature as sig;
+        if self
+            .alg
+            .as_deref()
+            .is_some_and(|published| published != alg.as_str())
+        {
+            return false;
         }
-        .verify(
-            &ring::signature::RSA_PKCS1_2048_8192_SHA256,
-            message,
-            signature,
-        )
-        .is_ok()
+        match (&self.material, alg) {
+            (Material::Rsa { n, e }, rsa) => {
+                let algorithm: &'static sig::RsaParameters = match rsa {
+                    SigningAlg::Rs256 => &sig::RSA_PKCS1_2048_8192_SHA256,
+                    SigningAlg::Rs384 => &sig::RSA_PKCS1_2048_8192_SHA384,
+                    SigningAlg::Rs512 => &sig::RSA_PKCS1_2048_8192_SHA512,
+                    SigningAlg::Ps256 => &sig::RSA_PSS_2048_8192_SHA256,
+                    SigningAlg::Ps384 => &sig::RSA_PSS_2048_8192_SHA384,
+                    SigningAlg::Ps512 => &sig::RSA_PSS_2048_8192_SHA512,
+                    SigningAlg::Es256 | SigningAlg::Es384 => return false,
+                };
+                sig::RsaPublicKeyComponents {
+                    n: &n[..],
+                    e: &e[..],
+                }
+                .verify(algorithm, message, signature)
+                .is_ok()
+            }
+            (Material::Ec { curve, point }, ec) => {
+                // A JWS signature is the fixed-width `r || s`, not ASN.1.
+                let algorithm: &'static sig::EcdsaVerificationAlgorithm = match (curve, ec) {
+                    (Curve::P256, SigningAlg::Es256) => &sig::ECDSA_P256_SHA256_FIXED,
+                    (Curve::P384, SigningAlg::Es384) => &sig::ECDSA_P384_SHA384_FIXED,
+                    _ => return false,
+                };
+                sig::UnparsedPublicKey::new(algorithm, point)
+                    .verify(message, signature)
+                    .is_ok()
+            }
+        }
     }
 }
 
@@ -57,6 +102,9 @@ struct Jwk {
     alg: Option<String>,
     n: Option<String>,
     e: Option<String>,
+    crv: Option<String>,
+    x: Option<String>,
+    y: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -64,33 +112,69 @@ struct Jwks {
     keys: Vec<Jwk>,
 }
 
-/// Parse a JWK set into the RSA keys it holds, by `kid`. Keys of another
-/// type are skipped, and so is a key the set says is for something other than
-/// RS256 signatures (`use` or `alg`, when present): a key published for
-/// encryption is never one a signature is checked against. A malformed RSA
-/// key is an error, because a set that half-parses would refuse real tokens
-/// for a reason nobody can see.
-pub fn parse(json: &str) -> Result<HashMap<String, Arc<RsaKey>>, String> {
+/// One base64url member of a key, or why it is not.
+fn member(kid: &str, name: &str, value: Option<String>) -> Result<Vec<u8>, String> {
+    URL_SAFE_NO_PAD
+        .decode(value.ok_or_else(|| format!("key {kid} has no {name}"))?)
+        .map_err(|e| format!("key {kid}: {name} is not base64url: {e}"))
+}
+
+/// Parse a JWK set into the keys a signature can be checked against, by
+/// `kid`: RSA keys, and EC keys on P-256 or P-384, the curves `ring`
+/// verifies. Keys of another type or curve are skipped, and so is a key the
+/// set says is for something other than the signatures verified here (`use`,
+/// `alg`): a key published for encryption is never one a signature is
+/// checked against. A malformed
+/// key of a kind taken is an error, because a set that half-parses would
+/// refuse real tokens for a reason nobody can see.
+pub fn parse(json: &str) -> Result<HashMap<String, Arc<PublicKey>>, String> {
     let set: Jwks = serde_json::from_str(json).map_err(|e| format!("key set is not JSON: {e}"))?;
     let mut keys = HashMap::new();
     for jwk in set.keys {
-        if jwk.kty != "RSA"
-            || jwk.use_.as_deref().is_some_and(|u| u != "sig")
-            || jwk.alg.as_deref().is_some_and(|a| a != "RS256")
+        if jwk.use_.as_deref().is_some_and(|u| u != "sig")
+            || jwk
+                .alg
+                .as_deref()
+                .is_some_and(|alg| alg.parse::<SigningAlg>().is_err())
         {
             continue;
         }
+        let curve = match (jwk.kty.as_str(), jwk.crv.as_deref()) {
+            ("RSA", _) => None,
+            ("EC", Some("P-256")) => Some(Curve::P256),
+            ("EC", Some("P-384")) => Some(Curve::P384),
+            _ => continue,
+        };
         let kid = jwk
             .kid
             .filter(|k| !k.is_empty())
-            .ok_or("an RSA key with no kid")?;
-        let n = URL_SAFE_NO_PAD
-            .decode(jwk.n.ok_or("an RSA key with no n")?)
-            .map_err(|e| format!("key {kid}: n is not base64url: {e}"))?;
-        let e = URL_SAFE_NO_PAD
-            .decode(jwk.e.ok_or("an RSA key with no e")?)
-            .map_err(|e| format!("key {kid}: e is not base64url: {e}"))?;
-        keys.insert(kid, Arc::new(RsaKey { n, e }));
+            .ok_or("a signing key with no kid")?;
+        let material = match curve {
+            None => Material::Rsa {
+                n: member(&kid, "n", jwk.n)?,
+                e: member(&kid, "e", jwk.e)?,
+            },
+            Some(curve) => {
+                let width = if curve == Curve::P256 { 32 } else { 48 };
+                let (x, y) = (member(&kid, "x", jwk.x)?, member(&kid, "y", jwk.y)?);
+                if x.len() != width || y.len() != width {
+                    return Err(format!("key {kid}: x and y are not its curve's width"));
+                }
+                // The uncompressed point: 0x04, then x, then y.
+                let mut point = Vec::with_capacity(1 + 2 * width);
+                point.push(0x04);
+                point.extend_from_slice(&x);
+                point.extend_from_slice(&y);
+                Material::Ec { curve, point }
+            }
+        };
+        keys.insert(
+            kid,
+            Arc::new(PublicKey {
+                material,
+                alg: jwk.alg,
+            }),
+        );
     }
     Ok(keys)
 }
@@ -114,7 +198,7 @@ impl std::fmt::Display for KeySetUrl {
 }
 
 struct Inner {
-    keys: HashMap<String, Arc<RsaKey>>,
+    keys: HashMap<String, Arc<PublicKey>>,
     fetched_at: Option<Instant>,
     attempted_at: Option<Instant>,
 }
@@ -155,7 +239,7 @@ impl JwksCache {
     /// `Ok(None)` is an unknown kid the provider does not publish either;
     /// `Err` is a set that could not be read with nothing cached to fall
     /// back on.
-    pub async fn key_for(&self, kid: &str) -> Result<Option<Arc<RsaKey>>, TelmoniError> {
+    pub async fn key_for(&self, kid: &str) -> Result<Option<Arc<PublicKey>>, TelmoniError> {
         let cached = {
             let inner = self.inner.read().await;
             let key = inner.keys.get(kid).cloned();
@@ -212,7 +296,7 @@ impl JwksCache {
         Ok(())
     }
 
-    async fn fetch(&self) -> Result<HashMap<String, Arc<RsaKey>>, String> {
+    async fn fetch(&self) -> Result<HashMap<String, Arc<PublicKey>>, String> {
         let url = match &self.url {
             KeySetUrl::Fixed(url) => url.clone(),
             KeySetUrl::Discovered(discovery) => discovery
@@ -246,12 +330,20 @@ fn unavailable() -> TelmoniError {
 mod tests {
     use super::*;
 
+    /// Keys of a kind or curve `ring` cannot verify are skipped; a broken key
+    /// of a kind taken is an error.
     #[test]
-    fn non_rsa_keys_are_skipped_and_a_broken_rsa_key_is_an_error() {
-        let set = r#"{"keys":[{"kty":"EC","kid":"ec1","crv":"P-256","x":"a","y":"b"}]}"#;
-        assert!(parse(set).unwrap().is_empty());
+    fn unverifiable_keys_are_skipped_and_a_broken_one_is_an_error() {
+        let skipped = r#"{"keys":[
+            {"kty":"EC","kid":"ec5","crv":"P-521","x":"a","y":"b"},
+            {"kty":"oct","kid":"o1","k":"c2VjcmV0"},
+            {"kty":"RSA","kid":"enc","use":"enc","n":"AQAB","e":"AQAB"}
+        ]}"#;
+        assert!(parse(skipped).unwrap().is_empty());
         let broken = r#"{"keys":[{"kty":"RSA","kid":"r1","n":"not base64url!!","e":"AQAB"}]}"#;
         assert!(parse(broken).is_err());
+        let short = r#"{"keys":[{"kty":"EC","kid":"ec1","crv":"P-256","x":"AQAB","y":"AQAB"}]}"#;
+        assert!(parse(short).is_err(), "a point of the wrong width");
     }
 
     /// ⚠ A refresh in flight must not queue the requests that already hold a
@@ -302,8 +394,10 @@ mod tests {
         drop(server);
     }
 
+    /// A key for encryption is never a signing key, and one published for an
+    /// algorithm verifies by that algorithm alone.
     #[test]
-    fn a_key_for_encryption_or_another_algorithm_is_never_a_signing_key() {
+    fn a_key_for_encryption_is_never_a_signing_key_nor_one_for_another_algorithm() {
         let key = |extra: &str| {
             format!(r#"{{"keys":[{{"kty":"RSA","kid":"r1","n":"AQAB","e":"AQAB"{extra}}}]}}"#)
         };
@@ -314,7 +408,8 @@ mod tests {
                 .contains_key("r1")
         );
         assert!(parse(&key(r#","use":"enc""#)).unwrap().is_empty());
-        assert!(parse(&key(r#","alg":"RS512""#)).unwrap().is_empty());
         assert!(parse(&key(r#","alg":"RSA-OAEP""#)).unwrap().is_empty());
+        let rs512 = parse(&key(r#","alg":"RS512""#)).unwrap();
+        assert!(!rs512["r1"].verifies(SigningAlg::Rs256, b"m", b"s"));
     }
 }

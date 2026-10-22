@@ -327,6 +327,7 @@ test: docker-up db-wait clickhouse-wait book
 
 .PHONY: e2e
 e2e: deps-check docker-up db-wait clickhouse-wait schema-check book
+	docker compose --profile oidc up -d dex
 	cargo build -p telmoni-server
 	cd $(WEB_DIR) && npm run test:e2e
 
@@ -453,7 +454,7 @@ db-reset:
 .PHONY: docker-up
 docker-up:
 	docker compose up -d
-	@echo "postgres :5432  clickhouse :8123  redis :6379  mailpit :8025$$(docker compose ps --status running --services 2>/dev/null | grep -qx ollama && echo '  ollama :11434')"
+	@echo "postgres :5432  clickhouse :8123  redis :6379  mailpit :8025$$(docker compose ps --status running --services 2>/dev/null | grep -qx dex && echo '  dex :5556')$$(docker compose ps --status running --services 2>/dev/null | grep -qx ollama && echo '  ollama :11434')"
 
 .PHONY: down
 down:

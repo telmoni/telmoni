@@ -39,7 +39,7 @@ describe("GET /auth/signup", () => {
 
   it("asks for the sign-up screen, not the sign-in one", async () => {
     const res = await GET(req("http://localhost:3000/auth/signup"));
-    expect(authorizeMock).toHaveBeenCalledWith(expect.any(String), { signUp: true });
+    expect(authorizeMock).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ signUp: true }));
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toContain("prompt=create");
     expect(res.headers.get("cache-control")).toBe("no-store, max-age=0");
@@ -82,10 +82,10 @@ describe("GET /auth/signup", () => {
 
   it("hands the address the splash collected to the hosted screen", async () => {
     await GET(req("http://localhost:3000/auth/signup?email=ada%40example.com"));
-    expect(authorizeMock).toHaveBeenCalledWith(expect.any(String), {
-      signUp: true,
-      loginHint: "ada@example.com",
-    });
+    expect(authorizeMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ signUp: true, loginHint: "ada@example.com" }),
+    );
   });
 
   it("drops a hint that is not an address rather than refusing the door", async () => {
@@ -93,7 +93,7 @@ describe("GET /auth/signup", () => {
       authorizeMock.mockClear();
       const res = await GET(req(`http://localhost:3000/auth/signup?email=${encodeURIComponent(bad)}`));
       expect(res.status, bad).toBe(307);
-      expect(authorizeMock, bad).toHaveBeenCalledWith(expect.any(String), { signUp: true });
+      expect(authorizeMock, bad).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ signUp: true }));
     }
   });
 

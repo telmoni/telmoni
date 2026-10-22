@@ -1,6 +1,8 @@
 //! The accounts auth holds itself: email and password. The login form, in
 //! Grafana's words — the way in every deployment has unless it turns the
-//! form off (`DISABLE_LOGIN_FORM`) in favour of an external provider.
+//! form off (`AUTH_DISABLE_USERNAME_PASSWORD`) in favour of an external
+//! provider, or holds some domains to the provider alone
+//! (`AUTH_DOMAINS_WITH_SSO_ENFORCEMENT`).
 //!
 //! The console's sign-in, sign-up, verification, forgot and reset pages post
 //! to the lanes in [`crate::handler::password`], which call here. A right
@@ -14,9 +16,9 @@
 //! the address verification, when the deployment asks for one
 //! (`VERIFY_EMAIL`), the password reset, and the code to a new address.
 //!
-//! Who may sign up is the deployment's call (`ALLOW_SIGN_UP`, off unless
-//! set): closed, an invitation is the way in, and completes an account for
-//! the address it was sent to. `ADMIN_EMAIL` and `ADMIN_PASSWORD` seed the
+//! Who may sign up is the deployment's call (`AUTH_DISABLE_SIGNUP`, closed
+//! unless set to `false`): closed, an invitation is the way in, and
+//! completes an account for the address it was sent to. `ADMIN_EMAIL` and `ADMIN_PASSWORD` seed the
 //! first account at boot, so a fresh deployment with sign-ups closed has
 //! somebody to send the invitations.
 
@@ -72,10 +74,12 @@ pub struct PasswordProvider {
     db: PgPool,
     issuer: Arc<Issuer>,
     mailer: Arc<dyn Mailer>,
-    /// Whether anybody may create a password account (`ALLOW_SIGN_UP`). Off,
-    /// an invited address alone may; the provider's sign-ups are its own
-    /// switch.
+    /// Whether anybody may create a password account (`AUTH_DISABLE_SIGNUP`
+    /// unset or `false`). Off, an invited address alone may.
     allow_sign_up: bool,
+    /// The domains whose addresses sign in at a provider alone, lowercased
+    /// (`AUTH_DOMAINS_WITH_SSO_ENFORCEMENT`).
+    sso_domains: Vec<String>,
 }
 
 impl PasswordProvider {
@@ -87,13 +91,36 @@ impl PasswordProvider {
         issuer: Arc<Issuer>,
         mailer: Arc<dyn Mailer>,
         allow_sign_up: bool,
+        sso_domains: Vec<String>,
     ) -> Self {
         Self {
             db,
             issuer,
             mailer,
             allow_sign_up,
+            sso_domains,
         }
+    }
+
+    /// Whether `email` signs in at a provider alone: its domain, after the
+    /// last `@`, one the deployment holds to single sign-on.
+    #[must_use]
+    pub fn held_to_sso(&self, email: &str) -> bool {
+        email.rsplit_once('@').is_some_and(|(_, domain)| {
+            let domain = domain.trim().to_lowercase();
+            self.sso_domains.contains(&domain)
+        })
+    }
+
+    /// The form refused for an address its domain holds to a provider.
+    fn refuse_if_held_to_sso(&self, email: &str) -> Result<(), TelmoniError> {
+        if self.held_to_sso(email) {
+            return Err(AuthError::SsoRequired(
+                "addresses at this domain sign in through single sign-on".into(),
+            )
+            .into());
+        }
+        Ok(())
     }
 
     /// Whether anybody may create an account, or only the invited.
@@ -126,24 +153,27 @@ impl PasswordProvider {
         &self,
         email: &str,
         password: &str,
-        given_name: Option<&str>,
-        family_name: Option<&str>,
+        (given_name, family_name): (Option<&str>, Option<&str>),
+        code_challenge: &str,
     ) -> Result<SignedUp, TelmoniError> {
         let email = crate::identity::validate_email(email)?;
+        self.refuse_if_held_to_sso(&email)?;
         hashing::validate(password)?;
 
-        if self.holder_of(&email).await?.is_some() {
-            return Err(AuthError::Conflict(
-                "that address already has an account; sign in instead".into(),
-            )
-            .into());
-        }
+        // Closed before the address is looked up, so a closed deployment
+        // never says which addresses hold an account.
         if !self.allow_sign_up && !self.invited(&email).await? {
             tracing::info!(
                 "sign-up refused: sign-ups are closed and the address holds no invitation"
             );
-            return Err(AuthzError::Forbidden(
+            return Err(AuthError::SignUpClosed(
                 "sign-ups are closed; ask somebody to invite you".into(),
+            )
+            .into());
+        }
+        if self.holder_of(&email).await?.is_some() {
+            return Err(AuthError::Conflict(
+                "that address already has an account; sign in instead".into(),
             )
             .into());
         }
@@ -175,7 +205,10 @@ impl PasswordProvider {
             .into());
         }
         if !verify {
-            let code = self.issuer.mint_code(&mut tx, &user_id).await?;
+            let code = self
+                .issuer
+                .mint_code(&mut tx, &user_id, code_challenge)
+                .await?;
             tx.commit().await?;
             tracing::info!(user_id = %user_id, "account created and signed in");
             return Ok(SignedUp::Code(code));
@@ -306,8 +339,14 @@ impl PasswordProvider {
     /// Check a password, and earn the one-time code the console's callback
     /// spends for the session. Every refusal that could tell an address with
     /// an account from one without is the same 401, taking the same time.
-    pub async fn sign_in(&self, email: &str, password: &str) -> Result<String, TelmoniError> {
+    pub async fn sign_in(
+        &self,
+        email: &str,
+        password: &str,
+        code_challenge: &str,
+    ) -> Result<String, TelmoniError> {
         let email = crate::identity::validate_email(email)?;
+        self.refuse_if_held_to_sso(&email)?;
         if password.is_empty() {
             return Err(AuthError::BadRequest("enter your password".into()).into());
         }
@@ -359,7 +398,10 @@ impl PasswordProvider {
             )
             .into());
         }
-        let code = self.issuer.mint_code(&mut tx, &user_id).await?;
+        let code = self
+            .issuer
+            .mint_code(&mut tx, &user_id, code_challenge)
+            .await?;
         tx.commit().await?;
         tracing::info!(user_id = %user_id, "signed in with a password");
         Ok(code)
@@ -370,6 +412,7 @@ impl PasswordProvider {
     /// for a real address would say which addresses are real.
     pub async fn forgot_password(&self, email: &str) -> Result<(), TelmoniError> {
         let email = crate::identity::validate_email(email)?;
+        self.refuse_if_held_to_sso(&email)?;
         if let Some(user_id) = self.holder_of(&email).await? {
             let mut tx = person_scope(&self.db, &user_id).await?;
             let holds_password = credentials::get(&mut tx, &user_id).await?.is_some();
@@ -417,6 +460,16 @@ impl PasswordProvider {
         let password_hash = hashing::hash(password.to_owned()).await?;
 
         let mut tx = person_scope(&self.db, user_id).await?;
+        // A link mailed before the domain was held to a provider sets nothing.
+        if let Some(identity) = identities::identity(&mut tx, user_id).await?
+            && self.held_to_sso(&identity.email)
+        {
+            tx.commit().await?;
+            return Err(AuthError::SsoRequired(
+                "addresses at this domain sign in through single sign-on".into(),
+            )
+            .into());
+        }
         let live = confirmation_codes::find_live(
             &mut tx,
             user_id,
@@ -466,6 +519,7 @@ impl PasswordProvider {
         email: &str,
     ) -> Result<PasswordResetLink, TelmoniError> {
         let email = crate::identity::validate_email(email)?;
+        self.refuse_if_held_to_sso(&email)?;
         let Some(user_id) = self.holder_of(&email).await? else {
             return Err(AuthError::NotFound("no account holds that address".into()).into());
         };
@@ -480,6 +534,14 @@ impl PasswordProvider {
         new_email: &str,
     ) -> Result<EmailChangeChallenge, TelmoniError> {
         let new_email = crate::identity::validate_email(new_email)?;
+        // The provider holds such an address: moved off its domain, the form
+        // would open to the account again.
+        let mut tx = person_scope(&self.db, user_id).await?;
+        let current = identities::identity(&mut tx, user_id).await?;
+        tx.commit().await?;
+        if let Some(current) = current {
+            self.refuse_if_held_to_sso(&current.email)?;
+        }
         if self
             .holder_of(&new_email)
             .await?

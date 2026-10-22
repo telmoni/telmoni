@@ -36,6 +36,9 @@ pub struct SignUpRequest {
     pub given_name: Option<String>,
     #[serde(default)]
     pub family_name: Option<String>,
+    /// The S256 challenge of the verifier the console sealed for this
+    /// sign-in, which the code it may earn is bound to.
+    pub code_challenge: String,
 }
 
 /// `POST /internal/v1/auth/password/sign-in`.
@@ -44,6 +47,17 @@ pub struct SignUpRequest {
 pub struct SignInRequest {
     pub email: String,
     pub password: Redacted,
+    /// The S256 challenge the code is bound to, as at sign-up.
+    pub code_challenge: String,
+}
+
+/// A challenge refused before anything is checked: no code could be bound to it.
+fn challenge(sent: &str) -> Result<&str, TelmoniError> {
+    if telmoni_shared::pkce::is_challenge(sent) {
+        Ok(sent)
+    } else {
+        Err(AuthError::BadRequest("codeChallenge is not an S256 challenge".into()).into())
+    }
 }
 
 /// `POST /internal/v1/auth/password/sign-in` answer, and a sign-up's when the
@@ -95,12 +109,13 @@ pub async fn sign_up(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SignUpRequest>,
 ) -> Result<axum::response::Response, TelmoniError> {
+    let code_challenge = challenge(&req.code_challenge)?;
     let signed_up = provider(&state)?
         .sign_up(
             &req.email,
             req.password.expose(),
-            req.given_name.as_deref(),
-            req.family_name.as_deref(),
+            (req.given_name.as_deref(), req.family_name.as_deref()),
+            code_challenge,
         )
         .await?;
     Ok(match signed_up {
@@ -115,8 +130,9 @@ pub async fn sign_in(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SignInRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
+    let code_challenge = challenge(&req.code_challenge)?;
     let code = provider(&state)?
-        .sign_in(&req.email, req.password.expose())
+        .sign_in(&req.email, req.password.expose(), code_challenge)
         .await?;
     Ok(Json(SignInResponse { code }))
 }
@@ -162,12 +178,15 @@ mod tests {
 
     #[test]
     fn every_credential_carrying_body_debugs_without_it() {
+        let challenge = telmoni_shared::pkce::challenge_of(&"v".repeat(43));
         let sign_up: SignUpRequest = serde_json::from_value(json!({
-            "email": "ada@example.com", "password": "hunter22hunter22", "givenName": "Ada"
+            "email": "ada@example.com", "password": "hunter22hunter22", "givenName": "Ada",
+            "codeChallenge": challenge
         }))
         .unwrap();
         let sign_in: SignInRequest = serde_json::from_value(json!({
-            "email": "ada@example.com", "password": "hunter22hunter22"
+            "email": "ada@example.com", "password": "hunter22hunter22",
+            "codeChallenge": challenge
         }))
         .unwrap();
         let reset: ResetPasswordRequest = serde_json::from_value(json!({

@@ -195,11 +195,14 @@ export async function writeSessionCookie(data: SessionData): Promise<void> {
 }
 
 // The pending sign-in `/auth/login` seals before the browser goes to prove
-// who it is: the CSRF state the callback checks, where to land, and, once
-// the sign-in page's "Continue with…" sent the browser to the external
-// provider, whose code the callback should expect.
+// who it is: the CSRF state the callback checks, the PKCE verifier and the
+// nonce the code is redeemed with, where to land, and, once the sign-in
+// page's "Continue with…" sent the browser to the external provider, whose
+// code the callback should expect.
 export interface PkceData {
   state: string;
+  verifier: string;
+  nonce: string;
   returnTo: string;
   provider?: "external";
 }
@@ -210,6 +213,8 @@ export async function sealPkce(data: PkceData): Promise<string> {
 
 const PkceData = z.object({
   state: z.string().min(1),
+  verifier: z.string().min(43),
+  nonce: z.string().min(43),
   returnTo: z.string().default("/console"),
   provider: z.literal("external").optional(),
 });

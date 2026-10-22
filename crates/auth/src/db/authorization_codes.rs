@@ -10,22 +10,26 @@ use uuid::Uuid;
 
 use crate::db::AuthLane;
 
-/// Mint a code for the person who just proved their password.
+/// Mint a code for the person who just proved their password, bound to the
+/// sign-in's S256 `code_challenge`.
 pub async fn create(
     tx: &mut Scoped<'_, Person>,
     user_id: &UserId,
     sid: &str,
     code_hash: &str,
+    code_challenge: &str,
     expires_at: DateTime<Utc>,
 ) -> sqlx::Result<()> {
     sqlx::query(
-        "INSERT INTO auth.authorization_codes (id, user_id, sid, code_hash, expires_at, shard_key)
-         VALUES ($1, $2, $3, $4, $5, $6)",
+        "INSERT INTO auth.authorization_codes
+             (id, user_id, sid, code_hash, code_challenge, expires_at, shard_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(Uuid::now_v7())
     .bind(user_id)
     .bind(sid)
     .bind(code_hash)
+    .bind(code_challenge)
     .bind(expires_at)
     .bind(telmoni_shared::derive_shard_key(user_id))
     .execute(tx.conn())
@@ -33,17 +37,18 @@ pub async fn create(
     Ok(())
 }
 
-/// Spend a code: the person and session it was minted for, or `None` for a
-/// code that is unknown, spent or expired. Spent by deletion, so a second
-/// presentation finds nothing.
+/// Spend a code: the person and session it was minted for, and the
+/// challenge its verifier must answer, or `None` for a code that is unknown,
+/// spent or expired. Spent by deletion, so a second presentation finds
+/// nothing, and a wrong verifier burns the code all the same.
 pub async fn spend(
     tx: &mut Scoped<'_, Maintenance<AuthLane>>,
     code_hash: &str,
-) -> sqlx::Result<Option<(UserId, String)>> {
+) -> sqlx::Result<Option<(UserId, String, String)>> {
     sqlx::query_as(
         "DELETE FROM auth.authorization_codes
           WHERE code_hash = $1 AND expires_at > now()
-      RETURNING user_id, sid",
+      RETURNING user_id, sid, code_challenge",
     )
     .bind(code_hash)
     .fetch_optional(tx.conn())

@@ -25,6 +25,7 @@ pub mod net_guard;
 pub mod oidc;
 pub mod openapi;
 pub mod person_token;
+pub mod pkce;
 pub mod rbac;
 pub mod seam;
 pub mod sharding;

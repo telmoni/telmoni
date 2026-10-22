@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { getAuthorizeUrl } from "@/lib/auth/oidc";
+import { newProof } from "@/lib/auth/pkce";
 import { PKCE_COOKIE, cookieOpts, getSession, sealPkce } from "@/lib/auth/session";
 import { safeReturnTo } from "@/lib/api/fetch";
 import { clientKey, rateLimitRetryAfter } from "@/lib/api/rate-limit";
@@ -40,10 +41,13 @@ export async function GET(request: NextRequest) {
   if (retryAfter !== null) return tooManyStarts(retryAfter);
 
   const state = crypto.randomUUID();
+  const proof = await newProof();
   const hint = loginHint(request.nextUrl.searchParams.get("email"));
   let authUrl: string;
   try {
     authUrl = await getAuthorizeUrl(state, {
+      codeChallenge: proof.challenge,
+      nonce: proof.nonce,
       signUp: true,
       ...(hint ? { loginHint: hint } : {}),
     });
@@ -55,7 +59,12 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const sealed = await sealPkce({ state, returnTo });
+  const sealed = await sealPkce({
+    state,
+    verifier: proof.verifier,
+    nonce: proof.nonce,
+    returnTo,
+  });
   const response = NextResponse.redirect(authUrl);
   response.headers.set("cache-control", "no-store, max-age=0");
   response.cookies.set({

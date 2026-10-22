@@ -23,6 +23,11 @@ const SERVICE_SECRET: &str = "test-service-secret";
 const REDIRECT_URI: &str = "http://localhost:3000/auth/callback";
 const APP_URL: &str = "http://localhost:3000";
 
+/// RFC 7636's own example pair, and a nonce, as the console's doors seal them.
+const CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+const NONCE: &str = "nonce_0123456789abcdef";
+
 /// How the router under test is put together.
 struct Setup {
     /// Whether the test door is open (`ALLOW_TEST_SESSION`); a deployed
@@ -76,6 +81,7 @@ fn app_configured(pool: PgPool, setup: Setup) -> (Router, Arc<ScriptedProvider>)
             Arc::clone(&issuer),
             Arc::clone(&mailer),
             true,
+            Vec::new(),
         ))
     });
     let state = Arc::new(AppState {
@@ -144,17 +150,16 @@ async fn exchange_external(app: &Router, code: &str) -> (StatusCode, serde_json:
         .clone()
         .oneshot(post_json(
             "/internal/v1/auth/exchange",
-            serde_json::json!({ "code": code, "provider": "external" }),
+            serde_json::json!({ "code": code, "codeVerifier": VERIFIER, "nonce": NONCE, "provider": "external" }),
         ))
         .await
         .unwrap();
     let status = resp.status();
-    let body = if status == StatusCode::OK {
-        json_body(resp).await
-    } else {
-        serde_json::Value::Null
-    };
-    (status, body)
+    let bytes = resp.into_body().collect().await.expect("body").to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
 }
 
 async fn linked_person(
@@ -180,7 +185,7 @@ async fn start_sends_the_browser_to_the_console_page_while_the_form_is_on(pool: 
         .clone()
         .oneshot(post_json(
             "/internal/v1/auth/start",
-            serde_json::json!({ "state": "csrf-abc-123" }),
+            serde_json::json!({ "state": "csrf-abc-123", "codeChallenge": CHALLENGE, "nonce": NONCE }),
         ))
         .await
         .unwrap();
@@ -195,6 +200,8 @@ async fn start_sends_the_browser_to_the_console_page_while_the_form_is_on(pool: 
             "/internal/v1/auth/start",
             serde_json::json!({
                 "state": "csrf-abc-123",
+                "codeChallenge": CHALLENGE,
+                "nonce": NONCE,
                 "signUp": true,
                 "loginHint": "ada@example.com",
             }),
@@ -217,7 +224,7 @@ async fn start_names_the_external_provider_when_asked_or_when_the_form_is_off(po
     let resp = app
         .oneshot(post_json(
             "/internal/v1/auth/start",
-            serde_json::json!({ "state": "csrf-abc-123", "provider": "external" }),
+            serde_json::json!({ "state": "csrf-abc-123", "codeChallenge": CHALLENGE, "nonce": NONCE, "provider": "external" }),
         ))
         .await
         .unwrap();
@@ -234,6 +241,8 @@ async fn start_names_the_external_provider_when_asked_or_when_the_form_is_off(po
         vec![Call::AuthorizeUrl {
             redirect_uri: REDIRECT_URI.into(),
             state: "csrf-abc-123".into(),
+            code_challenge: CHALLENGE.into(),
+            nonce: NONCE.into(),
             sign_up: false,
             login_hint: None,
         }]
@@ -251,6 +260,8 @@ async fn start_names_the_external_provider_when_asked_or_when_the_form_is_off(po
             "/internal/v1/auth/start",
             serde_json::json!({
                 "state": "csrf-abc-123",
+                "codeChallenge": CHALLENGE,
+                "nonce": NONCE,
                 "signUp": true,
                 "loginHint": "ada@example.com",
             }),
@@ -273,7 +284,7 @@ async fn start_refuses_a_provider_it_does_not_have(pool: PgPool) {
     let resp = app
         .oneshot(post_json(
             "/internal/v1/auth/start",
-            serde_json::json!({ "state": "csrf-abc-123", "provider": "google" }),
+            serde_json::json!({ "state": "csrf-abc-123", "codeChallenge": CHALLENGE, "nonce": NONCE, "provider": "google" }),
         ))
         .await
         .unwrap();
@@ -357,6 +368,8 @@ async fn an_external_exchange_creates_the_person_and_opens_a_session(pool: PgPoo
         provider.calls(),
         vec![Call::Exchange {
             code: "code_xyz".into(),
+            code_verifier: VERIFIER.into(),
+            nonce: NONCE.into(),
         }]
     );
     assert_eq!(
@@ -433,8 +446,9 @@ async fn a_stranger_is_refused_while_the_providers_sign_ups_are_closed(pool: PgP
             ..Setup::default()
         },
     );
-    let (status, _) = exchange_external(&app, "code_1").await;
+    let (status, body) = exchange_external(&app, "code_1").await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["type"], "/errors/auth/sign-up-closed", "{body}");
     assert_eq!(linked_person(&pool, &provider, TEST_SUBJECT).await, None);
     let people: i64 = sqlx::query_scalar("SELECT count(*) FROM auth.identities")
         .fetch_one(&pool)
@@ -515,7 +529,7 @@ async fn session_endpoints_require_the_service_secret(pool: PgPool) {
             Request::post("/internal/v1/auth/exchange")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    serde_json::json!({ "code": "code_xyz", "provider": "external" }).to_string(),
+                    serde_json::json!({ "code": "code_xyz", "codeVerifier": VERIFIER, "nonce": NONCE, "provider": "external" }).to_string(),
                 ))
                 .unwrap(),
         )
@@ -929,4 +943,176 @@ async fn the_test_session_route_is_mounted_only_when_the_door_is_open(pool: PgPo
         .await
         .unwrap();
     assert_eq!(email, "door@example.com");
+}
+
+/// Ada's address, as the scripted provider answers it, verified or not.
+fn ada(verified: bool) -> telmoni_auth::provider::Authenticated {
+    let mut answer = telmoni_auth::test_provider::authenticated(TEST_SUBJECT);
+    answer.subject.email_verified = verified;
+    answer
+}
+
+/// A live invitation for `email`, from an organization made for it.
+async fn invite(pool: &PgPool, email: &str) {
+    sqlx::query(
+        "INSERT INTO auth.organizations (id, external_id, slug, name, shard_key)
+         VALUES ($1, $2, 'org-' || md5($2), 'Acme', $3)",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind("org_invites_1")
+    .bind(uuid::Uuid::new_v4())
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO auth.organization_invites
+             (id, organization_id, email, role, token_hash, invited_by, expires_at, shard_key)
+         VALUES ($1, $2, $3, 'member', $4, 'user_owner_1', now() + interval '7 days', $5)",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind("org_invites_1")
+    .bind(email)
+    .bind(telmoni_shared::digest::sha256_hex(b"invite_token_1"))
+    .bind(uuid::Uuid::new_v4())
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// With sign-ups closed, an invitation is the operator's own yes at a
+/// provider as at the form — for an address the provider verified, never
+/// for one it only typed.
+#[sqlx::test]
+async fn with_sign_ups_closed_an_invited_verified_address_signs_up(pool: PgPool) {
+    invite(&pool, "ada@example.com").await;
+    let (app, provider) = app_configured(
+        pool.clone(),
+        Setup {
+            allow_sign_up: false,
+            ..Setup::default()
+        },
+    );
+    provider.on_exchange(Ok(ada(false)));
+    let (status, _) = exchange_external(&app, "code_1").await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "an unverified address");
+    assert_eq!(linked_person(&pool, &provider, TEST_SUBJECT).await, None);
+
+    provider.on_exchange(Ok(ada(true)));
+    let (status, body) = exchange_external(&app, "code_2").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        linked_person(&pool, &provider, TEST_SUBJECT)
+            .await
+            .is_some()
+    );
+}
+
+/// ⚠ Linking by address takes the deployment's switch and an address this
+/// sign-in's provider verified: with the switch on, an unverified address
+/// is refused as if it were off.
+#[sqlx::test]
+async fn an_address_links_only_where_the_provider_verified_it(pool: PgPool) {
+    seed_identity(&pool, "user_local_1", "ada@example.com").await;
+    let (app, provider) = app_configured(
+        pool.clone(),
+        Setup {
+            link_by_email: true,
+            ..Setup::default()
+        },
+    );
+    provider.on_exchange(Ok(ada(false)));
+    let (status, _) = exchange_external(&app, "code_1").await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(linked_person(&pool, &provider, TEST_SUBJECT).await, None);
+}
+
+/// A linked person's unverified new address never takes one another person
+/// holds; one nobody holds is recorded as before.
+#[sqlx::test]
+async fn an_unverified_address_never_takes_one_another_person_holds(pool: PgPool) {
+    seed_identity(&pool, "user_grace_1", "grace@example.com").await;
+    let (app, provider) = app(pool.clone());
+    provider.on_exchange(Ok(ada(true)));
+    let (status, body) = exchange_external(&app, "code_1").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let ada_id = linked_person(&pool, &provider, TEST_SUBJECT).await.unwrap();
+    let address = |user: String| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, String>("SELECT email FROM auth.identities WHERE user_id = $1")
+                .bind(user)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+
+    let mut squat = ada(false);
+    squat.subject.email = Some("grace@example.com".into());
+    provider.on_exchange(Ok(squat));
+    let (status, _) = exchange_external(&app, "code_2").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(address(ada_id.clone()).await, "ada@example.com");
+    assert_eq!(address("user_grace_1".into()).await, "grace@example.com");
+
+    let mut moved = ada(false);
+    moved.subject.email = Some("ada.new@example.com".into());
+    provider.on_exchange(Ok(moved));
+    let (status, _) = exchange_external(&app, "code_3").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(address(ada_id).await, "ada.new@example.com");
+}
+
+/// ⚠ An account made at the form under an address it never proved is not
+/// linked, or whoever made it would keep a password into the person who
+/// signs in at the provider; once it proved the address, it is.
+#[sqlx::test]
+async fn an_address_links_only_to_an_account_that_proved_it(pool: PgPool) {
+    telmoni_shared::test_util::apply_audit_migrations(&pool).await;
+    let (app, provider) = app_configured(
+        pool.clone(),
+        Setup {
+            link_by_email: true,
+            ..Setup::default()
+        },
+    );
+    let resp = app
+        .clone()
+        .oneshot(post_json(
+            "/internal/v1/auth/password/sign-up",
+            serde_json::json!({
+                "email": "ada@example.com",
+                "password": "correct horse battery staple",
+                "codeChallenge": CHALLENGE,
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+    provider.on_exchange(Ok(ada(true)));
+    let (status, _) = exchange_external(&app, "code_1").await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "an address the account never proved"
+    );
+    assert_eq!(linked_person(&pool, &provider, TEST_SUBJECT).await, None);
+
+    sqlx::query("UPDATE auth.identities SET email_verified = true WHERE email = $1")
+        .bind("ada@example.com")
+        .execute(&pool)
+        .await
+        .unwrap();
+    provider.on_exchange(Ok(ada(true)));
+    let (status, body) = exchange_external(&app, "code_2").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let holder: String = sqlx::query_scalar("SELECT user_id FROM auth.identities WHERE email = $1")
+        .bind("ada@example.com")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        linked_person(&pool, &provider, TEST_SUBJECT).await,
+        Some(holder)
+    );
 }

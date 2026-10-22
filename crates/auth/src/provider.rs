@@ -183,6 +183,36 @@ pub enum DevicePoll {
     Expired,
 }
 
+/// What binds a sign-in's code to the browser that started it, as RFC 9700
+/// (§ 2.1.1) asks of every client: the S256 challenge sent ahead, and the
+/// nonce the provider's id token must carry back.
+#[derive(Debug, Clone, Copy)]
+pub struct Binding<'a> {
+    /// RFC 7636's S256 challenge.
+    pub code_challenge: &'a str,
+    /// OpenID Connect's nonce.
+    pub nonce: &'a str,
+}
+
+/// What redeems a code so bound: the verifier its challenge was made from,
+/// and the same nonce.
+#[derive(Clone, Copy)]
+pub struct Proof<'a> {
+    /// RFC 7636's verifier.
+    pub code_verifier: &'a str,
+    /// OpenID Connect's nonce.
+    pub nonce: &'a str,
+}
+
+impl std::fmt::Debug for Proof<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Proof")
+            .field("code_verifier", &"***")
+            .field("nonce", &self.nonce)
+            .finish()
+    }
+}
+
 /// An external identity provider. This repository's implementation is
 /// [`crate::oidc::OidcProvider`]; a binary built on this library may supply
 /// another. `[EXT]` `[SEC]`: every method is on the sign-in path, so a
@@ -198,23 +228,27 @@ pub trait AuthProvider: Send + Sync + 'static {
     fn name(&self) -> &str;
 
     /// Build the authorization endpoint URL for the web flow. Async because
-    /// a provider's endpoints may be discovered on first use. `sign_up` asks
-    /// for the provider's registration screen, `login_hint` pre-fills the
-    /// address, where the provider offers either.
+    /// a provider's endpoints may be discovered on first use. `binding` ties
+    /// the code to this sign-in; `sign_up` asks for the provider's
+    /// registration screen, `login_hint` pre-fills the address, where the
+    /// provider offers either.
     async fn authorize_url(
         &self,
         redirect_uri: &str,
         state: &str,
+        binding: Binding<'_>,
         sign_up: bool,
         login_hint: Option<&str>,
     ) -> Result<String, TelmoniError>;
 
-    /// Exchange an authorization code for who the person is, checking the
-    /// id token's signature, issuer, audience and expiry.
+    /// Exchange an authorization code for who the person is, with the
+    /// `proof` its binding asks for, checking the id token's signature,
+    /// issuer, audience, expiry and nonce.
     async fn exchange_code(
         &self,
         code: &str,
         redirect_uri: &str,
+        proof: Proof<'_>,
     ) -> Result<Authenticated, TelmoniError>;
 
     /// Build the provider's **browser** logout URL — the half of sign-out no
@@ -287,8 +321,18 @@ fn unsupported(what: &str) -> TelmoniError {
 async fn _auth_provider_signature_snapshot(p: std::sync::Arc<dyn AuthProvider>) {
     let _: &str = p.id();
     let _: &str = p.name();
-    let _: Result<String, TelmoniError> = p.authorize_url("redirect", "state", false, None).await;
-    let _: Result<Authenticated, TelmoniError> = p.exchange_code("code", "redirect").await;
+    let binding = Binding {
+        code_challenge: "challenge",
+        nonce: "nonce",
+    };
+    let _: Result<String, TelmoniError> = p
+        .authorize_url("redirect", "state", binding, false, None)
+        .await;
+    let proof = Proof {
+        code_verifier: "verifier",
+        nonce: "nonce",
+    };
+    let _: Result<Authenticated, TelmoniError> = p.exchange_code("code", "redirect", proof).await;
     let _: String = p.logout_url(None, "https://app.example/").await;
     let _: Result<(), TelmoniError> = p.delete_user("subject").await;
     let _: Result<PasswordResetLink, TelmoniError> =

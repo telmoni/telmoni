@@ -358,7 +358,13 @@ async fn refresh_touches_the_row_and_a_sign_out_ends_it(pool: PgPool) {
                 .header("x-service-secret", SERVICE_SECRET)
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    json!({ "code": "code_1", "provider": "external" }).to_string(),
+                    json!({
+                        "code": "code_1",
+                        "codeVerifier": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+                        "nonce": "nonce_0123456789abcdef",
+                        "provider": "external",
+                    })
+                    .to_string(),
                 ))
                 .unwrap(),
         )

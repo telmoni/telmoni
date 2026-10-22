@@ -339,6 +339,19 @@ pub enum AuthError {
     /// Auth-scoped state conflict (duplicate slug, conflicting email). Maps to 409.
     #[error("conflict: {0}")]
     Conflict(String),
+
+    /// The address's domain signs in through the deployment's identity
+    /// provider alone (`AUTH_DOMAINS_WITH_SSO_ENFORCEMENT`): the login form
+    /// refuses it, and the sign-in page offers the provider instead. Maps to
+    /// 403.
+    #[error("single sign-on required: {0}")]
+    SsoRequired(String),
+
+    /// A new person refused while the deployment admits only those invited
+    /// (`AUTH_DISABLE_SIGNUP`), at the form or at a provider: its own type, so
+    /// the console can say so after a provider's round trip. Maps to 403.
+    #[error("sign-ups closed: {0}")]
+    SignUpClosed(String),
 }
 
 impl AuthError {
@@ -363,11 +376,16 @@ impl AuthError {
             Self::BadRequest(_) => ("bad-request", 400, "bad request"),
             Self::BadUrl(_) => ("bad-url", 400, "bad url"),
             Self::Conflict(_) => ("conflict", 409, "conflict"),
+            Self::SsoRequired(_) => ("sso-required", 403, "single sign-on required"),
+            Self::SignUpClosed(_) => ("sign-up-closed", 403, "sign-ups closed"),
         };
         let detail = match self {
-            Self::NotFound(m) | Self::BadRequest(m) | Self::BadUrl(m) | Self::Conflict(m) => {
-                Some(m.clone())
-            }
+            Self::NotFound(m)
+            | Self::BadRequest(m)
+            | Self::BadUrl(m)
+            | Self::Conflict(m)
+            | Self::SsoRequired(m)
+            | Self::SignUpClosed(m) => Some(m.clone()),
             _ => None,
         };
         ProblemDetails {
@@ -958,6 +976,20 @@ mod tests {
         assert_eq!(pd.status, 429);
         assert_eq!(pd.type_uri, "/errors/tenant/rate-limited");
         assert_eq!(pd.detail.as_deref(), Some("retry after 5s"));
+    }
+
+    #[test]
+    fn a_closed_sign_up_is_403_of_its_own_type() {
+        let pd = TelmoniError::from(AuthError::SignUpClosed(
+            "sign-ups are closed; ask somebody to invite you".into(),
+        ))
+        .to_problem_details();
+        assert_eq!(pd.type_uri, "/errors/auth/sign-up-closed");
+        assert_eq!(pd.status, 403);
+        assert_eq!(
+            pd.detail.as_deref(),
+            Some("sign-ups are closed; ask somebody to invite you")
+        );
     }
 
     #[test]

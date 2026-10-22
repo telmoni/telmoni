@@ -1,6 +1,7 @@
 //! The id token an external OpenID Connect provider answers a code exchange
 //! with, verified before anything in it is believed (OIDC Core § 3.1.3.7):
-//! RS256 under a key the provider publishes, from its issuer, addressed to
+//! the one algorithm the deployment names for the provider (RS256 unless
+//! set), under a key the provider publishes, from its issuer, addressed to
 //! this client, and unexpired.
 //!
 //! The only token this system checks by signature. The session's own bearer
@@ -20,6 +21,81 @@ use super::jwks::{JwksCache, KeySetUrl};
 /// the provider. The exchange spends the token the moment it arrives, so
 /// this is slack for clocks, never a second lifetime.
 const EXP_LEEWAY_SECS: i64 = 30;
+
+/// The one algorithm a provider's id tokens may carry
+/// (`AUTH_<PROVIDER>_ID_TOKEN_SIGNED_RESPONSE_ALG`): each one `ring`
+/// verifies, so no crate is added for one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SigningAlg {
+    /// RSASSA-PKCS1-v1_5 over SHA-256: what nearly every provider signs with.
+    #[default]
+    Rs256,
+    /// The same over SHA-384.
+    Rs384,
+    /// The same over SHA-512.
+    Rs512,
+    /// RSASSA-PSS over SHA-256.
+    Ps256,
+    /// RSASSA-PSS over SHA-384.
+    Ps384,
+    /// RSASSA-PSS over SHA-512.
+    Ps512,
+    /// ECDSA on P-256 over SHA-256.
+    Es256,
+    /// ECDSA on P-384 over SHA-384.
+    Es384,
+}
+
+impl SigningAlg {
+    /// Its name in a token's header.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Rs256 => "RS256",
+            Self::Rs384 => "RS384",
+            Self::Rs512 => "RS512",
+            Self::Ps256 => "PS256",
+            Self::Ps384 => "PS384",
+            Self::Ps512 => "PS512",
+            Self::Es256 => "ES256",
+            Self::Es384 => "ES384",
+        }
+    }
+}
+
+impl std::str::FromStr for SigningAlg {
+    type Err = String;
+
+    /// One of the eight, by its header name; `ES512` and every `HS*` are
+    /// refused with why.
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        Ok(match name.trim() {
+            "RS256" => Self::Rs256,
+            "RS384" => Self::Rs384,
+            "RS512" => Self::Rs512,
+            "PS256" => Self::Ps256,
+            "PS384" => Self::Ps384,
+            "PS512" => Self::Ps512,
+            "ES256" => Self::Es256,
+            "ES384" => Self::Es384,
+            "ES512" => {
+                return Err("ES512 is not verified here: ring has no P-521".into());
+            }
+            hmac if hmac.starts_with("HS") => {
+                return Err(format!(
+                    "{hmac} is refused: an HMAC-signed id token is signed with the client \
+                     secret, and anyone who holds the secret could mint one"
+                ));
+            }
+            other => {
+                return Err(format!(
+                    "{other:?} is not an algorithm an id token is verified by here: RS256, \
+                     RS384, RS512, PS256, PS384, PS512, ES256 or ES384"
+                ));
+            }
+        })
+    }
+}
 
 #[derive(Deserialize)]
 struct Header {
@@ -53,6 +129,8 @@ struct Claims {
     nbf: Option<i64>,
     #[serde(default)]
     aud: Option<Audience>,
+    #[serde(default)]
+    azp: Option<String>,
 }
 
 /// Verifies one provider's id tokens. One per configured provider, built at
@@ -60,6 +138,7 @@ struct Claims {
 pub struct IdTokenVerifier {
     issuer: String,
     client_id: String,
+    alg: SigningAlg,
     jwks: JwksCache,
 }
 
@@ -68,6 +147,7 @@ impl std::fmt::Debug for IdTokenVerifier {
         f.debug_struct("IdTokenVerifier")
             .field("issuer", &self.issuer)
             .field("client_id", &self.client_id)
+            .field("alg", &self.alg)
             .finish_non_exhaustive()
     }
 }
@@ -75,19 +155,29 @@ impl std::fmt::Debug for IdTokenVerifier {
 impl IdTokenVerifier {
     /// `key_set` is where the provider publishes its signing keys; `issuer`
     /// what a token must carry in `iss`; `client_id` what it must name in
-    /// `aud`.
+    /// `aud`. Its tokens are held to RS256 unless [`IdTokenVerifier::with_alg`]
+    /// names another.
     #[must_use]
     pub fn new(http: reqwest::Client, key_set: KeySetUrl, client_id: &str, issuer: &str) -> Self {
         Self {
             issuer: issuer.to_owned(),
             client_id: client_id.to_owned(),
+            alg: SigningAlg::default(),
             jwks: JwksCache::new(http, key_set),
         }
     }
 
-    /// Verify one id token: RS256 under a key the provider publishes, from
-    /// its issuer, for our client, unexpired, naming a subject. What the
-    /// token then says about the person is the caller's to read.
+    /// The same verifier, its tokens held to `alg` alone.
+    #[must_use]
+    pub fn with_alg(mut self, alg: SigningAlg) -> Self {
+        self.alg = alg;
+        self
+    }
+
+    /// Verify one id token: by the one algorithm configured, under a key the
+    /// provider publishes, from its issuer, for our client, unexpired,
+    /// naming a subject. What the token then says about the person is the
+    /// caller's to read.
     pub async fn verify(&self, token: &str) -> Result<(), TelmoniError> {
         // The signed bytes are everything before the last dot, exactly as sent.
         let Some((signing_input, signature_b64)) = token.rsplit_once('.') else {
@@ -110,8 +200,11 @@ impl IdTokenVerifier {
         }
         let header: Header = decode_json(header_b64)
             .ok_or_else(|| refuse("header is not readable", AuthError::InvalidToken))?;
-        if header.alg != "RS256" {
-            return Err(refuse("alg is not RS256", AuthError::InvalidToken));
+        if header.alg != self.alg.as_str() {
+            return Err(refuse(
+                "alg is not the one configured",
+                AuthError::InvalidToken,
+            ));
         }
         let Some(kid) = header.kid.filter(|k| !k.is_empty()) else {
             return Err(refuse("no kid", AuthError::InvalidToken));
@@ -129,7 +222,7 @@ impl IdTokenVerifier {
                 AuthError::InvalidToken,
             ));
         };
-        if !key.verifies(signing_input.as_bytes(), &signature) {
+        if !key.verifies(self.alg, signing_input.as_bytes(), &signature) {
             return Err(refuse("signature does not verify", AuthError::InvalidToken));
         }
 
@@ -150,6 +243,15 @@ impl IdTokenVerifier {
             Some(aud) if aud.names(&self.client_id) => {}
             Some(_) => return Err(refuse("aud is not ours", AuthError::InvalidToken)),
             None => return Err(refuse("no aud", AuthError::InvalidToken)),
+        }
+        // A token that names the party it was issued to names us (OIDC Core
+        // § 3.1.3.7), else another client's token listing us would pass.
+        if claims
+            .azp
+            .as_deref()
+            .is_some_and(|azp| azp != self.client_id)
+        {
+            return Err(refuse("azp is not ours", AuthError::InvalidToken));
         }
         let now = chrono::Utc::now().timestamp();
         if claims.exp.saturating_add(EXP_LEEWAY_SECS) <= now {
@@ -231,6 +333,69 @@ mod tests {
             "https://a.example/x"
         ));
         assert!(!same_issuer("https://a.example", "https://a.example/x"));
+    }
+
+    /// A verifier over a key-set stub serving `jwks`, its tokens held to `alg`.
+    async fn stub_serving(
+        jwks: String,
+        alg: SigningAlg,
+    ) -> (wiremock::MockServer, IdTokenVerifier) {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path("/jwks"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_string(jwks))
+            .mount(&server)
+            .await;
+        let v = IdTokenVerifier::new(
+            reqwest::Client::new(),
+            KeySetUrl::Fixed(format!("{}/jwks", server.uri())),
+            TEST_CLIENT_ID,
+            TEST_PROVIDER_ISSUER,
+        )
+        .with_alg(alg);
+        (server, v)
+    }
+
+    /// An EC key on P-256 verifies an ES256 token where ES256 is the one
+    /// configured, and nothing else does: a token's own header never chooses.
+    #[tokio::test]
+    async fn the_configured_algorithm_alone_verifies() {
+        use crate::test_util::id_token::{EcProvider, provider_jwks_json_any_alg, ps256_id_token};
+        let ec = EcProvider::p256();
+        let (_server, es256) = stub_serving(ec.jwks_json(), SigningAlg::Es256).await;
+        es256.verify(&ec.id_token(live("user_1"))).await.unwrap();
+        assert!(
+            es256
+                .verify(&provider_id_token(live("user_1")))
+                .await
+                .is_err()
+        );
+        let (_server, rs256) = stub_serving(ec.jwks_json(), SigningAlg::Rs256).await;
+        assert!(rs256.verify(&ec.id_token(live("user_1"))).await.is_err());
+
+        let (_server, ps256) = stub_serving(provider_jwks_json_any_alg(), SigningAlg::Ps256).await;
+        ps256.verify(&ps256_id_token(live("user_1"))).await.unwrap();
+        // The fixture's set says its key is for RS256 alone.
+        let (_server, held) = stub_serving(provider_jwks_json(), SigningAlg::Ps256).await;
+        assert!(held.verify(&ps256_id_token(live("user_1"))).await.is_err());
+    }
+
+    /// The eight are read by name; ES512 and every HS* are refused with why.
+    #[test]
+    fn the_algorithms_taken_and_refused_say_so() {
+        for name in [
+            "RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384",
+        ] {
+            assert_eq!(name.parse::<SigningAlg>().unwrap().as_str(), name);
+        }
+        assert!("ES512".parse::<SigningAlg>().unwrap_err().contains("P-521"));
+        assert!(
+            "HS256"
+                .parse::<SigningAlg>()
+                .unwrap_err()
+                .contains("client secret")
+        );
+        assert!("none".parse::<SigningAlg>().is_err());
     }
 
     #[tokio::test]
@@ -338,15 +503,22 @@ mod tests {
         assert!(v.verify(&provider_id_token(c)).await.is_err());
     }
 
-    /// An id token names its client in `aud`, as one string or a list; one
-    /// minted for another client of the same provider is refused, and so is
-    /// one that names no audience at all.
+    /// An id token names its client in `aud`, as one string or a list, and
+    /// in `azp` where it names one; one minted for another client of the
+    /// same provider is refused, and so is one that names no audience.
     #[tokio::test]
     async fn aud_is_required_and_held_to_our_client_id_in_either_spelling() {
         let (_server, v) = provider_stub().await;
         let mut many = live("user_1");
         many["aud"] = json!(["another_client", TEST_CLIENT_ID]);
-        assert!(v.verify(&provider_id_token(many)).await.is_ok());
+        assert!(v.verify(&provider_id_token(many.clone())).await.is_ok());
+        many["azp"] = json!(TEST_CLIENT_ID);
+        assert!(v.verify(&provider_id_token(many.clone())).await.is_ok());
+        many["azp"] = json!("another_client");
+        assert!(
+            v.verify(&provider_id_token(many)).await.is_err(),
+            "issued to another client"
+        );
         for refused in [
             json!("another_client"),
             json!(["another_client"]),

@@ -1,6 +1,7 @@
 # Local development services for Telmoni.
 #
-#   make docker-up       # start postgres, clickhouse, redis and mailpit
+#   make docker-up       # start postgres, clickhouse, redis and mailpit (and Dex
+#                        # with COMPOSE_PROFILES=oidc, Ollama with =ollama)
 #   make web-dev         # Next.js dev server
 #   make up              # the whole stack: these, then the server and the console
 #   make down            # stop containers (volumes survive)
@@ -94,6 +95,21 @@ services:
     ports:
       - "127.0.0.1:1025:1025"
       - "127.0.0.1:8025:8025"
+
+  # An OpenID Connect provider to sign in through: Dex, with a client for the
+  # console on :3000 and two people (`crates/auth/dex/dev-config.yaml`).
+  # Opt-in (COMPOSE_PROFILES=oidc in .env, with the AUTH_CUSTOM_* lines
+  # `.env.example` names for it); `make e2e` starts it either way.
+  dex:
+    image: ghcr.io/dexidp/dex:v2.46.1
+    container_name: telmoni-dex
+    profiles: ["oidc"]
+    restart: unless-stopped
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    ports:
+      - "127.0.0.1:5556:5556"
+    volumes:
+      - ./crates/auth/dex/dev-config.yaml:/etc/dex/config.yaml:ro
 
   # Local embeddings for the agent, when .env points EMBEDDINGS_URL at
   # http://localhost:11434/v1 rather than the Gemini the template names, and

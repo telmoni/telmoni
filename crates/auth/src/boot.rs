@@ -1,23 +1,25 @@
-//! What the environment says about sign-in, read once at boot: the login
-//! form and who may create an account, the OpenID Connect provider beside
-//! the form, and the first account. A binary built for another deployment
-//! reads its own provider's variables instead and hands it to
-//! [`providers_with`].
+//! What the environment says about sign-in, read once at boot under
+//! Langfuse's names: the login form and who may create an account, the
+//! OpenID Connect provider beside the form, and the first account. A binary
+//! built for another deployment reads its own provider's variables instead
+//! and hands it to [`providers_with`].
 //!
 //! **Sign-in.** Every session is the issuer's, whichever way it began, and
 //! its tokens are opaque secrets auth stores as their hashes: there is no
 //! signing key to configure. The login form — email and password, held
-//! here — is on unless `DISABLE_LOGIN_FORM=true`; who may create an account
-//! with a password is `ALLOW_SIGN_UP` (off: invited addresses alone; the
-//! provider's own sign-ups are `OIDC_ALLOW_SIGN_UP`'s), whether a new account
-//! confirms its address first is `VERIFY_EMAIL` (off), and `ADMIN_EMAIL`
-//! with `ADMIN_PASSWORD` seeds the first account at boot. Set `OIDC_ISSUER`,
-//! `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`, and the sign-in page offers
-//! "Continue with `OIDC_NAME`" beside the form: the provider's endpoints are
-//! discovered from the issuer on first use, a subject it names for the first
-//! time becomes an account here while `OIDC_ALLOW_SIGN_UP` (on) allows, and
-//! one whose address an account here already holds is that account only
-//! under `OIDC_ALLOW_INSECURE_EMAIL_LOOKUP`.
+//! here — is on unless `AUTH_DISABLE_USERNAME_PASSWORD=true`; nobody new may
+//! create an account, at the form or at a provider, unless
+//! `AUTH_DISABLE_SIGNUP=false`, though an invited address always may; an
+//! address under one of `AUTH_DOMAINS_WITH_SSO_ENFORCEMENT` signs in at a
+//! provider alone; whether a new account confirms its address first is
+//! `VERIFY_EMAIL` (off), and `ADMIN_EMAIL` with `ADMIN_PASSWORD` seeds the
+//! first account at boot. Set `AUTH_CUSTOM_CLIENT_ID`, `AUTH_CUSTOM_ISSUER` and
+//! `AUTH_CUSTOM_CLIENT_SECRET`, and the sign-in page offers "Continue with
+//! `AUTH_CUSTOM_NAME`" beside the form: the provider's endpoints are
+//! discovered from the issuer on first use, and an unknown subject whose
+//! address an account here holds is that account only under
+//! `AUTH_CUSTOM_ALLOW_ACCOUNT_LINKING`, and only for an address both the
+//! provider and the account proved.
 
 use std::sync::Arc;
 
@@ -25,34 +27,72 @@ use telmoni_shared::Redacted;
 use telmoni_shared::config::{env_parse, optional, require};
 use telmoni_shared::envelope::on_deployed_tier;
 use telmoni_shared::mail::MailSender;
-use telmoni_shared::oidc::{Discovery, IdTokenVerifier, KeySetUrl};
+use telmoni_shared::oidc::{Discovery, IdTokenVerifier, KeySetUrl, SigningAlg};
 
 use crate::external::External;
 use crate::issuer::Issuer;
 use crate::mailer::ComposingMailer;
-use crate::oidc::OidcProvider;
+use crate::oidc::{OidcProvider, Settings};
 use crate::password::PasswordProvider;
 use crate::{Config, Providers};
 
 /// The issuer every session is minted by, the login form unless it is off,
-/// and the external provider when one is named — all from the environment.
+/// and the external provider when its block names one — all from the
+/// environment.
 pub async fn providers_from_env(
     config: &Config,
     http: &reqwest::Client,
     pool: sqlx::PgPool,
     mail: Arc<dyn MailSender>,
 ) -> anyhow::Result<Providers> {
-    let external = match optional("OIDC_ISSUER") {
-        Some(issuer_url) => Some(external_from_env(http, issuer_url)?),
-        None => None,
+    let external = match optional("AUTH_CUSTOM_CLIENT_ID") {
+        Some(client_id) => Some(external_from_env(http, client_id)?),
+        None => {
+            // A provider is on when its client id is set; the rest of a
+            // block without it is a mistake, said before anybody signs in.
+            if let Some(name) = ["AUTH_CUSTOM_ISSUER", "AUTH_CUSTOM_CLIENT_SECRET"]
+                .into_iter()
+                .find(|name| optional(name).is_some())
+            {
+                anyhow::bail!(
+                    "{name} is set without AUTH_CUSTOM_CLIENT_ID: a provider is on only when its \
+                     client id is set"
+                );
+            }
+            None
+        }
     };
     providers_with(config, pool, mail, external).await
 }
 
+/// `AUTH_DISABLE_SIGNUP`: whether nobody new may create an account, at the
+/// form or at a provider — `true` unless set, so a deployment reachable from
+/// the internet registers nobody until its operator opens it.
+fn sign_ups_closed() -> anyhow::Result<bool> {
+    env_parse("AUTH_DISABLE_SIGNUP", true)
+}
+
+/// `AUTH_DOMAINS_WITH_SSO_ENFORCEMENT`: the domains whose addresses sign in
+/// at a provider alone, comma-separated.
+fn sso_domains() -> Vec<String> {
+    optional("AUTH_DOMAINS_WITH_SSO_ENFORCEMENT")
+        .map(|list| held_domains(&list))
+        .unwrap_or_default()
+}
+
+/// The domains a list names, lowercased as an address is
+/// (`identity::validate_email`), so one typed in capitals still matches.
+fn held_domains(list: &str) -> Vec<String> {
+    list.split(',')
+        .map(|domain| domain.trim().trim_start_matches('@').to_lowercase())
+        .filter(|domain| !domain.is_empty())
+        .collect()
+}
+
 /// [`providers_from_env`] with the external provider the binary chose in
-/// place of the one `OIDC_ISSUER` would name: the issuer and the login form
-/// still come from the environment, and the same rules hold — the form may
-/// be off only beside a provider.
+/// place of the one the `CUSTOM` block would name: the issuer and the login
+/// form still come from the environment, and the same rules hold — the form
+/// may be off only beside a provider, and so may a domain be held to one.
 pub async fn providers_with(
     config: &Config,
     pool: sqlx::PgPool,
@@ -62,30 +102,37 @@ pub async fn providers_with(
     let verify_email: bool = env_parse("VERIFY_EMAIL", false)?;
     let issuer = Arc::new(Issuer::new(pool.clone(), &config.app_url, verify_email));
 
-    let disable_login_form: bool = env_parse("DISABLE_LOGIN_FORM", false)?;
+    let sso_domains = sso_domains();
+    if !sso_domains.is_empty() && external.is_none() {
+        anyhow::bail!(
+            "AUTH_DOMAINS_WITH_SSO_ENFORCEMENT is set and no external provider is configured: \
+             nobody at those domains could sign in"
+        );
+    }
+    let disable_login_form: bool = env_parse("AUTH_DISABLE_USERNAME_PASSWORD", false)?;
     let password = if disable_login_form {
         if external.is_none() {
             anyhow::bail!(
-                "DISABLE_LOGIN_FORM is set and no external provider is configured: nobody could \
-                 sign in"
+                "AUTH_DISABLE_USERNAME_PASSWORD is set and no external provider is configured: \
+                 nobody could sign in"
             );
         }
         if optional("ADMIN_EMAIL").is_some() || optional("ADMIN_PASSWORD").is_some() {
             anyhow::bail!(
-                "ADMIN_EMAIL is set with DISABLE_LOGIN_FORM: an account with a password could \
-                 never sign in"
+                "ADMIN_EMAIL is set with AUTH_DISABLE_USERNAME_PASSWORD: an account with a \
+                 password could never sign in"
             );
         }
         None
     } else {
-        let allow_sign_up: bool = env_parse("ALLOW_SIGN_UP", false)?;
         let mailer = ComposingMailer::new(Arc::clone(&mail))
             .with_support_email(config.support_email.clone());
         let password = Arc::new(PasswordProvider::new(
             pool,
             Arc::clone(&issuer),
             Arc::new(mailer),
-            allow_sign_up,
+            !sign_ups_closed()?,
+            sso_domains,
         ));
         seed_admin_from_env(&password).await?;
         Some(password)
@@ -111,6 +158,12 @@ async fn seed_admin_from_env(password: &PasswordProvider) -> anyhow::Result<()> 
     match (optional("ADMIN_EMAIL"), optional("ADMIN_PASSWORD")) {
         (None, None) => Ok(()),
         (Some(email), Some(secret)) => {
+            if password.held_to_sso(&email) {
+                anyhow::bail!(
+                    "ADMIN_EMAIL is under AUTH_DOMAINS_WITH_SSO_ENFORCEMENT: its password could \
+                     never sign in"
+                );
+            }
             let secret = Redacted::from(secret);
             let created = password
                 .seed_admin(&email, secret.expose())
@@ -127,39 +180,77 @@ async fn seed_admin_from_env(password: &PasswordProvider) -> anyhow::Result<()> 
     }
 }
 
-/// An OpenID Connect provider beside the accounts held here, as a
-/// confidential client.
-fn external_from_env(http: &reqwest::Client, issuer_url: String) -> anyhow::Result<External> {
-    let client_id = require("OIDC_CLIENT_ID")?;
-    let client_secret: Redacted = require("OIDC_CLIENT_SECRET")?.into();
-    let name = optional("OIDC_NAME").unwrap_or_else(|| "single sign-on".to_owned());
-
-    if on_deployed_tier() && !issuer_url.starts_with("https://") {
+/// The `CUSTOM` block's OpenID Connect provider, beside the accounts held
+/// here, as a confidential client.
+fn external_from_env(http: &reqwest::Client, client_id: String) -> anyhow::Result<External> {
+    let issuer_url = require("AUTH_CUSTOM_ISSUER")?;
+    let client_secret: Redacted = require("AUTH_CUSTOM_CLIENT_SECRET")?.into();
+    let name = optional("AUTH_CUSTOM_NAME").unwrap_or_else(|| "single sign-on".to_owned());
+    let scope = optional("AUTH_CUSTOM_SCOPE").unwrap_or_else(|| "openid email profile".to_owned());
+    if !scope.split_whitespace().any(|s| s == "openid") {
         anyhow::bail!(
-            "OIDC_ISSUER is not https in a Kubernetes pod; the provider's key set and every \
-             grant would travel in the clear"
+            "AUTH_CUSTOM_SCOPE leaves out openid: the provider would answer with no id token, \
+             and nobody could be named"
         );
     }
 
+    if on_deployed_tier() && !issuer_url.starts_with("https://") {
+        anyhow::bail!(
+            "AUTH_CUSTOM_ISSUER is not https in a Kubernetes pod; the provider's key set and \
+             every grant would travel in the clear"
+        );
+    }
+
+    let alg: SigningAlg = optional("AUTH_CUSTOM_ID_TOKEN_SIGNED_RESPONSE_ALG")
+        .map(|name| name.parse())
+        .transpose()
+        .map_err(|why| anyhow::anyhow!("AUTH_CUSTOM_ID_TOKEN_SIGNED_RESPONSE_ALG: {why}"))?
+        .unwrap_or_default();
     let discovery = Arc::new(Discovery::new(http.clone(), &issuer_url));
-    let id_token_verifier = Arc::new(IdTokenVerifier::new(
-        http.clone(),
-        KeySetUrl::Discovered(Arc::clone(&discovery)),
-        &client_id,
-        &issuer_url,
-    ));
+    let id_token_verifier = Arc::new(
+        IdTokenVerifier::new(
+            http.clone(),
+            KeySetUrl::Discovered(Arc::clone(&discovery)),
+            &client_id,
+            &issuer_url,
+        )
+        .with_alg(alg),
+    );
     let provider = OidcProvider::new(
         http.clone(),
-        &client_id,
-        client_secret,
-        &issuer_url,
-        &name,
+        Settings {
+            client_id,
+            client_secret,
+            issuer: issuer_url,
+            name,
+            scope,
+            fetch_userinfo: env_parse("AUTH_CUSTOM_FETCH_USERINFO", false)?,
+            checks: optional("AUTH_CUSTOM_CHECKS")
+                .map(|list| list.parse())
+                .transpose()
+                .map_err(|why| anyhow::anyhow!("AUTH_CUSTOM_CHECKS: {why}"))?
+                .unwrap_or_default(),
+        },
         discovery,
         id_token_verifier,
     );
     Ok(External {
         provider: Arc::new(provider),
-        allow_sign_up: env_parse("OIDC_ALLOW_SIGN_UP", true)?,
-        link_by_email: env_parse("OIDC_ALLOW_INSECURE_EMAIL_LOOKUP", false)?,
+        allow_sign_up: !sign_ups_closed()?,
+        link_by_email: env_parse("AUTH_CUSTOM_ALLOW_ACCOUNT_LINKING", false)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A held domain is read as an address's domain is, however it was typed.
+    #[test]
+    fn a_held_domain_is_read_as_an_address_is() {
+        assert_eq!(
+            held_domains(" Corp.Example, @MÜNCHEN.example ,,"),
+            ["corp.example", "münchen.example"]
+        );
+    }
 }

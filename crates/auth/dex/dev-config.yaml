@@ -1,0 +1,45 @@
+# Dex, a local OpenID Connect provider: the compose file's `dex` service
+# (`--profile oidc`), which `make e2e` starts for `web/e2e/oidc.spec.ts`, and
+# which `make up` starts too with COMPOSE_PROFILES=oidc. Development only:
+# its people's password is `password` and its client's secret is below.
+issuer: http://127.0.0.1:5556/dex
+
+storage:
+  type: memory
+
+web:
+  http: 0.0.0.0:5556
+
+oauth2:
+  skipApprovalScreen: true
+  # Held to PKCE, so a sign-in that gets through proves the console sent it.
+  pkce:
+    enforce: true
+    codeChallengeMethodsSupported: ["S256"]
+
+# The console on :3000, as `make up` and the e2e suite run it.
+staticClients:
+  - id: telmoni-local
+    name: Telmoni
+    secret: telmoni-local-dex-secret
+    redirectURIs:
+      - http://localhost:3000/auth/callback
+
+enablePasswordDB: true
+
+# Dex's own example hash of `password`. Sign in as Ada to try it; Grace is
+# the e2e suite's stranger, whom a closed deployment turns away, so an
+# account of hers in the dev database fails that test.
+staticPasswords:
+  - email: ada@example.com
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: ada
+    name: Ada Lovelace
+    emailVerified: true
+    userID: 6f1c0c7e-6b1f-4f8e-9a51-0d3a2f6e1a01
+  - email: grace@example.com
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: grace
+    name: Grace Hopper
+    emailVerified: true
+    userID: 6f1c0c7e-6b1f-4f8e-9a51-0d3a2f6e1a02
