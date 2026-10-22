@@ -40,6 +40,29 @@ pub fn monitor_discovered(monitor: &MonitorRow, key: &ResolvedPingKey) -> Queued
     }
 }
 
+/// The project told of a monitor its agent's first run made, once a monitor,
+/// as a ping's first is told: the agent in the body and the metadata, so its
+/// owner can find what is sending and set it up.
+#[must_use]
+pub fn monitor_discovered_by_run(monitor: &MonitorRow) -> QueuedNotice {
+    QueuedNotice {
+        kind: NotificationKind::MonitorDiscovered,
+        title: format!("New monitor: {}", monitor.slug),
+        body: format!(
+            "A run of the agent {} came with no monitor watching it, so one was made and paused \
+             as new: its runs are kept, and it watches for nothing until you set it up.",
+            monitor.agent
+        ),
+        metadata: json!({
+            "slug": monitor.slug,
+            "monitor_id": monitor.id,
+            "agent": monitor.agent,
+            "made": true,
+        }),
+        dedup_key: format!("telemetry:monitor:{}:discovered", monitor.id),
+    }
+}
+
 /// The project told of a key its rotation retired, once a key: the key's
 /// prefix in the body and the metadata, so the crontab line still carrying
 /// it, refused from now on, can be found from the feed rather than from

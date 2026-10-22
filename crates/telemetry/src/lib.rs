@@ -113,6 +113,9 @@ pub struct AppState {
     /// The machine lanes' ceilings each organization's plan sets, and the
     /// day's counts held to them ([`ceilings`]).
     pub ceilings: ceilings::Ceilings,
+    /// The runs this replica's exports ended lately, while Redis does not
+    /// answer ([`ingest::runs`]).
+    pub ended_runs: ingest::runs::EndedLately,
     /// How long a ping waits out a move or a purge of its project
     /// (`handler::pings::MOVE_WAIT`); a field so a suite can wait longer.
     pub move_wait: std::time::Duration,

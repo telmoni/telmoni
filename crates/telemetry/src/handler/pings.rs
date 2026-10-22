@@ -35,8 +35,8 @@ use telmoni_shared::middleware::problem;
 use telmoni_shared::seam;
 use telmoni_shared::types::{PING_KEY_PREFIX, PING_KEY_RANDOM_LEN};
 use telmoni_shared::{
-    AuditAction, AuthError, MonitorState, ProjectId, SpanStatus, TelmoniError, TelmoniResourceKind,
-    slug,
+    AuditAction, AuthError, MonitorState, OrganizationId, ProjectId, SpanStatus, TelmoniError,
+    TelmoniResourceKind, slug,
 };
 
 use crate::AppState;
@@ -611,7 +611,15 @@ async fn ping(
     };
     let recorded = record(key, &monitor, progress, report, now, tx).await?;
     let exit_code = progress.exit_code.filter(|_| report == Report::Fail);
-    settle(key, &monitor, &recorded, exit_code, now, tx).await?;
+    settle(
+        (&key.project_id, &key.organization_id),
+        &monitor,
+        &recorded,
+        exit_code,
+        now,
+        tx,
+    )
+    .await?;
     Ok((recorded.run_id, monitor.id))
 }
 
@@ -743,7 +751,7 @@ fn taken(error: sqlx::Error) -> TelmoniError {
 
 /// What a ping did to its run, which decides the monitor's state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RunEvent {
+pub(crate) enum RunEvent {
     Opened,
     Heard,
     OverBound,
@@ -760,11 +768,11 @@ enum RunEvent {
 /// settle the monitor from the row as it stands though the run changes
 /// nothing of what the ping read; and, of the runs it ended, the one that
 /// ended last, for the monitor to keep.
-struct Recorded {
-    run_id: Uuid,
-    event: RunEvent,
-    revived: bool,
-    ended: Option<LastRun>,
+pub(crate) struct Recorded {
+    pub(crate) run_id: Uuid,
+    pub(crate) event: RunEvent,
+    pub(crate) revived: bool,
+    pub(crate) ended: Option<LastRun>,
 }
 
 /// The run recorded: opened, heard, or ended and handed to the outbox as a
@@ -1089,8 +1097,11 @@ async fn open_run(
             source: SOURCE,
             ping_key_id: Some(key.id),
             started_at: now,
+            heard_at: now,
             ends_by: ends_by(now, monitor.expected_duration_s),
             steps: steps.unwrap_or(0),
+            input_tokens: 0,
+            output_tokens: 0,
             cost_usd: cost_usd.unwrap_or(0.0),
             stall_after_s: monitor.stall_after_s,
             max_steps: monitor.max_steps,
@@ -1118,7 +1129,7 @@ async fn open_run(
 
 /// Whether a run is past its step cap. Its spend is held to its cost cap
 /// from 3.9, which prices a call; a `/checkpoint`'s cost is kept meanwhile.
-fn over_bound(run: &OpenRunRow) -> bool {
+pub(crate) fn over_bound(run: &OpenRunRow) -> bool {
     run.max_steps.is_some_and(|cap| run.steps > cap)
 }
 
@@ -1126,7 +1137,7 @@ fn over_bound(run: &OpenRunRow) -> bool {
 /// bounds. Read from the run as the write left it, never from the monitor as
 /// the ping read it: another of the run's pings may have taken it past its
 /// cap since, as one that opened the run beside this ping has.
-fn hearing(run: &OpenRunRow) -> RunEvent {
+pub(crate) fn hearing(run: &OpenRunRow) -> RunEvent {
     if over_bound(run) {
         RunEvent::OverBound
     } else {
@@ -1155,15 +1166,14 @@ fn hearing(run: &OpenRunRow) -> RunEvent {
 /// under the same lock ([`db::note_last_run`]); and the state it moved to
 /// opens or resolves the monitor's incident ([`incidents::on_change`]),
 /// `exit_code` the `/fail`'s where one came.
-async fn settle(
-    key: &ResolvedPingKey,
+pub(crate) async fn settle(
+    (project_id, organization_id): (&ProjectId, &OrganizationId),
     monitor: &MonitorRow,
     recorded: &Recorded,
     exit_code: Option<i32>,
     now: DateTime<Utc>,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
 ) -> Result<(), TelmoniError> {
-    let project_id = &key.project_id;
     let event = recorded.event;
     let found = settled(project_id, monitor, event, now);
     if found.is_none() && !recorded.revived && recorded.ended.is_none() {
@@ -1216,7 +1226,7 @@ async fn settle(
     incidents::on_change(
         tx,
         project_id,
-        &key.organization_id,
+        organization_id,
         &settled,
         held.state,
         trigger,

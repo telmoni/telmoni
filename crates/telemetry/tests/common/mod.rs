@@ -1086,6 +1086,25 @@ pub(crate) fn state_with_stores(pool: &PgPool, auth: Arc<dyn Auth>) -> Arc<AppSt
     state_with_stores_and_notices(pool, auth, NoticeLog::new())
 }
 
+/// [`state_with_stores`], under `entitlements`.
+pub(crate) fn state_with_stores_under(
+    pool: &PgPool,
+    auth: Arc<dyn Auth>,
+    entitlements: Arc<dyn Entitlements>,
+) -> Arc<AppState> {
+    let clickhouse = std::env::var("TELEMETRY_CLICKHOUSE_URL").expect(
+        "state_with_stores_under: TELEMETRY_CLICKHOUSE_URL is set, checked by clickhouse_or_skip",
+    );
+    Arc::new(module_at(
+        pool,
+        auth,
+        &clickhouse,
+        &redis_url(),
+        entitlements,
+        NoticeLog::new(),
+    ))
+}
+
 /// [`state_with_stores`], with `notices` keeping every notice the module
 /// hands through the seam.
 pub(crate) fn state_with_stores_and_notices(

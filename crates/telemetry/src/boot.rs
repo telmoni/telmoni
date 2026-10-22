@@ -82,6 +82,7 @@ pub fn state(
         redis,
         rate_limit: RateLimit::new("telemetry:ingest:limit", EXPORTS_PER_MINUTE),
         ceilings: crate::ceilings::Ceilings::default(),
+        ended_runs: crate::ingest::runs::EndedLately::default(),
         move_wait: MOVE_WAIT,
         body_wait: BODY_WAIT,
     })

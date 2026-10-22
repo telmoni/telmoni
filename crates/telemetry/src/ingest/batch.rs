@@ -10,7 +10,7 @@ use telmoni_shared::ProjectId;
 
 use crate::contract::{BATCH_SPANS_MAX, CLOCK_DRIFT_MAX_SECS};
 use crate::ingest::report::Report;
-use crate::ingest::span::{self, Context};
+use crate::ingest::span::{self, Context, RunStart};
 use crate::store::SpanRow;
 
 /// Why an export was refused whole, before any span of it was read.
@@ -27,6 +27,8 @@ pub enum BatchError {
 pub struct Batch {
     /// The spans kept, in the order they came.
     pub rows: Vec<SpanRow>,
+    /// The runs the export opened, each by its `telmoni.run.start`.
+    pub starts: Vec<RunStart>,
     /// The spans refused and the attributes dropped.
     pub report: Report,
 }
@@ -89,6 +91,9 @@ pub fn read(
                 // A span refused whole is named once, by its refusal: what
                 // was dropped from it before the refusal was known is not
                 // reported on top, since none of it was going to be kept.
+                if let Some(start) = span::run_start(one, &context) {
+                    batch.starts.push(start);
+                }
                 let dropped_before = batch.report.dropped.len();
                 match span::map(one, &context, &mut batch.report.dropped) {
                     Ok(Some(row)) => batch.rows.push(row),
@@ -118,6 +123,9 @@ pub fn read(
                     row.started_at -= ahead;
                     row.ended_at -= ahead;
                 }
+                for start in &mut batch.starts {
+                    start.started_at -= ahead;
+                }
             }
         }
         // One resource is one process, so one clock.
@@ -128,6 +136,10 @@ pub fn read(
                 }
             }
         }
+    }
+    // A run never began after its export arrived, whatever its clock said.
+    for start in &mut batch.starts {
+        start.started_at = start.started_at.min(received_at);
     }
     Ok(batch)
 }

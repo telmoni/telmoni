@@ -630,6 +630,26 @@ pub async fn hold_monitor<B: HasProject>(
     .await
 }
 
+/// One of the project's monitors, by the agent its runs name, held for the
+/// settling an export's run makes of it (`FOR NO KEY UPDATE`): two exports
+/// of one run, one ending it and one hearing it, take the monitor one after
+/// the other, so the second reads the run the first ended.
+pub async fn hold_monitor_by_agent<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    agent: &str,
+) -> sqlx::Result<Option<MonitorRow>> {
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {MONITOR_COLUMNS} FROM telemetry.monitors
+          WHERE project_id = $1 AND agent = $2
+            FOR NO KEY UPDATE"
+    )))
+    .bind(project_id)
+    .bind(agent)
+    .fetch_optional(tx.conn())
+    .await
+}
+
 /// How many monitors the organization holds across its projects: what its
 /// plan's ceiling is held to. Read in a scope that names the organization,
 /// which the `organization_read` policy admits.
@@ -1605,8 +1625,13 @@ pub struct OpenRunWrite<'a> {
     pub source: &'a str,
     pub ping_key_id: Option<Uuid>,
     pub started_at: DateTime<Utc>,
+    /// When the run was first heard: a ping's start, or the export that
+    /// first reported a run, which may say it began long before.
+    pub heard_at: DateTime<Utc>,
     pub ends_by: DateTime<Utc>,
     pub steps: i32,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
     pub cost_usd: f64,
     pub stall_after_s: Option<i32>,
     pub max_steps: Option<i32>,
@@ -1661,9 +1686,9 @@ pub async fn insert_open_run(
 ) -> sqlx::Result<Option<OpenRunRow>> {
     sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO telemetry.open_runs (id, project_id, organization_id, monitor_id, agent, \
-             source, ping_key_id, started_at, last_heard_at, ends_by, steps, cost_usd, \
-             stall_after_s, max_steps, max_cost_usd)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, $13, $14)
+             source, ping_key_id, started_at, last_heard_at, ends_by, steps, input_tokens, \
+             output_tokens, cost_usd, stall_after_s, max_steps, max_cost_usd)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
          ON CONFLICT (project_id, id) DO NOTHING
          RETURNING {OPEN_RUN_COLUMNS}"
     )))
@@ -1675,12 +1700,67 @@ pub async fn insert_open_run(
     .bind(run.source)
     .bind(run.ping_key_id)
     .bind(run.started_at)
+    .bind(run.heard_at)
     .bind(run.ends_by)
     .bind(run.steps)
+    .bind(run.input_tokens)
+    .bind(run.output_tokens)
     .bind(run.cost_usd)
     .bind(run.stall_after_s)
     .bind(run.max_steps)
     .bind(run.max_cost_usd)
+    .fetch_optional(tx.conn())
+    .await
+}
+
+/// What an export adds to a run it reports on: its steps and tokens, and
+/// the bounds it declares, each kept where it is tighter than the run's.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct RunAdds {
+    pub steps: i32,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub stall_after_s: Option<i32>,
+    pub max_steps: Option<i32>,
+    pub max_cost_usd: Option<f64>,
+}
+
+/// One of the project's open runs heard now, as [`hear_open_run`] hears one,
+/// with what an export of its spans adds to it: its counts summed, never
+/// past what a column holds, since each export counts spans no other did,
+/// and each bound the tighter of the two. `None` where the project has no
+/// open run by that id under `monitor_id`.
+pub async fn add_to_open_run<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    id: Uuid,
+    monitor_id: Uuid,
+    adds: RunAdds,
+) -> sqlx::Result<Option<RunWritten>> {
+    // `LEAST` passes over a NULL, so a bound neither side set stays none.
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "UPDATE telemetry.open_runs
+            SET last_heard_at = GREATEST(statement_timestamp(), last_heard_at),
+                steps = steps + LEAST($4, 2147483647 - steps),
+                input_tokens = input_tokens + LEAST($5, 9223372036854775807 - input_tokens),
+                output_tokens = output_tokens + LEAST($6, 9223372036854775807 - output_tokens),
+                stall_after_s = LEAST(stall_after_s, $7),
+                max_steps = LEAST(max_steps, $8),
+                max_cost_usd = LEAST(max_cost_usd, $9)
+          WHERE project_id = $1 AND id = $2 AND monitor_id = $3
+         RETURNING {OPEN_RUN_COLUMNS},
+                   (SELECT {RUN_WAS_QUIET} FROM telemetry.open_runs
+                     WHERE project_id = $1 AND id = $2) AS was_quiet"
+    )))
+    .bind(project_id)
+    .bind(id)
+    .bind(monitor_id)
+    .bind(adds.steps)
+    .bind(adds.input_tokens)
+    .bind(adds.output_tokens)
+    .bind(adds.stall_after_s)
+    .bind(adds.max_steps)
+    .bind(adds.max_cost_usd)
     .fetch_optional(tx.conn())
     .await
 }

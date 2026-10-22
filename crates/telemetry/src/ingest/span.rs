@@ -276,6 +276,45 @@ pub fn map(
     Ok(Some(row))
 }
 
+/// A run's `telmoni.run.start`, the span of no duration that opens it: read
+/// for its run, its agent, when it began and the bounds it declares, so the
+/// run is open from its first second, and never a row.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunStart {
+    pub run_id: Uuid,
+    pub agent: String,
+    pub started_at: DateTime<Utc>,
+    pub bound_stall_after_s: Option<u32>,
+    pub bound_max_steps: Option<u32>,
+    pub bound_max_cost_usd: Option<f64>,
+}
+
+/// The run `span` opens, where it is a `telmoni.run.start` naming its run
+/// and its agent: read by the rules a run's own span is read by, and
+/// nothing of it kept or reported, as nothing of it ever was.
+#[must_use]
+pub fn run_start(span: &Span, context: &Context<'_>) -> Option<RunStart> {
+    if span.name != contract::RUN_START {
+        return None;
+    }
+    let mut fields = Fields {
+        attributes: context.resource.to_vec(),
+        ..Fields::default()
+    };
+    let mut unreported = Drops::default();
+    for kv in &span.attributes {
+        fields.read(kv, "", &mut unreported).ok()?;
+    }
+    Some(RunStart {
+        run_id: fields.run_id?,
+        agent: fields.agent.take()?,
+        started_at: instant(span.start_time_unix_nano)?,
+        bound_stall_after_s: fields.bound_stall_after_s,
+        bound_max_steps: fields.bound_max_steps,
+        bound_max_cost_usd: fields.bound_max_cost_usd,
+    })
+}
+
 /// What a row counts against its plan: one unit per started KiB of its text
 /// as kept, and [`SPAN_FIXED_BYTES`] for its ids, times and counts — the ids
 /// counted there alone, never again as text.
