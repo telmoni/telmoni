@@ -7,6 +7,7 @@ import { Role } from "@/lib/types/enums";
 const actions = vi.hoisted(() => ({
   addMemberAction: vi.fn(async (): Promise<{ error: string | null }> => ({ error: null })),
   inviteMemberAction: vi.fn(async () => ({ error: null })),
+  leaveProjectAction: vi.fn(async (): Promise<{ error: string | null }> => ({ error: null })),
   removeMemberAction: vi.fn(async () => ({ error: null })),
   revokeInviteAction: vi.fn(async () => ({ error: null })),
   updateMemberRoleAction: vi.fn(async () => ({ error: null })),
@@ -566,5 +567,110 @@ describe("MembersPage: handing the project over", () => {
     mockProject = projectAs(Role.Admin, "Payments");
     render(await page());
     expect(screen.queryByRole("button", { name: /^transfer project/i })).toBeNull();
+  });
+});
+
+// A seat is its holder's to give up: the caller's own row carries Leave in
+// place of Remove, whatever their role and however the seat came, and the
+// owner's row carries neither — the project is theirs to delete.
+describe("MembersPage: leaving", () => {
+  const page = async () => MembersPage({ params: PARAMS });
+  // Who is reading the page, as `/me` names them.
+  const asPerson = (userId: string) => {
+    mockContext = {
+      ...ownerContext([]),
+      person: { userId, email: "me@example.com", analyticsOptIn: false },
+    };
+  };
+  const ROWS = [
+    {
+      id: "m_owner",
+      member_id: "user_owner",
+      email: "owner@example.com",
+      display_name: "Owner User",
+      role: Role.Owner,
+      created_at: "2026-08-01T00:00:00Z",
+      is_owner: true,
+    },
+    {
+      id: "m_1",
+      member_id: "user_2",
+      email: "admin@example.com",
+      display_name: "Admin User",
+      role: Role.Admin,
+      created_at: "2026-09-01T00:00:00Z",
+      is_owner: false,
+    },
+    {
+      id: "m_2",
+      member_id: "user_3",
+      email: "member@example.com",
+      display_name: "Member User",
+      role: Role.Member,
+      created_at: "2026-09-02T00:00:00Z",
+      is_owner: false,
+    },
+  ];
+
+  beforeEach(() => {
+    mockMembers = { kind: "ok", members: ROWS };
+  });
+
+  it("offers a member Leave on their own row, and nothing on anybody else's", async () => {
+    asPerson("user_3");
+    mockProject = projectAs(Role.Member);
+    render(await page());
+    expect(screen.getByRole("button", { name: "Leave My Project" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^leave/i })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /^remove/i })).toBeNull();
+    expect(screen.queryByRole("combobox")).toBeNull();
+  });
+
+  it("gives an admin Leave on their own row and Remove on everybody else's but the owner's", async () => {
+    asPerson("user_2");
+    mockProject = projectAs(Role.Admin);
+    render(await page());
+    expect(screen.getByRole("button", { name: "Leave My Project" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove admin@example.com" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Remove member@example.com" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^remove/i })).toHaveLength(1);
+  });
+
+  it("offers the owner no Leave: the project is theirs to delete", async () => {
+    asPerson("user_owner");
+    mockProject = projectAs(Role.Owner);
+    render(await page());
+    expect(screen.queryByRole("button", { name: /^leave/i })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /^remove/i })).toHaveLength(2);
+  });
+
+  // The seat goes once the dialog is confirmed, and the action is told to
+  // lead the person out: the page they stand on is no longer theirs to read.
+  it("gives up the seat once confirmed, and is led out of the project", async () => {
+    asPerson("user_3");
+    mockProject = projectAs(Role.Member);
+    render(await page());
+    await press("Leave My Project");
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog).toHaveTextContent("Leave My Project?");
+    expect(dialog).toHaveTextContent(/an owner or admin can add you back/i);
+    expect(actions.leaveProjectAction, "left before it was confirmed").not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Leave" }));
+    });
+    expect(actions.leaveProjectAction).toHaveBeenCalledWith(PROJECT, "project");
+    expect(actions.removeMemberAction).not.toHaveBeenCalled();
+  });
+
+  it("shows auth's refusal on the row", async () => {
+    actions.leaveProjectAction.mockResolvedValueOnce({ error: "the project is busy — try again in a moment" });
+    asPerson("user_2");
+    mockProject = projectAs(Role.Admin);
+    render(await page());
+    await press("Leave My Project");
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Leave" }));
+    });
+    expect(screen.getByText("the project is busy — try again in a moment")).toBeInTheDocument();
   });
 });

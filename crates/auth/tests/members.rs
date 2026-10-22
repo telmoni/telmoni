@@ -1693,6 +1693,77 @@ async fn an_owner_cannot_leave_their_own_project(pool: PgPool) {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
+/// A seat given from the roster is given up as an accepted one is, and the bell forgets it.
+#[sqlx::test]
+async fn a_seat_given_is_left_as_any_seat_is(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    sign_in(&pool, "user_owner").await;
+    sign_in(&pool, "user_member").await;
+    enrol(&pool, "user_owner", "user_member").await;
+    let project = project_of(&pool, "user_owner").await;
+    let (status, body) = give(&pool, "user_owner", &project, "user_member", "member").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(
+        unseen(&pool).await,
+        vec![(project.clone(), "user_member".to_owned())],
+        "the seat waits in the bell"
+    );
+
+    let (status, body) = call(
+        &pool,
+        "DELETE",
+        &format!("/internal/v1/memberships/{project}"),
+        "user_member",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    let me = sign_in(&pool, "user_member").await;
+    assert_eq!(me["memberships"], json!([]), "the seat is still held: {me}");
+    assert_eq!(
+        me["givenSeats"],
+        json!([]),
+        "the bell still shows the seat: {me}"
+    );
+    assert!(
+        unseen(&pool).await.is_empty(),
+        "a seat given up still waits to be seen"
+    );
+
+    let (status, roster) = call(
+        &pool,
+        "GET",
+        "/internal/v1/organization/members",
+        "user_owner",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{roster}");
+    assert!(
+        roster["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["member_id"] == "user_member"),
+        "leaving the project took the person off the organization's roster: {roster}"
+    );
+
+    let kinds: Vec<Option<String>> = sqlx::query_scalar(
+        "SELECT metadata ->> 'kind' FROM audit.events
+          WHERE organization_id = $1 AND resource_kind = 'member' AND action = 'deleted'",
+    )
+    .bind(organization_of(&pool, "user_owner").await)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        kinds,
+        vec![Some("left".to_owned())],
+        "the leave is on the owner's chain"
+    );
+}
+
 /// **A member seat reads the roster and changes none of it.**
 #[sqlx::test]
 async fn a_member_may_not_manage_the_project_they_were_let_into(pool: PgPool) {

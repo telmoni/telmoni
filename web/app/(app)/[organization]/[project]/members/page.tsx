@@ -55,6 +55,7 @@ export default async function MembersPage({
 
   const isOwner = project.role === Role.Owner;
   const canManage = administersProject(project.role);
+  const me = gate.person.userId;
   // Who may be seated here with nothing to accept: the organization's members
   // holding no seat on this project. Its owner and admins hold every project.
   const seated = new Set(listing.members.map((m) => m.member_id));
@@ -162,9 +163,11 @@ export default async function MembersPage({
                   <MemberRow
                     key={m.id}
                     projectId={project.id}
+                    projectName={project.name}
                     member={m}
                     canManage={canManage}
                     isOwnerCaller={isOwner}
+                    isSelf={m.member_id === me}
                   />
                 ))}
               </tbody>

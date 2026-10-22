@@ -34,7 +34,8 @@ export default async function OrganizationProjectsPage() {
   if (gate.organizationNotFound) notFound();
   const organization = activeOrganization(gate);
 
-  const administers = administersOrganization(organizationRoleOf(gate, ident));
+  const role = organizationRoleOf(gate, ident);
+  const administers = administersOrganization(role);
   if (!organization || !ident || !administers) {
     return (
       <AccessDenied
@@ -62,7 +63,8 @@ export default async function OrganizationProjectsPage() {
 
       <div className="grid gap-6">
         {/* The tiles, with Leave beside a project the person holds a seat
-            in: the one place a seat is given up. */}
+            in; never for the owner, who holds every project outright and
+            whose leave the lane refuses. */}
         <section className="grid gap-3" aria-label="Projects">
           {projects === null ? (
             <Card className="overflow-hidden p-0 gap-0">
@@ -85,7 +87,7 @@ export default async function OrganizationProjectsPage() {
               organization={organization.slug}
               projects={projects}
               action={(p) =>
-                membershipByProject.has(p.id) ? (
+                membershipByProject.has(p.id) && role !== "owner" ? (
                   <LeaveProject projectId={p.id} name={p.name} />
                 ) : null
               }

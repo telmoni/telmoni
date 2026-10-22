@@ -40,6 +40,7 @@ import {
   addMemberAction,
   cancelProjectOfferAction,
   inviteMemberAction,
+  leaveProjectAction,
   offerProjectAction,
   removeMemberAction,
   revokeInviteAction,
@@ -353,16 +354,21 @@ export function InviteRow({
 
 export type MemberRowProps = {
   projectId: string;
+  projectName: string;
   member: Member;
   canManage?: boolean;
   isOwnerCaller?: boolean;
+  /// The caller's own row: its action is Leave, never Remove.
+  isSelf?: boolean;
 };
 
 export function MemberRow({
   projectId,
+  projectName,
   member,
   canManage = true,
   isOwnerCaller = false,
+  isSelf = false,
 }: MemberRowProps) {
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -478,7 +484,26 @@ export function MemberRow({
               onConfirm={() => act(() => cancelProjectOfferAction(projectId))}
             />
           )}
-          {!isOwner && canManage && (
+          {!isOwner && isSelf && (
+            <ConfirmDialog
+              trigger={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 text-xs"
+                  disabled={pending}
+                  aria-label={`Leave ${projectName}`}
+                >
+                  Leave
+                </Button>
+              }
+              title={`Leave ${projectName}?`}
+              description="You will lose access to this project immediately. An owner or admin can add you back."
+              confirmLabel="Leave"
+              onConfirm={() => act(() => leaveProjectAction(projectId, "project"))}
+            />
+          )}
+          {!isOwner && !isSelf && canManage && (
             <ConfirmDialog
               trigger={
                 <Button

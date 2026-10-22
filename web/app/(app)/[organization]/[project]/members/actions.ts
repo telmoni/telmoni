@@ -1,6 +1,7 @@
 "use server";
 
 import { refresh, revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import type { SessionData } from "@/lib/auth/session";
@@ -13,10 +14,11 @@ import {
   identityContext,
   projectHeaders,
 } from "@/lib/server/entities/identity-context";
-import { fetchProjects } from "@/lib/server/data";
+import { activeOrganization, fetchProjects, getServerContext } from "@/lib/server/data";
 import { fetchMembers } from "@/lib/server/entities/member";
 import { unplacedOrganization } from "@/lib/server/identity";
 import { getServerSession } from "@/lib/server/session";
+import { organizationPath } from "@/lib/slug";
 import {
   organizationChannel,
   publishEvent,
@@ -288,8 +290,11 @@ async function tellOfferRecipients(
   );
 }
 
+/// Give up the caller's own seat. From the project's own Members page the seat
+/// was all that let them in, so `from: "project"` leads them to the organization.
 export async function leaveProjectAction(
   projectId: string,
+  from: "organization" | "project" = "organization",
 ): Promise<ActionResult> {
   const gate = await open("members:leave", 20, projectId);
   if ("error" in gate) return gate;
@@ -298,6 +303,12 @@ export async function leaveProjectAction(
     { method: "DELETE", headers: gate.headers },
   );
   if (!res?.ok) return answer(res);
+  if (from === "project") {
+    const ctx = await getServerContext();
+    const home = ctx ? activeOrganization(ctx) : null;
+    revalidatePath("/", "layout");
+    redirect(home ? organizationPath(home.slug) : "/console");
+  }
   refresh();
   return answer(res);
 }

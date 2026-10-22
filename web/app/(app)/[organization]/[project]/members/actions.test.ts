@@ -36,6 +36,16 @@ vi.mock("@/lib/server/data", () => ({
   fetchProjects: vi.fn(async () => [
     { id: "project_1", slug: "payments", name: "Payments", role: "owner" },
   ]),
+  // The organization the leaver is led to once their seat is gone.
+  getServerContext: vi.fn(async () => ({ activeOrganizationId: "org_1" })),
+  activeOrganization: vi.fn(() => ({ organizationId: "org_1", slug: "acme" })),
+}));
+// A leave from the project's own pages redirects, as Next does: by throwing.
+const mockRedirect = vi.fn((to: string) => {
+  throw new Error(`REDIRECT:${to}`);
+});
+vi.mock("next/navigation", () => ({
+  redirect: (to: string) => mockRedirect(to),
 }));
 // The roster auth answers for the project: where a removal reads the address
 // it tells, since the caller's argument could name anybody's.
@@ -63,6 +73,7 @@ import { NextResponse } from "next/server";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { featureOff } from "@/lib/server/flags";
 import { rateLimit } from "@/lib/api/rate-limit";
+import { getServerContext } from "@/lib/server/data";
 import { identityContext, personHeaders } from "@/lib/server/entities/identity-context";
 import { getServerSession } from "@/lib/server/session";
 
@@ -72,6 +83,7 @@ import {
   cancelProjectOfferAction,
   declineIncomingInviteAction,
   inviteMemberAction,
+  leaveProjectAction,
   offerProjectAction,
   revokeInviteAction,
   removeMemberAction,
@@ -663,5 +675,69 @@ describe("addMemberAction", () => {
     expect(await addMemberAction("project_1", "user_dana", "member")).toEqual({ error: null });
     expect(mockPublishEvent).not.toHaveBeenCalled();
     expect(vi.mocked(refresh)).toHaveBeenCalled();
+  });
+});
+
+// A seat given up by its holder: from the organization's Projects page the
+// page is drawn again, the person still standing there; from the project's
+// own Members page they are led to the organization that holds it.
+describe("leaveProjectAction", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getServerSession).mockResolvedValue({
+      userId: "usr_1",
+      email: "member@example.test",
+      accessToken: "at_1",
+    } as never);
+    vi.mocked(rateLimit).mockResolvedValue(null);
+    vi.mocked(identityContext).mockResolvedValue({
+      userId: "usr_1",
+      organizationId: "org_1",
+      role: "member",
+      accessToken: "at_1",
+    });
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+  });
+
+  it("gives up the seat by the memberships lane and draws the Projects page again", async () => {
+    expect(await leaveProjectAction("project_1")).toEqual({ error: null });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://auth.test/internal/v1/memberships/project_1",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    expect(vi.mocked(refresh)).toHaveBeenCalledOnce();
+    expect(mockRedirect).not.toHaveBeenCalled();
+  });
+
+  it("leads out of the project to its organization, the layout drawn again", async () => {
+    await expect(leaveProjectAction("project_1", "project")).rejects.toThrow("REDIRECT:/acme");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://auth.test/internal/v1/memberships/project_1",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    expect(vi.mocked(revalidatePath)).toHaveBeenCalledWith("/", "layout");
+    expect(vi.mocked(refresh)).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the console's door when the organization cannot be read", async () => {
+    vi.mocked(getServerContext).mockResolvedValueOnce(null as never);
+    await expect(leaveProjectAction("project_1", "project")).rejects.toThrow("REDIRECT:/console");
+  });
+
+  it("stays put on a refusal, and goes nowhere", async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 403 }));
+    expect(await leaveProjectAction("project_1", "project")).toEqual({
+      error: "invitation already used",
+    });
+    expect(mockRedirect).not.toHaveBeenCalled();
+    expect(vi.mocked(refresh)).not.toHaveBeenCalled();
+    expect(vi.mocked(revalidatePath)).not.toHaveBeenCalled();
+  });
+
+  it("refuses anything but a project id before asking auth", async () => {
+    const r = await leaveProjectAction("../organization/members/usr_2", "project");
+    expect(r.error).toMatch(/couldn't resolve that project/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockRedirect).not.toHaveBeenCalled();
   });
 });

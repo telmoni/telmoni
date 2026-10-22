@@ -381,9 +381,9 @@ impl Mailer for ComposingMailer {
                  on {product} as {role}. There is nothing to accept: you are a \
                  member of {organization}, and this is one of its projects. {can}\n\n\
                  Open it here:\n{link}\n\n\
-                 If you did not expect this, ask {giver} or the organization's \
-                 owner to take you off the project; leaving {organization} from \
-                 its Overview leaves every project in it. To tell us it was \
+                 If you did not expect this, leave the project from its Members \
+                 page, or ask {giver} to take you off it; leaving {organization} \
+                 from its Overview leaves every project in it. To tell us it was \
                  unwanted, write to {contact}.",
                 can = what_the_level_allows(InvitedTo::Project(role)),
                 contact = self.contact(),
@@ -972,6 +972,7 @@ mod tests {
             "read-only access",
             "nothing to accept",
             "https://app.example.com/acme/support-agent",
+            "leave the project from its Members page",
             SUPPORT,
         ] {
             assert!(

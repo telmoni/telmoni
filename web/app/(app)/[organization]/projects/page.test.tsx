@@ -221,6 +221,39 @@ describe("OrganizationProjectsPage", () => {
     ).toEqual(["/owned/personal-project"]);
   });
 
+  // An admin promoted from a seat still holds its row, and Leave gives it up.
+  it("offers an admin Leave beside a project they hold a seat on", async () => {
+    standingIn("user_admin", founders("admin"), [
+      { projectId: "project_growth", organizationId: "org_founders", role: Role.Member },
+    ]);
+    mockProjects = [
+      { id: "project_growth", slug: "growth", name: "Growth", role: Role.Admin },
+      { id: "project_ops", slug: "ops", name: "Ops", role: Role.Admin },
+    ];
+
+    render(
+      await OrganizationProjectsPage(),
+    );
+
+    expect(screen.getByRole("button", { name: "Leave Growth" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /leave/i })).toHaveLength(1);
+  });
+
+  // The owner holds every project outright and the lane refuses their leave,
+  // so a seat left over from before they owned the organization draws nothing.
+  it("offers the owner no Leave, whatever seat they still hold", async () => {
+    standingIn("user_owner", OWNED, [
+      { projectId: "project_own_1", organizationId: "org_owned", role: Role.Admin },
+    ]);
+
+    render(
+      await OrganizationProjectsPage(),
+    );
+
+    expect(screen.getByText("Personal Project")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /leave/i })).toBeNull();
+  });
+
   it("lists a project held through the organization role, with nothing to leave", async () => {
     standingIn("user_admin", founders("admin"));
     mockProjects = [
