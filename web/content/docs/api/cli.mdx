@@ -281,6 +281,8 @@ With a saved API key, it only removes the key. The key itself stays valid until 
 
 On macOS the CLI keeps its saved login in your login Keychain, as a password item for the service `telmoni`, which macOS encrypts and asks you about before another program reads it. Where the Keychain refuses it, as a locked one does over SSH, the CLI writes the credentials file instead and says so on stderr; with a copy in each, it reads the newer, and the next save the Keychain takes removes the file. The Keychain may ask you something only when stderr is a terminal: without one, as on a CI runner or with stderr redirected, a dialog it would need, to unlock it or to let a rebuilt `telmoni` read the item an older build saved, counts as a refusal. A save then goes to the file, and a login kept only in the Keychain is not read, so the CLI counts as signed out and says `note: the Keychain did not answer (…), so a login saved there is not read`. On Linux it always writes the file.
 
+macOS ties the item to the program that saved it. A CLI built from source is a new program after every build, so macOS asks once whether it may use the item: enter your login password and choose **Always Allow**. Over SSH, where it cannot ask, the CLI says the Keychain did not answer and counts as signed out until you allow it at the Mac or run `telmoni login` again.
+
 The credentials file is written with `0600` permissions (readable and writable only by your OS user) and is not encrypted:
 
 - **macOS**: `~/Library/Application Support/telmoni/credentials.json`
