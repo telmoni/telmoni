@@ -223,27 +223,24 @@ export function ConsoleSidebar({
               key={group.title}
               className={cn(expanded && i > 0 && "mt-6")}
             >
-              {/* The rows come in blocks (`navBlocks`). An unheaded block
-                  after the first stands 24px clear of the one above; a
-                  headed one takes the shape sidebars commonly give a
-                  section — 16px clear of the rows above, its heading a row of
-                  its own, 32px with the label centred, and its first row
-                  straight under — so the label sits closer to its rows than to
-                  the block before, which is what groups them. The label stands
-                  on the icons' left edge (`w-8` centres a 16px icon at 16px,
-                  so its edge is 8px in).
-                  Closed, a rule stands between blocks instead. A project's
-                  Observability and Project blocks are headed, and an
-                  organization's own rows are headed Organization under its
-                  Overview; Account's rail is one unheaded block, the way back
-                  under it saying what it is. A page that is not found hides
-                  every block but the first, as it hides the rows, so no gap
-                  stands over the way back. */}
+              {/* The rows come in blocks (`navBlocks`). An unheaded block stands
+                  24px clear of the one above; a headed one 16px, under a 32px
+                  heading row whose label sits on the icons' left edge, closer to
+                  its rows than to the block before, which is what groups them.
+                  Closed, a rule parts the blocks. The way back heads Account's
+                  rail as a block of its own, and is all a page not found shows. */}
+              <NavRow
+                item={{ title: returnLabel, url: returnUrl, icon: ArrowLeft, isActive: false }}
+                short={returnShort}
+                showLabel={expanded}
+                step
+                className={cn(!steppedIn && "hidden group-has-[[data-console-not-found]]/console:flex")}
+              />
               {navBlocks(group.items).map((block, k) => (
                 <div
                   key={k}
                   className={cn(
-                    k > 0 && expanded && (block.heading ? "mt-4" : "mt-6"),
+                    (k > 0 || steppedIn) && expanded && (block.heading ? "mt-4" : "mt-6"),
                     k > 0 && "group-has-[[data-console-not-found]]/console:hidden",
                   )}
                 >
@@ -254,7 +251,7 @@ export function ConsoleSidebar({
                       </div>
                     )
                   ) : (
-                    k > 0 && <div className="my-2 border-t border-sidebar-border" />
+                    (k > 0 || steppedIn) && <div className="my-2 border-t border-sidebar-border" />
                   )}
                   {block.items.map((item) => (
                     <NavRow
@@ -266,16 +263,6 @@ export function ConsoleSidebar({
                   ))}
                 </div>
               ))}
-              <NavRow
-                item={{ title: returnLabel, url: returnUrl, icon: ArrowLeft, isActive: false }}
-                short={returnShort}
-                showLabel={expanded}
-                step
-                className={cn(
-                  "mt-0.5",
-                  !steppedIn && "hidden group-has-[[data-console-not-found]]/console:flex",
-                )}
-              />
             </div>
           ))}
         </nav>

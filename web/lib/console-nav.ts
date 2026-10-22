@@ -237,7 +237,7 @@ const CORE_GROUPS: GroupSpec[] = [
   },
   {
     title: "Account",
-    // One unheaded block: the way back under it says what this rail is.
+    // One unheaded block: the way back above it says what this rail is.
     items: [
       { title: "Settings", path: "/settings", icon: User, key: "," },
       { title: "Notifications", path: "/notifications", icon: Bell, key: "n" },
