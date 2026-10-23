@@ -7,8 +7,8 @@ The Telmoni CLI (`telmoni`) is the official command-line interface for interacti
 
 ## Installation
 
-<Tabs items={['Shell installer (macOS & Linux)', 'From source (Rust / Cargo)']}>
-  <Tab value="Shell installer (macOS & Linux)">
+<Tabs items={['Shell installer (Linux)', 'From source (Rust / Cargo)']}>
+  <Tab value="Shell installer (Linux)">
     Install the latest release binary. No release has been cut yet, so until
     the first the installer has nothing to fetch: build from source instead.
 
@@ -19,10 +19,10 @@ The Telmoni CLI (`telmoni`) is the official command-line interface for interacti
     The installer downloads the release archive for your platform, checks it against the release's `SHA256SUMS`, and installs `telmoni` into `/usr/local/bin` when that directory is writable or the installer runs as root, and into `~/.local/bin` otherwise. `https://telmoni.com/install.sh` redirects to the latest release's copy of the same script. `TELMONI_INSTALL_DRY_RUN=1` prints the download, extract, mkdir, mv and chmod commands instead of running them. To pin a version or choose the directory, set `TELMONI_VERSION` or `TELMONI_INSTALL_DIR`. The installer goes through `sudo` or `doas` to create a directory that does not exist yet, the default `~/.local/bin` included, and to write into one your user cannot write to:
 
     ```console
-    $ curl -fsSL https://raw.githubusercontent.com/telmoni/telmoni-cli/main/install.sh | TELMONI_VERSION=0.1.0 TELMONI_INSTALL_DIR=/usr/local/bin sh
+    $ curl -fsSL https://raw.githubusercontent.com/telmoni/telmoni-cli/main/install.sh | TELMONI_VERSION=0.1.1 TELMONI_INSTALL_DIR=/usr/local/bin sh
     ```
 
-    Release binaries are built for Apple silicon macOS and x86_64 Linux; the Linux binary links against glibc. On an Intel Mac or ARM64 Linux the installer stops, and on a musl-based system such as Alpine its binary does not run, so you build from source instead.
+    Release binaries are built for x86_64 Linux and link against glibc. On a Mac the installer stops until the macOS build is signed, as it does on ARM64 Linux, and on a musl-based system such as Alpine the binary does not run, so you build from source instead.
 
     Each release's archives and `install.sh` carry build provenance signed through Sigstore, which the GitHub CLI checks a download against:
 
