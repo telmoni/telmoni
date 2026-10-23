@@ -17,13 +17,13 @@
 # pins it: `gcr.io/distroless/nodejsNN-debian13` publishes 22, 24 and 26 only. A
 # mismatch builds and runs until newer output meets the older runtime, and the
 # failure lands in a distroless image with no shell to open.
-FROM node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS deps
+FROM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
 # ── Stage 2: build the standalone bundle ─────────────────────────────────────
-FROM node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS builder
+FROM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS builder
 WORKDIR /app
 # CA roots for any HTTPS the build performs (e.g. next/font fetches).
 RUN apt-get update \
@@ -42,7 +42,7 @@ RUN npm run build
 RUN mkdir -p /app/.next/cache
 
 # ── Stage 3: minimal runtime — distroless node, non-root ─────────────────────
-FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:59c479c9b8c123e66047315c968aa2d35e31ae5149c856e4110a79c8b3563f0b AS runner
+FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:78f07ef1b5ea71ad7c055df15d0dd8997f2d288f9158623c4d4ae3d765b7d50d AS runner
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
