@@ -5,7 +5,7 @@ and tool calls as OpenTelemetry spans, sent to Telmoni and nowhere else. The
 client runs a tracer provider of its own beside whatever OpenTelemetry your
 application already has, sends nothing outside a run, and takes prompts,
 completions and tool payloads off every span before it leaves the process
-unless you ask and the project allows. Go 1.26 or later.
+unless you ask and the project allows. Go 1.26.10 or later.
 
 ## Installation
 

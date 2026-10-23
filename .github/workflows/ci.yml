@@ -258,8 +258,9 @@ jobs:
         if: matrix.sdk == 'go'
         uses: actions/setup-go@v7
         with:
-          # OpenTelemetry's Go SDK at the locked version requires 1.26.
-          go-version: '1.26'
+          # The floor sdk/go/go.mod names, so CI builds on the oldest Go the SDK
+          # allows rather than an older 1.26 the runner has cached.
+          go-version-file: sdk/go/go.mod
 
       - name: Verify the Go SDK
         if: matrix.sdk == 'go'

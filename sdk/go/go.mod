@@ -1,6 +1,8 @@
 module github.com/telmoni/telmoni/sdk/go
 
-go 1.26.0
+// The first 1.26 whose crypto/x509 distrusts the compromised intermediates
+// (CVE-2026-111943).
+go 1.26.10
 
 require (
 	go.opentelemetry.io/otel v1.47.0
