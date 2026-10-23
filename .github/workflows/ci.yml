@@ -177,7 +177,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: crate-ci/typos@v1
+      - uses: crate-ci/typos@v1.51.1
 
   # Web: TypeScript type-check + ESLint + vitest.
   web:
@@ -261,6 +261,7 @@ jobs:
           # The floor sdk/go/go.mod names, so CI builds on the oldest Go the SDK
           # allows rather than an older 1.26 the runner has cached.
           go-version-file: sdk/go/go.mod
+          cache-dependency-path: sdk/go/go.sum
 
       - name: Verify the Go SDK
         if: matrix.sdk == 'go'
