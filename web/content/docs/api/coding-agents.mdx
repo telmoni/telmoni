@@ -19,11 +19,14 @@ tool's input or output, a command, a file's path or the folder you work in.
 Each plugin is built on the [TypeScript SDK](/docs/api/sdks), which it carries
 inside its own package, and sends what the SDKs send, under a
 [project API key](/docs/api/api-keys) holding only the **ingest** scope (**Send
-spans**). The Claude Code, Codex and Cursor plugins need Node.js 22.23.4,
-24.22.1, 26.12.1 or later, October 2026's security releases, with npm on your
-`PATH`; the OpenCode plugin runs inside OpenCode, which
-installs it itself. Each installs from its npm package, as below; to run one
-from a checkout instead, build it in its repository:
+spans**). A self-hosted Telmoni's machine host is read [as the SDKs read
+one](/docs/api/sdks#the-key-on-the-wire): given without a scheme, it is
+`https://`, or `http://` for this machine, the only host plain HTTP goes to.
+The Claude Code, Codex and Cursor plugins need Node.js 22.23.4, 24.22.1,
+26.12.1 or later, October 2026's security releases, with npm on your `PATH`;
+the OpenCode plugin runs inside OpenCode, which installs it itself. Each
+installs from its npm package, as below; to run one from a checkout instead,
+build it in its repository:
 
 ```sh
 git clone https://github.com/telmoni/claude-observability-plugin.git   # or the codex-, opencode- or cursor-observability-plugin
@@ -187,8 +190,9 @@ OpenCode 1, and its `dist` folder on OpenCode 2, which takes no file there.
 
 The key goes in `telmoni.json` beside your OpenCode configuration
 (`~/.config/opencode/telmoni.json`, or in `OPENCODE_CONFIG_DIR` or under
-`XDG_CONFIG_HOME` where you set one), as `{ "apiKey": "telmoni_…" }`; the
-plugin reads it only while it is yours and shut to everyone else
+`XDG_CONFIG_HOME` where you set one), as `{ "apiKey": "telmoni_…" }`, with
+`"endpoint"` beside it for a self-hosted Telmoni; the plugin reads it only
+while it is yours and shut to everyone else
 (`chmod 600`), and never writes it. `TELMONI_API_KEY` and `TELMONI_ENDPOINT` in
 the environment OpenCode starts in come first. Restart OpenCode once the key
 is in place: the plugin reads it as OpenCode loads it. The plugin runs inside
@@ -217,10 +221,12 @@ it adds the plugin's hooks to `~/.cursor/hooks.json`, beside any other tool's.
 Cursor reloads that file as it changes, so your next prompt is recorded.
 `remove` takes the hooks out again and deletes the key and
 `~/.cursor/telmoni/`. For a self-hosted Telmoni, set `TELMONI_ENDPOINT` to its
-machine host when you run `setup`. The hooks run the Node that ran `setup`, and
-the plugin it ran, by their paths, so a Cursor opened from the Dock finds them;
-keep a checkout where it is, and run `setup` again after moving to another
-Node. Its log is `~/.cursor/telmoni/hook.log`.
+machine host when you run `setup`, which keeps it beside the key; one the SDK
+would not send to, `setup` refuses with the SDK's reason, changing nothing.
+The hooks run the Node that ran `setup`, and the plugin it ran, by their paths,
+so a Cursor opened from the Dock finds them; keep a checkout where it is, and
+run `setup` again after moving to another Node. Its log is
+`~/.cursor/telmoni/hook.log`.
 
 Cursor's cloud agents read the repository's hooks alone:
 `telmoni-cursor-observability setup --project` writes `.cursor/hooks.json` there, to commit,
