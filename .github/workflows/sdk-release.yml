@@ -370,10 +370,11 @@ jobs:
           package-manager-cache: false
 
       # Staged alone: npm's trusted publisher allows nothing more, and the
-      # version goes live when the owner approves it there.
+      # version goes live when the owner approves it there. The `./` makes it a
+      # file, where `npm/…` alone names a GitHub repository.
       - name: Stage the tarball the build packed
         if: steps.has.outputs.has == 'false'
-        run: npm stage publish "npm/telmoni-$VERSION.tgz" --provenance --access public --ignore-scripts
+        run: npm stage publish "./npm/telmoni-$VERSION.tgz" --provenance --access public --ignore-scripts
 
   crates:
     name: crates.io
