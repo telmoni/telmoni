@@ -1,0 +1,467 @@
+# Releases the four SDKs from a commit on main that CI has passed. A release is
+# their version bumped in one commit, and nothing else by hand.
+#
+# `workflow_run` after CI, under publish.yml's guard: a push to this
+# repository, never a fork's run from a branch it named main. `plan` reads the
+# version from every file that holds it and asks each registry for it, and only
+# what is still missing runs, so every other push ends green with nothing done.
+#
+# The jobs that tag and publish run in the `release` environment, whose
+# reviewer is the owner; they start together, so one approval sends them all.
+# Each registry trusts this file in that environment and mints the job a token
+# of its own (trusted publishing), so no secret is stored anywhere; npm's only
+# stages it, live once the owner approves it on npmjs.com with a second factor
+# no workflow holds. The build
+# runs where nothing can publish, and the publishing jobs run none of the
+# repository's code. Every action is pinned to a commit: a tag moved under this
+# file would change what runs where publishing is possible.
+name: Release the SDKs
+
+on:
+  workflow_run: # zizmor: ignore[dangerous-triggers]
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: What the version still needs
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      build: ${{ steps.plan.outputs.build }}
+      tag: ${{ steps.plan.outputs.tag }}
+      pypi: ${{ steps.plan.outputs.pypi }}
+      npm: ${{ steps.plan.outputs.npm }}
+      crates: ${{ steps.plan.outputs.crates }}
+      go: ${{ steps.plan.outputs.go }}
+      release: ${{ steps.plan.outputs.release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - name: Read the version, and ask each registry for it
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # The tokens and the provenance name main's tip, `github.sha`, so a
+          # commit main has moved past leaves its release to the newer run.
+          if [ "$SHA" != "$HEAD" ]; then
+            echo "::notice::main has moved on to ${HEAD:0:12}, whose own run releases"
+            exit 0
+          fi
+
+          python3 - "$RUNNER_TEMP/version" <<'PY'
+          import json, re, sys, tomllib
+
+          def text(path):
+              with open(path, encoding="utf-8") as f:
+                  return f.read()
+
+          def line(path, pattern):
+              match = re.search(pattern, text(path), re.M)
+              if match is None:
+                  sys.exit(f"::error file={path}::no version found")
+              return match.group(1)
+
+          lock = json.loads(text("sdk/typescript/package-lock.json"))
+          found = {
+              "sdk/typescript/package.json": json.loads(text("sdk/typescript/package.json"))["version"],
+              "sdk/typescript/package-lock.json": lock["version"],
+              "sdk/typescript/package-lock.json, its root package": lock["packages"][""]["version"],
+              "sdk/typescript/src/version.ts": line("sdk/typescript/src/version.ts", r"^export const VERSION = '([^']+)';$"),
+              "sdk/python/pyproject.toml": tomllib.loads(text("sdk/python/pyproject.toml"))["project"]["version"],
+              "sdk/python/src/telmoni/_version.py": line("sdk/python/src/telmoni/_version.py", r'^__version__ = "([^"]+)"$'),
+              "sdk/rust/Cargo.toml": tomllib.loads(text("sdk/rust/Cargo.toml"))["package"]["version"],
+              "Cargo.lock": next(p["version"] for p in tomllib.loads(text("Cargo.lock"))["package"] if p["name"] == "telmoni" and "source" not in p),
+              "sdk/go/version.go": line("sdk/go/version.go", r'^const Version = "([^"]+)"$'),
+          }
+          if len(set(found.values())) != 1:
+              for path, version in found.items():
+                  print(f"::error::{path} says {version}")
+              sys.exit("::error::the SDKs' versions disagree")
+          version = found["sdk/typescript/package.json"]
+          if not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version):
+              sys.exit(f"::error::{version} is not a plain X.Y.Z, which PyPI and SemVer read alike")
+          with open(sys.argv[1], "w", encoding="utf-8") as f:
+              f.write(version)
+          PY
+          version="$(cat "$RUNNER_TEMP/version")"
+
+          ua="telmoni-sdk-release (https://github.com/$GITHUB_REPOSITORY)"
+          # true when the registry answers 404; any answer but 200 or 404 stops
+          # the run rather than guess.
+          missing() {
+            local code
+            code="$(curl -sS -o /dev/null -w '%{http_code}' -A "$ua" "$1")"
+            case "$code" in
+              200) echo false ;;
+              404) echo true ;;
+              *) echo "::error::$1 answered $code" >&2; return 1 ;;
+            esac
+          }
+          pypi="$(missing "https://pypi.org/pypi/telmoni/$version/json")"
+          npm="$(missing "https://registry.npmjs.org/telmoni/$version")"
+          crates="$(missing "https://crates.io/api/v1/crates/telmoni/$version")"
+          # The proxy's list, never the version itself, whose miss it would cache.
+          go=true
+          if curl -sSf -A "$ua" "https://proxy.golang.org/github.com/telmoni/telmoni/sdk/go/@v/list" | grep -qx "v$version"; then
+            go=false
+          fi
+
+          # The commit a tag names, or nothing when there is no such tag.
+          tagged() {
+            local object
+            object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$1" --jq '.object.type + " " + .object.sha' 2>/dev/null)" || return 0
+            if [ "${object%% *}" = tag ]; then
+              gh api "repos/$GITHUB_REPOSITORY/git/tags/${object##* }" --jq .object.sha
+            else
+              echo "${object##* }"
+            fi
+          }
+          sdk_tag="$(tagged "sdk/v$version")"
+          go_tag="$(tagged "sdk/go/v$version")"
+          tag=false
+          if [ -z "$sdk_tag" ] || [ -z "$go_tag" ]; then tag=true; fi
+
+          release=true
+          if gh release view "sdk/v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then release=false; fi
+          # npm shows a staged version to nobody until the owner approves it, so
+          # it still lacks one this workflow staged; the GitHub release, cut only
+          # once every job passed, says that run is done.
+          staged=false
+          if [ "$npm" = true ] && [ "$release" = false ]; then
+            npm=false
+            staged=true
+            echo "::notice::npm holds $version staged until you approve it on npmjs.com, in the package's Staged Packages tab"
+          fi
+
+          build=false
+          if [ "$pypi" = true ] || [ "$npm" = true ] || [ "$crates" = true ]; then build=true; fi
+          # A tag on another commit while a registry still lacks the version is
+          # that commit's release, half done: finished by re-running its run,
+          # never by publishing this commit's files under its version.
+          for named in "$sdk_tag" "$go_tag"; do
+            if [ -n "$named" ] && [ "$named" != "$SHA" ] && [ "$build" = true ]; then
+              echo "::error::$version is tagged at ${named:0:12} but not yet on every registry: re-run that commit's release, or bump the version"
+              exit 1
+            fi
+          done
+
+          {
+            echo "version=$version"
+            echo "build=$build"
+            echo "tag=$tag"
+            echo "pypi=$pypi"
+            echo "npm=$npm"
+            echo "crates=$crates"
+            echo "go=$go"
+            echo "release=$release"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### The SDKs at $version"
+            echo
+            echo "| Still to do | |"
+            echo "|---|---|"
+            echo "| The tags \`sdk/v$version\` and \`sdk/go/v$version\` | $tag |"
+            echo "| PyPI | $pypi |"
+            echo "| npm | $npm$( [ "$staged" = true ] && echo ', staged: approve it on npmjs.com') |"
+            echo "| crates.io | $crates |"
+            echo "| The Go module proxy | $go |"
+            echo "| The GitHub release | $release |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: Build the packages
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      # No cache restored anywhere here: what a release builds comes from the
+      # commit and the registries alone.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          # CI's, for the locked vitest's engines.
+          node-version: 22
+          package-manager-cache: false
+
+      - name: The TypeScript SDK, verified as CI does and packed
+        run: |
+          set -euo pipefail
+          cd sdk/typescript
+          npm ci
+          npm run verify
+          npm pack --pack-destination "$RUNNER_TEMP"
+          test -f "$RUNNER_TEMP/telmoni-$VERSION.tgz"
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: 0.13.5
+          enable-cache: false
+
+      - name: The Python SDK's sdist and wheel
+        run: |
+          set -euo pipefail
+          uv build sdk/python --out-dir "$RUNNER_TEMP/python"
+          test -f "$RUNNER_TEMP/python/telmoni-$VERSION.tar.gz"
+          test -f "$RUNNER_TEMP/python/telmoni-$VERSION-py3-none-any.whl"
+
+      # Compiled as crates.io will compile it, so publishing need not.
+      - name: The Rust SDK, packaged and verified
+        run: cargo package -p telmoni --locked
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: npm
+          path: ${{ runner.temp }}/telmoni-${{ needs.plan.outputs.version }}.tgz
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: python
+          path: ${{ runner.temp }}/python/
+          if-no-files-found: error
+
+  tag:
+    name: Tag sdk/v${{ needs.plan.outputs.version }}
+    needs: [plan, build]
+    # After the build, beside the publishing jobs, so one approval covers them.
+    if: >-
+      !cancelled() && needs.plan.outputs.tag == 'true' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment:
+      name: release
+      url: https://github.com/${{ github.repository }}/tree/sdk/v${{ needs.plan.outputs.version }}
+    permissions:
+      contents: write # the two tags
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Tag the commit, for the SDKs and for Go's module
+        run: |
+          set -euo pipefail
+          tag() {
+            local object named=""
+            if object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$1" --jq '.object.type + " " + .object.sha' 2>/dev/null)"; then
+              named="${object##* }"
+              if [ "${object%% *}" = tag ]; then
+                named="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$named" --jq .object.sha)"
+              fi
+              if [ "$named" != "$SHA" ]; then
+                echo "::error::$1 already names ${named:0:12}"
+                exit 1
+              fi
+              echo "$1 is in place"
+              return
+            fi
+            object="$(gh api "repos/$GITHUB_REPOSITORY/git/tags" -f tag="$1" -f message="$2" -f object="$SHA" -f type=commit --jq .sha)"
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$1" -f sha="$object" --silent
+            echo "$1 tags ${SHA:0:12}"
+          }
+          tag "sdk/v$VERSION" "The SDKs, $VERSION"
+          tag "sdk/go/v$VERSION" "The Go SDK, $VERSION"
+
+  pypi:
+    name: PyPI
+    needs: [plan, build]
+    if: needs.plan.outputs.pypi == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: release
+      url: https://pypi.org/project/telmoni/${{ needs.plan.outputs.version }}/
+    permissions:
+      id-token: write # PyPI's token, minted for this job, and the attestations
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: python
+          path: dist
+
+      # Attestations signed by default. A file already there is skipped, so a
+      # re-run after a failure part-way uploads only what is missing.
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: dist/
+          skip-existing: true
+
+  npm:
+    name: npm, staged
+    needs: [plan, build]
+    if: needs.plan.outputs.npm == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: release
+      url: https://www.npmjs.com/package/telmoni/v/${{ needs.plan.outputs.version }}
+    permissions:
+      id-token: write # npm's token, minted for this job, and the provenance
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      # A re-run after a publish that went through finds the version there.
+      - name: Has npm the version?
+        id: has
+        run: |
+          set -euo pipefail
+          code="$(curl -sS -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/telmoni/$VERSION")"
+          case "$code" in
+            200) has=true ;;
+            404) has=false ;;
+            *) echo "::error::npm answered $code"; exit 1 ;;
+          esac
+          echo "has=$has" >> "$GITHUB_OUTPUT"
+
+      - if: steps.has.outputs.has == 'false'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: npm
+          path: npm
+
+      # Node 24's npm, 11.15 or later, stages by trusted publishing and attaches
+      # the provenance.
+      - if: steps.has.outputs.has == 'false'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      # Staged alone: npm's trusted publisher allows nothing more, and the
+      # version goes live when the owner approves it there.
+      - name: Stage the tarball the build packed
+        if: steps.has.outputs.has == 'false'
+        run: npm stage publish "npm/telmoni-$VERSION.tgz" --provenance --access public --ignore-scripts
+
+  crates:
+    name: crates.io
+    needs: [plan, build]
+    if: needs.plan.outputs.crates == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: release
+      url: https://crates.io/crates/telmoni/${{ needs.plan.outputs.version }}
+    permissions:
+      contents: read
+      id-token: write # crates.io's token, minted for this job
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - name: Has crates.io the version?
+        id: has
+        run: |
+          set -euo pipefail
+          code="$(curl -sS -o /dev/null -w '%{http_code}' -A "telmoni-sdk-release (https://github.com/$GITHUB_REPOSITORY)" "https://crates.io/api/v1/crates/telmoni/$VERSION")"
+          case "$code" in
+            200) has=true ;;
+            404) has=false ;;
+            *) echo "::error::crates.io answered $code"; exit 1 ;;
+          esac
+          echo "has=$has" >> "$GITHUB_OUTPUT"
+
+      - if: steps.has.outputs.has == 'false'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - if: steps.has.outputs.has == 'false'
+        id: auth
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+
+      # The build job verified it; publishing compiles nothing, so no build
+      # script runs beside the token.
+      - name: Publish the crate
+        if: steps.has.outputs.has == 'false'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish -p telmoni --locked --no-verify
+
+  go:
+    name: The Go module proxy
+    needs: [plan, tag]
+    if: >-
+      !cancelled() && needs.plan.outputs.go == 'true' &&
+      (needs.tag.result == 'success' || needs.tag.result == 'skipped')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions: {}
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      # The proxy fetches a version from its tag the first time it is asked.
+      - name: Ask the proxy for the tagged module
+        run: |
+          set -euo pipefail
+          base="https://proxy.golang.org/github.com/telmoni/telmoni/sdk/go/@v/v$VERSION"
+          for _ in $(seq 1 20); do
+            if curl -sSf -o /dev/null "$base.info" && curl -sSf -o /dev/null "$base.zip"; then
+              echo "the proxy serves v$VERSION"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::the proxy still does not serve v$VERSION"
+          exit 1
+
+  release:
+    name: The GitHub release
+    needs: [plan, tag, pypi, npm, crates, go]
+    if: >-
+      !cancelled() && needs.plan.outputs.release == 'true' &&
+      !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write # the GitHub release
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Not the latest: that stays the server's own release.
+      - name: Cut the release, its notes the SDKs' commits since the last
+        run: |
+          set -euo pipefail
+          previous="$(git describe --tags --abbrev=0 --match 'sdk/v*' "sdk/v$VERSION^" 2>/dev/null || true)"
+          notes="$(git log --format='- %s' "${previous:+$previous..}sdk/v$VERSION" -- sdk/)"
+          gh release create "sdk/v$VERSION" --repo "$GITHUB_REPOSITORY" --verify-tag --latest=false \
+            --title "SDKs $VERSION" --notes "${notes:-No change under sdk/ since ${previous:-the first release}.}"
