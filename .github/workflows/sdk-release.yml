@@ -145,12 +145,17 @@ jobs:
           build=false
           if [ "$pypi" = true ] || [ "$npm" = true ] || [ "$crates" = true ]; then build=true; fi
           # A tag on another commit while a registry still lacks the version is
-          # that commit's release, half done: finished by re-running its run,
-          # never by publishing this commit's files under its version.
+          # that commit's release, half done. A re-run keeps the workflow file it
+          # ran with, so this run finishes it when both tags stand and the
+          # packages' sources are the same at both commits; else it stops.
           for named in "$sdk_tag" "$go_tag"; do
             if [ -n "$named" ] && [ "$named" != "$SHA" ] && [ "$build" = true ]; then
-              echo "::error::$version is tagged at ${named:0:12} but not yet on every registry: re-run that commit's release, or bump the version"
-              exit 1
+              git fetch --quiet --no-tags --depth=1 origin "$named"
+              if [ "$tag" = true ] || ! git diff --quiet "$named" "$SHA" -- sdk Cargo.toml Cargo.lock; then
+                echo "::error::$version is tagged at ${named:0:12} and not yet on every registry, which this commit finishes only with both tags in place and the same SDKs: re-run that commit's release, or bump the version"
+                exit 1
+              fi
+              echo "::notice::$version is tagged at ${named:0:12}, whose SDKs this commit holds unchanged: this run finishes its release"
             fi
           done
 
