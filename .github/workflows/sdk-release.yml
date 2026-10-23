@@ -1,26 +1,25 @@
 # Releases the four SDKs from a commit on main that CI has passed. A release is
 # their version bumped in one commit, and nothing else by hand.
 #
-# `workflow_run` after CI, under publish.yml's guard: a push to this
-# repository, never a fork's run from a branch it named main. `plan` reads the
-# version from every file that holds it and asks each registry for it, and only
-# what is still missing runs, so every other push ends green with nothing done.
+# A push to main starts it, not CI's `workflow_run`, which crates.io's trusted
+# publishing refuses. `plan` reads the version from every file that holds it and
+# asks each registry for it, and only what is still missing runs, so every other
+# push ends green with nothing done; a version still to publish first waits for
+# CI to pass on the same commit, the one the release builds.
 #
 # The jobs that tag and publish run in the `release` environment, whose
 # reviewer is the owner; they start together, so one approval sends them all.
 # Each registry trusts this file in that environment and mints the job a token
 # of its own (trusted publishing), so no secret is stored anywhere; npm's only
 # stages it, live once the owner approves it on npmjs.com with a second factor
-# no workflow holds. The build
-# runs where nothing can publish, and the publishing jobs run none of the
-# repository's code. Every action is pinned to a commit: a tag moved under this
-# file would change what runs where publishing is possible.
+# no workflow holds. The build runs where nothing can publish, and the
+# publishing jobs run none of the repository's code. Every action is pinned to
+# a commit: a tag moved under this file would change what runs where publishing
+# is possible.
 name: Release the SDKs
 
 on:
-  workflow_run: # zizmor: ignore[dangerous-triggers]
-    workflows: [CI]
-    types: [completed]
+  push:
     branches: [main]
 
 permissions: {}
@@ -32,14 +31,11 @@ concurrency:
 jobs:
   plan:
     name: What the version still needs
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 40
     permissions:
       contents: read
+      actions: read # CI's run on this commit
     outputs:
       version: ${{ steps.plan.outputs.version }}
       build: ${{ steps.plan.outputs.build }}
@@ -52,24 +48,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
 
       - name: Read the version, and ask each registry for it
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
-          SHA: ${{ github.event.workflow_run.head_sha }}
-          HEAD: ${{ github.sha }}
+          SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          # The tokens and the provenance name main's tip, `github.sha`, so a
-          # commit main has moved past leaves its release to the newer run.
-          if [ "$SHA" != "$HEAD" ]; then
-            echo "::notice::main has moved on to ${HEAD:0:12}, whose own run releases"
-            exit 0
-          fi
-
           python3 - "$RUNNER_TEMP/version" <<'PY'
           import json, re, sys, tomllib
 
@@ -190,6 +177,30 @@ jobs:
             echo "| The GitHub release | $release |"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # CI starts beside this run, from the same push, and a run it cancels or
+      # fails stops this one: the next push's run, or a re-run, releases.
+      - name: Wait for CI to pass on this commit
+        if: steps.plan.outputs.build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          run=""
+          for _ in $(seq 1 30); do
+            run="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --event push --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+            [ -n "$run" ] && break
+            sleep 10
+          done
+          if [ -z "$run" ]; then
+            echo "::error::CI has no run on ${SHA:0:12}"
+            exit 1
+          fi
+          if ! gh run watch "$run" --repo "$GITHUB_REPOSITORY" --exit-status --interval 30 >/dev/null; then
+            echo "::error::CI did not pass on ${SHA:0:12}: re-run this release once it has, or push again"
+            exit 1
+          fi
+
   build:
     name: Build the packages
     needs: plan
@@ -203,7 +214,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
 
       # No cache restored anywhere here: what a release builds comes from the
@@ -268,7 +278,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       VERSION: ${{ needs.plan.outputs.version }}
-      SHA: ${{ github.event.workflow_run.head_sha }}
+      SHA: ${{ github.sha }}
     steps:
       - name: Tag the commit, for the SDKs and for Go's module
         run: |
@@ -395,7 +405,6 @@ jobs:
       - if: steps.has.outputs.has == 'false'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
 
       - if: steps.has.outputs.has == 'false'
@@ -453,7 +462,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
           persist-credentials: false
 
