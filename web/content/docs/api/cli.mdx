@@ -18,7 +18,7 @@ The Telmoni CLI (`telmoni`) is the official command-line interface for interacti
     The installer downloads the release archive for your platform, checks it against the release's `SHA256SUMS`, and installs `telmoni` into `/usr/local/bin` when that directory is writable or the installer runs as root, and into `~/.local/bin` otherwise. `https://telmoni.com/install.sh` redirects to the latest release's copy of the same script. `TELMONI_INSTALL_DRY_RUN=1` prints the download, extract, mkdir, mv and chmod commands instead of running them. To pin a version or choose the directory, set `TELMONI_VERSION` or `TELMONI_INSTALL_DIR`. The installer goes through `sudo` or `doas` to create a directory that does not exist yet, the default `~/.local/bin` included, and to write into one your user cannot write to:
 
     ```console
-    $ curl -fsSL https://raw.githubusercontent.com/telmoni/telmoni-cli/main/install.sh | TELMONI_VERSION=0.1.1 TELMONI_INSTALL_DIR=/usr/local/bin sh
+    $ curl -fsSL https://raw.githubusercontent.com/telmoni/telmoni-cli/main/install.sh | TELMONI_VERSION=0.1.2 TELMONI_INSTALL_DIR=/usr/local/bin sh
     ```
 
     Release binaries are built for x86_64 Linux and link against glibc. On a Mac the installer stops until the macOS build is signed, as it does on ARM64 Linux, and on a musl-based system such as Alpine the binary does not run, so you build from source instead.
@@ -45,11 +45,10 @@ The Telmoni CLI (`telmoni`) is the official command-line interface for interacti
   </Tab>
 </Tabs>
 
-Verify the installation by checking the version:
+Verify the installation by checking the version, which the CLI prints after its name:
 
 ```console
 $ telmoni --version
-telmoni 0.1.0
 ```
 
 ---
