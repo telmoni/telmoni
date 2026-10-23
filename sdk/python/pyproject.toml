@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "telmoni"
-version = "0.1.0"
+version = "0.1.1"
 description = "Python SDK for Telmoni: an agent's runs, steps, model calls and tool calls as OpenTelemetry spans"
 readme = "README.md"
 authors = [{ name = "Kendrick Lawton" }]
