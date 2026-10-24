@@ -2,7 +2,7 @@
 name = "telmoni"
 # The SDKs' version, the same in all four and tagged `sdk/v…`; the workspace's
 # `0.0.0` is the server's, and never this crate's.
-version = "0.1.1"
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "Rust SDK for Telmoni: an agent's runs, steps, model calls and tool calls as OpenTelemetry spans"

@@ -1,6 +1,6 @@
 {
   "name": "telmoni",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "TypeScript & JavaScript SDK for Telmoni: an agent's runs, steps, model calls and tool calls as OpenTelemetry spans",
   "license": "Apache-2.0",
   "author": "Kendrick Lawton",
