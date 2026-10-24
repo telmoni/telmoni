@@ -45,7 +45,7 @@ export function SiteHeader({ signedIn }: { signedIn: boolean }) {
         <div className="flex items-center px-3.5">
           <Link
             href="/"
-            className="flex min-w-0 items-center gap-2 pl-1.5 text-[17px] leading-none font-bold tracking-tight hover:opacity-70"
+            className="flex min-w-0 items-center gap-1.5 pl-1 text-[17px] leading-none font-bold tracking-tight hover:opacity-70"
           >
             {/* Raised and padded as the console header's are, for the same reasons. */}
             <TelmoniMark className="relative -top-[2.5px] size-6 shrink-0" />
