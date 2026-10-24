@@ -48,16 +48,22 @@ next-env.d.ts
 npm-debug.log*
 
 # ── SDKs (sdk/) ───────────────────────────────────────────────────────────────
-# Four ecosystems in one tree, each vendoring differently; node_modules/ is
-# already ignored above.
+# Four ecosystems in one tree. Each SDK's packaging reads its own manifest,
+# not this file; node_modules/, target/ and coverage/ are ignored above.
 sdk/*/dist/
+sdk/*/build/
+sdk/*/*.tgz
 sdk/*/.venv/
+sdk/*/venv/
 sdk/**/__pycache__/
+sdk/**/*.py[cod]
+sdk/**/*$py.class
+sdk/**/*.egg-info/
 sdk/*/.pytest_cache/
 sdk/*/.mypy_cache/
 sdk/*/.ruff_cache/
-sdk/**/*.egg-info/
-sdk/**/*.pyc
+sdk/go/**/*.test
+sdk/go/**/*.out
 
 # ── Test artifacts ────────────────────────────────────────────────────────────
 coverage/
@@ -69,21 +75,26 @@ blob-report/
 # ── Local ─────────────────────────────────────────────────────────────────────
 # The maintainer's own notes, never repo docs.
 scratch/
-docker-compose.override.yml
-*.pid
-# Root-anchored: a bare `logs/` would also hide a console route named logs.
 *.log
+# Root-anchored: a bare `logs/` would also hide a console route named logs.
 /logs/
+*.pid
+docker-compose.override.yml
 
 # ── Editor / OS ───────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 .zed/
+.fleet/
+*.sublime-project
+*.sublime-workspace
 *.swp
 *.swo
+*~
 *.orig
 *.rej
 *.bak
 .DS_Store
 ._*
 Thumbs.db
+Desktop.ini
