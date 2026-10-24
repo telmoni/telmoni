@@ -65,15 +65,6 @@ const SpansIngestedSchema = z.object({
   more: z.boolean(),
 });
 
-/// A ping landed on one of a project's monitors — a run opened, heard or
-/// ended, a monitor made — so a page reading them draws itself again. The
-/// server publishes it (`crates/telemetry/src/live.rs`) once the ping is in;
-/// the nudge says "read again", never what changed.
-const MonitorsChangedSchema = z.object({
-  organizationId: z.string(),
-  projectId: z.string(),
-});
-
 export const RealtimeEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("ownership:changed"),
@@ -111,10 +102,6 @@ export const RealtimeEventSchema = z.discriminatedUnion("type", [
     type: z.literal("spans:ingested"),
     data: SpansIngestedSchema,
   }),
-  z.object({
-    type: z.literal("monitors:changed"),
-    data: MonitorsChangedSchema,
-  }),
 ]);
 
 export type RealtimeEvent = z.infer<typeof RealtimeEventSchema>;
@@ -129,5 +116,4 @@ export const RealtimeEventDataSchema = {
   "invite:revoked": InviteRefSchema,
   "invite:resolved": InviteRefSchema,
   "spans:ingested": SpansIngestedSchema,
-  "monitors:changed": MonitorsChangedSchema,
 } as const;

@@ -142,7 +142,7 @@ export async function GET(request: NextRequest) {
         // The organization's channel reaches every member, seat or not; a
         // project's nudges, and the run ids in them, go to its readers alone.
         if (
-          (event.type === "spans:ingested" || event.type === "monitors:changed") &&
+          event.type === "spans:ingested" &&
           !readsProject(ctx, event.data.organizationId, event.data.projectId)
         ) {
           return;

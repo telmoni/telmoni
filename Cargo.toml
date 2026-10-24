@@ -83,13 +83,6 @@ redis = { version = "1", default-features = false, features = ["tokio-comp", "co
 # Utilities
 uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-# A monitor's schedule (`crates/telemetry/src/schedule.rs`): the five-field
-# crontab line, read as Vixie cron reads it, and its next due time in the
-# monitor's own zone. `chrono-tz` names the zone; `croner` walks the line,
-# chosen over the `cron` crate, which wants seven fields with seconds, and
-# `saffron`, which knows UTC alone.
-croner    = "4.0"
-chrono-tz = "0.10"
 anyhow = "1"
 thiserror = "2"
 tracing = "0.1"
@@ -183,9 +176,8 @@ map_unwrap_or = "warn"
 unused_async = "warn"
 useless_let_if_seq = "warn"
 unnecessary_wraps = "warn"
-# A `_ =>` over an enum silently absorbs the next variant. Wire enums are this
-# repo's spine, and `IncidentKind`'s wildcard was already labelling a
-# hypothetical third kind "has not reported".
+# A `_ =>` over an enum silently absorbs the next variant, and wire enums are
+# this repo's spine.
 match_wildcard_for_single_variants = "warn"
 # `as` between numeric types truncates, wraps or rounds without a word. Every
 # site in the tree was a seconds count on its way into `make_interval`, cast to

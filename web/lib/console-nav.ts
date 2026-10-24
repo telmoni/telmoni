@@ -9,7 +9,6 @@ import {
   ListTree,
   MessagesSquare,
   Plug,
-  Radar,
   Settings,
   ShieldCheck,
   SquareStack,
@@ -206,14 +205,12 @@ const CORE_GROUPS: GroupSpec[] = [
     // and 8.5), so the console shows the product's shape while the rest is
     // built: each opens a placeholder that the real page replaces, as Traces,
     // Sessions and Users were until theirs landed. The Observability
-    // block is headed because its six rows are the product, and the Project
+    // block is headed because its five rows are the product, and the Project
     // block because the rest of the rail is the project's own housekeeping;
-    // Overview stands alone above both. Monitors is `r`, its radar, since
-    // `g n` is Notifications from anywhere (`lib/keys.ts`).
+    // Overview stands alone above both.
     items: [
       { title: "Overview", path: "", icon: Activity, key: "o" },
-      { title: "Monitors", path: "/monitors", icon: Radar, block: { heading: "Observability" }, key: "r" },
-      { title: "Traces", path: "/traces", icon: ListTree, key: "t" },
+      { title: "Traces", path: "/traces", icon: ListTree, block: { heading: "Observability" }, key: "t" },
       { title: "Sessions", path: "/sessions", icon: MessagesSquare, key: "s" },
       { title: "Users", path: "/users", icon: UsersRound, key: "u" },
       { title: "Alerts", path: "/alerts", icon: BellRing, key: "a" },

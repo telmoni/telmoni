@@ -68,11 +68,7 @@ CREATE TABLE IF NOT EXISTS telemetry.spans
     environment              LowCardinality(String),
     release                  LowCardinality(String),
     tags                     Map(LowCardinality(String), String),
-    -- A run's bounds and sample rate, NULL where it set none and on every
-    -- other kind.
-    bound_stall_after_s      Nullable(UInt32),
-    bound_max_steps          Nullable(UInt32),
-    bound_max_cost_usd       Nullable(Float64),
+    -- A run's sample rate, NULL where it set none and on every other kind.
     sample_rate              Nullable(Float64),
     -- The attributes the field inventory names, and any other whose value is
     -- a number or a boolean; an array is kept as its JSON.

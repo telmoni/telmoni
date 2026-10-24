@@ -25,9 +25,9 @@ const FEED = {
   items: [
     {
       id: "n1",
-      kind: "monitor_discovered",
-      title: "New monitor: nightly-report",
-      body: "A ping named a monitor this project did not have.",
+      kind: "connector_connected",
+      title: "Slack connected",
+      body: "This project's notices will now be posted to #agents in Acme.",
       read_at: null,
       created_at: "2026-10-14T03:00:00Z",
     },

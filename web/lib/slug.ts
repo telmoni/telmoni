@@ -82,8 +82,6 @@ export const RESERVED_ORGANIZATION_SLUGS: ReadonlySet<string> = new Set([
   "organization",
   "organizations",
   "otlp",
-  "ping",
-  "pings",
   "plans",
   "pricing",
   "privacy",

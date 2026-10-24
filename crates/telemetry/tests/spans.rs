@@ -52,9 +52,6 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
         ..span(&project, SpanKind::ModelCall, "chat", 1_500)
     };
     let run = SpanRow {
-        bound_stall_after_s: Some(600),
-        bound_max_steps: Some(40),
-        bound_max_cost_usd: Some(2.5),
         sample_rate: Some(0.25),
         ..span(&project, SpanKind::Run, "nightly-report", 2_000)
     };
@@ -79,7 +76,7 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
              parent_span_id, kind, name, started_at, ended_at, status, error_type, model, \
              provider, input_tokens, output_tokens, cache_read_input_tokens, \
              cache_write_input_tokens, user_id, session_id, environment, release, tags, \
-             bound_stall_after_s, bound_max_steps, bound_max_cost_usd, sample_rate, attributes \
+             sample_rate, attributes \
              FROM telemetry.spans \
              WHERE project_id IN {projects:Array(String)} AND kind IN {kinds:Array(String)} \
              ORDER BY kind",

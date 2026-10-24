@@ -49,29 +49,6 @@ export const fetchAuditEvents = cache(
   },
 );
 
-/** One resource's rows of a project's audit log, newest first: a monitor's
- *  page reads its own recent changes so. */
-export const fetchResourceAudit = cache(
-  async (
-    projectId: string,
-    resourceKind: string,
-    resourceId: string,
-    limit: number,
-  ): Promise<AuditAccess> => {
-    const ctx = await identityContext();
-    if (!ctx) return { kind: "unavailable" };
-    const query = new URLSearchParams({
-      resource_kind: resourceKind,
-      resource_id: resourceId,
-      limit: String(limit),
-    });
-    return listAudit(
-      `${env.SERVER_URL}/internal/v1/audit/projects/${encodeURIComponent(projectId)}?${query}`,
-      projectHeaders(ctx, projectId),
-    );
-  },
-);
-
 export const fetchOrganizationAudit = cache(
   async (limit: number = LIST_LIMIT): Promise<AuditAccess> => {
     const ctx = await identityContext();

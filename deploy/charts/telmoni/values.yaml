@@ -198,8 +198,8 @@ ingress:
   annotations:
     networking.gke.io/certmap: "telmoni-web"
   # The machine lanes — ingest at /otlp/v1/traces, the read API under /v1,
-  # the CLI's under /cli/v1, the ping lane under /ping/v1 and Slack's events
-  # at /webhooks/v1/slack — go to the `server-api` Service: on a host of
+  # the CLI's under /cli/v1 and Slack's events at /webhooks/v1/slack — go to
+  # the `server-api` Service: on a host of
   # their own named here (`api.telmoni.example.com`, then the SDKs'
   # endpoint), whose certificate the map above must hold too; or, empty,
   # under their paths on the console's host, which is then the endpoint.

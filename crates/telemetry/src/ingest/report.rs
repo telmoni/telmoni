@@ -1,6 +1,6 @@
-//! OTLP's partial success: unset when nothing was refused, dropped or left
-//! untracked, else the spans refused counted, and each refusal, drop and run
-//! left untracked named with why, to 4 KiB.
+//! OTLP's partial success: unset when nothing was refused or dropped, else
+//! the spans refused counted, and each refusal and drop named with why, to
+//! 4 KiB.
 
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTracePartialSuccess;
 
@@ -17,9 +17,6 @@ pub struct Report {
     /// The attributes dropped from spans that were kept, in the order they
     /// came.
     pub dropped: Drops,
-    /// The runs whose spans were kept but which no monitor watches, each a
-    /// line saying why: a warning, as OTLP lets one ride with nothing refused.
-    pub notes: Vec<String>,
 }
 
 /// How many drops are kept by name: each line names its span's sixteen hex
@@ -74,15 +71,13 @@ impl Drops {
 }
 
 impl Report {
-    /// Whether no span was refused, no attribute dropped and no run left
-    /// untracked.
+    /// Whether no span was refused and no attribute dropped.
     #[must_use]
     pub fn is_clean(&self) -> bool {
-        self.refused.is_empty() && self.dropped.is_empty() && self.notes.is_empty()
+        self.refused.is_empty() && self.dropped.is_empty()
     }
 
-    /// OTLP's `partial_success`: `None` when nothing was refused, dropped or
-    /// left untracked.
+    /// OTLP's `partial_success`: `None` when nothing was refused or dropped.
     #[must_use]
     pub fn partial_success(&self, content_mode: ContentMode) -> Option<ExportTracePartialSuccess> {
         if self.is_clean() {
@@ -94,24 +89,16 @@ impl Report {
         })
     }
 
-    /// The lines, refusals first and runs left untracked last, cut at
-    /// [`ERROR_MESSAGE_MAX`] with a count of what was left out.
+    /// The lines, refusals first, cut at [`ERROR_MESSAGE_MAX`] with a count
+    /// of what was left out.
     fn message(&self, content_mode: ContentMode) -> String {
-        let lines = self
-            .refused
-            .iter()
-            .map(refused_line)
-            .chain(
-                self.dropped
-                    .named()
-                    .iter()
-                    .map(|d| dropped_line(d, content_mode)),
-            )
-            .chain(self.notes.iter().cloned());
-        cut(
-            lines,
-            self.refused.len() + self.dropped.len() + self.notes.len(),
-        )
+        let lines = self.refused.iter().map(refused_line).chain(
+            self.dropped
+                .named()
+                .iter()
+                .map(|d| dropped_line(d, content_mode)),
+        );
+        cut(lines, self.refused.len() + self.dropped.len())
     }
 }
 
@@ -204,7 +191,6 @@ mod tests {
                 reason: Refusal::NotARun,
             }],
             dropped: dropped(1..2),
-            notes: Vec::new(),
         };
         let partial = report.partial_success(ContentMode::Off).expect("not clean");
         assert_eq!(partial.rejected_spans, 1);
@@ -225,7 +211,6 @@ mod tests {
         let report = Report {
             refused: Vec::new(),
             dropped: dropped(0..200),
-            notes: Vec::new(),
         };
         let partial = report.partial_success(ContentMode::Off).expect("not clean");
         assert_eq!(partial.rejected_spans, 0);
@@ -273,7 +258,6 @@ mod tests {
         let report = Report {
             refused: Vec::new(),
             dropped: dropped(0..100_000),
-            notes: Vec::new(),
         };
         assert_eq!(
             (report.dropped.named().len(), report.dropped.len()),
@@ -301,7 +285,6 @@ mod tests {
         let message = Report {
             refused: Vec::new(),
             dropped: drops,
-            notes: Vec::new(),
         }
         .partial_success(ContentMode::Off)
         .expect("not clean")

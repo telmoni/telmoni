@@ -1,9 +1,10 @@
 //! A project's move lock: it keeps a write that files rows under the
 //! organization it read the project in from landing beside a move of the
 //! project to another organization, or beside its purge. A move or a purge
-//! takes it alone ([`lock_for_move`]) to its commit; a write — a ping, a key
-//! its rotation retires — only tries for it, shared ([`try_hold_in_place`]),
-//! and is turned away at once, holding no connection while it waits.
+//! takes it alone ([`lock_for_move`]) to its commit; a write — an export
+//! making the project's settings row — only tries for it, shared
+//! ([`try_hold_in_place`]), and is turned away at once, holding no
+//! connection while it waits.
 //!
 //! ⚠ Take it before any chain lock ([`crate::audit::lock_chain`]): a write
 //! holding its project may wait for that lock, and the other order

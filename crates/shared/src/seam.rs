@@ -16,8 +16,8 @@ use uuid::Uuid;
 
 use crate::acting::{Acting, ActingKey};
 use crate::{
-    AuditAction, FlagSet, Grants, LaneCeilings, MemberCeiling, MonitorCeiling, NotificationKind,
-    OrganizationId, OrganizationStatus, ProjectId, TelmoniError, UserId,
+    AuditAction, FlagSet, Grants, LaneCeilings, MemberCeiling, NotificationKind, OrganizationId,
+    OrganizationStatus, ProjectId, TelmoniError, UserId,
 };
 
 /// Who may read a document the agent indexes, beyond the tenant its keys
@@ -454,9 +454,9 @@ pub trait Agent: Send + Sync {
 pub trait Telemetry: Send + Sync {
     /// Everything held for an organization's projects, before its row goes.
     ///
-    /// ⚠ Call it holding no lock: the purge waits for pings in flight, which
-    /// may wait on the organization's chain lock, so a caller holding that
-    /// lock deadlocks where Postgres cannot see it.
+    /// ⚠ Call it holding no lock: the purge holds each project alone, and
+    /// waits for the writes holding it in place, so a caller holding a lock
+    /// they want deadlocks where Postgres cannot see it.
     async fn purge_organization(
         &self,
         organization_id: &OrganizationId,
@@ -487,14 +487,12 @@ pub trait Telemetry: Send + Sync {
     /// never the old one's, is what removes them.
     ///
     /// ⚠ **The caller holds the project's move lock alone** across the call
-    /// and to its own commit ([`crate::db::project_move::lock_for_move`]): a
-    /// ping holds its project in place while it writes, and the rotation
-    /// while it retires one of the project's ping keys, so the move waits for
-    /// the writes in flight; a ping kept out files its rows under the
-    /// organization it finds the project in once it is let in, and a key kept
-    /// out is retired there by a later tick. A move given
-    /// up on over its budget may still commit after the caller lets go; its
-    /// settling takes the lock again.
+    /// and to its own commit ([`crate::db::project_move::lock_for_move`]): an
+    /// export making the project's settings row holds the project in place
+    /// while it writes, so the move waits for it, and one kept out files the
+    /// row under the organization it finds the project in once it is let in.
+    /// A move given up on over its budget may still commit after the caller
+    /// lets go; its settling takes the lock again.
     async fn move_project(
         &self,
         project_id: &ProjectId,
@@ -602,23 +600,10 @@ pub trait Entitlements: Send + Sync {
         Ok(None)
     }
 
-    /// How many monitors the organization may hold across its projects;
-    /// `None` is as many as it makes. Asked where one is made, apart from
-    /// [`Entitlements::grants`], as [`Entitlements::member_ceiling`] is —
-    /// within a budget, and dropped where it runs out, so the answer must be
-    /// safe to cancel at any point: a read, never a write.
-    async fn monitor_ceiling(
-        &self,
-        organization_id: &OrganizationId,
-    ) -> Result<Option<MonitorCeiling>, TelmoniError> {
-        let _ = organization_id;
-        Ok(None)
-    }
-
-    /// The machine lanes' ceilings the organization's plan sets — pings a
-    /// minute and data out a day; `None` is none. Asked on every ping and
-    /// every answer the read API gives, so its callers keep the answer a
-    /// minute ([`lane_ceilings`]), and it may read the deployment's own rows.
+    /// The machine lanes' ceiling the organization's plan sets — data out a
+    /// day; `None` is none. Asked on every answer the read API gives, so its
+    /// callers keep the answer a minute ([`lane_ceilings`]), and it may read
+    /// the deployment's own rows.
     async fn lane_ceilings(
         &self,
         organization_id: &OrganizationId,
@@ -678,8 +663,8 @@ pub async fn member_ceiling(
     }
 }
 
-/// What a machine lane asks before it lets a ping, an answer or an export
-/// through: the organization's lane ceilings. An answer that cannot be had is
+/// What a machine lane asks before it lets an answer or an export through:
+/// the organization's lane ceilings. An answer that cannot be had is
 /// no ceiling, logged, as [`admit_new`] lets in what it cannot decide.
 pub async fn lane_ceilings(
     entitlements: &dyn Entitlements,
@@ -690,25 +675,6 @@ pub async fn lane_ceilings(
         Err(e) => {
             tracing::warn!(organization_id = %organization_id, error = %e,
                 "the lane ceilings could not be read; none is held");
-            None
-        }
-    }
-}
-
-/// What the lane that makes a monitor asks before one is made, and before
-/// it takes the organization's chain lock: the organization's monitor
-/// ceiling, which the lane holds its count to ([`MonitorCeiling::admit`])
-/// under the lock. An answer that cannot be had is no ceiling, logged, as
-/// [`admit_new`] lets in what it cannot decide.
-pub async fn monitor_ceiling(
-    entitlements: &dyn Entitlements,
-    organization_id: &OrganizationId,
-) -> Option<MonitorCeiling> {
-    match entitlements.monitor_ceiling(organization_id).await {
-        Ok(ceiling) => ceiling,
-        Err(e) => {
-            tracing::warn!(organization_id = %organization_id, error = %e,
-                "the monitor ceiling could not be read; none is held");
             None
         }
     }

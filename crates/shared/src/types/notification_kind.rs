@@ -27,42 +27,18 @@ pub enum NotificationKind {
     /// or the target refuses posts. The feed carries the news because the
     /// channel that would have carried it is the one that stopped.
     ConnectorDisconnected,
-    /// A monitor made by its first ping, before its owner set it up.
-    /// Telemetry raises it on the project's feed, once a monitor, with the
-    /// slug and which key sent it in the metadata.
-    MonitorDiscovered,
-    /// A ping key its rotation retired, over a week past its last ping — or
-    /// its minting, where none came — with a newer key of its project
-    /// standing. Telemetry raises it on the project's feed, once a key, with
-    /// the key's prefix in the metadata, so a line still carrying the key,
-    /// refused from then on, can be found from the feed rather than from
-    /// cron's mail.
-    PingKeyRetired,
-    /// An incident opened: a monitor moved into failed, stalled, over a bound
-    /// or late, and needs someone. Telemetry raises it on the project's feed,
-    /// once an incident, with the monitor, the cause and what moved it in the
-    /// metadata; a flapping monitor's says so.
-    IncidentOpened,
-    /// An incident resolved: the monitor is healthy again, or its owner
-    /// paused it. Telemetry raises it on the project's feed, once an
-    /// incident, with how it closed and how long it stood in the metadata.
-    IncidentResolved,
 }
 
 impl NotificationKind {
     /// Every kind, in wire order.
     #[must_use]
-    pub const fn all() -> [Self; 9] {
+    pub const fn all() -> [Self; 5] {
         [
             Self::OrganizationAlert,
             Self::MemberAdded,
             Self::MemberLeft,
             Self::ConnectorConnected,
             Self::ConnectorDisconnected,
-            Self::MonitorDiscovered,
-            Self::PingKeyRetired,
-            Self::IncidentOpened,
-            Self::IncidentResolved,
         ]
     }
 }
@@ -75,10 +51,6 @@ impl fmt::Display for NotificationKind {
             Self::MemberLeft => write!(f, "member_left"),
             Self::ConnectorConnected => write!(f, "connector_connected"),
             Self::ConnectorDisconnected => write!(f, "connector_disconnected"),
-            Self::MonitorDiscovered => write!(f, "monitor_discovered"),
-            Self::PingKeyRetired => write!(f, "ping_key_retired"),
-            Self::IncidentOpened => write!(f, "incident_opened"),
-            Self::IncidentResolved => write!(f, "incident_resolved"),
         }
     }
 }
@@ -92,15 +64,10 @@ impl FromStr for NotificationKind {
             "member_left" => Ok(Self::MemberLeft),
             "connector_connected" => Ok(Self::ConnectorConnected),
             "connector_disconnected" => Ok(Self::ConnectorDisconnected),
-            "monitor_discovered" => Ok(Self::MonitorDiscovered),
-            "ping_key_retired" => Ok(Self::PingKeyRetired),
-            "incident_opened" => Ok(Self::IncidentOpened),
-            "incident_resolved" => Ok(Self::IncidentResolved),
             _ => Err(ParseEnumError::new(
                 s,
                 "organization_alert, member_added, member_left, connector_connected, \
-                 connector_disconnected, monitor_discovered, ping_key_retired, \
-                 incident_opened, incident_resolved",
+                 connector_disconnected",
             )),
         }
     }
@@ -111,7 +78,7 @@ mod tests {
     use super::*;
 
     /// The vocabulary, read from the enum rather than restated here.
-    const ALL: [NotificationKind; 9] = NotificationKind::all();
+    const ALL: [NotificationKind; 5] = NotificationKind::all();
 
     /// `all()` is a hand-written array, so nothing but a `match` forces it to
     /// stay complete: a new variant fails to compile here until it is listed.
@@ -123,11 +90,7 @@ mod tests {
                 | NotificationKind::MemberAdded
                 | NotificationKind::MemberLeft
                 | NotificationKind::ConnectorConnected
-                | NotificationKind::ConnectorDisconnected
-                | NotificationKind::MonitorDiscovered
-                | NotificationKind::PingKeyRetired
-                | NotificationKind::IncidentOpened
-                | NotificationKind::IncidentResolved => {}
+                | NotificationKind::ConnectorDisconnected => {}
             }
         }
         let mut seen: Vec<String> = ALL.iter().map(ToString::to_string).collect();
@@ -166,6 +129,8 @@ mod tests {
             "token_rotated",
             "heartbeat_down",
             "heartbeat_recovered",
+            "monitor_discovered",
+            "ping_key_retired",
         ] {
             assert!(
                 legacy.parse::<NotificationKind>().is_err(),

@@ -27,43 +27,43 @@ const CAPTIONS = ["Open source · Apache-2.0", "Built in the open"];
 const CLAIM = "Know when your agents stall, loop or overspend, without sending us a single prompt.";
 const HIGHLIGHT = "stall, loop or overspend";
 const PITCH =
-  "Every run and the steps inside it, every model and tool call with its tokens, latency and cost, the bounds each agent keeps, and the alert when one breaks them. Prompts and completions stay out unless an organization owner turns them on for a project.";
+  "Every run and the steps inside it, every model and tool call with its tokens, latency and cost, and the alert when something goes wrong. Prompts and completions stay out unless an organization owner turns them on for a project.";
 
 // True today; it moves as the roadmap does, and says what is not built yet.
 const STATUS =
-  "What runs today is the foundation — organizations and roles, API keys, the audit log, notifications and the console agent — and the first of the telemetry on it: SDKs in four languages that record an agent's runs, ingest that keeps them as metadata, and a console that reads them as traces, sessions and users and holds each agent to its monitor. Alerts are next, built in the open.";
+  "What runs today is the foundation — organizations and roles, API keys, the audit log, notifications and the console agent — and the first of the telemetry on it: SDKs in four languages that record an agent's runs, ingest that keeps them as metadata, and a console that reads them as traces, sessions and users. Next, built in the open: alert rules and PagerDuty, what each call cost, and content an owner chooses to keep.";
 
 // What the product is for, one cell per goal, in the order they are built:
-// a small motion that says it, a line, then three points.
+// a small motion that says it, a line, what runs today and, last, what is
+// next.
 const GOALS = [
   {
     title: "Telemetry for agents",
     glyph: "spans",
     lead: "Every run and the steps inside it, from any framework.",
     points: [
-      "Runs, steps, model and tool calls over OpenTelemetry's own protocol, or a curl from a crontab",
-      "Tokens, latency, cost and failures, per run, per project, per end user",
-      "Spans kept as long as retention says; hourly totals a year back",
+      "Runs, steps, model and tool calls over OpenTelemetry's own protocol",
+      "Tokens, latency and failures, per run, per project, per end user, a year back",
+      "Next: what each call cost, and spans from any instrumentation that speaks the GenAI conventions",
     ],
   },
   {
     title: "Monitoring",
     glyph: "pulse",
-    lead: "Every agent held to its bounds, and heard when it breaks them.",
+    lead: "Every agent watched, and heard when it goes wrong.",
     points: [
-      "A schedule, a stall timeout, a step cap, a cost cap",
-      "Alerts with routing, severity, deduplication and maintenance windows",
-      "Slack, webhooks and PagerDuty",
+      "Notices in the console's feed, on Slack and through signed webhooks",
+      "Next: alerts on failure rate, latency, tokens or cost over a window, with a warning and an alert threshold, to Slack, webhooks and PagerDuty",
     ],
   },
   {
     title: "Privacy first",
     glyph: "redact",
-    lead: "Metadata by default: timings, statuses, counts, names, costs.",
+    lead: "Metadata by default: timings, statuses, counts and names.",
     points: [
-      "Prompts and completions stay out unless an owner turns them on, per project",
-      "Kept as they arrive, or sealed under a key the server does not hold",
-      "Every read audited, every deletion receipted, every field documented",
+      "Prompts and completions come off a span before it leaves your process, and ingest drops any that arrive",
+      "End users' ids hashed under each project's own key by default; every field documented, every change audited",
+      "Next: content kept as an owner turns it on, or sealed under a key the server does not hold; every read audited, every deletion receipted",
     ],
   },
 ] as const;
@@ -154,7 +154,7 @@ const WHY = [
   },
   {
     title: "OpenTelemetry native",
-    body: "Our SDKs today, on OpenTelemetry's own SDK and protocol; any instrumentation that speaks the GenAI conventions, and a curl from a crontab, next.",
+    body: "Our SDKs today, on OpenTelemetry's own SDK and protocol; any instrumentation that speaks the GenAI conventions next.",
   },
   {
     title: "Built in the open",
@@ -166,17 +166,17 @@ const FAQ = [
   {
     question: "What is Telmoni?",
     answer:
-      "A privacy-first telemetry and monitoring platform for AI agents: every run and the steps inside it, every model and tool call with its tokens, latency and cost, the bounds each agent keeps, and the alert when one breaks them. It is open source, Apache-2.0, and runs as one binary you can self-host.",
+      "A privacy-first telemetry and monitoring platform for AI agents: every run and the steps inside it, every model and tool call with its tokens, latency and cost, and the alert when something goes wrong. It is open source, Apache-2.0, and runs as one binary you can self-host.",
   },
   {
     question: "What runs today?",
     answer:
-      "The foundation — organizations and roles, API keys, the audit log, notifications, the console agent and the CLI — and the first of the telemetry: the SDKs record an agent's runs, ingest keeps them as metadata, and the console reads them as traces, sessions and users. Monitors and alerts are next.",
+      "The foundation — organizations and roles, API keys, the audit log, notifications, the console agent and the CLI — and the first of the telemetry: the SDKs record an agent's runs, ingest keeps them as metadata, and the console reads them as traces, sessions and users. Next: alert rules and PagerDuty, what each call cost, and content an owner chooses to keep.",
   },
   {
     question: "What does it store?",
     answer:
-      "Metadata: timings, statuses, counts, model and tool names, costs. Prompts, completions and tool payloads are not sent by the SDKs and are dropped at the door. A content mode that keeps them, for an organization owner to turn on per project, is planned; today the only mode is off.",
+      "Metadata: timings, statuses, counts, and model and tool names. Prompts, completions and tool payloads are not sent by the SDKs and are dropped at the door. A content mode that keeps them, for an organization owner to turn on per project, is planned; today the only mode is off.",
   },
   {
     question: "Can I self-host it?",
@@ -236,8 +236,8 @@ function markerOver(words: readonly number[], kept: number) {
 }
 
 // A goal's motion, in a cell's corner: spans arriving one under another, a
-// schedule's pulse, and a document's words going under a marker line by line
-// while the field kept on each line stays. Decorative, and still under
+// pulse heard in turn, and a document's words going under a marker line by
+// line while the field kept on each line stays. Decorative, and still under
 // reduced motion.
 type GlyphKind = "spans" | "pulse" | "redact" | "hosts" | "lock";
 

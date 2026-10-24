@@ -168,8 +168,8 @@ pub(crate) async fn purge_organization_siblings(
 const PROJECT_PURGE_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The longest telemetry's project purge or move may take: a purge records
-/// a delete on two ClickHouse tables and waits at most two seconds for the
-/// pings in flight; a move rewrites the project's rows. The transfer's
+/// a delete on two ClickHouse tables and waits at most two seconds for an
+/// export in flight; a move rewrites the project's settings row. The transfer's
 /// accept calls the move before notifications' purge, while its own
 /// transaction holds both organizations' locks, and the two together stay
 /// under the console's ten seconds.

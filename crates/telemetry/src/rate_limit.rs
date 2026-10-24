@@ -1,10 +1,9 @@
 //! Rate limits over Redis: GCRA on one timestamp per subject — the time its
 //! next request is theoretically allowed — so a limit of 600 a minute costs
 //! one key, not 600 entries; held in this process, per subject, while Redis
-//! does not answer. Ingest holds one per project, the door the binary puts
-//! in front of the machine lanes one per source and one per credential, and
-//! the ping lane one per organization at the rate its plan sets
-//! ([`RateLimit::wait_at`]), each a [`RateLimit`].
+//! does not answer. Ingest holds one per project, and the door the binary
+//! puts in front of the machine lanes one per source and one per credential,
+//! each a [`RateLimit`].
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -91,10 +90,8 @@ impl RateLimit {
     }
 
     /// `subject`'s request against `per_minute` a minute, `burst` of them at
-    /// once, rather than the limit's own: `None` to let it in, or how long
-    /// to wait, in milliseconds. For a rate each subject has its own of, as
-    /// each organization's plan sets its pings.
-    pub async fn wait_at(
+    /// once: `None` to let it in, or how long to wait, in milliseconds.
+    async fn wait_at(
         &self,
         redis: &Redis,
         subject: &str,
@@ -246,10 +243,10 @@ mod tests {
         );
     }
 
-    /// A plan's rate with a burst of its own: two a minute, twelve at once,
-    /// then one each thirty seconds.
+    /// A rate with a burst of its own: two a minute, twelve at once, then
+    /// one each thirty seconds.
     #[test]
-    fn a_rate_and_burst_of_the_subjects_own_meter_as_given() {
+    fn a_rate_and_burst_of_their_own_meter_as_given() {
         let limit = RateLimit::new("test:plan", 600);
         let interval = emission_interval_ms(2);
         let burst = interval * 12;
@@ -258,7 +255,7 @@ mod tests {
             assert_eq!(
                 limit.admit_locally("org", now, interval, burst),
                 Decision::Admit,
-                "ping {n} of the burst"
+                "request {n} of the burst"
             );
         }
         assert_eq!(

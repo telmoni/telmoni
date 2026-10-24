@@ -114,15 +114,13 @@ const LANE_WRITTEN: &[&str] = &["notifications.delivery_attempts", "agent.erasur
 /// The tables the runtime role writes but never deletes from: its
 /// maintenance lane purges them with their project or organization. A
 /// project's settings row removed by a request would set its content mode
-/// back with no audit row; a ping key is retired, never deleted, its row
-/// the record of what the key was.
-const LANE_DELETED: &[&str] = &["telemetry.project_settings", "telemetry.ping_keys"];
+/// back with no audit row.
+const LANE_DELETED: &[&str] = &["telemetry.project_settings"];
 
 /// The tables the runtime role only adds to: its maintenance lane drains
 /// them, landing or settling each row and removing it. A request that
-/// rewrote or removed an outbox row could unsay a finished run or a notice
-/// before it is handed on, or an uninstall before it is sent.
-const LANE_DRAINED: &[&str] = &["telemetry.outbox", "notifications.uninstalls"];
+/// rewrote or removed one could unsay an uninstall before it is sent.
+const LANE_DRAINED: &[&str] = &["notifications.uninstalls"];
 
 /// The runtime roles that write audit rows, each auditing its own writes on
 /// the organization's chain: every module's but the agent's, which changes
@@ -546,52 +544,6 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
         (
             "telemetry_maintenance",
             "telemetry.trace_views",
-            &["SELECT", "DELETE"],
-        ),
-        // The purges delete a project's or an organization's monitors; the
-        // project's own scope makes, changes and deletes them. (A transfer
-        // rewrites `organization_id` alone: a column grant, not this.)
-        (
-            "telemetry_maintenance",
-            "telemetry.monitors",
-            &["SELECT", "DELETE"],
-        ),
-        // The ping lane resolves a key outside any tenant, as auth resolves
-        // an API key; the purges delete them. A key is minted and retired in
-        // the project's own scope. (A transfer rewrites `organization_id`,
-        // and a ping's resolution `last_ping_at`, alone: column grants, not
-        // this.)
-        (
-            "telemetry_maintenance",
-            "telemetry.ping_keys",
-            &["SELECT", "DELETE"],
-        ),
-        // The purges delete a project's open runs with it; the ticker reads
-        // them across tenants to see one gone quiet (2.11). A run is opened,
-        // heard and ended in the project's own scope. (A transfer rewrites
-        // `organization_id` alone: a column grant, not this.)
-        (
-            "telemetry_maintenance",
-            "telemetry.open_runs",
-            &["SELECT", "DELETE"],
-        ),
-        // The purges take an incident with its monitor, by the cascade; the
-        // ticker reads them across tenants for a flapping one whose monitor
-        // has held its state an hour. An incident is opened and resolved in
-        // the project's own scope. (A transfer rewrites `organization_id`
-        // alone: a column grant, not this.)
-        (
-            "telemetry_maintenance",
-            "telemetry.incidents",
-            &["SELECT", "DELETE"],
-        ),
-        // The outbox loop leases rows across tenants and deletes each once
-        // it has landed; a lease is two columns, granted as columns. A row is
-        // written in the project's own scope. (A transfer rewrites
-        // `organization_id` alone: a column grant, not this.)
-        (
-            "telemetry_maintenance",
-            "telemetry.outbox",
             &["SELECT", "DELETE"],
         ),
     ];

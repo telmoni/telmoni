@@ -43,28 +43,12 @@ pub const CLOCK_DRIFT_MAX_SECS: i64 = 55 * 60;
 /// since the Unix epoch, as a span's times are written.
 pub const SENT_AT: &str = "telmoni-sent-at";
 
-// ── The ping lane ────────────────────────────────────────────────────────────
-
-/// The most of a ping's body that is read. A body is content — what 4.1
-/// keeps on an `on` project, and what is dropped until then, the answer
-/// saying so — and is never read past this, so a crontab's `curl` with a log
-/// attached costs a bounded read; the ping counts whatever its body.
-pub const PING_BODY_MAX_BYTES: usize = 100 * 1024;
-/// A run's progress as its `/checkpoint`s reported it, on its finished span:
-/// its steps, and its spend in US dollars, under names of ours, since no
-/// convention names what a crontab reports.
-pub const RUN_STEPS: &str = "telmoni.run.steps";
-pub const RUN_COST_USD: &str = "telmoni.run.cost_usd";
-/// A `/fail` ping's exit code, under the conventions' own name for a
-/// process's.
-pub const EXIT_CODE: &str = "process.exit.code";
-
 // ── Caps, each named after its field ─────────────────────────────────────────
 
 /// A span's `name`, a run's and a tool's among them: room for a model call's
 /// `<operation> <model>`, the longest operation and a model at its cap.
 pub const NAME_MAX: usize = longest(&MODEL_OPERATIONS) + 1 + MODEL_MAX;
-/// `agent`, the monitor a run counts under: the monitors' and open runs' CHECK.
+/// `agent`, the agent a run is of.
 pub const AGENT_MAX: usize = 128;
 /// `error_type`: the exception's class.
 pub const ERROR_TYPE_MAX: usize = 128;
@@ -109,7 +93,7 @@ pub const SPAN_FIXED_BYTES: u32 = 64;
 
 /// The run a span belongs to: a UUID, the same on every span of the run.
 pub const RUN_ID: &str = "telmoni.run_id";
-/// The run's agent: the monitor it is counted under.
+/// The run's agent.
 pub const AGENT: &str = "telmoni.agent";
 /// The end user a span was for, as the application's own id for them:
 /// OpenTelemetry's own name, so an application instrumented without our SDK
@@ -120,20 +104,12 @@ pub const AGENT: &str = "telmoni.agent";
 pub const USER_ID: &str = "user.id";
 /// A tag: `telmoni.tag.<key>`.
 pub const TAG_PREFIX: &str = "telmoni.tag.";
-/// A run's stall timeout, in seconds.
-pub const BOUND_STALL_AFTER_S: &str = "telmoni.bound.stall_after_s";
-/// A run's step cap.
-pub const BOUND_MAX_STEPS: &str = "telmoni.bound.max_steps";
-/// A run's cost cap, in US dollars.
-pub const BOUND_MAX_COST_USD: &str = "telmoni.bound.max_cost_usd";
 /// The share of runs the SDK sends.
 pub const SAMPLE_RATE: &str = "telmoni.sample_rate";
 /// Set on a span the agent cancelled.
 pub const CANCELLED: &str = "telmoni.cancelled";
 /// `sealed` on a span whose content our SDK encrypted (4.2).
 pub const CONTENT_MARK: &str = "telmoni.content";
-/// The span of no duration that opens a run, sent at once; never a row.
-pub const RUN_START: &str = "telmoni.run.start";
 /// Our SDKs' instrumentation scope.
 pub const SCOPE: &str = "telmoni";
 /// The resource attribute our SDKs name themselves by.
@@ -307,9 +283,6 @@ pub const FIELDS: &[&str] = &[
     RUN_ID,
     AGENT,
     USER_ID,
-    BOUND_STALL_AFTER_S,
-    BOUND_MAX_STEPS,
-    BOUND_MAX_COST_USD,
     SAMPLE_RATE,
     CANCELLED,
     CONTENT_MARK,
@@ -350,7 +323,7 @@ pub fn is_field(key: &str) -> bool {
 pub enum ReadOn {
     /// Every span of a run, the run among them.
     EverySpan,
-    /// The run's own span, and the `telmoni.run.start` that opens it.
+    /// The run's own span.
     Run,
     /// A model call.
     ModelCall,
@@ -525,27 +498,6 @@ pub const INVENTORY: &[InventoryRow] = &[
         "tags, under <key>",
         Needs::AnyMode,
         "up to 32 tags; a key up to 64 characters, a value up to 256",
-    ),
-    row(
-        BOUND_STALL_AFTER_S,
-        ReadOn::Run,
-        "the column bound_stall_after_s",
-        Needs::AnyMode,
-        "seconds, a whole number",
-    ),
-    row(
-        BOUND_MAX_STEPS,
-        ReadOn::Run,
-        "the column bound_max_steps",
-        Needs::AnyMode,
-        "a whole number",
-    ),
-    row(
-        BOUND_MAX_COST_USD,
-        ReadOn::Run,
-        "the column bound_max_cost_usd",
-        Needs::AnyMode,
-        "US dollars",
     ),
     row(
         SAMPLE_RATE,

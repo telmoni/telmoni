@@ -3,7 +3,7 @@
 //! organization in one transaction. Every guard around that move — who may
 //! offer, to whom, where it may land, what ends an offer, what comes with the
 //! project and what stays behind — who is mailed each change, and its races
-//! with a removal and with the pings writing into the project.
+//! with a removal and with an export filing the project's settings.
 #![allow(
     clippy::indexing_slicing,
     reason = "a panicking helper is a failing test"
@@ -1757,10 +1757,10 @@ async fn the_accept_holds_the_source_chain_while_the_settings_move(pool: PgPool)
 
 /// ⚠ **Every move of the settings holds the project alone**: a refused
 /// accept's, the settling of it, an accepted one's and an owner's move, each
-/// under the project's move lock. Telemetry's pings hold their project in
-/// place while they write, so none writes beside a move — which would miss a
-/// ping's rows not yet committed, or move a row the ping then updates, a 500
-/// — and one that waited it out files its rows where the project went.
+/// under the project's move lock. An export making the project's settings
+/// row holds the project in place while it writes, so none files the row
+/// beside a move, under the organization the project is leaving; one kept
+/// out is tried again and files it where the project went.
 #[sqlx::test]
 async fn every_move_of_the_settings_holds_the_project_alone(pool: PgPool) {
     let h = staffed_project(&pool).await;
@@ -1830,22 +1830,19 @@ async fn every_move_of_the_settings_holds_the_project_alone(pool: PgPool) {
     );
 }
 
-/// ⚠ **A transfer waits for the pings in flight before it takes a chain
-/// lock.** A ping holds its project in place from the start of its
-/// transaction and may wait for its organization's chain lock meanwhile, so
-/// an accept that took a chain lock and then waited on that ping would wait
-/// in a circle, which Postgres breaks by aborting one side.
+/// A transfer waits for an export in flight before it takes a chain lock, so
+/// the organizations' other writers are not held behind the export meanwhile.
 #[sqlx::test]
-async fn a_transfer_waits_for_the_pings_in_flight_before_it_takes_a_chain_lock(pool: PgPool) {
+async fn a_transfer_waits_for_an_export_in_flight_before_it_takes_a_chain_lock(pool: PgPool) {
     let h = staffed_project(&pool).await;
     assert_eq!(
         offer(&pool, &h, OWNER, &h.source, ADMIN).await.0,
         StatusCode::OK
     );
-    let mut ping = pool.begin().await.expect("a ping's transaction");
+    let mut export = pool.begin().await.expect("an export's transaction");
     assert!(
         project_move::try_hold_in_place(
-            &mut ping,
+            &mut export,
             &ProjectId::try_new(h.project.as_str()).expect("the project's id"),
         )
         .await
@@ -1863,22 +1860,22 @@ async fn a_transfer_waits_for_the_pings_in_flight_before_it_takes_a_chain_lock(p
             OrganizationId::try_new(organization.as_str()).expect("an organization's id");
         assert!(
             !chain_lock_held(&pool, &organization).await,
-            "the accept took a chain lock before it waited for the ping"
+            "the accept took a chain lock before it waited for the export"
         );
     }
-    ping.commit().await.expect("the ping commits");
+    export.commit().await.expect("the export commits");
     let (status, body) = accept.await.expect("the accept answers");
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(organization_of_project(&pool, &h.project).await, h.admins);
 }
 
-/// A transfer a check refuses never waits on a ping: the project's move lock
-/// is taken once every check under the organizations' locks has passed, so
-/// a refusal is answered while a ping holds the project, and the
-/// organizations' lanes are not held behind the ping meanwhile — an accept's
+/// A transfer a check refuses never waits on an export: the project's move
+/// lock is taken once every check under the organizations' locks has passed,
+/// so a refusal is answered while an export holds the project, and the
+/// organizations' lanes are not held behind the export meanwhile — an accept's
 /// offer spent, an owner's move out of an organization being deleted.
 #[sqlx::test]
-async fn a_transfer_a_check_refuses_never_waits_on_a_ping(pool: PgPool) {
+async fn a_transfer_a_check_refuses_never_waits_on_an_export(pool: PgPool) {
     let h = staffed_project(&pool).await;
     assert_eq!(
         offer(&pool, &h, OWNER, &h.source, ADMIN).await.0,
@@ -1886,10 +1883,10 @@ async fn a_transfer_a_check_refuses_never_waits_on_a_ping(pool: PgPool) {
     );
     assert_eq!(cancel(&pool, &h, OWNER, &h.source).await.0, StatusCode::OK);
     let second = found(&pool, OWNER, "Second").await;
-    let mut ping = pool.begin().await.expect("a ping's transaction");
+    let mut export = pool.begin().await.expect("an export's transaction");
     assert!(
         project_move::try_hold_in_place(
-            &mut ping,
+            &mut export,
             &ProjectId::try_new(h.project.as_str()).expect("the project's id"),
         )
         .await
@@ -1901,7 +1898,7 @@ async fn a_transfer_a_check_refuses_never_waits_on_a_ping(pool: PgPool) {
         accept(&pool, &h, ADMIN, &h.admins, None),
     )
     .await
-    .expect("the refused accept waited on the ping");
+    .expect("the refused accept waited on the export");
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     set_pending(&pool, &h.source, true).await;
     let (status, body) = tokio::time::timeout(
@@ -1909,17 +1906,17 @@ async fn a_transfer_a_check_refuses_never_waits_on_a_ping(pool: PgPool) {
         move_into(&pool, &h, OWNER, &h.source, &second),
     )
     .await
-    .expect("the refused move waited on the ping");
+    .expect("the refused move waited on the export");
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
-    ping.rollback().await.expect("the ping ends");
+    export.rollback().await.expect("the export ends");
     assert_eq!(organization_of_project(&pool, &h.project).await, h.source);
 }
 
-/// A transfer kept waiting by a ping past the role's `lock_timeout` — a ping
-/// holding its project across a slow answer — is a 409 to try again, not a
-/// 500, and moves nothing; the next try, the ping gone, goes through.
+/// A transfer kept waiting by an export past the role's `lock_timeout` — an
+/// export holding its project across a slow answer — is a 409 to try again,
+/// not a 500, and moves nothing; the next try, the export gone, goes through.
 #[sqlx::test]
-async fn a_transfer_kept_waiting_by_a_ping_is_a_conflict(pool: PgPool) {
+async fn a_transfer_kept_waiting_by_an_export_is_a_conflict(pool: PgPool) {
     let h = staffed_project(&pool).await;
     assert_eq!(
         offer(&pool, &h, OWNER, &h.source, ADMIN).await.0,
@@ -1937,10 +1934,10 @@ async fn a_transfer_kept_waiting_by_a_ping_is_a_conflict(pool: PgPool) {
     .execute(&pool)
     .await
     .expect("a lock_timeout for every new connection");
-    let mut ping = pool.begin().await.expect("a ping's transaction");
+    let mut export = pool.begin().await.expect("an export's transaction");
     assert!(
         project_move::try_hold_in_place(
-            &mut ping,
+            &mut export,
             &ProjectId::try_new(h.project.as_str()).expect("the project's id"),
         )
         .await
@@ -1961,7 +1958,7 @@ async fn a_transfer_kept_waiting_by_a_ping_is_a_conflict(pool: PgPool) {
         "{body}"
     );
     assert_eq!(organization_of_project(&pool, &h.project).await, h.source);
-    ping.rollback().await.expect("the ping ends");
+    export.rollback().await.expect("the export ends");
     assert_eq!(
         accept(&pool, &h, ADMIN, &h.admins, None).await.0,
         StatusCode::OK

@@ -87,8 +87,6 @@ pub const ORGANIZATION_RESERVED: &[&str] = &[
     "organization",
     "organizations",
     "otlp",
-    "ping",
-    "pings",
     "plans",
     "pricing",
     "privacy",

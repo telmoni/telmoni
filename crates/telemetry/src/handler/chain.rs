@@ -14,10 +14,8 @@ use sqlx::PgPool;
 use telmoni_shared::acting::Acting;
 use telmoni_shared::audit::lock_chain;
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
-use telmoni_shared::seam::{self, Auth, Entitlements};
-use telmoni_shared::{
-    AuthError, MonitorCeiling, OrganizationId, OrganizationStatus, ProjectId, TelmoniError,
-};
+use telmoni_shared::seam::Auth;
+use telmoni_shared::{AuthError, OrganizationId, OrganizationStatus, ProjectId, TelmoniError};
 
 /// The longest a change waits for the organization's chain lock: the
 /// role's own `lock_timeout` on a tier, set on the transaction too, so that a
@@ -29,7 +27,7 @@ const CHAIN_LOCK_WAIT: Duration = Duration::from_secs(2);
 /// How long a change waits for an answer from across a seam: auth's second
 /// answer while it holds the organization's chain lock, well inside the two
 /// seconds every other writer in the organization waits for that lock before
-/// giving up, and the plan's ceiling before it takes the lock ([`ceiling`]).
+/// giving up.
 const ANSWER_BUDGET: Duration = Duration::from_secs(1);
 
 /// Postgres's `lock_not_available`: a `lock_timeout` ran out.
@@ -93,9 +91,8 @@ pub(crate) async fn hold(
     Ok(now)
 }
 
-/// The organization's chain lock alone, taken in `tx` and let go with it,
-/// for a write nobody is acting as a person for: a monitor its first ping
-/// makes. Refused where the lock is not had in time, so a ping waits on no
+/// The organization's chain lock alone, taken in `tx` and let go with it.
+/// Refused where the lock is not had in time, so a change waits on no
 /// transfer for longer than any other writer would.
 pub(crate) async fn lock(
     project_id: &ProjectId,
@@ -118,9 +115,7 @@ pub(crate) async fn lock(
 
 /// The organization's chain lock, taken in `tx` and let go with it, where it
 /// is had within [`CHAIN_LOCK_WAIT`]; `false` where it is not, `tx` then
-/// aborted for the caller to roll back. For a write a later attempt does as
-/// well as this one — a key its rotation retires, which the next tick finds
-/// again — where [`lock`] refuses the caller who is waiting on an answer.
+/// aborted for the caller to roll back.
 pub(crate) async fn lock_in_time(
     organization_id: &OrganizationId,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
@@ -200,37 +195,6 @@ pub(crate) async fn open(auth: &dyn Auth, organization_id: &OrganizationId) -> b
                  as open"
             );
             true
-        }
-    }
-}
-
-/// The organization's monitor ceiling, for a change to read before it takes
-/// the lock — only the count under the lock needs it — and within the same
-/// second auth's second answer gets. A deployment answers it from a database
-/// of its own, through a pool a burst can spend, and a read that waited on
-/// that under the lock would hold every other writer in the organization to
-/// the lock's two seconds and a 409 for as long as it waited; before the
-/// lock, and bounded, it costs this change a second at most — and a move of
-/// the project that second, where the change is a ping, which holds its
-/// project in place meanwhile. An answer not had in time is no ceiling,
-/// logged, as the seam answers one it cannot read.
-pub(crate) async fn ceiling(
-    entitlements: &dyn Entitlements,
-    organization_id: &OrganizationId,
-) -> Option<MonitorCeiling> {
-    match tokio::time::timeout(
-        ANSWER_BUDGET,
-        seam::monitor_ceiling(entitlements, organization_id),
-    )
-    .await
-    {
-        Ok(ceiling) => ceiling,
-        Err(_) => {
-            tracing::warn!(
-                organization_id = %organization_id,
-                "telemetry: the monitor ceiling was not answered in time; none is held"
-            );
-            None
         }
     }
 }

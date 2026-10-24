@@ -37,7 +37,6 @@ use crate::ingest::batch::{self, BatchError, SenderClock};
 use crate::ingest::claims::{self, Claim, Guard};
 use crate::ingest::decode::{self, DecodeError, Encoding};
 use crate::ingest::report::Report;
-use crate::ingest::runs;
 use crate::live;
 use crate::{AppState, db, hashing};
 
@@ -194,7 +193,7 @@ async fn write(
     // settings row, so the purges find every project with spans.
     let storage = hashing::storage_for(state, key).await?;
     let received_at = Utc::now().trunc_subsecs(6);
-    let mut batch = batch::read(&request, &key.project_id, received_at, sender, &|raw| {
+    let batch = batch::read(&request, &key.project_id, received_at, sender, &|raw| {
         storage.store(raw)
     })
     .map_err(batch_error)?;
@@ -219,28 +218,14 @@ async fn write(
     );
     // The organization's open consoles are told, so a page reading this
     // project's spans draws itself again — unless nothing was kept or the
-    // project is gone — and the runs the export reports on are kept open or
-    // ended on their monitors. The answer waits for the settling, not the
-    // telling.
-    let reports = !batch.rows.is_empty() || !batch.starts.is_empty();
-    if reports && settle_written(state, &key.project_id).await {
-        if !batch.rows.is_empty() {
-            live::spans_ingested(
-                Arc::clone(state),
-                key.organization_id.as_str(),
-                key.project_id.as_str(),
-                batch.rows.iter().map(|row| row.run_id),
-            );
-        }
-        let runs = runs::settle(state, key, &batch).await;
-        if runs.moved {
-            live::monitors_changed(
-                Arc::clone(state),
-                key.organization_id.as_str(),
-                key.project_id.as_str(),
-            );
-        }
-        batch.report.notes = runs.notes;
+    // project is gone. The answer waits for the check, not the telling.
+    if !batch.rows.is_empty() && settle_written(state, &key.project_id).await {
+        live::spans_ingested(
+            Arc::clone(state),
+            key.organization_id.as_str(),
+            key.project_id.as_str(),
+            batch.rows.iter().map(|row| row.run_id),
+        );
     }
     let body = response_body(encoding, &batch.report, content_mode)?;
     Ok((content_mode, body))

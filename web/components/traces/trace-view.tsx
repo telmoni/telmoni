@@ -686,11 +686,6 @@ function SpanDetail({
   const tokens = span.input_tokens + span.output_tokens;
   const run = span.kind === SpanKind.Run;
   const tags = Object.entries(span.tags);
-  const bounds = [
-    span.bound_stall_after_s !== null && `stall after ${formatDuration(span.bound_stall_after_s * 1000)}`,
-    span.bound_max_steps !== null && `${formatCount(span.bound_max_steps)} steps at most`,
-    span.bound_max_cost_usd !== null && `$${span.bound_max_cost_usd} at most`,
-  ].filter((b): b is string => typeof b === "string");
 
   return (
     <section aria-label="The span chosen" className={cn("flex flex-col", className)}>
@@ -862,7 +857,6 @@ function SpanDetail({
                     </span>
                   </Field>
                 )}
-                {bounds.length > 0 && <Field label="Bounds">{bounds.join("; ")}</Field>}
                 {span.sample_rate !== null && span.sample_rate !== 1 && (
                   <Field label="Sample rate">{span.sample_rate}</Field>
                 )}

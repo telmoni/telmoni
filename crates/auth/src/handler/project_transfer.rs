@@ -724,10 +724,9 @@ async fn lock_transfer_chains(
 }
 
 /// The project's move lock, alone, for a move of its rows. A wait the role's
-/// `lock_timeout` ends — a ping holding the project across a slow answer, or
-/// the rotation retiring one of its ping keys across a wait for its chain
-/// lock — is a 409 to try again, not the 500 a database that failed would
-/// be.
+/// `lock_timeout` ends — an export holding the project while it files the
+/// project's settings row — is a 409 to try again, not the 500 a database
+/// that failed would be.
 async fn lock_project_for_move(
     conn: &mut sqlx::PgConnection,
     project_id: &ProjectId,
@@ -765,10 +764,10 @@ async fn lock_project_for_move(
 /// ⚠ **The project's move lock, alone, once every check has passed and
 /// before any chain lock**, held to the commit
 /// ([`telmoni_shared::db::project_move`]): an accept a check refuses never
-/// waits on a ping, the accept waits for the pings writing into the project
-/// — as long as the role's `lock_timeout` lets it, then a 409 — and a ping
-/// kept out meanwhile files its rows under the organization it then finds
-/// the project in.
+/// waits on an export, the accept waits for an export filing the project's
+/// settings row — as long as the role's `lock_timeout` lets it, then a 409 —
+/// and an export kept out meanwhile is tried again, filing the row under the
+/// organization it then finds the project in.
 ///
 /// ⚠ **Telemetry's move, then notifications' purge, then the commit, and a
 /// step that fails moves nothing.** Telemetry's move of the project's
@@ -923,8 +922,8 @@ pub async fn accept(
     }
 
     // The project's move lock once every check has passed, so an accept a
-    // check refuses never waits on a ping, and before the chain locks, which a
-    // ping holding the project may be waiting for.
+    // check refuses never waits on an export, and before the chain locks, so
+    // that none is held while it does.
     lock_project_for_move(&mut tx, &project_id).await?;
     lock_transfer_chains(&mut tx, &source, &destination).await?;
     emit_project_transfer_audits(
@@ -1117,7 +1116,7 @@ pub async fn move_project(
     }
 
     // Where the accept takes it, for the accept's reasons: no refused move
-    // waits on a ping, and no chain lock is held while one does.
+    // waits on an export, and no chain lock is held while one does.
     lock_project_for_move(&mut tx, &project_id).await?;
     lock_transfer_chains(&mut tx, &source, &destination).await?;
     emit_project_move_audits(
@@ -1297,12 +1296,10 @@ async fn move_purge_and_commit(
 /// project, under both organizations' locks, as an accept takes them, and
 /// moves the settings there under the project's move lock — right whichever
 /// happened, a retry's accept in between included; a project moved on since,
-/// beyond both, is the later accept's to settle. A ping let in between the
-/// two moves, or a ping key the rotation retired then, filed its rows under
-/// the organization the first one named: its telemetry rows go back with
-/// the rest, while what it recorded on that organization's chain, and a
-/// notice delivered there, stay. The
-/// request settles them itself before it answers, so a rollout that waits for
+/// beyond both, is the later accept's to settle. An export let in between
+/// the two moves filed the project's settings row under the organization
+/// the first one named: the row goes back with the rest. The request settles
+/// telemetry itself before it answers, so a rollout that waits for
 /// it waits for that too; a settling that fails, or a request dropped before
 /// it could, leaves the guard armed, and its drop tries again in a task of
 /// its own ([`SETTLE_RETRIES`]).
@@ -1407,8 +1404,8 @@ impl Settle {
         if standing.organization_id != self.source && standing.organization_id != self.destination {
             return Ok(());
         }
-        // So that no ping writes beside the move, which would miss its rows
-        // or have its updates refused.
+        // So that no export files the project's settings row beside the
+        // move, under the organization the project is leaving.
         lock_project_for_move(&mut tx, &self.project_id).await?;
         crate::handler::deletion::move_project_telemetry(
             &self.state,

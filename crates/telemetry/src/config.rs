@@ -1,7 +1,7 @@
 //! Telemetry configuration, loaded once from the environment.
 
 use telmoni_shared::Redacted;
-use telmoni_shared::config::{env_parse, optional_base_url, require};
+use telmoni_shared::config::{optional_base_url, require};
 
 /// Loaded-once telemetry configuration.
 #[derive(Clone, Debug)]
@@ -27,15 +27,12 @@ pub struct Config {
     /// digest and its rate limits, shared by every replica. Required, though
     /// nothing dials it at boot: a replica that cannot reach it stands in.
     pub redis_url: Redacted,
-    /// Seconds between the monitors' ticks (`TELEMETRY_TICK_SECS`, 1 to 60,
-    /// default 5): how long past its moment a monitor may go unmarked.
-    pub tick_secs: u64,
 }
 
 impl Config {
     /// Build the configuration from process environment variables.
     pub fn from_env() -> anyhow::Result<Self> {
-        let config = Self {
+        Ok(Self {
             database_url: require("TELEMETRY_DATABASE_URL")?.into(),
             clickhouse_url: require("TELEMETRY_CLICKHOUSE_URL")?.into(),
             telemetry_kek: require("TELEMETRY_KEK")?.into(),
@@ -44,13 +41,6 @@ impl Config {
             metadata_api_base: optional_base_url("METADATA_API_BASE")
                 .unwrap_or_else(|| "http://metadata.google.internal".to_owned()),
             redis_url: require("REDIS_URL")?.into(),
-            tick_secs: env_parse("TELEMETRY_TICK_SECS", 5)?,
-        };
-        // Schedules run down to a minute; a slower tick could first look
-        // after the next due time.
-        if !(1..=60).contains(&config.tick_secs) {
-            anyhow::bail!("TELEMETRY_TICK_SECS must be between 1 and 60");
-        }
-        Ok(config)
+        })
     }
 }

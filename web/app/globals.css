@@ -817,8 +817,8 @@ html.a11y-no-letter-keys [data-letter-key] {
 }
 
 /* ── The splash's motion (`components/mark.tsx`, `app/page.tsx`) ──────────────
-   Small movements that say what the product does: spans arriving, a
-   schedule's pulse, a prompt's words under a marker while its fields stay,
+   Small movements that say what the product does: spans arriving, an
+   agent's pulse, a prompt's words under a marker while its fields stay,
    machines' lights coming on, a lock opening; and the page's own: a
    highlighter stroke drawn, a block rising into view. A loop that waits for
    its turn waits on its first frame (`backwards`): drawn whole until then,
@@ -883,7 +883,7 @@ html.a11y-no-letter-keys [data-letter-key] {
   @variant motion-reduce { animation: none; transform: none; }
 }
 
-/* A schedule's pulse: three runs heard in turn, a ring going out from each,
+/* An agent's pulse: three runs heard in turn, a ring going out from each,
    then a rest, on the lights' rhythm above. Tailwind's `animate-ping` repeats
    every second, so the first and last dots, a second apart, fell on the same
    beat. The ring is unseen between rounds and while it waits for its first. */

@@ -1,7 +1,6 @@
 //! What telemetry tells the console's open pages, so one draws itself again
 //! rather than polls: a project's spans arrived (`spans:ingested`, naming the
-//! batch's runs and nothing a span holds), or a ping landed on one of its
-//! monitors (`monitors:changed`). Sent on the organization's channel, which
+//! batch's runs and nothing a span holds). Sent on the organization's channel, which
 //! the console's stream passes on to the project's readers alone
 //! (`web/app/api/v1/events/route.ts`); on a task of its own, never waited on,
 //! and lost while Redis stands in, the page's Refresh being there for that.
@@ -25,9 +24,8 @@ fn channel(organization_id: &str) -> String {
 /// met; past it `more` tells the page its run may be among the rest.
 const RUNS_MAX: usize = 32;
 
-/// The events' names, as the console's `RealtimeEventSchema` knows them.
+/// The event's name, as the console's `RealtimeEventSchema` knows it.
 const SPANS_INGESTED: &str = "spans:ingested";
-const MONITORS_CHANGED: &str = "monitors:changed";
 
 #[derive(Debug, Serialize)]
 struct Event<D> {
@@ -44,14 +42,6 @@ struct Spans<'a> {
     project_id: &'a str,
     runs: Vec<String>,
     more: bool,
-}
-
-/// A ping heard on one of a project's monitors.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Monitors<'a> {
-    organization_id: &'a str,
-    project_id: &'a str,
 }
 
 /// The batch's runs as the nudge names them: each once, in the order the
@@ -91,18 +81,6 @@ fn spans_message(
     })
 }
 
-/// The nudge for a ping heard on one of `project_id`'s monitors: the JSON the
-/// console reads.
-fn monitors_message(organization_id: &str, project_id: &str) -> serde_json::Result<String> {
-    serde_json::to_string(&Event {
-        kind: MONITORS_CHANGED,
-        data: Monitors {
-            organization_id,
-            project_id,
-        },
-    })
-}
-
 /// Tell the organization's open consoles that a batch of `project_id`'s is
 /// in. Nothing here waits: the message is built now, cheaply, and published
 /// on a task of its own (`publish`), so the export's answer is never held
@@ -124,25 +102,6 @@ pub fn spans_ingested(
             project_id = %project_id,
             error = %error,
             "ingest: the console's nudge did not encode"
-        ),
-    }
-}
-
-/// Tell the organization's open consoles that one of `project_id`'s monitors
-/// or runs changed — a ping landed, or the ticker moved one — once the
-/// change is in; the caller is never held for Redis (`publish`).
-pub fn monitors_changed(state: Arc<AppState>, organization_id: &str, project_id: &str) {
-    match monitors_message(organization_id, project_id) {
-        Ok(message) => publish(
-            state,
-            organization_id,
-            message,
-            "telling the console of monitors changed",
-        ),
-        Err(error) => tracing::debug!(
-            project_id = %project_id,
-            error = %error,
-            "ping: the console's nudge did not encode"
         ),
     }
 }
@@ -219,20 +178,6 @@ mod tests {
         assert_eq!(
             parsed["data"]["more"], false,
             "the cap itself is not past it"
-        );
-    }
-
-    /// A ping's nudge names the project and nothing of the ping.
-    #[test]
-    fn a_pings_nudge_names_the_project_alone() {
-        let message = monitors_message("org_1", "project_1").expect("encodes");
-        let parsed: Value = serde_json::from_str(&message).expect("json");
-        assert_eq!(parsed["type"], "monitors:changed");
-        assert_eq!(parsed["data"]["organizationId"], "org_1");
-        assert_eq!(parsed["data"]["projectId"], "project_1");
-        assert_eq!(
-            parsed["data"].as_object().map(serde_json::Map::len),
-            Some(2)
         );
     }
 

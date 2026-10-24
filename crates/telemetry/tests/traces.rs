@@ -247,7 +247,6 @@ async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
                 user_id: "user-a".into(),
                 session_id: "conv-1".into(),
                 tags: vec![("team".into(), "search".into())],
-                bound_max_steps: Some(40),
                 sample_rate: Some(1.0),
                 ..span_at(
                     &p.ours,
@@ -865,7 +864,6 @@ async fn a_trace_is_its_runs_spans_in_order_and_another_projects_run_is_not_here
     assert_eq!(run["name"], "nightly-report");
     assert_eq!(run["parent_span_id"], "");
     assert_eq!(run["tags"], serde_json::json!({ "team": "search" }));
-    assert_eq!(run["bound_max_steps"], 40);
     assert_eq!(run["sample_rate"], 1.0);
     assert_eq!(run["user_id"], "user-a");
     assert_eq!(run["environment"], "production");

@@ -46,27 +46,8 @@ pub struct ListParams {
     /// "nothing has happened in your organization". Now it is a 400.
     action: Option<AuditAction>,
     resource_kind: Option<TelmoniResourceKind>,
-    /// One resource's rows: a monitor's page reads its own changes so.
-    resource_id: Option<String>,
     cursor: Option<Uuid>,
     limit: Option<i64>,
-}
-
-/// The longest resource id the lanes narrow to: longer than any this
-/// platform writes, so a longer one is a mistake said, not an empty page.
-const RESOURCE_ID_MAX: usize = 128;
-
-impl ListParams {
-    /// The resource id asked for, refused as a 400 when no row could hold it.
-    fn resource_id(&self) -> Result<Option<&str>, TelmoniError> {
-        match self.resource_id.as_deref() {
-            Some(id) if id.is_empty() || id.chars().count() > RESOURCE_ID_MAX => Err(
-                AuthError::BadRequest(format!("resource_id is 1 to {RESOURCE_ID_MAX} characters"))
-                    .into(),
-            ),
-            id => Ok(id),
-        }
-    }
 }
 
 /// `GET /internal/v1/audit/projects/{project_id}` — the events written inside one
@@ -106,7 +87,6 @@ pub async fn list_project_audit(
             actor: params.actor.as_deref(),
             action: params.action,
             resource_kind: params.resource_kind,
-            resource_id: params.resource_id()?,
             cursor: params.cursor,
             limit,
         },
@@ -151,7 +131,6 @@ pub async fn list_organization_audit(
             actor: params.actor.as_deref(),
             action: params.action,
             resource_kind: params.resource_kind,
-            resource_id: params.resource_id()?,
             cursor: params.cursor,
             limit,
         },

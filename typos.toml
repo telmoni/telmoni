@@ -24,9 +24,6 @@ extend-ignore-re = [
   "\\b(SELECT|INSERT|UPDATE|DELETE|UNIQUE|CHECK)s\\b",
   # External CamelCase product name — typos splits it and flags "Strat" ≠ "Start".
   "OptionStrat",
-  # The ordinal suffixes a schedule's words spell ("1st", "22nd"): typos reads
-  # the bare "nd" as "and".
-  "\"th\", \"st\", \"nd\", \"rd\"",
   # A maintainer's own words, quoted verbatim in three places (AGENTS.md, the
   # `analytics_opt_in` column comment, and analytics_preference.rs). They
   # misspell "analysis", and the misspelling STAYS: the line is attributed and

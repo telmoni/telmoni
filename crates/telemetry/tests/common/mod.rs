@@ -25,9 +25,9 @@ use telmoni_shared::seam::{
 };
 use telmoni_shared::test_util::{ServiceRole, chain_lock_held, service_pool};
 use telmoni_shared::{
-    ApiKeyScope, AuthError, AuthzError, FlagSet, Grants, LaneCeilings, MonitorCeiling,
-    NotificationKind, OrganizationId, OrganizationRole, OrganizationStatus, Paused, ProjectId,
-    Role, SpanKind, SpanStatus, TelmoniError, UserId,
+    ApiKeyScope, AuthError, AuthzError, FlagSet, Grants, LaneCeilings, NotificationKind,
+    OrganizationId, OrganizationRole, OrganizationStatus, Paused, ProjectId, Role, SpanKind,
+    SpanStatus, TelmoniError, UserId,
 };
 use telmoni_telemetry::store::{self, SpanRow, Store};
 use telmoni_telemetry::{AppState, Config};
@@ -63,28 +63,18 @@ pub(crate) struct AuthStub {
     /// deletion is marked, or one gone.
     standings: Mutex<HashMap<OrganizationId, Option<OrganizationStatus>>>,
     /// A project auth says where it is this many more times before it is
-    /// deleted (`None`) or moves to the organization named.
-    change_after: Mutex<Option<(ProjectId, usize, Option<OrganizationId>)>>,
+    /// deleted.
+    forget_after: Mutex<Option<(ProjectId, usize)>>,
     /// How many times auth was asked where projects are.
     homes_asked: AtomicUsize,
     /// Whether asking where a project is fails, as it does while auth cannot
     /// be reached.
     homes_fail: AtomicBool,
-    /// How many more asks of where a project is are answered before every
-    /// one fails.
-    homes_fail_after: Mutex<Option<usize>>,
-    /// Whether asking an organization's standing fails.
-    standing_fail: AtomicBool,
-    /// The advisory locks held at each ask of an organization's standing, as
+    /// The advisory locks held at each ask of where projects are, as
     /// `chain_probe`'s session sees them.
-    standing_held: Mutex<Vec<i64>>,
-    /// The advisory locks held at each ask of where projects are, seen as
-    /// `standing_held` is.
     homes_held: Mutex<Vec<i64>>,
-    /// How long each answer of an organization's standing takes to come, as
-    /// an auth whose pool is spent takes.
-    standing_delay: Mutex<Duration>,
-    /// How long each answer of where projects are takes to come.
+    /// How long each answer of where projects are takes to come, as an auth
+    /// whose pool is spent takes.
     homes_delay: Mutex<Duration>,
 }
 
@@ -211,57 +201,13 @@ impl AuthStub {
         self
     }
 
-    /// Moves `project`, its seats and keys, to `organization`, as a
-    /// transfer's commit does.
-    pub(crate) fn move_to(&self, project: &ProjectId, organization: &OrganizationId) -> &Self {
-        for ((_, seated), (held_by, _, _)) in self
-            .seats
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .iter_mut()
-        {
-            if *seated == project.to_string() {
-                *held_by = organization.clone();
-            }
-        }
-        for key in self
-            .keys
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .values_mut()
-        {
-            if key.project_id == *project {
-                key.organization_id = organization.clone();
-            }
-        }
-        self
-    }
-
     /// Say where `project` is `asks` more times, then forget it: its deletion
     /// committing between one ask and the next.
     pub(crate) fn forget_after(&self, project: &ProjectId, asks: usize) -> &Self {
         *self
-            .change_after
+            .forget_after
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some((project.clone(), asks, None));
-        self
-    }
-
-    /// Say where `project` is `asks` more times, then move it to
-    /// `organization`: a transfer of it committing between one ask and the
-    /// next.
-    pub(crate) fn move_after(
-        &self,
-        project: &ProjectId,
-        organization: &OrganizationId,
-        asks: usize,
-    ) -> &Self {
-        *self
-            .change_after
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some((project.clone(), asks, Some(organization.clone())));
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((project.clone(), asks));
         self
     }
 
@@ -276,32 +222,6 @@ impl AuthStub {
         self
     }
 
-    /// Answer where projects are `asks` more times, then fail every ask: auth
-    /// lost between one ask and the next.
-    pub(crate) fn failing_homes_after(&self, asks: usize) -> &Self {
-        *self
-            .homes_fail_after
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(asks);
-        self
-    }
-
-    /// Fail every ask of an organization's standing from now on, or stop
-    /// failing.
-    pub(crate) fn failing_standing(&self, failing: bool) -> &Self {
-        self.standing_fail.store(failing, Ordering::SeqCst);
-        self
-    }
-
-    /// How many advisory locks were held at each ask of an organization's
-    /// standing, in order, where the stub probes.
-    pub(crate) fn standing_held(&self) -> Vec<i64> {
-        self.standing_held
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
-    }
-
     /// How many advisory locks were held at each ask of where projects are,
     /// in order, where the stub probes.
     pub(crate) fn homes_held(&self) -> Vec<i64> {
@@ -309,16 +229,6 @@ impl AuthStub {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
-    }
-
-    /// Answer every ask of an organization's standing `delay` late from now
-    /// on, `Duration::ZERO` for at once.
-    pub(crate) fn delaying_standing(&self, delay: Duration) -> &Self {
-        *self
-            .standing_delay
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = delay;
-        self
     }
 
     /// Answer every ask of where projects are `delay` late from now on,
@@ -490,32 +400,18 @@ impl Auth for AuthStub {
         if !delay.is_zero() {
             tokio::time::sleep(delay).await;
         }
-        {
-            let mut fail_after = self
-                .homes_fail_after
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            match fail_after.as_mut() {
-                Some(0) => {
-                    *fail_after = None;
-                    self.homes_fail.store(true, Ordering::SeqCst);
-                }
-                Some(asks) => *asks -= 1,
-                None => {}
-            }
-        }
         if self.homes_fail.load(Ordering::SeqCst) {
             return Err(TelmoniError::Internal("auth cannot be reached".into()));
         }
-        let changed = {
-            let mut change_after = self
-                .change_after
+        let forgotten = {
+            let mut forget_after = self
+                .forget_after
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            match change_after.as_mut() {
-                Some((project, asks, _)) if projects.contains(project) => {
+            match forget_after.as_mut() {
+                Some((project, asks)) if projects.contains(project) => {
                     if *asks == 0 {
-                        change_after.take()
+                        forget_after.take()
                     } else {
                         *asks -= 1;
                         None
@@ -524,14 +420,8 @@ impl Auth for AuthStub {
                 _ => None,
             }
         };
-        match changed {
-            Some((project, _, None)) => {
-                self.forget(&project);
-            }
-            Some((project, _, Some(organization))) => {
-                self.move_to(&project, &organization);
-            }
-            None => {}
+        if let Some((project, _)) = forgotten {
+            self.forget(&project);
         }
         let seats = self
             .seats
@@ -568,19 +458,6 @@ impl Auth for AuthStub {
         &self,
         organization_id: &OrganizationId,
     ) -> Result<Option<OrganizationStatus>, TelmoniError> {
-        if let Some(probe) = &self.chain_probe {
-            Self::record_locks_held(probe, &self.standing_held).await;
-        }
-        let delay = *self
-            .standing_delay
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if !delay.is_zero() {
-            tokio::time::sleep(delay).await;
-        }
-        if self.standing_fail.load(Ordering::SeqCst) {
-            return Err(TelmoniError::Internal("auth cannot be reached".into()));
-        }
         Ok(self
             .standings
             .lock()
@@ -629,163 +506,22 @@ impl Entitlements for PausedOrganization {
     }
 }
 
-/// Entitlements under which every organization takes in anything, recording
-/// at each ask of `organization`'s standing how many advisory locks the
-/// suite's database held then: a ping asks the standing of the organization
-/// its project moved to with nothing held, so no move waits on the answer.
-pub(crate) struct StandingAsked {
-    pool: PgPool,
-    organization: OrganizationId,
-    held: Mutex<Vec<i64>>,
-}
-
-impl StandingAsked {
-    pub(crate) fn of(pool: &PgPool, organization: &OrganizationId) -> Arc<Self> {
-        Arc::new(Self {
-            pool: pool.clone(),
-            organization: organization.clone(),
-            held: Mutex::new(Vec::new()),
-        })
-    }
-
-    /// How many advisory locks were held at each ask, in order.
-    pub(crate) fn held(&self) -> Vec<i64> {
-        self.held
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
-    }
-}
+/// A plan's data out a day, in bytes, for every organization: what billing
+/// answers for one on a plan.
+pub(crate) struct DataOut(pub(crate) u64);
 
 #[async_trait]
-impl Entitlements for StandingAsked {
-    async fn grants(&self, organization_id: &OrganizationId) -> Result<Grants, TelmoniError> {
-        if *organization_id == self.organization {
-            let held: i64 = sqlx::query_scalar(
-                "SELECT count(*) FROM pg_locks
-                  WHERE locktype = 'advisory' AND granted
-                    AND database = (SELECT oid FROM pg_database
-                                     WHERE datname = current_database())",
-            )
-            .fetch_one(&self.pool)
-            .await
-            .expect("count the advisory locks held");
-            self.held
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(held);
-        }
+impl Entitlements for DataOut {
+    async fn grants(&self, _organization_id: &OrganizationId) -> Result<Grants, TelmoniError> {
         Ok(Grants::unlimited())
-    }
-}
-
-/// Entitlements under which every organization holds `limit` monitors,
-/// answered after `after`, with whether the organization's chain lock was
-/// held at each ask recorded in order, probed from `pool` as auth's stub
-/// probes it: the lanes read the ceiling before the lock, never under it.
-pub(crate) struct Ceiling {
-    pool: PgPool,
-    limit: u32,
-    after: Duration,
-    asked: Mutex<Vec<bool>>,
-}
-
-impl Ceiling {
-    pub(crate) fn of(pool: &PgPool, limit: u32) -> Arc<Self> {
-        Self::answered_after(pool, limit, Duration::ZERO)
-    }
-
-    pub(crate) fn answered_after(pool: &PgPool, limit: u32, after: Duration) -> Arc<Self> {
-        Arc::new(Self {
-            pool: pool.clone(),
-            limit,
-            after,
-            asked: Mutex::new(Vec::new()),
-        })
-    }
-
-    /// Whether the organization's chain lock was held at each ask, in order.
-    pub(crate) fn asked(&self) -> Vec<bool> {
-        self.asked
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
-    }
-}
-
-#[async_trait]
-impl Entitlements for Ceiling {
-    async fn grants(&self, organization_id: &OrganizationId) -> Result<Grants, TelmoniError> {
-        let _ = organization_id;
-        Ok(Grants::unlimited())
-    }
-
-    async fn monitor_ceiling(
-        &self,
-        organization_id: &OrganizationId,
-    ) -> Result<Option<MonitorCeiling>, TelmoniError> {
-        let held = chain_lock_held(&self.pool, organization_id).await;
-        self.asked
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(held);
-        tokio::time::sleep(self.after).await;
-        Ok(Some(MonitorCeiling {
-            limit: self.limit,
-            entitlement: "pro".into(),
-            detail: "Move to Pro for more.".into(),
-        }))
-    }
-}
-
-/// A plan's lane ceilings, and where given its monitors: what billing
-/// answers for an organization on a plan, the numbers as a suite needs them.
-pub(crate) struct PlanLanes {
-    pub(crate) pings_per_minute: u32,
-    pub(crate) data_out_per_day: u64,
-    pub(crate) monitors: Option<u32>,
-}
-
-impl PlanLanes {
-    /// Hobby's numbers: two pings a minute, 5 MB a day, five monitors.
-    pub(crate) const fn hobby() -> Self {
-        Self {
-            pings_per_minute: 2,
-            data_out_per_day: 5_000_000,
-            monitors: Some(5),
-        }
-    }
-}
-
-#[async_trait]
-impl Entitlements for PlanLanes {
-    async fn grants(&self, organization_id: &OrganizationId) -> Result<Grants, TelmoniError> {
-        let _ = organization_id;
-        Ok(Grants::unlimited())
-    }
-
-    async fn monitor_ceiling(
-        &self,
-        organization_id: &OrganizationId,
-    ) -> Result<Option<MonitorCeiling>, TelmoniError> {
-        let _ = organization_id;
-        Ok(self.monitors.map(|limit| MonitorCeiling {
-            limit,
-            entitlement: "pro".into(),
-            detail: "Move to Pro for more monitors.".into(),
-        }))
     }
 
     async fn lane_ceilings(
         &self,
-        organization_id: &OrganizationId,
+        _organization_id: &OrganizationId,
     ) -> Result<Option<LaneCeilings>, TelmoniError> {
-        let _ = organization_id;
         Ok(Some(LaneCeilings {
-            pings_per_minute: self.pings_per_minute,
-            data_out_per_day: self.data_out_per_day,
-            entitlement: "pro".into(),
-            detail: "Move to Pro for more pings.".into(),
+            data_out_per_day: self.0,
         }))
     }
 }
@@ -803,16 +539,6 @@ pub(crate) struct LoggedNotice {
     pub(crate) dedup_key: Option<String>,
 }
 
-/// How the fake answers a notice, where a suite has it fail: as notifications
-/// refusing one, or unable to write one.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum Answer {
-    #[default]
-    Taken,
-    Refused,
-    Down,
-}
-
 /// Notifications as this module holds it: every notice handed through the
 /// seam, kept for a suite to read, and a dedup key replayed on the same
 /// organization's feed of the same project answered with its first row and
@@ -820,13 +546,6 @@ pub(crate) enum Answer {
 #[derive(Default)]
 pub(crate) struct NoticeLog {
     notices: Mutex<Vec<LoggedNotice>>,
-    answer: Mutex<Answer>,
-    /// Every project purged through the seam, in order.
-    purged: Mutex<Vec<ProjectId>>,
-    /// Whether a purge never ends, as one stuck at a connector's vendor.
-    purges_stall: AtomicBool,
-    /// Whether a purge fails, as one notifications cannot write does.
-    purges_fail: AtomicBool,
 }
 
 impl NoticeLog {
@@ -834,38 +553,12 @@ impl NoticeLog {
         Arc::new(Self::default())
     }
 
-    /// How every notice from now on is answered.
-    pub(crate) fn answer(&self, answer: Answer) {
-        *self
-            .answer
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = answer;
-    }
-
-    /// Every notice handed over, in order, but those a purge took.
+    /// Every notice handed over, in order.
     pub(crate) fn notices(&self) -> Vec<LoggedNotice> {
         self.notices
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
-    }
-
-    /// Every project purged through the seam, in order.
-    pub(crate) fn purged(&self) -> Vec<ProjectId> {
-        self.purged
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
-    }
-
-    /// Have every purge from now on never end, or end again.
-    pub(crate) fn stalling_purges(&self, stalling: bool) {
-        self.purges_stall.store(stalling, Ordering::SeqCst);
-    }
-
-    /// Have every purge from now on fail, or succeed again.
-    pub(crate) fn failing_purges(&self, failing: bool) {
-        self.purges_fail.store(failing, Ordering::SeqCst);
     }
 }
 
@@ -877,17 +570,6 @@ impl Notifications for NoticeLog {
         project_id: Option<&ProjectId>,
         notice: Notice<'_>,
     ) -> Result<Emitted, TelmoniError> {
-        match *self
-            .answer
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-        {
-            Answer::Taken => {}
-            Answer::Refused => {
-                return Err(TelmoniError::BadRequest("the fake refuses notices".into()));
-            }
-            Answer::Down => return Err(TelmoniError::Internal("the fake is down".into())),
-        }
         let mut notices = self
             .notices
             .lock()
@@ -928,31 +610,12 @@ impl Notifications for NoticeLog {
         Ok(0)
     }
 
-    /// As notifications purges a project: its notices go from the feed.
-    async fn purge_project(&self, project_id: &ProjectId) -> Result<u64, TelmoniError> {
-        if self.purges_stall.load(Ordering::SeqCst) {
-            std::future::pending::<()>().await;
-        }
-        if self.purges_fail.load(Ordering::SeqCst) {
-            return Err(TelmoniError::Internal("the fake cannot purge".into()));
-        }
-        let mut notices = self
-            .notices
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let before = notices.len();
-        notices.retain(|logged| logged.project_id.as_ref() != Some(project_id));
-        let gone = before - notices.len();
-        drop(notices);
-        self.purged
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(project_id.clone());
-        Ok(u64::try_from(gone).unwrap_or(u64::MAX))
+    async fn purge_project(&self, _project_id: &ProjectId) -> Result<u64, TelmoniError> {
+        Ok(0)
     }
 
-    async fn purge_project_for_move(&self, project_id: &ProjectId) -> Result<u64, TelmoniError> {
-        self.purge_project(project_id).await
+    async fn purge_project_for_move(&self, _project_id: &ProjectId) -> Result<u64, TelmoniError> {
+        Ok(0)
     }
 
     async fn redact_person(&self, _user_id: &UserId) -> Result<u64, TelmoniError> {
@@ -974,23 +637,6 @@ pub(crate) fn state_with_notices(
         "http://telemetry:telemetry@127.0.0.1:1",
         "redis://127.0.0.1:1",
         entitlements,
-        notices,
-    ))
-}
-
-/// [`state_with_notices`], over Redis as `REDIS_URL` names it, or the compose
-/// file's, for a test that listens on the console's channel.
-pub(crate) fn state_with_redis_and_notices(
-    pool: &PgPool,
-    auth: Arc<dyn Auth>,
-    notices: Arc<NoticeLog>,
-) -> Arc<AppState> {
-    Arc::new(module_at(
-        pool,
-        auth,
-        "http://telemetry:telemetry@127.0.0.1:1",
-        &redis_url(),
-        Arc::new(NoLimits),
         notices,
     ))
 }
@@ -1018,46 +664,6 @@ pub(crate) fn redis_url() -> String {
     std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_owned())
 }
 
-/// [`state_with_notices`], with pings waiting out a move for `move_wait`
-/// rather than two seconds, for a test that holds a move longer.
-pub(crate) fn state_waiting_out_moves(
-    pool: &PgPool,
-    auth: Arc<dyn Auth>,
-    notices: Arc<NoticeLog>,
-    move_wait: Duration,
-) -> Arc<AppState> {
-    Arc::new(AppState {
-        move_wait,
-        ..module_at(
-            pool,
-            auth,
-            "http://telemetry:telemetry@127.0.0.1:1",
-            "redis://127.0.0.1:1",
-            Arc::new(NoLimits),
-            notices,
-        )
-    })
-}
-
-/// [`state_with_notices`], its ticker looking every `tick_secs` rather than
-/// the five seconds it takes unset.
-pub(crate) fn state_ticking_every(
-    pool: &PgPool,
-    auth: Arc<dyn Auth>,
-    tick_secs: u64,
-) -> Arc<AppState> {
-    let mut module = module_at(
-        pool,
-        auth,
-        "http://telemetry:telemetry@127.0.0.1:1",
-        "redis://127.0.0.1:1",
-        Arc::new(NoLimits),
-        NoticeLog::new(),
-    );
-    module.config.tick_secs = tick_secs;
-    Arc::new(module)
-}
-
 /// The module over no store a suite can reach, refusing an export whose body
 /// has not arrived within `body_wait`, where the module waits a minute.
 pub(crate) fn state_waiting_bodies(
@@ -1083,7 +689,7 @@ pub(crate) fn state_waiting_bodies(
 /// [`clickhouse_or_skip`], and Redis as `REDIS_URL` names it, or the compose
 /// file's; neither dialled until a lane needs it.
 pub(crate) fn state_with_stores(pool: &PgPool, auth: Arc<dyn Auth>) -> Arc<AppState> {
-    state_with_stores_and_notices(pool, auth, NoticeLog::new())
+    state_with_stores_under(pool, auth, Arc::new(NoLimits))
 }
 
 /// [`state_with_stores`], under `entitlements`.
@@ -1102,26 +708,6 @@ pub(crate) fn state_with_stores_under(
         &redis_url(),
         entitlements,
         NoticeLog::new(),
-    ))
-}
-
-/// [`state_with_stores`], with `notices` keeping every notice the module
-/// hands through the seam.
-pub(crate) fn state_with_stores_and_notices(
-    pool: &PgPool,
-    auth: Arc<dyn Auth>,
-    notices: Arc<NoticeLog>,
-) -> Arc<AppState> {
-    let clickhouse = std::env::var("TELEMETRY_CLICKHOUSE_URL").expect(
-        "state_with_stores: TELEMETRY_CLICKHOUSE_URL is set, checked by clickhouse_or_skip",
-    );
-    Arc::new(module_at(
-        pool,
-        auth,
-        &clickhouse,
-        &redis_url(),
-        Arc::new(NoLimits),
-        notices,
     ))
 }
 
@@ -1144,7 +730,6 @@ fn module_at(
         kms_api_base: "http://127.0.0.1:1".into(),
         metadata_api_base: "http://127.0.0.1:1".into(),
         redis_url: redis_url.into(),
-        tick_secs: 5,
     };
     telmoni_telemetry::boot::state(
         config,
@@ -1365,9 +950,6 @@ pub(crate) fn received(
         environment: String::new(),
         release: String::new(),
         tags: Vec::new(),
-        bound_stall_after_s: None,
-        bound_max_steps: None,
-        bound_max_cost_usd: None,
         sample_rate: None,
         attributes: Vec::new(),
     }

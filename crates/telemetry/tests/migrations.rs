@@ -240,9 +240,6 @@ fn spans_has_a_column_for_every_field_of_the_row_and_no_other() {
         environment: String::new(),
         release: String::new(),
         tags: Vec::new(),
-        bound_stall_after_s: None,
-        bound_max_steps: None,
-        bound_max_cost_usd: None,
         sample_rate: None,
         attributes: Vec::new(),
     };

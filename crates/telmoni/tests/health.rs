@@ -18,7 +18,7 @@ use telmoni_auth::test_provider::test_issuer;
 use telmoni_server::{App, Module, Parts};
 use telmoni_shared::middleware::http::is_request_id;
 use telmoni_shared::test_util::{captured_logs, unreachable_pool};
-use telmoni_shared::types::{PING_KEY_PREFIX, mint_ping_key};
+use telmoni_shared::types::API_TOKEN_PREFIX;
 
 const SECRET: &str = "test-service-secret";
 
@@ -78,7 +78,6 @@ fn assemble() -> App {
             kms_api_base: "http://127.0.0.1:1".into(),
             metadata_api_base: "http://127.0.0.1:1".into(),
             redis_url: "redis://127.0.0.1:1".into(),
-            tick_secs: 5,
         },
         telemetry_pool: unreachable_pool(),
         agent: None,
@@ -614,188 +613,28 @@ async fn the_doors_refusal_of_an_export_waits_for_its_body() {
     panic!("the door let every probe in");
 }
 
-/// The key with its last character percent-encoded: one key to the lane,
-/// which reads its path decoded, and no key to the door.
-fn percent_encoded_last(key: &str) -> String {
-    let last = key.bytes().next_back().expect("a key has a last byte");
-    let head = key
-        .strip_suffix(char::from(last))
-        .expect("the key ends in its last byte");
-    format!("{head}%{last:02X}")
-}
-
-/// The ping lane is on the binary's `/ping/v1`, behind the door, which reads
-/// the key from the path as it came: a key spelled as minted passes to the
-/// lane, which asks the database for it (unreachable here); any other
-/// spelling in the key's place — the key with a character percent-encoded,
-/// a word — is refused at the door with the lane's own answer for a key it
-/// does not hold, so an encoding of a key is never let in on a bucket of
-/// its own; nothing in the key's place, or a doubled slash before it, is
-/// the lane's own 404, and the lane's root with its trailing slash the
-/// server's. The lane's answers and the door's refusals alike reach the
-/// caller saying no cache may keep them.
-#[tokio::test]
-async fn the_ping_lane_is_served_at_ping_behind_the_door() {
-    let key = mint_ping_key();
-    let asked = send(get(&format!("/ping/v1/{key}/nightly"))).await;
-    assert_eq!(
-        asked.status(),
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "a key as minted reaches the lane, which asks the database"
-    );
-    assert_eq!(
-        header(&asked, "cache-control"),
-        Some("no-store"),
-        "the lane's answer, through the door"
-    );
-    assert_eq!(problem(asked).await["type"], "/errors/internal/database");
-
-    // The door's refusal is the lane's answer for a key it does not hold,
-    // none a cache may keep either: one that took `%41` for `A` would keep
-    // it as the answer for the key itself.
-    let encoded = percent_encoded_last(&key);
-    let refused = send(get(&format!("/ping/v1/{encoded}/nightly"))).await;
-    assert_eq!(refused.status(), StatusCode::NOT_FOUND);
-    assert_eq!(header(&refused, "cache-control"), Some("no-store"));
-    let body = problem(refused).await;
-    assert_eq!(body["type"], "/errors/auth/not-found");
-    assert_eq!(body["detail"], "no ping key by that value");
-
-    let word = send(get("/ping/v1/notakey/nightly")).await;
-    assert_eq!(word.status(), StatusCode::NOT_FOUND);
-    assert_eq!(header(&word, "cache-control"), Some("no-store"));
-    assert_eq!(problem(word).await["detail"], "no ping key by that value");
-
-    // The lane's own 404 where no key is; the server's for the lane's root
-    // with its trailing slash, which the nesting does not take, and for a
-    // path without the version: nothing to count either way.
-    let doubled = format!("/ping/v1//{key}/nightly");
-    for nothing in ["/ping/v1", doubled.as_str()] {
-        let response = send(get(nothing)).await;
-        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{nothing}");
-        assert_eq!(
-            header(&response, "cache-control"),
-            Some("no-store"),
-            "{nothing}: the lane's fallback, through the door"
-        );
-        assert_eq!(
-            problem(response).await["detail"],
-            "no such lane under /ping/v1",
-            "{nothing}"
-        );
-    }
-    let unversioned = format!("/ping/{key}/nightly");
-    for path in ["/ping/v1/", unversioned.as_str()] {
-        let response = send(get(path)).await;
-        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
-        assert_eq!(problem(response).await["detail"], "no such lane", "{path}");
-    }
-}
-
-/// The door meters the ping lane by the key, whatever addresses spend it,
-/// and the key is one bucket however it is sent: with its minute spent, the
-/// same key with a character percent-encoded is refused as no key rather
-/// than let in on a bucket of its own, while another key has a minute of
-/// its own. A method the lane does not take is answered behind the door
-/// with no database, so the count is the door's alone.
-#[tokio::test]
-async fn the_door_meters_the_ping_lane_by_key_from_any_address() {
-    let app = app();
-    let router = app.router();
-    let key = mint_ping_key();
-    let put = |path: String, address: &str| {
-        router.clone().oneshot(
-            Request::put(path)
-                .header("x-forwarded-for", format!("{address}, 35.191.0.1"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-    };
-    let mut addresses = [
-        "203.0.113.9",
-        "203.0.113.10",
-        "198.51.100.7",
-        "198.51.100.8",
-    ]
-    .into_iter()
-    .cycle();
-    for n in 0..600 {
-        let address = addresses.next().expect("the addresses cycle");
-        assert_eq!(
-            put(format!("/ping/v1/{key}/nightly"), address)
-                .await
-                .expect("router responds")
-                .status(),
-            StatusCode::METHOD_NOT_ALLOWED,
-            "request {n} is within the key's minute"
-        );
-    }
-    // The limit leaks ten a second, so a slow machine earns one more for
-    // every tenth of a second the burst took; the loop ends at the first
-    // refusal either way, and a limit that never refuses runs it out.
-    let mut refused = None;
-    for _ in 0..600 {
-        let address = addresses.next().expect("the addresses cycle");
-        let response = put(format!("/ping/v1/{key}/nightly"), address)
-            .await
-            .expect("router responds");
-        if response.status() == StatusCode::TOO_MANY_REQUESTS {
-            refused = Some(response);
-            break;
-        }
-    }
-    let refused = refused.expect("the key's minute was spent");
-    assert!(header(&refused, "retry-after").is_some());
-    assert_eq!(header(&refused, "cache-control"), Some("no-store"));
-    assert_eq!(
-        problem(refused).await["type"],
-        "/errors/tenant/rate-limited"
-    );
-
-    let encoded = percent_encoded_last(&key);
-    let spelled_otherwise = put(format!("/ping/v1/{encoded}/nightly"), "203.0.113.11")
-        .await
-        .expect("router responds");
-    assert_eq!(
-        spelled_otherwise.status(),
-        StatusCode::NOT_FOUND,
-        "an encoding of the key is no bucket of its own"
-    );
-
-    let other = mint_ping_key();
-    assert_eq!(
-        put(format!("/ping/v1/{other}/nightly"), "203.0.113.9")
-            .await
-            .expect("router responds")
-            .status(),
-        StatusCode::METHOD_NOT_ALLOWED,
-        "another key is metered on its own"
-    );
-}
-
-/// ⚠ A request is named by this process alone: an id sent to the ping lane,
+/// ⚠ A request is named by this process alone: an id sent to a public lane,
 /// free text or well formed, gives way to one minted here, the id the
 /// response echoes; and one sent with the service secret beside it does too,
 /// so no answer on a public lane tells a guessed secret from a wrong one.
 #[tokio::test]
 async fn a_request_is_named_by_this_process_alone() {
-    let key = mint_ping_key();
     for sent in ["it's free text, of any length", "req-from-the-caller"] {
-        let pinged = send(
-            Request::get(format!("/ping/v1/{key}/nightly"))
+        let asked = send(
+            Request::get("/v1/organization")
                 .header("x-request-id", sent)
                 .body(Body::empty())
                 .unwrap(),
         )
         .await;
-        let named = header(&pinged, "x-request-id").expect("an id echoed");
+        let named = header(&asked, "x-request-id").expect("an id echoed");
         assert_ne!(named, sent, "the caller named its request");
         assert!(is_request_id(named), "{named}");
     }
 
     for secret in [SECRET, "a-guess"] {
         let probed = send(
-            Request::get(format!("/ping/v1/{key}/nightly"))
+            Request::get("/v1/organization")
                 .header("x-service-secret", secret)
                 .header("x-request-id", "req-probe")
                 .body(Body::empty())
@@ -810,71 +649,33 @@ async fn a_request_is_named_by_this_process_alone() {
     }
 }
 
-/// ⚠ No log line carries a ping's key, at any level, whoever writes it: the
-/// span the binary opens for every request, before the door and the lanes,
-/// prints the path with the key cut out — on the lane's own failure, which
-/// it logs at error inside the span, on the lane's fallback, on the door's
-/// refusal of the key spelled otherwise, and on the server's 404 for a lane
+/// ⚠ No log line carries an API key pasted into a path: the span the binary
+/// opens for every request, before the door and the lanes, prints the path
+/// with the key cut out — on a lane's 404 and on the server's for a lane
 /// misspelt, the likeliest leak, as a shell's join leaves one.
 #[tokio::test]
-async fn no_log_line_carries_a_pings_key() {
+async fn no_log_line_carries_an_api_key_in_a_path() {
     let (_logging, logs) = captured_logs();
-    let key = mint_ping_key();
-    let encoded = percent_encoded_last(&key);
-    for (path, answered, printed) in [
-        (
-            format!("/ping/v1/{key}/nightly"),
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "/ping/v1/…/nightly",
-        ),
-        (
-            format!("/ping/v1//{key}/nightly"),
-            StatusCode::NOT_FOUND,
-            "/ping/v1//…/nightly",
-        ),
-        (
-            format!("/ping/v1/{encoded}/nightly"),
-            StatusCode::NOT_FOUND,
-            "/ping/v1/…/nightly",
-        ),
-        (
-            format!("/PING/V1/{key}/nightly"),
-            StatusCode::NOT_FOUND,
-            "/PING/V1/…/nightly",
-        ),
-        (
-            format!("/pings/v1/{key}/nightly"),
-            StatusCode::NOT_FOUND,
-            "/pings/v1/…/nightly",
-        ),
-        (
-            format!("/ping/{key}/nightly"),
-            StatusCode::NOT_FOUND,
-            "/ping/…/nightly",
-        ),
+    let key = format!("{API_TOKEN_PREFIX}k3yk3yk3yk3yk3yk3yk3yk3y");
+    for (path, printed) in [
+        (format!("/v1/{key}"), "/v1/…"),
+        (format!("/v1/members/{key}"), "/v1/members/…"),
+        (format!("/v2/{key}/members"), "/v2/…/members"),
     ] {
         let before = logs.text().len();
-        assert_eq!(send(get(&path)).await.status(), answered, "{path}");
+        assert_eq!(
+            send(get(&path)).await.status(),
+            StatusCode::NOT_FOUND,
+            "{path}"
+        );
         let own = logs.text().split_off(before);
         assert!(
             own.contains(&format!(r#""path":"{printed}""#)),
             "{path} was not logged as {printed}: {own}"
         );
     }
-    let lines = logs.text();
-    let refused = lines
-        .lines()
-        .find(|line| line.contains("ping: refused on our side"))
-        .expect("the lane's own line at error");
     assert!(
-        refused.contains(r#""path":"/ping/v1/…/nightly""#),
-        "the lane's line was written outside the request's span: {refused}"
+        !logs.text().contains("k3yk3yk3y"),
+        "an API key reached a log line"
     );
-    // The key less its last character, so its encoded spelling counts too.
-    let secret: String = key
-        .chars()
-        .skip(PING_KEY_PREFIX.len())
-        .take(key.len() - PING_KEY_PREFIX.len() - 1)
-        .collect();
-    assert!(!lines.contains(&secret), "a ping's key reached a log line");
 }

@@ -27,37 +27,6 @@ export const Flag = {
 } as const;
 export type Flag = typeof Flag[keyof typeof Flag];
 
-/** Wire vocabulary of the Rust `MonitorState`: what a monitor is in, the worst first. */
-export const MonitorState = {
-  Failed:    "failed",
-  Stalled:   "stalled",
-  OverBound: "over_bound",
-  Late:      "late",
-  Running:   "running",
-  New:       "new",
-  Paused:    "paused",
-  Healthy:   "healthy",
-} as const;
-export type MonitorState = typeof MonitorState[keyof typeof MonitorState];
-
-/** Wire vocabulary of the Rust `IncidentDetail`: what opened an incident. */
-export const IncidentDetail = {
-  RunFailed:     "run_failed",
-  RunNeverCame:  "run_never_came",
-  RunNeverEnded: "run_never_ended",
-  RunLate:       "run_late",
-  RunStalled:    "run_stalled",
-  RunOverBound:  "run_over_bound",
-} as const;
-export type IncidentDetail = typeof IncidentDetail[keyof typeof IncidentDetail];
-
-/** Wire vocabulary of the Rust `IncidentResolution`: how an incident closed. */
-export const IncidentResolution = {
-  Recovered: "recovered",
-  Paused:    "paused",
-} as const;
-export type IncidentResolution = typeof IncidentResolution[keyof typeof IncidentResolution];
-
 /** Wire vocabulary of the Rust `NotificationKind`. */
 export const NotificationKind = {
   OrganizationAlert:     "organization_alert",
@@ -65,10 +34,6 @@ export const NotificationKind = {
   MemberLeft:            "member_left",
   ConnectorConnected:    "connector_connected",
   ConnectorDisconnected: "connector_disconnected",
-  MonitorDiscovered:     "monitor_discovered",
-  PingKeyRetired:        "ping_key_retired",
-  IncidentOpened:        "incident_opened",
-  IncidentResolved:      "incident_resolved",
 } as const;
 export type NotificationKind = typeof NotificationKind[keyof typeof NotificationKind];
 

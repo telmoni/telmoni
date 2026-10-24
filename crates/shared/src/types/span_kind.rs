@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum SpanKind {
     /// One execution of an agent: `invoke_agent`, or `invoke_workflow` for a
-    /// run of several agents. What a monitor expects and holds to its bounds.
+    /// run of several agents.
     Run,
     /// A unit of work the SDKs, the CLI or a hook opened as one, under their
     /// instrumentation scope, that is no model or tool call. What the step

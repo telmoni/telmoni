@@ -29,10 +29,6 @@ const ROSTER_PAGES = /^\/[^/]+(?:\/[^/]+)?\/(members|audit-log)$/;
 // with; `traces/export` is the download's route, not a page.
 const SPAN_PAGES = /^\/[^/]+\/[^/]+\/(traces|sessions|users)(?:\/(?!export$)([^/]+))?$/;
 
-// A page reading a project's monitors: its overview, where the board is, its
-// Monitors page, or one monitor's.
-const MONITOR_PAGES = /^\/[^/]+\/[^/]+(?:\/monitors(?:\/[^/]+)?)?$/;
-
 function payload<K extends keyof typeof RealtimeEventDataSchema>(
   e: MessageEvent,
   kind: K,
@@ -249,14 +245,6 @@ export function RealtimeListener({
         }
         if (section === "traces" && one && !data.more && !data.runs.includes(one)) return;
         live.nudge();
-      });
-
-      // A ping landed on one of the project's monitors: a page reading them
-      // is drawn again, under the hold span pages have.
-      es.addEventListener("monitors:changed", (e: MessageEvent) => {
-        const data = payload(e, "monitors:changed");
-        if (!data || data.projectId !== projectIdRef.current) return;
-        if (MONITOR_PAGES.test(pathnameRef.current)) live.nudge();
       });
 
       es.addEventListener("close", () => {

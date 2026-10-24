@@ -433,8 +433,8 @@ pub async fn purge_project_for_move(
     let purged = db::purge_project_connections(&mut tx, project_id).await?;
     let filed = uninstall::file(&mut tx, &purged.connections).await?;
     rows += purged.rows;
-    // A notice raised while the feed went — a retirement's, a monitor's, a seat's
-    // emitted after auth's commit — goes last; one an erasure holds costs a wait the
+    // A notice raised while the feed went — a seat's emitted after auth's
+    // commit — goes last; one an erasure holds costs a wait the
     // deadlock detector ends, and the move is tried again.
     rows += db::purge_feed_chunk(
         &mut tx,

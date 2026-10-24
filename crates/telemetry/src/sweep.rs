@@ -1,5 +1,5 @@
 //! Finishes project purges cut short. Auth purges a deleted project once;
-//! when that fails (ClickHouse down, or a ping holding the project too long)
+//! when that fails (ClickHouse down, or an export holding the project too long)
 //! the settings row stays, so every ten minutes this asks auth which of the
 //! projects with a settings row are gone and purges them again. A deleted
 //! project never comes back, and the purge is safe to repeat.

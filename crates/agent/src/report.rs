@@ -20,8 +20,7 @@ use telmoni::{ModelCallRecord, RunRecord, Telmoni, ToolCallRecord, Usage};
 
 use crate::observe::{Generation, Step, ToolUse, TurnEnding, TurnRecord};
 
-/// The agent every question is a run of: the console agent's own name, which
-/// is its monitor's slug once it has one.
+/// The agent every question is a run of: the console agent's own name.
 pub(crate) const AGENT: &str = "console-agent";
 
 /// How a tool call that answered the model with an error, or was given up,
@@ -480,15 +479,14 @@ mod tests {
         assert_eq!(
             names,
             [
-                "telmoni.run.start",
                 "chat claude-sonnet-5-5",
                 "execute_tool list_members",
                 "chat claude-sonnet-5-5",
                 "invoke_agent console-agent",
             ],
-            "the run's start first and the run's own span last, as a record is sent"
+            "the run's own span last, as a record is sent"
         );
-        let run = &spans[4];
+        let run = &spans[3];
         assert_eq!(
             attribute(run, "telmoni.run_id"),
             Some(Value::from(turn.trace_id.to_string()))
@@ -520,7 +518,7 @@ mod tests {
             assert_eq!(span["traceId"], run["traceId"], "one trace, the question's");
         }
 
-        let first = &spans[1];
+        let first = &spans[0];
         assert_eq!(
             attribute(first, "gen_ai.request.model"),
             Some(Value::from("claude-sonnet-5-5"))
@@ -533,15 +531,15 @@ mod tests {
             .map(|value| value.to_string().trim_matches('"').to_owned());
         assert_eq!(tokens.as_deref(), Some("2000"));
         assert_eq!(
-            attribute(&spans[2], "gen_ai.tool.name"),
+            attribute(&spans[1], "gen_ai.tool.name"),
             Some(Value::from("list_members"))
         );
         assert_eq!(
-            attribute(&spans[2], "error.type"),
+            attribute(&spans[1], "error.type"),
             Some(Value::from(TOOL_ERROR_TYPE))
         );
         assert_eq!(
-            attribute(&spans[3], "error.type"),
+            attribute(&spans[2], "error.type"),
             Some(Value::from("/errors/agent/model-unavailable"))
         );
 

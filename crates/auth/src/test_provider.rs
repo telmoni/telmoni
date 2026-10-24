@@ -380,8 +380,9 @@ impl RecordingTelemetry {
     }
 
     /// At each move from now on, ask from a session of `pool`'s whether
-    /// `project`'s move lock is held alone: the lock a ping holds its project
-    /// in place with, which a move must hold so that no ping writes beside it.
+    /// `project`'s move lock is held alone: the lock an export holds its
+    /// project in place with, which a move must hold so that no export files
+    /// the project's settings beside it.
     pub fn probing_move_lock(&self, pool: PgPool, project: ProjectId) -> &Self {
         *self
             .move_probe

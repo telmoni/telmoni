@@ -563,9 +563,9 @@ pub enum TenantError {
         retry_after_secs: u64,
     },
 
-    /// Past a ceiling the organization's plan sets on a machine lane — pings
-    /// a minute, data out a day — never sold on its own, so the refusal says
-    /// when it lifts. Maps to 429 (carries `Retry-After`), as a rate limit.
+    /// Past a ceiling the organization's plan sets on a machine lane — data
+    /// out a day — never sold on its own, so the refusal says when it lifts.
+    /// Maps to 429 (carries `Retry-After`), as a rate limit.
     #[error("past the plan's ceiling; retry after {retry_after_secs}s")]
     PastCeiling {
         /// The sentence the caller reads: which ceiling, and when it lifts.

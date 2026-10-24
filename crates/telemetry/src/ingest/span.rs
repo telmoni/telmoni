@@ -148,27 +148,19 @@ fn resource_text(value: Option<&Value>, max: usize) -> String {
         .unwrap_or_default()
 }
 
-/// The span as a row, `Ok(None)` for the span that opens a run and is never
-/// one, or the refusal; every attribute dropped on the way is pushed to
-/// `dropped`.
+/// The span as a row, or the refusal; every attribute dropped on the way is
+/// pushed to `dropped`.
 ///
 /// # Errors
 ///
 /// The span broke a field's rule: it is refused whole, and nothing of it is
 /// kept.
-pub fn map(
-    span: &Span,
-    context: &Context<'_>,
-    dropped: &mut Drops,
-) -> Result<Option<SpanRow>, Refused> {
+pub fn map(span: &Span, context: &Context<'_>, dropped: &mut Drops) -> Result<SpanRow, Refused> {
     let span_id = hex(&span.span_id);
     let refuse = |reason: Refusal| Refused {
         span_id: span_id.clone(),
         reason,
     };
-    if span.name == contract::RUN_START {
-        return Ok(None);
-    }
     if span.trace_id.len() != 16 || span.trace_id.iter().all(|b| *b == 0) {
         return Err(refuse(Refusal::Invalid("trace_id")));
     }
@@ -266,53 +258,11 @@ pub fn map(
         environment: context.environment.to_owned(),
         release: context.release.to_owned(),
         tags: fields.tags,
-        bound_stall_after_s: fields.bound_stall_after_s,
-        bound_max_steps: fields.bound_max_steps,
-        bound_max_cost_usd: fields.bound_max_cost_usd,
         sample_rate: fields.sample_rate,
         attributes: fields.attributes,
     };
     row.units = units_of(&row);
-    Ok(Some(row))
-}
-
-/// A run's `telmoni.run.start`, the span of no duration that opens it: read
-/// for its run, its agent, when it began and the bounds it declares, so the
-/// run is open from its first second, and never a row.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RunStart {
-    pub run_id: Uuid,
-    pub agent: String,
-    pub started_at: DateTime<Utc>,
-    pub bound_stall_after_s: Option<u32>,
-    pub bound_max_steps: Option<u32>,
-    pub bound_max_cost_usd: Option<f64>,
-}
-
-/// The run `span` opens, where it is a `telmoni.run.start` naming its run
-/// and its agent: read by the rules a run's own span is read by, and
-/// nothing of it kept or reported, as nothing of it ever was.
-#[must_use]
-pub fn run_start(span: &Span, context: &Context<'_>) -> Option<RunStart> {
-    if span.name != contract::RUN_START {
-        return None;
-    }
-    let mut fields = Fields {
-        attributes: context.resource.to_vec(),
-        ..Fields::default()
-    };
-    let mut unreported = Drops::default();
-    for kv in &span.attributes {
-        fields.read(kv, "", &mut unreported).ok()?;
-    }
-    Some(RunStart {
-        run_id: fields.run_id?,
-        agent: fields.agent.take()?,
-        started_at: instant(span.start_time_unix_nano)?,
-        bound_stall_after_s: fields.bound_stall_after_s,
-        bound_max_steps: fields.bound_max_steps,
-        bound_max_cost_usd: fields.bound_max_cost_usd,
-    })
+    Ok(row)
 }
 
 /// What a row counts against its plan: one unit per started KiB of its text
@@ -362,9 +312,6 @@ struct Fields {
     user_id: Option<String>,
     session_id: Option<String>,
     cancelled: bool,
-    bound_stall_after_s: Option<u32>,
-    bound_max_steps: Option<u32>,
-    bound_max_cost_usd: Option<f64>,
     sample_rate: Option<f64>,
     tags: Vec<(String, String)>,
     attributes: Vec<(String, String)>,
@@ -402,21 +349,6 @@ impl Fields {
                     contract::USER_ID_MAX,
                     contract::USER_ID,
                 )?);
-            }
-            contract::BOUND_STALL_AFTER_S => {
-                self.bound_stall_after_s =
-                    Some(positive_u32(value, contract::BOUND_STALL_AFTER_S)?);
-            }
-            contract::BOUND_MAX_STEPS => {
-                self.bound_max_steps = Some(positive_u32(value, contract::BOUND_MAX_STEPS)?);
-            }
-            contract::BOUND_MAX_COST_USD => {
-                let cost = number(value).ok_or(Refusal::Invalid(contract::BOUND_MAX_COST_USD))?;
-                // Compared through `partial_cmp`, so a NaN is refused too.
-                if cost.partial_cmp(&0.0) != Some(Ordering::Greater) {
-                    return Err(Refusal::Invalid(contract::BOUND_MAX_COST_USD));
-                }
-                self.bound_max_cost_usd = Some(cost);
             }
             contract::SAMPLE_RATE => {
                 let rate = number(value).ok_or(Refusal::Invalid(contract::SAMPLE_RATE))?;
@@ -591,14 +523,6 @@ fn count(value: &Value, field: &'static str) -> Result<u64, Refusal> {
     }
 }
 
-/// A bound: an integer, 1 or more, that fits its column.
-fn positive_u32(value: &Value, field: &'static str) -> Result<u32, Refusal> {
-    match value {
-        Value::IntValue(n) if *n >= 1 => u32::try_from(*n).map_err(|_| Refusal::Invalid(field)),
-        _ => Err(Refusal::Invalid(field)),
-    }
-}
-
 /// A number: a double, or an integer small enough to be one exactly.
 fn number(value: &Value) -> Option<f64> {
     match value {
@@ -762,9 +686,7 @@ mod tests {
         let resource = vec![("service.name".to_owned(), "reporter".to_owned())];
         let hash = |id: &str| format!("h({id})");
         let mut dropped = Drops::default();
-        let row = map(&call(), &context(&project, &resource, &hash), &mut dropped)
-            .expect("kept")
-            .expect("a row");
+        let row = map(&call(), &context(&project, &resource, &hash), &mut dropped).expect("kept");
 
         assert_eq!(row.kind, SpanKind::ModelCall);
         assert_eq!(row.name, "chat claude-sonnet-5-5");
@@ -825,7 +747,7 @@ mod tests {
     }
 
     #[test]
-    fn a_run_is_named_by_its_agent_and_carries_its_bounds() {
+    fn a_run_is_named_by_its_agent_and_carries_its_sample_rate() {
         let project = ProjectId::new();
         let keep = |id: &str| id.to_owned();
         let mut dropped = Drops::default();
@@ -836,18 +758,13 @@ mod tests {
                 kv(contract::RUN_ID, s(RUN)),
                 kv(contract::AGENT, s("nightly-report")),
                 kv(contract::OPERATION, s("invoke_agent")),
-                kv(contract::BOUND_STALL_AFTER_S, Value::IntValue(600)),
-                kv(contract::BOUND_MAX_STEPS, Value::IntValue(40)),
-                kv(contract::BOUND_MAX_COST_USD, Value::IntValue(2)),
                 kv(contract::SAMPLE_RATE, Value::DoubleValue(0.25)),
                 kv(contract::CANCELLED, Value::BoolValue(true)),
             ],
             status: None,
             ..call()
         };
-        let row = map(&run, &context(&project, &[], &keep), &mut dropped)
-            .expect("kept")
-            .expect("a row");
+        let row = map(&run, &context(&project, &[], &keep), &mut dropped).expect("kept");
         assert_eq!(row.kind, SpanKind::Run);
         assert_eq!(
             row.name, "nightly-report",
@@ -855,15 +772,7 @@ mod tests {
         );
         assert_eq!(row.parent_span_id, "");
         assert_eq!(row.status, SpanStatus::Cancelled);
-        assert_eq!(
-            (
-                row.bound_stall_after_s,
-                row.bound_max_steps,
-                row.bound_max_cost_usd,
-                row.sample_rate
-            ),
-            (Some(600), Some(40), Some(2.0), Some(0.25))
-        );
+        assert_eq!(row.sample_rate, Some(0.25));
         assert!(dropped.is_empty());
     }
 
@@ -879,17 +788,13 @@ mod tests {
             ..call()
         };
         let ours = context(&project, &[], &keep);
-        let row = map(&plain, &ours, &mut Drops::default())
-            .expect("kept")
-            .expect("a row");
+        let row = map(&plain, &ours, &mut Drops::default()).expect("kept");
         assert_eq!(row.kind, SpanKind::Step);
         let theirs = Context {
             scope: "opentelemetry.instrumentation.httpx",
             ..ours
         };
-        let row = map(&plain, &theirs, &mut Drops::default())
-            .expect("kept")
-            .expect("a row");
+        let row = map(&plain, &theirs, &mut Drops::default()).expect("kept");
         assert_eq!(row.kind, SpanKind::Span);
     }
 
@@ -911,23 +816,6 @@ mod tests {
         .unwrap_err();
         assert_eq!(refused.reason, Refusal::NotARun);
         assert_eq!(refused.span_id, "0f".repeat(8));
-    }
-
-    #[test]
-    fn the_span_that_opens_a_run_is_never_a_row() {
-        let project = ProjectId::new();
-        let keep = |id: &str| id.to_owned();
-        let start = Span {
-            name: contract::RUN_START.into(),
-            ..call()
-        };
-        let outcome = map(
-            &start,
-            &context(&project, &[], &keep),
-            &mut Drops::default(),
-        )
-        .expect("kept");
-        assert!(outcome.is_none());
     }
 
     #[test]
@@ -957,11 +845,6 @@ mod tests {
                 contract::SAMPLE_RATE,
                 Value::DoubleValue(1.5),
                 Refusal::Invalid(contract::SAMPLE_RATE),
-            ),
-            (
-                contract::BOUND_MAX_STEPS,
-                Value::IntValue(0),
-                Refusal::Invalid(contract::BOUND_MAX_STEPS),
             ),
             (
                 contract::CANCELLED,
@@ -1027,8 +910,7 @@ mod tests {
             &context(&project, &[], &keep),
             &mut Drops::default(),
         )
-        .expect("a model at its cap keeps its call")
-        .expect("a row");
+        .expect("a model at its cap keeps its call");
         assert_eq!((row.kind, row.model), (SpanKind::ModelCall, widest_model));
         let backwards = Span {
             end_time_unix_nano: 1,
@@ -1076,9 +958,7 @@ mod tests {
             ..call()
         };
         let mut dropped = Drops::default();
-        let row = map(&span, &context(&project, &[], &keep), &mut dropped)
-            .expect("kept")
-            .expect("a row");
+        let row = map(&span, &context(&project, &[], &keep), &mut dropped).expect("kept");
         assert_eq!(row.tags.len(), contract::TAGS_MAX);
         assert_eq!(row.attributes.len(), ATTRIBUTES_MAX);
         let over_cap = dropped
@@ -1104,8 +984,7 @@ mod tests {
             &context(&project, &[], &keep),
             &mut Drops::default(),
         )
-        .expect("kept")
-        .expect("a row");
+        .expect("kept");
         assert_eq!(units_of(&row), 1);
         let heavy = SpanRow {
             attributes: (0..60)
@@ -1137,8 +1016,7 @@ mod tests {
             &context(&project, &[], &keep),
             &mut Drops::default(),
         )
-        .expect("kept")
-        .expect("a row");
+        .expect("kept");
         let wide = |chars: usize| "\u{1F600}".repeat(chars);
         let widest = SpanRow {
             agent: wide(contract::AGENT_MAX),
@@ -1220,9 +1098,7 @@ mod tests {
             release: &read.release,
             ..context(&project, &read.attributes, &keep)
         };
-        let row = map(&call(), &on_every_span, &mut Drops::default())
-            .expect("kept")
-            .expect("a row");
+        let row = map(&call(), &on_every_span, &mut Drops::default()).expect("kept");
         assert_eq!(row.environment, "production");
         assert_eq!(row.release, "2026.10.18");
         assert!(

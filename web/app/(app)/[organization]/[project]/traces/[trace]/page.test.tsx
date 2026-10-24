@@ -125,9 +125,6 @@ function span(over: Record<string, unknown>) {
     environment: "",
     release: "",
     tags: {},
-    bound_stall_after_s: null,
-    bound_max_steps: null,
-    bound_max_cost_usd: null,
     sample_rate: null,
     attributes: {},
     units: 1,
@@ -141,7 +138,6 @@ const SPANS = [
     user_id: "9f86d081884c7d659a2feaa0c55ad015",
     session_id:"conv-1",
     tags: { team: "search" },
-    bound_max_steps: 40,
   }),
   span({
     span_id: "0000000000000002",
@@ -250,7 +246,6 @@ describe("TracePage", () => {
     // The run's own span, read with the whole trace's sums.
     const run = chosen();
     expect(within(run).getByRole("heading", { name: "nightly-report" })).toBeInTheDocument();
-    expect(within(run).getByText("40 steps at most")).toBeInTheDocument();
     expect(within(run).getByText(/1 step, 2 calls/)).toBeInTheDocument();
     expect(within(run).getByText("(1,200 in, 300 out)")).toBeInTheDocument();
     expect(within(run).getAllByText("team=search").length).toBeGreaterThan(0);

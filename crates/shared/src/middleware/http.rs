@@ -14,7 +14,7 @@ use tower_http::classify::{ServerErrorsAsFailures, SharedClassifier};
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
 use tower_http::trace::TraceLayer;
 
-use crate::types::{API_TOKEN_PREFIX, PING_KEY_PREFIX};
+use crate::types::API_TOKEN_PREFIX;
 
 /// The header that names a request: minted for each, and echoed on its
 /// response.
@@ -83,21 +83,16 @@ fn make_span(request: &Request<Body>) -> tracing::Span {
     )
 }
 
-/// The path as the span prints it: a ping's key rides in its URL,
-/// `/ping/v1/{ping_key}/{slug}`, so a credential is cut out two ways, since
-/// the likeliest leak is a path the router never matches. By place, the
-/// segment where the key goes ([`keys_place`]), whatever was pasted there;
-/// by shape, any segment carrying a ping key's prefix or an API key's
-/// ([`PING_KEY_PREFIX`], [`API_TOKEN_PREFIX`]).
+/// The path as the span prints it, an API key pasted into a URL cut out of
+/// it: any segment carrying the key's prefix ([`API_TOKEN_PREFIX`]), since
+/// the likeliest leak is a path the router never matches.
 fn loggable_path(path: &str) -> std::borrow::Cow<'_, str> {
-    let keys_place = keys_place(path);
-    if keys_place.is_none() && !path.split('/').any(shaped_as_a_credential) {
+    if !path.split('/').any(shaped_as_a_credential) {
         return path.into();
     }
     path.split('/')
-        .enumerate()
-        .map(|(at, segment)| {
-            if Some(at) == keys_place || shaped_as_a_credential(segment) {
+        .map(|segment| {
+            if shaped_as_a_credential(segment) {
                 "…"
             } else {
                 segment
@@ -108,38 +103,10 @@ fn loggable_path(path: &str) -> std::borrow::Cow<'_, str> {
         .into()
 }
 
-/// Where the key sits in a path to the lane, counted in segments: the first
-/// non-empty one after the lane's name and version, in any case and past
-/// doubled slashes, or after the name alone when no version follows it;
-/// `None` on any other path, and on the lane's own root.
-fn keys_place(path: &str) -> Option<usize> {
-    let mut named = path
-        .split('/')
-        .enumerate()
-        .filter(|(_, segment)| !segment.is_empty());
-    let (_, lane) = named.next()?;
-    if !lane.eq_ignore_ascii_case("ping") {
-        return None;
-    }
-    let (at, segment) = named.next()?;
-    if is_version(segment) {
-        named.next().map(|(at, _)| at)
-    } else {
-        Some(at)
-    }
-}
-
-/// Whether a segment names a lane's version: `v` and its digits.
-fn is_version(segment: &str) -> bool {
-    segment
-        .strip_prefix(['v', 'V'])
-        .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
-}
-
 /// Whether a path segment carries a key's prefix anywhere in it: what a
 /// shell wraps a key in rides with it.
 fn shaped_as_a_credential(segment: &str) -> bool {
-    segment.contains(PING_KEY_PREFIX) || segment.contains(API_TOKEN_PREFIX)
+    segment.contains(API_TOKEN_PREFIX)
 }
 
 #[cfg(test)]
@@ -319,37 +286,15 @@ mod tests {
         assert!(!lines.contains("free text"), "{lines}");
     }
 
-    /// ⚠ The span cuts the segment where the key goes, and any shaped as one.
+    /// ⚠ The span cuts any segment shaped as an API key, wherever it sits.
     #[test]
-    fn a_pings_key_is_cut_out_of_the_logged_path() {
+    fn an_api_key_is_cut_out_of_the_logged_path() {
         for (path, logged) in [
-            (
-                "/ping/v1/telmoniping_k3yk3yk3yk3yk3yk3yk3yk3yk3yk3yk3y/nightly/start",
-                "/ping/v1/…/nightly/start",
-            ),
-            ("/ping/v1/telmoniping_k3y/nightly", "/ping/v1/…/nightly"),
-            ("/ping/v1/telmoniping_k3y/", "/ping/v1/…/"),
-            ("/ping/v1/telmoniping_k3y", "/ping/v1/…"),
-            ("/ping/v1/notakey/nightly", "/ping/v1/…/nightly"),
-            ("/ping/v1/telmoni_4p1k3y/nightly", "/ping/v1/…/nightly"),
-            ("/ping/v1//telmoniping_k3y/nightly", "/ping/v1//…/nightly"),
-            ("/ping//v1/notakey/nightly", "/ping//v1/…/nightly"),
-            ("//ping/v1/notakey/nightly", "//ping/v1/…/nightly"),
-            ("/PING/V1/notakey/nightly", "/PING/V1/…/nightly"),
-            ("/ping/v2/notakey/nightly", "/ping/v2/…/nightly"),
-            ("/ping/notakey/nightly", "/ping/…/nightly"),
-            ("/ping/vee/nightly", "/ping/…/nightly"),
-            ("/pings/v1/telmoniping_k3y/nightly", "/pings/v1/…/nightly"),
-            ("/pings/v1/notakey/nightly", "/pings/v1/notakey/nightly"),
-            ("/ping/v1/'telmoniping_k3y'/nightly", "/ping/v1/…/nightly"),
-            ("/nightly/telmoniping_k3y", "/nightly/…"),
             ("/v1/telmoni_4p1k3y", "/v1/…"),
-            ("/ping/v1/telmoniping_k3y/telmoniping_k3y", "/ping/v1/…/…"),
-            ("/ping/v1/", "/ping/v1/"),
-            ("/ping/v1", "/ping/v1"),
-            ("/ping/", "/ping/"),
-            ("/ping", "/ping"),
+            ("/v1/'telmoni_4p1k3y'/members", "/v1/…/members"),
+            ("//v1/telmoni_4p1k3y/telmoni_4p1k3y", "//v1/…/…"),
             ("/v1/organization", "/v1/organization"),
+            ("/v1/", "/v1/"),
         ] {
             assert_eq!(loggable_path(path), logged, "{path}");
         }

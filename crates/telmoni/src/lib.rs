@@ -3,11 +3,9 @@
 //! Auth, notifications, telemetry and the agent are libraries. This crate
 //! links them, hands each the others through the seams in
 //! [`telmoni_shared::seam`], mounts their routers under one listener, and
-//! runs their background loops — the delivery loop, telemetry's outbox loop,
-//! its ping keys' rotation and its monitors' ticker, the retention sweeps,
-//! the agent's indexer,
-//! the deletion sweep and the nightly audit walk — as tasks of the same
-//! process. Each module still connects as its own database
+//! runs their background loops — the delivery loop, telemetry's purge sweep,
+//! the retention sweeps, the agent's indexer, the deletion sweep and the
+//! nightly audit walk — as tasks of the same process. Each module still connects as its own database
 //! role, so row-level security and the grants stand exactly as they did
 //! across services.
 //!
@@ -118,7 +116,7 @@ pub struct App {
     pub telemetry: Arc<telmoni_telemetry::AppState>,
     /// The agent, when the deployment has one.
     pub agent: Option<Arc<telmoni_agent::AppState>>,
-    /// The machine door, in front of `/v1`, `/cli/v1`, `/ping/v1` and `/otlp`.
+    /// The machine door, in front of `/v1`, `/cli/v1` and `/otlp`.
     door: Arc<door::Door>,
     secrets: ServiceSecrets,
     /// The deployment's own modules, in the order they were mounted.
@@ -373,11 +371,10 @@ impl App {
                 require_service_secret,
             ));
         // The machine lanes behind the door, each named, then versioned: the
-        // read API at `/v1`, the CLI's at `/cli/v1`, pings at `/ping/v1`, and
-        // ingest at `/otlp`, whose `/v1/traces` is OTLP's own, nested whole so
-        // `/otlp/` is its to answer too. Each lane gates its own, by key,
-        // bearer, device code or the key in a ping's path. The probes are the
-        // platform's, and carry no version.
+        // read API at `/v1`, the CLI's at `/cli/v1`, and ingest at `/otlp`,
+        // whose `/v1/traces` is OTLP's own, nested whole so `/otlp/` is its to
+        // answer too. Each lane gates its own, by key, bearer or device code.
+        // The probes are the platform's, and carry no version.
         let core = Router::new()
             .merge(probes)
             .merge(log_level)
@@ -389,11 +386,6 @@ impl App {
             .nest(
                 "/cli/v1",
                 self.door.cli(telmoni_auth::cli_router(self.auth.clone())),
-            )
-            .nest(
-                "/ping/v1",
-                self.door
-                    .ping(telmoni_telemetry::ping_router(self.telemetry.clone())),
             )
             .nest_service(
                 "/otlp",
@@ -410,7 +402,7 @@ impl App {
             .iter()
             .fold(core, |router, module| router.merge(module.router()))
             // A path no lane serves is the server's own problem document, as
-            // a lane's is under it; `/ping/v1/` itself falls through to here.
+            // a lane's is under it.
             .fallback(not_found)
             .layer(telmoni_shared::middleware::http::trace_layer())
             .layer(telmoni_shared::middleware::http::request_id_layers())
@@ -446,9 +438,6 @@ impl App {
         let delivery = tokio::spawn(telmoni_notifications::delivery::run(
             self.notifications.clone(),
         ));
-        let outbox = tokio::spawn(telmoni_telemetry::outbox::run(self.telemetry.clone()));
-        let rotation = tokio::spawn(telmoni_telemetry::rotation::run(self.telemetry.clone()));
-        let ticker = tokio::spawn(telmoni_telemetry::ticker::run(self.telemetry.clone()));
         let purges = tokio::spawn(telmoni_telemetry::sweep::run(self.telemetry.clone()));
         let refusals = tokio::spawn(telmoni_telemetry::ceilings::run(self.telemetry.clone()));
         if env_parse("RUN_SWEEPS", true)? {
@@ -479,27 +468,14 @@ impl App {
             telmoni_shared::shutdown::shutdown_signal(),
         );
         // ⚠ These loops are raced against the server: a dead one would leave
-        // a Ready pod that quietly stops delivering, writing pings, retiring
-        // keys, calling monitors late, finishing purges or telling owners of
-        // their plan's refusals, so the process exits and the restart is the
-        // recovery.
+        // a Ready pod that quietly stops delivering, finishing purges or
+        // telling owners of their plan's refusals, so the process exits and
+        // the restart is the recovery.
         tokio::select! {
             () = serve => {},
             ended = delivery => match ended {
                 Ok(()) => anyhow::bail!("the delivery loop exited; restarting the process"),
                 Err(e) => anyhow::bail!("the delivery loop died: {e}"),
-            },
-            ended = outbox => match ended {
-                Ok(()) => anyhow::bail!("the outbox loop exited; restarting the process"),
-                Err(e) => anyhow::bail!("the outbox loop died: {e}"),
-            },
-            ended = rotation => match ended {
-                Ok(()) => anyhow::bail!("the ping keys' rotation exited; restarting the process"),
-                Err(e) => anyhow::bail!("the ping keys' rotation died: {e}"),
-            },
-            ended = ticker => match ended {
-                Ok(()) => anyhow::bail!("the monitors' ticker exited; restarting the process"),
-                Err(e) => anyhow::bail!("the monitors' ticker died: {e}"),
             },
             ended = purges => match ended {
                 Ok(()) => anyhow::bail!("telemetry's purge sweep exited; restarting the process"),
@@ -586,12 +562,6 @@ where
                 purged = terminated.purged,
                 "terminate complete; the deletion sweep finishes it"
             );
-            Ok(())
-        }
-        Command::ReleaseOutbox => {
-            let app = build().await?;
-            let released = telmoni_telemetry::outbox::release(&app.telemetry).await?;
-            tracing::info!(released, "outbox release complete; the loop takes the rows");
             Ok(())
         }
     }

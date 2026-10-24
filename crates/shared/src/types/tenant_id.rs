@@ -186,16 +186,6 @@ pub const ORGANIZATION_ID_PREFIX: &str = "org_";
 /// The prefix every minted API token carries — `telmoni_`.
 pub const API_TOKEN_PREFIX: &str = "telmoni_";
 
-/// The prefix every minted ping key carries — `telmoniping_`: never
-/// `telmoni_`, the API keys' ([`API_TOKEN_PREFIX`]), which auth's key checks
-/// and the CLI's `validate_api_key` take as an API key's, so neither key
-/// passes the other's gate.
-pub const PING_KEY_PREFIX: &str = "telmoniping_";
-
-/// How many base62 characters follow a ping key's prefix: twice an id's,
-/// since a key is a secret where an id is a name.
-pub const PING_KEY_RANDOM_LEN: usize = 32;
-
 /// The alphabet the random half is spelled in.
 const BASE62: &[u8; 62] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
@@ -208,13 +198,6 @@ const BASE62_REJECT_AT: u8 = 248;
 /// `prefix` and 16 random base62 characters, drawn from v4 UUIDs.
 fn mint(prefix: &str) -> String {
     mint_base62(prefix, MINTED_ID_RANDOM_LEN)
-}
-
-/// A fresh ping key: [`PING_KEY_PREFIX`] and [`PING_KEY_RANDOM_LEN`] random
-/// base62 characters, shown once and kept as its SHA-256, as an API key is.
-#[must_use]
-pub fn mint_ping_key() -> String {
-    mint_base62(PING_KEY_PREFIX, PING_KEY_RANDOM_LEN)
 }
 
 /// `prefix` and `len` random base62 characters, drawn from v4 UUIDs: every
@@ -329,26 +312,6 @@ mod tests {
             random.bytes().all(|b| BASE62.contains(&b)),
             "characters outside base62 alphabet: {s}"
         );
-    }
-
-    /// A ping key is its prefix and thirty-two base62 characters, and its
-    /// prefix is not the API keys': neither key passes the other's gate.
-    #[test]
-    fn a_minted_ping_key_is_its_prefix_and_thirty_two_base62_characters() {
-        let key = mint_ping_key();
-        let random = key
-            .strip_prefix(PING_KEY_PREFIX)
-            .unwrap_or_else(|| panic!("no prefix: {key}"));
-        assert_eq!(random.chars().count(), PING_KEY_RANDOM_LEN, "{key}");
-        assert!(
-            random.bytes().all(|b| BASE62.contains(&b)),
-            "characters outside base62 alphabet: {key}"
-        );
-        assert!(
-            !key.starts_with(API_TOKEN_PREFIX),
-            "a ping key would pass as an API key: {key}"
-        );
-        assert_ne!(mint_ping_key(), key, "two keys minted the same");
     }
 
     #[test]

@@ -640,56 +640,6 @@ async fn a_filter_narrows_the_page_and_a_word_outside_the_vocabulary_is_refused(
     }
 }
 
-/// A page narrows to one resource's rows, as a monitor's page reads its own
-/// changes; an id no row could hold is refused, never an empty page.
-#[sqlx::test]
-async fn a_page_narrows_to_one_resource(pool: PgPool) {
-    apply_audit_migrations(&pool).await;
-    let organization = sign_in(&pool, OWNER).await;
-    let project = create_project(&pool, &organization, "Platform").await;
-    mint(&pool, OWNER, &organization, &project, "first key").await;
-    mint(&pool, OWNER, &organization, &project, "second key").await;
-    let page = format!("/internal/v1/audit/projects/{project}");
-    let get = |query: String| {
-        let (pool, organization, project) = (pool.clone(), organization.clone(), project.clone());
-        async move {
-            call(
-                &pool,
-                "GET",
-                &query,
-                OWNER,
-                &organization,
-                Some(&project),
-                None,
-            )
-            .await
-        }
-    };
-
-    let (status, body) = get(format!("{page}?resource_kind=token")).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    let first = events(&body)
-        .iter()
-        .find(|r| r["metadata"]["name"] == "first key")
-        .and_then(|r| r["resource_id"].as_str().map(str::to_owned))
-        .expect("the first key's row");
-
-    let (status, body) = get(format!("{page}?resource_kind=token&resource_id={first}")).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    let rows = events(&body);
-    assert_eq!(rows.len(), 1, "{body}");
-    assert_eq!(rows[0]["resource_id"], json!(first));
-    assert_eq!(rows[0]["metadata"]["name"], "first key");
-
-    for bad in [
-        "?resource_id=".to_owned(),
-        format!("?resource_id={}", "x".repeat(129)),
-    ] {
-        let (status, _) = get(format!("{page}{bad}")).await;
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}");
-    }
-}
-
 /// The export a verifier is promised, built in the background: a file of the
 /// chain oldest first by `seq`, each row's hash recomputed from the file's own
 /// fields alone, each `prev_hash` the hash of the row before it, and nothing

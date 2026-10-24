@@ -28,7 +28,7 @@ export default async function AlertsPage({
         <Card className="overflow-hidden p-0 gap-0">
           <div className="grid gap-1 p-4">
             <p className="text-sm font-medium">Nothing to show yet.</p>
-            <p className="text-sm text-muted-foreground">Incidents will list here, open ones first, with what opened each and where it was sent, and under them every rule, bound, routing and maintenance window, each editable.</p>
+            <p className="text-sm text-muted-foreground">Incidents will list here, open ones first, each with the alert rule that opened it and where it was sent, and under them every rule — a failure rate, a latency percentile, or tokens or cost per run over a window — with its routing and maintenance windows, each editable.</p>
           </div>
         </Card>
       </div>

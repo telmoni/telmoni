@@ -522,8 +522,7 @@ const FACETS_SQL: &str = concat!(
 const SPANS_SQL: &str = "SELECT project_id, received_at, units, run_id, agent, trace_id, \
      span_id, parent_span_id, kind, name, started_at, ended_at, status, error_type, model, \
      provider, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, \
-     user_id, session_id, environment, release, tags, bound_stall_after_s, bound_max_steps, \
-     bound_max_cost_usd, sample_rate, attributes \
+     user_id, session_id, environment, release, tags, sample_rate, attributes \
      FROM telemetry.spans \
      WHERE project_id IN {projects:Array(String)} AND run_id = {run:UUID} \
      AND span_id IN (SELECT span_id FROM (SELECT span_id, sum(units) OVER (\
@@ -836,7 +835,7 @@ mod tests {
         assert!(SPANS_SQL.contains("{units_max:UInt32}"));
     }
 
-    /// A trace shows its spans up to the count and while their units fit, a ping's taking none.
+    /// A trace shows its spans up to the count and while their units fit, a row of none taking none.
     #[test]
     fn a_trace_shows_its_spans_while_their_count_and_units_fit() {
         assert_eq!(shown([1, 1, 1], 5, 8), 3, "a small run whole");
@@ -846,7 +845,7 @@ mod tests {
         assert_eq!(
             shown([0, 0, 8, 0, 1], 5, 8),
             4,
-            "a ping's row takes no units"
+            "a row of no units takes none of the cap"
         );
         assert_eq!(shown([], 5, 8), 0);
     }

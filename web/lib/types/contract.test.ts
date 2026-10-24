@@ -9,11 +9,8 @@ import {
   ContentMode,
   Flag,
   FlagOffDetail,
-  IncidentDetail,
-  IncidentResolution,
   LayoutDepth,
   LayoutOpen,
-  MonitorState,
   NotificationKind,
   OrganizationStatus,
   Role,
@@ -45,11 +42,8 @@ const CONSOLE: Record<string, Record<string, string>> = {
   ApiKeyScope,
   ContentMode,
   Flag,
-  IncidentDetail,
-  IncidentResolution,
   LayoutDepth,
   LayoutOpen,
-  MonitorState,
   NotificationKind,
   OrganizationStatus,
   Role,
@@ -68,9 +62,9 @@ describe("wire contract", () => {
     expect(Object.keys(CONSOLE).sort()).toEqual(Object.keys(contract.enums).sort());
   });
 
-  // In the server's order, not as sets: an order can mean something —
-  // `MonitorState` lists the worst first, the order the Monitors page sorts
-  // by — and a copy holding the right values shuffled would sort it wrong.
+  // In the server's order, not as sets: the console lists some in that order —
+  // the content modes, a connector's events — and a copy holding the right
+  // values shuffled would list them wrong.
   it.each(Object.keys(CONSOLE))("%s has exactly the server's values, in its order", (name) => {
     expect(Object.values(CONSOLE[name]!)).toEqual(contract.enums[name]);
   });

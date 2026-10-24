@@ -3,8 +3,7 @@
 //!
 //! - **Postgres**, the `telemetry` schema, connected as the `telemetry` role:
 //!   what must be transactional or private — each project's settings, its
-//!   content mode among them, its saved views, its monitors and ping keys,
-//!   its runs still going, and the outbox of what it hands on ([`db`]).
+//!   content mode among them, and its saved views and layouts ([`db`]).
 //! - **ClickHouse**, the `telemetry` database, connected as the `telemetry`
 //!   user: the spans, a row per finished span of every kind, and their
 //!   hourly rollup — metadata only, never a content field in any mode. Every
@@ -17,13 +16,8 @@
 //! `tenant_isolation` does not hold. Auth reaches it through
 //! [`telmoni_shared::seam::Telemetry`] ([`seam`]) to purge an organization's
 //! or a project's data and move a project's settings; the console through its
-//! lanes under `/internal/v1/telemetry` ([`handler`], [`router`]); a crontab
-//! through the ping lane, `/ping/v1/{ping_key}/{slug}` ([`ping_router`]).
-//! The [`outbox`] carries what a ping ends to ClickHouse and what it
-//! discovers to the feed; [`rotation`] retires a replaced key a week after
-//! its last ping; the [`ticker`] marks a monitor late, failed or stalled and
-//! ends a run past its ceiling; the [`sweep`] finishes a purge auth's call
-//! could not.
+//! lanes under `/internal/v1/telemetry` ([`handler`], [`router`]). The
+//! [`sweep`] finishes a purge auth's call could not.
 //!
 //! ⚠ **Its readiness reads Postgres alone.** The server is one process for
 //! every module: a ClickHouse outage must leave sign-in, and every console
@@ -37,7 +31,7 @@ use std::sync::Arc;
 
 use axum::{
     Router, middleware,
-    routing::{MethodFilter, delete, get, on, post, put},
+    routing::{get, post, put},
 };
 use sqlx::PgPool;
 
@@ -52,22 +46,16 @@ pub mod contract;
 pub mod db;
 pub mod handler;
 pub mod hashing;
-pub mod incidents;
 pub mod ingest;
 pub mod live;
-pub mod notify;
-pub mod outbox;
 pub mod rate_limit;
 pub mod replica;
 pub mod retention;
-pub mod rotation;
-pub mod schedule;
 pub mod schema;
 pub mod seam;
 pub mod sessions;
 pub mod store;
 pub mod sweep;
-pub mod ticker;
 pub mod traces;
 pub mod users;
 
@@ -75,9 +63,8 @@ pub use config::Config;
 
 /// Shared module state, handed to the seam and to every handler.
 pub struct AppState {
-    /// Postgres pool, as the `telemetry` role: each project's settings, its
-    /// saved views, its monitors and ping keys, its runs still going, and the
-    /// outbox of what it hands on.
+    /// Postgres pool, as the `telemetry` role: each project's settings and
+    /// its saved views and layouts.
     pub db: PgPool,
     /// Loaded-once configuration.
     pub config: Config,
@@ -91,9 +78,8 @@ pub struct AppState {
     /// What each organization may take in, read at ingest's door: a binary
     /// that sells nothing hands it no limits.
     pub entitlements: Arc<dyn telmoni_shared::seam::Entitlements>,
-    /// Notifications, in process: where a notice of this module's goes once
-    /// the outbox hands it over: a monitor a first ping made, a ping key
-    /// retired, an incident opened or resolved.
+    /// Notifications, in process: where the owners hear of an organization
+    /// held to its plan's ceilings ([`ceilings`]).
     pub notifications: Arc<dyn telmoni_shared::seam::Notifications>,
     /// The client Cloud KMS is called through, where `TELEMETRY_KEK` names a
     /// key there.
@@ -113,12 +99,6 @@ pub struct AppState {
     /// The machine lanes' ceilings each organization's plan sets, and the
     /// day's counts held to them ([`ceilings`]).
     pub ceilings: ceilings::Ceilings,
-    /// The runs this replica's exports ended lately, while Redis does not
-    /// answer ([`ingest::runs`]).
-    pub ended_runs: ingest::runs::EndedLately,
-    /// How long a ping waits out a move or a purge of its project
-    /// (`handler::pings::MOVE_WAIT`); a field so a suite can wait longer.
-    pub move_wait: std::time::Duration,
     /// How long an export's body may take to arrive
     /// (`handler::ingest::BODY_WAIT`); a field so a suite can wait less.
     pub body_wait: std::time::Duration,
@@ -139,8 +119,8 @@ impl AppState {
 }
 
 /// The module's router: the console's lanes under `/internal/v1`, behind the
-/// service secret; ingest and the ping lane the binary nests behind the
-/// machine door ([`otlp_router`], [`ping_router`]).
+/// service secret; ingest the binary nests behind the machine door
+/// ([`otlp_router`]).
 pub fn router(state: Arc<AppState>) -> Router {
     let internal = Router::new()
         .route(
@@ -185,40 +165,6 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/telemetry/views/{id}",
             put(handler::views::update_view).delete(handler::views::delete_view),
         )
-        .route(
-            "/telemetry/monitors",
-            get(handler::monitors::list_monitors).post(handler::monitors::create_monitor),
-        )
-        .route(
-            "/telemetry/monitors/schedule",
-            post(handler::monitors::preview_schedule),
-        )
-        .route(
-            "/telemetry/timezones",
-            get(handler::monitors::list_timezones),
-        )
-        .route(
-            "/telemetry/monitors/{slug}",
-            get(handler::monitors::get_monitor)
-                .put(handler::monitors::update_monitor)
-                .delete(handler::monitors::delete_monitor),
-        )
-        .route(
-            "/telemetry/monitors/{slug}/pause",
-            post(handler::monitors::pause_monitor),
-        )
-        .route(
-            "/telemetry/monitors/{slug}/resume",
-            post(handler::monitors::resume_monitor),
-        )
-        .route(
-            "/telemetry/ping-keys",
-            get(handler::ping_keys::list_ping_keys).post(handler::ping_keys::create_ping_key),
-        )
-        .route(
-            "/telemetry/ping-keys/{id}",
-            delete(handler::ping_keys::delete_ping_key),
-        )
         .layer(middleware::from_fn_with_state(
             state.service_secrets.clone(),
             require_service_secret,
@@ -247,27 +193,5 @@ pub fn otlp_router(state: Arc<AppState>) -> Router {
         .route_layer(middleware::from_fn_with_state(gate, require_api_key))
         .method_not_allowed_fallback(handler::ingest::method_not_allowed)
         .fallback(handler::ingest::not_found)
-        .with_state(state)
-}
-
-/// The ping lane, for the binary to nest at `/ping/v1` behind the machine
-/// door: `/{ping_key}/{slug}` and its `/start`, `/checkpoint` and `/fail`,
-/// `GET` or `POST`, the key in the path its one gate ([`handler::pings`]).
-/// A stray path or method is answered as the other machine lanes answer one,
-/// and no answer is one a cache may keep ([`handler::pings::never_stored`]).
-pub fn ping_router(state: Arc<AppState>) -> Router {
-    // `GET`'s handler answers `HEAD` too, as axum serves a `GET` route.
-    let lane = MethodFilter::GET.or(MethodFilter::POST);
-    Router::new()
-        .route("/{ping_key}/{slug}", on(lane, handler::pings::success))
-        .route("/{ping_key}/{slug}/start", on(lane, handler::pings::start))
-        .route(
-            "/{ping_key}/{slug}/checkpoint",
-            on(lane, handler::pings::checkpoint),
-        )
-        .route("/{ping_key}/{slug}/fail", on(lane, handler::pings::fail))
-        .method_not_allowed_fallback(handler::pings::method_not_allowed)
-        .fallback(handler::pings::not_found)
-        .layer(middleware::map_response(handler::pings::never_stored))
         .with_state(state)
 }

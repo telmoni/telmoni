@@ -2,14 +2,12 @@
 //! [`telmoni_shared::seam::Telemetry`], on a handle to the module's state.
 //! Auth runs its purges and a project's move through this.
 //!
-//! A purge takes a project's spans and totals with its settings, saved
-//! views, monitors, ping keys, open runs and outbox rows: the ping keys
-//! first, so the ping lane is closed whatever fails after; then the rows
-//! marked deleted in ClickHouse, before the settings row goes, so a purge
-//! cut short leaves the row the sweep finds it by ([`crate::sweep`]); then
-//! the rest and the row removed. An organization's projects are the ones its settings rows name,
-//! since neither a span nor a view names an organization; its monitors,
-//! keys, runs and outbox rows name it.
+//! A purge takes a project's spans and totals with its settings and saved
+//! views: the rows marked deleted in ClickHouse first, before the settings
+//! row goes, so a purge cut short leaves the row the sweep finds it by
+//! ([`crate::sweep`]); then the views and the row removed. An organization's
+//! projects are the ones its settings rows name, since neither a span nor a
+//! view names an organization.
 
 use std::sync::Arc;
 
@@ -46,23 +44,20 @@ async fn mark_deleted(state: &AppState, project: &ProjectId) -> Result<(), Telmo
 }
 
 /// One project's purge, as auth calls it after the delete and the sweep
-/// calls it again: its ping keys, then its spans and totals, then the rest.
-/// Safe to repeat; answers how many rows went from Postgres.
+/// calls it again: its spans and totals, then the rest. Safe to repeat;
+/// answers how many rows went from Postgres.
 pub(crate) async fn purge_project(
     state: &AppState,
     project_id: &ProjectId,
 ) -> Result<u64, TelmoniError> {
-    let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
-    let closed = db::close_ping_lane(&mut tx, project_id).await?;
-    tx.commit().await?;
     mark_deleted(state, project_id).await?;
     let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
-    let purged = closed + db::purge_project(&mut tx, project_id).await?;
+    let purged = db::purge_project(&mut tx, project_id).await?;
     tx.commit().await?;
     tracing::info!(
         project_id = %project_id,
         purged,
-        "telemetry purge: the project's rows marked deleted and its settings, views, monitors, keys and runs removed"
+        "telemetry purge: the project's rows marked deleted and its settings and views removed"
     );
     Ok(purged)
 }
@@ -86,7 +81,7 @@ impl Telemetry for TelemetrySeam {
             organization_id = %organization_id,
             projects = projects.len(),
             purged,
-            "telemetry purge: the organization's projects' rows marked deleted and their settings, views, monitors, keys and runs removed"
+            "telemetry purge: the organization's projects' rows marked deleted and their settings and views removed"
         );
         Ok(purged)
     }
@@ -115,7 +110,7 @@ impl Telemetry for TelemetrySeam {
             project_id = %project_id,
             organization_id = %organization_id,
             moved,
-            "telemetry: the project's settings, monitors, keys and runs moved with it"
+            "telemetry: the project's settings moved with it"
         );
         Ok(())
     }

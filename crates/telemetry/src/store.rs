@@ -249,7 +249,7 @@ pub struct SpanRow {
     /// Its run's id, the same on every span of a run.
     #[serde(with = "clickhouse::serde::uuid")]
     pub run_id: Uuid,
-    /// Its run's agent: the monitor it is counted under.
+    /// Its run's agent.
     pub agent: String,
     /// Its trace's id, in hex.
     pub trace_id: String,
@@ -295,12 +295,6 @@ pub struct SpanRow {
     pub release: String,
     /// The application's own tags.
     pub tags: Vec<(String, String)>,
-    /// A run's stall timeout, in seconds; `None` where it set none.
-    pub bound_stall_after_s: Option<u32>,
-    /// A run's step cap; `None` where it set none.
-    pub bound_max_steps: Option<u32>,
-    /// A run's cost cap, in US dollars; `None` where it set none.
-    pub bound_max_cost_usd: Option<f64>,
     /// The share of runs the SDK sends, on a run; `None` on every other kind.
     pub sample_rate: Option<f64>,
     /// The attributes the contract keeps, under their own names.
