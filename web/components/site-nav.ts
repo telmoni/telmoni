@@ -1,5 +1,5 @@
 import { EXTRA_PRIMARY_NAV, type ExtraPrimaryNavItem } from "@/lib/extension/site-nav";
-import { DOCS_URL } from "@/lib/site";
+import { DOCS_URL, REPO_URL } from "@/lib/site";
 
 export type NavLink = { label: string; href: string; newTab?: boolean };
 
@@ -21,7 +21,7 @@ export type NavItem =
   | { label: string; panel: NavPanel; href?: never; newTab?: never };
 
 const CORE_PRIMARY_NAV: readonly NavItem[] = [
-  { label: "Product", href: "/" },
+  ...(REPO_URL ? [{ label: "GitHub", href: REPO_URL, newTab: true } satisfies NavItem] : []),
   { label: "Docs", href: DOCS_URL },
 ];
 
@@ -50,9 +50,10 @@ export function withExtraPrimaryNav(
 }
 
 /**
- * ⚠ **Two plain links, and no panel, because nothing here has two pages to
- * sit side by side.** The company pages — about, security, the legal
- * documents — are the operator's, not the product's, and left this
+ * ⚠ **Two plain links — the source and the book — and no panel, because
+ * nothing here has two pages to sit side by side.** The brand is the way
+ * home, so the row names no `Product`. The company pages — about, security,
+ * the legal documents — are the operator's, not the product's, and left this
  * repository; the footer draws the legal links from the deployment's
  * configuration (`lib/server/branding.ts`). A panel holding a single card is
  * a worse link than a link, so `Docs` is a link. Add a panel back with the

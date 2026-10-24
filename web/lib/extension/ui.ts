@@ -27,6 +27,17 @@ export {
 export { AccessDenied } from "@/components/access-denied";
 export { PageAction } from "@/components/page-action";
 export { PageHeader } from "@/components/page-header";
+export {
+  BODY,
+  EYEBROW,
+  LEAD,
+  PaperGo,
+  PaperHero,
+  PaperLink,
+  PaperPoint,
+  PaperSection,
+} from "@/components/paper-page";
+export { INSET } from "@/lib/inset";
 export { SidePanelRow } from "@/components/side-panel";
 export { RoleRestricted } from "@/components/role-restricted";
 export { ServiceUnavailable } from "@/components/service-unavailable";

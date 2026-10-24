@@ -5,7 +5,9 @@ import { Button } from "@/components/ui/button";
 import { MobileNav } from "@/components/mobile-nav";
 import { SiteNavMenu } from "@/components/site-nav-menu";
 import { TelmoniMark } from "@/components/telmoni-mark";
+import { INSET } from "@/lib/inset";
 import { PRODUCT_NAME } from "@/lib/site";
+import { cn } from "@/lib/utils";
 
 const NAV_TYPE = "text-sm font-normal";
 
@@ -26,26 +28,32 @@ function Keycap({ children }: { children: string }) {
 }
 
 // ⚠ **`relative z-50` on the bar, and the panel is why.** A dropdown hanging
-// out of it has to paint over the page, and the splash raises its own copy to
-// `z-10`; with no z-index here the bar's subtree competes at the root and
-// loses.
+// out of it has to paint over the page; with no z-index here the bar's
+// subtree competes at the root and loses.
 //
-// The bar is a row of three cells, as a product site draws one: the brand,
-// the navigation centred, and the two buttons, with the row ruled off from
-// the page and no rule between the cells — nothing continues one below, and
-// under `lg`, where the buttons go, a rule would stand beside an empty cell.
-// A panel, when one returns, hangs from the row's rule. The brand stands on
-// the console header's pixels — the same 60px row, the mark at the same x
-// (`px-3.5` on the cell and `pl-1.5` on the link, as there), the same 17px
-// name — so signing in moves nothing but the page under it.
-export function SiteHeader({ signedIn }: { signedIn: boolean }) {
+// The bar is one row: the brand at the left and, at the right, the links
+// and then the two buttons, the row ruled off from the page. Edge to edge,
+// the brand stands on the console header's pixels — the
+// same 60px row, the mark at the same x (`px-3.5` on the cell and `pl-1` on
+// the link, as there), the same 17px name — so signing in moves nothing but
+// the page under it. `inset` is a framed public page's column: the row
+// taller, and its cells inset as the sections are.
+export function SiteHeader({ signedIn, inset = false }: { signedIn: boolean; inset?: boolean }) {
   return (
-    <header className="relative z-50 h-15 shrink-0 border-b border-border bg-background">
-      <div className="relative grid h-full grid-cols-[auto_minmax(0,1fr)_auto]">
-        <div className="flex items-center px-3.5">
+    <header
+      className={cn(
+        "relative z-50 h-15 shrink-0 border-b border-border bg-background",
+        inset && "lg:h-24",
+      )}
+    >
+      <div className="flex h-full items-center justify-between">
+        <div className={cn("flex items-center", inset ? INSET : "px-3.5")}>
           <Link
             href="/"
-            className="flex min-w-0 items-center gap-1.5 pl-1 text-[17px] leading-none font-bold tracking-tight hover:opacity-70"
+            className={cn(
+              "flex min-w-0 items-center gap-1.5 text-[17px] leading-none font-bold tracking-tight hover:opacity-70",
+              !inset && "pl-1",
+            )}
           >
             {/* Raised and padded as the console header's are, for the same reasons. */}
             <TelmoniMark className="relative -top-[2.5px] size-6 shrink-0" />
@@ -53,20 +61,13 @@ export function SiteHeader({ signedIn }: { signedIn: boolean }) {
           </Link>
         </div>
 
-        {/* The middle cell stays empty: the navigation sits over the row at
-            the page's own centre, which the cells, unequal as the brand and the
-            buttons are, would not give it. */}
-        <div />
-        <div className="absolute left-1/2 top-0 flex h-full -translate-x-1/2 items-center">
-          <SiteNavMenu />
-        </div>
-
         {/* A visitor gets the pair every row of buttons in the product uses:
             the other way out outlined, the thing you came to do filled, with
             its key. A member gets two outlined: the console is where they
             already are, not a thing to sell, and the key stays on it. Below
             `lg` neither shows; the drawer carries the same pair. */}
-        <div className="flex items-center px-3">
+        <div className={cn("flex items-center gap-3", inset ? INSET : "px-3")}>
+          <SiteNavMenu />
           <div className="hidden items-center gap-2 lg:flex">
             {signedIn ? (
               <>

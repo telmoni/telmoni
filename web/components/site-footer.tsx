@@ -4,7 +4,9 @@ import { CornersToggle } from "@/components/corners-toggle";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 import { footerColumns, footerLegal, type FooterLink } from "@/lib/footer";
+import { INSET } from "@/lib/inset";
 import { branding } from "@/lib/server/branding";
+import { cn } from "@/lib/utils";
 
 // A link into the console is routed; one out of it opens in a new tab.
 function FooterAnchor({ link, className }: { link: FooterLink; className: string }) {
@@ -21,13 +23,16 @@ function FooterAnchor({ link, className }: { link: FooterLink; className: string
 
 // Four columns, as a product site draws them, and the legal line at the foot
 // beside the copyright: what each holds is `lib/footer.ts`'s to decide.
-export function SiteFooter() {
+// `inset` is a framed public page's column, where the columns start where
+// its sections do.
+export function SiteFooter({ inset = false }: { inset?: boolean }) {
   const deployment = { legalUrl: branding.LEGAL_URL, supportEmail: branding.SUPPORT_EMAIL };
   const drawn = footerColumns(deployment);
   const legal = footerLegal(deployment);
+  const pad = inset ? INSET : "px-3.5";
   return (
     <footer className="border-t bg-muted/30">
-      <div className="grid w-full grid-cols-2 gap-10 px-3.5 py-12 sm:grid-cols-4">
+      <div className={cn("grid w-full grid-cols-2 gap-10 py-12 sm:grid-cols-4", pad)}>
         {drawn.map((column) => (
           <nav key={column.title} aria-label={column.title}>
             <h2 className="text-xs font-medium tracking-label text-foreground uppercase">
@@ -46,7 +51,12 @@ export function SiteFooter() {
           </nav>
         ))}
       </div>
-      <div className="flex w-full flex-col gap-4 border-t px-3.5 py-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+      <div
+        className={cn(
+          "flex w-full flex-col gap-4 border-t py-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between",
+          pad,
+        )}
+      >
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <span>© {new Date().getFullYear()} {branding.COMPANY_NAME}. All rights reserved.</span>
           {legal.length > 0 && (

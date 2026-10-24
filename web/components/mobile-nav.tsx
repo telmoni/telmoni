@@ -4,10 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Menu, MessagesSquare, X } from "lucide-react";
 
-import { GithubIcon } from "@/components/brand-icons";
 import { Button } from "@/components/ui/button";
 import { PRIMARY_NAV, panelLinks, type NavLink } from "@/components/site-nav";
-import { DISCUSSIONS_URL, REPO_URL } from "@/lib/site";
+import { DISCUSSIONS_URL } from "@/lib/site";
 
 const NAV_TYPE = "text-sm font-normal w-full justify-start";
 
@@ -121,23 +120,10 @@ export function MobileNav({ signedIn }: { signedIn: boolean }) {
                 </div>
               )}
 
-              {(REPO_URL || DISCUSSIONS_URL) && (
+              {DISCUSSIONS_URL && (
                 <span aria-hidden className="my-2 h-px bg-border" />
               )}
 
-              {REPO_URL && (
-                <Button asChild variant="ghost" size="sm" className={`${NAV_TYPE} text-muted-foreground hover:text-foreground`}>
-                  <a
-                    href={REPO_URL}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={() => setOpen(false)}
-                  >
-                    <GithubIcon />
-                    GitHub
-                  </a>
-                </Button>
-              )}
               {DISCUSSIONS_URL && (
                 <Button asChild variant="ghost" size="sm" className={`${NAV_TYPE} text-muted-foreground hover:text-foreground`}>
                   <a
