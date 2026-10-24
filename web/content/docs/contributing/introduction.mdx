@@ -30,7 +30,7 @@ Run the repository's gate, which is what its CI runs: `make ci` in the platform 
 
 - Keep a pull request to one change.
 - Commits follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`).
-- Every commit is signed off by its author: `git commit -s` adds `Signed-off-by: Your Name <you@example.com>` from git's `user.name` and `user.email`, certifying the [Developer Certificate of Origin](https://developercertificate.org/), that you may submit the change under the project's Apache-2.0 licence, as its section 5 provides. A pull request with a commit not signed off is sent back to be signed.
+- Every commit is signed off by its author: `git commit -s` adds `Signed-off-by: Your Name <you@example.com>` from git's `user.name` and `user.email`, certifying the [Developer Certificate of Origin](https://developercertificate.org/), that you may submit the change under the project's Apache-2.0 licence, as its section 5 provides. A pull request with a commit not signed off is sent back to be signed, and the merge commit is signed off too: a maintainer merges from a clone with `git merge --no-ff --signoff` and pushes, never from GitHub's merge button, whose commit carries none.
 - Only people are commit authors; the [AI policy](/docs/contributing/ai-policy) has the rest.
 
 ## Security
