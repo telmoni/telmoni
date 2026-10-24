@@ -25,4 +25,7 @@
 //
 // A run that has already ended, kept in a job's own log or reported by a hook
 // once its turn is over, is sent whole from its record with RecordRun.
+//
+// The guide to it, beside the other three SDKs, is the SDKs page of Telmoni's
+// book: https://github.com/telmoni/docs/blob/main/content/api/sdks.mdx
 package telmoni

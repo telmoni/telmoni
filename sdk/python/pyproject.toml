@@ -6,7 +6,6 @@ build-backend = "setuptools.build_meta"
 name = "telmoni"
 version = "0.1.1"
 description = "Python SDK for Telmoni: an agent's runs, steps, model calls and tool calls as OpenTelemetry spans"
-readme = "README.md"
 authors = [{ name = "Kendrick Lawton" }]
 # OpenTelemetry's SDK requires 3.10, and 3.9 is past its end of life.
 requires-python = ">=3.10"

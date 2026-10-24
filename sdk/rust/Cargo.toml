@@ -9,10 +9,10 @@ description = "Rust SDK for Telmoni: an agent's runs, steps, model calls and too
 repository = "https://github.com/telmoni/telmoni"
 authors = ["Kendrick Lawton"]
 license.workspace = true
-readme = "README.md"
+readme = false
 keywords = ["telmoni", "sdk", "opentelemetry", "agents"]
-# The library alone: its tests read the fixtures beside it, outside the crate.
-include = ["/src", "/README.md", "/LICENSE"]
+# The library and its license alone, what a build needs: its tests read the fixtures beside it, outside the crate.
+include = ["/src", "/LICENSE"]
 
 [dependencies]
 opentelemetry = { workspace = true }

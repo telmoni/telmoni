@@ -1,0 +1,3 @@
+# The sdist leaves out the README and the tests, which no install runs.
+exclude README.md
+prune tests

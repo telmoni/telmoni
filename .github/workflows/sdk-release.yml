@@ -235,7 +235,10 @@ jobs:
           cd sdk/typescript
           npm ci
           npm run verify
-          npm pack --pack-destination "$RUNNER_TEMP"
+          # From a copy of what runs and its license: npm adds a README it finds beside package.json.
+          mkdir "$RUNNER_TEMP/typescript"
+          cp -R package.json LICENSE dist "$RUNNER_TEMP/typescript/"
+          npm pack "$RUNNER_TEMP/typescript" --ignore-scripts --pack-destination "$RUNNER_TEMP"
           test -f "$RUNNER_TEMP/telmoni-$VERSION.tgz"
 
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
