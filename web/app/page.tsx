@@ -136,11 +136,6 @@ const DEVELOPERS: { title: string; doors: Door[] } = {
 
 const FAQ = [
   {
-    question: "What is Telmoni?",
-    answer:
-      "A privacy-first telemetry and monitoring platform for AI agents: every run and the steps inside it, every model and tool call with its tokens, latency and cost, and the alert when something goes wrong. It is open source, Apache-2.0, and runs as one binary you can self-host.",
-  },
-  {
     question: "What runs today?",
     answer:
       "The foundation — organizations and roles, API keys, the audit log, notifications, the console agent and the CLI — and the first of the telemetry: the SDKs record an agent's runs, ingest keeps them as metadata, and the console reads them as traces, sessions and users. Next: alert rules and PagerDuty, what each call cost, and content an owner chooses to keep.",

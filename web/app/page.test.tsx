@@ -129,7 +129,6 @@ describe("the splash page", () => {
     render(await SplashPage());
 
     for (const question of [
-      "What is Telmoni?",
       "What runs today?",
       "What does it store?",
       "Can I self-host it?",
