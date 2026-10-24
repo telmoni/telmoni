@@ -15,7 +15,7 @@ You need Rust at the version `rust-toolchain.toml` pins (`rustup` installs it on
 $ git clone https://github.com/telmoni/docs.git ../docs
 ```
 
-For `make ci` you also need `cargo install cargo-deny typos-cli`. `make doctor` checks that Rust, Node and npm, Docker with Compose and a running daemon, `rsync` and `gh` are installed and that both env files and the docs beside the platform exist; it checks no versions, and not `cargo-deny` or `typos`. The SDK suites want Node 22.18, 24.11, or 26 or later, which the TypeScript suite's tsup requires though the SDK itself runs on Node 18.19 or later, and npm (TypeScript, after `npm ci --prefix sdk/typescript`), Go 1.26 or later, and for Python (3.10 or later) a venv: `python3 -m venv sdk/python/.venv && sdk/python/.venv/bin/pip install -e "sdk/python[dev]"`.
+For `make ci` you also need `cargo install cargo-deny typos-cli`. `make doctor` checks that Rust, Node and npm, Docker with Compose and a running daemon, `rsync` and `gh` are installed and that both env files and the docs beside the platform exist; it checks no versions, and not `cargo-deny` or `typos`. The SDK suites want Node 22.18, 24.11, or 26 or later, which the TypeScript suite's tsup requires though the SDK itself runs on Node 18 from 18.19, or 20.6 or later, and npm (TypeScript, after `npm ci --prefix sdk/typescript`), Go 1.26.10 or later, and for Python (3.10 or later) a venv: `python3 -m venv sdk/python/.venv && sdk/python/.venv/bin/pip install -e "sdk/python[dev]"`.
 
 ```console
 $ make first-run
@@ -75,7 +75,7 @@ The first signs in to the platform's `make up`, at the server, which serves the 
 $ cargo xtask ci
 ```
 
-`cargo xtask ci` is the gate CI runs: fmt, the toolchain check, clippy, build, test, doc and `cargo deny`. CI lints its workflows with actionlint beside it. `cargo xtask dist` packages this machine's binary as `dist/telmoni-<os>-<arch>.tar.gz`, with its `SHA256SUMS`; a release is an annotated `v*` tag whose version matches `Cargo.toml`, which `.github/workflows/release.yml` builds for both platforms and publishes with `install.sh` ([`ARCHITECTURE.md`](https://github.com/telmoni/telmoni-cli/blob/main/ARCHITECTURE.md#distribution)).
+`cargo xtask ci` is the gate CI runs: fmt, the toolchain check, clippy, build, test, doc and `cargo deny`. CI lints its workflows with actionlint beside it. `cargo xtask dist` packages this machine's binary as `dist/telmoni-<os>-<arch>.tar.gz`, with its `SHA256SUMS`; a release is the workspace's version bumped in one commit on `main`: `.github/workflows/release.yml` waits for CI to pass on it, builds the x86_64 Linux archive, and on the owner's approval tags the commit `v*`, publishes the crate to crates.io and cuts the GitHub release with the archive and `install.sh`, a Mac building from source until its archive can be signed ([`ARCHITECTURE.md`](https://github.com/telmoni/telmoni-cli/blob/main/ARCHITECTURE.md#distribution)).
 
 ## The skills
 

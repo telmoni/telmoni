@@ -1,6 +1,6 @@
 ---
 title: "Telmoni CLI"
-description: "Installing and using the official Telmoni command-line tool (telmoni): device authentication, CI login, status, organizations, a job run under a monitor, and configuration."
+description: "Installing and using the official Telmoni command-line tool (telmoni): device authentication, CI login, status, organizations, and configuration."
 ---
 
 The Telmoni CLI (`telmoni`) is the official command-line interface for interacting with Telmoni from your terminal, scripts, and CI/CD pipelines.
@@ -190,24 +190,6 @@ $ TELMONI_ORG=acme telmoni status
 
 ---
 
-## Running a job under a monitor
-
-`telmoni run` wraps a command in a monitor's pings, so a cron job, a queue consumer or any script is watched without a `curl` line of its own:
-
-```console
-$ TELMONI_PING_KEY="telmoniping_..." telmoni run --monitor nightly-sync -- ./nightly.sh --full
-```
-
-Everything after `--` is the command, run as it is: its standard input, output and error are its own, nothing of its output is sent anywhere, and its exit code becomes the CLI's. Around it the CLI sends two pings on the lane a crontab's `curl` uses, under the project's ping key from `--ping-key` or `TELMONI_PING_KEY`, to the endpoint `TELMONI_ENDPOINT`, the `endpoint` configuration key or the default names: `/start` before the command runs, then a bare ping when it exits `0`, or `/fail` with its exit code when it does not. Both name one run, so a ping that had to be sent again is heard as the ping it repeats, and two runs of one monitor at once are told apart. The monitor is the slug's; a slug no monitor of the project has makes one, paused as new until it is set up, and raises a `monitor_discovered` notice.
-
-A command a signal ended exits `128` plus the signal's number, as a shell reports it, and one that could not be started exits `127` when it was not found and `126` otherwise; each is reported as a failed run too, so the monitor hears that its job did not run.
-
-Telmoni never fails the job. Each ping is tried twice at most, five seconds a try with a second between, and a refusal is final; what happened is a `note: telmoni run:` line on stderr, and nothing else changes: the command runs and exits as it would have. A lost start ping leaves a run the end ping records with no duration; a lost end ping leaves a run that Telmoni ends as never ended at the monitor's next run or its timeouts. Without a key, or with a slug that could not be a monitor's (lowercase letters and digits joined by single hyphens, up to 48 characters), nothing is sent and the command runs, with a note. A signal sent to `telmoni run` alone is not relayed to the command; at a terminal, Ctrl-C reaches both.
-
-A ping key may stand on the command line, unlike an API key, because it lives on crontab lines by design and can fake a ping and nothing more; where a process list is shared, `TELMONI_PING_KEY` keeps it out of it.
-
----
-
 ## CLI Configuration
 
 The CLI stores local preferences in `config.json`, in the same directory as the [credentials file](#credential-storage-paths), even on a Mac whose login is in the Keychain.
@@ -249,7 +231,7 @@ $ telmoni config get endpoint
 | `-h`, `--help` | Print help information |
 | `-V`, `--version` | Print version information (`telmoni --version`, before any subcommand) |
 
-`telmoni` exits `0` on success and `1` on any failure, which it explains on stderr; a mistyped command or flag exits `2`. `logout` exits `0` when nobody is signed in, and `run` exits with its command's own code ([Running a job under a monitor](#running-a-job-under-a-monitor)).
+`telmoni` exits `0` on success and `1` on any failure, which it explains on stderr; a mistyped command or flag exits `2`. `logout` exits `0` when nobody is signed in.
 
 ---
 
@@ -262,7 +244,6 @@ The CLI reads the following environment variables:
 | `TELMONI_ENDPOINT` | The endpoint `telmoni login` signs in to (default: `https://api.telmoni.com`, the machine host). It comes after `--endpoint` and ahead of the `endpoint` configuration key. A saved session keeps the endpoint it signed in to. |
 | `TELMONI_API_KEY` | An API key for each command that acts with one, ahead of any saved login and never saved, for CI/CD runs. At a terminal, a new key is [asked about once](#2-programmatic--ci-login-api-key) first. A blank value counts as unset. |
 | `TELMONI_ORG` | With a browser session, the organization `status`, `whoami` and `logout` act in instead of the active one, by ID or slug, from the list the CLI saved. A script should give the ID, which nothing moves. |
-| `TELMONI_PING_KEY` | The project's ping key, for `telmoni run`; `--ping-key` comes before it. A blank value counts as unset. |
 
 Its requests to any host but this machine also go through a proxy named by
 the system proxy variables (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` and

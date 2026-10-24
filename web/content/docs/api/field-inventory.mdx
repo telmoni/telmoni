@@ -16,7 +16,7 @@ The names are the [GenAI semantic conventions](https://github.com/open-telemetry
 at commit `6fd0d763a092db245a54104fc1124031eb3c51d2`, pinned on purpose: the
 conventions have tagged no release and rename what Telmoni sums, so a rename
 is a change to this page and to ingest, never to what is stored. What the
-conventions do not name — runs, tags, bounds, sample rates — is Telmoni's own,
+conventions do not name — runs, tags, sample rates — is Telmoni's own,
 under `telmoni.*`; the user a span was for is `user.id`, from OpenTelemetry's
 general registry.
 
@@ -27,9 +27,9 @@ shows the same list on a project's **Privacy** page, served from the same code.
 ## How to read it
 
 - **On**: the spans the attribute belongs on, where Telmoni's SDKs and the
-  conventions put it — every span of a run, the run itself (and the
-  `telmoni.run.start` that opens it), a model call, a tool call, any span that
-  carries it, or the resource every span of an export shares. Ingest reads it
+  conventions put it — every span of a run, the run itself, a model call, a
+  tool call, any span that carries it, or the resource every span of an export
+  shares. Ingest reads it
   from whichever span carries it, a model's name or tokens on a step among
   them.
 - **Kept as**: the column of `spans` it fills, `attributes` under its own
@@ -44,10 +44,9 @@ shows the same list on a project's **Privacy** page, served from the same code.
   keep at most 2 KiB together, keys and values; one past that is dropped
   without a word.
 
-Two things on the wire are not attributes: the instrumentation scope
+One thing on the wire is not an attribute: the instrumentation scope
 `telmoni`, under which a span the conventions give no operation is a step
-rather than a plain span, and the span named `telmoni.run.start`, which opens
-a run and is never a row.
+rather than a plain span.
 
 ## Telmoni's own
 
@@ -57,9 +56,6 @@ a run and is never a row.
 | `telmoni.agent` | every span | the column `agent`, and a run's `name` where `gen_ai.agent.name` and `gen_ai.workflow.name` are unset | any | 1 to 128 characters; a span without it is refused |
 | `user.id` | any span | the column `user_id`, as its HMAC-SHA-256 under a key of the project's own, the first 16 bytes in hex | any | 1 to 128 characters |
 | `telmoni.tag.<key>` | any span | `tags`, under `<key>` | any | up to 32 tags; a key up to 64 characters, a value up to 256 |
-| `telmoni.bound.stall_after_s` | the run | the column `bound_stall_after_s` | any | seconds, a whole number, 1 or more |
-| `telmoni.bound.max_steps` | the run | the column `bound_max_steps` | any | a whole number, 1 or more |
-| `telmoni.bound.max_cost_usd` | the run | the column `bound_max_cost_usd` | any | US dollars, above 0 |
 | `telmoni.sample_rate` | the run | the column `sample_rate` | any | above 0, up to 1: the share of runs the SDK sends |
 | `telmoni.cancelled` | any span | the column `status`, as `cancelled` | any | `true` on a span the agent cancelled |
 | `telmoni.content` | any span | read and not kept: `sealed` would mark content the SDK encrypted, which no SDK does today and no project can keep | any | `sealed` |

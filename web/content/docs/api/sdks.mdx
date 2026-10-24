@@ -13,7 +13,7 @@ leaves the process unless you ask and the project's content mode allows.
 | Language | Package | Requires | Source |
 |---|---|---|---|
 | **Python** | `telmoni` | Python 3.10 or later | [`sdk/python`](https://github.com/telmoni/telmoni/tree/main/sdk/python) |
-| **TypeScript / JavaScript** | `telmoni` | Node.js 18.19 or 20.6 or later | [`sdk/typescript`](https://github.com/telmoni/telmoni/tree/main/sdk/typescript) |
+| **TypeScript / JavaScript** | `telmoni` | Node.js 18 from 18.19, or 20.6 or later | [`sdk/typescript`](https://github.com/telmoni/telmoni/tree/main/sdk/typescript) |
 | **Go** | `github.com/telmoni/telmoni/sdk/go` | Go 1.26.10 or later | [`sdk/go`](https://github.com/telmoni/telmoni/tree/main/sdk/go) |
 | **Rust** | `telmoni` | Rust 1.99.1 or later | [`sdk/rust`](https://github.com/telmoni/telmoni/tree/main/sdk/rust) |
 
@@ -57,15 +57,14 @@ carry nothing else; Rust also carries serde, serde_json, tracing and uuid.
 
 A run is one execution of an agent. Open one around the agent's work, and
 inside it open a step for each unit of work, a model call around each call to
-a model, and a tool call around each tool. The SDK sends the run's start at
-once, so a run stalled in its first call is still heard, and the rest when
-each span ends. Set `TELMONI_API_KEY` to a [project API key](/docs/api/api-keys)
+a model, and a tool call around each tool. The SDK sends each span when it
+ends. Set `TELMONI_API_KEY` to a [project API key](/docs/api/api-keys)
 holding the **ingest** scope.
 
 <Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
   <Tab value="Python">
     ```python
-    from telmoni import Bounds, Telmoni, Usage
+    from telmoni import Telmoni, Usage
 
     telmoni = Telmoni.from_env()
 
@@ -89,7 +88,6 @@ holding the **ingest** scope.
         user_id="user_42",
         session_id="conv_7",
         tags={"env": "prod"},
-        bounds=Bounds(stall_after_s=60, max_steps=10, max_cost_usd=1.5),
     ) as run:
         ...
     ```
@@ -100,15 +98,14 @@ holding the **ingest** scope.
     again; a `KeyboardInterrupt` or `asyncio.CancelledError` marks it
     cancelled. `fail("TimeoutError")` and `cancel()` do the same by hand.
     `run` raises `ValueError` for a blank agent name or a sample rate outside
-    its range. A bound or a token count is read from a number or its text, a
-    stall's, steps' or count's fraction cut, and of what Telmoni would refuse,
-    these are left off with one warning: a bound outside 1 to 4294967295, a
-    cost not above 0, a token count below 0 or past 64 bits, a tag whose key
-    is not 1 to 64 characters or whose value is past 256, and the tags past
-    the first 32 kept; an empty user, session, provider or response model is
-    left off as unset. A name, model, provider, user, session, response model
-    or error type that is no string goes as its text with one warning, as does
-    a tag that is no string, finite number or bool; an exception or an
+    its range. A token count is read from a number or its text, its fraction
+    cut, and of what Telmoni would refuse, these are left off with one
+    warning: a token count below 0 or past 64 bits, a tag whose key is not 1
+    to 64 characters or whose value is past 256, and the tags past the first
+    32 kept; an empty user, session, provider or response model is left off
+    as unset. A name, model, provider, user, session, response model or error
+    type that is no string goes as its text with one warning, as does a tag
+    that is no string, finite number or bool; an exception or an
     exception's class handed to `fail()` goes as the class's name, never its
     message. Past Telmoni's caps, counted in characters, a name, the agent, a
     model, a provider, a response model or an error type is cut to its cap — a
@@ -152,13 +149,12 @@ holding the **ingest** scope.
     marks it cancelled. `fail('TimeoutError')` and `cancel()` do the same by
     hand, and `wrap` turns a function into one that opens a run per call.
     `run` throws a `TypeError` for a blank agent name and a `RangeError` for
-    a sample rate that is no number or outside its range. A bound or a token
-    count is read from a number, a bigint or a decimal numeral's text, a
-    stall's, steps' or count's fraction cut, and of what Telmoni would refuse,
-    these are left off with one warning: a bound outside 1 to 4294967295, a
-    cost not above 0, a token count below 0 or past 64 bits, a tag whose key
-    is not 1 to 64 characters or whose value is past 256, and the tags past
-    the first 32 kept; an empty user, session, provider or response model is
+    a sample rate that is no number or outside its range. A token count is
+    read from a number, a bigint or a decimal numeral's text, its fraction
+    cut, and of what Telmoni would refuse, these are left off with one
+    warning: a token count below 0 or past 64 bits, a tag whose key is not 1
+    to 64 characters or whose value is past 256, and the tags past the first
+    32 kept; an empty user, session, provider or response model is
     left off as unset. A name, model, provider, user, session, response model
     or error type that is no string goes as its text with one warning, as does
     a tag that is no string, finite number or boolean; an error, or a class,
@@ -182,7 +178,6 @@ holding the **ingest** scope.
     	UserID:    "user_42",
     	SessionID: "conv_7",
     	Tags:      map[string]string{"env": "prod"},
-    	Bounds:    &telmoni.Bounds{StallAfterS: 60, MaxSteps: 10, MaxCostUSD: 1.5},
     })
     defer run.End()
 
@@ -216,9 +211,7 @@ holding the **ingest** scope.
     never panics: a `Client` not from `New`, the nil a failed `New` returns
     among them, sends nothing; a blank agent name opens a run that does
     nothing, and of what Telmoni would refuse, these are left off with one
-    warning — a `StallAfterS` or `MaxSteps` past 4294967295 or below 0, a
-    `MaxCostUSD` that is no finite number above 0 (0 leaves any of the three
-    unset), a token count below 0, a tag whose key is not 1 to 64 characters
+    warning — a token count below 0, a tag whose key is not 1 to 64 characters
     or whose value is past 256, and the tags past the first 32 kept, by key.
     Past Telmoni's caps, counted in characters, a name, the agent, a model, a
     provider, a response model or an error type is cut to its cap — a step's
@@ -230,7 +223,7 @@ holding the **ingest** scope.
   </Tab>
   <Tab value="Rust">
     ```rust
-    use telmoni::{Bounds, Config, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage};
+    use telmoni::{Config, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage};
 
     let telmoni = Telmoni::new(Config::from_env());
 
@@ -240,7 +233,6 @@ holding the **ingest** scope.
             user_id: Some("user_42".into()),
             session_id: Some("conv_7".into()),
             tags: [("env".to_owned(), "prod".to_owned())].into(),
-            bounds: Bounds { stall_after_s: Some(60), max_steps: Some(10), max_cost_usd: Some(1.5) },
             ..RunOptions::default()
         },
     )?;
@@ -269,10 +261,8 @@ holding the **ingest** scope.
     its range, and `record_run` for the cases
     [below](#a-run-recorded-after-it-ended); nothing else in the SDK fails:
     of what Telmoni would refuse, these are left off with one warning — a
-    `stall_after_s` or `max_steps` that is no whole number from 1 to
-    4294967295, a `max_cost_usd` that is no finite number above 0, a token
-    count below 0, a tag whose key is not 1 to 64 characters or whose value
-    is past 256, and the tags past the first 32 kept, by key — and an export
+    token count below 0, a tag whose key is not 1 to 64 characters or whose
+    value is past 256, and the tags past the first 32 kept, by key — and an export
     that fails is warned about, never returned. Past Telmoni's caps, counted
     in characters, a name, the agent, a model, a provider, a response model or
     an error type is cut to its cap — a step's or a tool's name, and a model
@@ -473,8 +463,9 @@ exporter, content rules and sample rate, in a trace of its own named by the
 run's id, whatever trace is current. Each span's id is derived from the run's
 id and the span's place in the record, and a record travels in bodies of its
 own, so the same record sent again is the same bytes, whatever else the client
-is sending, which Telmoni answers within the hour as it answered the first,
-storing nothing twice: give a run the same id each time you send it. A record
+is sending, which Telmoni, where it reaches its Redis, answers within the hour
+as it answered the first, storing nothing twice: give a run the same id each
+time you send it. A record
 holds no content.
 The [coding-agent plugins](/docs/api/coding-agents) are built on it.
 
@@ -591,9 +582,8 @@ A run is a span of its own, named `invoke_agent <agent>`, inside your current
 trace when one is current and a trace of its own otherwise. It carries the
 run's id (`telmoni.run_id`, a UUID), its agent (`telmoni.agent`), the user
 and conversation you named (`user.id`, `gen_ai.conversation.id`), the first 32
-of its tags Telmoni would keep, the most it keeps, as `telmoni.tag.<key>`, the
-bounds and the sample rate; a `telmoni.run.start`
-span of no duration goes out at once under it. Every span inside the run
+of its tags Telmoni would keep, the most it keeps, as `telmoni.tag.<key>`, and
+the sample rate. Every span inside the run
 carries the run's id, agent, user and session, so Telmoni knows each
 span's run without waiting
 for the trace's tree. The resource every span of an export shares names the
@@ -627,7 +617,7 @@ is the second lock, not the first.
 
 `sample_rate`, on the client or on one run, is the share of runs sent, a
 number above 0 and up to 1. A run sampled out is dropped whole in the SDK,
-its start among it, never through the trace's sampled flag, so your
+never through the trace's sampled flag, so your
 application's own sampling is untouched and the volume Telmoni sees is a
 dial you hold. A step or call still open when its run ends is dropped too,
 however late it ends.

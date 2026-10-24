@@ -47,10 +47,10 @@ your code can branch on.
 | `/errors/tenant/cross-tenant-denied` | 403 | Reserved for a request that reaches outside the organization or project it may act in; no lane returns it. | |
 | `/errors/bad-request` | 400 | The request body or query string is not the shape the lane takes, or a value failed its rule. `detail` names the shape or the parameter, never the value sent. | |
 | `/errors/payload-too-large` | 413 | The request body is larger than this route accepts, such as a body over 8 KiB sent to the CLI's lanes. | |
-| `/errors/not-found` | 404 | No lane answers at this path on the machine host, under `/v1`, `/cli`, `/ping` or `/otlp`. Not a resource a lane looked for: that is `/errors/auth/not-found`. Under `/otlp` the body is OTLP's `Status` rather than a problem document, its message opening with the type. | |
+| `/errors/not-found` | 404 | No lane answers at this path on the machine host, under `/v1`, `/cli` or `/otlp`. Not a resource a lane looked for: that is `/errors/auth/not-found`. Under `/otlp` the body is OTLP's `Status` rather than a problem document, its message opening with the type. | |
 | `/errors/method-not-allowed` | 405 | The lane does not take this method. The `Allow` header lists the ones it does. On `/otlp/v1/traces` the body is OTLP's `Status`. | |
 | `/errors/incompatible-client` | 426 | Reserved for a client older than the oldest version Telmoni supports; no lane checks a client's version, so none returns it. | |
-| `/errors/tenant/rate-limited` | 429 | Too many requests. Wait and try again. A `Retry-After` header carries the same number of seconds. On the hosted service the same type answers a ceiling of the organization's plan: its monitors' pings a minute, the ping not recorded, or its data out for the UTC day — the read API's answers and the exports — until midnight UTC; `detail` says which. | `retry_after_secs` |
+| `/errors/tenant/rate-limited` | 429 | Too many requests. Wait and try again. A `Retry-After` header carries the same number of seconds. On the hosted service the same type answers the ceiling of the organization's plan on its data out for the UTC day — the read API's answers and the exports — until midnight UTC; `detail` says so. | `retry_after_secs` |
 | `/errors/tenant/feature-off` | 503 | This feature is switched off, for your organization or for the whole deployment. `detail` says which in a sentence. | `flag`, `retry_after_secs` |
 | `/errors/mail/delivery-failed` | 502 | An email this request depended on, such as a confirmation code, could not be sent. | |
 | `/errors/connectors/key-unavailable` | 502 | The key that seals connector secrets could not be reached, so a connector could not be set up or its secret rotated. Nothing was changed; try again shortly. | |
@@ -62,7 +62,7 @@ your code can branch on.
 | `/errors/telemetry/invalid-batch` | 400 | An export to `/otlp/v1/traces` did not decode as OTLP in the encoding its `Content-Type` named, held no span, held more than 1,000, did not arrive within 60 seconds, or could not be read. On that lane the body is OTLP's `Status` rather than a problem document, its message opening with the type. | |
 | `/errors/telemetry/batch-too-large` | 413 | An export was larger than 1 MiB once decompressed. Send fewer spans per export. | `max_bytes` |
 | `/errors/telemetry/store-unavailable` | 503 | The store that keeps spans, or the key service that seals a project's hashing key, did not answer; or a project's first export came while the project was being moved to another organization or deleted. Nothing was kept; retry after the second `Retry-After` gives. | `retry_after_secs` |
-| `/errors/plan/limit-reached` | 402 | What was asked is past what the organization's plan holds. Only a deployment that sells plans answers it, never a self-hosted one: on the hosted service, a paused organization's exports, agent questions, invitations and members added to a project from it, a monitor made, or a ping to a slug no monitor has, once the plan's monitors are all made, a monitor's schedule that would take the organization's monitors past the pings a minute its plan holds, counting two a run, an invitation past Hobby's one member and the seat it would take, a second organization asked for while the person's Hobby place is held, which is paid for first instead, a cancellation of an organization that could not fall to Hobby, and an organization offered to someone whose free plan is already taken ([Billing](https://telmoni.com/docs/workspace/billing)). `detail` says what lifts it; on `/otlp/v1/traces` it is OTLP's `Status`, its message opening with the type, and an exporter drops the export rather than retrying it. | `entitlement` |
+| `/errors/plan/limit-reached` | 402 | What was asked is past what the organization's plan holds. Only a deployment that sells plans answers it, never a self-hosted one: on the hosted service, a paused organization's exports, agent questions, invitations and members added to a project from it, an invitation past Hobby's one member and the seat it would take, a second organization asked for while the person's Hobby place is held, which is paid for first instead, a cancellation of an organization that could not fall to Hobby, and an organization offered to someone whose free plan is already taken ([Billing](https://telmoni.com/docs/workspace/billing)). `detail` says what lifts it; on `/otlp/v1/traces` it is OTLP's `Status`, its message opening with the type, and an exporter drops the export rather than retrying it. | `entitlement` |
 
 `feature-off` answers `503` with a retry hint, not `404`, on purpose: the route
 exists and the switch is Telmoni's, so a program should wait and retry rather
@@ -70,15 +70,15 @@ than conclude the route is gone.
 
 ## Methods, and lanes that do not exist
 
-Every lane under `/v1`, `/cli` and `/ping` answers a problem document, the two
+Every lane under `/v1` and `/cli` answers a problem document, the two
 the door itself mints among them; ingest, under `/otlp`, answers OTLP's `Status`
 instead, these two among them ([Sending spans](/docs/api/ingest#refusals)).
 
 **A method a lane does not take** is `405` with an `Allow` header,
 `/errors/method-not-allowed`. The [API](/docs/api/reference) takes `GET` and
 `HEAD`, and `OPTIONS` alone answers `204` with `Allow: GET, HEAD, OPTIONS`; the
-CLI's lanes and ingest take `POST` and the ping lane `GET`, `HEAD` and `POST`,
-and every other method, `OPTIONS` included, is told so:
+CLI's lanes and ingest take `POST`, and every other method, `OPTIONS`
+included, is told so:
 
 ```json
 {
@@ -89,7 +89,7 @@ and every other method, `OPTIONS` included, is told so:
 }
 ```
 
-**A path no lane serves**, under `/v1`, `/cli`, `/ping` or `/otlp`, is `404` with
+**A path no lane serves**, under `/v1`, `/cli` or `/otlp`, is `404` with
 `/errors/not-found`: a type apart from `/errors/auth/not-found`, which a lane
 answers about a resource it looked for and did not find, so a client can tell
 a missing lane from a missing row:

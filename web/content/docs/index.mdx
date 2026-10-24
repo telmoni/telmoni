@@ -9,10 +9,10 @@ the door, and the console reads them as [traces](/docs/workspace/traces),
 [sessions](/docs/workspace/sessions) and
 [users](/docs/workspace/users). Underneath is a foundation for organizations
 and their projects: members and roles, API keys, notifications and a
-hash-chained audit log, with a CLI and an HTTP API. Monitors and alerts are
-not built yet. These documentation pages describe the open core platform,
-hosted cloud service, console interface, developer tools, and HTTP API as
-implemented today.
+hash-chained audit log, with a CLI and an HTTP API. The console's Alerts and
+Dashboards pages are not built yet. These documentation pages describe the open core
+platform, hosted cloud service, console interface, developer tools, and HTTP
+API as implemented today.
 
 ## Platform capabilities
 
@@ -49,7 +49,9 @@ platform deployed on your own infrastructure:
 - **[Client SDKs](/docs/api/sdks)**: SDKs for Python, TypeScript / JavaScript, Go and
   Rust that record an agent's runs, steps, model calls and tool calls as
   OpenTelemetry spans, with content taken off before it leaves the process;
-  installed from the repository.
+  each installed with its language's own tool.
+- **[Coding-agent plugins](/docs/api/coding-agents)**: Each turn of Claude Code,
+  Codex, OpenCode or Cursor recorded as a run, metadata only, with no code.
 - **[Agent skill](/docs/api/agent-skill)**: Teaches a coding agent, in Claude
   Code, Codex, Cursor and others that read `SKILL.md`, to work with Telmoni:
   the SDKs, the CLI, the API, webhooks and self-hosting.
