@@ -218,4 +218,8 @@ service, it goes through its identity provider's sign-out page, which ends
 your session there too. A post from
 another site, which the browser's Fetch Metadata or `Origin` header gives
 away, is turned back to the home page without signing you out, and so is a
-link to `/auth/logout` from another site.
+link to `/auth/logout` from another site. A link from this site, or the address
+typed, does not sign you out either: with a live session it opens a page that
+asks, and the sign-out is the button on it. A session already ended — by a
+deletion, an email change or a revocation from another device — is let out
+without the question.
