@@ -11,6 +11,8 @@ const deleteAccountAction = vi.hoisted(() =>
   vi.fn<(code: string) => Promise<Answer>>(async () => ({ ok: true, deleted: true })),
 );
 vi.mock("./actions", () => ({ requestAccountDeletionCodeAction, deleteAccountAction }));
+const signOut = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/auth/sign-out", () => ({ signOut }));
 
 import { DeleteAccountForm } from "./_delete-account";
 
@@ -115,6 +117,6 @@ describe("DeleteAccountForm", () => {
     expect(document.body.textContent).toMatch(/signing you out and taking you to the home page/i);
 
     await press(/sign out now/i);
-    expect(replace).toHaveBeenCalledWith("/auth/logout");
+    expect(signOut).toHaveBeenCalled();
   });
 });

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { HeaderShortcuts } from "@/components/header-shortcuts";
 import { Button } from "@/components/ui/button";
 import { MobileNav } from "@/components/mobile-nav";
+import { SignOutButton } from "@/components/sign-out-button";
 import { SiteNavMenu } from "@/components/site-nav-menu";
 import { TelmoniMark } from "@/components/telmoni-mark";
 import { INSET } from "@/lib/inset";
@@ -71,10 +72,7 @@ export function SiteHeader({ signedIn, inset = false }: { signedIn: boolean; ins
           <div className="hidden items-center gap-2 lg:flex">
             {signedIn ? (
               <>
-                <Button asChild variant="outline" size="sm" className={NAV_TYPE}>
-                  {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-                  <a href="/auth/logout">Sign out</a>
-                </Button>
+                <SignOutButton className={NAV_TYPE} />
                 <Button asChild variant="outline" size="sm" className={NAV_TYPE}>
                   <Link href="/console">
                     Console

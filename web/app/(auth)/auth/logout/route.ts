@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 
-import { destroySession } from "@/lib/auth/session";
+import { destroySession, getSession } from "@/lib/auth/session";
 import { env } from "@/lib/env";
 
 // ⚠ **A cross-site post is refused before anything else, because signing out
@@ -35,12 +35,15 @@ export function POST(request: NextRequest) {
   return performLogout();
 }
 
-// A navigation, not a post: the links and `window.location` sign-outs land
-// here, and so does a page's redirect of a dead session, which arrives as
-// whatever site the chain began on. Only another site's link is turned away.
-export function GET(request: NextRequest) {
+// A navigation, not a post: a page's redirect of a dead session lands here
+// and is let out, and another site's link is turned away. A live session is
+// asked first (`confirm/page.tsx`), since a link is all it takes to arrive.
+export async function GET(request: NextRequest) {
   if (request.headers.get("sec-fetch-site") === "cross-site") {
     return NextResponse.redirect(new URL("/", env.AUTH_URL));
+  }
+  if ((await getSession()) !== null) {
+    return NextResponse.redirect(new URL("/auth/logout/confirm", env.AUTH_URL));
   }
   return performLogout();
 }

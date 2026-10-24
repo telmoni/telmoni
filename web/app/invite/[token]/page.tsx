@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { SignOutButton } from "@/components/sign-out-button";
 import { Card } from "@/components/ui/card";
 import { getServerSession } from "@/lib/server/session";
 import { lookUpInvite } from "@/lib/server/data";
@@ -97,10 +98,7 @@ export default async function InvitePage({
           address to accept it.
         </p>
         <div>
-          <Button variant="outline" asChild>
-            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-            <a href="/auth/logout">Sign out</a>
-          </Button>
+          <SignOutButton size="default" />
         </div>
       </Shell>
     );

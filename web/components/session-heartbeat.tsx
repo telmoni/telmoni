@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 
 import { afterRefusedHeartbeat } from "@/lib/auth/heartbeat";
+import { signOut } from "@/lib/auth/sign-out";
 
 const RETRY_MS = 30_000;
 
@@ -71,8 +72,10 @@ export function SessionHeartbeat({ expiresAt: initialExpiresAt }: SessionHeartbe
         if (res.status === 401) {
           // Both ways out are Route Handlers, which `router.push` is not for
           // (it fetches a page's payload): a full load runs them and follows
-          // where they redirect.
-          window.location.replace(afterRefusedHeartbeat(await res.json().catch(() => null)));
+          // where they redirect — the sign-out as the post it has to be.
+          const to = afterRefusedHeartbeat(await res.json().catch(() => null));
+          if (to === "/auth/logout") signOut();
+          else window.location.replace(to);
           return;
         }
         if (res.ok) {

@@ -48,6 +48,12 @@ const post = (site = "same-origin") =>
     headers: { "sec-fetch-site": site },
   });
 
+// A same-site navigation: a typed address, a page's redirect, or a link.
+const navigation = () =>
+  new NextRequest("http://localhost:3000/auth/logout", {
+    headers: { "sec-fetch-site": "same-origin" },
+  });
+
 // A signed-in browser's cookie: the session the exchange answered with, and
 // an opaque bearer nothing reads.
 async function plantSession(sessionId: string, sessionRowId: string | null = null) {
@@ -213,17 +219,38 @@ describe("GET /auth/logout", () => {
     expect(mockedRevoke).not.toHaveBeenCalled();
   });
 
-  it("performs the full provider sign-out on a same-origin navigation", async () => {
+  // A link is all it takes to arrive here, so a live session is asked first.
+  it("sends a live session to the confirmation page without touching it", async () => {
     await plantSession("session_42");
-    mockedGetLogoutUrl.mockResolvedValue(PROVIDER_LOGOUT);
+    const sealed = jar.store.get(SESSION_COOKIE);
 
-    const res = await GET(
-      new NextRequest("http://localhost:3000/auth/logout", {
-        headers: { "sec-fetch-site": "same-origin" },
-      }),
-    );
+    const res = await GET(navigation());
+
+    expect(res.headers.get("location")).toBe("http://localhost:3000/auth/logout/confirm");
+    expect(jar.store.get(SESSION_COOKIE)).toBe(sealed);
+    expect(mockedGetLogoutUrl).not.toHaveBeenCalled();
+    expect(mockedRevoke).not.toHaveBeenCalled();
+  });
+
+  // A page's redirect of a dead session, which must still land signed out.
+  it("signs out and lands on the splash when no live session stands", async () => {
+    const res = await GET(navigation());
 
     expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe(PROVIDER_LOGOUT);
+    expect(res.headers.get("location")).toBe("http://localhost:3000/");
+    expect(mockedGetLogoutUrl).not.toHaveBeenCalled();
+    expect(mockedRevoke).not.toHaveBeenCalled();
+  });
+
+  it("clears the cookie of a session the console ended already, without asking", async () => {
+    await plantSession("session_42", "row_42");
+    await blacklistSession("row_42");
+
+    const res = await GET(navigation());
+
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("http://localhost:3000/");
+    expect(jar.store.get(SESSION_COOKIE) ?? "").toBe("");
+    expect(mockedGetLogoutUrl).not.toHaveBeenCalled();
   });
 });

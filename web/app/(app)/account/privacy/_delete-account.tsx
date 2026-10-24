@@ -6,6 +6,7 @@ import { useEffect, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { signOut } from "@/lib/auth/sign-out";
 import { PRODUCT_NAME } from "@/lib/site";
 
 import { deleteAccountAction, requestAccountDeletionCodeAction } from "./actions";
@@ -36,7 +37,7 @@ export function DeleteAccountForm({
 
   useEffect(() => {
     if (!farewell) return;
-    const t = setTimeout(() => window.location.replace("/auth/logout"), FAREWELL_MS);
+    const t = setTimeout(signOut, FAREWELL_MS);
     return () => clearTimeout(t);
   }, [farewell]);
 
@@ -92,10 +93,7 @@ export function DeleteAccountForm({
           Signing you out and taking you to the home page&hellip;
         </p>
         <div>
-          <Button
-            variant="destructive"
-            onClick={() => window.location.replace("/auth/logout")}
-          >
+          <Button variant="destructive" onClick={signOut}>
             Sign out now
           </Button>
         </div>

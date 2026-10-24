@@ -91,8 +91,9 @@ describe("AccountOnly", () => {
       "data-email",
       "ada@example.test",
     );
-    expect(screen.getByRole("link", { name: /sign out/i })).toHaveAttribute(
-      "href",
+    // A post, as the account menu's: a GET with a live session only asks.
+    expect(screen.getByRole("button", { name: /sign out/i }).closest("form")).toHaveAttribute(
+      "action",
       "/auth/logout",
     );
     expect(screen.getByTestId("heartbeat")).toBeInTheDocument();

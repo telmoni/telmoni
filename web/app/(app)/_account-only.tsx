@@ -1,5 +1,6 @@
 import { PaperShell } from "@/components/paper-shell";
 import { SessionHeartbeat } from "@/components/session-heartbeat";
+import { SignOutButton } from "@/components/sign-out-button";
 import { Card } from "@/components/ui/card";
 import { analyticsConfigured } from "@/lib/analytics";
 import type { ActiveSession } from "@/lib/server/data";
@@ -94,12 +95,12 @@ export function AccountOnly({
           <DeleteAccountForm email={email} ownedOrganizations={ownedOrganizations} />
         </Card>
 
-        <p className="text-sm">
-          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-          <a href="/auth/logout" className="underline underline-offset-4">
-            Sign out
-          </a>
-        </p>
+        <div className="text-sm">
+          <SignOutButton
+            variant="link"
+            className="h-auto p-0 text-sm font-normal text-foreground underline underline-offset-4"
+          />
+        </div>
       </main>
     </PaperShell>
   );

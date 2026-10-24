@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Menu, MessagesSquare, X } from "lucide-react";
 
+import { SignOutButton } from "@/components/sign-out-button";
 import { Button } from "@/components/ui/button";
 import { PRIMARY_NAV, panelLinks, type NavLink } from "@/components/site-nav";
 import { DISCUSSIONS_URL } from "@/lib/site";
@@ -96,12 +97,7 @@ export function MobileNav({ signedIn }: { signedIn: boolean }) {
                       Console
                     </Link>
                   </Button>
-                  <Button asChild size="sm" variant="outline" className={NAV_TYPE}>
-                    {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-                    <a href="/auth/logout" onClick={() => setOpen(false)}>
-                      Sign out
-                    </a>
-                  </Button>
+                  <SignOutButton className={NAV_TYPE} />
                 </div>
               ) : (
                 <div className="flex flex-col gap-3">

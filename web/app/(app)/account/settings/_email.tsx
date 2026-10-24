@@ -6,6 +6,7 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { signOut } from "@/lib/auth/sign-out";
 import { emailPosture } from "@/lib/sign-in-method";
 
 import {
@@ -121,13 +122,7 @@ export function ChangeEmail({
           with the new one is what confirms the change took.
         </p>
         <div>
-          <Button
-            onClick={() => {
-              window.location.replace("/auth/logout");
-            }}
-          >
-            Sign in again
-          </Button>
+          <Button onClick={signOut}>Sign in again</Button>
         </div>
       </div>
     );

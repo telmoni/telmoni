@@ -35,6 +35,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import { signOut } from "@/lib/auth/sign-out";
 import { CORNERS_DEFAULT, type Corners } from "@/lib/corners";
 import { setCorners, useCorners } from "@/lib/use-corners";
 import { ACCOUNT_MENU_EVENT, pressedKey } from "@/lib/keys";
@@ -269,11 +270,7 @@ export function NavUser() {
             className="h-9 cursor-pointer gap-2 px-2"
             onSelect={(event) => {
               event.preventDefault();
-              const form = document.createElement("form");
-              form.method = "POST";
-              form.action = "/auth/logout";
-              document.body.appendChild(form);
-              form.submit();
+              signOut();
             }}
           >
             <LogOut />
