@@ -67,16 +67,16 @@
 
   --brand-positive: oklch(0.56 0.17 145);
   --brand-negative: oklch(0.55 0.22 25);
-  /* The marker is the monogram's cyan: here lightened at its hue, on a dark
-     page the mark's own; the words on it keep the mark's dark ink in both. */
+  /* The marker is cyan, lightened at its hue on a light page; the words on
+     it keep the mark's dark ink in both. */
   --highlight: oklch(0.9 0.067 223);
-  --highlight-foreground: #1f2937;
+  --highlight-foreground: #161616;
 
-  /* The mark's colours as the brand pack spells them: darker shades on a
-     light surface, lighter on a dark one. */
-  --mark-ink: #1f2937;
-  --mark-cyan: #0e7490;
-  --mark-ember: #c2410c;
+  /* The mark's greys as the brand pack spells them: the t stands out most
+     from the surface, and the m fades toward it. */
+  --mark-ink: #161616;
+  --mark-mid: #52525b;
+  --mark-faint: #a1a1aa;
 
   --sidebar: var(--background);
   --sidebar-foreground: oklch(0.27 0.01 250);
@@ -123,11 +123,11 @@
   --brand-positive: oklch(0.65 0.17 145);
   --brand-negative: oklch(0.65 0.22 25);
   --highlight: #22d3ee;
-  --highlight-foreground: #1f2937;
+  --highlight-foreground: #161616;
 
-  --mark-ink: #e6e8ea;
-  --mark-cyan: #22d3ee;
-  --mark-ember: #f97316;
+  --mark-ink: #e4e4e4;
+  --mark-mid: #a1a1aa;
+  --mark-faint: #6b6b73;
 
   --sidebar: var(--background);
   --sidebar-foreground: oklch(0.96 0.005 250);
@@ -176,9 +176,9 @@
 
   /* Restated with the surface: the home page puts `dark` on this element
      itself, where `.dark`'s light shades would vanish into light paper. */
-  --mark-ink: #1f2937;
-  --mark-cyan: #0e7490;
-  --mark-ember: #c2410c;
+  --mark-ink: #161616;
+  --mark-mid: #52525b;
+  --mark-faint: #a1a1aa;
 
   background-color: var(--background);
   color: var(--foreground);
@@ -217,9 +217,9 @@
   --brand-positive: oklch(0.68 0.14 150);
   --brand-negative: oklch(0.65 0.2 27);
 
-  --mark-ink: #e6e8ea;
-  --mark-cyan: #22d3ee;
-  --mark-ember: #f97316;
+  --mark-ink: #e4e4e4;
+  --mark-mid: #a1a1aa;
+  --mark-faint: #6b6b73;
 
   background-color: var(--background);
   color: var(--foreground);
@@ -573,8 +573,8 @@ html.a11y-no-letter-keys [data-letter-key] {
   --color-brand-positive: var(--brand-positive);
   --color-brand-negative: var(--brand-negative);
   --color-mark-ink: var(--mark-ink);
-  --color-mark-cyan: var(--mark-cyan);
-  --color-mark-ember: var(--mark-ember);
+  --color-mark-mid: var(--mark-mid);
+  --color-mark-faint: var(--mark-faint);
   --color-highlight: var(--highlight);
   --color-highlight-foreground: var(--highlight-foreground);
   --color-console-field: var(--console-field);
