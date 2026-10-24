@@ -1,6 +1,6 @@
 # Telmoni — Agent Guidelines
 
-The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni/telmoni)): organizations and projects, members and roles, API keys (`api_tokens` in the code; customer copy always says *API key*), notifications, an audit log and a console agent. One Rust binary, `telmoni`, runs auth, notifications, telemetry and the console agent as modules; the Next.js console in `web/` sits beside it; the Helm chart in `deploy/` deploys both to GKE. A deployment that needs more builds its own binary and console on top (README § Extending Telmoni); nothing here names one.
+The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni/telmoni)): organizations and projects, members and roles, API keys (`api_tokens` in the code; customer copy always says *API key*), notifications, an audit log and a console agent. One Rust binary, `telmoni`, runs auth, notifications, telemetry and the console agent as modules; the Next.js console in `web/` sits beside it; `deploy/` holds the Helm chart and the self-host Compose file. A deployment that needs more builds its own binary and console on top (README § Extending Telmoni); nothing here names one.
 
 ## Ground Rules
 - **Pre-launch:** nothing has shipped. Fix schemas, wire contracts, Redis keys and APIs directly to their ideal state; no migration paths, dual-writes, shims or versioned schemas.
@@ -11,22 +11,22 @@ The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni
 ## Where Things Live
 | Path | What |
 |---|---|
-| `crates/telmoni` | The binary: `serve` (every module on `PORT` 8082, the sweeps and the agent's indexer on timers) and one-shot admin subcommands (`cli.rs`). `App::assemble` is what a deployment's own binary calls. |
+| `crates/telmoni` | The binary (`telmoni-server`): `serve` (every module on `PORT` 8082, the sweeps and the agent's indexer on timers), the machine door (`door.rs`) and one-shot admin subcommands (`cli.rs`). `App::assemble` is what a deployment's own binary calls. |
 | `crates/auth` | Sign-in (password form, OIDC), identities, organizations, projects, members, invitations, transfers, API keys, sessions, flags, export and deletion, `/v1`. |
 | `crates/notifications` | The in-app feed, the Slack and webhook connectors, the delivery queue. |
 | `crates/agent` | The console agent, read-only: model adapters, embeddings, the index, hybrid search, tools. Needs the `vector` extension, which a superuser installs. Off until `AGENT_MODEL_PROVIDER` is set. |
-| `crates/telemetry` | Each project's settings and content mode in Postgres, the mode read and set through the console's lane under `/internal/v1/telemetry` (`handler/`); the spans and their hourly totals in ClickHouse, which the module reads and writes only through `store.rs`, each read naming its projects. `clickhouse/` holds ClickHouse's one migration file, which `migrate` applies (`schema.rs`), its settings and its local users; `rotate` drops the expired days and months (`retention.rs`), both as the migrator's user. |
+| `crates/telemetry` | Ingest at `/otlp/v1/traces` (`ingest/`, `handler/ingest.rs`); each project's settings, content mode and saved views and layouts in Postgres (`db.rs`, `handler/`); the spans and their hourly totals in ClickHouse, read and written only through `store.rs`, each read naming its projects. `clickhouse/` holds ClickHouse's one migration file (`schema.rs`), its settings and its local users; `rotate` drops the expired days and months (`retention.rs`), both as the migrator's user. |
 | `crates/shared` | `TelmoniError`, RBAC (`rbac.rs`), tenancy scopes, the seams between modules (`seam.rs`), audit, `Redacted`. `tests/` holds the cross-module suites. |
 | `crates/migrator` | The migration runner and the `audit` schema; grants, role hardening and the local roles and extensions in `sql/`. Each module's SQL is in `crates/<module>/migrations/`, and telemetry's ClickHouse file in `crates/telemetry/clickhouse/`. |
 | `web/` | `app/` routes and their tests, `lib/` logic and its tests, `components/` UI (no tests), `content/docs/` the book (the customer docs, served at `/docs`), laid in from `../docs` by `make book` and ignored by git, `e2e/` Playwright, `proxy.ts` middleware, `lib/extension/` and `components/extension/` the slots a console built on this one fills. |
-| `sdk/` | The four SDKs (`python/`, `typescript/`, `go/`, `rust/`): an agent's runs, steps, model calls and tool calls as OpenTelemetry spans, sent to `/otlp/v1/traces` by an exporter of each one's own and nowhere else; `fixtures/`, the golden export and the answers every suite replays. `crates/telemetry/src/contract.rs` names what ingest reads, and each SDK's `contract` module copies it. |
+| `sdk/` | The four SDKs (`python/`, `typescript/`, `go/`, `rust/`): an agent's runs, steps, model calls and tool calls as OpenTelemetry spans, sent to `/otlp/v1/traces` by an exporter of each one's own and nowhere else; `fixtures/`, the golden exports, the answers, the headers and the endpoints every suite replays. `crates/telemetry/src/contract.rs` names what ingest reads, and each SDK's `contract` module copies it. |
 | `contract/` | Generated wire contract and OpenAPI document (`make contract`); never hand-edited. |
 | `scripts/` | `up.sh`, `book.sh` (the book, laid into the console) and the webhook tunnel and receiver. Ask before adding one. |
 | `deploy/` | The Helm chart (`charts/telmoni`) and the self-host compose (`compose/`). |
 | `ARCHITECTURE.md` | How the platform is built, and why, on one page: the repository's one internal document. |
 | `scratch/` | The maintainer's notes, gitignored. Never write to it. |
 | [`telmoni/docs`](https://github.com/telmoni/docs) | Sibling repo, checked out as `../docs`: the book, `content/`, which `make book` lays into `web/content/docs`, and `hosted/`, the hosted service's own pages, which this console never serves. |
-| [`telmoni/telmoni-cli`](https://github.com/telmoni/telmoni-cli) | Sibling repo, checked out as `../telmoni-cli`: the CLI, a client of the `/cli` and `/v1` lanes and nothing else. |
+| [`telmoni/telmoni-cli`](https://github.com/telmoni/telmoni-cli) | Sibling repo, checked out as `../telmoni-cli`: the CLI, a client of the `/cli/v1` and `/v1` lanes and nothing else. |
 
 ## Commands
 - **After every change** (no permission needed; report failures verbatim): `make check` (typecheck, cargo check, fmt, clippy, rustdoc), then `make lint`.
