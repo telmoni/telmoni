@@ -1,3 +1,5 @@
+"use client";
+
 import * as React from "react";
 
 import { Card } from "@/components/ui/card";
@@ -29,19 +31,56 @@ import { cn } from "@/lib/utils";
 // row" asks for, enforced rather than agreed.
 const CELL = "px-4 py-3";
 
+// Which way the table still runs past its card: a table wider than its card
+// scrolls inside it, and the scrollbar at the card's foot is out of sight
+// under a page of rows, so the clipped edge itself fades into the page where
+// there is more (`globals.css`, `[data-overflow]`). Measured again as the
+// card scrolls and as either the card or the table changes width.
+function useOverflow(wrapper: React.RefObject<HTMLDivElement | null>) {
+  const [overflow, setOverflow] = React.useState("");
+  React.useEffect(() => {
+    const card = wrapper.current?.firstElementChild;
+    if (!(card instanceof HTMLElement)) return;
+    const measure = () => {
+      const left = card.scrollLeft > 0;
+      const right = card.scrollLeft + card.clientWidth < card.scrollWidth - 1;
+      setOverflow(left && right ? "left right" : left ? "left" : right ? "right" : "");
+    };
+    measure();
+    card.addEventListener("scroll", measure, { passive: true });
+    const observer = new ResizeObserver(measure);
+    observer.observe(card);
+    if (card.firstElementChild) observer.observe(card.firstElementChild);
+    return () => {
+      card.removeEventListener("scroll", measure);
+      observer.disconnect();
+    };
+  }, [wrapper]);
+  return overflow;
+}
+
 // The Card shell and the table itself.
 //
 // `tabIndex={0}` is load-bearing: `globals.css` gives a Card containing a
 // table `overflow-x: auto`, and a scroll container that cannot be focused
 // cannot be scrolled from the keyboard.
+//
+// ⚠ **`min-w-0` on the wrapper is load-bearing too.** The card scrolls
+// because, as a grid or flex item, a scroll container's automatic minimum
+// width is zero; a plain block around it has the table's full width for its
+// minimum, the track grows to it, and the page scrolls sideways instead.
 export function DataTable({
   className,
   ...props
 }: React.ComponentProps<"table">) {
+  const wrapper = React.useRef<HTMLDivElement>(null);
+  const overflow = useOverflow(wrapper);
   return (
-    <Card className="overflow-hidden p-0 gap-0" tabIndex={0}>
-      <table className={cn("w-full text-sm", className)} {...props} />
-    </Card>
+    <div ref={wrapper} className="relative min-w-0" data-overflow={overflow || undefined}>
+      <Card className="overflow-hidden p-0 gap-0" tabIndex={0}>
+        <table className={cn("w-full text-sm", className)} {...props} />
+      </Card>
+    </div>
   );
 }
 

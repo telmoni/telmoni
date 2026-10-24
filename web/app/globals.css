@@ -552,6 +552,27 @@ html.a11y-no-letter-keys [data-letter-key] {
 .theme-console [data-slot="card"]:has(table) {
   overflow-x: auto;
 }
+/* While a table runs past its card on a side, that edge fades into the page,
+   which says there is more where the eye is; the scrollbar at the card's
+   foot (`::-webkit-scrollbar`, below) is under a page of rows. The fade stops
+   short of the scrollbar's row. `data-table.tsx` measures which side. */
+.theme-console [data-overflow~="left"]::before,
+.theme-console [data-overflow~="right"]::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0.5rem;
+  width: 3rem;
+  pointer-events: none;
+}
+.theme-console [data-overflow~="left"]::before {
+  left: 0;
+  background: linear-gradient(to right, var(--background), transparent);
+}
+.theme-console [data-overflow~="right"]::after {
+  right: 0;
+  background: linear-gradient(to left, var(--background), transparent);
+}
 
 .theme-console [data-slot="card"] table {
   min-width: max-content;
