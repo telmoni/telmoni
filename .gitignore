@@ -29,6 +29,7 @@ application_default_credentials.json
 .gemini/
 .aider*
 .cursor/
+skills
 
 # ── Rust ──────────────────────────────────────────────────────────────────────
 # Cargo.lock is committed for reproducible builds.
