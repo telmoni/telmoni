@@ -388,6 +388,16 @@
 .theme-sharp .toaster .sonner-loading-bar {
   border-radius: 0;
 }
+/* The book's typography (Fumadocs, `app/docs`) draws its prose code and
+   tables from its own stylesheet, and a child variant — `*:rounded-full` on
+   its theme switch — puts a radius on children whose own class says nothing:
+   none carries `rounded`, so the attribute rule reaches none. By name, as the
+   toast is. */
+.theme-sharp .prose :is(code, table, .highlighted-word),
+.theme-sharp [class*="*:rounded"] > *,
+.theme-sharp [class*="**:rounded"] * {
+  border-radius: 0;
+}
 
 *:focus,
 *:focus-visible {
