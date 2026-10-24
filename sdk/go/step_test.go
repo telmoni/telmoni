@@ -121,7 +121,7 @@ func TestASecondEndAndALateMarkDoNothing(t *testing.T) {
 	run.End()
 	h.flush()
 	spans := h.transport.spans(t)
-	if got := sortedNames(spans); !reflect.DeepEqual(got, []string{"invoke_agent bot", "plan", "telmoni.run.start"}) {
+	if got := sortedNames(spans); !reflect.DeepEqual(got, []string{"invoke_agent bot", "plan"}) {
 		t.Errorf("spans sent: %v", got)
 	}
 	attributes := attributesOf(t, byName(spans)["plan"])
@@ -145,7 +145,7 @@ func TestAStepNamedNothingOrPastIngestsCapKeepsItsSpan(t *testing.T) {
 	}
 	run.End()
 	h.flush()
-	want := []string{"invoke_agent bot", n(145), n(145), n(145), "step", "step", "telmoni.run.start", strings.Repeat("�", 145)}
+	want := []string{"invoke_agent bot", n(145), n(145), n(145), "step", "step", strings.Repeat("�", 145)}
 	if got := sortedNames(h.transport.spans(t)); !reflect.DeepEqual(got, want) {
 		t.Errorf("spans sent: %q", got)
 	}

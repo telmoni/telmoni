@@ -27,7 +27,6 @@ func Example() {
 		UserID:    "user_42",
 		SessionID: "conv_7",
 		Tags:      map[string]string{"env": "prod"},
-		Bounds:    &telmoni.Bounds{StallAfterS: 60, MaxSteps: 10, MaxCostUSD: 1.5},
 	})
 	defer run.End()
 

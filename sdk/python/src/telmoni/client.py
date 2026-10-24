@@ -12,7 +12,7 @@ from . import contract
 from ._version import __version__
 from .exporter import Exporter, Transport
 from .ids import Ids
-from .models import Bounds, Config, RunRecord
+from .models import Config, RunRecord
 from .processor import Processor
 from .propagation import read_headers, write_headers
 from .runs import (
@@ -97,7 +97,6 @@ class Telmoni:
         user_id: str | None = None,
         session_id: str | None = None,
         tags: Mapping[str, str] | None = None,
-        bounds: Bounds | None = None,
         sample_rate: float | None = None,
     ) -> RunScope:
         """A run of ``agent``: ``with telmoni.run("bot") as run:`` or ``@telmoni.run("bot")``."""
@@ -107,7 +106,6 @@ class Telmoni:
                 user_id=user_id,
                 session_id=session_id,
                 tags=tags,
-                bounds=bounds,
                 sample_rate=sample_rate,
             )
         )

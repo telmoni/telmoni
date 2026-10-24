@@ -20,16 +20,11 @@ pub(crate) const TAGS_MAX: usize = 32;
 pub(crate) const TAG_KEY_MAX: usize = 64;
 /// The most characters a tag's value holds: ingest's `TAG_VALUE_MAX`.
 pub(crate) const TAG_VALUE_MAX: usize = 256;
-pub(crate) const BOUND_STALL_AFTER_S: &str = "telmoni.bound.stall_after_s";
-pub(crate) const BOUND_MAX_STEPS: &str = "telmoni.bound.max_steps";
-pub(crate) const BOUND_MAX_COST_USD: &str = "telmoni.bound.max_cost_usd";
 pub(crate) const SAMPLE_RATE: &str = "telmoni.sample_rate";
 pub(crate) const CANCELLED: &str = "telmoni.cancelled";
 /// Never sent: on every span of a run the sample rate kept out, from its
 /// start, so the processor drops each however late it ends.
 pub(crate) const SAMPLED_OUT: &str = "telmoni.sampled_out";
-/// The span of no duration that opens a run, sent at once.
-pub(crate) const RUN_START: &str = "telmoni.run.start";
 /// The deployment, on the resource: the configuration's `environment` and
 /// `release`.
 pub(crate) const ENVIRONMENT: &str = "deployment.environment.name";

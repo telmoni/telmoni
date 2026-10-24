@@ -182,7 +182,7 @@ describe('beside the application', () => {
     ]);
     expect(attributesOf(run)['telmoni.tag.a']).toBe('b');
     expect(attributesOf(run)['user.id']).toBe('c');
-    expect(ours.transport.spans().map((span) => span.name).sort()).toEqual(['invoke_agent bot', 's', 'telmoni.run.start']);
+    expect(ours.transport.spans().map((span) => span.name).sort()).toEqual(['invoke_agent bot', 's']);
     const resource = ours.transport.bodies()[0]!.resourceSpans[0]!.resource.attributes;
     expect(new Set(resource.map((attribute) => attribute.key))).toEqual(
       new Set([

@@ -4,8 +4,8 @@
 //! A run inside a trace the application does not sample is still sent; the
 //! run's own sample rate is applied here, by run, never through the trace's
 //! flag. The queue is bounded, so a slow Telmoni never slows an agent: past
-//! its size, spans are dropped and counted. `telmoni.run.start` wakes the
-//! worker at once, and a recorded run travels in exports of its own.
+//! its size, spans are dropped and counted. A recorded run goes at once, in
+//! exports of its own.
 
 use std::collections::VecDeque;
 use std::fmt;
@@ -71,7 +71,6 @@ struct State {
     stage: Option<Stage>,
     reserved: usize,
     dropped: usize,
-    urgent: bool,
     flushing: usize,
     shutdown: bool,
     exporting: bool,
@@ -193,11 +192,8 @@ impl SpanProcessor for Processor {
             state.dropped += 1;
             return;
         }
-        if span.name == contract::RUN_START {
-            state.urgent = true;
-        }
         state.queue.push_back(span);
-        if state.urgent || state.queue.len() >= self.shared.batching.max_batch_size {
+        if state.queue.len() >= self.shared.batching.max_batch_size {
             self.shared.wake.notify_all();
         }
     }
@@ -259,7 +255,6 @@ fn work(shared: &Shared, exporter: &Exporter, warner: &Warner) {
                 state.fences.pop_front();
             }
             let dropped = std::mem::take(&mut state.dropped);
-            state.urgent = false;
             state.exporting = !batch.is_empty();
             (batch, dropped)
         };
@@ -286,11 +281,10 @@ fn work(shared: &Shared, exporter: &Exporter, warner: &Warner) {
 }
 
 /// Under the lock: whether the worker should export without waiting; a
-/// record queued goes at once, as a live run's start does.
+/// record queued goes at once.
 fn due(state: &State, batching: &Batching) -> bool {
     state.shutdown
         || state.flushing > 0
-        || state.urgent
         || !state.fences.is_empty()
         || state.queue.len() >= batching.max_batch_size
 }

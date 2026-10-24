@@ -4,14 +4,14 @@ One contract across the four SDKs: what each must send for the same run, and wha
 
 ## `run.json`
 
-`scenario` is the run every suite performs, and how the client is built for it: `capture_content`, and the `environment` and `release` the client names its deployment by, which the resource carries as `deployment.environment.name` and `service.version`; `export` is the OTLP/JSON body the SDK must have sent for it, in `ExportTraceServiceRequest`'s JSON encoding, after the normalization below. The SDK sends `telmoni.run.start` at once, in an export of its own, and the rest when the run ends, so a suite gathers every body its fake transport received and compares their spans together.
+`scenario` is the run every suite performs, and how the client is built for it: `capture_content`, and the `environment` and `release` the client names its deployment by, which the resource carries as `deployment.environment.name` and `service.version`; `export` is the OTLP/JSON body the SDK must have sent for it, in `ExportTraceServiceRequest`'s JSON encoding, after the normalization below. The run's spans may travel in more than one export, so a suite gathers every body its fake transport received and compares their spans together.
 
 Before comparing, a suite normalizes what it captured:
 
 1. Spans are sorted by `name`, and every `attributes` array by `key`.
 2. Every `traceId` is checked to be the same 32 lowercase hex characters, then replaced by `<trace>`.
 3. Each `spanId` is replaced by `<span:NAME>`, its span's name; each `parentSpanId` by `<span:NAME>` of the span it names, which must be in the export. A root span has no `parentSpanId`.
-4. `startTimeUnixNano` and `endTimeUnixNano` are checked to be decimal strings with end no earlier than start, and equal on `telmoni.run.start`, then replaced by `<time>`.
+4. `startTimeUnixNano` and `endTimeUnixNano` are checked to be decimal strings with end no earlier than start, then replaced by `<time>`.
 5. `telmoni.run_id` is checked to be one UUID (8-4-4-4-12 lowercase hex, version 4) on every span, then replaced by `<uuid>`.
 6. `telemetry.sdk.language` is replaced by `<language>`; `telemetry.sdk.version`, `telemetry.distro.version` and the scope's `version` by `<version>`.
 7. Everything else is compared as JSON: names, kinds, every attribute's key and typed value (`stringValue`; `intValue` as a decimal string; `doubleValue` as a number; `boolValue`), each span's `status`, the resource and the scope's name. A span with no error carries no `status`; one that failed carries `{"code": 2}`.
@@ -22,14 +22,14 @@ Every request carries `Telmoni-Sent-At`, the SDK's clock as the attempt leaves, 
 
 ## `recorded.json`
 
-`scenario.record` is a run that has already ended, handed whole to `record_run` (`recordRun`, `RecordRun`): its id, its agent, user, session and tags, its times, and what ran inside it, a step holding its own calls. Times are RFC 3339 in UTC, to the millisecond, which every language holds exactly. `export` is the one body the SDK must send for it: a record travels in a single export when it holds no more spans than a batch, its `telmoni.run.start` first, then each span as it ended — a step after its calls — and the run's own last.
+`scenario.record` is a run that has already ended, handed whole to `record_run` (`recordRun`, `RecordRun`): its id, its agent, user, session and tags, its times, and what ran inside it, a step holding its own calls. Times are RFC 3339 in UTC, to the millisecond, which every language holds exactly. `export` is the one body the SDK must send for it: a record travels in a single export when it holds no more spans than a batch, each span as it ended — a step after its calls — and the run's own last.
 
 Nothing is derived at random, so the export is compared nearly whole:
 
 1. Exactly one body was sent.
 2. Every `attributes` array is sorted by `key`, the resource's too; spans keep the order they were sent in.
 3. `telemetry.sdk.language` is replaced by `<language>`; `telemetry.sdk.version`, `telemetry.distro.version` and the scope's `version` by `<version>`.
-4. Everything else is compared as JSON, ids and times included. The trace's id is the run's, without its hyphens. Each span's id is the first eight bytes, in hex, of the version 5 UUID (RFC 9562) named by the span's place in the record, in decimal, under the run's id: `0` the run, `1` its start, then each step and call in the record's order, a step before its calls.
+4. Everything else is compared as JSON, ids and times included. The trace's id is the run's, without its hyphens. Each span's id is the first eight bytes, in hex, of the version 5 UUID (RFC 9562) named by the span's place in the record, in decimal, under the run's id: `0` the run, then each step and call from `1` in the record's order, a step before its calls.
 
 The same record sent twice must be the same bytes, which ingest's claim on a body answers once.
 

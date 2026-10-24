@@ -83,8 +83,8 @@ pub use processor::Batching;
 pub use propagation::Carrier;
 pub use records::{CallRecord, ModelCallRecord, RecordItem, RunRecord, StepRecord, ToolCallRecord};
 pub use runs::{
-    Bounds, Content, ModelCall, ModelCallOptions, Reply, Run, RunOptions, Step, ToolCall,
-    ToolCallOptions, Usage,
+    Content, ModelCall, ModelCallOptions, Reply, Run, RunOptions, Step, ToolCall, ToolCallOptions,
+    Usage,
 };
 
 /// The SDK's version: the crate's, sent as `telemetry.distro.version`, as the

@@ -30,16 +30,11 @@ var versioned = map[string]bool{"telemetry.sdk.version": true, "telemetry.distro
 type runFixture struct {
 	Scenario struct {
 		Run struct {
-			Agent     string            `json:"agent"`
-			UserID    string            `json:"user_id"`
-			SessionID string            `json:"session_id"`
-			Tags      map[string]string `json:"tags"`
-			Bounds    struct {
-				StallAfterS int     `json:"stall_after_s"`
-				MaxSteps    int     `json:"max_steps"`
-				MaxCostUSD  float64 `json:"max_cost_usd"`
-			} `json:"bounds"`
-			SampleRate float64 `json:"sample_rate"`
+			Agent      string            `json:"agent"`
+			UserID     string            `json:"user_id"`
+			SessionID  string            `json:"session_id"`
+			Tags       map[string]string `json:"tags"`
+			SampleRate float64           `json:"sample_rate"`
 			Inside     []struct {
 				Step   string `json:"step"`
 				Inside []struct {
@@ -178,9 +173,6 @@ func normalize(t *testing.T, export map[string]any) map[string]any {
 		if end < start {
 			t.Errorf("%s ends before it starts", name)
 		}
-		if name == "telmoni.run.start" && end != start {
-			t.Errorf("telmoni.run.start lasts %d ns; it has no duration", end-start)
-		}
 		span["startTimeUnixNano"], span["endTimeUnixNano"] = "<time>", "<time>"
 		attributes := span["attributes"].([]any)
 		sortByKey(attributes)
@@ -227,23 +219,11 @@ func perform(t *testing.T, h *harness, fixture runFixture) {
 	t.Helper()
 	spec := fixture.Scenario.Run
 	ctx, run := h.client.Run(context.Background(), spec.Agent, telmoni.RunOptions{
-		UserID:    spec.UserID,
-		SessionID: spec.SessionID,
-		Tags:      spec.Tags,
-		Bounds: &telmoni.Bounds{
-			StallAfterS: spec.Bounds.StallAfterS,
-			MaxSteps:    spec.Bounds.MaxSteps,
-			MaxCostUSD:  spec.Bounds.MaxCostUSD,
-		},
+		UserID:     spec.UserID,
+		SessionID:  spec.SessionID,
+		Tags:       spec.Tags,
 		SampleRate: spec.SampleRate,
 	})
-	// The run's start is sent at once, before anything else ends.
-	if !h.transport.waitFor(1, waitTimeout) {
-		t.Fatal("the run's start was not sent at once")
-	}
-	if got := names(h.transport.spans(t)); !reflect.DeepEqual(got, []string{"telmoni.run.start"}) {
-		t.Fatalf("sent before the run went on: %v", got)
-	}
 	stepSpec := spec.Inside[0]
 	stepCtx, step := run.Step(ctx, stepSpec.Step)
 	callSpec := stepSpec.Inside[0].ModelCall
@@ -281,8 +261,8 @@ func TestTheRunMatchesTheGoldenExport(t *testing.T) {
 	}, nil)
 	perform(t, h, fixture)
 	bodies := h.transport.bodies(t)
-	if len(bodies) < 2 {
-		t.Fatalf("the run's start travels in an export of its own; got %d exports", len(bodies))
+	if len(bodies) == 0 {
+		t.Fatal("the run was not sent")
 	}
 	gathered := deepCopy(t, bodies[0])
 	var spans []any
@@ -341,15 +321,10 @@ func TestEachAttemptCarriesThisClockAsItLeaves(t *testing.T) {
 	}
 }
 
-// aRun is one empty run, its start exported before its end so the two travel
-// apart, as they do in any run that lasts.
+// aRun is one empty run, sent in an export of its own.
 func aRun(t *testing.T, h *harness) {
 	t.Helper()
-	before := len(h.transport.all())
 	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	if !h.transport.waitFor(before+1, waitTimeout) {
-		t.Fatal("the run's start was not sent at once")
-	}
 	run.End()
 	h.flush()
 }
@@ -395,7 +370,7 @@ func TestKept(t *testing.T) {
 
 func TestDroppedIsWarnedOnce(t *testing.T) {
 	dropped := answerFrom(t, "answers/dropped.json")
-	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, dropped, dropped, dropped, dropped))
+	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, dropped, dropped))
 	aRun(t, h)
 	aRun(t, h)
 	h.shutdown()
@@ -406,7 +381,7 @@ func TestDroppedIsWarnedOnce(t *testing.T) {
 
 func TestUnlistedNamesTheTagThatWouldKeepIt(t *testing.T) {
 	unlisted := answerFrom(t, "answers/unlisted.json")
-	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, unlisted, unlisted))
+	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, unlisted))
 	aRun(t, h)
 	h.shutdown()
 	expectWarnings(t, h, "telmoni: the server dropped ai.prompt (unlisted; text the field inventory does not name is never kept); "+
@@ -417,6 +392,7 @@ func TestRefusedIsWarnedOnceAndNeverRetried(t *testing.T) {
 	refused := answerFrom(t, "answers/refused.json")
 	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, refused, refused))
 	aRun(t, h)
+	aRun(t, h)
 	h.shutdown()
 	expectWarnings(t, h, "telmoni: the server refused a span: no telmoni.run_id and telmoni.agent; a span outside a Telmoni run is refused")
 	expectRequests(t, h, 2)
@@ -425,12 +401,12 @@ func TestRefusedIsWarnedOnceAndNeverRetried(t *testing.T) {
 
 func TestRateLimitedWaitsRetryAfterAndSendsTheSameBytes(t *testing.T) {
 	h := newHarness(t, telmoni.Config{APIKey: "k"},
-		newFakeTransport(t, answerFrom(t, "answers/rate-limited.json"), kept(t), kept(t)))
+		newFakeTransport(t, answerFrom(t, "answers/rate-limited.json"), kept(t)))
 	aRun(t, h)
 	h.shutdown()
 	expectSleeps(t, h, 2*time.Second)
 	requests := h.transport.all()
-	expectRequests(t, h, 3)
+	expectRequests(t, h, 2)
 	if len(requests) >= 2 && !reflect.DeepEqual(requests[0].body, requests[1].body) {
 		t.Error("the retry did not send the same bytes")
 	}
@@ -441,6 +417,7 @@ func TestUnavailableIsRetriedThreeTimesThenDropped(t *testing.T) {
 	unavailable := answerFrom(t, "answers/unavailable.json")
 	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, unavailable, unavailable, unavailable, kept(t)))
 	aRun(t, h)
+	aRun(t, h)
 	h.shutdown()
 	expectSleeps(t, h, time.Second, time.Second)
 	expectWarnings(t, h, "telmoni: export failed after 3 attempts (503 /errors/telemetry/store-unavailable); the batch was dropped")
@@ -449,28 +426,29 @@ func TestUnavailableIsRetriedThreeTimesThenDropped(t *testing.T) {
 
 func TestForbiddenIsNotRetriedAndTheNextBatchIsStillSent(t *testing.T) {
 	forbidden := answerFrom(t, "answers/forbidden.json")
-	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, forbidden, forbidden, kept(t)))
+	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, forbidden, forbidden))
 	aRun(t, h)
 	aRun(t, h)
 	h.shutdown()
 	expectWarnings(t, h, "telmoni: export refused with 403 /errors/authz/forbidden; the batch was dropped")
-	expectRequests(t, h, 4)
+	expectRequests(t, h, 2)
 	expectSleeps(t, h)
 }
 
 func TestANetworkFailureIsRetriedWithBackoff(t *testing.T) {
 	h := newHarness(t, telmoni.Config{APIKey: "k"},
-		newFakeTransport(t, errors.New("refused"), errors.New("refused"), kept(t), kept(t)))
+		newFakeTransport(t, errors.New("refused"), errors.New("refused"), kept(t)))
 	aRun(t, h)
 	h.shutdown()
 	expectSleeps(t, h, time.Second, 2*time.Second)
 	expectWarnings(t, h)
-	expectRequests(t, h, 4)
+	expectRequests(t, h, 3)
 }
 
 func TestANetworkFailureThreeTimesNamesTheErrorsType(t *testing.T) {
 	down := errors.New("refused")
 	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, down, down, down, kept(t)))
+	aRun(t, h)
 	aRun(t, h)
 	h.shutdown()
 	expectSleeps(t, h, time.Second, 2*time.Second)

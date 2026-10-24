@@ -266,14 +266,6 @@ func ConfigFromEnv() Config {
 	}.normalized()
 }
 
-// Bounds is what a monitor holds a run to; a zero field is not sent, nor one
-// ingest would refuse the run for, which Run leaves off with one warning.
-type Bounds struct {
-	StallAfterS int
-	MaxSteps    int
-	MaxCostUSD  float64
-}
-
 // Usage is a model call's tokens, counted as the conventions count them:
 // input tokens include the cache's reads and writes, output tokens include
 // reasoning. Where a provider reports parts apart, sum them first. Each count

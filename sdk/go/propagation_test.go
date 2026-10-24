@@ -182,7 +182,7 @@ func TestAContinuedRunsStepsAndCallsCarryTheCallersRunUnderItsSpan(t *testing.T)
 
 	spans := worker.transport.spans(t)
 	if got := sortedNames(spans); !reflect.DeepEqual(got, []string{"chat gpt-x", "execute_tool search", "work"}) {
-		t.Fatalf("sent %v: nothing of the run itself, no invoke_agent and no telmoni.run.start", got)
+		t.Fatalf("sent %v: nothing of the run itself, whose invoke_agent the caller sends", got)
 	}
 	for _, span := range spans {
 		if span["traceId"] != callerTrace {

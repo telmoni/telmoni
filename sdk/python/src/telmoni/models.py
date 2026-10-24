@@ -271,16 +271,6 @@ class Config:
 
 
 @dataclass(frozen=True)
-class Bounds:
-    """What a monitor holds a run to; each optional, a stall's or steps'
-    fraction cut, and one ingest would refuse left off with one warning."""
-
-    stall_after_s: int | None = None
-    max_steps: int | None = None
-    max_cost_usd: float | None = None
-
-
-@dataclass(frozen=True)
 class Usage:
     """A model call's tokens, as the conventions count them: input includes the
     cache's reads and writes, output reasoning; sum parts reported apart. Each

@@ -39,15 +39,10 @@ export const BATCH_SPANS_MAX = 1000;
 /** An attribute's longest key and value as text, in characters: ingest drops one past either. */
 export const ATTRIBUTE_KEY_MAX = 128;
 export const ATTRIBUTE_VALUE_MAX = 1024;
-export const BOUND_STALL_AFTER_S = 'telmoni.bound.stall_after_s';
-export const BOUND_MAX_STEPS = 'telmoni.bound.max_steps';
-export const BOUND_MAX_COST_USD = 'telmoni.bound.max_cost_usd';
 export const SAMPLE_RATE = 'telmoni.sample_rate';
 export const CANCELLED = 'telmoni.cancelled';
 /** Never sent: on every span of a run the sample rate kept out, from its start, so the processor drops each however late it ends. */
 export const SAMPLED_OUT = 'telmoni.sampled_out';
-/** The span of no duration that opens a run, sent at once. */
-export const RUN_START = 'telmoni.run.start';
 /** The deployment, on the resource: the client's `environment` and `release`. */
 export const ENVIRONMENT = 'deployment.environment.name';
 export const RELEASE = 'service.version';

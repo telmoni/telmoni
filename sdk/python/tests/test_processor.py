@@ -35,12 +35,12 @@ def test_the_queue_is_bounded_and_drops_are_counted_once(
         processor.shutdown()
         client.shutdown()
     names = sorted(s["name"] for s in transport.spans())
-    assert len(names) == 2, names
+    assert names == ["s0", "s1"], names
     warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
     assert (
         len(warnings) == 1
         and "queue was full" in warnings[0]
-        and "5 spans" in warnings[0]
+        and "4 spans" in warnings[0]
     )
 
 
@@ -84,10 +84,7 @@ def test_shutdown_drains_what_is_queued(transport: FakeTransport) -> None:
     with client.run("bot"):
         pass
     client.shutdown()
-    assert {s["name"] for s in transport.spans()} == {
-        "telmoni.run.start",
-        "invoke_agent bot",
-    }
+    assert [s["name"] for s in transport.spans()] == ["invoke_agent bot"]
     client.shutdown()
 
 
@@ -103,11 +100,10 @@ def test_a_batch_fills_and_goes_without_a_flush(transport: FakeTransport) -> Non
     client._provider._active_span_processor._span_processors = (processor,)
     try:
         with client.run("bot"):
-            assert transport.wait_for(1)
             for n in range(3):
                 with client.step(f"s{n}"):
                     pass
-            assert transport.wait_for(2), "three steps fill a batch of three"
+            assert transport.wait_for(1), "three steps fill a batch of three"
     finally:
         processor.shutdown()
         client.shutdown()

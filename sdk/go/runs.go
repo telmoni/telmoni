@@ -8,11 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"math"
 	"slices"
 	"strings"
 	"sync"
-	"time"
 	"unicode/utf8"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -30,8 +28,6 @@ type RunOptions struct {
 	SessionID string
 	// Tags travel as telmoni.tag.<key>.
 	Tags map[string]string
-	// Bounds are what a monitor holds the run to.
-	Bounds *Bounds
 	// SampleRate is this run's share of being sent, above 0 and up to 1; 0
 	// means the client's.
 	SampleRate float64
@@ -86,8 +82,7 @@ func (h *handle) End() {
 // Fail marks the span failed with err's Go type and never its message: the
 // message is content. An error that is or wraps context.Canceled marks it
 // cancelled instead: the agent gave the call up. A deadline that ran out is
-// a failure, as a timeout is in the other SDKs, since a stalled call is what
-// a monitor is for; it fails with its own type.
+// a failure, as a timeout is in the other SDKs; it fails with its own type.
 func (h *handle) Fail(err error) {
 	if h == nil || h.span == nil || err == nil {
 		return
@@ -127,10 +122,9 @@ func errorTypeName(err error) string {
 	return strings.TrimPrefix(fmt.Sprintf("%T", err), "*")
 }
 
-// Run is a run of an agent: a span of its own in whatever trace was current,
-// opened by telmoni.run.start. Every span inside it carries the run's id,
-// agent, user and session, so ingest knows each span's run without
-// waiting for the trace's tree.
+// Run is a run of an agent: a span of its own in whatever trace was current.
+// Every span inside it carries the run's id, agent, user and session, so
+// ingest knows each span's run without waiting for the trace's tree.
 type Run struct {
 	handle
 	id        string
@@ -174,18 +168,16 @@ func RunFromContext(ctx context.Context) *Run {
 }
 
 // Run opens a run of agent: the span "invoke_agent <agent>", under the span in
-// ctx or at the root of a trace of its own, and sends telmoni.run.start at
-// once. The context returned carries the run and its span, so spans the
-// application opens with it nest under the run. End it with run.End, usually
-// deferred.
+// ctx or at the root of a trace of its own. The context returned carries the
+// run and its span, so spans the application opens with it nest under the
+// run. End it with run.End, usually deferred.
 //
 // A blank agent name opens no run: its handle does nothing, and the client
 // warns once. A SampleRate outside (0, 1] falls back to the client's; an
-// agent past 128 characters is cut to them; and a bound ingest refuses, a
-// user or session id past its cap, or a tag it drops or past the 32nd by key
-// is left off, each with one warning. None panics: telemetry never takes the
-// agent down, where Python and TypeScript raise for a blank agent or a bad
-// rate.
+// agent past 128 characters is cut to them; and a user or session id past its
+// cap, or a tag ingest drops or past the 32nd by key, is left off, each with
+// one warning. None panics: telemetry never takes the agent down, where
+// Python and TypeScript raise for a blank agent or a bad rate.
 func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (context.Context, *Run) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -223,30 +215,16 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 	if sampledOut {
 		inherited = append(inherited, attribute.Bool(attrSampledOut, true))
 	}
-	common := append(c.boundAttributes(opts.Bounds), attribute.Float64(attrSampleRate, rate))
 	tags := c.tagAttributes(opts.Tags)
-	attrs := make([]attribute.KeyValue, 0, 2+len(inherited)+len(common)+len(tags))
+	attrs := make([]attribute.KeyValue, 0, 3+len(inherited)+len(tags))
 	attrs = append(attrs, attribute.String(attrOperation, runOperation), attribute.String(attrAgentName, agent))
 	attrs = append(attrs, inherited...)
-	attrs = append(attrs, common...)
+	attrs = append(attrs, attribute.Float64(attrSampleRate, rate))
 	attrs = append(attrs, tags...)
-	start := time.Now()
 	ctx, span := c.tracer.Start(ctx, runOperation+" "+agent,
 		trace.WithSpanKind(trace.SpanKindInternal),
 		trace.WithAttributes(attrs...),
-		trace.WithTimestamp(start),
 	)
-	// OpenTelemetry sends a span only once it ends; without this one a run
-	// stalled in its first call would never be heard.
-	openerAttrs := make([]attribute.KeyValue, 0, len(inherited)+len(common))
-	openerAttrs = append(openerAttrs, inherited...)
-	openerAttrs = append(openerAttrs, common...)
-	_, opener := c.tracer.Start(ctx, runStart,
-		trace.WithSpanKind(trace.SpanKindInternal),
-		trace.WithAttributes(openerAttrs...),
-		trace.WithTimestamp(start),
-	)
-	opener.End(trace.WithTimestamp(start))
 	run := &Run{handle: handle{span: span, client: c}, id: runID, agent: agent, inherited: inherited, sampledOut: sampledOut}
 	return contextWithRun(ctx, run), run
 }
@@ -483,35 +461,6 @@ func (c *Client) fits(id string, most int, what string) bool {
 		c.exporter.warnOnce("long:"+what, fmt.Sprintf("telmoni: a %s must be up to %d characters; the run is sent without it", what, most))
 	}
 	return false
-}
-
-// boundAttributes is the bounds a run is sent with, a zero one unset; one
-// ingest would refuse the run for is left off with one warning.
-func (c *Client) boundAttributes(b *Bounds) []attribute.KeyValue {
-	if b == nil {
-		return nil
-	}
-	var out []attribute.KeyValue
-	for _, bound := range []struct {
-		name, key string
-		value     int
-	}{
-		{"StallAfterS", attrBoundStallAfter, b.StallAfterS},
-		{"MaxSteps", attrBoundMaxSteps, b.MaxSteps},
-	} {
-		if bound.value < 0 || int64(bound.value) > math.MaxUint32 {
-			c.exporter.warnOnce("run:"+bound.name, "telmoni: a run's "+bound.name+" must be a whole number from 1 to 4294967295; the run is sent without it")
-		} else if bound.value != 0 {
-			out = append(out, attribute.Int(bound.key, bound.value))
-		}
-	}
-	// JSON carries no infinity or NaN, so the batch would be lost with it.
-	if cost := b.MaxCostUSD; cost < 0 || math.IsNaN(cost) || math.IsInf(cost, 0) {
-		c.exporter.warnOnce("run:cost", "telmoni: a run's MaxCostUSD must be a finite number above 0; the run is sent without it")
-	} else if cost != 0 {
-		out = append(out, attribute.Float64(attrBoundMaxCostUSD, cost))
-	}
-	return out
 }
 
 // tagAttributes is a run's first 32 tags by key within ingest's caps; more

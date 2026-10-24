@@ -111,22 +111,6 @@
                 "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
                 "spanId": "40ee8bbb83b45236",
                 "parentSpanId": "98f0a67d3b8b56b9",
-                "name": "telmoni.run.start",
-                "kind": 1,
-                "startTimeUnixNano": "1791795600000000000",
-                "endTimeUnixNano": "1791795600000000000",
-                "attributes": [
-                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "session_7" } },
-                  { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
-                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
-                  { "key": "telmoni.sample_rate", "value": { "doubleValue": 1.0 } },
-                  { "key": "user.id", "value": { "stringValue": "user_42" } }
-                ]
-              },
-              {
-                "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
-                "spanId": "a0317a36306c5b53",
-                "parentSpanId": "98f0a67d3b8b56b9",
                 "name": "chat claude-opus-4-5",
                 "kind": 3,
                 "startTimeUnixNano": "1791795600100000000",
@@ -147,7 +131,7 @@
               },
               {
                 "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
-                "spanId": "8ec41731d61b59db",
+                "spanId": "a0317a36306c5b53",
                 "parentSpanId": "98f0a67d3b8b56b9",
                 "name": "execute_tool Bash",
                 "kind": 1,
@@ -166,8 +150,8 @@
               },
               {
                 "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
-                "spanId": "429477561e6f525e",
-                "parentSpanId": "464a001e80215c8d",
+                "spanId": "464a001e80215c8d",
+                "parentSpanId": "8ec41731d61b59db",
                 "name": "chat claude-haiku-4-5",
                 "kind": 3,
                 "startTimeUnixNano": "1791795603700000000",
@@ -188,8 +172,8 @@
               },
               {
                 "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
-                "spanId": "d92e4747917e5a08",
-                "parentSpanId": "464a001e80215c8d",
+                "spanId": "429477561e6f525e",
+                "parentSpanId": "8ec41731d61b59db",
                 "name": "execute_tool Read",
                 "kind": 1,
                 "startTimeUnixNano": "1791795605010000000",
@@ -205,7 +189,7 @@
               },
               {
                 "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
-                "spanId": "464a001e80215c8d",
+                "spanId": "8ec41731d61b59db",
                 "parentSpanId": "98f0a67d3b8b56b9",
                 "name": "Task",
                 "kind": 1,
@@ -220,7 +204,7 @@
               },
               {
                 "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
-                "spanId": "24268760615f58c4",
+                "spanId": "d92e4747917e5a08",
                 "parentSpanId": "98f0a67d3b8b56b9",
                 "name": "chat claude-opus-4-5",
                 "kind": 3,
@@ -242,7 +226,7 @@
               },
               {
                 "traceId": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
-                "spanId": "db0480f72cc653a3",
+                "spanId": "24268760615f58c4",
                 "parentSpanId": "98f0a67d3b8b56b9",
                 "name": "execute_tool WebFetch",
                 "kind": 1,

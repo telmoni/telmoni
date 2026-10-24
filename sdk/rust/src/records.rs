@@ -4,9 +4,9 @@
 //!
 //! Its trace is its own, named by the run's id, whatever trace is current;
 //! each span's id is derived from that id and the span's place in the record.
-//! Its spans are queued whole once built, the run's start first and the run's
-//! own last, and travel in exports of their own, so the same record sent
-//! again is the same bytes, whatever else is sent meanwhile.
+//! Its spans are queued whole once built, the run's own last, and travel in
+//! exports of their own, so the same record sent again is the same bytes,
+//! whatever else is sent meanwhile.
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -293,7 +293,7 @@ pub(crate) fn send(inner: &Inner, mut record: RunRecord) -> Result<(), Error> {
     } = record;
     let run_id = run_uuid.to_string();
     let inherited = runs::inherited(&run_id, &agent, user_id, session_id);
-    let attributes = runs::run_attributes(&agent, &inherited, &[], rate, tags, &inner.warner);
+    let attributes = runs::run_attributes(&agent, &inherited, rate, tags, &inner.warner);
     // Sampled out, no span is built: none of a record's ends after it, and
     // the same record sent again draws again.
     if rate < 1.0 && (inner.random)() >= rate {
@@ -321,16 +321,6 @@ pub(crate) fn send(inner: &Inner, mut record: RunRecord) -> Result<(), Error> {
         attributes,
         start,
     );
-    spans
-        .open(
-            contract::RUN_START,
-            &run,
-            SpanKind::Internal,
-            runs::start_attributes(&inherited, &[], rate),
-            start,
-        )
-        .span()
-        .end_with_timestamp(start);
     for item in inside {
         match item {
             RecordItem::Step(step) => {
@@ -355,10 +345,9 @@ pub(crate) fn send(inner: &Inner, mut record: RunRecord) -> Result<(), Error> {
     Ok(())
 }
 
-/// How many spans `record` queues: the run and its start, then each step and
-/// each call.
+/// How many spans `record` queues: the run, then each step and each call.
 fn spans_in(record: &RunRecord) -> usize {
-    2 + record
+    1 + record
         .inside
         .iter()
         .map(|item| match item {
@@ -392,7 +381,7 @@ fn check(record: &RunRecord) -> Result<(), Error> {
     Ok(())
 }
 
-/// Each span of `record` but `telmoni.run.start`, as [`check`] reads it.
+/// Each span of `record`, as [`check`] reads it.
 fn spans_of(record: &RunRecord) -> Vec<Checked<'_>> {
     let mut spans = vec![Checked::run(record)];
     for item in &record.inside {
@@ -562,8 +551,8 @@ struct Spans<'a> {
     tracer: &'a SdkTracer,
     run_id: Uuid,
     trace_id: TraceId,
-    /// The next span's place: `0` the run, `1` its start, then each step and
-    /// call as the record holds them, a step before its calls.
+    /// The next span's place: `0` the run, then each step and call from `1`
+    /// as the record holds them, a step before its calls.
     place: u64,
 }
 

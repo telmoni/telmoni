@@ -204,7 +204,7 @@ fn a_continued_runs_steps_and_calls_carry_the_callers_run_under_its_span() -> Ou
     assert_eq!(
         names,
         ["chat gpt-x", "execute_tool search", "work"],
-        "nothing of the run itself: no invoke_agent, no telmoni.run.start"
+        "nothing of the run itself, whose invoke_agent the caller sends"
     );
     for span in &spans {
         assert_eq!(text(span, "traceId")?, caller_trace, "{}", name_of(span));

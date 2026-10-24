@@ -39,16 +39,11 @@ ATTRIBUTE_KEY_MAX = 128
 ATTRIBUTE_VALUE_MAX = 1024
 """An attribute's longest key and value as text, in characters: ingest drops one
 past either."""
-BOUND_STALL_AFTER_S = "telmoni.bound.stall_after_s"
-BOUND_MAX_STEPS = "telmoni.bound.max_steps"
-BOUND_MAX_COST_USD = "telmoni.bound.max_cost_usd"
 SAMPLE_RATE = "telmoni.sample_rate"
 CANCELLED = "telmoni.cancelled"
 SAMPLED_OUT = "telmoni.sampled_out"
 """Never sent: on every span of a run the sample rate kept out, from its start,
 so the processor drops each however late it ends."""
-RUN_START = "telmoni.run.start"
-"""The span of no duration that opens a run, sent at once."""
 ENVIRONMENT = "deployment.environment.name"
 """The deployment, on the resource: the client's ``environment`` and ``release``."""
 RELEASE = "service.version"

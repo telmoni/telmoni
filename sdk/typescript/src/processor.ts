@@ -5,8 +5,7 @@
  * A run inside a trace the application does not sample is still sent; the run's
  * own sample rate is applied here, by run, never through the trace's flag. The
  * queue is bounded, so a slow Telmoni never slows an agent: past its size, spans
- * are dropped and counted. `telmoni.run.start` wakes the worker at once, and a
- * recorded run travels in exports of its own.
+ * are dropped and counted. A recorded run goes at once, in exports of its own.
  */
 
 import type { Context } from '@opentelemetry/api';
@@ -40,7 +39,6 @@ export class Processor implements SpanProcessor {
   #stage: { traceId: string; spans: ReadableSpan[] } | undefined;
   #reserved = 0;
   #dropped = 0;
-  #urgent = false;
   #flushers: Array<() => void> = [];
   #timer: ReturnType<typeof setTimeout> | undefined;
   #inFlight: Promise<void> | undefined;
@@ -104,7 +102,6 @@ export class Processor implements SpanProcessor {
       return;
     }
     this.#queue.push(span);
-    if (span.name === contract.RUN_START) this.#urgent = true;
     this.#wake(this.#due() ? 0 : this.#delayMs);
   }
 
@@ -150,12 +147,11 @@ export class Processor implements SpanProcessor {
     return this.#queue.length === 0 && this.#inFlight === undefined;
   }
 
-  /** Whether the worker should export without waiting; a record queued goes at once, as a live run's start does. */
+  /** Whether the worker should export without waiting; a record queued goes at once. */
   #due(): boolean {
     return (
       this.#down ||
       this.#flushers.length > 0 ||
-      this.#urgent ||
       this.#fences.length > 0 ||
       this.#queue.length >= this.#maxBatchSize
     );
@@ -186,7 +182,6 @@ export class Processor implements SpanProcessor {
     while ((this.#fences[0] ?? Infinity) <= this.#taken) this.#fences.shift();
     const dropped = this.#dropped;
     this.#dropped = 0;
-    this.#urgent = false;
     if (dropped > 0) {
       this.#warn(`telmoni: the export queue was full; ${dropped} spans were dropped`);
     }

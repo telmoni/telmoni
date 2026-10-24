@@ -522,7 +522,7 @@ describe('a number ingest cannot read', () => {
         'app.ratios': [1.5, Infinity],
         'app.ratio': 0.25,
         'gen_ai.usage.input_tokens': Number.NaN,
-        'telmoni.bound.max_steps': Infinity,
+        'gen_ai.usage.cache_read.input_tokens': Infinity,
         'gen_ai.usage.output_tokens': 2 ** 64,
       }),
       span('beside', {}),
@@ -536,7 +536,7 @@ describe('a number ingest cannot read', () => {
       'app.ratios': { arrayValue: { values: [{ doubleValue: 1.5 }, { doubleValue: null }] } },
       'app.ratio': { doubleValue: 0.25 },
       'gen_ai.usage.input_tokens': { doubleValue: null },
-      'telmoni.bound.max_steps': { doubleValue: null },
+      'gen_ai.usage.cache_read.input_tokens': { doubleValue: null },
       'gen_ai.usage.output_tokens': { doubleValue: 2 ** 64 },
     });
   });

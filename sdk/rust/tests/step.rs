@@ -114,7 +114,7 @@ fn a_step_named_nothing_or_past_ingests_cap_keeps_its_span() -> Outcome {
         .spans()?
         .iter()
         .map(|span| name_of(span).to_owned())
-        .filter(|name| name != "telmoni.run.start" && name != "invoke_agent bot")
+        .filter(|name| name != "invoke_agent bot")
         .collect();
     steps.sort();
     assert_eq!(

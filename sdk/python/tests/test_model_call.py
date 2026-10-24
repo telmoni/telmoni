@@ -158,7 +158,7 @@ def test_a_model_calls_text_past_ingests_caps_keeps_its_call(
     sent = {
         s["name"]: attributes_of(s)
         for s in transport.spans()
-        if s["name"] not in ("telmoni.run.start", "invoke_agent bot")
+        if s["name"] != "invoke_agent bot"
     }
     assert sent.keys() == {
         "chat",
@@ -217,24 +217,23 @@ def test_content_leaves_only_when_asked_and_the_project_allows(
     transport: FakeTransport,
 ) -> None:
     on = Answer(200, {"Telmoni-Content-Mode": "on"}, b'{"partialSuccess":null}')
-    # The first run's two exports are answered `off`, the second run's `on`;
-    # waiting for each start inside its run keeps the exports apart, so the
-    # mode each call is encoded under is the same on every machine.
-    transport.answers = [kept(), kept(), on, on]
+    # An empty run's export is answered `off`, the next two runs' `on`; each run
+    # flushed before the next opens, the mode each call is encoded under is the
+    # same on every machine.
+    transport.answers = [kept(), on, on]
     client = Telmoni(Config(api_key="k", capture_content=True), transport=transport)
     try:
         with client.run("bot"):
-            assert transport.wait_for(1)
-            with client.model_call("m", input_messages="first"):
-                pass
+            pass
         assert client.flush()
         assert client.content_mode == "off"
-        with client.run("bot"):
-            assert transport.wait_for(3)
-            with client.model_call("m", input_messages="second"):
-                pass
+        with client.run("bot"), client.model_call("m", input_messages="first"):
+            pass
         assert client.flush()
         assert client.content_mode == "on"
+        with client.run("bot"), client.model_call("m", input_messages="second"):
+            pass
+        assert client.flush()
     finally:
         client.shutdown()
     first, second = calls(transport)
@@ -246,7 +245,7 @@ def test_content_stays_home_without_capture_content_even_when_allowed(
     transport: FakeTransport,
 ) -> None:
     on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
-    transport.answers = [on] * 4
+    transport.answers = [on] * 2
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
         with client.run("bot"):

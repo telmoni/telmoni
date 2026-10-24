@@ -280,8 +280,8 @@ func TestARecordInsideALiveRunTakesATraceOfItsOwn(t *testing.T) {
 			recorded = append(recorded, span)
 		}
 	}
-	if len(recorded) != 9 {
-		t.Fatalf("sent %d spans of the record, want its 9", len(recorded))
+	if len(recorded) != 8 {
+		t.Fatalf("sent %d spans of the record, want its 8", len(recorded))
 	}
 	want := strings.ReplaceAll(record.RunID, "-", "")
 	for _, span := range recorded {
@@ -334,8 +334,8 @@ func TestTheSampleRateDropsARecordWhole(t *testing.T) {
 	random = 0.1
 	recordRun(t, h, record)
 	spans := h.transport.spans(t)
-	if len(spans) != 9 {
-		t.Fatalf("sent %d spans, want the record's 9", len(spans))
+	if len(spans) != 8 {
+		t.Fatalf("sent %d spans, want the record's 8", len(spans))
 	}
 	if got := attributesOf(t, byName(spans)["invoke_agent claude-code"])["telmoni.sample_rate"]; got != 0.25 {
 		t.Errorf("telmoni.sample_rate = %v, want the client's 0.25", got)
@@ -466,17 +466,13 @@ func TestARecordAtTheEdgesOfWhatIngestReadsIsSentAsGiven(t *testing.T) {
 	}}}
 	recordRun(t, h, record)
 	spans := h.transport.spans(t)
-	want := []string{" ", "chat  ", "execute_tool ", "execute_tool  ", "invoke_agent claude-code", "telmoni.run.start"}
+	want := []string{" ", "chat  ", "execute_tool ", "execute_tool  ", "invoke_agent claude-code"}
 	if got := sortedNames(spans); !reflect.DeepEqual(got, want) {
 		t.Fatalf("spans sent: %q, want %q", got, want)
 	}
 	for _, span := range spans {
-		end := "18446744073709551615"
-		if span["name"] == "telmoni.run.start" {
-			end = "1"
-		}
-		if span["startTimeUnixNano"] != "1" || span["endTimeUnixNano"] != end {
-			t.Errorf("%q runs from %v to %v, want from 1 to %s", span["name"], span["startTimeUnixNano"], span["endTimeUnixNano"], end)
+		if span["startTimeUnixNano"] != "1" || span["endTimeUnixNano"] != "18446744073709551615" {
+			t.Errorf("%q runs from %v to %v, want from 1 to 18446744073709551615", span["name"], span["startTimeUnixNano"], span["endTimeUnixNano"])
 		}
 	}
 }
@@ -498,8 +494,8 @@ func TestARecordAtIngestsCapsIsSentAsGiven(t *testing.T) {
 	}
 	recordRun(t, h, record)
 	spans := h.transport.spans(t)
-	if len(spans) != 6 {
-		t.Fatalf("sent %d spans, want the record's 6", len(spans))
+	if len(spans) != 5 {
+		t.Fatalf("sent %d spans, want the record's 5", len(spans))
 	}
 	for name, want := range map[string]map[string]any{
 		"invoke_agent " + wide(128):     {"telmoni.agent": wide(128), "user.id": wide(128), "gen_ai.conversation.id": wide(200), "error.type": wide(128)},
@@ -569,13 +565,13 @@ func TestItemsGivenByPointerAreReadThroughThem(t *testing.T) {
 	sameBody(t, byPointer, byValue)
 }
 
-// A record as large as a batch, its run, its start and 510 calls, travels in
-// one export, its start first and its run last.
+// A record as large as a batch, its run and 511 calls, travels in one export,
+// its first call first and its run last.
 func TestARecordAsLargeAsABatchTravelsInOneExport(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	record := theRecord(t)
 	record.Inside = nil
-	for n := range 510 {
+	for n := range 511 {
 		at := record.Start.Add(time.Duration(n) * time.Millisecond)
 		record.Inside = append(record.Inside, telmoni.ToolCallRecord{Name: "t", Start: at, End: at})
 	}
@@ -588,8 +584,8 @@ func TestARecordAsLargeAsABatchTravelsInOneExport(t *testing.T) {
 	if len(spans) != 512 {
 		t.Fatalf("the export holds %d spans, want 512", len(spans))
 	}
-	if spans[0] != "telmoni.run.start" || spans[511] != "invoke_agent claude-code" {
-		t.Errorf("the export runs from %s to %s, want from the start to the run", spans[0], spans[511])
+	if spans[0] != "execute_tool t" || spans[511] != "invoke_agent claude-code" {
+		t.Errorf("the export runs from %s to %s, want from the first call to the run", spans[0], spans[511])
 	}
 }
 
@@ -597,24 +593,21 @@ func TestARecordAsLargeAsABatchTravelsInOneExport(t *testing.T) {
 // queued, since its tail — the run's own span first — would otherwise be
 // dropped; drained, the queue takes it whole.
 func TestARecordTheQueueHasNoRoomForIsRefusedWhole(t *testing.T) {
-	// Room for five spans, and a worker that will not wake until flushed.
-	h := newHarness(t, testConfig(), nil, telmoni.WithQueue(5, 100, time.Minute))
+	// Room for four spans, and a worker that will not wake until flushed.
+	h := newHarness(t, testConfig(), nil, telmoni.WithQueue(4, 100, time.Minute))
 	record := theRecord(t)
 	record.Inside = nil
 	for range 2 {
 		record.Inside = append(record.Inside, telmoni.ToolCallRecord{Name: "t", Start: record.Start, End: record.Start})
 	}
 	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	// The start goes alone; two steps then hold two of the five slots.
-	if !h.transport.waitFor(1, waitTimeout) {
-		t.Fatal("the run's start was not sent at once")
-	}
+	// Two steps hold two of the four slots.
 	for n := range 2 {
 		_, step := run.Step(ctx, fmt.Sprintf("s%d", n))
 		step.End()
 	}
 	if err := h.client.RecordRun(context.Background(), record); !errors.Is(err, telmoni.ErrQueueFull) {
-		t.Fatalf("RecordRun with room for three of the record's four spans = %v, want ErrQueueFull", err)
+		t.Fatalf("RecordRun with room for two of the record's three spans = %v, want ErrQueueFull", err)
 	}
 	run.End()
 	h.flush()
@@ -629,8 +622,8 @@ func TestARecordTheQueueHasNoRoomForIsRefusedWhole(t *testing.T) {
 			calls++
 		}
 	}
-	if calls != 2 || len(got) != 8 {
-		t.Errorf("spans sent: %v, want the live run's four and the record's four", got)
+	if calls != 2 || len(got) != 6 {
+		t.Errorf("spans sent: %v, want the live run's three and the record's three", got)
 	}
 	if warnings := h.logs.warnings(); len(warnings) != 0 {
 		t.Errorf("warnings: %q, want none, since nothing was dropped", warnings)
@@ -659,9 +652,6 @@ func TestARecordTravelsInExportsOfItsOwn(t *testing.T) {
 	beside := record
 	beside.RunID = "0191a3b4-2222-4aaa-8bbb-000000000002"
 	ctx, live := h.client.Run(context.Background(), "live", telmoni.RunOptions{})
-	if !h.transport.waitFor(1, waitTimeout) {
-		t.Fatal("the run's start was not sent at once")
-	}
 	_, step := live.Step(ctx, "live step")
 	step.End()
 	for _, r := range []telmoni.RunRecord{record, beside} {
@@ -705,9 +695,6 @@ func TestARecordLargerThanABatchIsCutFromItsOwnStart(t *testing.T) {
 		record.Inside = append(record.Inside, telmoni.ToolCallRecord{Name: "t", Start: record.Start, End: record.Start})
 	}
 	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	if !h.transport.waitFor(1, waitTimeout) {
-		t.Fatal("the run's start was not sent at once")
-	}
 	for n := range 2 {
 		_, step := run.Step(ctx, fmt.Sprintf("s%d", n))
 		step.End()
@@ -722,10 +709,9 @@ func TestARecordLargerThanABatchIsCutFromItsOwnStart(t *testing.T) {
 		got = append(got, names(spansIn(body)))
 	}
 	want := [][]string{
-		{"telmoni.run.start"},
 		{"s0", "s1"},
-		{"telmoni.run.start", "execute_tool t", "execute_tool t"},
-		{"execute_tool t", "invoke_agent claude-code"},
+		{"execute_tool t", "execute_tool t", "execute_tool t"},
+		{"invoke_agent claude-code"},
 		{"invoke_agent bot"},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -776,18 +762,15 @@ func TestARecordsRoomIsKeptWhileItIsBuilt(t *testing.T) {
 	sampler := &hookedSampler{}
 	cfg := testConfig()
 	cfg.Sampler = sampler
-	// Room for five spans, and a worker that will not wake until flushed.
-	h := newHarness(t, cfg, nil, telmoni.WithQueue(5, 100, time.Minute))
+	// Room for four spans, and a worker that will not wake until flushed.
+	h := newHarness(t, cfg, nil, telmoni.WithQueue(4, 100, time.Minute))
 	record := theRecord(t)
 	record.Inside = nil
 	for range 2 {
 		record.Inside = append(record.Inside, telmoni.ToolCallRecord{Name: "t", Start: record.Start, End: record.Start})
 	}
 	ctx, live := h.client.Run(context.Background(), "live", telmoni.RunOptions{})
-	if !h.transport.waitFor(1, waitTimeout) {
-		t.Fatal("the run's start was not sent at once")
-	}
-	// Room for one step beside the record's four spans.
+	// Room for one step beside the record's three spans.
 	sampler.hook = func() {
 		for n := range 2 {
 			_, step := live.Step(ctx, fmt.Sprintf("s%d", n))
@@ -800,7 +783,7 @@ func TestARecordsRoomIsKeptWhileItIsBuilt(t *testing.T) {
 	h.flush()
 	live.End()
 	h.flush()
-	want := []string{"execute_tool t", "execute_tool t", "invoke_agent claude-code", "invoke_agent live", "s0", "telmoni.run.start", "telmoni.run.start"}
+	want := []string{"execute_tool t", "execute_tool t", "invoke_agent claude-code", "invoke_agent live", "s0"}
 	if got := sortedNames(h.transport.spans(t)); !reflect.DeepEqual(got, want) {
 		t.Errorf("spans sent: %v\nwant: %v", got, want)
 	}
@@ -809,20 +792,17 @@ func TestARecordsRoomIsKeptWhileItIsBuilt(t *testing.T) {
 	}
 }
 
-// A record queued behind a live step goes in the export after the step's, as
-// a live run's start would, with no flush.
+// A record queued behind a live step goes in the export after the step's, with
+// no flush.
 func TestARecordGoesAtOnce(t *testing.T) {
 	h := newHarness(t, testConfig(), nil, telmoni.WithQueue(2048, 512, time.Minute))
 	ctx, live := h.client.Run(context.Background(), "live", telmoni.RunOptions{})
-	if !h.transport.waitFor(1, waitTimeout) {
-		t.Fatal("the run's start was not sent at once")
-	}
 	_, step := live.Step(ctx, "live step")
 	step.End()
 	if err := h.client.RecordRun(context.Background(), theRecord(t)); err != nil {
 		t.Fatalf("RecordRun: %v", err)
 	}
-	if !h.transport.waitFor(3, waitTimeout) {
+	if !h.transport.waitFor(2, waitTimeout) {
 		t.Error("the record waited for the delay")
 	}
 	live.End()

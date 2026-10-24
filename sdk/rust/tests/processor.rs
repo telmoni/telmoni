@@ -3,7 +3,6 @@
 
 mod common;
 
-use std::collections::HashSet;
 use std::time::Duration;
 
 use common::{FakeTransport, Harness, Outcome, Sleeps, Warnings, client, hooks, keyed, name_of};
@@ -23,17 +22,12 @@ fn the_queue_is_bounded_and_drops_are_counted_once() -> Outcome {
     };
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
 
-    // The start's export is held at the gate: the worker is inside it, the
-    // queue behind it empty, until the gate opens.
-    transport.close_gate();
     let run = telmoni.run("bot", RunOptions::default())?;
-    assert!(transport.wait_for(1));
     for n in 0..5 {
         let step = run.step(&format!("s{n}"));
         step.end();
     }
     run.end();
-    transport.open_gate();
     assert!(telmoni.flush());
     telmoni.shutdown();
 
@@ -43,7 +37,7 @@ fn the_queue_is_bounded_and_drops_are_counted_once() -> Outcome {
         .map(|span| name_of(span).to_owned())
         .collect();
     names.sort();
-    assert_eq!(names, ["s0", "s1", "telmoni.run.start"]);
+    assert_eq!(names, ["s0", "s1"]);
     let warned = warnings.all();
     assert_eq!(warned.len(), 1, "{warned:?}");
     let warning = warned.first().ok_or("a warning")?;
@@ -62,8 +56,8 @@ fn shutdown_drains_what_is_queued() -> Outcome {
     run.end();
     harness.telmoni.shutdown();
     assert_eq!(
-        harness.spans()?.iter().map(name_of).collect::<HashSet<_>>(),
-        HashSet::from(["telmoni.run.start", "invoke_agent bot"])
+        harness.spans()?.iter().map(name_of).collect::<Vec<_>>(),
+        ["invoke_agent bot"]
     );
     harness.telmoni.shutdown();
     Ok(())
@@ -80,12 +74,8 @@ fn dropping_the_client_drains_what_is_queued() -> Outcome {
         run.end();
     }
     assert_eq!(
-        transport
-            .spans()?
-            .iter()
-            .map(name_of)
-            .collect::<HashSet<_>>(),
-        HashSet::from(["telmoni.run.start", "invoke_agent bot"])
+        transport.spans()?.iter().map(name_of).collect::<Vec<_>>(),
+        ["invoke_agent bot"]
     );
     Ok(())
 }
@@ -104,12 +94,11 @@ fn a_batch_fills_and_goes_without_a_flush() -> Outcome {
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
 
     let run = telmoni.run("bot", RunOptions::default())?;
-    assert!(transport.wait_for(1));
     for n in 0..3 {
         let step = run.step(&format!("s{n}"));
         step.end();
     }
-    assert!(transport.wait_for(2), "three steps fill a batch of three");
+    assert!(transport.wait_for(1), "three steps fill a batch of three");
     run.end();
     telmoni.shutdown();
     assert!(warnings.all().is_empty());
@@ -133,18 +122,14 @@ fn a_hook_that_panics_does_not_stop_the_exporter() -> Outcome {
     };
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
 
-    // The start's export is held at the gate; the steps behind it overflow
-    // the queue, so the next batch carries a drop count and the hook panics
-    // on its warning.
-    transport.close_gate();
+    // The steps overflow the queue before the worker wakes, so the batch the
+    // flush takes carries a drop count and the hook panics on its warning.
     let run = telmoni.run("bot", RunOptions::default())?;
-    assert!(transport.wait_for(1));
     for n in 0..3 {
         let step = run.step(&format!("s{n}"));
         step.end();
     }
     run.end();
-    transport.open_gate();
     assert!(
         telmoni.flush(),
         "the flush waited on a worker that was gone"
@@ -161,10 +146,10 @@ fn a_hook_that_panics_does_not_stop_the_exporter() -> Outcome {
         spans.iter().any(|span| name_of(span) == "s0"),
         "the batch beside the warning that panicked was not sent"
     );
-    let starts = spans
+    let runs = spans
         .iter()
-        .filter(|span| name_of(span) == "telmoni.run.start")
+        .filter(|span| name_of(span) == "invoke_agent bot")
         .count();
-    assert_eq!(starts, 2, "the run after the panic was not sent");
+    assert_eq!(runs, 1, "the run after the panic was not sent");
     Ok(())
 }

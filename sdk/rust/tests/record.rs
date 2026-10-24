@@ -313,7 +313,7 @@ fn a_record_takes_a_trace_of_its_own_and_leaves_the_context_alone() -> Outcome {
 
     let spans = harness.spans()?;
     let recorded = of_run(&spans, &record.run_id);
-    assert_eq!(recorded.len(), 9, "every span of the record, by its id");
+    assert_eq!(recorded.len(), 8, "every span of the record, by its id");
     let trace = json!(record.run_id.replace('-', ""));
     assert!(
         recorded
@@ -351,7 +351,7 @@ fn a_failed_run_is_marked_on_its_own_span() -> Outcome {
     assert!(attributes.get("telmoni.cancelled").is_none());
     assert_eq!(
         spans.iter().map(name_of).collect::<Vec<_>>(),
-        ["telmoni.run.start", "invoke_agent claude-code"]
+        ["invoke_agent claude-code"]
     );
     Ok(())
 }
@@ -395,7 +395,7 @@ fn the_sample_rate_drops_a_record_whole() -> Outcome {
         spans.len(),
         "only the record kept"
     );
-    assert_eq!(spans.len(), 9, "the record kept is sent whole");
+    assert_eq!(spans.len(), 8, "the record kept is sent whole");
     assert_eq!(
         attributes_of(run_span(&spans, &kept.run_id)?)?.get("telmoni.sample_rate"),
         Some(&json!(0.25))
@@ -938,9 +938,9 @@ fn a_record_the_queue_has_no_room_for_is_refused_whole() -> Outcome {
     let warnings = Warnings::default();
     let sleeps = Sleeps::default();
     let mut hooks = hooks(&transport, &warnings, &sleeps);
-    // Room for five spans, and a worker that will not wake until flushed.
+    // Room for four spans, and a worker that will not wake until flushed.
     hooks.batching = Batching {
-        max_queue_size: 5,
+        max_queue_size: 4,
         max_batch_size: 100,
         schedule_delay: Duration::from_secs(60),
     };
@@ -955,21 +955,17 @@ fn a_record_the_queue_has_no_room_for_is_refused_whole() -> Outcome {
         ..golden
     };
 
-    // The start's export is held at the gate, the worker inside it; two
-    // steps then hold two of the five slots.
-    transport.close_gate();
+    // Two steps hold two of the four slots.
     let run = telmoni.run("bot", RunOptions::default())?;
-    assert!(transport.wait_for(1));
     for n in 0..2 {
         let step = run.step(&format!("s{n}"));
         step.end();
     }
     assert_eq!(
         telmoni.record_run(record.clone()),
-        Err(Error::QueueFull { spans: 4 }),
-        "room for three of the record's four spans"
+        Err(Error::QueueFull { spans: 3 }),
+        "room for two of the record's three spans"
     );
-    transport.open_gate();
     run.end();
     assert!(telmoni.flush());
     telmoni.record_run(record)?;
@@ -986,8 +982,8 @@ fn a_record_the_queue_has_no_room_for_is_refused_whole() -> Outcome {
         .filter(|name| *name == "execute_tool t")
         .count();
     assert!(
-        calls == 2 && names.len() == 8,
-        "the live run's four spans and the record's four: {names:?}"
+        calls == 2 && names.len() == 6,
+        "the live run's three spans and the record's three: {names:?}"
     );
     assert!(warnings.all().is_empty(), "{:?}", warnings.all());
     Ok(())
@@ -1013,10 +1009,6 @@ fn a_record_travels_in_exports_of_its_own() -> Outcome {
         ..record.clone()
     };
     let live = harness.telmoni.run("live", RunOptions::default())?;
-    assert!(
-        harness.transport.wait_for(1),
-        "the live run's start goes alone"
-    );
     live.step("live step").end();
     harness.telmoni.record_run(record.clone())?;
     harness.telmoni.record_run(beside.clone())?;
@@ -1084,7 +1076,6 @@ fn a_record_larger_than_a_batch_is_cut_from_its_own_start() -> Outcome {
         ..golden
     };
     let run = telmoni.run("bot", RunOptions::default())?;
-    assert!(transport.wait_for(1));
     for n in 0..2 {
         run.step(&format!("s{n}")).end();
     }
@@ -1106,10 +1097,9 @@ fn a_record_larger_than_a_batch_is_cut_from_its_own_start() -> Outcome {
     assert_eq!(
         exports,
         [
-            vec!["telmoni.run.start"],
             vec!["s0", "s1"],
-            vec!["telmoni.run.start", "execute_tool t", "execute_tool t"],
-            vec!["execute_tool t", "invoke_agent claude-code"],
+            vec!["execute_tool t", "execute_tool t", "execute_tool t"],
+            vec!["invoke_agent claude-code"],
             vec!["invoke_agent bot"],
         ]
     );
@@ -1198,9 +1188,9 @@ fn a_records_room_is_kept_while_it_is_built() -> Outcome {
     let warnings = Warnings::default();
     let sleeps = Sleeps::default();
     let mut hooks = hooks(&transport, &warnings, &sleeps);
-    // Room for five spans, and a worker that will not wake until flushed.
+    // Room for four spans, and a worker that will not wake until flushed.
     hooks.batching = Batching {
-        max_queue_size: 5,
+        max_queue_size: 4,
         max_batch_size: 100,
         schedule_delay: Duration::from_secs(60),
     };
@@ -1220,8 +1210,7 @@ fn a_records_room_is_kept_while_it_is_built() -> Outcome {
         ..golden
     };
     let live = Arc::new(telmoni.run("live", RunOptions::default())?);
-    assert!(transport.wait_for(1));
-    // Room for one step beside the record's four spans.
+    // Room for one step beside the record's three spans.
     let stepping = Arc::clone(&live);
     *lock(&sampler.0) = Some(Box::new(move || {
         stepping.step("s0").end();
@@ -1249,8 +1238,6 @@ fn a_records_room_is_kept_while_it_is_built() -> Outcome {
             "invoke_agent claude-code",
             "invoke_agent live",
             "s0",
-            "telmoni.run.start",
-            "telmoni.run.start",
         ]
     );
     assert_eq!(
@@ -1260,8 +1247,8 @@ fn a_records_room_is_kept_while_it_is_built() -> Outcome {
     Ok(())
 }
 
-/// A record queued behind a live step goes in the export after the step's, as
-/// a live run's start would, with no flush.
+/// A record queued behind a live step goes in the export after the step's,
+/// with no flush.
 #[test]
 fn a_record_goes_at_once() -> Outcome {
     let transport = FakeTransport::new([])?;
@@ -1274,10 +1261,9 @@ fn a_record_goes_at_once() -> Outcome {
     };
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
     let live = telmoni.run("live", RunOptions::default())?;
-    assert!(transport.wait_for(1));
     live.step("live step").end();
     telmoni.record_run(the_record()?)?;
-    assert!(transport.wait_for(3), "the record waited for the delay");
+    assert!(transport.wait_for(2), "the record waited for the delay");
     live.end();
     telmoni.shutdown();
     Ok(())

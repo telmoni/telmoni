@@ -73,13 +73,6 @@ export type HeaderCarrier =
   | Record<string, string | readonly string[] | undefined>
   | { get(name: string): string | null | undefined; set(name: string, value: string): void };
 
-/** What a monitor holds a run to; each optional, a stall's or steps' fraction cut, and one ingest would refuse left off with one warning. */
-export interface Bounds {
-  stallAfterSeconds?: number | undefined;
-  maxSteps?: number | undefined;
-  maxCostUsd?: number | undefined;
-}
-
 /**
  * A model call's tokens, as the conventions count them: input includes the
  * cache's reads and writes, output reasoning; sum parts reported apart. Each
@@ -98,7 +91,6 @@ export interface RunOptions {
   userId?: string | undefined;
   sessionId?: string | undefined;
   tags?: Readonly<Record<string, string>> | undefined;
-  bounds?: Bounds | undefined;
   /** This run's share, over the client's `sampleRate`. */
   sampleRate?: number | undefined;
 }

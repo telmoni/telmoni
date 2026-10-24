@@ -16,10 +16,10 @@ describe('the processor', () => {
       await h.telmoni.shutdown();
     }
     const names = h.transport.spans().map((span) => span.name);
-    expect(names, names.join(', ')).toHaveLength(2);
+    expect(names).toEqual(['s0', 's1']);
     expect(h.warnings).toHaveLength(1);
     expect(h.warnings[0]).toContain('queue was full');
-    expect(h.warnings[0]).toContain('5 spans');
+    expect(h.warnings[0]).toContain('4 spans');
   });
 
   it('keeps going past a warning whose hook throws, the next flush still sending', async () => {
@@ -49,9 +49,7 @@ describe('the processor', () => {
     const h = harness();
     h.telmoni.run('bot', () => {});
     await h.telmoni.shutdown();
-    expect(new Set(h.transport.spans().map((span) => span.name))).toEqual(
-      new Set(['telmoni.run.start', 'invoke_agent bot']),
-    );
+    expect(h.transport.spans().map((span) => span.name)).toEqual(['invoke_agent bot']);
     await h.telmoni.shutdown();
     expect(h.transport.requests).toHaveLength(1);
   });
@@ -60,10 +58,9 @@ describe('the processor', () => {
     const h = harness({}, { processor: { maxBatchSize: 3, scheduleDelaySeconds: 60 } });
     try {
       await h.telmoni.run('bot', async (run) => {
-        expect(await h.transport.waitFor(1)).toBe(true);
         for (let n = 0; n < 3; n++) run.step(`s${n}`, () => {});
-        expect(await h.transport.waitFor(2), 'three steps fill a batch of three').toBe(true);
-        expect(h.transport.spans().map((span) => span.name)).toEqual(['telmoni.run.start', 's0', 's1', 's2']);
+        expect(await h.transport.waitFor(1), 'three steps fill a batch of three').toBe(true);
+        expect(h.transport.spans().map((span) => span.name)).toEqual(['s0', 's1', 's2']);
       });
     } finally {
       await h.telmoni.shutdown();
@@ -104,15 +101,15 @@ describe('the processor', () => {
     vi.useFakeTimers();
     try {
       // The real sleep, on the fake clock: every answer asks for 20 s, and a
-      // batch of one leaves the run's own span queued behind its start.
+      // batch of one leaves the run's own span queued behind its step.
       const h = harness(
         {},
         { sleep: undefined, processor: { maxBatchSize: 1 } },
         Array.from({ length: 10 }, () => answer(429, { 'Retry-After': '20' }, '{}')),
       );
-      h.telmoni.run('bot', () => {});
+      h.telmoni.run('bot', (run) => run.step('s', () => {}));
       const done = h.telmoni.shutdown();
-      // Before the deadline the drain goes on: the start's retry, 20 s in.
+      // Before the deadline the drain goes on: the step's retry, 20 s in.
       await vi.advanceTimersByTimeAsync(30_000);
       await done;
       expect(h.transport.requests).toHaveLength(2);

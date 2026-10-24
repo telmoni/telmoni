@@ -185,18 +185,18 @@ afterEach(() => {
 
 describe('a recorded run', () => {
   it('is refused whole when the queue has no room for it, and goes whole once there is', async () => {
-    // Room for five spans, and a worker that will not wake until flushed.
-    const h = harness({}, { processor: { maxQueueSize: 5, maxBatchSize: 100, scheduleDelaySeconds: 60 } });
+    // Room for four spans, and a worker that will not wake until flushed.
+    const h = harness({}, { processor: { maxQueueSize: 4, maxBatchSize: 100, scheduleDelaySeconds: 60 } });
     const golden = theRecord();
     const call: ToolCallRecord = { type: 'tool_call', name: 't', start: golden.start, end: golden.start };
     const record: RunRecord = { ...golden, inside: [call, call] };
     try {
-      // Nothing yields inside the run, so its start and two steps hold three of the five slots.
+      // Nothing yields inside the run, so its two steps hold two of the four slots.
       h.telmoni.run('bot', (run) => {
         run.step('s0', () => {});
         run.step('s1', () => {});
         expect(() => h.telmoni.recordRun(record)).toThrow(QueueFullError);
-        expect(() => h.telmoni.recordRun(record)).toThrow('4 spans');
+        expect(() => h.telmoni.recordRun(record)).toThrow('3 spans');
       });
       expect(await h.telmoni.flush()).toBe(true);
       h.telmoni.recordRun(record);
@@ -206,7 +206,7 @@ describe('a recorded run', () => {
     }
     const names = h.transport.spans().map((span) => span.name);
     expect(names.filter((name) => name === 'execute_tool t')).toHaveLength(2);
-    expect(names).toHaveLength(8);
+    expect(names).toHaveLength(6);
     expect(h.warnings).toEqual([]);
   });
 
@@ -252,8 +252,7 @@ describe('a recorded run', () => {
     const h = harness();
     let sent = 0;
     try {
-      await h.telmoni.run('live', async (run) => {
-        expect(await h.transport.waitFor(1)).toBe(true); // the live run's start goes alone
+      h.telmoni.run('live', (run) => {
         run.step('live step', () => {});
         h.telmoni.recordRun(record);
         h.telmoni.recordRun(beside);
@@ -277,8 +276,7 @@ describe('a recorded run', () => {
     const golden = theRecord();
     const call: ToolCallRecord = { type: 'tool_call', name: 't', start: golden.start, end: golden.start };
     try {
-      await h.telmoni.run('bot', async (run) => {
-        expect(await h.transport.waitFor(1)).toBe(true);
+      h.telmoni.run('bot', (run) => {
         run.step('s0', () => {});
         run.step('s1', () => {});
         h.telmoni.recordRun({ ...golden, inside: [call, call, call] });
@@ -288,10 +286,9 @@ describe('a recorded run', () => {
       await h.telmoni.shutdown();
     }
     expect(h.transport.bodies().map((body) => body.resourceSpans[0]!.scopeSpans[0]!.spans.map((s) => s.name))).toEqual([
-      ['telmoni.run.start'],
       ['s0', 's1'],
-      ['telmoni.run.start', 'execute_tool t', 'execute_tool t'],
-      ['execute_tool t', 'invoke_agent claude-code'],
+      ['execute_tool t', 'execute_tool t', 'execute_tool t'],
+      ['invoke_agent claude-code'],
       ['invoke_agent bot'],
     ]);
   });
@@ -300,8 +297,7 @@ describe('a recorded run', () => {
     const sampler = new Hooked();
     const h = harness({ sampler });
     try {
-      await h.telmoni.run('live', async (run) => {
-        expect(await h.transport.waitFor(1)).toBe(true);
+      h.telmoni.run('live', (run) => {
         sampler.hook = () => run.step('live step', () => {});
         h.telmoni.recordRun(theRecord());
       });
@@ -315,14 +311,13 @@ describe('a recorded run', () => {
 
   it('keeps its room while it is built, a live span past it dropped', async () => {
     const sampler = new Hooked();
-    // Room for five spans, and a worker that will not wake until flushed.
-    const h = harness({ sampler }, { processor: { maxQueueSize: 5, maxBatchSize: 100, scheduleDelaySeconds: 60 } });
+    // Room for four spans, and a worker that will not wake until flushed.
+    const h = harness({ sampler }, { processor: { maxQueueSize: 4, maxBatchSize: 100, scheduleDelaySeconds: 60 } });
     const golden = theRecord();
     const call: ToolCallRecord = { type: 'tool_call', name: 't', start: golden.start, end: golden.start };
     try {
       await h.telmoni.run('live', async (run) => {
-        expect(await h.transport.waitFor(1)).toBe(true);
-        // Room for one step beside the record's four spans.
+        // Room for one step beside the record's three spans.
         sampler.hook = () => {
           run.step('s0', () => {});
           run.step('s1', () => {});
@@ -345,20 +340,17 @@ describe('a recorded run', () => {
       'invoke_agent claude-code',
       'invoke_agent live',
       's0',
-      'telmoni.run.start',
-      'telmoni.run.start',
     ]);
     expect(h.warnings).toEqual(['telmoni: the export queue was full; 1 spans were dropped']);
   });
 
-  it("goes at once, as a live run's start does", async () => {
+  it('goes at once', async () => {
     const h = harness({}, { processor: { scheduleDelaySeconds: 60 } });
     try {
       await h.telmoni.run('live', async (run) => {
-        expect(await h.transport.waitFor(1)).toBe(true);
         run.step('live step', () => {});
         h.telmoni.recordRun(theRecord());
-        expect(await h.transport.waitFor(3), 'the record waited for the delay').toBe(true);
+        expect(await h.transport.waitFor(2), 'the record waited for the delay').toBe(true);
       });
     } finally {
       await h.telmoni.shutdown();

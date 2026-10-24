@@ -177,11 +177,10 @@ impl Telmoni {
     }
 
     /// A run of `agent`, as a guard: the span `invoke_agent <agent>` in
-    /// whatever trace is current, opened by `telmoni.run.start`, sent at once,
-    /// and ended when the guard drops or on [`Run::end`]. An agent past 128
-    /// characters is cut to them, and a bound or tag out of range, a tag past
-    /// the first 32 by key, or a user or session past its cap is left off,
-    /// each with one warning.
+    /// whatever trace is current, ended when the guard drops or on
+    /// [`Run::end`]. An agent past 128 characters is cut to them, and a tag
+    /// out of range, a tag past the first 32 by key, or a user or session past
+    /// its cap is left off, each with one warning.
     ///
     /// # Errors
     ///
@@ -239,8 +238,8 @@ impl Telmoni {
     /// place in the record, so the same record sent again is the same bytes,
     /// which ingest answers once: give a run the same id each time it is
     /// sent. Its spans travel in exports of their own, whatever else is sent
-    /// meanwhile, in one when it holds no more than a batch, its start first
-    /// and the run's own span last.
+    /// meanwhile, in one when it holds no more than a batch, the run's own
+    /// span last.
     ///
     /// ```no_run
     /// use std::time::{Duration, SystemTime};

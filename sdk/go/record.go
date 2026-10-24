@@ -156,14 +156,13 @@ func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 	if record.SessionID != "" {
 		inherited = append(inherited, attribute.String(attrSessionID, record.SessionID))
 	}
-	sampleRate := attribute.Float64(attrSampleRate, rate)
 	// By key: a map ranges in a new order each time, and the same record must
 	// be the same bytes.
 	tags := c.tagAttributes(record.Tags)
 	attrs := make([]attribute.KeyValue, 0, 3+len(inherited)+len(tags))
 	attrs = append(attrs, attribute.String(attrOperation, runOperation), attribute.String(attrAgentName, record.Agent))
 	attrs = append(attrs, inherited...)
-	attrs = append(attrs, sampleRate)
+	attrs = append(attrs, attribute.Float64(attrSampleRate, rate))
 	attrs = append(attrs, tags...)
 	// Warned of before the hold, as the tags are: a logger that records a run
 	// would wait on it for good.
@@ -187,8 +186,6 @@ func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 	root := trace.ContextWithSpanContext(ctx, trace.SpanContext{})
 	run := r.open(root, runOperation+" "+record.Agent, trace.SpanKindInternal, attrs, record.Start)
 	inRun := trace.ContextWithSpan(root, run)
-	opener := r.open(inRun, runStart, trace.SpanKindInternal, slices.Concat(inherited, []attribute.KeyValue{sampleRate}), record.Start)
-	opener.End(trace.WithTimestamp(record.Start))
 	for _, item := range record.Inside {
 		switch item := itemValue(item).(type) {
 		case StepRecord:
@@ -208,8 +205,8 @@ func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 }
 
 // recorder opens a record's spans, each with the ids its place gives it: 0 the
-// run, 1 its start, then each step and call in the record's order, a step
-// before its calls.
+// run, then each step and call from 1 in the record's order, a step before its
+// calls.
 type recorder struct {
 	tracer    trace.Tracer
 	runID     [16]byte
@@ -317,10 +314,10 @@ func checkRecord(record RunRecord) error {
 	return nil
 }
 
-// recordSpans counts the spans a record queues: the run and its start, then
-// each step and each call.
+// recordSpans counts the spans a record queues: the run, then each step and
+// each call.
 func recordSpans(record RunRecord) int {
-	n := 2
+	n := 1
 	for _, item := range record.Inside {
 		n++
 		if step, ok := itemValue(item).(StepRecord); ok {

@@ -509,9 +509,12 @@ fn the_fakes_work() -> Outcome {
 
     let fixture = load_fixture("run.json")?;
     assert!(text(field(&fixture, "scenario")?, "capture_content").is_err());
-    let bounds = field(field(field(&fixture, "scenario")?, "run")?, "bounds")?;
-    assert_eq!(int(bounds, "max_steps")?, 10);
-    assert!((float(bounds, "max_cost_usd")? - 1.5).abs() < f64::EPSILON);
+    let run = field(field(&fixture, "scenario")?, "run")?;
+    assert!((float(run, "sample_rate")? - 1.0).abs() < f64::EPSILON);
+    assert_eq!(
+        int(&load_fixture("answers/forbidden.json")?, "status")?,
+        403
+    );
 
     let span = json!({
         "name": "s",

@@ -25,7 +25,7 @@ const telmoni = Telmoni.fromEnv();
 
 const reply = await telmoni.run(
   'support-bot',
-  { userId: 'user_42', sessionId: 'conv_7', bounds: { maxSteps: 10, maxCostUsd: 1.5 } },
+  { userId: 'user_42', sessionId: 'conv_7' },
   async (run) => {
     const plan = await run.step('plan', (step) =>
       step.modelCall('gpt-4o-mini', { provider: 'openai', inputMessages: messages }, async (call) => {
@@ -61,12 +61,11 @@ marks the span cancelled instead. `run.fail('RateLimit')` and `run.cancel()`
 mark a span by hand. Steps nest: `step.step(...)`, `step.modelCall(...)` and
 `step.toolCall(...)` open under the step; the same methods on `run` open under
 the run. `run` throws a `TypeError` for a blank agent name and a `RangeError`
-for a sample rate that is no number or outside (0, 1]. A bound or a token
-count is read from a number, a bigint or a decimal numeral's text, a stall's,
-steps' or count's fraction cut, and of what ingest would refuse, these are
-left off with one warning: a bound outside 1 to 4294967295, a cost not above
-0, a token count below 0 or past 64 bits, a tag whose key is not 1 to 64
-characters or whose value is past 256, and the tags past the first 32 kept,
+for a sample rate that is no number or outside (0, 1]. A token count is read
+from a number, a bigint or a decimal numeral's text, its fraction cut, and of
+what ingest would refuse, these are left off with one warning: a token count
+below 0 or past 64 bits, a tag whose key is not 1 to 64 characters or whose
+value is past 256, and the tags past the first 32 kept,
 the most ingest keeps; an empty user, session, provider or response model is
 left off as unset. A name, model, provider, user, session, response model or
 error type that is no string goes as its text with one warning, as does a tag
@@ -210,8 +209,8 @@ takes when it starts a trace of its own.
 
 ## Sending
 
-Spans are batched (a queue of 2048, batches of 512, every five seconds; a run's
-start goes at once) and sent as OTLP/JSON to `POST {endpoint}/otlp/v1/traces`
+Spans are batched (a queue of 2048, batches of 512, every five seconds; a
+recorded run goes at once) and sent as OTLP/JSON to `POST {endpoint}/otlp/v1/traces`
 over HTTPS: a plain-HTTP endpoint is refused with a `TypeError` unless its host
 is this machine — `localhost`, a name under it, 127.0.0.0/8 or `::1`, an
 IPv4-mapped address read as its IPv4 — and no redirect is followed, since every

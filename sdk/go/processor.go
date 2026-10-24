@@ -33,8 +33,8 @@ const defaultWait = 30 * time.Second
 // A run inside a trace the application does not sample is still sent; the
 // run's own sample rate is applied here, by run, never through the trace's
 // flag. The queue is bounded, so a slow Telmoni never slows an agent: past its
-// size, spans are dropped and counted. telmoni.run.start wakes the worker at
-// once, and a recorded run travels in exports of its own.
+// size, spans are dropped and counted. A recorded run goes at once, in exports
+// of its own.
 type processor struct {
 	exporter *exporter
 	logger   *slog.Logger
@@ -53,7 +53,6 @@ type processor struct {
 	stage     *stage
 	reserved  int
 	dropped   int
-	urgent    bool
 	flushing  int
 	exporting bool
 	stopped   bool
@@ -141,10 +140,7 @@ func (p *processor) OnEnd(span sdktrace.ReadOnlySpan) {
 		return
 	}
 	p.queue = append(p.queue, span)
-	if span.Name() == runStart {
-		p.urgent = true
-	}
-	if p.urgent || len(p.queue) >= p.limits.maxBatch {
+	if len(p.queue) >= p.limits.maxBatch {
 		p.signal()
 	}
 }
@@ -256,7 +252,6 @@ func (p *processor) work() {
 		}
 		dropped := p.dropped
 		p.dropped = 0
-		p.urgent = false
 		p.exporting = n > 0
 		p.mu.Unlock()
 		if dropped > 0 {
@@ -296,9 +291,9 @@ func (p *processor) warn(text string) {
 }
 
 // due is whether the worker should export without waiting; under the lock. A
-// record queued goes at once, as a live run's start does.
+// record queued goes at once.
 func (p *processor) due() bool {
-	return p.stopped || p.flushing > 0 || p.urgent || len(p.fences) > 0 || len(p.queue) >= p.limits.maxBatch
+	return p.stopped || p.flushing > 0 || len(p.fences) > 0 || len(p.queue) >= p.limits.maxBatch
 }
 
 // release lets every Flush waiting go; under the lock.

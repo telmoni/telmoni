@@ -111,8 +111,6 @@ describe('a name of no string', () => {
       'fine',
       'invoke_agent 42',
       'invoke_agent other',
-      'telmoni.run.start',
-      'telmoni.run.start',
     ]);
     expect(h.warnings).toHaveLength(4);
     expect(h.warnings.every((warning) => warning.includes('is sent as its text'))).toBe(true);
@@ -126,7 +124,7 @@ describe('a name of no string', () => {
     const steps = h.transport
       .spans()
       .map((span) => span.name)
-      .filter((name) => !['telmoni.run.start', 'invoke_agent bot'].includes(name));
+      .filter((name) => name !== 'invoke_agent bot');
     expect(steps.sort()).toEqual([...Array(3).fill('n'.repeat(145)), 'step', 'step']);
     expect(h.warnings).toEqual([
       'telmoni: a step needs its name; one without is sent named step',

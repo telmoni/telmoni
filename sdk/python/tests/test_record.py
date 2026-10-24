@@ -30,6 +30,7 @@ from telmoni import (
     ToolCallRecord,
     Usage,
     current_run,
+    runs,
 )
 from telmoni.exporter import Exporter
 from telmoni.processor import Processor
@@ -181,7 +182,6 @@ def test_a_record_travels_in_exports_of_its_own(transport: FakeTransport) -> Non
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
         with client.run("live"):
-            assert transport.wait_for(1)  # the live run's start goes alone
             with client.step("live step"):
                 pass
             client.record_run(record)
@@ -209,7 +209,6 @@ def test_a_record_larger_than_a_batch_is_cut_from_its_own_start(
     record = dataclasses.replace(golden, inside=[call, call, call])
     try:
         with client.run("bot"):
-            assert transport.wait_for(1)
             for n in range(2):
                 with client.step(f"s{n}"):
                     pass
@@ -221,10 +220,9 @@ def test_a_record_larger_than_a_batch_is_cut_from_its_own_start(
     assert [
         [span["name"] for span in spans_in(body)] for body in transport.bodies()
     ] == [
-        ["telmoni.run.start"],
         ["s0", "s1"],
-        ["telmoni.run.start", "execute_tool t", "execute_tool t"],
-        ["execute_tool t", "invoke_agent claude-code"],
+        ["execute_tool t", "execute_tool t", "execute_tool t"],
+        ["invoke_agent claude-code"],
         ["invoke_agent bot"],
     ]
 
@@ -365,20 +363,19 @@ def test_a_records_room_is_kept_while_it_is_built(
     sampler = Hooked()
     client = Telmoni(Config(api_key="k", sampler=sampler), transport=transport)
     processor = with_limits(
-        client, transport, max_queue_size=5, max_batch_size=100, schedule_delay_s=60
+        client, transport, max_queue_size=4, max_batch_size=100, schedule_delay_s=60
     )
     golden = the_record()
     call = ToolCallRecord(name="t", start=golden.start, end=golden.start)
     try:
         with client.run("live") as live:
-            assert transport.wait_for(1)
 
             def steps() -> None:
                 for n in range(2):
                     with live.step(f"s{n}"):
                         pass
 
-            # Room for one step beside the record's four spans.
+            # Room for one step beside the record's three spans.
             sampler.hook = steps
             client.record_run(dataclasses.replace(golden, inside=[call, call]))
             assert client.flush()
@@ -392,8 +389,6 @@ def test_a_records_room_is_kept_while_it_is_built(
         "invoke_agent claude-code",
         "invoke_agent live",
         "s0",
-        "telmoni.run.start",
-        "telmoni.run.start",
     ]
     assert [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING] == [
         "telmoni: the export queue was full; 1 spans were dropped"
@@ -401,28 +396,31 @@ def test_a_records_room_is_kept_while_it_is_built(
 
 
 def test_a_record_goes_at_once(transport: FakeTransport) -> None:
-    """Queued behind a live step, it goes in the export after the step's, as a
-    live run's start would, with no flush."""
+    """Queued behind a live step, it goes in the export after the step's, with
+    no flush."""
     client = Telmoni(Config(api_key="k"), transport=transport)
     processor = with_limits(client, transport, schedule_delay_s=60)
     try:
         with client.run("live"):
-            assert transport.wait_for(1)
             with client.step("live step"):
                 pass
             client.record_run(the_record())
-            assert transport.wait_for(3), "the record waited for the delay"
+            assert transport.wait_for(2), "the record waited for the delay"
     finally:
         processor.shutdown()
         client.shutdown()
 
 
 def test_a_record_cut_short_sends_nothing(transport: FakeTransport) -> None:
-    """Its start has ended when the next span fails; nothing of it is queued."""
+    """Its first call has ended when the next fails; nothing of it is queued."""
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
         with (
-            mock.patch("telmoni.runs._close", side_effect=RuntimeError("cut")),
+            mock.patch(
+                "telmoni.runs._close",
+                wraps=runs._close,
+                side_effect=[mock.DEFAULT, RuntimeError("cut")],
+            ),
             pytest.raises(RuntimeError, match="cut"),
         ):
             client.record_run(the_record())
@@ -689,9 +687,9 @@ def test_a_record_the_queue_has_no_room_for_is_refused_whole(
 ) -> None:
     """Refused whole before anything is queued; drained, the queue takes it."""
     client = Telmoni(Config(api_key="k"), transport=transport)
-    # Room for five spans, and a worker that will not wake until flushed.
+    # Room for four spans, and a worker that will not wake until flushed.
     processor = with_limits(
-        client, transport, max_queue_size=5, max_batch_size=100, schedule_delay_s=60
+        client, transport, max_queue_size=4, max_batch_size=100, schedule_delay_s=60
     )
     golden = the_record()
     record = dataclasses.replace(
@@ -703,12 +701,11 @@ def test_a_record_the_queue_has_no_room_for_is_refused_whole(
     )
     try:
         with client.run("bot"):
-            # The start goes alone; two steps then hold two of the five slots.
-            assert transport.wait_for(1)
+            # Two steps hold two of the four slots.
             for n in range(2):
                 with client.step(f"s{n}"):
                     pass
-            with pytest.raises(QueueFullError, match="4 spans"):
+            with pytest.raises(QueueFullError, match="3 spans"):
                 client.record_run(record)
         assert client.flush()
         client.record_run(record)
@@ -717,7 +714,7 @@ def test_a_record_the_queue_has_no_room_for_is_refused_whole(
         processor.shutdown()
         client.shutdown()
     names = [s["name"] for s in transport.spans()]
-    assert names.count("execute_tool t") == 2 and len(names) == 8, names
+    assert names.count("execute_tool t") == 2 and len(names) == 6, names
 
 
 @pytest.mark.parametrize(

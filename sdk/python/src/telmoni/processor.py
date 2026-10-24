@@ -4,8 +4,7 @@ without the check that skips a span whose trace is not sampled.
 A run inside a trace the application does not sample is still sent; the run's
 own sample rate is applied here, by run, never through the trace's flag. The
 queue is bounded, so a slow Telmoni never slows an agent: past its size, spans
-are dropped and counted. ``telmoni.run.start`` wakes the worker at once, and a
-recorded run travels in exports of its own.
+are dropped and counted. A recorded run goes at once, in exports of its own.
 """
 
 from __future__ import annotations
@@ -61,7 +60,6 @@ class Processor(SpanProcessor):
         self._stage: tuple[int, list[ReadableSpan]] | None = None
         self._reserved = 0
         self._dropped = 0
-        self._urgent = False
         self._flushing = 0
         self._shutdown = False
         self._exporting = False
@@ -92,7 +90,6 @@ class Processor(SpanProcessor):
         self._stage = None
         self._reserved = 0
         self._dropped = 0
-        self._urgent = False
         self._flushing = 0
         self._exporting = False
         if not self._shutdown:
@@ -154,9 +151,7 @@ class Processor(SpanProcessor):
                 self._dropped += 1
                 return
             self._queue.append(span)
-            if span.name == contract.RUN_START:
-                self._urgent = True
-            if self._urgent or len(self._queue) >= self._max_batch_size:
+            if len(self._queue) >= self._max_batch_size:
                 self._wake.notify_all()
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:
@@ -199,7 +194,6 @@ class Processor(SpanProcessor):
                 while self._fences and self._fences[0] <= self._taken:
                     self._fences.popleft()
                 dropped, self._dropped = self._dropped, 0
-                self._urgent = False
                 self._exporting = bool(batch)
             if dropped:
                 warn(
@@ -213,11 +207,10 @@ class Processor(SpanProcessor):
 
     def _due(self) -> bool:
         """Under the lock: whether the worker should export without waiting; a
-        record queued goes at once, as a live run's start does."""
+        record queued goes at once."""
         return (
             self._shutdown
             or self._flushing > 0
-            or self._urgent
             or bool(self._fences)
             or len(self._queue) >= self._max_batch_size
         )

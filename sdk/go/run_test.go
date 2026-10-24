@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"math"
 	"net"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -41,7 +39,6 @@ func TestARunIsASpanWithTheContractAttributes(t *testing.T) {
 		UserID:    "user_1",
 		SessionID: "conv_1",
 		Tags:      map[string]string{"env": "test", "team": "a"},
-		Bounds:    &telmoni.Bounds{StallAfterS: 30, MaxSteps: 5, MaxCostUSD: 0.5},
 	})
 	if !uuidV4.MatchString(run.ID()) {
 		t.Errorf("run id %q is not a lowercase version 4 UUID", run.ID())
@@ -72,51 +69,18 @@ func TestARunIsASpanWithTheContractAttributes(t *testing.T) {
 		t.Error("a run that went well has a status")
 	}
 	want := map[string]any{
-		"gen_ai.operation.name":       "invoke_agent",
-		"gen_ai.agent.name":           "support-bot",
-		"telmoni.run_id":              run.ID(),
-		"telmoni.agent":               "support-bot",
-		"user.id":                     "user_1",
-		"gen_ai.conversation.id":      "conv_1",
-		"telmoni.bound.stall_after_s": int64(30),
-		"telmoni.bound.max_steps":     int64(5),
-		"telmoni.bound.max_cost_usd":  0.5,
-		"telmoni.sample_rate":         1.0,
-		"telmoni.tag.env":             "test",
-		"telmoni.tag.team":            "a",
+		"gen_ai.operation.name":  "invoke_agent",
+		"gen_ai.agent.name":      "support-bot",
+		"telmoni.run_id":         run.ID(),
+		"telmoni.agent":          "support-bot",
+		"user.id":                "user_1",
+		"gen_ai.conversation.id": "conv_1",
+		"telmoni.sample_rate":    1.0,
+		"telmoni.tag.env":        "test",
+		"telmoni.tag.team":       "a",
 	}
 	if got := attributesOf(t, span); !reflect.DeepEqual(got, want) {
 		t.Errorf("attributes\n got: %v\nwant: %v", got, want)
-	}
-}
-
-func TestTheStartIsSentAtOnceWithTheBounds(t *testing.T) {
-	h := newHarness(t, testConfig(), nil)
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{Bounds: &telmoni.Bounds{MaxSteps: 3}})
-	if !h.transport.waitFor(1, waitTimeout) {
-		t.Fatal("the run's start was not sent at once")
-	}
-	spans := h.transport.spans(t)
-	if got := names(spans); !reflect.DeepEqual(got, []string{"telmoni.run.start"}) {
-		t.Fatalf("sent at the start: %v", got)
-	}
-	start := spans[0]
-	if start["startTimeUnixNano"] != start["endTimeUnixNano"] {
-		t.Error("telmoni.run.start has a duration")
-	}
-	want := map[string]any{
-		"telmoni.run_id":          run.ID(),
-		"telmoni.agent":           "bot",
-		"telmoni.bound.max_steps": int64(3),
-		"telmoni.sample_rate":     1.0,
-	}
-	if got := attributesOf(t, start); !reflect.DeepEqual(got, want) {
-		t.Errorf("attributes\n got: %v\nwant: %v", got, want)
-	}
-	run.End()
-	h.flush()
-	if runSpan(t, h)["spanId"] != h.transport.spans(t)[0]["parentSpanId"] {
-		t.Error("the start is not the run's child")
 	}
 }
 
@@ -295,8 +259,8 @@ func TestARunsTextAtIngestsCapsIsSentWhole(t *testing.T) {
 	}
 }
 
-// A deadline that ran out is a failure, not a cancellation: a stalled call is
-// what a monitor is for, and the other SDKs fail a timeout with its type.
+// A deadline that ran out is a failure, not a cancellation, as the other SDKs
+// fail a timeout with its type.
 func TestADeadlineThatRanOutIsAFailure(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
@@ -459,7 +423,7 @@ func TestTheSampleRateDropsWholeRunsInTheProcessor(t *testing.T) {
 	if want := map[string]any{kept.ID(): 0.25, keptAtHalf.ID(): 0.5}; !reflect.DeepEqual(rates, want) {
 		t.Errorf("runs and rates sent\n got: %v\nwant: %v", rates, want)
 	}
-	want := []string{"invoke_agent bot", "invoke_agent bot", "telmoni.run.start", "telmoni.run.start"}
+	want := []string{"invoke_agent bot", "invoke_agent bot"}
 	if got := sortedNames(spans); !reflect.DeepEqual(got, want) {
 		t.Errorf("spans sent: %v", got)
 	}
@@ -531,82 +495,6 @@ func TestABadRunRateFallsBackToTheClientsWithOneWarning(t *testing.T) {
 	warnings := h.logs.warnings()
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "SampleRate") {
 		t.Errorf("warnings = %q, want one about the rate", warnings)
-	}
-}
-
-func TestACostBoundThatIsNoFiniteNumberIsLeftOffWithOneWarning(t *testing.T) {
-	h := newHarness(t, testConfig(), nil)
-	for _, cost := range []float64{math.Inf(1), math.NaN()} {
-		_, run := h.client.Run(context.Background(), "bot",
-			telmoni.RunOptions{Bounds: &telmoni.Bounds{MaxSteps: 5, MaxCostUSD: cost}})
-		run.End()
-	}
-	h.flush()
-	runs := withPrefix(h.transport.spans(t), "invoke_agent ")
-	if len(runs) != 2 {
-		t.Fatalf("want both runs sent, got %v", names(runs))
-	}
-	for _, span := range runs {
-		attributes := attributesOf(t, span)
-		if _, sent := attributes["telmoni.bound.max_cost_usd"]; sent {
-			t.Errorf("a cost bound was sent: %v", attributes)
-		}
-		if got := attributes["telmoni.bound.max_steps"]; got != int64(5) {
-			t.Errorf("telmoni.bound.max_steps = %v, want the other bounds kept", got)
-		}
-	}
-	warnings := h.logs.warnings()
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "MaxCostUSD") {
-		t.Errorf("warnings = %q, want one about the cost bound", warnings)
-	}
-}
-
-// A bound ingest refuses is left off the run and its start with one warning.
-func TestABoundIngestWouldRefuseIsLeftOffWithOneWarning(t *testing.T) {
-	if strconv.IntSize < 64 {
-		t.Skip("an int of 32 bits never passes 4294967295")
-	}
-	var top int64 = math.MaxUint32
-	h := newHarness(t, testConfig(), nil)
-	open := func(agent string, bounds telmoni.Bounds) {
-		_, run := h.client.Run(context.Background(), agent, telmoni.RunOptions{Bounds: &bounds})
-		run.End()
-	}
-	open("unset", telmoni.Bounds{})
-	open("edges", telmoni.Bounds{StallAfterS: 1, MaxSteps: int(top), MaxCostUSD: math.SmallestNonzeroFloat64})
-	if warnings := h.logs.warnings(); len(warnings) != 0 {
-		t.Errorf("warnings = %q, want none for a zero bound or one at ingest's edges", warnings)
-	}
-	open("refused", telmoni.Bounds{StallAfterS: -1, MaxSteps: int(top + 1), MaxCostUSD: -0.5})
-	open("refused", telmoni.Bounds{StallAfterS: int(top + 1), MaxSteps: -1, MaxCostUSD: math.Inf(-1)})
-	h.flush()
-	want := map[any]map[string]any{
-		"unset":   {},
-		"refused": {},
-		"edges": {
-			"telmoni.bound.stall_after_s": int64(1),
-			"telmoni.bound.max_steps":     top,
-			"telmoni.bound.max_cost_usd":  math.SmallestNonzeroFloat64,
-		},
-	}
-	spans := h.transport.spans(t)
-	if len(spans) != 8 {
-		t.Fatalf("spans sent: %v, want four runs and their starts", sortedNames(spans))
-	}
-	for _, span := range spans {
-		attributes := attributesOf(t, span)
-		agent := attributes["telmoni.agent"]
-		if got := attributesUnder(attributes, "telmoni.bound."); !reflect.DeepEqual(got, want[agent]) {
-			t.Errorf("%v of the %v run carries the bounds %v, want %v", span["name"], agent, got, want[agent])
-		}
-	}
-	wantWarnings := []string{
-		"telmoni: a run's StallAfterS must be a whole number from 1 to 4294967295; the run is sent without it",
-		"telmoni: a run's MaxSteps must be a whole number from 1 to 4294967295; the run is sent without it",
-		"telmoni: a run's MaxCostUSD must be a finite number above 0; the run is sent without it",
-	}
-	if warnings := h.logs.warnings(); !reflect.DeepEqual(warnings, wantWarnings) {
-		t.Errorf("warnings = %q\nwant one for each bound: %q", warnings, wantWarnings)
 	}
 }
 
@@ -695,17 +583,15 @@ func TestALoggerThatPanicsOnAWarningNeverReachesTheAgentsCall(t *testing.T) {
 			t.Fatalf("the logger's panic reached the agent's call: %v", r)
 		}
 	}()
-	// Three warnings on this call: a cost left off, a tag dropped, and the
-	// tags past the 32.
+	// Two warnings on this call: a tag dropped, and the tags past the 32.
 	tags := numberedTags(40)
 	tags[""] = "v"
-	bounds := &telmoni.Bounds{MaxCostUSD: math.NaN()}
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{Tags: tags, Bounds: bounds})
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{Tags: tags})
 	_, step := run.Step(ctx, "s")
 	step.End()
 	run.End()
 	h.flush()
-	want := []string{"invoke_agent bot", "s", "telmoni.run.start"}
+	want := []string{"invoke_agent bot", "s"}
 	if got := sortedNames(h.transport.spans(t)); !reflect.DeepEqual(got, want) {
 		t.Errorf("spans sent: %v, want %v", got, want)
 	}

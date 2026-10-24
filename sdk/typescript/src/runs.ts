@@ -1,25 +1,22 @@
 /**
  * Runs, steps, model calls and tool calls, as callbacks on handles.
  *
- * A run is a span of its own in whatever trace is current, opened by
- * `telmoni.run.start`; every span inside it carries the run's id, agent,
- * user and session, so ingest knows each span's run without waiting
- * for the trace's tree. Steps and calls open on a run's handle, or a step's,
- * so nothing can be opened — or sent — outside a run.
+ * A run is a span of its own in whatever trace is current; every span inside
+ * it carries the run's id, agent, user and session, so ingest knows each
+ * span's run without waiting for the trace's tree. Steps and calls open on a
+ * run's handle, or a step's, so nothing can be opened — or sent — outside a run.
  */
 
 import { randomUUID } from 'node:crypto';
 
 import { ROOT_CONTEXT, SpanKind, SpanStatusCode, context, createContextKey, trace } from '@opentelemetry/api';
-import type { Attributes, Context, HrTime, Span, SpanContext, SpanOptions, Tracer } from '@opentelemetry/api';
-import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
+import type { Attributes, Context, HrTime, Span, SpanContext, Tracer } from '@opentelemetry/api';
 
 import * as contract from './contract.js';
 import { errorType, isAbort } from './errors.js';
 import { type Ids, spanIdAt } from './ids.js';
 import type { Processor } from './processor.js';
 import type {
-  Bounds,
   CallRecord,
   ModelAnswer,
   ModelCallOptions,
@@ -256,7 +253,6 @@ export class Opener {
     if (typeof rate !== 'number' || !(rate > 0 && rate <= 1)) {
       throw new RangeError('sampleRate must be a number above 0 and up to 1');
     }
-    const bounds = boundsOf(options.bounds, this.#warnOnce);
     const sampledOut = rate < 1 && Math.random() >= rate;
     const runId = randomUUID();
     const inherited: Attributes = { [contract.RUN_ID]: runId, [contract.AGENT]: agent };
@@ -275,23 +271,12 @@ export class Opener {
       [contract.OPERATION]: 'invoke_agent',
       [contract.AGENT_NAME]: agent,
       ...inherited,
-      ...bounds,
       [contract.SAMPLE_RATE]: rate,
       ...tagsOf(Object.entries(options.tags ?? {}), this.#warnOnce),
     };
     const parent = context.active();
     const span = this.#start(`invoke_agent ${agent}`, parent, attributes, SpanKind.INTERNAL);
-    const run = new Run(this, span, parent, runId, agent, inherited, sampledOut);
-    // OpenTelemetry sends a span only once it ends; without this one a run
-    // stalled in its first call would never be heard.
-    const start = startTimeOf(span);
-    const opening: SpanOptions = {
-      kind: SpanKind.INTERNAL,
-      attributes: { ...inherited, ...bounds, [contract.SAMPLE_RATE]: rate },
-    };
-    if (start !== undefined) opening.startTime = start;
-    this.#tracer.startSpan(contract.RUN_START, opening, run.context).end(start);
-    return run;
+    return new Run(this, span, parent, runId, agent, inherited, sampledOut);
   }
 
   /**
@@ -371,11 +356,10 @@ export class Opener {
    *
    * Its trace is its own, named by the run's id, whatever context is active;
    * each span's id is derived from that id and the span's place in the record.
-   * Its spans are queued whole once built, the run's start first and the
-   * run's own last, and travel in exports of their own, so the same record
-   * sent again is the same bytes, whatever else is sent meanwhile. Throws
-   * `QueueFullError`, queuing nothing, when the export queue has no room for
-   * the whole record.
+   * Its spans are queued whole once built, the run's own last, and travel in
+   * exports of their own, so the same record sent again is the same bytes,
+   * whatever else is sent meanwhile. Throws `QueueFullError`, queuing nothing,
+   * when the export queue has no room for the whole record.
    */
   record(record: RunRecord): void {
     const agent: unknown = record.agent;
@@ -464,10 +448,6 @@ export class Opener {
     this.#processor.record(runHex, spansIn(items), () => {
       const span = open(`invoke_agent ${record.agent}`, ROOT_CONTEXT, attributes, SpanKind.INTERNAL, record.start);
       const ctx = trace.setSpan(ROOT_CONTEXT, span);
-      const at = hrTimeOf(record.start);
-      open(contract.RUN_START, ctx, { ...inherited, [contract.SAMPLE_RATE]: rate }, SpanKind.INTERNAL, record.start).end(
-        at,
-      );
       for (const [item, calls] of items) {
         if (item.type === 'step') {
           const step = open(item.name, ctx, inherited, SpanKind.INTERNAL, item.start);
@@ -522,9 +502,9 @@ function later(a: HrTime, b: HrTime): boolean {
 
 type Item = StepRecord | CallRecord;
 
-/** How many spans a record queues: the run and its start, then each step and each call. */
+/** How many spans a record queues: the run, then each step and each call. */
 function spansIn(items: ReadonlyArray<readonly [Item, readonly CallRecord[]]>): number {
-  return items.reduce((spans, [, calls]) => spans + 1 + calls.length, 2);
+  return items.reduce((spans, [, calls]) => spans + 1 + calls.length, 1);
 }
 
 /** The record's items, each step with its calls, read once and checked, so the items checked are the items built. */
@@ -668,43 +648,10 @@ function usageOf(usage: Usage | undefined, warnOnce: WarnOnce): Attributes {
   return out;
 }
 
-/**
- * What the run is held to; a bound ingest would refuse the run for is left
- * off with one warning, so a computed one never costs the run.
- */
-function boundsOf(bounds: Bounds | undefined, warnOnce: WarnOnce): Attributes {
-  const out: Attributes = {};
-  if (!isSet(bounds)) return out;
-  const keep = (name: string, key: string, number: number | undefined, allowed: string): void => {
-    if (number === undefined) {
-      warnOnce(`run:${name}`, `telmoni: a run's ${name} must be ${allowed}; the run is sent without it`);
-    } else {
-      out[key] = number;
-    }
-  };
-  const fits = 'a whole number from 1 to 4294967295';
-  if (isSet(bounds.stallAfterSeconds)) {
-    keep('stallAfterSeconds', contract.BOUND_STALL_AFTER_S, whole(bounds.stallAfterSeconds, 1, 2 ** 32), fits);
-  }
-  if (isSet(bounds.maxSteps)) keep('maxSteps', contract.BOUND_MAX_STEPS, whole(bounds.maxSteps, 1, 2 ** 32), fits);
-  if (isSet(bounds.maxCostUsd)) {
-    const cost = finite(bounds.maxCostUsd);
-    const above = cost !== undefined && cost > 0 ? cost : undefined;
-    keep('maxCostUsd', contract.BOUND_MAX_COST_USD, above, 'a finite number above 0');
-  }
-  return out;
-}
-
 /** `value` truncated to a whole number from `least` and below `end`, as ingest takes one, or undefined. */
 function whole(value: unknown, least: number, end: number): number | undefined {
   const number = Math.trunc(numberOf(value));
   return Number.isFinite(number) && number >= least && number < end ? number : undefined;
-}
-
-/** `value` as a finite number, or undefined. */
-function finite(value: unknown): number | undefined {
-  const number = numberOf(value);
-  return Number.isFinite(number) ? number : undefined;
 }
 
 const DECIMAL = /^\s*[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?\s*$/i;
@@ -826,12 +773,6 @@ function readable([seconds, nanos]: HrTime): boolean {
   const after = seconds > 0 || (seconds === 0 && nanos > 0);
   const within = seconds < 18_446_744_073 || (seconds === 18_446_744_073 && nanos < 709_551_616);
   return after && within;
-}
-
-/** The SDK's span carries its start; the api's type does not say so. */
-function startTimeOf(span: Span): HrTime | undefined {
-  const start = (span as Partial<ReadableSpan>).startTime;
-  return Array.isArray(start) ? start : undefined;
 }
 
 function asJson(value: unknown): string {

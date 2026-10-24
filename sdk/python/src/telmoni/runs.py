@@ -1,9 +1,8 @@
 """Runs, steps, model calls and tool calls, as context managers and decorators.
 
-A run is a span of its own in whatever trace is current, opened by
-``telmoni.run.start``; every span inside it carries the run's id, agent,
-user and session, so ingest knows each span's run without waiting
-for the trace's tree. Nothing is sent outside a run.
+A run is a span of its own in whatever trace is current; every span inside it
+carries the run's id, agent, user and session, so ingest knows each span's run
+without waiting for the trace's tree. Nothing is sent outside a run.
 """
 
 from __future__ import annotations
@@ -23,7 +22,6 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from opentelemetry import context, trace
-from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.trace import (
     NonRecordingSpan,
     Span,
@@ -36,7 +34,6 @@ from opentelemetry.trace import (
 from . import contract, ids
 from .exporter import warn
 from .models import (
-    Bounds,
     CallRecord,
     ModelCallRecord,
     RunRecord,
@@ -279,7 +276,6 @@ class Opener:
         user_id: str | None,
         session_id: str | None,
         tags: Mapping[str, str] | None,
-        bounds: Bounds | None,
         sample_rate: float | None,
     ) -> Run:
         warn_once = self._client.exporter.warn_once
@@ -295,7 +291,6 @@ class Opener:
         rate = self._client.config.sample_rate if sample_rate is None else sample_rate
         if not 0 < rate <= 1:
             raise ValueError("sample_rate must be above 0 and up to 1")
-        limits = _bounds(bounds, warn_once)
         sampled_out = rate < 1 and random.random() >= rate
         run_id = str(uuid.uuid4())
         inherited: dict[str, str] = {contract.RUN_ID: run_id, contract.AGENT: agent}
@@ -321,7 +316,6 @@ class Opener:
                 contract.OPERATION: "invoke_agent",
                 contract.AGENT_NAME: agent,
                 **inherited,
-                **limits,
                 contract.SAMPLE_RATE: float(rate),
             }
         )
@@ -330,17 +324,6 @@ class Opener:
             f"invoke_agent {agent}", parent, attributes, SpanKind.INTERNAL
         )
         ctx = trace.set_span_in_context(span, parent)
-        start = span.start_time if isinstance(span, ReadableSpan) else None
-        # OpenTelemetry sends a span only once it ends; without this one a run
-        # stalled in its first call would never be heard.
-        opener = self._start(
-            contract.RUN_START,
-            ctx,
-            {**inherited, **limits, contract.SAMPLE_RATE: float(rate)},
-            SpanKind.INTERNAL,
-            start_time=start,
-        )
-        opener.end(end_time=start)
         run = Run(
             self._client,
             span,
@@ -457,9 +440,9 @@ class Opener:
 
         Its trace is its own, named by the run's id, whatever trace is current;
         each span's id is derived from that id and the span's place in the
-        record. Its spans are queued whole once built, the run's start first and
-        the run's own last, and travel in exports of their own, so the same
-        record sent again is the same bytes, whatever else is sent meanwhile.
+        record. Its spans are queued whole once built, the run's own last, and
+        travel in exports of their own, so the same record sent again is the
+        same bytes, whatever else is sent meanwhile.
         Raises ``QueueFullError``, sending nothing, when the export queue has
         no room for the whole record.
         """
@@ -523,7 +506,7 @@ class Opener:
             return
         # Queued whole or not at all: a record that outgrows the queue's room
         # would lose its tail, the run's own span first.
-        need = 2 + sum(1 + len(calls) for _item, calls in items)
+        need = 1 + sum(1 + len(calls) for _item, calls in items)
         # Worked out before the hold: a count that warns runs the application's
         # logging handlers, which may record a run of their own.
         usages = {
@@ -577,14 +560,6 @@ class Opener:
                 record.start,
             )
             ctx = trace.set_span_in_context(span, root)
-            opener = open_span(
-                contract.RUN_START,
-                ctx,
-                {**inherited, contract.SAMPLE_RATE: float(rate)},
-                SpanKind.INTERNAL,
-                record.start,
-            )
-            opener.end(end_time=_nanos(record.start))
             for item, calls in items:
                 if isinstance(item, StepRecord):
                     step = open_span(
@@ -940,46 +915,8 @@ def _close(
     span.end(end_time=_nanos(item.end))
 
 
-def _bounds(
-    bounds: Bounds | None, warn_once: Callable[[str, str], None]
-) -> dict[str, Any]:
-    """What the run is held to; a bound ingest would refuse the run for is
-    left off with one warning, so a computed one never costs the run."""
-    if bounds is None:
-        return {}
-    out: dict[str, Any] = {}
-
-    def keep(name: str, key: str, number: float | None, allowed: str) -> None:
-        if number is None:
-            warn_once(
-                f"run:{name}",
-                f"telmoni: a run's {name} must be {allowed}; the run is sent without it",
-            )
-        else:
-            out[key] = number
-
-    whole = "a whole number from 1 to 4294967295"
-    if bounds.stall_after_s is not None:
-        stall = _whole(bounds.stall_after_s, _BOUND)
-        keep("stall_after_s", contract.BOUND_STALL_AFTER_S, stall, whole)
-    if bounds.max_steps is not None:
-        steps = _whole(bounds.max_steps, _BOUND)
-        keep("max_steps", contract.BOUND_MAX_STEPS, steps, whole)
-    if bounds.max_cost_usd is not None:
-        cost = _finite(bounds.max_cost_usd)
-        positive = cost if cost is not None and cost > 0 else None
-        keep(
-            "max_cost_usd",
-            contract.BOUND_MAX_COST_USD,
-            positive,
-            "a finite number above 0",
-        )
-    return out
-
-
-# What ingest takes: a token count from 0, a bound from 1 that fits 32 bits.
+# What ingest takes: a token count from 0 that fits 64 bits.
 _COUNT = range(2**63)
-_BOUND = range(1, 2**32)
 
 
 def _whole(value: float, allowed: range) -> int | None:
@@ -992,18 +929,6 @@ def _whole(value: float, allowed: range) -> int | None:
     except (TypeError, ValueError, OverflowError):
         return None
     return number if number in allowed else None
-
-
-def _finite(value: float) -> float | None:
-    """`value` as a finite float; None for NaN, an infinity, a `bool` or no
-    number."""
-    if isinstance(value, bool):
-        return None
-    try:
-        number = float(value)
-    except (TypeError, ValueError, OverflowError):
-        return None
-    return number if math.isfinite(number) else None
 
 
 def _as_json(value: object) -> str:

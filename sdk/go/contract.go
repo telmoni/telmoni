@@ -11,21 +11,16 @@ const (
 	distroName = "telemetry.distro.name"
 	distro     = "telmoni"
 
-	attrRunID           = "telmoni.run_id"
-	attrAgent           = "telmoni.agent"
-	attrUserID          = "user.id"
-	tagPrefix           = "telmoni.tag."
-	attrBoundStallAfter = "telmoni.bound.stall_after_s"
-	attrBoundMaxSteps   = "telmoni.bound.max_steps"
-	attrBoundMaxCostUSD = "telmoni.bound.max_cost_usd"
-	attrSampleRate      = "telmoni.sample_rate"
-	attrCancelled       = "telmoni.cancelled"
+	attrRunID      = "telmoni.run_id"
+	attrAgent      = "telmoni.agent"
+	attrUserID     = "user.id"
+	tagPrefix      = "telmoni.tag."
+	attrSampleRate = "telmoni.sample_rate"
+	attrCancelled  = "telmoni.cancelled"
 	// attrSampledOut is never sent: on every span of a run the sample rate
 	// kept out, from its start, so the processor drops each however late it
 	// ends.
 	attrSampledOut = "telmoni.sampled_out"
-	// runStart is the span of no duration that opens a run, sent at once.
-	runStart = "telmoni.run.start"
 	// The deployment, on the resource: the configuration's Environment and
 	// Release.
 	attrEnvironment = "deployment.environment.name"

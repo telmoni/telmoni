@@ -8,7 +8,6 @@ import { describe, expect, it } from 'vitest';
 import type { Telmoni } from '../src/index';
 import {
   type ExportBody,
-  type FakeTransport,
   type Harness,
   type JsonAttribute,
   answers,
@@ -42,7 +41,6 @@ interface Scenario {
     user_id: string;
     session_id: string;
     tags: Record<string, string>;
-    bounds: { stall_after_s: number; max_steps: number; max_cost_usd: number };
     sample_rate: number;
     inside: [
       { step: string; inside: [{ model_call: ModelCallSpec }] },
@@ -95,7 +93,6 @@ function normalize(body: ExportBody): ExportBody {
     const start = BigInt(span.startTimeUnixNano);
     const end = BigInt(span.endTimeUnixNano);
     expect(end >= start).toBe(true);
-    if (span.name === 'telmoni.run.start') expect(end).toBe(start);
     span.startTimeUnixNano = '<time>';
     span.endTimeUnixNano = '<time>';
     span.attributes = [...span.attributes].sort(byKey);
@@ -119,7 +116,7 @@ function normalize(body: ExportBody): ExportBody {
   return out;
 }
 
-async function perform(telmoni: Telmoni, scenario: Scenario, transport: FakeTransport): Promise<void> {
+async function perform(telmoni: Telmoni, scenario: Scenario): Promise<void> {
   const spec = scenario.run;
   await telmoni.run(
     spec.agent,
@@ -127,17 +124,9 @@ async function perform(telmoni: Telmoni, scenario: Scenario, transport: FakeTran
       userId: spec.user_id,
       sessionId: spec.session_id,
       tags: spec.tags,
-      bounds: {
-        stallAfterSeconds: spec.bounds.stall_after_s,
-        maxSteps: spec.bounds.max_steps,
-        maxCostUsd: spec.bounds.max_cost_usd,
-      },
       sampleRate: spec.sample_rate,
     },
     async (run) => {
-      // The run's start is sent at once, before anything else ends.
-      expect(await transport.waitFor(1)).toBe(true);
-      expect(transport.spans().map((span) => span.name)).toEqual(['telmoni.run.start']);
       const [stepSpec, toolSpec] = spec.inside;
       await run.step(stepSpec.step, async (step) => {
         const call = stepSpec.inside[0].model_call;
@@ -175,12 +164,12 @@ describe('run.json', () => {
       release: fixture.scenario.release,
     });
     try {
-      await perform(telmoni, fixture.scenario, transport);
+      await perform(telmoni, fixture.scenario);
     } finally {
       await telmoni.shutdown();
     }
     const bodies = transport.bodies();
-    expect(bodies.length, "the run's start travels in an export of its own").toBeGreaterThanOrEqual(2);
+    expect(bodies.length, 'the run was sent').toBeGreaterThanOrEqual(1);
     const gathered = structuredClone(bodies[0]!);
     gathered.resourceSpans[0]!.scopeSpans[0]!.spans = bodies.flatMap(
       (body) => body.resourceSpans[0]!.scopeSpans[0]!.spans,
@@ -196,15 +185,9 @@ describe('run.json', () => {
   });
 });
 
-/**
- * One empty run, its start exported before its end so the two travel apart,
- * as they do in any run that lasts.
- */
-async function aRun({ telmoni, transport }: Harness): Promise<void> {
-  const before = transport.requests.length;
-  await telmoni.run('bot', async () => {
-    expect(await transport.waitFor(before + 1)).toBe(true);
-  });
+/** One empty run, sent in an export of its own. */
+async function aRun({ telmoni }: Harness): Promise<void> {
+  telmoni.run('bot', () => {});
   expect(await telmoni.flush()).toBe(true);
 }
 
@@ -223,7 +206,7 @@ describe('answers/', () => {
   });
 
   it('dropped is warned once', async () => {
-    const h = harness({ apiKey: 'k' }, {}, answers('dropped', 4));
+    const h = harness({ apiKey: 'k' }, {}, answers('dropped', 2));
     try {
       await aRun(h);
       await aRun(h);
@@ -238,7 +221,7 @@ describe('answers/', () => {
   });
 
   it('unlisted names the tag that would keep it', async () => {
-    const h = harness({ apiKey: 'k' }, {}, answers('unlisted', 2));
+    const h = harness({ apiKey: 'k' }, {}, answers('unlisted'));
     try {
       await aRun(h);
     } finally {
@@ -253,16 +236,17 @@ describe('answers/', () => {
     const h = harness({ apiKey: 'k' }, {}, answers('refused', 2));
     try {
       await aRun(h);
+      await aRun(h);
     } finally {
       await h.telmoni.shutdown();
     }
     expect(h.warnings).toHaveLength(1);
     expect(h.warnings[0]).toContain('a span outside a Telmoni run is refused');
-    expect(h.transport.requests, 'one export each for the start and the run').toHaveLength(2);
+    expect(h.transport.requests, 'one export each run, neither sent again').toHaveLength(2);
   });
 
   it('rate limited waits Retry-After and sends the same bytes', async () => {
-    const h = harness({ apiKey: 'k' }, {}, [...answers('rate-limited'), kept(), kept()]);
+    const h = harness({ apiKey: 'k' }, {}, [...answers('rate-limited'), kept()]);
     try {
       await aRun(h);
     } finally {
@@ -296,6 +280,7 @@ describe('answers/', () => {
     const h = harness({ apiKey: 'k' }, {}, [...answers('unavailable', 3), kept()]);
     try {
       await aRun(h);
+      await aRun(h);
     } finally {
       await h.telmoni.shutdown();
     }
@@ -303,11 +288,11 @@ describe('answers/', () => {
     expect(h.warnings).toHaveLength(1);
     expect(h.warnings[0]).toContain('3 attempts');
     expect(h.warnings[0]).toContain('/errors/telemetry/store-unavailable');
-    expect(h.transport.requests, "three for the start, then the run's own export").toHaveLength(4);
+    expect(h.transport.requests, "three for the first run, then the next run's own export").toHaveLength(4);
   });
 
   it('forbidden is not retried and the next batch is still sent', async () => {
-    const h = harness({ apiKey: 'k' }, {}, [...answers('forbidden', 2), kept()]);
+    const h = harness({ apiKey: 'k' }, {}, answers('forbidden', 2));
     try {
       await aRun(h);
       await aRun(h);
@@ -317,11 +302,11 @@ describe('answers/', () => {
     expect(h.warnings).toHaveLength(1);
     expect(h.warnings[0]).toContain('403');
     expect(h.warnings[0]).toContain('/errors/authz/forbidden');
-    expect(h.transport.requests).toHaveLength(4);
+    expect(h.transport.requests).toHaveLength(2);
   });
 
   it('a network failure is retried with backoff', async () => {
-    const h = harness({ apiKey: 'k' }, {}, [new Error('refused'), new Error('refused'), kept(), kept()]);
+    const h = harness({ apiKey: 'k' }, {}, [new Error('refused'), new Error('refused'), kept()]);
     try {
       await aRun(h);
     } finally {

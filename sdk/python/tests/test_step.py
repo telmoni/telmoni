@@ -131,8 +131,6 @@ def test_a_name_of_no_string_goes_as_its_text_and_keeps_the_batch(
         "fine",
         "invoke_agent Kind.PLAN",
         "invoke_agent other",
-        "telmoni.run.start",
-        "telmoni.run.start",
     ]
     warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
     assert len(warnings) == 4 and all("is sent as its text" in w for w in warnings)
@@ -148,9 +146,7 @@ def test_a_step_named_nothing_or_past_ingests_cap_keeps_its_span(
                 pass
     assert telmoni.flush()
     steps = sorted(
-        s["name"]
-        for s in transport.spans()
-        if s["name"] not in ("telmoni.run.start", "invoke_agent bot")
+        s["name"] for s in transport.spans() if s["name"] != "invoke_agent bot"
     )
     assert steps == ["n" * 145] * 3 + ["step"] * 2
     warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]

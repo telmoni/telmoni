@@ -233,7 +233,7 @@ fn a_model_calls_text_past_ingests_caps_keeps_its_call() -> Outcome {
     let spans = harness.spans()?;
     let sent: Map<String, Value> = spans
         .iter()
-        .filter(|span| !["telmoni.run.start", "invoke_agent bot"].contains(&name_of(span)))
+        .filter(|span| name_of(span) != "invoke_agent bot")
         .map(|span| Ok((name_of(span).to_owned(), attributes_of(span)?)))
         .collect::<Result<_, Failure>>()?;
     let custom_name: String = format!("{} {}", "o".repeat(20), m(128))
@@ -329,8 +329,7 @@ fn mode_unknown() -> Answer {
 
 /// ⚠ Content stays home until an answer has said the mode. No answer here
 /// names one, so wherever the worker's exports fall against the spans'
-/// encoding — the run's start goes out at once, on a thread of its own —
-/// nothing has said `on` when the call leaves.
+/// encoding, nothing has said `on` when the call leaves.
 #[test]
 fn content_stays_home_until_an_answer_has_said_the_mode() -> Outcome {
     let harness = Harness::answering(

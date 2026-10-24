@@ -5,7 +5,6 @@ from ._version import __version__
 from .client import Telmoni
 from .models import (
     DEFAULT_ENDPOINT,
-    Bounds,
     Config,
     ModelCallRecord,
     RunRecord,
@@ -19,7 +18,6 @@ from .runs import ModelCall, Run, Step, ToolCall, current_run
 
 __all__ = [
     "DEFAULT_ENDPOINT",
-    "Bounds",
     "Config",
     "ModelCall",
     "ModelCallRecord",

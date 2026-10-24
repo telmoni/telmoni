@@ -2,7 +2,6 @@ export { DEFAULT_ENDPOINT, Telmoni } from './client.js';
 export { QueueFullError } from './errors.js';
 export { Handle, ModelCall, Parent, Run, Step, ToolCall, currentRun } from './runs.js';
 export type {
-  Bounds,
   CallRecord,
   Config,
   HeaderCarrier,

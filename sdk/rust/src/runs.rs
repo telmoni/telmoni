@@ -1,20 +1,17 @@
 //! Runs, steps, model calls and tool calls, as guards and closures.
 //!
-//! A run is a span of its own in whatever trace is current, opened by
-//! `telmoni.run.start`; every span inside it carries the run's id, agent,
-//! user and session, so ingest knows each span's run without waiting
-//! for the trace's tree. A step, a model call or a tool call is opened from
-//! the handle it belongs under, so nothing can be opened outside a run.
+//! A run is a span of its own in whatever trace is current; every span inside
+//! it carries the run's id, agent, user and session, so ingest knows each
+//! span's run without waiting for the trace's tree. A step, a model call or a
+//! tool call is opened from the handle it belongs under, so nothing can be
+//! opened outside a run.
 
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::SystemTime;
 
-use opentelemetry::trace::{
-    Span as _, SpanKind, SpanRef, Status, TraceContextExt as _, Tracer as _,
-};
+use opentelemetry::trace::{SpanKind, SpanRef, Status, TraceContextExt as _, Tracer as _};
 use opentelemetry::{Context, ContextGuard, KeyValue};
 use serde::Serialize;
 use uuid::Uuid;
@@ -34,18 +31,6 @@ pub(crate) struct RunInfo {
     /// Whether the sample rate kept the run out: nothing of it is sent, nor
     /// handed to another service.
     pub(crate) sampled_out: bool,
-}
-
-/// What a monitor holds a run to, each optional; a bound outside ingest's
-/// range is left off the run with one warning.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct Bounds {
-    /// How long the run may go without a span before it counts as stalled.
-    pub stall_after_s: Option<i64>,
-    /// How many steps the run may take.
-    pub max_steps: Option<i64>,
-    /// How much the run may cost, in US dollars.
-    pub max_cost_usd: Option<f64>,
 }
 
 /// A model call's tokens as the conventions count them: input with the cache's
@@ -74,8 +59,6 @@ pub struct RunOptions {
     pub session_id: Option<String>,
     /// Tags, sent as `telmoni.tag.<key>`.
     pub tags: BTreeMap<String, String>,
-    /// What a monitor holds the run to.
-    pub bounds: Bounds,
     /// This run's share of being sent, above 0 and up to 1, in place of the
     /// configuration's.
     pub sample_rate: Option<f64>,
@@ -553,7 +536,7 @@ impl ToolCall {
     }
 }
 
-/// Opens a run for the client: its span, its sampling, and its start span.
+/// Opens a run for the client: its span and its sampling.
 pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Result<Run, Error> {
     if agent.trim().is_empty() {
         return Err(Error::EmptyAgent);
@@ -562,33 +545,6 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
     let rate = options.sample_rate.unwrap_or(inner.config.sample_rate);
     if !(rate > 0.0 && rate <= 1.0) {
         return Err(Error::SampleRate(rate));
-    }
-    // A bound out of range loses the run at ingest; an error would stop the agent.
-    let mut limits = options.bounds;
-    for (name, bound) in [
-        ("stall_after_s", &mut limits.stall_after_s),
-        ("max_steps", &mut limits.max_steps),
-    ] {
-        if bound.is_some_and(|value| !(1..=i64::from(u32::MAX)).contains(&value)) {
-            inner.warner.once(
-                format!("run:{name}"),
-                &format!(
-                    "telmoni: a run's {name} must be a whole number from 1 to {}; the run is sent without it",
-                    u32::MAX
-                ),
-            );
-            *bound = None;
-        }
-    }
-    if limits
-        .max_cost_usd
-        .is_some_and(|usd| !(usd.is_finite() && usd > 0.0))
-    {
-        inner.warner.once(
-            "run:max_cost_usd".to_owned(),
-            "telmoni: a run's max_cost_usd must be a finite number above 0; the run is sent without it",
-        );
-        limits.max_cost_usd = None;
     }
 
     let sampled_out = rate < 1.0 && (inner.random)() >= rate;
@@ -603,40 +559,20 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
     if sampled_out {
         inherited.push(KeyValue::new(contract::SAMPLED_OUT, true));
     }
-    let bounds = bound_attributes(&limits);
-    let attributes = run_attributes(
-        &agent,
-        &inherited,
-        &bounds,
-        rate,
-        options.tags,
-        &inner.warner,
-    );
+    let attributes = run_attributes(&agent, &inherited, rate, options.tags, &inner.warner);
 
     let parent = Context::current();
-    let start = SystemTime::now();
     let tracer = &inner.tracer;
     let span = tracer
         .span_builder(format!("{} {agent}", contract::RUN_OPERATION))
         .with_kind(SpanKind::Internal)
         .with_attributes(attributes)
-        .with_start_time(start)
         .start_with_context(tracer, &parent);
     let cx = parent.with_span(span).with_value(RunInfo {
         run_id: run_id.clone(),
         agent: agent.clone(),
         sampled_out,
     });
-
-    // OpenTelemetry sends a span only once it ends; without this one a run
-    // stalled in its first call would never be heard.
-    let mut opener = tracer
-        .span_builder(contract::RUN_START)
-        .with_kind(SpanKind::Internal)
-        .with_attributes(start_attributes(&inherited, &bounds, rate))
-        .with_start_time(start)
-        .start_with_context(tracer, &cx);
-    opener.end_with_timestamp(start);
 
     Ok(Run {
         handle: Handle {
@@ -705,11 +641,10 @@ pub(crate) fn inherited(
 }
 
 /// The run span's own attributes: the operation and the agent, what every
-/// span inside carries, the bounds, the sample rate and the tags.
+/// span inside carries, the sample rate and the tags.
 pub(crate) fn run_attributes(
     agent: &str,
     inherited: &[KeyValue],
-    bounds: &[KeyValue],
     rate: f64,
     mut tags: BTreeMap<String, String>,
     warner: &Warner,
@@ -719,7 +654,6 @@ pub(crate) fn run_attributes(
         KeyValue::new(contract::AGENT_NAME, agent.to_owned()),
     ];
     attributes.extend_from_slice(inherited);
-    attributes.extend_from_slice(bounds);
     attributes.push(KeyValue::new(contract::SAMPLE_RATE, rate));
     // Ingest drops these before it counts its 32, so they take no place there.
     let given = tags.len();
@@ -753,19 +687,6 @@ pub(crate) fn run_attributes(
             value,
         ));
     }
-    attributes
-}
-
-/// What `telmoni.run.start` carries: what every span inside the run carries,
-/// the bounds and the sample rate.
-pub(crate) fn start_attributes(
-    inherited: &[KeyValue],
-    bounds: &[KeyValue],
-    rate: f64,
-) -> Vec<KeyValue> {
-    let mut attributes = inherited.to_vec();
-    attributes.extend_from_slice(bounds);
-    attributes.push(KeyValue::new(contract::SAMPLE_RATE, rate));
     attributes
 }
 
@@ -902,18 +823,4 @@ pub(crate) fn mark_failed(span: &SpanRef<'_>, error_type: String) {
 /// Marks `span` cancelled by the agent, which is neither ok nor an error.
 pub(crate) fn mark_cancelled(span: &SpanRef<'_>) {
     span.set_attribute(KeyValue::new(contract::CANCELLED, true));
-}
-
-fn bound_attributes(bounds: &Bounds) -> Vec<KeyValue> {
-    let mut out = Vec::new();
-    if let Some(seconds) = bounds.stall_after_s {
-        out.push(KeyValue::new(contract::BOUND_STALL_AFTER_S, seconds));
-    }
-    if let Some(steps) = bounds.max_steps {
-        out.push(KeyValue::new(contract::BOUND_MAX_STEPS, steps));
-    }
-    if let Some(usd) = bounds.max_cost_usd {
-        out.push(KeyValue::new(contract::BOUND_MAX_COST_USD, usd));
-    }
-    out
 }

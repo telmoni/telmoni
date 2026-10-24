@@ -9,7 +9,7 @@ from unittest import mock
 import pytest
 
 from conftest import FakeTransport, attributes_of
-from telmoni import Bounds, Config, Run, Telmoni, current_run
+from telmoni import Config, Run, Telmoni, current_run
 
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
@@ -28,7 +28,6 @@ def test_a_run_is_a_span_with_the_contract_attributes(
         user_id="user_1",
         session_id="conv_1",
         tags={"env": "test", "team": "a"},
-        bounds=Bounds(stall_after_s=30, max_steps=5, max_cost_usd=0.5),
     ) as run:
         assert UUID.match(run.run_id)
         assert run.agent == "support-bot"
@@ -46,32 +45,10 @@ def test_a_run_is_a_span_with_the_contract_attributes(
         "telmoni.agent": "support-bot",
         "user.id": "user_1",
         "gen_ai.conversation.id": "conv_1",
-        "telmoni.bound.stall_after_s": 30,
-        "telmoni.bound.max_steps": 5,
-        "telmoni.bound.max_cost_usd": 0.5,
         "telmoni.sample_rate": 1.0,
         "telmoni.tag.env": "test",
         "telmoni.tag.team": "a",
     }
-
-
-def test_the_start_is_sent_at_once_with_the_bounds(
-    telmoni: Telmoni, transport: FakeTransport
-) -> None:
-    with telmoni.run("bot", bounds=Bounds(max_steps=3)) as run:
-        assert transport.wait_for(1)
-        spans = transport.spans()
-        assert [s["name"] for s in spans] == ["telmoni.run.start"]
-        start = spans[0]
-        assert start["startTimeUnixNano"] == start["endTimeUnixNano"]
-        assert attributes_of(start) == {
-            "telmoni.run_id": run.run_id,
-            "telmoni.agent": "bot",
-            "telmoni.bound.max_steps": 3,
-            "telmoni.sample_rate": 1.0,
-        }
-    assert telmoni.flush()
-    assert run_span(transport)["spanId"] == transport.spans()[0]["parentSpanId"]
 
 
 def test_an_exception_fails_the_run_with_its_class_alone(
@@ -210,7 +187,7 @@ def test_the_sample_rate_drops_whole_runs_in_the_processor(
         client.shutdown()
     spans = transport.spans()
     assert {attributes_of(s)["telmoni.run_id"] for s in spans} == {kept.run_id}
-    assert {s["name"] for s in spans} == {"telmoni.run.start", "invoke_agent bot"}
+    assert [s["name"] for s in spans] == ["invoke_agent bot"]
     assert attributes_of(spans[0])["telmoni.sample_rate"] == 0.25
 
 
@@ -253,46 +230,6 @@ def test_a_run_needs_an_agent_and_a_valid_rate(telmoni: Telmoni) -> None:
         pass
     with pytest.raises(ValueError), telmoni.run("bot", sample_rate=0):
         pass
-
-
-def test_a_bound_ingest_would_refuse_the_run_for_is_left_off_with_one_warning(
-    telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
-) -> None:
-    for bounds in (
-        Bounds(max_cost_usd=float("inf"), max_steps=10),
-        Bounds(max_cost_usd=float("nan")),
-        Bounds(stall_after_s=2**63, max_steps="7"),  # type: ignore[arg-type]
-        Bounds(stall_after_s=2**32, max_steps=0, max_cost_usd=0.0),
-        Bounds(stall_after_s=2**32 - 1, max_steps=-1, max_cost_usd=-1.0),
-        Bounds(max_steps=True),
-        Bounds(max_cost_usd=True),
-    ):
-        with telmoni.run("bot", bounds=bounds):
-            pass
-    assert telmoni.flush()
-    runs = [s for s in transport.spans() if s["name"] == "invoke_agent bot"]
-    assert len(runs) == 7, "every run sent, and the batch with them"
-    sent = [
-        {k: v for k, v in attributes_of(s).items() if k.startswith("telmoni.bound.")}
-        for s in runs
-    ]
-    assert sent == [
-        {"telmoni.bound.max_steps": 10},
-        {},
-        {"telmoni.bound.max_steps": 7},
-        {},
-        {"telmoni.bound.stall_after_s": 2**32 - 1},
-        {},
-        {},
-    ]
-    warnings = {r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING}
-    whole = "must be a whole number from 1 to 4294967295; the run is sent without it"
-    cost = "must be a finite number above 0; the run is sent without it"
-    assert warnings == {
-        f"telmoni: a run's stall_after_s {whole}",
-        f"telmoni: a run's max_steps {whole}",
-        f"telmoni: a run's max_cost_usd {cost}",
-    }
 
 
 def test_a_run_sends_its_first_32_tags_and_warns_once_of_the_rest(

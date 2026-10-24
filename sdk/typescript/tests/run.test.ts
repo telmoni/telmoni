@@ -24,7 +24,6 @@ describe('a run', () => {
         userId: 'user_1',
         sessionId: 'conv_1',
         tags: { env: 'test', team: 'a' },
-        bounds: { stallAfterSeconds: 30, maxSteps: 5, maxCostUsd: 0.5 },
       },
       (run) => {
         expect(run).toBeInstanceOf(Run);
@@ -45,40 +44,16 @@ describe('a run', () => {
       'telmoni.agent': 'support-bot',
       'user.id': 'user_1',
       'gen_ai.conversation.id': 'conv_1',
-      'telmoni.bound.stall_after_s': 30,
-      'telmoni.bound.max_steps': 5,
-      'telmoni.bound.max_cost_usd': 0.5,
       'telmoni.sample_rate': 1,
       'telmoni.tag.env': 'test',
       'telmoni.tag.team': 'a',
     });
   });
 
-  it('sends its start at once, with the bounds', async () => {
-    await h.telmoni.run('bot', { bounds: { maxSteps: 3 } }, async (run) => {
-      expect(await h.transport.waitFor(1)).toBe(true);
-      const spans = h.transport.spans();
-      expect(spans.map((span) => span.name)).toEqual(['telmoni.run.start']);
-      const start = spans[0]!;
-      expect(start.startTimeUnixNano).toBe(start.endTimeUnixNano);
-      expect(attributesOf(start)).toEqual({
-        'telmoni.run_id': run.runId,
-        'telmoni.agent': 'bot',
-        'telmoni.bound.max_steps': 3,
-        'telmoni.sample_rate': 1,
-      });
-    });
-    expect(await h.telmoni.flush()).toBe(true);
-    expect(one(runsIn(h.transport)).spanId).toBe(h.transport.spans()[0]!.parentSpanId);
-  });
-
-  it('types the bounds and the rate as the contract does, whatever the number', async () => {
-    h.telmoni.run('bot', { bounds: { stallAfterSeconds: 30.9, maxSteps: 5, maxCostUsd: 2 }, sampleRate: 1 }, () => {});
+  it('types the rate as the contract does, whatever the number', async () => {
+    h.telmoni.run('bot', { sampleRate: 1 }, () => {});
     expect(await h.telmoni.flush()).toBe(true);
     const typed = Object.fromEntries(one(runsIn(h.transport)).attributes.map((a) => [a.key, a.value]));
-    expect(typed['telmoni.bound.stall_after_s']).toEqual({ intValue: '30' });
-    expect(typed['telmoni.bound.max_steps']).toEqual({ intValue: '5' });
-    expect(typed['telmoni.bound.max_cost_usd']).toEqual({ doubleValue: 2 });
     expect(typed['telmoni.sample_rate']).toEqual({ doubleValue: 1 });
   });
 
@@ -308,41 +283,6 @@ describe('a run', () => {
     expect(t.transport.spans().map((span) => span.name)).toEqual(expect.arrayContaining(['invoke_agent bot', '7']));
   });
 
-  it('leaves off a bound ingest would refuse the run for, with one warning', async () => {
-    for (const bounds of [
-      { maxCostUsd: Infinity, maxSteps: 10 },
-      { maxCostUsd: Number.NaN },
-      { stallAfterSeconds: 2 ** 63, maxSteps: '7' as unknown as number },
-      { stallAfterSeconds: 2 ** 32, maxSteps: 0, maxCostUsd: 0 },
-      { stallAfterSeconds: 2 ** 32 - 1, maxSteps: -1, maxCostUsd: -1 },
-      { maxSteps: true as unknown as number },
-      { maxCostUsd: true as unknown as number },
-    ]) {
-      h.telmoni.run('bot', { bounds }, () => {});
-    }
-    expect(await h.telmoni.flush()).toBe(true);
-    const runs = h.transport.spans().filter((span) => span.name === 'invoke_agent bot');
-    expect(runs, 'every run sent, and the batch with them').toHaveLength(7);
-    const sent = runs.map((span) =>
-      Object.fromEntries(Object.entries(attributesOf(span)).filter(([key]) => key.startsWith('telmoni.bound.'))),
-    );
-    expect(sent).toEqual([
-      { 'telmoni.bound.max_steps': 10 },
-      {},
-      { 'telmoni.bound.max_steps': 7 },
-      {},
-      { 'telmoni.bound.stall_after_s': 2 ** 32 - 1 },
-      {},
-      {},
-    ]);
-    const whole = 'must be a whole number from 1 to 4294967295; the run is sent without it';
-    expect([...h.warnings].sort()).toEqual([
-      "telmoni: a run's maxCostUsd must be a finite number above 0; the run is sent without it",
-      `telmoni: a run's maxSteps ${whole}`,
-      `telmoni: a run's stallAfterSeconds ${whole}`,
-    ]);
-  });
-
   it('is found from its context; without a context manager, from nothing else', () => {
     h.telmoni.run('bot', (run) => {
       expect(currentRun(run.context)).toBe(run);
@@ -415,7 +355,7 @@ describe('the sample rate', () => {
       expect(await sampled.telmoni.flush()).toBe(true);
       const spans = sampled.transport.spans();
       expect(new Set(spans.map((span) => attributesOf(span)['telmoni.run_id']))).toEqual(new Set([kept.runId]));
-      expect(new Set(spans.map((span) => span.name))).toEqual(new Set(['telmoni.run.start', 'invoke_agent bot']));
+      expect(spans.map((span) => span.name)).toEqual(['invoke_agent bot']);
       expect(attributesOf(spans[0]!)['telmoni.sample_rate']).toBe(0.25);
     } finally {
       await sampled.telmoni.shutdown();

@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from conftest import FakeTransport, answer_from, kept, load_fixture
-from telmoni import Bounds, Config, Telmoni, Usage
+from telmoni import Config, Telmoni, Usage
 
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$")
 HEX32 = re.compile(r"^[0-9a-f]{32}$")
@@ -44,8 +44,6 @@ def normalize(export: dict[str, Any]) -> dict[str, Any]:
             span["parentSpanId"] = f"<span:{names[span['parentSpanId']]}>"
         start, end = int(span["startTimeUnixNano"]), int(span["endTimeUnixNano"])
         assert end >= start
-        if span["name"] == "telmoni.run.start":
-            assert end == start
         span["startTimeUnixNano"] = span["endTimeUnixNano"] = "<time>"
         span["attributes"] = sorted(span["attributes"], key=lambda a: a["key"])
         for attribute in span["attributes"]:
@@ -65,26 +63,15 @@ def normalize(export: dict[str, Any]) -> dict[str, Any]:
     return export
 
 
-def perform(
-    telmoni: Telmoni, scenario: dict[str, Any], transport: FakeTransport
-) -> None:
+def perform(telmoni: Telmoni, scenario: dict[str, Any]) -> None:
     run_spec = scenario["run"]
-    bounds = run_spec["bounds"]
     with telmoni.run(
         run_spec["agent"],
         user_id=run_spec["user_id"],
         session_id=run_spec["session_id"],
         tags=run_spec["tags"],
-        bounds=Bounds(
-            stall_after_s=bounds["stall_after_s"],
-            max_steps=bounds["max_steps"],
-            max_cost_usd=bounds["max_cost_usd"],
-        ),
         sample_rate=run_spec["sample_rate"],
     ):
-        # The run's start is sent at once, before anything else ends.
-        assert transport.wait_for(1)
-        assert [s["name"] for s in transport.spans()] == ["telmoni.run.start"]
         step_spec = run_spec["inside"][0]
         with telmoni.step(step_spec["step"]):
             call_spec = step_spec["inside"][0]["model_call"]
@@ -120,11 +107,11 @@ def test_the_run_matches_the_golden_export(
         sleep=sleeps.append,
     )
     try:
-        perform(telmoni, scenario, transport)
+        perform(telmoni, scenario)
     finally:
         telmoni.shutdown()
     bodies = transport.bodies()
-    assert len(bodies) >= 2, "the run's start travels in an export of its own"
+    assert bodies, "the run was sent"
     gathered = copy.deepcopy(bodies[0])
     gathered["resourceSpans"][0]["scopeSpans"][0]["spans"] = [
         span
@@ -164,13 +151,9 @@ def warnings_in(caplog: pytest.LogCaptureFixture) -> list[str]:
 
 
 def a_run(telmoni: Telmoni) -> None:
-    """One empty run, its start exported before its end so the two travel
-    apart, as they do in any run that lasts."""
-    transport = telmoni.exporter._transport
-    assert isinstance(transport, FakeTransport)
-    before = len(transport.requests)
+    """One empty run, sent in an export of its own."""
     with telmoni.run("bot"):
-        assert transport.wait_for(before + 1)
+        pass
     assert telmoni.flush()
 
 
@@ -189,7 +172,7 @@ def test_kept(sleeps: list[float], caplog: pytest.LogCaptureFixture) -> None:
 
 def test_dropped_is_warned_once(caplog: pytest.LogCaptureFixture) -> None:
     dropped = load_fixture("answers/dropped.json")
-    transport = FakeTransport([answer_from(dropped)] * 4)
+    transport = FakeTransport([answer_from(dropped)] * 2)
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
         a_run(client)
@@ -207,7 +190,7 @@ def test_dropped_is_warned_once(caplog: pytest.LogCaptureFixture) -> None:
 def test_unlisted_names_the_tag_that_would_keep_it(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    transport = FakeTransport([answer_from(load_fixture("answers/unlisted.json"))] * 2)
+    transport = FakeTransport([answer_from(load_fixture("answers/unlisted.json"))])
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
         a_run(client)
@@ -225,19 +208,20 @@ def test_refused_is_warned_once_and_never_retried(
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
         a_run(client)
+        a_run(client)
     finally:
         client.shutdown()
     warnings = warnings_in(caplog)
     assert len(warnings) == 1, warnings
     assert "a span outside a Telmoni run is refused" in warnings[0]
-    assert len(transport.requests) == 2, "one export each for the start and the run"
+    assert len(transport.requests) == 2, "one export each run, neither sent again"
 
 
 def test_rate_limited_waits_retry_after_and_sends_the_same_bytes(
     sleeps: list[float], caplog: pytest.LogCaptureFixture
 ) -> None:
     transport = FakeTransport(
-        [answer_from(load_fixture("answers/rate-limited.json")), kept(), kept()]
+        [answer_from(load_fixture("answers/rate-limited.json")), kept()]
     )
     client = Telmoni(Config(api_key="k"), transport=transport)
     client.exporter._sleep = sleeps.append
@@ -259,6 +243,7 @@ def test_unavailable_is_retried_three_times_then_dropped(
     client.exporter._sleep = sleeps.append
     try:
         a_run(client)
+        a_run(client)
     finally:
         client.shutdown()
     assert sleeps == [1.0, 1.0]
@@ -269,7 +254,7 @@ def test_unavailable_is_retried_three_times_then_dropped(
         and "/errors/telemetry/store-unavailable" in warnings[0]
     )
     assert len(transport.requests) == 4, (
-        "three for the start, then the run's own export"
+        "three for the first run, then the next run's own export"
     )
 
 
@@ -277,7 +262,7 @@ def test_forbidden_is_not_retried_and_the_next_batch_is_still_sent(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     forbidden = answer_from(load_fixture("answers/forbidden.json"))
-    transport = FakeTransport([forbidden, forbidden, kept()])
+    transport = FakeTransport([forbidden, forbidden])
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
         a_run(client)
@@ -287,13 +272,13 @@ def test_forbidden_is_not_retried_and_the_next_batch_is_still_sent(
     warnings = warnings_in(caplog)
     assert len(warnings) == 1, warnings
     assert "403" in warnings[0] and "/errors/authz/forbidden" in warnings[0]
-    assert len(transport.requests) == 4
+    assert len(transport.requests) == 2
 
 
 def test_a_network_failure_is_retried_with_backoff(
     sleeps: list[float], caplog: pytest.LogCaptureFixture
 ) -> None:
-    transport = FakeTransport([OSError("refused"), OSError("refused"), kept(), kept()])
+    transport = FakeTransport([OSError("refused"), OSError("refused"), kept()])
     client = Telmoni(Config(api_key="k"), transport=transport)
     client.exporter._sleep = sleeps.append
     try:
@@ -311,7 +296,6 @@ def test_an_answer_broken_before_its_status_is_retried_like_a_refused_connection
         [
             http.client.RemoteDisconnected(""),
             http.client.BadStatusLine(""),
-            kept(),
             kept(),
         ]
     )

@@ -1,5 +1,5 @@
-//! A run: its span and attributes, its start sent at once, what fails and
-//! cancels it, the closures, the sample rate, and what it refuses.
+//! A run: its span and attributes, what fails and cancels it, the closures,
+//! the sample rate, and what it refuses.
 
 mod common;
 
@@ -13,7 +13,7 @@ use common::{
     lock, name_of, named, only, run_span, starting_with, tags,
 };
 use serde_json::{Value, json};
-use telmoni::{Bounds, Config, Error, ModelCall, Run, RunOptions, Step, Telmoni, ToolCall};
+use telmoni::{Config, Error, ModelCall, Run, RunOptions, Step, Telmoni, ToolCall};
 
 /// An application's error, with the SDK's own among its causes so
 /// `try_run_with` can hand a run that did not open back as one of these.
@@ -49,11 +49,6 @@ fn a_run_is_a_span_with_the_contract_attributes() -> Outcome {
             user_id: Some("user_1".to_owned()),
             session_id: Some("conv_1".to_owned()),
             tags: tags(&[("env", "test"), ("team", "a")]),
-            bounds: Bounds {
-                stall_after_s: Some(30),
-                max_steps: Some(5),
-                max_cost_usd: Some(0.5),
-            },
             sample_rate: None,
         },
     )?;
@@ -77,58 +72,10 @@ fn a_run_is_a_span_with_the_contract_attributes() -> Outcome {
             "telmoni.agent": "support-bot",
             "user.id": "user_1",
             "gen_ai.conversation.id": "conv_1",
-            "telmoni.bound.stall_after_s": 30,
-            "telmoni.bound.max_steps": 5,
-            "telmoni.bound.max_cost_usd": 0.5,
             "telmoni.sample_rate": 1.0,
             "telmoni.tag.env": "test",
             "telmoni.tag.team": "a",
         })
-    );
-    Ok(())
-}
-
-#[test]
-fn the_start_is_sent_at_once_with_the_bounds() -> Outcome {
-    let harness = Harness::new()?;
-    let run = harness.telmoni.run(
-        "bot",
-        RunOptions {
-            bounds: Bounds {
-                max_steps: Some(3),
-                ..Bounds::default()
-            },
-            ..RunOptions::default()
-        },
-    )?;
-    assert!(harness.transport.wait_for(1));
-    let spans = harness.spans()?;
-    assert_eq!(
-        spans.iter().map(name_of).collect::<Vec<_>>(),
-        ["telmoni.run.start"]
-    );
-    let start = spans.first().ok_or("the start")?;
-    assert_eq!(
-        start.get("startTimeUnixNano"),
-        start.get("endTimeUnixNano"),
-        "no duration"
-    );
-    assert_eq!(
-        attributes_of(start)?,
-        json!({
-            "telmoni.run_id": run.run_id(),
-            "telmoni.agent": "bot",
-            "telmoni.bound.max_steps": 3,
-            "telmoni.sample_rate": 1.0,
-        })
-    );
-    run.end();
-    harness.flush()?;
-    let spans = harness.spans()?;
-    assert_eq!(
-        only(&spans, "invoke_agent ")?.get("spanId"),
-        spans.first().ok_or("the start")?.get("parentSpanId"),
-        "the start is the run's child"
     );
     Ok(())
 }
@@ -283,8 +230,8 @@ fn the_sample_rate_drops_whole_runs_in_the_processor() -> Outcome {
         .collect::<Result<_, common::Failure>>()?;
     assert_eq!(run_ids, HashSet::from([Some(json!(kept_id))]));
     assert_eq!(
-        spans.iter().map(name_of).collect::<HashSet<_>>(),
-        HashSet::from(["telmoni.run.start", "invoke_agent bot"])
+        spans.iter().map(name_of).collect::<Vec<_>>(),
+        ["invoke_agent bot"]
     );
     assert_eq!(
         attributes_of(spans.first().ok_or("a span")?)?.get("telmoni.sample_rate"),
@@ -372,128 +319,6 @@ fn a_run_needs_an_agent_and_a_valid_rate() -> Outcome {
 
     harness.flush()?;
     assert!(harness.transport.requests().is_empty(), "nothing opened");
-    Ok(())
-}
-
-#[test]
-fn a_cost_bound_that_is_no_finite_number_is_left_off_with_one_warning() -> Outcome {
-    let harness = Harness::new()?;
-    for usd in [f64::INFINITY, f64::NAN] {
-        let run = harness.telmoni.run(
-            "bot",
-            RunOptions {
-                bounds: Bounds {
-                    max_steps: Some(5),
-                    max_cost_usd: Some(usd),
-                    ..Bounds::default()
-                },
-                ..RunOptions::default()
-            },
-        )?;
-        run.end();
-    }
-    harness.flush()?;
-    let spans = harness.spans()?;
-    let runs = starting_with(&spans, "invoke_agent ");
-    assert_eq!(runs.len(), 2, "every run sent, and the batch with them");
-    for span in runs {
-        let attributes = attributes_of(span)?;
-        assert_eq!(attributes.get("telmoni.bound.max_cost_usd"), None);
-        assert_eq!(attributes.get("telmoni.bound.max_steps"), Some(&json!(5)));
-    }
-    let warnings = harness.warnings.all();
-    assert_eq!(warnings.len(), 1, "{warnings:?}");
-    assert!(
-        warnings
-            .iter()
-            .all(|w| w.contains("max_cost_usd must be a finite number"))
-    );
-    Ok(())
-}
-
-/// A bound ingest would refuse the run over is left off with one warning per bound.
-#[test]
-fn a_bound_outside_ingests_range_is_left_off_with_one_warning() -> Outcome {
-    let harness = Harness::new()?;
-    let refused = [
-        Bounds {
-            stall_after_s: Some(0),
-            max_steps: Some(-1),
-            max_cost_usd: Some(0.0),
-        },
-        Bounds {
-            stall_after_s: Some(i64::from(u32::MAX) + 1),
-            max_steps: Some(i64::MAX),
-            max_cost_usd: Some(-0.0),
-        },
-        Bounds {
-            stall_after_s: Some(i64::MIN),
-            max_steps: Some(0),
-            max_cost_usd: Some(-2.5),
-        },
-    ];
-    for bounds in refused {
-        let run = harness.telmoni.run(
-            "bot",
-            RunOptions {
-                bounds,
-                ..RunOptions::default()
-            },
-        )?;
-        run.end();
-    }
-    let kept = harness.telmoni.run(
-        "bot",
-        RunOptions {
-            bounds: Bounds {
-                stall_after_s: Some(1),
-                max_steps: Some(i64::from(u32::MAX)),
-                max_cost_usd: Some(f64::MIN_POSITIVE),
-            },
-            ..RunOptions::default()
-        },
-    )?;
-    let kept_id = kept.run_id().to_owned();
-    kept.end();
-    harness.flush()?;
-
-    let spans = harness.spans()?;
-    assert_eq!(spans.len(), 8, "every run sent, with its start");
-    for span in &spans {
-        let attributes = attributes_of(span)?;
-        if attributes.get("telmoni.run_id") == Some(&json!(kept_id)) {
-            assert_eq!(
-                attributes.get("telmoni.bound.stall_after_s"),
-                Some(&json!(1))
-            );
-            assert_eq!(
-                attributes.get("telmoni.bound.max_steps"),
-                Some(&json!(4_294_967_295_i64))
-            );
-            assert!(
-                attributes
-                    .get("telmoni.bound.max_cost_usd")
-                    .and_then(Value::as_f64)
-                    .is_some_and(|usd| usd > 0.0)
-            );
-            continue;
-        }
-        let bounds: Vec<&String> = attributes
-            .as_object()
-            .ok_or("attributes")?
-            .keys()
-            .filter(|key| key.starts_with("telmoni.bound."))
-            .collect();
-        assert!(bounds.is_empty(), "{bounds:?}");
-    }
-    assert_eq!(
-        harness.warnings.all(),
-        [
-            "telmoni: a run's stall_after_s must be a whole number from 1 to 4294967295; the run is sent without it",
-            "telmoni: a run's max_steps must be a whole number from 1 to 4294967295; the run is sent without it",
-            "telmoni: a run's max_cost_usd must be a finite number above 0; the run is sent without it",
-        ]
-    );
     Ok(())
 }
 
@@ -631,10 +456,6 @@ fn a_warning_sink_that_panics_never_reaches_the_agent() -> Outcome {
         "bot",
         RunOptions {
             tags: (0..40).map(|n| (format!("k{n}"), n.to_string())).collect(),
-            bounds: Bounds {
-                max_cost_usd: Some(f64::NAN),
-                ..Bounds::default()
-            },
             ..RunOptions::default()
         },
     )?;

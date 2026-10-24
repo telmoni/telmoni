@@ -23,7 +23,7 @@ point `TELMONI_ENDPOINT` at its machine host; the docs read in
 ## Quick start
 
 ```python
-from telmoni import Bounds, Telmoni, Usage
+from telmoni import Telmoni, Usage
 
 # Reads TELMONI_ENDPOINT, TELMONI_API_KEY (a key with the ingest scope) and
 # TELMONI_ORG, and nothing else.
@@ -51,7 +51,6 @@ with telmoni.run(
     user_id="user_42",
     session_id="conv_7",
     tags={"env": "prod"},
-    bounds=Bounds(stall_after_s=60, max_steps=10, max_cost_usd=1.5),
 ) as run:
     ...
 
@@ -63,11 +62,10 @@ Each of `run`, `step`, `model_call` and `tool_call` is a context manager, an
 failed with the exception's class, never its message, and is raised again; a
 `KeyboardInterrupt` or `asyncio.CancelledError` marks it cancelled. `fail()`
 and `cancel()` do the same by hand. `run` raises `ValueError` for a blank agent
-name or a sample rate outside (0, 1]. A bound or a token count is read from a
-number or its text, a stall's, steps' or count's fraction cut, and of what
-ingest would refuse, these are left off with one warning: a bound outside 1 to
-4294967295, a cost not above 0, a token count below 0 or past 64 bits, a tag
-whose key is not 1 to 64 characters or whose value is past 256, and the tags
+name or a sample rate outside (0, 1]. A token count is read from a number or
+its text, its fraction cut, and of what ingest would refuse, these are left off
+with one warning: a token count below 0 or past 64 bits, a tag whose key is not
+1 to 64 characters or whose value is past 256, and the tags
 past the first 32 kept, the most ingest keeps; an empty user, session,
 provider or response model is left off as unset. A name, model, provider,
 user, session, response model or error type that is no string goes as its

@@ -151,7 +151,7 @@ describe('a model call', () => {
     const sent = Object.fromEntries(
       h.transport
         .spans()
-        .filter((span) => !['telmoni.run.start', 'invoke_agent bot'].includes(span.name))
+        .filter((span) => span.name !== 'invoke_agent bot')
         .map((span) => [span.name, attributesOf(span)]),
     );
     expect(Object.keys(sent).sort()).toEqual(

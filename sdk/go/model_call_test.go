@@ -173,25 +173,25 @@ func TestContentIsTakenOffBeforeItLeaves(t *testing.T) {
 
 func TestContentLeavesOnlyWhenAskedAndTheProjectAllows(t *testing.T) {
 	on := contentOn()
-	// The first run's two exports are answered off, the second run's on;
-	// waiting for each start inside its run keeps the exports apart, so the
-	// mode each call is encoded under is the same on every machine.
-	h := newHarness(t, telmoni.Config{APIKey: "k", CaptureContent: true}, newFakeTransport(t, kept(t), kept(t), on, on))
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	if !h.transport.waitFor(1, waitTimeout) {
-		t.Fatal("the run's start was not sent at once")
+	// An empty run's export is answered off, the next two runs' on; each run
+	// flushed before the next opens, the mode each call is encoded under is the
+	// same on every machine.
+	h := newHarness(t, telmoni.Config{APIKey: "k", CaptureContent: true}, newFakeTransport(t, kept(t), on, on))
+	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	run.End()
+	h.flush()
+	if mode := h.client.ContentMode(); mode != "off" {
+		t.Fatalf("the content mode is %q after the empty run, want off", mode)
 	}
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
 	_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{InputMessages: "first"})
 	call.End()
 	run.End()
 	h.flush()
-	if mode := h.client.ContentMode(); mode != "off" {
-		t.Fatalf("the content mode is %q after the first run, want off", mode)
+	if mode := h.client.ContentMode(); mode != "on" {
+		t.Fatalf("the content mode is %q after the first call's run, want on", mode)
 	}
 	ctx, run = h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	if !h.transport.waitFor(3, waitTimeout) {
-		t.Fatal("the second run's start was not sent at once")
-	}
 	_, call = run.ModelCall(ctx, "m", telmoni.ModelCallOptions{
 		InputMessages:      "second",
 		SystemInstructions: []string{"be brief"},
@@ -205,7 +205,7 @@ func TestContentLeavesOnlyWhenAskedAndTheProjectAllows(t *testing.T) {
 		t.Fatalf("want two model calls, got %v", names(spans))
 	}
 	if _, has := attributesOf(t, spans[0])["gen_ai.input.messages"]; has {
-		t.Error("content left before the project's mode was known")
+		t.Error("content left while the project's mode was off")
 	}
 	second := attributesOf(t, spans[1])
 	if second["gen_ai.input.messages"] != "second" {
@@ -221,7 +221,7 @@ func TestContentLeavesOnlyWhenAskedAndTheProjectAllows(t *testing.T) {
 
 func TestContentStaysHomeWithoutCaptureContentEvenWhenAllowed(t *testing.T) {
 	on := contentOn()
-	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, on, on, on, on))
+	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, on, on))
 	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
 	run.End()
 	h.flush()
@@ -284,7 +284,7 @@ func TestAModelCallsTextPastIngestsCapsKeepsItsCall(t *testing.T) {
 	h.flush()
 	sent := map[string]map[string]any{}
 	for _, span := range h.transport.spans(t) {
-		if name := span["name"].(string); name != "telmoni.run.start" && name != "invoke_agent bot" {
+		if name := span["name"].(string); name != "invoke_agent bot" {
 			sent[name] = attributesOf(t, span)
 		}
 	}

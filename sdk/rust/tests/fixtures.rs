@@ -16,7 +16,7 @@ use common::{
 use serde_json::{Value, json};
 use telmoni::transport::TransportError;
 use telmoni::{
-    Bounds, Config, Hooks, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage,
+    Config, Hooks, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage,
 };
 
 /// The fixture's normalization, as its README sets it out.
@@ -63,9 +63,6 @@ fn normalize(export: &Value) -> Result<Value, Failure> {
         let start: u128 = text(span, "startTimeUnixNano")?.parse()?;
         let end: u128 = text(span, "endTimeUnixNano")?.parse()?;
         assert!(end >= start, "{name} ends before it starts");
-        if name == "telmoni.run.start" {
-            assert_eq!(end, start, "the start has a duration");
-        }
         let object = span.as_object_mut().ok_or("a span object")?;
         object.insert("traceId".to_owned(), json!("<trace>"));
         let own = names.get(&span_id).ok_or("its own id")?;
@@ -136,7 +133,6 @@ fn key_of(attribute: &Value) -> &str {
 /// The scenario, through the API, as the README describes it.
 fn perform(harness: &Harness, scenario: &Value) -> Outcome {
     let run_spec = field(scenario, "run")?;
-    let bounds = field(run_spec, "bounds")?;
     let tags = field(run_spec, "tags")?
         .as_object()
         .ok_or("tags")?
@@ -149,20 +145,9 @@ fn perform(harness: &Harness, scenario: &Value) -> Outcome {
             user_id: Some(text(run_spec, "user_id")?.to_owned()),
             session_id: Some(text(run_spec, "session_id")?.to_owned()),
             tags,
-            bounds: Bounds {
-                stall_after_s: Some(int(bounds, "stall_after_s")?),
-                max_steps: Some(int(bounds, "max_steps")?),
-                max_cost_usd: Some(float(bounds, "max_cost_usd")?),
-            },
             sample_rate: Some(float(run_spec, "sample_rate")?),
         },
     )?;
-    // The run's start is sent at once, before anything else ends.
-    assert!(harness.transport.wait_for(1));
-    assert_eq!(
-        harness.spans()?.iter().map(name_of).collect::<Vec<_>>(),
-        ["telmoni.run.start"]
-    );
 
     let inside = field(run_spec, "inside")?.as_array().ok_or("inside")?;
     let step_spec = inside.first().ok_or("a step")?;
@@ -219,11 +204,7 @@ fn the_run_matches_the_golden_export() -> Outcome {
     perform(&harness, scenario)?;
 
     let bodies = harness.transport.bodies()?;
-    assert!(
-        bodies.len() >= 2,
-        "the run's start travels in an export of its own"
-    );
-    let mut gathered = bodies.first().ok_or("a body")?.clone();
+    let mut gathered = bodies.first().ok_or("the run was not sent")?.clone();
     let every_span: Vec<Value> = bodies.iter().flat_map(spans_of).collect();
     *gathered
         .get_mut("resourceSpans")
@@ -311,13 +292,9 @@ fn each_attempt_carries_this_clock_as_it_leaves() -> Outcome {
     Ok(())
 }
 
-/// One empty run, its start exported before its end so the two travel apart,
-/// as they do in any run that lasts.
+/// One empty run, sent in an export of its own.
 fn a_run(harness: &Harness) -> Outcome {
-    let before = harness.transport.count();
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    assert!(harness.transport.wait_for(before + 1));
-    run.end();
+    harness.telmoni.run("bot", RunOptions::default())?.end();
     harness.flush()
 }
 
@@ -335,7 +312,7 @@ fn kept_logs_nothing_and_sets_the_mode() -> Outcome {
 
 #[test]
 fn dropped_is_warned_once() -> Outcome {
-    let harness = Harness::answering(keyed(), std::iter::repeat_n(Ok(answer("dropped")?), 4))?;
+    let harness = Harness::answering(keyed(), std::iter::repeat_n(Ok(answer("dropped")?), 2))?;
     a_run(&harness)?;
     a_run(&harness)?;
     harness.telmoni.shutdown();
@@ -360,7 +337,7 @@ fn dropped_is_warned_once() -> Outcome {
 
 #[test]
 fn unlisted_names_the_tag_that_would_keep_it() -> Outcome {
-    let harness = Harness::answering(keyed(), std::iter::repeat_n(Ok(answer("unlisted")?), 2))?;
+    let harness = Harness::answering(keyed(), [Ok(answer("unlisted")?)])?;
     a_run(&harness)?;
     harness.telmoni.shutdown();
     let warnings = harness.warnings.all();
@@ -375,6 +352,7 @@ fn unlisted_names_the_tag_that_would_keep_it() -> Outcome {
 fn refused_is_warned_once_and_never_retried() -> Outcome {
     let harness = Harness::answering(keyed(), std::iter::repeat_n(Ok(answer("refused")?), 2))?;
     a_run(&harness)?;
+    a_run(&harness)?;
     harness.telmoni.shutdown();
     let warnings = harness.warnings.all();
     assert_eq!(warnings.len(), 1, "{warnings:?}");
@@ -386,21 +364,14 @@ fn refused_is_warned_once_and_never_retried() -> Outcome {
     assert_eq!(
         harness.transport.count(),
         2,
-        "one export each for the start and the run"
+        "one export each run, neither sent again"
     );
     Ok(())
 }
 
 #[test]
 fn rate_limited_waits_retry_after_and_sends_the_same_bytes() -> Outcome {
-    let harness = Harness::answering(
-        keyed(),
-        [
-            Ok(answer("rate-limited")?),
-            Ok(answer("kept")?),
-            Ok(answer("kept")?),
-        ],
-    )?;
+    let harness = Harness::answering(keyed(), [Ok(answer("rate-limited")?), Ok(answer("kept")?)])?;
     a_run(&harness)?;
     harness.telmoni.shutdown();
     assert_eq!(harness.sleeps.all(), [Duration::from_secs(2)]);
@@ -427,6 +398,7 @@ fn unavailable_is_retried_three_times_then_dropped() -> Outcome {
         ],
     )?;
     a_run(&harness)?;
+    a_run(&harness)?;
     harness.telmoni.shutdown();
     assert_eq!(
         harness.sleeps.all(),
@@ -443,7 +415,7 @@ fn unavailable_is_retried_three_times_then_dropped() -> Outcome {
     assert_eq!(
         harness.transport.count(),
         4,
-        "three for the start, then the run's own export"
+        "three for the first run, then the next run's own export"
     );
     Ok(())
 }
@@ -451,10 +423,7 @@ fn unavailable_is_retried_three_times_then_dropped() -> Outcome {
 #[test]
 fn forbidden_is_not_retried_and_the_next_batch_is_still_sent() -> Outcome {
     let forbidden = answer("forbidden")?;
-    let harness = Harness::answering(
-        keyed(),
-        [Ok(forbidden.clone()), Ok(forbidden), Ok(answer("kept")?)],
-    )?;
+    let harness = Harness::answering(keyed(), [Ok(forbidden.clone()), Ok(forbidden)])?;
     a_run(&harness)?;
     a_run(&harness)?;
     harness.telmoni.shutdown();
@@ -463,7 +432,7 @@ fn forbidden_is_not_retried_and_the_next_batch_is_still_sent() -> Outcome {
     let warning = warnings.first().ok_or("a warning")?;
     assert!(warning.contains("403"), "{warning}");
     assert!(warning.contains("/errors/authz/forbidden"), "{warning}");
-    assert_eq!(harness.transport.count(), 4);
+    assert_eq!(harness.transport.count(), 2);
     Ok(())
 }
 
@@ -474,7 +443,6 @@ fn a_network_failure_is_retried_with_backoff() -> Outcome {
         [
             Err(TransportError::new("ConnectionRefused")),
             Err(TransportError::new("ConnectionRefused")),
-            Ok(answer("kept")?),
             Ok(answer("kept")?),
         ],
     )?;
@@ -494,6 +462,7 @@ fn a_platform_never_reached_is_warned_once_with_the_errors_name() -> Outcome {
         keyed(),
         std::iter::repeat_n(Err(TransportError::new("ConnectionRefused")), 6),
     )?;
+    a_run(&harness)?;
     a_run(&harness)?;
     harness.telmoni.shutdown();
     let warnings = harness.warnings.all();

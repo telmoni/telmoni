@@ -5,7 +5,6 @@
       "user_id": "user_42",
       "session_id": "conv_7",
       "tags": { "env": "test" },
-      "bounds": { "stall_after_s": 60, "max_steps": 10, "max_cost_usd": 1.5 },
       "sample_rate": 1.0,
       "inside": [
         {
@@ -102,9 +101,6 @@
                   { "key": "gen_ai.conversation.id", "value": { "stringValue": "conv_7" } },
                   { "key": "gen_ai.operation.name", "value": { "stringValue": "invoke_agent" } },
                   { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
-                  { "key": "telmoni.bound.max_cost_usd", "value": { "doubleValue": 1.5 } },
-                  { "key": "telmoni.bound.max_steps", "value": { "intValue": "10" } },
-                  { "key": "telmoni.bound.stall_after_s", "value": { "intValue": "60" } },
                   { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
                   { "key": "telmoni.sample_rate", "value": { "doubleValue": 1.0 } },
                   { "key": "telmoni.tag.env", "value": { "stringValue": "test" } },
@@ -123,25 +119,6 @@
                   { "key": "gen_ai.conversation.id", "value": { "stringValue": "conv_7" } },
                   { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
                   { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
-                  { "key": "user.id", "value": { "stringValue": "user_42" } }
-                ]
-              },
-              {
-                "traceId": "<trace>",
-                "spanId": "<span:telmoni.run.start>",
-                "parentSpanId": "<span:invoke_agent support-bot>",
-                "name": "telmoni.run.start",
-                "kind": 1,
-                "startTimeUnixNano": "<time>",
-                "endTimeUnixNano": "<time>",
-                "attributes": [
-                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "conv_7" } },
-                  { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
-                  { "key": "telmoni.bound.max_cost_usd", "value": { "doubleValue": 1.5 } },
-                  { "key": "telmoni.bound.max_steps", "value": { "intValue": "10" } },
-                  { "key": "telmoni.bound.stall_after_s", "value": { "intValue": "60" } },
-                  { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
-                  { "key": "telmoni.sample_rate", "value": { "doubleValue": 1.0 } },
                   { "key": "user.id", "value": { "stringValue": "user_42" } }
                 ]
               }

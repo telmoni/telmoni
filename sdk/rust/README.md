@@ -68,11 +68,9 @@ fn main() -> Result<(), telmoni::Error> {
 
 Every handle is a guard: its span ends when it is dropped or on `end()`.
 `run` returns `Error::EmptyAgent` for a blank agent name and
-`Error::SampleRate` for a rate outside (0, 1]. A bound ingest would refuse the
-run over — a `stall_after_s` or `max_steps` outside 1 to 4294967295, a
-`max_cost_usd` that is not a finite number above 0 — is left off the run with
-one warning, and a negative token count off its call; a run sends its first 32
-tags by key, the most ingest keeps, and warns once of the rest. A tag whose key
+`Error::SampleRate` for a rate outside (0, 1]. A negative token count is left
+off its call with one warning; a run sends its first 32 tags by key, the most
+ingest keeps, and warns once of the rest. A tag whose key
 is not 1 to 64 characters or whose value is over 256 is left off with one
 warning first and takes no place among them. Past ingest's caps, counted in
 characters, a name, the agent, a model, a provider, a response model or an
