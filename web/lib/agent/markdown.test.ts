@@ -163,6 +163,9 @@ describe("parseInline", () => {
   it.each([
     "//evil.example/path",
     "/\\evil.example",
+    "/acme/..//evil.example/?leak=SECRET",
+    "/acme/%2e%2e//evil.example/",
+    "/auth/logout",
     "https://telmoni.com/docs/x",
     "https://evil.example/",
     "data:text/html,<b>hi</b>",
@@ -183,6 +186,26 @@ describe("allowedHref", () => {
     expect(allowedHref("//telmoni.com/docs")).toBeNull();
     expect(allowedHref("/ok path")).toBeNull();
     expect(allowedHref("")).toBeNull();
+  });
+
+  // The router, falling back to a full load, hands the path to `location.assign`,
+  // where `/acme/..//evil.example` is `//evil.example`: another host.
+  it("resolves dot segments as the browser will and refuses a path that leaves the origin", () => {
+    expect(allowedHref("/acme/..//evil.example/?leak=SECRET")).toBeNull();
+    expect(allowedHref("/acme/%2e%2e//evil.example/")).toBeNull();
+    expect(allowedHref("/acme/.%2E//evil.example")).toBeNull();
+    expect(allowedHref("/acme/../web/members")).toBe("/web/members");
+    expect(allowedHref("/acme/./audit-log?page=2#top")).toBe("/acme/audit-log?page=2#top");
+  });
+
+  it("refuses a door: signing out answers a GET, and an install starts on one", () => {
+    expect(allowedHref("/auth/logout")).toBeNull();
+    expect(allowedHref("/auth")).toBeNull();
+    expect(allowedHref("/connect/slack/start")).toBeNull();
+    expect(allowedHref("/api/v1/events")).toBeNull();
+    expect(allowedHref("/_next/static/x.js")).toBeNull();
+    expect(allowedHref("/acme/../auth/logout")).toBeNull();
+    expect(allowedHref("/authors")).toBe("/authors");
   });
 });
 
