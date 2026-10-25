@@ -1,5 +1,5 @@
 //! Auth — identities, organizations, members, roles, API tokens, sessions —
-//! as a module of the `telmoni` binary. It owns the `auth` schema, connects
+//! as a module of the `telmoni-server` binary. It owns the `auth` schema, connects
 //! as the `auth` role, and answers the modules beside it through
 //! [`telmoni_shared::seam::Auth`]; what it asks of them goes through
 //! [`Siblings`].

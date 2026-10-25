@@ -1,13 +1,13 @@
-//! `telmoni` — the server, and every job beside it, as one binary.
+//! `telmoni-server` — the server, and every job beside it, as one binary.
 //!
 //! ```text
-//! telmoni serve                      listen on PORT (8082); every module, every loop
-//! telmoni migrate                    every pending migration, the grants, ClickHouse's file; exit
-//! telmoni rotate                     the audit partitions: create ahead (drops are off);
+//! telmoni-server serve               listen on PORT (8082); every module, every loop
+//! telmoni-server migrate             every pending migration, the grants, ClickHouse's file; exit
+//! telmoni-server rotate              the audit partitions: create ahead (drops are off);
 //!                                    telemetry's: drop days and months past retention; exit
-//! telmoni sweep <deletion|audit-verify|retention|agent-reindex|audit-exports>
+//! telmoni-server sweep <deletion|audit-verify|retention|agent-reindex|audit-exports>
 //!                                    one sweep, once; exit
-//! telmoni terminate <org_id>         an operator closes an organization
+//! telmoni-server terminate <org_id>  an operator closes an organization
 //! ```
 //!
 //! Every command reads the same environment (`.env` on a laptop). `serve`

@@ -1,4 +1,4 @@
-//! The nightly purge of ClickHouse's partitions, which `telmoni rotate` runs
+//! The nightly purge of ClickHouse's partitions, which `telmoni-server rotate` runs
 //! as the migrator's user. Retention is a purge, not a filter: a span's day
 //! goes whole once every row in it is older than the longest retention sold,
 //! an hour's totals once their month is older than

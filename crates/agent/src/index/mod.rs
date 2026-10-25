@@ -835,7 +835,7 @@ pub async fn store(
     Ok(())
 }
 
-/// `telmoni sweep agent-reindex`: give every passage a different model
+/// `telmoni-server sweep agent-reindex`: give every passage a different model
 /// embedded a vector from the configured one, a page at a time. Answers
 /// how many it redid.
 ///

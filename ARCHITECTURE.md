@@ -36,7 +36,7 @@ Telmoni is a privacy-first telemetry and monitoring platform for AI agents, open
 - a read-only console agent that answers from the docs and a project's own data;
 - telemetry: ingest over OpenTelemetry's own protocol, behind a project API key, with every content field dropped at the door; each project's settings, saved views and layouts in Postgres, its content mode set by the organization's owner and the key its user ids are hashed under; and the spans and their hourly totals in ClickHouse, read back as traces, sessions and users.
 
-It is **one Rust binary**, `telmoni`, and **a Next.js console** beside it, deployed together with a Helm chart or Docker Compose. A deployment that needs more builds its own binary and console on these crates rather than forking them ([Extending the core](#extending-the-core)).
+It is **one Rust binary**, `telmoni-server`, and **a Next.js console** beside it, deployed together with a Helm chart or Docker Compose. A deployment that needs more builds its own binary and console on these crates rather than forking them ([Extending the core](#extending-the-core)).
 
 | For | Read |
 |---|---|
@@ -127,7 +127,7 @@ flowchart TB
     Relays["Route Handlers: reads, agent turns, live events"]
   end
   Redis[("Redis: limits, blacklist, live events, announcement, ingest's claims")]
-  subgraph Server["server: telmoni serve, one process"]
+  subgraph Server["server: telmoni-server serve, one process"]
     Auth["auth"]
     Notif["notifications"]
     Telemetry["telemetry"]
@@ -146,7 +146,7 @@ flowchart TB
 
 | Block | What it is | What it keeps |
 |---|---|---|
-| `telmoni` | The binary (`telmoni-server`): `App`, `Parts`, `Module` and `run`; `serve`, the machine door (`door.rs`), the subcommands (`cli.rs`) and the sweeps' timers (`sweeps.rs`) | — |
+| `telmoni` | The binary and its crate, `telmoni-server`: `App`, `Parts`, `Module` and `run`; `serve`, the machine door (`door.rs`), the subcommands (`cli.rs`) and the sweeps' timers (`sweeps.rs`) | — |
 | `auth` | Identity, sessions and the one issuer; organizations, projects, rosters, invitations and transfers; API keys; flags; export, audit exports and deletion; `/me`, `/cli/v1` and `/v1` | The `auth` schema |
 | `notifications` | The feeds, the connectors, the delivery queue and its loop, Slack's events, the uninstalls a delete or a refused install files (`uninstall.rs`), and the retention sweep, which also finishes a deleted project's purge (`retention.rs`) | The `notifications` schema |
 | `agent` | Model adapters, embeddings, the index and hybrid search, five read-only tools, the turn loop, and the recorder that sends its own questions through the Rust SDK (`observe.rs`, `report.rs`) | The `agent` schema, with pgvector |
@@ -388,8 +388,8 @@ Most of it runs inside `serve`, in every replica, and all of it is safe for repl
 | Notifications' retention, a deleted project's purge its delete could not finish, found by the rows it left once auth no longer has the project, and the uninstalls deletes filed that did not go through | `serve`, every replica, hourly, the first a minute after boot | Advisory locks, chunk by chunk; each purge and each uninstall safe to repeat |
 | The agent's retention | `serve`, hourly | Advisory locks, chunk by chunk |
 | Agent indexer | `serve`, when the agent is on | Cursor leases |
-| Migrations | `telmoni migrate`, a Helm hook Job | One Job |
-| Partition rotation, and ClickHouse's purge | `telmoni rotate`, a daily CronJob | `Forbid` |
+| Migrations | `telmoni-server migrate`, a Helm hook Job | One Job |
+| Partition rotation, and ClickHouse's purge | `telmoni-server rotate`, a daily CronJob | `Forbid` |
 
 - **Work a request starts** is awaited where losing it would matter — the deletion tail, the agent's erase — or left for a lease or a sweep to finish. Two are bare tasks a rollout can lose: the password-reset mail, so that its timing reveals nothing, and the retries that settle telemetry's settings after a transfer that could not settle them itself (*Known gaps*).
 - **No loop is told to stop.** Leases lapse, locks die with their connections, and committed chunks stay committed, so a loop cut short loses nothing.

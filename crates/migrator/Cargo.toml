@@ -5,7 +5,7 @@ edition.workspace      = true
 rust-version.workspace = true
 publish                = false
 
-# A library: `telmoni migrate` and `telmoni rotate`
+# A library: `telmoni-server migrate` and `telmoni-server rotate`
 # (`crates/telmoni`) run it, as a Job before the server rolls. This crate
 # still owns the `audit` schema (`migrations/`) and the grants (`sql/`).
 [lib]

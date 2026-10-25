@@ -1,11 +1,11 @@
-//! Auth's sweeps on a timer, inside `telmoni serve`.
+//! Auth's sweeps on a timer, inside `telmoni-server serve`.
 //!
 //! The deletion and audit-verify sweeps take a leader lock for their tick
 //! ([`telmoni_auth::sweep`]), so replicas running the same timers cannot both
 //! sweep one tick; retention needs none, its DELETEs being idempotent, nor the
 //! audit exports' retry, each build claiming its export first. Every
 //! step is idempotent, so a tick cut short by a rollout is finished by the
-//! next. A failed tick is logged and the next one runs. `telmoni sweep
+//! next. A failed tick is logged and the next one runs. `telmoni-server sweep
 //! <name>` runs any of them once by hand.
 
 use std::sync::Arc;

@@ -6,7 +6,7 @@ edition.workspace      = true
 rust-version.workspace = true
 publish                = false
 
-# A library: the `telmoni` binary
+# A library: the `telmoni-server` binary
 # (`crates/telmoni`) links it beside auth.
 [lib]
 name = "telmoni_notifications"

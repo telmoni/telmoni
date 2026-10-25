@@ -6,7 +6,7 @@ edition.workspace      = true
 rust-version.workspace = true
 publish                = false
 
-# A library: the `telmoni` binary links it beside auth and notifications, and
+# A library: the `telmoni-server` binary links it beside auth and notifications, and
 # the migrator applies its ClickHouse file and purges its partitions.
 [lib]
 name = "telmoni_telemetry"

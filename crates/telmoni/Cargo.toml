@@ -14,9 +14,9 @@ publish                = false
 name = "telmoni_server"
 path = "src/lib.rs"
 
-# Undocumented: its rustdoc would land where the SDK's, the crate `telmoni`, does.
+# Undocumented: its rustdoc would collide with the library's, under one name.
 [[bin]]
-name = "telmoni"
+name = "telmoni-server"
 path = "src/main.rs"
 doc  = false
 

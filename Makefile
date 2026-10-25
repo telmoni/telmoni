@@ -41,7 +41,7 @@ help:
 	@echo "    make up                   run the whole stack: Postgres, ClickHouse, Redis, the server, the console"
 	@echo "    make down                 stop docker containers"
 	@echo "    make docker-up            run postgres, clickhouse + redis in Docker (headless)"
-	@echo "    make server-dev           run the server alone (telmoni serve)"
+	@echo "    make server-dev           run the server alone (telmoni-server serve)"
 	@echo "    make web-dev              run the console alone"
 	@echo "    make book                 lay the docs (telmoni/docs, at ../docs) into the console; up and web-dev keep them in step"
 	@echo "    make sweep SWEEP=deletion run one sweep by hand (deletion, audit-verify, retention, agent-reindex, audit-exports)"

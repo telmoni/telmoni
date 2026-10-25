@@ -1,4 +1,4 @@
-//! The ClickHouse file, and how `telmoni migrate` applies it: after the
+//! The ClickHouse file, and how `telmoni-server migrate` applies it: after the
 //! Postgres sets, as the migrator's user, one statement per request, since
 //! sqlx's migrator speaks only Postgres and ClickHouse's HTTP interface takes
 //! one statement at a time. Every statement is `IF NOT EXISTS`, so every run

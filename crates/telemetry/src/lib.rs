@@ -1,5 +1,5 @@
 //! Telemetry — what an agent's runs leave behind — as a module of the
-//! `telmoni` binary. It owns two stores, each for what it is good at:
+//! `telmoni-server` binary. It owns two stores, each for what it is good at:
 //!
 //! - **Postgres**, the `telemetry` schema, connected as the `telemetry` role:
 //!   what must be transactional or private — each project's settings, its
@@ -10,9 +10,9 @@
 //!   read and write goes through [`store`], the one query module, which names
 //!   on each read the projects its row policy may admit.
 //!
-//! Its ClickHouse tables are made by [`schema`] (`telmoni migrate`); expired
+//! Its ClickHouse tables are made by [`schema`] (`telmoni-server migrate`); expired
 //! days and months are dropped, and deleted projects' rows rewritten away, by
-//! [`retention`] (`telmoni rotate`), both as the migrator's user, whom
+//! [`retention`] (`telmoni-server rotate`), both as the migrator's user, whom
 //! `tenant_isolation` does not hold. Auth reaches it through
 //! [`telmoni_shared::seam::Telemetry`] ([`seam`]) to purge an organization's
 //! or a project's data and move a project's settings; the console through its

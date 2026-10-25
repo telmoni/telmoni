@@ -9,7 +9,7 @@
 //! role, so row-level security and the grants stand exactly as they did
 //! across services.
 //!
-//! The binary is the command line over this: `telmoni serve`, and the
+//! The binary is the command line over this: `telmoni-server serve`, and the
 //! migrator and each sweep as a subcommand run as a Job. A binary built for
 //! another deployment calls [`App::assemble`] with its own identity
 //! provider and transport, [`App::mount`]s the modules of its own, and hands
@@ -43,7 +43,7 @@ use telmoni_shared::{
 
 use cli::{Command, Sweep};
 
-/// The port `telmoni serve` listens on when `PORT` is unset.
+/// The port `telmoni-server serve` listens on when `PORT` is unset.
 pub const DEFAULT_PORT: u16 = 8082;
 
 /// A module a deployment links beside auth and notifications: its routes go
@@ -413,7 +413,7 @@ impl App {
 
     /// Run the process until it is told to stop: refuse what a deployed tier
     /// must not run with, start every loop, and serve on `port`.
-    /// `RUN_SWEEPS=false` leaves auth's sweeps to `telmoni sweep` runs
+    /// `RUN_SWEEPS=false` leaves auth's sweeps to `telmoni-server sweep` runs
     /// scheduled elsewhere.
     pub async fn serve(self: Arc<Self>, port: u16) -> anyhow::Result<()> {
         if self.auth.config.allow_test_session && telmoni_shared::envelope::on_deployed_tier() {
@@ -444,7 +444,7 @@ impl App {
             sweeps::spawn(self.auth.clone());
         } else {
             tracing::warn!(
-                "RUN_SWEEPS is false; the deletion, retention and audit sweeps run only as `telmoni sweep`"
+                "RUN_SWEEPS is false; the deletion, retention and audit sweeps run only as `telmoni-server sweep`"
             );
         }
         for module in &self.modules {

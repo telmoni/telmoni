@@ -1,4 +1,4 @@
-//! The console agent — a module of the `telmoni` binary that answers a
+//! The console agent — a module of the `telmoni-server` binary that answers a
 //! person's questions about their project, read-only, citing what it used.
 //!
 //! It owns the `agent` schema and connects as the `agent` role. Retrieval

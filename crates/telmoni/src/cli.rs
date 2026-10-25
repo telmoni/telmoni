@@ -81,7 +81,7 @@ impl Command {
     #[must_use]
     pub fn usage() -> String {
         format!(
-            "usage: telmoni serve | migrate | rotate | sweep <{}> | terminate <org_id>",
+            "usage: telmoni-server serve | migrate | rotate | sweep <{}> | terminate <org_id>",
             Sweep::names()
         )
     }

@@ -124,7 +124,7 @@ const MUTATIONS: &[Mutation] = &[
         resource_kind: "Organization",
         actor_id: ActorPattern::Variable,
     },
-    // The operator's, run as `telmoni terminate`.
+    // The operator's, run as `telmoni-server terminate`.
     Mutation {
         file: "crates/auth/src/sweep.rs",
         fn_name: "terminate",

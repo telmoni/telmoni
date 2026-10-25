@@ -756,7 +756,7 @@ pub(crate) struct ClickHouse {
     pub(crate) telemetry: clickhouse::Client,
 }
 
-/// The file applied once per suite, as `telmoni migrate` applies it.
+/// The file applied once per suite, as `telmoni-server migrate` applies it.
 static MIGRATED: OnceCell<()> = OnceCell::const_new();
 
 /// ClickHouse as `MIGRATOR_CLICKHOUSE_URL` and `TELEMETRY_CLICKHOUSE_URL` name

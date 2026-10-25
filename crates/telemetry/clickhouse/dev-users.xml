@@ -4,7 +4,7 @@
   passwords are the ones .env.example carries, and the server listens on
   127.0.0.1 alone; a tier writes the same users from its secrets.
 
-  - `migrator`: `telmoni migrate` and `telmoni rotate`. It makes the database,
+  - `migrator`: `telmoni-server migrate` and `telmoni-server rotate`. It makes the database,
     the tables, the view and the row policies: `tenant_isolation`, `TO ALL
     EXCEPT CURRENT_USER`, does not hold it, and its own, `migrator_reads_all`,
     admits it to every row whatever the server's default, so the view, which

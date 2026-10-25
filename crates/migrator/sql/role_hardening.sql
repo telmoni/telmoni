@@ -1,5 +1,5 @@
 -- Superuser half of the role setup. Owner-issued grants are object_grants.sql
--- beside this file, which `telmoni migrate` applies after every run, and each
+-- beside this file, which `telmoni-server migrate` applies after every run, and each
 -- module's migration.
 --
 -- Applied as a superuser before the first migration, and again after any edit;

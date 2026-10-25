@@ -748,7 +748,7 @@ fn purge_lane(organization: &str) -> Request<Body> {
     )
 }
 
-/// An operator's termination of `organization`, as `telmoni terminate` runs it.
+/// An operator's termination of `organization`, as `telmoni-server terminate` runs it.
 fn terminate(organization: &str) -> Request<Body> {
     service(
         "POST",

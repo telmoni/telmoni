@@ -1,5 +1,5 @@
-//! The migration runner — `telmoni migrate` — and the nightly rotation —
-//! `telmoni rotate`. Each runs once and returns, as the migrator's own
+//! The migration runner — `telmoni-server migrate` — and the nightly rotation —
+//! `telmoni-server rotate`. Each runs once and returns, as the migrator's own
 //! database role (`MIGRATOR_DATABASE_URL`) and ClickHouse user
 //! (`MIGRATOR_CLICKHOUSE_URL`): a Kubernetes Job before the server rolls,
 //! `make db-migrate` on a laptop, one command either way. Files are fully

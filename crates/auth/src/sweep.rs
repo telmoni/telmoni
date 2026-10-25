@@ -1,7 +1,7 @@
 //! The sweeps — the durable retry net behind every inline tail, and the
-//! nightly checks — and the operator's command. The `telmoni` binary runs
+//! nightly checks — and the operator's command. The `telmoni-server` binary runs
 //! the sweeps on a timer inside `serve`, and any of them by hand as
-//! `telmoni sweep <name>`; the command runs as `telmoni terminate`.
+//! `telmoni-server sweep <name>`; the command runs as `telmoni-server terminate`.
 //!
 //! The deletion and audit-verify sweeps take a transaction-scoped advisory
 //! lock first, so replicas running the same timer cannot both sweep one

@@ -25,7 +25,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 2
 
-BINARY=target/debug/telmoni
+BINARY=target/debug/telmoni-server
 if [ ! -x "$BINARY" ]; then
     echo "✗ up: $BINARY is missing; \`make up\` builds it, or: cargo build -p telmoni-server" >&2
     exit 2

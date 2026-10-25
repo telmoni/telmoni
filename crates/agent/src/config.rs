@@ -20,7 +20,7 @@ pub const DEFAULT_EMBEDDINGS_MODEL: &str = "nomic-embed-text";
 /// otherwise refuse every write, or a truncated vector would search nonsense.
 pub const EMBEDDING_DIMENSIONS: usize = 768;
 
-/// The port `telmoni serve` listens on when `PORT` is unset: the binary's
+/// The port `telmoni-server serve` listens on when `PORT` is unset: the binary's
 /// own default, spelled here too because this crate cannot read it.
 const DEFAULT_PORT: &str = "8082";
 

@@ -1,4 +1,4 @@
-//! Partition rotation — `telmoni rotate`.
+//! Partition rotation — `telmoni-server rotate`.
 
 use anyhow::{Context, Result};
 use chrono::Utc;

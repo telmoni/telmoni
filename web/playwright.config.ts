@@ -34,7 +34,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: "../target/debug/telmoni serve",
+      command: "../target/debug/telmoni-server serve",
       url: "http://localhost:8082/health",
       reuseExistingServer: !process.env.CI,
       timeout: 30_000,
