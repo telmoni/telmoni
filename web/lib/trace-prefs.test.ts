@@ -17,6 +17,7 @@ describe("what a browser kept of the trace list's look", () => {
           density: "compact",
           refresh: 60,
           filters: false,
+          filtersWidth: 240,
           peekFull: true,
           peekWidth: 720,
           layout: { view: null, options: COMPLEX },
@@ -27,6 +28,7 @@ describe("what a browser kept of the trace list's look", () => {
       density: "compact",
       refresh: 60,
       filters: false,
+      filtersWidth: 240,
       peekFull: true,
       peekWidth: 720,
       layout: { view: null, options: COMPLEX },
@@ -44,6 +46,7 @@ describe("what a browser kept of the trace list's look", () => {
           density: "airy",
           refresh: 45,
           filters: "yes",
+          filtersWidth: 40,
           peekFull: 1,
           peekWidth: 12.5,
           layout: { view: null, options: {} },
@@ -53,6 +56,8 @@ describe("what a browser kept of the trace list's look", () => {
     // A width no panel stands at, stored by hand or by an older build.
     expect(readPrefs(JSON.stringify({ peekWidth: 40 })).peekWidth).toBeNull();
     expect(readPrefs(JSON.stringify({ peekWidth: "720" })).peekWidth).toBeNull();
+    expect(readPrefs(JSON.stringify({ filtersWidth: 600 })).filtersWidth).toBeNull();
+    expect(readPrefs(JSON.stringify({ filtersWidth: 244 })).filtersWidth).toBe(244);
     expect(readPrefs(JSON.stringify({ density: "compact" }))).toEqual({
       ...DEFAULT_PREFS,
       columns: DEFAULT_COLUMNS,

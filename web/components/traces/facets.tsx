@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import { ChevronRightIcon, PanelLeftIcon, SearchIcon, XIcon } from "lucide-react";
 import Link from "next/link";
 
 import { LinkPending } from "@/components/link-pending";
 import { useListNavigation } from "@/components/traces/navigate";
+import { FiltersEdge, useFiltersWidth } from "@/components/traces/panel-width";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -71,6 +72,8 @@ export function TraceFacetsPanel({ organization, slug, query, ui, facets }: Prop
   const { filters: shown } = useTracePrefs();
   const [search, setSearch] = useState("");
   const { go, pending } = useListNavigation();
+  const panel = useRef<HTMLElement>(null);
+  const { width, edge } = useFiltersWidth(panel);
   // Hidden, the panel leaves its button where its heading stood, as
   // Langfuse's sidebar folds to its icon, so it opens again from there.
   if (!shown) {
@@ -89,12 +92,15 @@ export function TraceFacetsPanel({ organization, slug, query, ui, facets }: Prop
     return facets?.[filter].values.some((v) => v.value.toLowerCase().includes(needle)) ?? false;
   });
 
-  // As wide as the console's rail rows ("the sidebar apps", `--spacing-sidebar-inner`),
-  // and that width whether the rail is open or closed; `gap-3` is the page's own
-  // above it, so the toggle has as much room under it as over it.
+  // As wide as the console's rail rows ("the sidebar apps", `--spacing-sidebar-inner`)
+  // until dragged, whether the rail is open or closed, and never past half the
+  // row, so the list keeps its room; `gap-3` is the page's own above it, so the
+  // toggle has as much room under it as over it.
   return (
     <aside
-      className="grid w-full shrink-0 content-start gap-3 md:w-sidebar-inner"
+      ref={panel}
+      style={{ "--filters-width": width === null ? undefined : `${width}px` } as CSSProperties}
+      className="relative grid w-full shrink-0 content-start gap-3 md:w-[var(--filters-width,var(--spacing-sidebar-inner))] md:max-w-1/2"
       aria-label="Filters"
       aria-busy={pending}
       data-pending={pending ? "" : undefined}
@@ -155,6 +161,8 @@ export function TraceFacetsPanel({ organization, slug, query, ui, facets }: Prop
           ))}
         </div>
       )}
+      {/* Last in the panel, so Tab reaches it after the filters, between them and the list. */}
+      <FiltersEdge edge={edge} />
     </aside>
   );
 }

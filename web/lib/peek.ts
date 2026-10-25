@@ -1,4 +1,5 @@
 import { VIEW_PARAM } from "@/lib/layout";
+import { draggedPanelWidth } from "@/lib/panel-width";
 import { PEEK_PARAM } from "@/lib/traces";
 
 // The trace list's peek and the browser's history (`components/traces/peek.tsx`):
@@ -106,7 +107,7 @@ export const PEEK_WIDTH_MIN = 480;
 /** The panel's width as its left edge is dragged from `startX` to `x`: wider
  *  leftwards, held between its least and the content area it stands in. */
 export function draggedWidth(start: number, startX: number, x: number, area: number): number {
-  return Math.round(Math.min(Math.max(start + startX - x, Math.min(PEEK_WIDTH_MIN, area)), area));
+  return draggedPanelWidth(start, startX, x, { grows: "left", min: Math.min(PEEK_WIDTH_MIN, area), max: area });
 }
 
 /** What a read of a trace's spans came to. */

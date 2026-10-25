@@ -1,31 +1,106 @@
 "use client";
 
-import { useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import {
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type RefObject,
+} from "react";
 
-import { draggedWidth } from "@/lib/peek";
+import {
+  FILTERS_WIDTH_DEFAULT,
+  FILTERS_WIDTH_MAX,
+  FILTERS_WIDTH_MIN,
+  FILTERS_WIDTH_STEP,
+  draggedPanelWidth,
+  filtersBounds,
+  type DragBounds,
+} from "@/lib/panel-width";
+import { PEEK_WIDTH_MIN } from "@/lib/peek";
 import { setTracePrefs, useTracePrefs } from "@/lib/use-trace-prefs";
 import { cn } from "@/lib/utils";
 
-// How wide a panel a list opens stands, full size or dragged: one choice for
-// every such panel — a trace's over the trace list, a session's over the
-// sessions list — kept with the list's other choices (`lib/trace-prefs.ts`).
+// How wide a panel beside a list stands, dragged by its edge: one mechanism
+// for every such panel — a trace's or a session's over its list, the filters
+// beside the trace list — each width kept with the list's other choices
+// (`lib/trace-prefs.ts`), followed as the pointer moves and written once it
+// lets go, as the agent's window is sized by its own (`agent-window.tsx`).
+
+type Pointer = ReactPointerEvent<HTMLDivElement>;
+
+/** The pointer handlers an edge takes. */
+type EdgeHandlers = {
+  onPointerDown: (e: Pointer) => void;
+  onPointerMove: (e: Pointer) => void;
+  onPointerUp: (e: Pointer) => void;
+  onPointerCancel: (e: Pointer) => void;
+  onLostPointerCapture: (e: Pointer) => void;
+  onDoubleClick: () => void;
+};
+
+/** The width a drag has the panel at, `null` at rest, and its edge's
+ *  handlers: the bounds read off the area the panel stands in, its parent,
+ *  as a drag starts; `keep` called once with the width a drag ends at, or
+ *  with `null` on a double click, which gives the panel its own width back. */
+function useDraggedEdge(
+  panel: RefObject<HTMLElement | null>,
+  bounds: (area: number) => DragBounds,
+  keep: (width: number | null) => void,
+): { dragged: number | null; handlers: EdgeHandlers } {
+  const [dragged, setDragged] = useState<number | null>(null);
+  const drag = useRef<{
+    pointerId: number;
+    x: number;
+    start: number;
+    bounds: DragBounds;
+    width: number | null;
+  } | null>(null);
+  const onPointerDown = (e: Pointer) => {
+    if (e.button !== 0 || !e.isPrimary || !panel.current) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const area = panel.current.parentElement?.getBoundingClientRect().width ?? 0;
+    drag.current = {
+      pointerId: e.pointerId,
+      x: e.clientX,
+      start: panel.current.getBoundingClientRect().width,
+      bounds: bounds(area),
+      width: null,
+    };
+  };
+  const onPointerMove = (e: Pointer) => {
+    const d = drag.current;
+    if (!d || d.pointerId !== e.pointerId) return;
+    d.width = draggedPanelWidth(d.start, d.x, e.clientX, d.bounds);
+    setDragged(d.width);
+  };
+  const end = (e: Pointer) => {
+    const d = drag.current;
+    if (!d || d.pointerId !== e.pointerId) return;
+    drag.current = null;
+    if (d.width !== null) keep(d.width);
+    setDragged(null);
+  };
+  return {
+    dragged,
+    handlers: {
+      onPointerDown,
+      onPointerMove,
+      onPointerUp: end,
+      onPointerCancel: end,
+      onLostPointerCapture: end,
+      onDoubleClick: () => keep(null),
+    },
+  };
+}
 
 /** The edge's handlers and look, for `PanelEdge`; `null` at full size,
  *  where there is no edge to drag. */
-export type PanelEdgeProps = {
-  onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
-  onPointerMove: (e: ReactPointerEvent<HTMLDivElement>) => void;
-  onPointerUp: (e: ReactPointerEvent<HTMLDivElement>) => void;
-  onPointerCancel: (e: ReactPointerEvent<HTMLDivElement>) => void;
-  onLostPointerCapture: (e: ReactPointerEvent<HTMLDivElement>) => void;
-  onDoubleClick: () => void;
-  className: string;
-};
+export type PanelEdgeProps = EdgeHandlers & { className: string };
 
-/** The panel's width and whether it fills the content area, as the person
- *  set them; its left edge dragged, as the agent's window is sized by its
- *  own (`agent-window.tsx`): followed as the pointer moves, and kept once it
- *  lets go — one write a drag. */
+/** A trace's or a session's panel: its width and whether it fills the content
+ *  area, as the person set them, its left edge dragged. */
 export function usePanelWidth(panel: RefObject<HTMLDivElement | null>): {
   full: boolean;
   width: number | null;
@@ -33,31 +108,11 @@ export function usePanelWidth(panel: RefObject<HTMLDivElement | null>): {
   edge: PanelEdgeProps | null;
 } {
   const { peekFull, peekWidth } = useTracePrefs();
-  const [dragged, setDragged] = useState<number | null>(null);
-  const drag = useRef<{ pointerId: number; x: number; start: number; width: number | null } | null>(
-    null,
+  const { dragged, handlers } = useDraggedEdge(
+    panel,
+    (area) => ({ grows: "left", min: Math.min(PEEK_WIDTH_MIN, area), max: area }),
+    (width) => setTracePrefs({ peekWidth: width }),
   );
-  const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || !e.isPrimary || !panel.current) return;
-    e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    const start = panel.current.getBoundingClientRect().width;
-    drag.current = { pointerId: e.pointerId, x: e.clientX, start, width: null };
-  };
-  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
-    const d = drag.current;
-    const area = panel.current?.parentElement?.getBoundingClientRect().width;
-    if (!d || d.pointerId !== e.pointerId || !area) return;
-    d.width = draggedWidth(d.start, d.x, e.clientX, area);
-    setDragged(d.width);
-  };
-  const end = (e: ReactPointerEvent<HTMLDivElement>) => {
-    const d = drag.current;
-    if (!d || d.pointerId !== e.pointerId) return;
-    drag.current = null;
-    if (d.width !== null) setTracePrefs({ peekWidth: d.width });
-    setDragged(null);
-  };
   return {
     full: peekFull,
     width: dragged ?? peekWidth,
@@ -65,13 +120,7 @@ export function usePanelWidth(panel: RefObject<HTMLDivElement | null>): {
     edge: peekFull
       ? null
       : {
-          onPointerDown,
-          onPointerMove,
-          onPointerUp: end,
-          onPointerCancel: end,
-          onLostPointerCapture: end,
-          // Back at its own width.
-          onDoubleClick: () => setTracePrefs({ peekWidth: null }),
+          ...handlers,
           className: cn(
             "absolute inset-y-0 left-0 z-10 hidden w-1.5 cursor-ew-resize touch-none md:block",
             "hover:bg-foreground/10",
@@ -86,4 +135,69 @@ export function usePanelWidth(panel: RefObject<HTMLDivElement | null>): {
 export function PanelEdge({ edge }: { edge: PanelEdgeProps | null }) {
   if (!edge) return null;
   return <div aria-hidden="true" data-testid="peek-resize" {...edge} />;
+}
+
+/** The filters' edge: its handlers, the width it stands at and whether it
+ *  is being dragged, for `FiltersEdge`. */
+export type FiltersEdgeProps = EdgeHandlers & {
+  onKeyDown: (e: ReactKeyboardEvent<HTMLDivElement>) => void;
+  now: number;
+  dragging: boolean;
+};
+
+/** The filters' width, as the person dragged or keyed it, `null` for their
+ *  own, and the edge between them and the list: a splitter the keyboard
+ *  moves too, the filters having no Full size to fall back on. */
+export function useFiltersWidth(panel: RefObject<HTMLElement | null>): {
+  width: number | null;
+  edge: FiltersEdgeProps;
+} {
+  const { filtersWidth } = useTracePrefs();
+  const keep = (width: number | null) => setTracePrefs({ filtersWidth: width });
+  const { dragged, handlers } = useDraggedEdge(panel, filtersBounds, keep);
+  const width = dragged ?? filtersWidth;
+  const now = width ?? FILTERS_WIDTH_DEFAULT;
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      keep(null);
+      return;
+    }
+    const { min, max } = filtersBounds(panel.current?.parentElement?.getBoundingClientRect().width ?? 0);
+    const to = {
+      ArrowRight: now + FILTERS_WIDTH_STEP,
+      ArrowLeft: now - FILTERS_WIDTH_STEP,
+      Home: min,
+      End: max,
+    }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    keep(Math.min(Math.max(Math.round(to), min), max));
+  };
+  return { width, edge: { ...handlers, onKeyDown, now, dragging: dragged !== null } };
+}
+
+/** The edge between the filters and the list, in the middle of the gap
+ *  between them: a separator the pointer drags and the keyboard moves. */
+export function FiltersEdge({ edge }: { edge: FiltersEdgeProps }) {
+  const { now, dragging, ...handlers } = edge;
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize the filters"
+      aria-valuemin={FILTERS_WIDTH_MIN}
+      aria-valuemax={FILTERS_WIDTH_MAX}
+      aria-valuenow={now}
+      tabIndex={0}
+      data-testid="filters-resize"
+      {...handlers}
+      className={cn(
+        // 6px wide, 5px from the filters and from the list (`gap-4`).
+        "absolute inset-y-0 -right-[11px] z-10 hidden w-1.5 cursor-ew-resize touch-none rounded-full outline-none md:block",
+        "hover:bg-foreground/10 focus-visible:bg-foreground/20",
+        dragging && "bg-foreground/10",
+      )}
+    />
+  );
 }

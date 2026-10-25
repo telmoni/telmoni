@@ -1,4 +1,5 @@
 import { readLayoutChoice, type LayoutChoice } from "@/lib/layout";
+import { keptFiltersWidth } from "@/lib/panel-width";
 import { PEEK_WIDTH_MIN } from "@/lib/peek";
 import { DEFAULT_COLUMNS, orderedColumns } from "@/lib/traces";
 import type { TraceColumn } from "@/lib/types/enums";
@@ -6,7 +7,7 @@ import type { TraceColumn } from "@/lib/types/enums";
 // What a person chose of the trace list's look, kept in their own browser as
 // Langfuse keeps a table's columns: which columns show, how tightly the rows
 // sit, how often the page reads itself again, whether the filters stand
-// beside it, how wide a trace opened from it stands, full size or dragged,
+// beside it and how wide, how wide a trace opened from it stands, full size or dragged,
 // and the layout they last chose for a session's page and a trace's. None
 // of it is the list's state — a link a colleague opens shows their own
 // columns — so none of it is in the URL; a saved view carries its columns
@@ -26,6 +27,9 @@ export type TracePrefs = {
   refresh: RefreshSeconds;
   /** Whether the filters' sidebar shows. */
   filters: boolean;
+  /** How wide, in pixels, the person dragged the filters; `null` for their
+   *  own width. */
+  filtersWidth: number | null;
   /** Whether a trace opened from the list fills the content area, rather
    *  than standing beside the list (`components/traces/peek.tsx`). */
   peekFull: boolean;
@@ -43,6 +47,7 @@ export const DEFAULT_PREFS: TracePrefs = {
   density: "comfortable",
   refresh: 0,
   filters: true,
+  filtersWidth: null,
   peekFull: false,
   peekWidth: null,
   layout: null,
@@ -88,6 +93,7 @@ export function readPrefs(stored: string | null): TracePrefs {
       ? (kept.refresh as RefreshSeconds)
       : DEFAULT_PREFS.refresh,
     filters: typeof kept.filters === "boolean" ? kept.filters : DEFAULT_PREFS.filters,
+    filtersWidth: keptFiltersWidth(kept.filtersWidth),
     peekFull: typeof kept.peekFull === "boolean" ? kept.peekFull : DEFAULT_PREFS.peekFull,
     peekWidth: keptWidth(kept.peekWidth),
     layout: readLayoutChoice(kept.layout),
