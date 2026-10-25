@@ -720,8 +720,8 @@ async fn a_sign_in_records_the_session_its_bearer_names(pool: PgPool) {
     assert_eq!(provider_sid.as_deref(), Some("sid_456"));
 }
 
-/// ⚠ AN ORGANIZATION IS BORN NAMED AFTER ITS HOLDER, as Vercel and Cloudflare
-/// name a new account, at the slug that name reads as, so the console opens
+/// ⚠ AN ORGANIZATION IS BORN NAMED AFTER ITS HOLDER, at the slug that name
+/// reads as, so the console opens
 /// straight onto it. Nothing is read off the address, which travels beside it
 /// for the console to name whom to ask: read from the person, never copied
 /// onto the organization.

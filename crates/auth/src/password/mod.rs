@@ -1,5 +1,5 @@
-//! The accounts auth holds itself: email and password. The login form, in
-//! Grafana's words — the way in every deployment has unless it turns the
+//! The accounts auth holds itself: email and password. The login form — the
+//! way in every deployment has unless it turns the
 //! form off (`AUTH_DISABLE_USERNAME_PASSWORD`) in favour of an external
 //! provider, or holds some domains to the provider alone
 //! (`AUTH_DOMAINS_WITH_SSO_ENFORCEMENT`).

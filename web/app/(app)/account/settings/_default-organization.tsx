@@ -20,8 +20,8 @@ export interface DefaultOrganizationChoice {
   label: string;
 }
 
-// The organization a sign-in opens in, as Vercel's default team is the one
-// shown at sign-in. `current` is the one auth answers now — chosen here, or
+// The organization a sign-in opens in. `current` is the one auth answers now —
+// chosen here, or
 // picked for whoever has not chosen or has left their choice.
 export function DefaultOrganization({
   organizations,

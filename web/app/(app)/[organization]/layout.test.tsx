@@ -134,7 +134,7 @@ describe("OrganizationLayout", () => {
   });
 
   // ⚠ Nothing is asked before a new organization opens: it is provisioned
-  // named after its owner, as Vercel and Cloudflare name a new account, and a
+  // named after its owner, and a
   // name with no Latin letter in it keeps a placeholder slug until the owner
   // picks a URL on Settings. Either way its pages render for the owner.
   it("opens a just-provisioned organization for its owner, asking nothing", async () => {

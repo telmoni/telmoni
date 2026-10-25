@@ -389,9 +389,8 @@ async fn a_person_opens_in_the_organization_they_chose(pool: PgPool) {
 }
 
 /// ⚠ **The choice is the seat's.** Leaving the chosen organization, or being
-/// removed from it, hands the person back to the oldest they own, as Vercel
-/// picks a new default team for whoever leaves theirs — and coming back does
-/// not bring the old choice with it. One being deleted is passed over while
+/// removed from it, hands the person back to the oldest they own — and coming
+/// back does not bring the old choice with it. One being deleted is passed over while
 /// it is pending, and the choice itself stands: it is the seat's, not the
 /// status's, so an organization active again would be the default again.
 #[sqlx::test]

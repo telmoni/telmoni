@@ -195,7 +195,7 @@ async fn provisioning_gives_the_organization_its_url(pool: PgPool) {
 
 /// ⚠ **A rename moves no URL.** The name and the URL are two settings: every
 /// link to an organization's pages stands through any number of renames, the
-/// first included, as on Vercel.
+/// first included.
 #[sqlx::test]
 async fn a_rename_keeps_the_url(pool: PgPool) {
     apply_audit_migrations(&pool).await;

@@ -12,8 +12,8 @@ config:
   authUrl: "http://localhost:3000"
   # One callback for every provider (AUTH_REDIRECT_URI).
   redirectUri: "http://localhost:3000/auth/callback"
-  # Langfuse's names. The login form is on unless disableUsernamePassword,
-  # which needs the OpenID Connect provider in `server-secrets`. Nobody new
+  # The login form is on unless disableUsernamePassword, which needs the
+  # OpenID Connect provider in `server-secrets`. Nobody new
   # signs up, at the form or at a provider, unless disableSignup is false; an
   # invited address always may, at a provider one it verified: the first
   # account comes from ADMIN_EMAIL and ADMIN_PASSWORD in `server-secrets`, and
@@ -27,8 +27,8 @@ config:
   verifyEmail: false
   disableUsernamePassword: false
   domainsWithSsoEnforcement: ""
-  # Where every person created starts, as Langfuse's LANGFUSE_DEFAULT_ORG_ID
-  # gives one (TELMONI_DEFAULT_*): an organization's id, from its Settings,
+  # Where every person created starts (TELMONI_DEFAULT_*): an organization's
+  # id, from its Settings,
   # joined as a member unless defaultOrgRole is admin, and one of its
   # projects, seated as a member unless defaultProjectRole is admin. Once, as
   # they are created; empty for none.

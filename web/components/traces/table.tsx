@@ -44,10 +44,9 @@ type Props = {
 // The page's rows, a run each: its id, which opens its trace, and the
 // columns the person shows (`lib/trace-prefs.ts`), each heading that sorts a
 // link that sorts by it. A click on a row opens its trace in the peek beside
-// the list (`peek.tsx`), as Langfuse's rows do, and the row stays marked
-// while it is open. Rows are chosen, as Langfuse's are, to download
-// those alone; the choice is the page's, so a page of new rows starts with
-// none chosen (the page keys this on its rows).
+// the list (`peek.tsx`), and the row stays marked while it is open. Rows are
+// chosen to download those alone; the choice is the page's, so a page of new
+// rows starts with none chosen (the page keys this on its rows).
 export function TraceTable({ organization, slug, query, ui, traces }: Props) {
   const prefs = useTracePrefs();
   const peeked = usePeekedRun();

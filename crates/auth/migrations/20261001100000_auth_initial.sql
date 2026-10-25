@@ -70,9 +70,8 @@ CREATE TABLE auth.accounts (
     -- The seat whose organization a sign-in opens this person in, when they
     -- chose one. A seat, not an organization: leaving, a removal or the
     -- organization's erasure takes the choice with the seat, and a later seat
-    -- in the same organization is not chosen until they choose it again, as
-    -- Vercel picks a new default team for whoever leaves theirs. Its foreign
-    -- key follows `auth.organization_members`, below.
+    -- in the same organization is not chosen until they choose it again. Its
+    -- foreign key follows `auth.organization_members`, below.
     default_membership_id UUID,
     deletion_requested_at TIMESTAMPTZ,
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),

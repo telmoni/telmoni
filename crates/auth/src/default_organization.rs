@@ -1,5 +1,5 @@
 //! The organization, and the project in it, that every person created here
-//! joins, as Langfuse's `LANGFUSE_DEFAULT_ORG_ID` gives one:
+//! joins:
 //! `TELMONI_DEFAULT_ORG_ID` with `TELMONI_DEFAULT_ORG_ROLE`, and
 //! `TELMONI_DEFAULT_PROJECT_ID` with `TELMONI_DEFAULT_PROJECT_ROLE`. A person
 //! joins once, in the transaction that creates them, so one removed later is
@@ -128,8 +128,7 @@ impl DefaultOrganization {
     }
 }
 
-/// A roster role as the variable spells it, in any case, Langfuse's
-/// uppercase included.
+/// A roster role as the variable spells it, in any case.
 fn roster_role(role: &str) -> anyhow::Result<OrganizationRole> {
     match role.trim().to_ascii_lowercase().as_str() {
         "member" => Ok(OrganizationRole::Member),
@@ -280,7 +279,7 @@ mod tests {
         assert_eq!(joined.project.map(|(_, role)| role), Some(Role::Admin));
     }
 
-    /// ⚠ Owner, Langfuse's viewer and none, an unknown role, a malformed id
+    /// ⚠ Owner, viewer and none, an unknown role, a malformed id
     /// and a variable without its id each refuse boot, naming the variable.
     #[test]
     fn a_setting_that_cannot_hold_refuses_boot() {

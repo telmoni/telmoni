@@ -4,8 +4,8 @@ import { PEEK_WIDTH_MIN } from "@/lib/peek";
 import { DEFAULT_COLUMNS, orderedColumns } from "@/lib/traces";
 import type { TraceColumn } from "@/lib/types/enums";
 
-// What a person chose of the trace list's look, kept in their own browser as
-// Langfuse keeps a table's columns: which columns show, how tightly the rows
+// What a person chose of the trace list's look, kept in their own browser:
+// which columns show, how tightly the rows
 // sit, how often the page reads itself again, whether the filters stand
 // beside it and how wide, how wide a trace opened from it stands, full size or dragged,
 // and the layout they last chose for a session's page and a trace's. None

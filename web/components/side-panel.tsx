@@ -19,7 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-// The console's side panel, as Langfuse's peek opens a trace: over the right
+// The console's side panel: over the right
 // side of the content area — under the header, beside the rail, neither
 // covered — and non-modal, so the page beside it keeps its pointer and its
 // keys; or `full`, over the area whole. The trace list's peek stands in one

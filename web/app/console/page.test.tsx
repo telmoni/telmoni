@@ -55,8 +55,8 @@ describe("ConsoleEntry", () => {
     expect(mockRedirect).toHaveBeenCalledWith("/auth/logout");
   });
 
-  // ⚠ The overview, never a project: Vercel opens on a team's overview, and
-  // the overview is the one page every member may open. Which organization is
+  // ⚠ The overview, never a project: the overview is the one page every
+  // member may open. Which organization is
   // auth's to say — the one the cookie remembers, else the person's default,
   // which a sign-in leaves it to by forgetting the cookie.
   it("lands on the overview of the organization auth answered", async () => {
@@ -79,8 +79,8 @@ describe("ConsoleEntry", () => {
     },
   );
 
-  // ⚠ Nothing is asked before the console opens, as Vercel and Cloudflare
-  // ask nothing: an organization is provisioned already named after its
+  // ⚠ Nothing is asked before the console opens: an organization is
+  // provisioned already named after its
   // owner, at the URL that name reads as, and both are changed on Settings.
   it("opens a just-provisioned organization on its overview, asking nothing first", async () => {
     mockContext = {

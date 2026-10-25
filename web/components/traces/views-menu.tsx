@@ -62,7 +62,7 @@ type Props = {
   canSave: boolean;
 };
 
-// The project's saved views, as Langfuse's table views are: picked from a
+// The project's saved views: picked from a
 // menu, each opening the list on its filters, sort and window with its
 // columns; the one the page was opened from named on the button, starred
 // once the list has moved off it. Every member applies them; owners and

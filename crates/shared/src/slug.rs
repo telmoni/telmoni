@@ -10,7 +10,7 @@
 //! (`PATCH /internal/v1/organization`), so only a URL change moves it. Ids key
 //! lanes, headers, cookies and foreign keys; every link a person is shown —
 //! an index entry's URL and a citation included — is spelled with slugs, and
-//! dies when the slug moves, as a Vercel link does. The console redirects an
+//! dies when the slug moves. The console redirects an
 //! id in a path to wherever the slug is now.
 //!
 //! An organization's slug is unique across every organization, being the

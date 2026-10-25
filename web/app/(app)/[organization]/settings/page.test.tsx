@@ -170,8 +170,8 @@ describe("OrganizationSettingsPage", () => {
     expect(screen.queryByTestId("access-denied")).toBeNull();
   });
 
-  // Vercel's team page, for an organization: the name and the URL are two
-  // settings, the id is shown for the API, and the danger zone is the owner's.
+  // The organization's settings page: the name and the URL are two settings,
+  // the id is shown for the API, and the danger zone is the owner's.
   it("shows the name, the URL, the id and the danger zone, in that order, to the owner", async () => {
     render(await OrganizationSettingsPage());
     expect(screen.getByTestId("page-header")).toHaveTextContent("Settings");

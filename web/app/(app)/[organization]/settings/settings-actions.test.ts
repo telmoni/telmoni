@@ -176,7 +176,7 @@ describe("renameOrganizationAction", () => {
   });
 });
 
-// The URL is its own setting, as on Vercel's team page: a slug an owner or
+// The URL is its own setting: a slug an owner or
 // admin chooses, which auth holds to being free and none of the console's own
 // words.
 describe("changeOrganizationUrlAction", () => {

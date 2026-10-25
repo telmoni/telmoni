@@ -6,8 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import type { TraceQuery } from "@/lib/server/entities/traces";
 import { activeFilters, tracesHref, unfiltered, without, type TraceUi } from "@/lib/traces";
 
-// The filters in force above the list, as Langfuse writes its query above
-// its table: a value at a time, each taken off by its own ×, and all of them
+// The filters in force above the list: a value at a time, each taken off by
+// its own ×, and all of them
 // at once. Plain links, so the bar is the server's to draw.
 export function TraceFilterBar({
   organization,

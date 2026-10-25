@@ -173,8 +173,8 @@ export async function confirmEmailChangeAction(
   return body.success ? { error: null, email: body.data.email } : { error: null };
 }
 
-// The organization a sign-in opens in, as Vercel's default team is. The
-// body names it, so no organization header goes with it: auth refuses one the
+// The organization a sign-in opens in. The body names it, so no organization
+// header goes with it: auth refuses one the
 // person holds no seat in, or one being deleted, and records the choice on the
 // chosen organization's chain.
 export async function setDefaultOrganizationAction(

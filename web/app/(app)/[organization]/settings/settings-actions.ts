@@ -28,8 +28,8 @@ interface Answer {
 }
 
 /// `PATCH /internal/v1/organization` for the organization the page rendered: the
-/// name, the slug, or both. The name and the URL are two settings, as on
-/// Vercel's team page: a name moves no slug.
+/// name, the slug, or both. The name and the URL are two settings: a name
+/// moves no slug.
 async function patchOrganization(
   organizationId: string,
   bucket: string,

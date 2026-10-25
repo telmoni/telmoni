@@ -412,8 +412,8 @@ pub async fn set_analytics_preference(
 
 /// `PUT /internal/v1/me/default-organization` — the organization a sign-in opens
 /// this person in, and the one a request naming none acts in: one of the
-/// active organizations they hold a seat in, as Vercel's default team is one
-/// of yours. `/me` answers it as `defaultOrganizationId`.
+/// active organizations they hold a seat in. `/me` answers it as
+/// `defaultOrganizationId`.
 pub async fn set_default_organization(
     State(state): State<Arc<AppState>>,
     principal: Principal,

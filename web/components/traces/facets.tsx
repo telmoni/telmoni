@@ -63,8 +63,8 @@ type Props = {
   facets: TraceFacets | null;
 };
 
-// The filters, beside the list as Langfuse's sidebar stands beside its
-// tables: each a section of the values the window's runs carry, with how
+// The filters, beside the list: each a section of the values the window's
+// runs carry, with how
 // many runs carry each under every other filter, ticked to narrow the list
 // to them. Ids — users and sessions — can be typed in as well, since the
 // fifty a facet names are rarely the one a person is after.
@@ -74,8 +74,8 @@ export function TraceFacetsPanel({ organization, slug, query, ui, facets }: Prop
   const { go, pending } = useListNavigation();
   const panel = useRef<HTMLElement>(null);
   const { width, edge } = useFiltersWidth(panel);
-  // Hidden, the panel leaves its button where its heading stood, as
-  // Langfuse's sidebar folds to its icon, so it opens again from there.
+  // Hidden, the panel leaves its button where its heading stood, so it opens
+  // again from there.
   if (!shown) {
     return (
       <div className="shrink-0">

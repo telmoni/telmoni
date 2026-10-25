@@ -64,7 +64,7 @@ export const OPEN_KEY = "o";
 export const ORGANIZATION_KEY = "O";
 
 /** `g` then this reaches Notifications, the bell's page, from anywhere in the
- *  console, as GitHub's `g n` does. */
+ *  console. */
 export const NOTIFICATIONS_KEY = "n";
 
 export interface GoSequence {

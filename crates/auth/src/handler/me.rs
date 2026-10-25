@@ -78,9 +78,8 @@ pub struct MeResponse {
     pub active_organization_id: Option<OrganizationId>,
     /// The organization a sign-in opens in, and the one a request naming none
     /// acts in: the one the person chose, while they hold its seat and it is
-    /// active, else the oldest they own, else the oldest they belong to — as
-    /// Vercel opens on a default team, and picks another for whoever leaves
-    /// theirs. `None` exactly when `active_organization_id` is.
+    /// active, else the oldest they own, else the oldest they belong to.
+    /// `None` exactly when `active_organization_id` is.
     pub default_organization_id: Option<OrganizationId>,
     /// The project seats the person holds.
     pub memberships: Vec<members::Membership>,
@@ -354,9 +353,8 @@ enum Provisioning {
 /// ([`found_organization`], as an organization asked for is made). It is named
 /// after them ([`crate::identity::default_organization`]), from the
 /// `display_name` `/me` has just read, and goes by the first free slug that
-/// name gives, so the console opens straight onto it, as Vercel and Cloudflare
-/// open a new account; the owner renames it, or moves its URL, on Settings. It
-/// has no project until somebody makes one, as a Vercel team starts empty.
+/// name gives, so the console opens straight onto it; the owner renames it, or
+/// moves its URL, on Settings. It has no project until somebody makes one.
 ///
 /// ⚠ **Serialised on the person, and re-checked under the lock.** Two
 /// concurrent first renders would otherwise each see "no organization" and

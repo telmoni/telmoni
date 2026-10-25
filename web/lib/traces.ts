@@ -38,7 +38,7 @@ import {
 
 /** The rows a page offers to hold. */
 export const ROWS_PER_PAGE = [25, 50, 100] as const;
-/** The rows a page holds when the URL names none, as Langfuse's does. */
+/** The rows a page holds when the URL names none. */
 export const DEFAULT_ROWS = 50;
 /** The furthest page the server turns to. */
 export const MAX_PAGE = 1_000;
@@ -225,8 +225,7 @@ export function activeFilters(query: TraceQuery): ActiveFilter[] {
   );
 }
 
-/** Where the columns menu files a column, as Langfuse's files its usage and
- *  cost: the counts of a run's parts, and its tokens. */
+/** Where the columns menu files a column: the counts of a run's parts, and its tokens. */
 export type ColumnGroup = "counts" | "tokens";
 
 /** Each group's heading in the columns menu. */
@@ -250,7 +249,7 @@ export type ColumnSpec = {
 };
 
 /** The trace's id, which every row shows, since it opens the trace: in the
- *  columns menu, ticked and not to be unticked, as Langfuse shows its own. */
+ *  columns menu, ticked and not to be unticked. */
 export const TRACE_ID_COLUMN = {
   label: "Trace ID",
   hint: "The run's id, which opens its trace. Always shown.",
@@ -460,8 +459,7 @@ export function nextSort(
   return { ...sortAfterClick(SORTS, TraceSort.Started, query, column), page: undefined };
 }
 
-/** A ready-made query a toolbar button applies, as Langfuse's Quality, Slow
- *  and Cost do: cost waits for prices (roadmap 7.1). */
+/** A ready-made query a toolbar button applies; cost waits for prices (roadmap 7.1). */
 export type Preset = {
   id: "errors" | "slow" | "tokens";
   label: string;

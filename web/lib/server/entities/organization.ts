@@ -96,8 +96,8 @@ export interface ServerContext {
   activeOrganizationId: string | null;
   /// The organization a sign-in opens in, as auth resolved it: the one the
   /// person chose on Account Settings while they still hold its seat, else the
-  /// oldest they own, else the oldest they belong to — as Vercel opens on a
-  /// default team. A sign-in forgets the cookie, so this is what the first
+  /// oldest they own, else the oldest they belong to. A sign-in forgets the
+  /// cookie, so this is what the first
   /// `/me` after it acts in. `null` exactly when `activeOrganizationId` is.
   defaultOrganizationId: string | null;
   /// ⚠ The path named an organization and auth answered with another: the

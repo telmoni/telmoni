@@ -198,8 +198,8 @@ services:
       TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-1}
       SERVICE_SECRET: ${SERVICE_SECRET}
       APP_URL: ${APP_URL:-http://localhost:3000}
-      # Langfuse's names. The login form is on unless
-      # AUTH_DISABLE_USERNAME_PASSWORD; nobody new signs up, at the form or
+      # The login form is on unless AUTH_DISABLE_USERNAME_PASSWORD; nobody
+      # new signs up, at the form or
       # at a provider, unless AUTH_DISABLE_SIGNUP=false (an invited address
       # always may); ADMIN_EMAIL and ADMIN_PASSWORD seed the first account.
       # An OpenID Connect provider sits beside the form when
@@ -211,8 +211,7 @@ services:
       VERIFY_EMAIL: ${VERIFY_EMAIL:-false}
       AUTH_DISABLE_USERNAME_PASSWORD: ${AUTH_DISABLE_USERNAME_PASSWORD:-false}
       AUTH_DOMAINS_WITH_SSO_ENFORCEMENT: ${AUTH_DOMAINS_WITH_SSO_ENFORCEMENT:-}
-      # Where every person created starts, as Langfuse's
-      # LANGFUSE_DEFAULT_ORG_ID gives one: an organization's id and one of its
+      # Where every person created starts: an organization's id and one of its
       # projects', each joined as a member unless its role is admin.
       TELMONI_DEFAULT_ORG_ID: ${TELMONI_DEFAULT_ORG_ID:-}
       TELMONI_DEFAULT_ORG_ROLE: ${TELMONI_DEFAULT_ORG_ROLE:-}

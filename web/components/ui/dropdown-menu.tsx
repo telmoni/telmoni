@@ -32,7 +32,7 @@ function DropdownMenuTrigger({
 }
 
 // No border on a menu: its own surface (`bg-menu`, the light theme's a hair
-// lighter than the page, as Langfuse's sidebar is) and a soft shadow
+// lighter than the page) and a soft shadow
 // (`shadow-menu`, set per theme in `globals.css`) lift it off the page. The
 // owner asked for the outlines to go (2026-10-08); the sub-menu is drawn the same.
 function DropdownMenuContent({

@@ -23,9 +23,8 @@ export function PageHeader({
   /** How many the page lists, beside its title, as the Projects page counts
    *  its projects; none while that count cannot be read. */
   count?: number;
-  /** What the page is, behind an ⓘ beside its title, as Langfuse's tracing
-   *  page says what it lists: for a page whose toolbar leaves no room for a
-   *  sentence. */
+  /** What the page is, behind an ⓘ beside its title: for a page whose toolbar
+   *  leaves no room for a sentence. */
   info?: string;
   action?: ReactNode;
   /** Where the page's way back leads, drawn above its title as `← backLabel`:

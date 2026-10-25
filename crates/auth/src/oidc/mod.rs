@@ -144,8 +144,8 @@ impl IdTokenClaims {
     }
 }
 
-/// What a provider is held to (`AUTH_<PROVIDER>_CHECKS`, Langfuse's
-/// setting): PKCE and the nonce, each on unless the deployment names the
+/// What a provider is held to (`AUTH_<PROVIDER>_CHECKS`): PKCE and the
+/// nonce, each on unless the deployment names the
 /// provider as one that refuses it; `state` always, since the callback is
 /// built on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -169,7 +169,7 @@ impl std::str::FromStr for Checks {
     type Err = String;
 
     /// A comma-separated list of `pkce`, `nonce` and `state`, which must
-    /// name `state`: Langfuse's `none`, or a list without it, is refused.
+    /// name `state`: `none`, or a list without it, is refused.
     fn from_str(list: &str) -> Result<Self, Self::Err> {
         let (mut checks, mut state) = (
             Self {

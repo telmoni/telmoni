@@ -38,8 +38,8 @@ import { PEEK_PARAM, PEEK_NUDGED, shortId, traceHref } from "@/lib/traces";
 import { offerPageSteps } from "@/lib/use-page-steps";
 import { cn } from "@/lib/utils";
 
-// A trace opened from the list without leaving it, as Langfuse's peek opens
-// one: the console's side panel (`side-panel.tsx`) over the list, which fills
+// A trace opened from the list without leaving it: the console's side panel
+// (`side-panel.tsx`) over the list, which fills
 // the content area at a press and goes back. The run it shows is the URL's
 // `?peek=`, kept in the browser's history (`lib/peek.ts`), so a link holds it
 // and Back shuts it. The list's filters, sorts and pages carry no `peek`, so

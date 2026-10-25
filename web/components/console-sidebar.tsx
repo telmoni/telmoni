@@ -54,8 +54,7 @@ function NavRow({
   // its icon keeps a 32px box at the row's left edge, 14px in. Both put the
   // icon's centre 30px from the window's edge, where the header's mark
   // stands, at the same height row for row, so nothing slides when the rail
-  // toggles — Gemini's rail is the reference; the label then starts where the
-  // header's name does.
+  // toggles; the label then starts where the header's name does.
   if (!showLabel) {
     return (
       <Link
@@ -175,8 +174,8 @@ export function ConsoleSidebar({
   // 12px in on each side (`px-3`), so every icon lands on the centre the
   // header's mark stands on. The control that opens and closes it is the
   // header's, in the cell above; closed, the whole column is a way to open
-  // it too — the cursor says so, a bar and an arrow (`cursor-expand`) as
-  // Gemini draws it, and a press anywhere off a row opens it —
+  // it too — the cursor says so, a bar and an arrow (`cursor-expand`), and a
+  // press anywhere off a row opens it —
   // so nobody has to aim at the one button. Below `md` it is a drawer under
   // the header, opened from the header's hamburger.
   return (

@@ -11,7 +11,7 @@
 //! receiver's dedup key. The secret goes only into the MAC.
 //!
 //! **During a rotation's overlap there are two `v1`s**, the new secret's first
-//! and then the prior one's, as Stripe sends during a roll. A receiver accepts
+//! and then the prior one's. A receiver accepts
 //! the delivery when ANY `v1` verifies, so it keeps working whichever secret it
 //! holds while it is being moved.
 //!

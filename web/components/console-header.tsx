@@ -76,7 +76,7 @@ export function ConsoleHeader({
         {/* `pl-1`: open, the mark's centre is 30px in — the cell's 14, 4
             more and half its 24 — the closed column's axis, which every rail
             icon keeps in both states, so the mark rests while the rail
-            toggles, as Gemini's does, and only the name and the control come
+            toggles, and only the name and the control come
             and go; `gap-1.5` starts the name where the rows' labels start,
             48px in. The link's own box still opens on the rows' edge. Below
             `md` there is no brand at all: the bar is a phone's width, and the

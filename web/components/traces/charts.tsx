@@ -22,7 +22,7 @@ import type { TraceHistogram } from "@/lib/server/entities/traces";
 import { formatCount, formatDuration } from "@/lib/traces";
 import { cn } from "@/lib/utils";
 
-/** What a chart of the list draws, as Langfuse's "Count" picks it. */
+/** What a chart of the list draws. */
 type Metric = "runs" | "tokens" | "duration";
 
 const METRIC_LABEL: Record<Metric, string> = {
@@ -207,7 +207,7 @@ function MetricChart({
   );
 }
 
-// The strip above the table, as Langfuse draws its count above its traces:
+// The strip above the table:
 // the window's runs by when they started, or their tokens or durations,
 // picked beside it.
 export function TraceHistogramStrip({ histogram }: { histogram: TraceHistogram }) {

@@ -252,8 +252,8 @@ describe("TracesPage", () => {
     expect(table.getByText("1,500")).toBeInTheDocument();
     expect(table.getByText("2 s")).toBeInTheDocument();
     expect(table.getByText("500 ms")).toBeInTheDocument();
-    // Columns past the first eight are offered, not shown; the count, as
-    // Langfuse's, holds the trace's id, which always shows.
+    // Columns past the first eight are offered, not shown; the count holds the
+    // trace's id, which always shows.
     expect(table.queryByRole("columnheader", { name: /Model calls/ })).toBeNull();
     expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("9/23");
     // The window and the refresh stand on the title's row.

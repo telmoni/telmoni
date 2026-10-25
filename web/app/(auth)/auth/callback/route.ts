@@ -180,8 +180,8 @@ export async function GET(request: NextRequest) {
     ...cookieOpts(SESSION_TTL_SECONDS),
   });
   response.cookies.delete(PKCE_COOKIE);
-  // ⚠ **A sign-in opens the person's default organization**, as a Vercel
-  // sign-in opens the default team: with no organization remembered, `/me`
+  // ⚠ **A sign-in opens the person's default organization**: with no
+  // organization remembered, `/me`
   // answers the default, and `/console` lands there. A sign-out clears this
   // cookie already; a session that ended any other way — expired, revoked
   // from another device — left it behind, naming wherever the last one stood.

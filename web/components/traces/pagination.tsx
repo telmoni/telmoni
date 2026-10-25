@@ -40,7 +40,7 @@ type Props = {
   limit: number;
 };
 
-// The foot of the list, as Langfuse's is: how many traces it holds, how many
+// The foot of the list: how many traces it holds, how many
 // a page shows, which page this is, and the way to the others — the first
 // and the last a click away too.
 export function TracePagination({ organization, slug, query, ui, total, page, limit }: Props) {

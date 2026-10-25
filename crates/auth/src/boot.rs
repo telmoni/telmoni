@@ -1,5 +1,5 @@
-//! What the environment says about sign-in, read once at boot under
-//! Langfuse's names: the login form and who may create an account, the
+//! What the environment says about sign-in, read once at boot: the login
+//! form and who may create an account, the
 //! OpenID Connect provider beside the form, and the first account. A binary
 //! built for another deployment reads its own provider's variables instead
 //! and hands it to [`providers_with`].

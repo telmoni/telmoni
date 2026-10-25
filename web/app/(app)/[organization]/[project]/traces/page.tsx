@@ -44,7 +44,7 @@ import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Traces" };
 
-// The trace list, laid out as Langfuse's tracing page: a toolbar, the
+// The trace list: a toolbar, the
 // filters beside the list, the runs over the window above a page of rows,
 // and the way through the pages below. A row per run of this project's
 // agents in a window of days, every column a sort and most a filter, all of

@@ -24,12 +24,11 @@ export default async function ConsoleEntry() {
     );
   }
 
-  // ⚠ The organization's overview, never a project of it: as Vercel opens on
-  // a team's overview, the one page every member of the organization may
-  // open, where the projects page refuses a member; their projects are a
-  // press away in the header's switcher. Nothing is asked first: an
-  // organization is provisioned already named after its owner, as Vercel and
-  // Cloudflare name a new account, and renamed on Settings. Which
+  // ⚠ The organization's overview, never a project of it: the one page every
+  // member of the organization may open, where the projects page refuses a
+  // member; their projects are a press away in the header's switcher. Nothing
+  // is asked first: an organization is provisioned already named after its
+  // owner, and renamed on Settings. Which
   // organization is auth's answer: the one the cookie remembers, else the
   // person's default — and a sign-in clears the cookie (`auth/callback`), so
   // signing in opens the default, while within a session this returns to

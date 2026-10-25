@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/select";
 import { windowLabel, windowsOffered } from "@/lib/list-query";
 
-// The window a list reads, as Langfuse's "Past 1 day" picker sets it: a pick
+// The window a list reads: a pick
 // is the page's URL with the new window in it, everything else the URL holds
 // — the sort, the filters, a saved view — kept, and the list back on its
 // first page, which the new window may not reach past.

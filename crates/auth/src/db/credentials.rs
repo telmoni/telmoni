@@ -10,12 +10,11 @@ use chrono::{DateTime, Duration, Utc};
 use telmoni_shared::UserId;
 use telmoni_shared::db::tenant_session::{Person, Scoped};
 
-/// Wrong passwords in a row before the account stops answering for a while:
-/// Grafana's `brute_force_login_protection_max_attempts`.
+/// Wrong passwords in a row before the account stops answering for a while.
 pub const LOCKOUT_AFTER: i32 = 5;
 
-/// How long a locked account stops answering: the window Grafana counts
-/// attempts in. Short, because a lockout is something anybody who knows the
+/// How long a locked account stops answering. Short, because a lockout is
+/// something anybody who knows the
 /// address can cause.
 pub const LOCKOUT_MINUTES: i64 = 5;
 

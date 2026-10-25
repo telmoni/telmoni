@@ -10,8 +10,8 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* The cursor over a closed rail: a bar and an arrow, as Gemini draws
-     its own, black with a white outline as the system pointer is, the same
+  /* The cursor over a closed rail: a bar and an arrow, black with a white
+     outline as the system pointer is, the same
      in both themes so it reads as a cursor and never as a theme's icon.
      Drawn as an SVG data URL, hotspot at its centre. */
   --cursor-expand: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cg%20stroke='%23ffffff'%20stroke-width='4'%3E%3Cpath%20d='M5%205v14'/%3E%3Cpath%20d='M9%2012h10'/%3E%3Cpath%20d='M15%208l4%204-4%204'/%3E%3C/g%3E%3Cg%20stroke='%23000000'%20stroke-width='2'%3E%3Cpath%20d='M5%205v14'/%3E%3Cpath%20d='M9%2012h10'/%3E%3Cpath%20d='M15%208l4%204-4%204'/%3E%3C/g%3E%3C/svg%3E") 12 12, pointer;
@@ -25,8 +25,8 @@
 
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.245 0.005 260);
-  /* A dropdown menu's own surface and shadow: in the light, the grey
-     Langfuse gives its sidebar (#fcfcfc), a hair off white — lighter than the
+  /* A dropdown menu's own surface and shadow: in the light, a grey a hair
+     off white (#fcfcfc) — lighter than the
      docs' grey page, darker than the console's white one — and a soft shadow
      in both themes, since the menus carry no border. */
   --menu: oklch(0.991 0 0);

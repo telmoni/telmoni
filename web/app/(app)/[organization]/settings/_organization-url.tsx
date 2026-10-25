@@ -21,7 +21,7 @@ export function OrganizationUrlForm({
   organizationId: string;
   /// The slug its paths begin with now.
   slug: string;
-  /// The console's host, shown ahead of the field as Vercel shows its own.
+  /// The console's host, shown ahead of the field.
   host: string;
   canEdit: boolean;
 }) {

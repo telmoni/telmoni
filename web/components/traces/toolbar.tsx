@@ -78,18 +78,17 @@ type Props = {
   canSave: boolean;
 };
 
-/** Each ready-made query's icon, as Langfuse marks Quality, Slow and Cost. */
+/** Each ready-made query's icon. */
 const PRESET_ICON: Record<Preset["id"], LucideIcon> = {
   errors: CircleXIcon,
   slow: TimerIcon,
   tokens: CoinsIcon,
 };
 
-// The trace list's toolbar, Langfuse's own set on one row: the ready-made
-// queries, the saved views and the table or the charts on the left; the
-// columns, the rows' density and a download on the right. The window and the
-// refresh stand on the title's row, as Langfuse keeps them at the top of the
-// page (`TraceHeaderControls`), and the filters' panel opens and closes from
+// The trace list's toolbar, on one row: the ready-made queries, the saved
+// views and the table or the charts on the left; the columns, the rows'
+// density and a download on the right. The window and the refresh stand on
+// the title's row (`TraceHeaderControls`), and the filters' panel opens and closes from
 // its own heading. Every control is a shadcn one; each that changes what the
 // list holds changes its URL, and each that changes only how it looks is kept
 // in the browser (`lib/trace-prefs.ts`).
@@ -161,8 +160,7 @@ export function TraceToolbar(props: Props) {
   );
 }
 
-// The window the list reads and its refresh, on the title's row as Langfuse
-// keeps its "Past 1 day" and refresh at the top of the page.
+// The window the list reads and its refresh, on the title's row.
 export function TraceHeaderControls({ days }: { days: number }) {
   return (
     <div className="flex items-center gap-3.5">
@@ -231,7 +229,7 @@ function RefreshControl() {
   );
 }
 
-/** Which columns the table shows, as Langfuse's "Columns" picks them: the
+/** Which columns the table shows: the
  *  trace's id ticked for good, the counts and the tokens each a group that
  *  opens under its heading with how many of it show, what a column means
  *  behind its ⓘ, and the menu left open while columns are ticked one after
@@ -323,7 +321,7 @@ function ColumnsMenu() {
 
 /** One column in the menu: a box ticked while it shows, and what it means
  *  behind an ⓘ where its heading does not say. A column always shown is
- *  ticked and greyed, as Langfuse greys its own. */
+ *  ticked and greyed. */
 function ColumnItem({
   label,
   hint,

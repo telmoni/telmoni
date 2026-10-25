@@ -101,10 +101,10 @@ pub fn display_for(display_name: Option<&str>, email: &str) -> String {
         .to_string()
 }
 
-/// What a person's first organization is called when it is provisioned, as
-/// Vercel and Cloudflare name a new account after its holder — the first word
-/// of their name, "Ada's organization" — and the slugs it may go by, best
-/// first. Somebody who gave no name gets "My organization". Nothing is read
+/// What a person's first organization is called when it is provisioned —
+/// named after its holder, the first word of their name, "Ada's organization"
+/// — and the slugs it may go by, best first. Somebody who gave no name gets
+/// "My organization". Nothing is read
 /// off their address: the name is shown to everyone the owner invites, and
 /// the slug that follows it is in every path. The owner renames it, and moves
 /// its URL, on Settings.

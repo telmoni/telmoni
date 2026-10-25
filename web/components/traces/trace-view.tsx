@@ -69,7 +69,7 @@ import {
 import { SpanKind, SpanStatus } from "@/lib/types/enums";
 import { cn } from "@/lib/utils";
 
-// One trace read a span at a time, as Langfuse's trace view reads one: its
+// One trace read a span at a time: its
 // spans as the tree they ran in down one side, and the span chosen there, in
 // full, beside it. Every pixel is metadata: no prompt, completion or tool
 // payload reaches the console, in any content mode, and a span's attributes

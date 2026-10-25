@@ -4,7 +4,7 @@ import { SpanKind } from "@/lib/types/enums";
 
 // One trace as the tree its spans were recorded in, for the view that reads
 // it a span at a time (`components/traces/trace-view.tsx`): each span under
-// its parent, as Langfuse's trace view nests its observations.
+// its parent.
 
 /** A span and the spans recorded under it. */
 export type SpanNode = {

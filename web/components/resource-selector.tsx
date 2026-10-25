@@ -69,8 +69,8 @@ type Row = {
 // from the keyboard: the name opens the resource, the gear its settings.
 // Under the pointer, or with either target focused, the whole row fills —
 // one fill across the name and the gear, since the row is one thing — and
-// the gear's own small box, set 4px in from the row's top, bottom and right
-// as Langfuse sets its own, darkens a step more under the pointer. The one
+// the gear's own small box, set 4px in from the row's top, bottom and right,
+// darkens a step more under the pointer. The one
 // you stand in carries a check after its name rather than a fill, so hover
 // and current never look alike. Neither item fills on its own: the menu's
 // per-item fill is turned off here and the row carries it.
