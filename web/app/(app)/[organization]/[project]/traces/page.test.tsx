@@ -246,6 +246,9 @@ describe("TracesPage", () => {
     // A run whose own span has not arrived is running, whatever its spans say.
     expect(table.getByText("Running")).toBeInTheDocument();
     expect(table.queryByText("Error")).toBeNull();
+    // A run that recovered from a failed call, and one still running past
+    // one, each name it beside the badge.
+    expect(table.getAllByText("1 failed span")).toHaveLength(2);
     expect(table.getByText("1,500")).toBeInTheDocument();
     expect(table.getByText("2 s")).toBeInTheDocument();
     expect(table.getByText("500 ms")).toBeInTheDocument();

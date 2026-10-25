@@ -295,7 +295,7 @@ function SessionPanel({
               {formatCount(session.traces.length)}
               {session.more ? " traces shown" : session.traces.length === 1 ? " trace" : " traces"}
               {sums.errors > 0 && (
-                <span className="text-destructive">, {formatCount(sums.errors)} in error</span>
+                <span className="text-destructive">, {formatCount(sums.errors)} with failed spans</span>
               )}
             </span>
             <span className="tabular-nums">{formatCount(sums.steps)} steps</span>

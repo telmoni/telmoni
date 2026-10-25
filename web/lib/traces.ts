@@ -296,7 +296,7 @@ export const TRACE_COLUMNS: readonly ColumnSpec[] = [
     label: "Status",
     sort: TraceSort.Status,
     first: SortDirection.Asc,
-    hint: "OK, Error or Cancelled once the run's own span arrives; Running until it does.",
+    hint: "OK, Error or Cancelled once the run's own span arrives; Running until it does. Beside any but Error, how many of the run's spans failed.",
   },
   {
     key: TraceColumn.ErrorType,

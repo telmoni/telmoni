@@ -164,12 +164,14 @@ describe("SessionPeek", () => {
       "Tools",
     ]);
     expect(within(table).getByText("RuntimeError")).toBeInTheDocument();
+    // A run that ended in error says so once: no failed-span count beside it.
+    expect(within(table).queryByText(/failed span/)).toBeNull();
     // The sums on the header's line: the user, leading to their traces.
     expect(within(panel).getByRole("link", { name: `user ${HASHED}` })).toHaveAttribute(
       "href",
       `/acme/web/traces?user=${HASHED}&days=30`,
     );
-    expect(within(panel).getByText("1 trace")).toHaveTextContent("1 trace, 1 in error");
+    expect(within(panel).getByText("1 trace")).toHaveTextContent("1 trace, 1 with failed spans");
     expect(within(panel).getByText("1,500 tokens")).toHaveAttribute("title", "1,200 in, 300 out");
     expect(within(panel).getByRole("link", { name: "Open the session's page" })).toHaveAttribute(
       "href",

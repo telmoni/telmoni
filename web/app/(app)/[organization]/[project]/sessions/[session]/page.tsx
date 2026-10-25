@@ -144,7 +144,7 @@ export default async function SessionPage({
                 {session.more ? " shown" : ""}
                 {errors > 0 && (
                   <span className="text-destructive">
-                    , {formatCount(errors)} in error
+                    , {formatCount(errors)} with failed spans
                   </span>
                 )}
               </span>

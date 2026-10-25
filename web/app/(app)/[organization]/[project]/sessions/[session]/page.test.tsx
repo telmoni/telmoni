@@ -274,7 +274,7 @@ describe("SessionPage", () => {
       "href",
       `/acme/web/traces?user=${HASHED}`,
     );
-    expect(screen.getByText("1 in error", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("1 with failed spans", { exact: false })).toBeInTheDocument();
     expect(screen.getByText("1,515")).toBeInTheDocument();
     expect(screen.getByText("(1,210 in, 305 out)")).toBeInTheDocument();
 
