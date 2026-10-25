@@ -12,27 +12,31 @@ local model named by the path to its file is sent by the file's name alone.
 
 | Agent | Plugin | Package | Runs as |
 |---|---|---|---|
-| **Claude Code** | [`telmoni/claude-observability-plugin`](https://github.com/telmoni/claude-observability-plugin) | `@telmoni/claude-observability-plugin` | `claude-code` |
+| **Claude Code** | [`telmoni/claude-observability-plugin`](https://github.com/telmoni/claude-observability-plugin) | the repository itself | `claude-code` |
 | **Codex** | [`telmoni/codex-observability-plugin`](https://github.com/telmoni/codex-observability-plugin) | `@telmoni/codex-observability-plugin` | `codex` |
 | **OpenCode** | [`telmoni/opencode-observability-plugin`](https://github.com/telmoni/opencode-observability-plugin) | `@telmoni/opencode-observability-plugin` | `opencode` |
-| **Cursor** | [`telmoni/cursor-observability-plugin`](https://github.com/telmoni/cursor-observability-plugin) | `@telmoni/cursor-observability-plugin` | `cursor` |
+| **Cursor** | [`telmoni/cursor-observability-plugin`](https://github.com/telmoni/cursor-observability-plugin) | `@telmoni/cursor-observability-plugin`, or the repository as a Cursor plugin | `cursor` |
 
-Each plugin is built on the [TypeScript SDK](/docs/api/sdks), which it carries
-inside its own package, and sends what the SDKs send, under a
-[project API key](/docs/api/api-keys) holding only the **ingest** scope (**Send
-spans**). A self-hosted Telmoni's machine host is read [as the SDKs read
-one](/docs/api/sdks#the-key-on-the-wire): given without a scheme, it is
-`https://`, or `http://` for this machine, the only host plain HTTP goes to.
-The Claude Code, Codex and Cursor plugins need Node.js 22.23.4, 24.22.1,
-26.12.1 or later, October 2026's security releases; Codex's and Cursor's
-install with npm, so it must be on your `PATH`, and Claude Code and Codex need
-git, with which they add a plugin's marketplace; the OpenCode plugin runs
-inside OpenCode, which installs it itself. Each installs as built, as below; to
-run one from a checkout instead, build it in its repository:
+The Claude Code plugin is built on the [Python SDK](/docs/api/sdks), which its
+hook fetches the first time it runs; the other three on the [TypeScript
+SDK](/docs/api/sdks), which each carries inside its own package. All send what
+the SDKs send, under a [project API key](/docs/api/api-keys) holding only the
+**ingest** scope (**Send spans**). A self-hosted Telmoni's machine host is read
+[as the SDKs read one](/docs/api/sdks#the-key-on-the-wire): given without a
+scheme, it is `https://`, or `http://` for this machine, the only host plain
+HTTP goes to. The Claude Code plugin needs git, with which Claude Code adds its
+marketplace, and [uv](https://docs.astral.sh/uv/) on your `PATH`, or without
+uv Python 3.10 or later with the `telmoni` package installed for `python3`. The
+Codex and Cursor plugins need Node.js 22.23.4, 24.22.1, 26.12.1 or later,
+October 2026's security releases, and npm on your `PATH`, which installs them,
+but for Cursor's installed as a Cursor plugin, which needs Node alone; Codex
+needs git too. The OpenCode plugin runs inside OpenCode, which installs
+it itself. The Claude Code plugin runs from a checkout as cloned; to run one of
+the others from a checkout, build it in its repository:
 
 ```sh
-git clone https://github.com/telmoni/claude-observability-plugin.git   # or the codex-, opencode- or cursor-observability-plugin
-(cd claude-observability-plugin && npm install && npm run build)
+git clone https://github.com/telmoni/codex-observability-plugin.git   # or the opencode- or cursor-observability-plugin
+(cd codex-observability-plugin && npm install && npm run build)
 ```
 
 ---
@@ -81,8 +85,9 @@ and the turn, and every span's from the run's.
 names, ids, times, counts and flags: each entry's kind, id, time and outcome, a
 reply's model, provider and token counts, a tool call's name, and a subagent's
 kind. The Claude Code plugin also reads the skill a `Skill` call names, which
-it sends as the tag `skills`, and whether a prompt is empty, opens with a tag
-or marks an interruption, which it never keeps. It never keeps or sends a
+it sends as the tag `skills`, the kind an `Agent` call names, and whether a
+prompt is empty, opens with a tag or marks an interruption, which it never
+keeps. It never keeps or sends a
 prompt or a reply, the model's thinking, a tool's input or output beyond that
 skill's name, a command, the path or contents of a file you work on, the
 working folder, a session's title or anyone's email, whatever the project's
@@ -99,10 +104,11 @@ waits on every hook, as soon as Node has started.
 
 ## Claude Code
 
-Its repository is its marketplace, and names the plugin's `release` branch,
-which each release fills with the package as built, so the hook arrives as
-built and nothing else does. Installed so, it loads in every Claude Code you
-start, an editor's included:
+Its repository is its marketplace, and the plugin is the repository itself:
+Claude Code clones it with your git, and the hook runs from the clone, so
+there is nothing to build. Installed so, it loads in every Claude Code you
+start, an editor's included, and `claude plugin update
+telmoni-observability@telmoni-plugins` takes the next version:
 
 ```sh
 claude plugin marketplace add telmoni/claude-observability-plugin
@@ -110,7 +116,7 @@ claude plugin install telmoni-observability@telmoni-plugins
 ```
 
 From a checkout, start Claude Code with the plugin and your key in its
-environment instead; that one session alone loads it:
+environment instead; that one session alone loads it, as cloned:
 
 ```sh
 TELMONI_API_KEY=tm_… claude --plugin-dir ./claude-observability-plugin
@@ -124,15 +130,21 @@ takes the configuration as JSON (`{"TELMONI_API_KEY": "tm_…"}`); without
 own credentials: in the Keychain on macOS, and in its credentials file
 elsewhere. Left blank, the endpoint is `https://api.telmoni.com`; a self-hosted
 Telmoni gives its own machine host. `TELMONI_API_KEY` and `TELMONI_ENDPOINT` in
-the environment serve when the plugin's own settings are unset.
+the environment Claude Code starts in — your shell's, or a repository's
+`.claude/settings.json` `env` block — come before the plugin's own settings, so
+one checkout can report to another project.
 
 Plugins load as a session starts, so start a new one once the key is set. The
 hook runs when a turn stops, when an API error ends one, and when the session
-ends; a turn that started a subagent in the background is sent once that
-subagent has finished too. Its log is `~/.claude/telmoni/hook.log` (under
-`CLAUDE_CONFIG_DIR` where you set one). Inside Cursor, which runs Claude
-Code's hooks too, the plugin does nothing: Cursor's own plugin records those
-conversations.
+ends, and hands its work to a process of its own, so no turn waits on
+Telmoni; a turn that started a subagent in the background is sent once the
+subagent's notice has been answered. Its log is `hook.log` in the plugin's
+data folder: `~/.claude/plugins/data/telmoni-observability-telmoni-plugins/`
+for an install from the marketplace, `telmoni-observability-inline/` there
+under `--plugin-dir`, or `~/.claude/telmoni/` where Claude Code gives the
+plugin no data folder, each under `CLAUDE_CONFIG_DIR` where you set one.
+Inside Cursor, which runs Claude Code's hooks too, the plugin does nothing:
+Cursor's own plugin records those conversations.
 
 ---
 
@@ -256,6 +268,20 @@ The hooks run the Node that ran `setup`, and the plugin it ran, by their paths,
 so a Cursor opened from the Dock finds them; keep a checkout where it is, and
 run `setup` again after moving to another Node. Its log is
 `~/.cursor/telmoni/hook.log`.
+
+Cursor installs the repository itself as a plugin too: from Cursor's marketplace
+once it is listed there, as **Telmoni Observability**; by its address,
+`https://github.com/telmoni/cursor-observability-plugin`, in the search field of
+Cursor's Plugins settings; or cloned into
+`~/.cursor/plugins/local/telmoni-observability` and loaded with **Developer:
+Reload Window**. Its hooks run the bundle committed in the repository's `dist/`
+with the `node` on Cursor's `PATH`, so npm is not needed. Installed so, there is
+no `setup`: give the key as `TELMONI_API_KEY` in the environment Cursor runs its
+hooks with, or write `~/.cursor/telmoni.json` yourself, `{"apiKey": "tm_…"}`,
+with an `"endpoint"` for a self-hosted Telmoni, readable by you alone (`chmod
+600`). Where hooks `setup` wrote run the plugin too, the plugin's stand aside.
+To take it out, remove the plugin in Cursor and delete `~/.cursor/telmoni.json`
+and `~/.cursor/telmoni/`.
 
 Cursor's cloud agents read the repository's hooks alone:
 `telmoni-cursor-observability setup --project` writes `.cursor/hooks.json`
