@@ -105,7 +105,7 @@ export function ChangeEmail({
     return (
       <div className="grid gap-3">
         <p className="text-muted-foreground">
-          Your address is now <span className="font-mono">{changedTo}</span>.
+          Your address is now <span className="font-medium">{changedTo}</span>.
           Sign in with that from now on &mdash; your password has not changed.
         </p>
         {/* ⚠ **EVERY session, and that includes this browser.** Auth's
@@ -174,7 +174,7 @@ export function ChangeEmail({
         >
           <div className="grid gap-2">
             <Label htmlFor="email-code-new">
-              Code sent to <span className="font-mono">{sentTo}</span>
+              Code sent to <span className="font-medium">{sentTo}</span>
             </Label>
             <Input
               id="email-code-new"
@@ -192,7 +192,7 @@ export function ChangeEmail({
           </div>
           <div className="grid gap-2">
             <Label htmlFor="email-code-current">
-              Code sent to <span className="font-mono">{email}</span>
+              Code sent to <span className="font-medium">{email}</span>
             </Label>
             <Input
               id="email-code-current"

@@ -170,7 +170,7 @@ export function TraceTable({ organization, slug, query, ui, traces }: Props) {
                     event.preventDefault();
                     openPeek(trace.run_id);
                   }}
-                  className="font-mono text-xs underline-offset-4 hover:underline"
+                  className="text-xs underline-offset-4 hover:underline"
                 >
                   {shortId(trace.run_id)}
                 </Link>

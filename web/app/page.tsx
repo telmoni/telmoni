@@ -204,7 +204,7 @@ export default async function SplashPage() {
         {/* The product shot — a recording of the console — is still to be
             taken; its frame holds the place and says so. */}
         <div className="dots flex aspect-[16/9] w-full items-center justify-center border-b border-border">
-          <p className="flex items-center gap-3 border border-dashed border-border bg-background px-5 py-4 font-mono text-sm text-muted-foreground">
+          <p className="flex items-center gap-3 border border-dashed border-border bg-background px-5 py-4 text-sm text-muted-foreground">
             <Play aria-hidden="true" className="size-4" />
             A recording of the console, coming soon
           </p>

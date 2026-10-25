@@ -21,7 +21,7 @@ function Keycap({ children }: { children: string }) {
     <kbd
       data-letter-key=""
       aria-hidden="true"
-      className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-sm border border-current/30 bg-current/10 px-1 font-mono text-[11px] leading-none"
+      className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-sm border border-current/30 bg-current/10 px-1 text-[11px] leading-none"
     >
       {children}
     </kbd>

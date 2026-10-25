@@ -355,7 +355,7 @@ function TypedValue({
         aria-label={asked}
         autoComplete="off"
         spellCheck={false}
-        className="font-mono text-xs"
+        className="text-xs"
       />
       <Button type="submit" variant="outline" disabled={!taken}>
         Add

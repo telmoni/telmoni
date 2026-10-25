@@ -238,7 +238,7 @@ function Runs({
                 <Td className="whitespace-nowrap">
                   <Link
                     href={traceHref(organization, slug, run)}
-                    className="font-mono text-xs underline-offset-4 hover:underline"
+                    className="text-xs underline-offset-4 hover:underline"
                   >
                     {shortId(run)}
                   </Link>

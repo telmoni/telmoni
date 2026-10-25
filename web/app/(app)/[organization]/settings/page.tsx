@@ -88,7 +88,7 @@ export default async function OrganizationSettingsPage() {
           description="Your organization's identifier within Telmoni, for the API and the CLI. It never changes."
         >
           <Rows>
-            <SettingsRow label="Organization ID" mono copy={organization.organizationId}>
+            <SettingsRow label="Organization ID" copy={organization.organizationId}>
               {organization.organizationId}
             </SettingsRow>
           </Rows>

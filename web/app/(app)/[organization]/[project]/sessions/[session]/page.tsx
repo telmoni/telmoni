@@ -122,15 +122,15 @@ export default async function SessionPage({
         >
           <Rows>
             <Row label="Session" hint="As the application named it.">
-              <code className="max-w-96 truncate text-xs" title={session.session_id}>
+              <span className="max-w-96 truncate text-xs" title={session.session_id}>
                 {session.session_id}
-              </code>
+              </span>
             </Row>
             <Row label="User" hint="The end user, as stored.">
               {user ? (
                 <Link
                   href={tracesHref(organization, slug, { user: [user], days: query.days })}
-                  className="font-mono text-xs underline-offset-4 hover:underline"
+                  className="text-xs underline-offset-4 hover:underline"
                 >
                   {user}
                 </Link>

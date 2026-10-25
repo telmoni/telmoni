@@ -118,7 +118,7 @@ export function DeleteOrganizationForm({
           <div className="grid gap-2">
             <Label htmlFor="delete-organization-code">
               Enter the 6-digit code sent to{" "}
-              <span className="font-mono">{email}</span>
+              <span className="font-medium">{email}</span>
             </Label>
             <Input
               id="delete-organization-code"

@@ -209,7 +209,7 @@ export const TraceMeta = memo(function TraceMeta({
         </MetaLink>
       )}
       {Object.entries(root.tags).map(([key, value]) => (
-        <Badge key={key} variant="secondary" className="font-mono text-xs font-normal">
+        <Badge key={key} variant="secondary" className="text-xs font-normal">
           {key}={value}
         </Badge>
       ))}
@@ -622,25 +622,13 @@ const SpanRow = memo(function SpanRow({
   );
 });
 
-/** One term and its value in the span's details: an id's value, or an
- *  attribute's name and value, in the code face. */
-function Field({
-  label,
-  mono,
-  monoLabel,
-  children,
-}: {
-  label: string;
-  mono?: boolean;
-  monoLabel?: boolean;
-  children: ReactNode;
-}) {
+/** One term and its value in the span's details: an id, or an attribute's
+ *  name and value. */
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)] gap-3 border-b border-border py-2 last:border-b-0">
-      <dt className={cn("min-w-0 break-words text-muted-foreground", monoLabel && "font-mono text-xs leading-5")}>
-        {label}
-      </dt>
-      <dd className={cn("min-w-0 break-words", mono && "font-mono text-xs leading-5")}>{children}</dd>
+      <dt className="min-w-0 break-words text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 break-words">{children}</dd>
     </div>
   );
 }
@@ -827,7 +815,7 @@ function SpanDetail({
                 </Field>
                 <Field label="Duration">{formatDuration(spanMillis(span))}</Field>
                 {run && span.user_id && (
-                  <Field label="User" mono>
+                  <Field label="User">
                     <Link
                       href={tracesHref(organization, slug, { user: [span.user_id], days: reaching })}
                       className="underline-offset-4 hover:underline"
@@ -837,7 +825,7 @@ function SpanDetail({
                   </Field>
                 )}
                 {run && span.session_id && (
-                  <Field label="Session" mono>
+                  <Field label="Session">
                     <Link
                       href={sessionHref(organization, slug, span.session_id, { days: reaching })}
                       className="underline-offset-4 hover:underline"
@@ -850,7 +838,7 @@ function SpanDetail({
                   <Field label="Tags">
                     <span className="flex flex-wrap gap-1">
                       {tags.map(([key, value]) => (
-                        <Badge key={key} variant="secondary" className="font-mono text-xs font-normal">
+                        <Badge key={key} variant="secondary" className="text-xs font-normal">
                           {key}={value}
                         </Badge>
                       ))}
@@ -861,19 +849,19 @@ function SpanDetail({
                   <Field label="Sample rate">{span.sample_rate}</Field>
                 )}
                 {run && (
-                  <Field label="Run id" mono>
+                  <Field label="Run id">
                     {runId}
                   </Field>
                 )}
-                <Field label="Span id" mono>
+                <Field label="Span id">
                   {span.span_id}
                 </Field>
                 {span.parent_span_id && (
-                  <Field label="Parent span id" mono>
+                  <Field label="Parent span id">
                     {span.parent_span_id}
                   </Field>
                 )}
-                <Field label="Trace id" mono>
+                <Field label="Trace id">
                   {span.trace_id}
                 </Field>
                 <Field label="Received">
@@ -892,7 +880,7 @@ function SpanDetail({
             ) : (
               <dl className="text-sm">
                 {attributes.map(([key, value]) => (
-                  <Field key={key} label={key} mono monoLabel>
+                  <Field key={key} label={key}>
                     {value}
                   </Field>
                 ))}

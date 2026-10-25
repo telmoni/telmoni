@@ -44,7 +44,7 @@ export default async function SettingsPage({
           description="This project's identifier, which never changes when its name or URL does; the audit log names the project by it."
         >
           <Rows>
-            <SettingsRow label="Project ID" mono copy={project.id}>
+            <SettingsRow label="Project ID" copy={project.id}>
               {project.id}
             </SettingsRow>
           </Rows>

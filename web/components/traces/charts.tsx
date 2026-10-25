@@ -151,7 +151,7 @@ function MetricChart({
                 style={{ background: item.color ?? item.payload?.fill }}
               />
               <span className="text-muted-foreground">{config[String(name)]?.label ?? name}</span>
-              <span className="ml-auto font-mono tabular-nums">
+              <span className="ml-auto tabular-nums">
                 {typeof raw === "number" ? value(raw) : "—"}
               </span>
             </div>

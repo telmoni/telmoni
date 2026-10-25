@@ -148,7 +148,7 @@ export default async function UsersPage({
 function UserTableRow({ user, traces }: { user: UserRow; traces: string }) {
   return (
     <tr>
-      <Td className="max-w-64 truncate font-mono text-xs" title={user.user_id}>
+      <Td className="max-w-64 truncate text-xs" title={user.user_id}>
         <Link href={traces} className="underline-offset-4 hover:underline">
           {user.user_id}
         </Link>

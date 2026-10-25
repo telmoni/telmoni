@@ -188,12 +188,12 @@ function SessionTableRow({
 }) {
   return (
     <tr>
-      <Td className="max-w-64 truncate font-mono text-xs" title={session.session_id}>
+      <Td className="max-w-64 truncate text-xs" title={session.session_id}>
         <SessionLink sessionId={session.session_id} href={open}>
           {session.session_id}
         </SessionLink>
       </Td>
-      <Td className="max-w-48 truncate font-mono text-xs" title={session.user_id || undefined}>
+      <Td className="max-w-48 truncate text-xs" title={session.user_id || undefined}>
         {session.user_id ? (
           <Link href={user} className="underline-offset-4 hover:underline">
             {session.user_id}

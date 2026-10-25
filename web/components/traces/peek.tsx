@@ -201,9 +201,9 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
         title={summary ? summary.root.agent : "Trace"}
         beside={
           <>
-            <code className="shrink-0 text-xs text-muted-foreground" title={shown}>
+            <span className="shrink-0 text-xs text-muted-foreground" title={shown}>
               {shortId(shown)}
-            </code>
+            </span>
             <CopyButton value={shown} label="the run's id" />
           </>
         }

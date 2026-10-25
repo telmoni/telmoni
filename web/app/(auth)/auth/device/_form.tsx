@@ -54,7 +54,7 @@ export function DeviceForm({ code: initialCode }: { code: string }) {
           spellCheck={false}
           required
           placeholder="WDJB-MJHT"
-          className="font-mono tracking-widest"
+          className="tracking-widest"
           value={code}
           onChange={(e) => setCode(e.target.value)}
         />

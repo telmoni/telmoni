@@ -229,7 +229,7 @@ function SessionPanel({
         icon={MessagesSquare}
         titleId={titleId}
         title={
-          <span className="font-mono text-sm" title={shown}>
+          <span className="text-sm" title={shown}>
             {shown}
           </span>
         }
@@ -284,7 +284,7 @@ function SessionPanel({
             {sums.user ? (
               <Link
                 href={tracesHref(organization, slug, { user: [sums.user], days: query.days })}
-                className="font-mono text-xs underline-offset-4 hover:underline"
+                className="text-xs underline-offset-4 hover:underline"
               >
                 user {sums.user}
               </Link>

@@ -96,17 +96,7 @@ export default async function PrivacyPage({
                 <tbody>
                   {inventory.rows.map((row) => (
                     <tr key={row.attribute}>
-                      {/* The three rows that name no attribute say what they
-                          cover in words, and read as words. */}
-                      <Td
-                        className={
-                          row.attribute.includes(".")
-                            ? "whitespace-nowrap font-mono text-xs"
-                            : "whitespace-nowrap text-xs"
-                        }
-                      >
-                        {row.attribute}
-                      </Td>
+                      <Td className="whitespace-nowrap text-xs">{row.attribute}</Td>
                       <Td className="whitespace-nowrap text-xs text-muted-foreground">
                         {row.on}
                       </Td>

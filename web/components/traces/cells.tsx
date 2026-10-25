@@ -14,14 +14,14 @@ import { TraceColumn } from "@/lib/types/enums";
 // session's page draws its traces under a layout's columns
 // (`session-runs.tsx`): the same column reads the same on both.
 
-/** A cell's look: a number stands right in figures of one width, an id in
- *  the mono face, cut short where it runs long. */
+/** A cell's look: a number stands right in figures of one width, an id is
+ *  cut short where it runs long. */
 export function cellClass(column: ColumnSpec): string {
   if (column.numeric) return "whitespace-nowrap text-right tabular-nums";
   switch (column.key) {
     case TraceColumn.User:
     case TraceColumn.Session:
-      return "max-w-48 truncate font-mono text-xs";
+      return "max-w-48 truncate text-xs";
     case TraceColumn.Started:
     case TraceColumn.Ended:
       return "whitespace-nowrap text-xs text-muted-foreground";

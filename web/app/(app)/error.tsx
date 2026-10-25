@@ -19,7 +19,7 @@ export default function ConsoleError({
         {error.message || "An unexpected error occurred."}
       </p>
       {error.digest && (
-        <p className="text-xs text-muted-foreground/50 font-mono">ref: {error.digest}</p>
+        <p className="text-xs text-muted-foreground/50">ref: {error.digest}</p>
       )}
       <Button variant="outline" onClick={() => retry()}>Try again</Button>
     </div>

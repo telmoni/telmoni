@@ -750,6 +750,11 @@ html.a11y-no-letter-keys [data-letter-key] {
     -moz-osx-font-smoothing: grayscale;
   }
 
+  /* A keycap names a key, as a word does: never the code face. */
+  kbd {
+    font-family: var(--font-sans);
+  }
+
   h1,
   h2,
   h3,

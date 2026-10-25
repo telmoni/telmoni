@@ -63,7 +63,7 @@ export function SignUpForm({
     return (
       <div className="grid gap-3 text-sm">
         <p>
-          Check your email. We sent a link to <span className="font-mono">{sentTo}</span> to
+          Check your email. We sent a link to <span className="font-medium">{sentTo}</span> to
           confirm it is yours; it works once and expires in 24 hours.
         </p>
         <p className="text-muted-foreground">

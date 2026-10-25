@@ -39,14 +39,14 @@ export function AuditTable({ events }: { events: AuditEvent[] }) {
               <Td className="whitespace-nowrap text-muted-foreground">
                 <LocalTime iso={event.created_at} />
               </Td>
-              <Td className="font-mono text-xs whitespace-nowrap">
+              <Td className="text-xs whitespace-nowrap">
                 {event.actor_id}
               </Td>
               <Td className="text-center whitespace-nowrap">{event.action}</Td>
               <Td className="text-xs text-muted-foreground">
                 <span className="whitespace-nowrap">{resourceLabel(event.resource_kind)}</span>
                 {event.resource_id ? (
-                  <span className="font-mono whitespace-nowrap">
+                  <span className="whitespace-nowrap">
                     {showDetails
                       ? ` · ${event.resource_id}`
                       : ` · ${event.resource_id.slice(0, 18)}`}
@@ -77,7 +77,7 @@ function EventDetails({ event }: { event: AuditEvent }) {
       {fields.map(([label, value]) => (
         <div key={label} className="contents">
           <dt className="text-muted-foreground/70">{label}</dt>
-          <dd className="font-mono break-all">{value}</dd>
+          <dd className="break-all">{value}</dd>
         </div>
       ))}
     </dl>

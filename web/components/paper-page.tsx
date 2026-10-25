@@ -9,10 +9,10 @@ import { cn } from "@/lib/utils";
 // apart and numbered, each inset by the one measure; a list marked as the
 // monogram is drawn; one outlined button a section ends on.
 
-// The small mono line a section opens with: its number, as a document's
+// The small line a section opens with: its number, as a document's
 // sections are numbered, or what a page is, over a title in the console's
 // own face.
-export const EYEBROW = "font-mono text-[11px] uppercase tracking-label text-muted-foreground";
+export const EYEBROW = "text-[11px] uppercase tracking-label text-muted-foreground";
 
 // A paragraph of a section.
 export const BODY = "text-[15px] leading-[1.65] text-muted-foreground";

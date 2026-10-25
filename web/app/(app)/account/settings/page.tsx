@@ -43,13 +43,13 @@ export default async function AccountSettingsPage() {
         >
           <Rows>
             <SettingsRow label="Name">{displayName(session)}</SettingsRow>
-            <SettingsRow label="Email" mono>
+            <SettingsRow label="Email">
               {session.email}
             </SettingsRow>
             {method && (
               <SettingsRow label="Sign-in method">{method}</SettingsRow>
             )}
-            <SettingsRow label="User ID" mono copy={session.userId}>
+            <SettingsRow label="User ID" copy={session.userId}>
               {session.userId}
             </SettingsRow>
           </Rows>

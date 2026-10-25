@@ -69,7 +69,7 @@ export function ConfirmDialog({
           {confirmPhrase && (
             <div className="grid gap-2">
               <Label htmlFor={phraseId}>
-                Type <span className="font-mono">{confirmPhrase}</span> to confirm
+                Type <span className="font-medium">{confirmPhrase}</span> to confirm
               </Label>
               <Input
                 id={phraseId}

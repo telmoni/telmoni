@@ -31,7 +31,7 @@ export default async function DevicePage({
       <CardHeader>
         <CardTitle>Sign in a device</CardTitle>
         <CardDescription>
-          A device is asking to sign in as <span className="font-mono">{session.email}</span>.
+          A device is asking to sign in as <span className="font-medium">{session.email}</span>.
           Approve it only if the code below is the one it shows.
         </CardDescription>
       </CardHeader>

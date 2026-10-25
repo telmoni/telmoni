@@ -181,9 +181,9 @@ function Tile({
                   {/* Two endpoints on one host are told apart by the start
                       of the URL's fingerprint — never by the URL. */}
                   {connection.provider === "webhook" && (
-                    <code className="shrink-0 text-xs text-muted-foreground">
+                    <span className="shrink-0 text-xs text-muted-foreground">
                       {connection.channel_id.slice(0, 8)}
-                    </code>
+                    </span>
                   )}
                 </span>
                 <StatusBadge status={connection.status} />
