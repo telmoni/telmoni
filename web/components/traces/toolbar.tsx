@@ -101,7 +101,7 @@ export function TraceToolbar(props: Props) {
 
   return (
     <div
-      className="flex flex-wrap items-center gap-2"
+      className="flex flex-wrap items-center gap-3.5"
       aria-busy={pending}
       data-pending={pending ? "" : undefined}
     >
@@ -152,7 +152,7 @@ export function TraceToolbar(props: Props) {
         </TabsList>
       </Tabs>
 
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex items-center gap-3.5">
         <ColumnsMenu />
         <DensityMenu />
         <DownloadMenu organization={organization} slug={slug} query={query} total={props.total} />
@@ -165,7 +165,7 @@ export function TraceToolbar(props: Props) {
 // keeps its "Past 1 day" and refresh at the top of the page.
 export function TraceHeaderControls({ days }: { days: number }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-3.5">
       <WindowPicker days={days} />
       <RefreshControl />
     </div>

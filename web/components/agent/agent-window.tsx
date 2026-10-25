@@ -212,8 +212,11 @@ export function AgentWindow({
           // close: a dialog's title may wrap, so it sits a fixed 7px down from
           // the top instead, which a touch screen's 44px buttons put off
           // centre. This one is a single line, cut short rather than wrapped.
+          // The bar's inset is its own on every side, so a scrolled
+          // conversation stops 14px under the controls rather than running
+          // beneath them.
           className={cn(
-            "flex shrink-0 items-center gap-3 px-3.5 pt-3.5 select-none",
+            "flex shrink-0 items-center gap-3 p-3.5 select-none",
             !full && "touch-none",
             !full && (gesture === "move" ? "cursor-grabbing" : "cursor-grab"),
           )}

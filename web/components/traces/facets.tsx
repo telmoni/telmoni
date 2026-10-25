@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronRightIcon, PanelLeftIcon, SearchIcon } from "lucide-react";
+import { ChevronRightIcon, PanelLeftIcon, SearchIcon, XIcon } from "lucide-react";
 import Link from "next/link";
 
 import { LinkPending } from "@/components/link-pending";
@@ -108,12 +108,21 @@ export function TraceFacetsPanel({ organization, slug, query, ui, facets }: Prop
           </Badge>
         )}
         {ticked > 0 && (
-          <Button asChild variant="ghost" size="xs" className="ml-auto">
-            <Link href={tracesHref(organization, slug, unfiltered(query), {}, ui)} scroll={false}>
-              Clear all
-              <LinkPending />
-            </Link>
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button asChild variant="ghost" size="icon-xs" className="ml-auto">
+                <Link
+                  href={tracesHref(organization, slug, unfiltered(query), {}, ui)}
+                  scroll={false}
+                  aria-label="Clear all filters"
+                >
+                  <XIcon />
+                  <LinkPending />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Clear all filters</TooltipContent>
+          </Tooltip>
         )}
       </div>
       <div className="relative">
@@ -209,9 +218,11 @@ function FacetSection({
 
   return (
     <Collapsible open={open} onOpenChange={setChosen} className="border-b border-border py-1">
+      {/* The header's contents sit 8px in, as a value's do, and its Clear is
+          an X: a word at the panel's edge stretched the row. */}
       <div className="flex items-center gap-1">
         <CollapsibleTrigger asChild>
-          <Button variant="ghost" size="sm" className="flex-1 justify-start px-1.5">
+          <Button variant="ghost" size="sm" className="flex-1 justify-start px-2 has-[>svg]:px-2">
             <ChevronRightIcon
               className={cn("text-muted-foreground transition-transform", open && "rotate-90")}
               aria-hidden="true"
@@ -225,12 +236,21 @@ function FacetSection({
           </Button>
         </CollapsibleTrigger>
         {ticked.length > 0 && (
-          <Button asChild variant="ghost" size="xs">
-            <Link href={clearHref} scroll={false} aria-label={`Clear the ${label.toLowerCase()} filter`}>
-              Clear
-              <LinkPending />
-            </Link>
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button asChild variant="ghost" size="icon-xs">
+                <Link
+                  href={clearHref}
+                  scroll={false}
+                  aria-label={`Clear the ${label.toLowerCase()} filter`}
+                >
+                  <XIcon />
+                  <LinkPending />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Clear</TooltipContent>
+          </Tooltip>
         )}
       </div>
       <CollapsibleContent className="grid gap-2 pb-2">
@@ -255,11 +275,11 @@ function FacetSection({
         {mode === "text" ? (
           <TypedValue filter={filter} label={label} onAdd={onToggle} />
         ) : values.length === 0 ? (
-          <p className="px-1.5 text-xs text-muted-foreground">
+          <p className="px-2 text-xs text-muted-foreground">
             No {label.toLowerCase()} among the window&rsquo;s runs.
           </p>
         ) : (
-          <Command className="bg-transparent" defaultValue={NONE_CHOSEN}>
+          <Command className="group/facet bg-transparent" defaultValue={NONE_CHOSEN}>
             {values.length > SEARCHABLE_FROM && (
               <CommandInput placeholder={`Search ${label.toLowerCase()}s`} />
             )}
@@ -269,8 +289,16 @@ function FacetSection({
               </CommandEmpty>
               {values.map((v) => {
                 const on = ticked.includes(v.value);
+                // cmdk's cursor stays on the last row touched and a click leaves the
+                // list focused, so it is painted only under the pointer or with
+                // the keyboard (`:focus-visible`); the tick alone says what is on.
                 return (
-                  <CommandItem key={v.value} value={v.value} onSelect={() => onToggle(v.value)}>
+                  <CommandItem
+                    key={v.value}
+                    value={v.value}
+                    onSelect={() => onToggle(v.value)}
+                    className="data-[selected=true]:bg-transparent data-[selected=true]:text-foreground data-[selected=true]:hover:bg-accent/50 group-focus-visible/facet:data-[selected=true]:bg-accent/50 group-has-[:focus-visible]/facet:data-[selected=true]:bg-accent/50"
+                  >
                     <Checkbox checked={on} tabIndex={-1} aria-hidden="true" className="pointer-events-none" />
                     <span className="min-w-0 flex-1 truncate" title={v.value}>
                       {text(v.value)}
@@ -284,7 +312,7 @@ function FacetSection({
           </Command>
         )}
         {facet.more && mode === "select" && (
-          <p className="px-1.5 text-xs text-muted-foreground">
+          <p className="px-2 text-xs text-muted-foreground">
             The {FACET_VALUES_MAX} with the most runs{typed ? "; type one in to find another" : ""}.
           </p>
         )}

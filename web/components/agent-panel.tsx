@@ -541,7 +541,7 @@ export function AgentPanel() {
       >
         {/* One column, as wide as reads well: all of a floating window, and
             the middle of the screen at full size. */}
-        <div ref={columnRef} className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 py-3.5">
+        <div ref={columnRef} className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 pb-3.5">
           {notice && (
             <p role="alert" className="text-sm text-destructive">
               {notice}
