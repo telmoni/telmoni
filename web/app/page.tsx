@@ -48,7 +48,7 @@ const INSTALL: readonly InstallTab[] = [
         {
           label: "skill",
           command:
-            "claude plugin marketplace add telmoni/skills@release && claude plugin install telmoni@telmoni",
+            "claude plugin marketplace add telmoni/skills && claude plugin install telmoni@telmoni",
         },
       ]
     : []),
