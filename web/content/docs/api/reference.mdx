@@ -25,7 +25,7 @@ lanes are routed by path: [Self-hosting → Production](/docs/self-host/producti
 Authenticate all requests by including your project API key as a bearer token:
 
 ```http
-Authorization: Bearer telmoni_...
+Authorization: Bearer tm_...
 ```
 
 Requests lacking a valid or live key return `401 Unauthorized`, as a problem
@@ -37,7 +37,7 @@ being deleted, answers the same way:
   "type": "/errors/auth/invalid-token",
   "title": "invalid token",
   "status": 401,
-  "detail": "a live telmoni_ API key is required"
+  "detail": "a live tm_ API key is required"
 }
 ```
 

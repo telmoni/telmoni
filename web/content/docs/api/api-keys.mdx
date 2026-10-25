@@ -33,7 +33,9 @@ lets each person mint 5 keys, rotate 10 and revoke 20 a minute.
 your secret manager immediately. Telmoni stores only a SHA-256 hash of the
 token; the plaintext appears in the mint or rotate answer alone.
 
-Every key begins with the prefix `telmoni_`.
+Every key begins with the prefix `tm_`. The **API keys** page names each by its
+first characters, `tm_` and the eight after it: enough to tell two keys apart
+in a configuration file, never enough to use one.
 
 ## Using a key
 
@@ -76,7 +78,7 @@ of whether the individual user who created it leaves the project.
 ## Who can see keys
 
 Anyone on the project (Owner, Admin, or Member) can view the list of active
-keys: each key's name, what it opens, creation date, last-used date (written at
+keys: each key's name, its first characters, what it opens, creation date, last-used date (written at
 most once a minute, so a busy key is not a write per request), and expiration
 date. The
 secret itself is never visible after creation.
@@ -86,7 +88,7 @@ secret itself is never visible after creation.
 To replace a key while the old one keeps working for a day, select **Rotate**
 on its row on the **API keys** page.
 
-Rotating a key produces a new `telmoni_` token (shown once) and keeps the
+Rotating a key produces a new `tm_` token (shown once) and keeps the
 previous token valid for a **24-hour grace period**, or until its own expiry if
 that comes sooner. Both tokens authenticate during that window; after it, the
 old one is refused like a revoked key. The replacement keeps the key's name,

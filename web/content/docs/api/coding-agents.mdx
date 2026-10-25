@@ -113,13 +113,13 @@ From a checkout, start Claude Code with the plugin and your key in its
 environment instead; that one session alone loads it:
 
 ```sh
-TELMONI_API_KEY=telmoni_… claude --plugin-dir ./claude-observability-plugin
+TELMONI_API_KEY=tm_… claude --plugin-dir ./claude-observability-plugin
 ```
 
 In a Claude Code session, set the key with
 `/plugin configure telmoni-observability@telmoni-plugins`. From your shell,
 `claude plugin configure telmoni-observability@telmoni-plugins --values-stdin`
-takes the configuration as JSON (`{"TELMONI_API_KEY": "telmoni_…"}`); without
+takes the configuration as JSON (`{"TELMONI_API_KEY": "tm_…"}`); without
 `--values-stdin` it only lists the options. Claude Code keeps the key with its
 own credentials: in the Keychain on macOS, and in its credentials file
 elsewhere. Left blank, the endpoint is `https://api.telmoni.com`; a self-hosted
@@ -153,7 +153,7 @@ nothing, so trust them once in Codex itself. Its repository's README says how
 to run it from a checkout.
 
 The key goes in `telmoni.json` in Codex's folder — `~/.codex`, or `CODEX_HOME`
-where you set one — as `{ "apiKey": "telmoni_…" }`, with `"endpoint"` beside
+where you set one — as `{ "apiKey": "tm_…" }`, with `"endpoint"` beside
 it for a self-hosted Telmoni; `TELMONI_API_KEY` and `TELMONI_ENDPOINT` in
 Codex's environment — your shell's, or the `.env` in Codex's folder — come
 first, and with both set the file is not read. The plugin reads the file only
@@ -208,7 +208,7 @@ OpenCode 1, and its `dist` folder on OpenCode 2, which takes no file there.
 
 The key goes in `telmoni.json` beside your OpenCode configuration
 (`~/.config/opencode/telmoni.json`, or in `OPENCODE_CONFIG_DIR` or under
-`XDG_CONFIG_HOME` where you set one), as `{ "apiKey": "telmoni_…" }`, with
+`XDG_CONFIG_HOME` where you set one), as `{ "apiKey": "tm_…" }`, with
 `"endpoint"` beside it for a self-hosted Telmoni; `TELMONI_API_KEY` and
 `TELMONI_ENDPOINT` in the environment OpenCode starts in come first, and with
 both set the file is not read. The plugin never writes the file, and reads it

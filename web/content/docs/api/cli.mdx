@@ -89,7 +89,7 @@ Your CLI session appears under **Active sessions** on your account's **Privacy**
 For headless build systems, GitHub Actions, Docker containers, and background automation, use an [API key](/docs/api/api-keys). Put it in the `TELMONI_API_KEY` environment variable, and every command that acts with a key uses it, ahead of any saved login, without saving it:
 
 ```console
-$ export TELMONI_API_KEY="telmoni_..."
+$ export TELMONI_API_KEY="tm_..."
 $ telmoni status
 ```
 
@@ -107,7 +107,7 @@ A blank `TELMONI_API_KEY` counts as unset. To save a key instead, pipe it to `te
 $ telmoni login --with-key < key.txt
 ```
 
-`login --with-key` checks only the key's shape (the `telmoni_` prefix with something after it, and no whitespace) and saves it with the endpoint. It does not call the server, so a wrong key is refused by the first command that uses it.
+`login --with-key` checks only the key's shape (the `tm_` prefix with something after it, and no whitespace) and saves it with the endpoint. It does not call the server, so a wrong key is refused by the first command that uses it.
 
 To fetch the key from a secret manager for each command instead, set [`api_key_helper`](#configuration-keys-reference) to a command that prints it. It runs through `sh` when `TELMONI_API_KEY` is unset or its key declined, with 30 seconds to answer; what it prints is the key, never shown or saved, and its error output is shown as it is.
 
