@@ -11,11 +11,11 @@ The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni
 ## Where Things Live
 | Path | What |
 |---|---|
-| `crates/telmoni` | The binary (`telmoni-server`): `serve` (every module on `PORT` 8082, the sweeps and the agent's indexer on timers), the machine door (`door.rs`) and one-shot admin subcommands (`cli.rs`). `App::assemble` is what a deployment's own binary calls. |
+| `crates/telmoni` | The `telmoni` binary (crate `telmoni-server`): `serve` (every module on `PORT` 8082, the sweeps and the agent's indexer on timers), the machine door (`door.rs`) and one-shot admin subcommands (`cli.rs`). `App::assemble` is what a deployment's own binary calls. |
 | `crates/auth` | Sign-in (password form, OIDC), identities, organizations, projects, members, invitations, transfers, API keys, sessions, flags, export and deletion, `/v1`. |
 | `crates/notifications` | The in-app feed, the Slack and webhook connectors, the delivery queue. |
 | `crates/agent` | The console agent, read-only: model adapters, embeddings, the index, hybrid search, tools. Needs the `vector` extension, which a superuser installs. Off until `AGENT_MODEL_PROVIDER` is set. |
-| `crates/telemetry` | Ingest at `/otlp/v1/traces` (`ingest/`, `handler/ingest.rs`); each project's settings, content mode and saved views and layouts in Postgres (`db.rs`, `handler/`); the spans and their hourly totals in ClickHouse, read and written only through `store.rs`, each read naming its projects. `clickhouse/` holds ClickHouse's one migration file (`schema.rs`), its settings and its local users; `rotate` drops the expired days and months (`retention.rs`), both as the migrator's user. |
+| `crates/telemetry` | Ingest at `/otlp/v1/traces` (`ingest/`, `handler/ingest.rs`); each project's settings, content mode and saved views and layouts in Postgres (`db.rs`, `handler/`); the spans and their hourly totals in ClickHouse, read and written only through `store.rs`, each read naming its projects. `clickhouse/` holds ClickHouse's one migration file, which `migrate` applies (`schema.rs`), its settings and its local users; `rotate` drops the expired days and months (`retention.rs`), both as the migrator's user. |
 | `crates/shared` | `TelmoniError`, RBAC (`rbac.rs`), tenancy scopes, the seams between modules (`seam.rs`), audit, `Redacted`. `tests/` holds the cross-module suites. |
 | `crates/migrator` | The migration runner and the `audit` schema; grants, role hardening and the local roles and extensions in `sql/`. Each module's SQL is in `crates/<module>/migrations/`, and telemetry's ClickHouse file in `crates/telemetry/clickhouse/`. |
 | `web/` | `app/` routes and their tests, `lib/` logic and its tests, `components/` UI (no tests), `content/docs/` the book (the customer docs, served at `/docs`), laid in from `../docs` by `make book` and ignored by git, `e2e/` Playwright, `proxy.ts` middleware, `lib/extension/` and `components/extension/` the slots a console built on this one fills. |
@@ -31,7 +31,6 @@ The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni
 ## Commands
 - **After every change** (no permission needed; report failures verbatim): `make check` (typecheck, cargo check, fmt, clippy, rustdoc), then `make lint`.
 - **After a change under `sdk/`:** `make sdk-check` too (the TypeScript, Go and Python suites, and `cargo test -p telmoni`, the Rust SDK's, which needs no database); the Rust SDK is a workspace member, so `make check` already covers it.
-- **After a change under `deploy/` or `infra/`:** `make infra-check` too (Helm lint and render; Terraform fmt and validate on both roots of `dev` and `prod`).
 - **After a change in `../docs`:** `make book-check` too, the book's own gate (its `make check` runs the same): the console built with the pages, and the tests that read them.
 - **Only when asked:** `make test TEST_THREADS=2`, `make test-svc SVC=<crate> TEST_THREADS=2 [TEST_FILTER=<name>]`, `make ci`, `make e2e`, `npm run test` in `web/`, `make db-reset`. Never bare `cargo test`: `make test` starts Postgres and ClickHouse, and `make test-svc` expects both running. Unasked, say "untested" and name the command (`make db-reset` first if a migration changed).
 - **After a wire-contract change:** `make contract`, then update `web/lib/types/enums.ts` (and `web/lib/slug.ts`, which it also pins) until `contract.test.ts` passes.
@@ -60,11 +59,11 @@ The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni
 ## Git Rules
 - Commit only when asked: never `git add` or `git commit` unprompted.
 - Conventional commits (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`) of 1–5 lines and the sign-off: a subject, then optionally a blank line and up to 3 lines on *why*. No file lists, test output, AI signatures or `Co-authored-by` trailers.
-- Every commit is signed off by the developer it is made for, certifying the [Developer Certificate of Origin](https://developercertificate.org/): `git commit -s` adds `Signed-off-by: Name <email>` from git's `user.name` and `user.email`, which name a person, never an agent. A merge commit too: a branch is merged in a clone, `git merge --no-ff --signoff`, and pushed, never from GitHub's merge button, whose commit carries none.
+- Every commit is signed off by the developer it is made for, certifying the [Developer Certificate of Origin](https://developercertificate.org/): `git commit -s` adds `Signed-off-by: Name <email>` from git's `user.name` and `user.email`, which name a person, never an agent.
 - No branches, worktrees, pushes or pull requests.
 
 ## Definition of Done
-- [ ] `make check` and `make lint` (and `make infra-check` when `deploy/` or `infra/` is edited) pass, or the failure is reported verbatim.
+- [ ] `make check` and `make lint` pass, or the failure is reported verbatim.
 - [ ] No secret or PII reaches a log, an error `detail` or a commit.
 - [ ] The README still describes the tree, `ARCHITECTURE.md` and the book (`../docs`) say what the change does, and every page left wrong in another repository is named.
 - [ ] Nothing that needs asking happened unasked (tests, `make db-reset`, dependencies, external state, other repos, commits), and anything untested is reported with its command.
