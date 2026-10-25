@@ -711,6 +711,12 @@ html.a11y-no-letter-keys [data-letter-key] {
   line-height: 1rem;
 }
 
+/* `w-filters`: the filters beside the trace list, at the width they were
+   dragged to, else the rail rows' (`--spacing-sidebar-inner`). */
+@utility w-filters {
+  width: var(--filters-width, var(--spacing-sidebar-inner));
+}
+
 @layer base {
   * {
     @apply border-border;

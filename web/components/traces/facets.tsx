@@ -92,15 +92,14 @@ export function TraceFacetsPanel({ organization, slug, query, ui, facets }: Prop
     return facets?.[filter].values.some((v) => v.value.toLowerCase().includes(needle)) ?? false;
   });
 
-  // As wide as the console's rail rows ("the sidebar apps", `--spacing-sidebar-inner`)
-  // until dragged, whether the rail is open or closed, and never past half the
-  // row, so the list keeps its room; `gap-3` is the page's own above it, so the
-  // toggle has as much room under it as over it.
+  // As wide as the console's rail rows until dragged (`w-filters`, `globals.css`),
+  // and never past half the row, so the list keeps its room; `gap-3` is the
+  // page's own above it, so the toggle has as much room under it as over it.
   return (
     <aside
       ref={panel}
       style={{ "--filters-width": width === null ? undefined : `${width}px` } as CSSProperties}
-      className="relative grid w-full shrink-0 content-start gap-3 md:w-[var(--filters-width,var(--spacing-sidebar-inner))] md:max-w-1/2"
+      className="relative grid w-full shrink-0 content-start gap-3 md:w-filters md:max-w-1/2"
       aria-label="Filters"
       aria-busy={pending}
       data-pending={pending ? "" : undefined}
@@ -305,7 +304,7 @@ function FacetSection({
                     key={v.value}
                     value={v.value}
                     onSelect={() => onToggle(v.value)}
-                    className="data-[selected=true]:bg-transparent data-[selected=true]:text-foreground data-[selected=true]:hover:bg-accent/50 group-focus-visible/facet:data-[selected=true]:bg-accent/50 group-has-[:focus-visible]/facet:data-[selected=true]:bg-accent/50"
+                    className="data-[selected=true]:bg-transparent data-[selected=true]:text-foreground data-[selected=true]:hover:bg-accent/50 group-focus-visible/facet:data-[selected=true]:bg-accent/50 group-has-focus-visible/facet:data-[selected=true]:bg-accent/50"
                   >
                     <Checkbox checked={on} tabIndex={-1} aria-hidden="true" className="pointer-events-none" />
                     <span className="min-w-0 flex-1 truncate" title={v.value}>
