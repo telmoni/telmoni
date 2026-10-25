@@ -58,10 +58,10 @@ Telmoni uses cryptographic hash chaining across audit log rows:
 - In a deployment with the hardened database roles, the services can insert and
   read `audit.events` but neither update nor delete it.
 - A verification sweep walks each organization's chain every 24 hours inside
-  `telmoni serve` (unless `RUN_SWEEPS=false`). It recomputes each row's hash
+  `telmoni-server serve` (unless `RUN_SWEEPS=false`). It recomputes each row's hash
   and checks its link to the row before it, up to the first break in a chain,
   which it reports in the server log. On a self-hosted deployment, the
-  operator's `telmoni sweep audit-verify` runs it on demand, or on the
+  operator's `telmoni-server sweep audit-verify` runs it on demand, or on the
   operator's own schedule when `RUN_SWEEPS=false`.
 
 ## Exporting and verifying
@@ -200,7 +200,7 @@ The chain's daily verification covers the whole chain.
 ## Retention
 
 The platform never deletes audit rows. The table is partitioned into monthly
-tables by `created_at`, and `telmoni rotate` creates the current month's
+tables by `created_at`, and `telmoni-server rotate` creates the current month's
 partition and the next three ahead of time and drops none. The 730-day window
 for audit events governs only how long the console agent's index keeps its
 copies of them. An organization's chain also outlives the organization's
@@ -208,4 +208,4 @@ deletion. An export's file is the exception: it is a copy, kept 7 days.
 
 For self-hosted instances, retention is therefore bounded by your database and
 its backups. See [Production](/docs/self-host/production#partition-rotation)
-for scheduling `telmoni rotate`.
+for scheduling `telmoni-server rotate`.

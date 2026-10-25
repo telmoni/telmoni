@@ -27,7 +27,7 @@ flowchart TD
 
     HookJob["Pre-install / pre-upgrade hook Job: telmoni-migrate"] -.->|Runs DDL & Grants| Postgres
     HookJob -.->|Database & tables| ClickHouse
-    RotateCron["CronJob: rotate (telmoni rotate)"] -.->|Scheduled partition maintenance| Postgres
+    RotateCron["CronJob: rotate (telmoni-server rotate)"] -.->|Scheduled partition maintenance| Postgres
     RotateCron -.->|Drops days of spans past retention| ClickHouse
 ```
 
@@ -254,7 +254,7 @@ The Telmoni Helm chart sets these defaults:
   - `allow-server-and-jobs-egress`: the server and the migrator jobs may reach any address, for the database, ClickHouse, Redis, the mail and identity vendors, the KMS key and customers' webhooks; the server's own URL guard is what keeps a webhook off private addresses. A ClickHouse inside the cluster needs policies of your own (see [Prerequisites](#prerequisites)).
   - `allow-embeddings-ingress`, `allow-embeddings-egress` and `allow-server-to-embeddings`, with `embeddings.enabled`: the embeddings pod accepts `11434` from the `server` pods alone and may reach any host on port 443 for the model pull at each start, and the server may reach it on `11434`.
 - **Pre-upgrade Migration Safety**: Migrations run as a Kubernetes `Job` annotated `"helm.sh/hook": pre-install,pre-upgrade` at weight `-5`, with `backoffLimit: 0` and `activeDeadlineSeconds: 300`; the `telmoni-tier` ConfigMap and the `migrator` ServiceAccount it needs are hooks too, at weight `-10`, and are kept. If a migration fails, the release fails before any Deployment is updated, though the `telmoni-tier` ConfigMap already holds the new values, and a pod that restarts afterwards reads them.
-- **Partition Management**: The chart runs partition rotation itself, as a CronJob named `rotate` (`migrator.rotateSchedule`, default `"0 2 * * *"`, in `Etc/UTC`, never two at once), running `telmoni rotate` as the migrator role to ensure the current month and the next three months of audit partitions exist ahead of time, and, as the migrator's ClickHouse user, to drop each day of spans once every span in it arrived more than 360 days ago, and each month of hourly totals once it is more than 13 months behind.
+- **Partition Management**: The chart runs partition rotation itself, as a CronJob named `rotate` (`migrator.rotateSchedule`, default `"0 2 * * *"`, in `Etc/UTC`, never two at once), running `telmoni-server rotate` as the migrator role to ensure the current month and the next three months of audit partitions exist ahead of time, and, as the migrator's ClickHouse user, to drop each day of spans once every span in it arrived more than 360 days ago, and each month of hourly totals once it is more than 13 months behind.
 
 ## Reaching the console and the machine lanes
 

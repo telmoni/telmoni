@@ -186,12 +186,13 @@ This script, which refuses to run as one of the five roles and stops if any of t
 
 **Run migrations and apply object grants**
 
-Execute the migrator as the `migrator` user, in Postgres and in ClickHouse:
+Execute the migrator as the `migrator` user, in Postgres and in ClickHouse. On Compose, run the `migrate` service with the migrator's URLs in place of the stack's own; the chart's hook Job reads them from `migrator-secrets`:
 
-```bash
-MIGRATOR_DATABASE_URL="postgres://migrator:<migrator password>@postgres:5432/telmoni" \
-MIGRATOR_CLICKHOUSE_URL="http://migrator:<ClickHouse migrator password>@clickhouse:8123" \
-  telmoni migrate
+```console
+$ docker compose -f deploy/compose/docker-compose.yml run --rm \
+    -e MIGRATOR_DATABASE_URL="postgres://migrator:<migrator password>@postgres:5432/telmoni" \
+    -e MIGRATOR_CLICKHOUSE_URL="http://migrator:<ClickHouse migrator password>@clickhouse:8123" \
+    migrate
 ```
 
 After every run the migrator applies `object_grants.sql`. It grants each module's role `SELECT`, `INSERT`, `UPDATE` and `DELETE` on its own schema, and `SELECT` and `INSERT` on `audit.events` to `auth`, `notifications` and `telemetry`. It takes back the module roles' writes to the tables only the owner or a maintenance lane writes (the feature-flag tables, the delivery log, the agent's erasure fences), and `telemetry`'s deletes from the project settings its maintenance lane purges. When any of the four module roles is missing, as in the Compose quickstart, the grants are skipped with a warning naming it. Then it creates ClickHouse's `telemetry` database, its tables and their row policies, every statement `IF NOT EXISTS`, so a second run changes nothing. The database records the digest of the statements it was made from, and a release whose statements differ refuses to run over it rather than skip the difference: before Telmoni's first release, that means recreating ClickHouse's volume.
@@ -204,15 +205,15 @@ After every run the migrator applies `object_grants.sql`. It grants each module'
 
 ## Partition rotation
 
-Telmoni's audit log uses range-partitioned tables partitioned monthly by timestamp (`created_at`). An audit row for a month with no partition fails its insert, and the change it records fails with it, so `telmoni migrate` creates the current month and the next three, and the rotation command keeps that runway ahead of the calendar. The same command drops ClickHouse's spans past retention:
+Telmoni's audit log uses range-partitioned tables partitioned monthly by timestamp (`created_at`). An audit row for a month with no partition fails its insert, and the change it records fails with it, so `telmoni-server migrate` creates the current month and the next three, and the rotation command keeps that runway ahead of the calendar. The same command drops ClickHouse's spans past retention; on Compose it is the `migrate` service run with `rotate`, and on Kubernetes the chart's CronJob:
 
-```bash
-telmoni rotate
+```console
+$ docker compose -f deploy/compose/docker-compose.yml run --rm migrate rotate
 ```
 
 ### Rotation behavior
 
-- **Forward Runway**: `telmoni rotate` creates the current calendar month and the next three months of partitions ahead of time (`{table}_YYYY_MM`). It never drops audit partitions.
+- **Forward Runway**: `telmoni-server rotate` creates the current calendar month and the next three months of partitions ahead of time (`{table}_YYYY_MM`). It never drops audit partitions.
 - **Spans**: It drops each day of spans in ClickHouse once every span in it arrived more than 360 days ago, and each month of hourly totals once it is more than 13 months behind. A night it misses is caught up by the next.
 - **Deleted projects**: It rewrites away the rows a deleted project left. Deleting a project, or an organization with its projects, marks every span and every hour of totals of the project deleted the moment the purge runs, so that within moments, as the store applies the mark, no read answers them; the rotation applies that mark to the disk, so the rows leave it too. A rewrite that outlasts the statement's minute is left running, since a ClickHouse mutation finishes on its own, and noted in the log.
 - **Idempotency**: Safe to run any number of times: a run creates only the audit partitions that are missing, drops only the days and months past retention and rewrites only what is marked, so a second run the same night changes nothing.
@@ -228,33 +229,33 @@ The Helm chart runs it daily as the `rotate` CronJob (`migrator.rotateSchedule`,
 
 ---
 
-## Operator CLI sweeps & disaster recovery
+## Operator commands & disaster recovery
 
-The `telmoni` binary includes administrative commands for cluster operators. No standalone binary is published: run them through the server image, whose entrypoint it is, as `docker compose -f deploy/compose/docker-compose.yml run --rm server sweep deletion` on Compose, or `kubectl exec -n telmoni deploy/server -- /app/telmoni sweep deletion` on Kubernetes.
+The server binary, `telmoni-server`, carries the operator commands. No standalone copy is published: run them through the server image, whose entrypoint it is, as `docker compose -f deploy/compose/docker-compose.yml run --rm server sweep deletion` on Compose, or `kubectl exec -n telmoni deploy/server -- /app/telmoni-server sweep deletion` on Kubernetes.
 
 ### Background maintenance sweeps
 
-Inside `telmoni serve`, the deletion sweep runs every ten minutes, the audit-export sweep every five, and the retention and audit-verification sweeps every 24 hours, each first a minute after boot. The deletion and audit-verification sweeps take a leader lock for each tick, so replicas on the same timers do not run one tick twice; the retention and audit-export sweeps take none, since their deletes are safe to repeat and each export they build is claimed first. Every step is idempotent, so a tick cut short by a rollout is finished by the next. `RUN_SWEEPS=false` leaves them to runs you schedule; schedule the audit-export sweep every few minutes, since it is the only retry for an export a restart cut short — without it one shows **Preparing** for good, and three such hold its owner off starting another — and what deletes a file past its 7 days. Telemetry's own sweep runs inside `telmoni serve` on every replica whatever `RUN_SWEEPS` says: every ten minutes, it finishes a deleted project's telemetry purge that its deletion could not. So does notifications' retention sweep, every hour and first a minute after boot: it deletes notices past 90 days, finished deliveries past 30 and expired connector handshakes, finishes a deleted project's connectors purge that its deletion could not, and asks Slack again, for a day, to uninstall an app a disconnect or a purge left unused that Slack did not answer. You can also trigger individual maintenance jobs on demand:
+Inside `telmoni-server serve`, the deletion sweep runs every ten minutes, the audit-export sweep every five, and the retention and audit-verification sweeps every 24 hours, each first a minute after boot. The deletion and audit-verification sweeps take a leader lock for each tick, so replicas on the same timers do not run one tick twice; the retention and audit-export sweeps take none, since their deletes are safe to repeat and each export they build is claimed first. Every step is idempotent, so a tick cut short by a rollout is finished by the next. `RUN_SWEEPS=false` leaves them to runs you schedule; schedule the audit-export sweep every few minutes, since it is the only retry for an export a restart cut short — without it one shows **Preparing** for good, and three such hold its owner off starting another — and what deletes a file past its 7 days. Telemetry's own sweep runs inside `telmoni-server serve` on every replica whatever `RUN_SWEEPS` says: every ten minutes, it finishes a deleted project's telemetry purge that its deletion could not. So does notifications' retention sweep, every hour and first a minute after boot: it deletes notices past 90 days, finished deliveries past 30 and expired connector handshakes, finishes a deleted project's connectors purge that its deletion could not, and asks Slack again, for a day, to uninstall an app a disconnect or a purge left unused that Slack did not answer. You can also trigger individual maintenance jobs on demand:
 
 ```bash
 # Finish pending deletions: erase each organization past its wait (15 minutes
 # after its deletion), then each person whose deletion is pending
-telmoni sweep deletion
+telmoni-server sweep deletion
 
 # Verify cryptographic hash chain across the audit ledger
-telmoni sweep audit-verify
+telmoni-server sweep audit-verify
 
 # Delete API keys revoked or expired over 7 days ago, invitations 30 days past
 # expiry or withdrawal, sessions revoked over 90 days ago, and the sign-in
 # tokens, codes and device authorizations nobody can use any more
-telmoni sweep retention
+telmoni-server sweep retention
 
 # Re-embed every agent passage that a previous EMBEDDINGS_MODEL embedded
-telmoni sweep agent-reindex
+telmoni-server sweep agent-reindex
 
 # Delete every audit log export past its 7 days, then finish building the
 # exports a restart left unfinished
-telmoni sweep audit-exports
+telmoni-server sweep audit-exports
 ```
 
 ### Emergency organization management
@@ -264,7 +265,7 @@ If an organization needs to be closed by a platform administrator:
 ```bash
 # Close an organization at once; the deletion sweep erases it after the same
 # 15-minute wait as an owner's deletion
-telmoni terminate org_019a0b8c3f2e7d41
+telmoni-server terminate org_019a0b8c3f2e7d41
 ```
 
 `terminate` closes the organization without its owner's confirmation code, as `service:operator` in its audit log. There is no way back: the next deletion sweep past the wait erases it, as it erases one its owner deleted.
@@ -273,7 +274,7 @@ telmoni terminate org_019a0b8c3f2e7d41
 
 ## What the server refuses at boot
 
-`telmoni serve` reads its environment once and stops, with the reason in its log, rather than run with a setting that would fail later or weaken the deployment:
+`telmoni-server serve` reads its environment once and stops, with the reason in its log, rather than run with a setting that would fail later or weaken the deployment:
 
 - `AUTH_DISABLE_USERNAME_PASSWORD=true` or `AUTH_DOMAINS_WITH_SSO_ENFORCEMENT` with no provider configured (no `AUTH_CUSTOM_CLIENT_ID`): nobody, or nobody at those domains, could sign in.
 - `ADMIN_EMAIL` or `ADMIN_PASSWORD` with `AUTH_DISABLE_USERNAME_PASSWORD=true`, or an `ADMIN_EMAIL` at a domain `AUTH_DOMAINS_WITH_SSO_ENFORCEMENT` names: the seeded account could never sign in. The two are also refused one without the other, and at every boot an `ADMIN_EMAIL` that is not an address or an `ADMIN_PASSWORD` under 8 characters or over 256 bytes, even once the account exists.
@@ -285,7 +286,7 @@ telmoni terminate org_019a0b8c3f2e7d41
 - `AGENT_MODEL_PROVIDER` without `AGENT_DATABASE_URL`, or with a value other than `anthropic` and `openai`; `openai` without `AGENT_MODEL`; `RERANK_URL` without `RERANK_MODEL`; a hosted `AGENT_MODEL_URL` or `EMBEDDINGS_URL` without its key; `AGENT_MODEL_TIMEOUT_SECS` outside 1 to 100; an embeddings endpoint that answers with a width other than 768 (one not answering yet is allowed, and checked at its first answer).
 - A set value that does not parse (`PORT=eight`), or a count below its minimum: the `NOTIFICATIONS_DELIVERY_*` settings, `AGENT_MESSAGES_PER_HOUR` and `AGENT_MAX_TOKENS` must be at least 1, except `NOTIFICATIONS_DELIVERY_BACKOFF_SECS`, which may be 0. A blank value reads as unset and takes the default.
 - A `TELEMETRY_CLICKHOUSE_URL` that is not an `http` or `https` URL with a host, or that carries a query string or a fragment: settings are the server's to choose, never the URL's. The reason names the fault, never the URL, which holds a password. ClickHouse itself being down is no refusal: the server starts, and reaches it at the first read or write of a span.
-- In a Kubernetes pod only: an `AUTH_CUSTOM_ISSUER` that is not `https://`, an `SMTP_URL` that is neither TLS nor loopback, a `local:` `CONNECTOR_KEK` or `TELEMETRY_KEK`, `ALLOW_TEST_SESSION`, a missing `DATABASE_CA_CERT`, and a ClickHouse URL over plain `http` to anything but loopback or a Service's name with its namespace (`clickhouse.<namespace>.svc`, `….svc.cluster.local`), which `telmoni migrate` and `telmoni rotate` refuse too.
+- In a Kubernetes pod only: an `AUTH_CUSTOM_ISSUER` that is not `https://`, an `SMTP_URL` that is neither TLS nor loopback, a `local:` `CONNECTOR_KEK` or `TELEMETRY_KEK`, `ALLOW_TEST_SESSION`, a missing `DATABASE_CA_CERT`, and a ClickHouse URL over plain `http` to anything but loopback or a Service's name with its namespace (`clickhouse.<namespace>.svc`, `….svc.cluster.local`), which `telmoni-server migrate` and `telmoni-server rotate` refuse too.
 
 ---
 
@@ -409,7 +410,7 @@ Connector credentials are sealed with `CONNECTOR_KEK`, and a dump restored witho
 
 ### ClickHouse backups
 
-ClickHouse holds the `telemetry` database: every span, the hourly totals, and the digest of the statements its tables were made from. Losing it loses that history but not the server: `telmoni migrate` makes an empty store again. Back it up with ClickHouse's own `BACKUP`, as a user allowed to write backups, such as the Compose stack's single ClickHouse user. The image allows backups under `backups/` in its data directory, so on the Compose host the archive lands in ClickHouse's volume, from where you copy it off:
+ClickHouse holds the `telemetry` database: every span, the hourly totals, and the digest of the statements its tables were made from. Losing it loses that history but not the server: `telmoni-server migrate` makes an empty store again. Back it up with ClickHouse's own `BACKUP`, as a user allowed to write backups, such as the Compose stack's single ClickHouse user. The image allows backups under `backups/` in its data directory, so on the Compose host the archive lands in ClickHouse's volume, from where you copy it off:
 
 ```bash
 # The container's own CLICKHOUSE_USER and CLICKHOUSE_PASSWORD sign the client in
@@ -419,7 +420,7 @@ docker compose -f deploy/compose/docker-compose.yml cp \
   clickhouse:/var/lib/clickhouse/backups/telemetry_20270101.zip /backups/
 ```
 
-To restore, copy the archive back into the same directory, drop what is there, and restore it. The row policies are not part of the database: they stay on the server, and `telmoni migrate` makes them again on a new one, finding its own digest in the restored store:
+To restore, copy the archive back into the same directory, drop what is there, and restore it. The row policies are not part of the database: they stay on the server, and `telmoni-server migrate` makes them again on a new one, finding its own digest in the restored store:
 
 ```bash
 docker compose -f deploy/compose/docker-compose.yml cp \

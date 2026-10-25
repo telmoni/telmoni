@@ -237,8 +237,8 @@ The agent indexes this documentation from one text file that holds every page: t
 
 ```bash
 # Docker Compose
-docker compose -f deploy/compose/docker-compose.yml exec server /app/telmoni sweep agent-reindex
+docker compose -f deploy/compose/docker-compose.yml exec server /app/telmoni-server sweep agent-reindex
 
 # Kubernetes
-kubectl exec -it deployment/server -n telmoni -- /app/telmoni sweep agent-reindex
+kubectl exec -it deployment/server -n telmoni -- /app/telmoni-server sweep agent-reindex
 ```
