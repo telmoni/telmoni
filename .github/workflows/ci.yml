@@ -1,8 +1,9 @@
 # CI — the full quality gate: format, clippy (workspace deny lints), typos,
 # cargo-deny (advisories/licenses/bans/sources), web typecheck/lint/knip/test/
 # build, the Rust test suite against a fully migrated Postgres and
-# ClickHouse, and the TypeScript, Go and Python SDK suites (the Rust SDK is a
-# workspace member, under the cargo jobs).
+# ClickHouse, the TypeScript, Go and Python SDK suites (the Rust SDK is a
+# workspace member, under the cargo jobs), and the chart and the compose file
+# under `deploy/`, linted, rendered and parsed.
 # `make ci` runs this same set locally — that is the contract, and the two
 # halves are checked against each other whenever either changes.
 # Intentionally absent: benchmarks, fuzzing, OS matrix, browser e2e, and any
@@ -288,13 +289,39 @@ jobs:
           mypy
           pytest
 
+  # The deploy files, as `make deploy-check` runs them: the chart linted and
+  # rendered, as it ships and with every optional part on, and the compose
+  # file parsed. helm and compose come with the runner image; nothing here
+  # touches a cluster.
+  deploy-check:
+    name: Deploy files (chart + compose)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Lint and render the chart
+        run: |
+          helm lint --strict deploy/charts/telmoni
+          helm template telmoni deploy/charts/telmoni > /dev/null
+          helm template telmoni deploy/charts/telmoni --set highAvailability.enabled=true,ingress.enabled=true,embeddings.enabled=true > /dev/null
+      - name: Parse the compose file
+        env:
+          POSTGRES_PASSWORD: x
+          CLICKHOUSE_PASSWORD: x
+          AUTH_SECRET: x
+          SERVICE_SECRET: x
+          TELEMETRY_KEK: x
+        run: docker compose -f deploy/compose/docker-compose.yml config -q
+
   # Single required status check — branch protection points at this one job.
   # It passes only if every job above succeeded (and none were cancelled).
   ci-status:
     name: CI status
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    needs: [rustfmt, clippy, rustdoc, typos, test-rust, deny, web, sdks]
+    needs: [rustfmt, clippy, rustdoc, typos, test-rust, deny, web, sdks, deploy-check]
     if: always()
     steps:
       # `skipped` counts as a failure: a required check that goes green because

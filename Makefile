@@ -53,11 +53,12 @@ help:
 	@echo "    make flag KEY=connectors ON=false WHY=\"...\" BY=<who>   flip a feature flag (ORG=<id> for one organization; make flags lists)"
 	@echo ""
 	@echo "  Before you push"
-	@echo "    make ci                   the full gate — run this (check + lint + test + web + deny + typos)"
+	@echo "    make ci                   the full gate — run this (check + lint + test + web + deny + typos + sdks + deploy)"
 	@echo "    make check                the fast half: types, clippy, fmt, rustdoc"
 	@echo "    make sdk-check            the SDKs: the TypeScript, Go and Python suites, and the Rust crate's tests"
 	@echo "    make test                 vitest (web) + cargo test (the crates)"
 	@echo "    make book-check           the docs' gate: the console built with them, and the tests that read its pages"
+	@echo "    make deploy-check         the deploy files: the chart linted and rendered, and the compose file parsed"
 	@echo "    make fmt                  cargo fmt + prettier"
 	@echo ""
 	@echo "  More"
@@ -289,7 +290,7 @@ doc:
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --locked --no-deps --document-private-items --quiet
 
 .PHONY: ci
-ci: check lint test web-gate deny typos sdk-check
+ci: check lint test web-gate deny typos sdk-check deploy-check
 
 .PHONY: web-gate
 web-gate: book
@@ -354,6 +355,16 @@ sdk-check:
 	cd sdk/go && test -z "$$(gofmt -l .)" && go vet ./... && go test -race ./...
 	cd sdk/python && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/mypy && .venv/bin/pytest
 	cargo test -p telmoni --locked
+
+# The deploy files, as CI's `deploy-check` job checks them: the chart linted
+# and rendered, as it ships and with every optional part on, and the compose
+# file parsed, its secrets set to a placeholder.
+.PHONY: deploy-check
+deploy-check:
+	helm lint --strict deploy/charts/telmoni
+	helm template telmoni deploy/charts/telmoni > /dev/null
+	helm template telmoni deploy/charts/telmoni --set highAvailability.enabled=true,ingress.enabled=true,embeddings.enabled=true > /dev/null
+	POSTGRES_PASSWORD=x CLICKHOUSE_PASSWORD=x AUTH_SECRET=x SERVICE_SECRET=x TELEMETRY_KEK=x docker compose -f deploy/compose/docker-compose.yml config -q
 
 .PHONY: fmt
 fmt:

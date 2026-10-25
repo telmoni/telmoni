@@ -27,10 +27,12 @@ The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni
 | `scratch/` | The maintainer's notes, gitignored. Never write to it. |
 | [`telmoni/docs`](https://github.com/telmoni/docs) | Sibling repo, checked out as `../docs`: the book, `content/`, which `make book` lays into `web/content/docs`, and `hosted/`, the hosted service's own pages, which this console never serves. |
 | [`telmoni/telmoni-cli`](https://github.com/telmoni/telmoni-cli) | Sibling repo, checked out as `../telmoni-cli`: the CLI, a client of the `/cli/v1` and `/v1` lanes and nothing else. |
+| [`telmoni/skills`](https://github.com/telmoni/skills), `telmoni/<agent>-observability-plugin` | Sibling repos, checked out as `../skills` and `../<agent>-observability-plugin` (`claude`, `codex`, `cursor`, `opencode`): the agent skill, which restates the SDKs, the CLI, the API and the book's paths and sends nothing of its own, and the four plugins, clients of the SDKs. A change to a lane, an SDK or a page's path names what it leaves wrong there. |
 
 ## Commands
 - **After every change** (no permission needed; report failures verbatim): `make check` (typecheck, cargo check, fmt, clippy, rustdoc), then `make lint`.
 - **After a change under `sdk/`:** `make sdk-check` too (the TypeScript, Go and Python suites, and `cargo test -p telmoni`, the Rust SDK's, which needs no database); the Rust SDK is a workspace member, so `make check` already covers it.
+- **After a change under `deploy/`:** `make deploy-check` too (the chart linted and rendered, as it ships and with every optional part on; the compose file parsed).
 - **After a change in `../docs`:** `make book-check` too, the book's own gate (its `make check` runs the same): the console built with the pages, and the tests that read them.
 - **Only when asked:** `make test TEST_THREADS=2`, `make test-svc SVC=<crate> TEST_THREADS=2 [TEST_FILTER=<name>]`, `make ci`, `make e2e`, `npm run test` in `web/`, `make db-reset`. Never bare `cargo test`: `make test` starts Postgres and ClickHouse, and `make test-svc` expects both running. Unasked, say "untested" and name the command (`make db-reset` first if a migration changed).
 - **After a wire-contract change:** `make contract`, then update `web/lib/types/enums.ts` (and `web/lib/slug.ts`, which it also pins) until `contract.test.ts` passes.
@@ -63,7 +65,7 @@ The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni
 - No branches, worktrees, pushes or pull requests.
 
 ## Definition of Done
-- [ ] `make check` and `make lint` pass, or the failure is reported verbatim.
+- [ ] `make check` and `make lint` (and `make deploy-check` when `deploy/` is edited) pass, or the failure is reported verbatim.
 - [ ] No secret or PII reaches a log, an error `detail` or a commit.
 - [ ] The README still describes the tree, `ARCHITECTURE.md` and the book (`../docs`) say what the change does, and every page left wrong in another repository is named.
 - [ ] Nothing that needs asking happened unasked (tests, `make db-reset`, dependencies, external state, other repos, commits), and anything untested is reported with its command.
