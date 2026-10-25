@@ -340,11 +340,7 @@ mod tests {
     fn a_credential_is_its_token_however_the_header_spells_it() {
         let plain = with_authorization("Bearer tm_abc");
         assert_eq!(bearer_token(&plain), Some("tm_abc"));
-        for spelling in [
-            "bEaReR telmoni_abc",
-            "BEARER   telmoni_abc ",
-            "bearer telmoni_abc\t",
-        ] {
+        for spelling in ["bEaReR tm_abc", "BEARER   tm_abc ", "bearer tm_abc\t"] {
             assert_eq!(
                 bearer_token(&with_authorization(spelling)),
                 Some("tm_abc"),
