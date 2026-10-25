@@ -22,7 +22,7 @@ row each, fifty to a page:
 | Agent | The run's agent (`telmoni.agent`) |
 | User | The end user the run was for (`user.id`), as stored: hashed under the project's own key |
 | Session | The session the run belongs to (`gen_ai.conversation.id`), as the application set it |
-| Status | **OK**, **Error** or **Cancelled** once the run's own span has arrived; **Running** until it has |
+| Status | **OK**, **Error** or **Cancelled** once the run's own span has arrived; **Running** until it has. Beside any but **Error**, how many of the run's spans failed: a run can recover from a failed call |
 | Steps | How many steps the run took; hover for its model and tool calls |
 | Tokens | Its model calls' input and output tokens, summed; hover for the split |
 | Duration | From its first span's start to its last span's end |
