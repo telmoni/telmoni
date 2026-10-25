@@ -111,6 +111,7 @@ describe("ApiKeysPage", () => {
         {
           id: "tok_1",
           name: "Admin key",
+          token_hint: "tm_cHksNLsh",
           scopes: ["read", "ingest"],
           expires_at: null,
           last_used_at: null,
@@ -123,6 +124,7 @@ describe("ApiKeysPage", () => {
     expect(screen.getByTestId("page-header")).toHaveTextContent("API keys");
     expect(screen.getByTestId("keys-actions")).toBeInTheDocument();
     expect(screen.getByText("Admin key")).toBeInTheDocument();
+    expect(screen.getByText("tm_cHksNLsh…")).toBeInTheDocument();
     // What the key opens, in the server's order, as the list names it.
     expect(screen.getByText("Read the API, Send spans")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Rotate/i })).toBeInTheDocument();
@@ -141,6 +143,7 @@ describe("ApiKeysPage", () => {
         {
           id: "tok_1",
           name: "Read only key",
+          token_hint: "tm_gJERKmx5",
           scopes: ["read"],
           expires_at: null,
           last_used_at: null,

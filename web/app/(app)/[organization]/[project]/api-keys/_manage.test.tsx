@@ -49,7 +49,7 @@ describe("KeysActions", () => {
   });
 
   it("mints the key as filled in, shuts the panel, and shows the key once in a dialog", async () => {
-    mintTokenAction.mockResolvedValue({ status: "ok", token: "telmoni_abc123" });
+    mintTokenAction.mockResolvedValue({ status: "ok", token: "tm_abc123" });
     render(<KeysActions projectId={PROJECT} />);
     const panel = openPanel();
     const mint = within(panel).getByRole("button", { name: "Mint key" });
@@ -67,7 +67,7 @@ describe("KeysActions", () => {
       scopes: ["ingest"],
     });
     const shown = await screen.findByRole("dialog", { name: "Key created" });
-    expect(within(shown).getByText("telmoni_abc123")).toBeInTheDocument();
+    expect(within(shown).getByText("tm_abc123")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "New API key" })).toBeNull();
     fireEvent.click(within(shown).getByRole("button", { name: "I've saved it" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());

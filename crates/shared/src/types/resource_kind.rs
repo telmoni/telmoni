@@ -18,7 +18,7 @@ pub enum TelmoniResourceKind {
     Project,
     /// A project membership row or invite (role assignment within one project).
     Member,
-    /// A `telmoni_` API token — minted, rotated, or revoked.
+    /// A `tm_` API token — minted, rotated, or revoked.
     Token,
     /// A browser sign-in, ended from another device. Distinct from `Token`, or
     /// "signed out my old laptop" would be filed under API-key activity.

@@ -5,6 +5,7 @@ import { ServiceUnavailable } from "@/components/service-unavailable";
 
 import { PageHeader } from "@/components/page-header";
 import { AccessDenied } from "@/components/access-denied";
+import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { ownerContact } from "@/lib/identity";
 import {
@@ -64,7 +65,8 @@ export default async function ApiKeysPage({
               that carries an `h2` here uses it to name a section the title
               does NOT already cover — "Invited", "Organization notices". */}
           <p className="text-sm text-muted-foreground">
-            Keys for sending spans and reading the API. Plaintext is shown only when minted.
+            Keys for sending spans and reading the API, each named by its first characters; the
+            plaintext is shown only when minted.
           </p>
           {tokens.length === 0 ? (
             <Card className="overflow-hidden p-0 gap-0">
@@ -81,6 +83,7 @@ export default async function ApiKeysPage({
             <DataTable>
               <THead>
                 <Th>Name</Th>
+                <Th>Key</Th>
                 <Th>Opens</Th>
                 <Th>Expires</Th>
                 <Th>Last used</Th>
@@ -91,6 +94,9 @@ export default async function ApiKeysPage({
                 {tokens.map((t) => (
                   <tr key={t.id}>
                     <Td className="font-medium whitespace-nowrap">{t.name}</Td>
+                    <Td className="whitespace-nowrap">
+                      <Badge variant="secondary">{t.token_hint}…</Badge>
+                    </Td>
                     <Td className="text-xs text-muted-foreground whitespace-nowrap">
                       {t.scopes.map((s) => SCOPE_LABEL[s]).join(", ")}
                     </Td>

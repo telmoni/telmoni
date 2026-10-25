@@ -23,7 +23,7 @@ pub struct Config {
     pub endpoint: String,
     /// The organization (`org_…`, `TELMONI_ORG`).
     pub organization_id: Option<String>,
-    /// The API key (`telmoni_…`, `TELMONI_API_KEY`); the one bearer ingest
+    /// The API key (`tm_…`, `TELMONI_API_KEY`); the one bearer ingest
     /// takes. Never serialized, and redacted in `Debug`: a configuration
     /// written out or logged would otherwise carry the key.
     #[serde(skip_serializing)]

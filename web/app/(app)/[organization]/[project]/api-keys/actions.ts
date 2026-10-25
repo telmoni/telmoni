@@ -33,7 +33,6 @@ const MintedToken = z.object({ id: z.string(), token: z.string() });
 export interface MintResult {
   status:  "ok" | "error";
   token?:  string;
-  prefix?: string;
   id?:     string;
   error?:  string;
 }
@@ -108,9 +107,7 @@ export async function mintTokenAction(projectId: string, input: unknown): Promis
     return { status: "error", error: "Unexpected response from the key service." };
   }
   const body = parsed.data;
-  const prefix = body.token.slice(0, 9);
-
-  return { status: "ok", token: body.token, prefix, id: body.id };
+  return { status: "ok", token: body.token, id: body.id };
 }
 
 export async function rotateTokenAction(
@@ -156,7 +153,7 @@ export async function rotateTokenAction(
     return { status: "error", error: "Unexpected response from the key service." };
   }
   const body = parsed.data;
-  return { status: "ok", token: body.token, prefix: body.token.slice(0, 9), id: body.id };
+  return { status: "ok", token: body.token, id: body.id };
 }
 
 export async function revokeTokenAction(

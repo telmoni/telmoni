@@ -876,15 +876,15 @@ async fn seed_keys(pool: &PgPool) -> [&'static str; 3] {
     .unwrap();
     let first_project = project_of(ORGANIZATION);
     let keys = [
-        ("telmoni_live_first", first_project.as_str(), None),
-        ("telmoni_live_second", second_project.as_str(), None),
-        ("telmoni_in_grace", first_project.as_str(), Some("1 day")),
+        ("tm_live_first", first_project.as_str(), None),
+        ("tm_live_second", second_project.as_str(), None),
+        ("tm_in_grace", first_project.as_str(), Some("1 day")),
     ];
     for (raw, project, grace) in keys {
         sqlx::query(
-            "INSERT INTO auth.api_tokens (organization_id, project_id, name, token_hash,
+            "INSERT INTO auth.api_tokens (organization_id, project_id, name, token_hash, token_hint,
                                           created_by, scopes, revoked_at)
-             VALUES ($1, $2, $3, $4, $5, ARRAY['read'],
+             VALUES ($1, $2, $3, $4, 'tm_hint', $5, ARRAY['read'],
                      CASE WHEN $6::text IS NULL THEN NULL ELSE now() + $6::interval END)",
         )
         .bind(ORGANIZATION)
@@ -1818,11 +1818,11 @@ async fn a_deletion_request_closes_every_key_without_revoking_it(pool: PgPool) {
 #[sqlx::test]
 async fn a_pending_deletion_organizations_key_does_not_validate(pool: PgPool) {
     seed_organization_deletion(&pool, "pending_deletion").await;
-    let raw = "telmoni_missed_by_the_revoke";
+    let raw = "tm_missed_by_the_revoke";
     sqlx::query(
-        "INSERT INTO auth.api_tokens (organization_id, project_id, name, token_hash, created_by,
+        "INSERT INTO auth.api_tokens (organization_id, project_id, name, token_hash, token_hint, created_by,
                                       scopes)
-         VALUES ($1, $2, 'missed', $3, $4, ARRAY['read'])",
+         VALUES ($1, $2, 'missed', $3, 'tm_hint', $4, ARRAY['read'])",
     )
     .bind(ORGANIZATION)
     .bind(project_of(ORGANIZATION))

@@ -9,7 +9,7 @@ use telmoni_shared::openapi::{Answer, Method, Route, document};
 const UNIVERSAL: &[Answer] = &[
     Answer {
         status: 401,
-        description: "No live `telmoni_` API key was presented. A revoked, \
+        description: "No live `tm_` API key was presented. A revoked, \
                       expired or unknown key answers the same way.",
     },
     Answer {

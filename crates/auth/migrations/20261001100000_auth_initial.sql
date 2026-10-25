@@ -658,6 +658,9 @@ CREATE TABLE auth.api_tokens (
     name            TEXT        NOT NULL,
     description     TEXT,
     token_hash      TEXT        NOT NULL UNIQUE,
+    -- The key's first characters, `tm_` and eight more, which name the row in
+    -- the console: enough to tell two keys apart, never to use one.
+    token_hint      TEXT        NOT NULL,
     created_by      TEXT        NOT NULL,
     -- What the key opens, chosen when it is minted and kept through every
     -- rotation: `read`, the `/v1` lanes, and `ingest`, sending spans. No

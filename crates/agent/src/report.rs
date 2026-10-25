@@ -220,7 +220,7 @@ pub(crate) mod testing {
     /// A client on `capture`, keyed and pointed at this machine.
     pub(crate) fn client(capture: &Capture) -> Telmoni {
         Telmoni::with_hooks(
-            Config::new("http://127.0.0.1:1", None, Some("telmoni_test_key".into())),
+            Config::new("http://127.0.0.1:1", None, Some("tm_test_key".into())),
             Hooks {
                 transport: Box::new(capture.clone()),
                 sleep: Box::new(|_| {}),
@@ -467,7 +467,7 @@ mod tests {
                 .find(|(key, _)| key.eq_ignore_ascii_case(name))
                 .map(|(_, value)| value.as_str())
         };
-        assert_eq!(header("Authorization"), Some("Bearer telmoni_test_key"));
+        assert_eq!(header("Authorization"), Some("Bearer tm_test_key"));
         assert_eq!(header("Content-Type"), Some("application/json"));
 
         let text = String::from_utf8(body.clone()).unwrap_or_default();

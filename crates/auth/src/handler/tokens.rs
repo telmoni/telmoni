@@ -72,6 +72,17 @@ pub(crate) fn generate_token() -> String {
     format!("{API_TOKEN_PREFIX}{}", URL_SAFE_NO_PAD.encode(bytes))
 }
 
+/// How many of a key's random characters its hint shows after the prefix:
+/// enough to tell two keys apart in a config file, never to use one.
+const HINT_CHARS: usize = 8;
+
+/// The key's first characters, as the console names its row.
+fn hint_of(raw_token: &str) -> &str {
+    raw_token
+        .get(..API_TOKEN_PREFIX.len() + HINT_CHARS)
+        .unwrap_or_default()
+}
+
 /// Gate a token verb on the actor's **authoritative** role. ⚠ Without this a
 /// Member could mint a full-access token: the policy was defined and
 /// matrix-tested but never enforced on this path. The role is resolved in the
@@ -118,7 +129,7 @@ async fn refuse_unless_tokens_on(
     access.leave_owner_scope().await
 }
 
-/// `GET /internal/v1/tokens` — the project's `telmoni_` tokens, metadata only.
+/// `GET /internal/v1/tokens` — the project's keys, metadata only.
 pub async fn list_tokens(
     State(state): State<Arc<AppState>>,
     principal: Principal,
@@ -178,6 +189,7 @@ pub async fn create_token(
         &scopes,
         expires_at,
         &token_hash,
+        hint_of(&raw_token),
     )
     .await
     .map_err(|e| -> TelmoniError {
@@ -291,6 +303,7 @@ pub async fn rotate_token(
         &ctx.scopes,
         expires_at,
         &token_hash,
+        hint_of(&raw_token),
     )
     .await
     .map_err(|e| -> TelmoniError {
@@ -412,19 +425,16 @@ pub async fn revoke_token(
 mod tests {
     use super::*;
 
+    /// A minted key is the prefix and 32 random bytes in URL-safe base64; its
+    /// hint is the prefix and the first eight of those characters.
     #[test]
-    fn test_generate_token_has_tor_prefix() {
+    fn a_minted_key_carries_the_prefix_and_its_hint_is_its_first_characters() {
         let t = generate_token();
-        assert!(
-            t.starts_with("telmoni_"),
-            "expected telmoni_ prefix, got: {t}"
-        );
-    }
-
-    #[test]
-    fn test_generate_token_sufficient_length() {
-        let t = generate_token();
-        assert!(t.len() >= 47, "token too short: {}", t.len());
+        assert!(t.starts_with(API_TOKEN_PREFIX), "{t}");
+        assert_eq!(t.len(), API_TOKEN_PREFIX.len() + 43, "{t}");
+        let hint = hint_of(&t);
+        assert_eq!(hint.len(), API_TOKEN_PREFIX.len() + HINT_CHARS);
+        assert!(t.starts_with(hint) && hint.len() < t.len(), "{hint}");
     }
 
     #[test]
@@ -436,13 +446,13 @@ mod tests {
 
     #[test]
     fn test_hash_token_deterministic() {
-        let tok = "telmoni_test_input";
+        let tok = "tm_test_input";
         assert_eq!(hash_token(tok), hash_token(tok));
     }
 
     #[test]
     fn test_hash_token_distinct_inputs() {
-        assert_ne!(hash_token("telmoni_aaa"), hash_token("telmoni_bbb"));
+        assert_ne!(hash_token("tm_aaa"), hash_token("tm_bbb"));
     }
 
     #[test]

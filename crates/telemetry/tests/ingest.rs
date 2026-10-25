@@ -38,10 +38,10 @@ use telmoni_telemetry::store::Projects;
 use telmoni_telemetry::{otlp_router, router};
 
 const LANE: &str = "/otlp/v1/traces";
-const INGEST_KEY: &str = "telmoni_ingest_key";
-const READ_KEY: &str = "telmoni_read_only_key";
+const INGEST_KEY: &str = "tm_ingest_key";
+const READ_KEY: &str = "tm_read_only_key";
 /// Another project's ingest key, in another organization.
-const OTHER_KEY: &str = "telmoni_other_projects_key";
+const OTHER_KEY: &str = "tm_other_projects_key";
 const RUN: &str = "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01";
 
 /// The module's lanes as the binary mounts them, ingest nested at `/otlp`.

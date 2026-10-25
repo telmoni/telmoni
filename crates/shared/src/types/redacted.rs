@@ -98,8 +98,8 @@ mod tests {
     fn owned_conversions_round_trip_the_plaintext() {
         let s: String = Redacted::from("sk-live-owned").into();
         assert_eq!(s, "sk-live-owned");
-        let a: Arc<str> = Redacted::from("telmoni_owned").into();
-        assert_eq!(&*a, "telmoni_owned");
+        let a: Arc<str> = Redacted::from("tm_owned").into();
+        assert_eq!(&*a, "tm_owned");
     }
 
     #[test]
@@ -113,8 +113,8 @@ mod tests {
             token: Redacted,
         }
         let h = Holder {
-            token: "telmoni_live_abc".into(),
+            token: "tm_live_abc".into(),
         };
-        assert!(!format!("{h:?}").contains("telmoni_live_abc"));
+        assert!(!format!("{h:?}").contains("tm_live_abc"));
     }
 }

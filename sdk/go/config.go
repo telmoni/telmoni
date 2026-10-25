@@ -23,7 +23,7 @@ type Config struct {
 	// DefaultEndpoint, a host without a scheme gets https://, http:// locally.
 	Endpoint       string `json:"endpoint"`
 	OrganizationID string `json:"organization_id,omitempty"`
-	// APIKey is the API key (telmoni_…) with the ingest scope. It is never
+	// APIKey is the API key (tm_…) with the ingest scope. It is never
 	// marshalled, and String and GoString redact it: a configuration logged
 	// or written out would otherwise carry the key.
 	APIKey string `json:"-"`

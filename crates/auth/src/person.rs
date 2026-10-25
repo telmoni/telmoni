@@ -24,6 +24,7 @@ use axum::{
 
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::person_token::Principal;
+use telmoni_shared::types::API_TOKEN_PREFIX;
 use telmoni_shared::{AuthError, TelmoniError};
 
 use crate::AppState;
@@ -33,10 +34,6 @@ use crate::db::{AuthLane, access_tokens};
 /// already in flight when it ran out, never a second lifetime. The console
 /// refreshes with a minute left.
 const EXP_LEEWAY_SECS: i64 = 30;
-
-/// The prefix of a `telmoni_` API token, which rides the same header on the
-/// `/v1` lane and must never be mistaken for a person.
-const API_TOKEN_PREFIX: &str = "telmoni_";
 
 /// The token in an `Authorization: Bearer` header, or the refusal it earns.
 fn bearer_of(authorization: Option<&str>) -> Result<&str, TelmoniError> {
@@ -56,7 +53,7 @@ fn bearer_of(authorization: Option<&str>) -> Result<&str, TelmoniError> {
     };
     if token.starts_with(API_TOKEN_PREFIX) {
         return Err(refuse(
-            "a telmoni_ API token on a person lane",
+            "an API token on a person lane",
             AuthError::InvalidToken,
         ));
     }
@@ -132,11 +129,11 @@ mod tests {
         assert_eq!(status(bearer_of(None)), 401);
     }
 
-    /// A `telmoni_` API token rides the same header on `/v1`, and it is not a
+    /// An API token rides the same header on `/v1`, and it is not a
     /// person: on this lane it is refused before anything is looked up.
     #[test]
     fn an_api_token_is_refused_before_any_lookup() {
-        let err = bearer_of(Some("Bearer telmoni_abc")).unwrap_err();
+        let err = bearer_of(Some("Bearer tm_abc")).unwrap_err();
         assert_eq!(
             err.to_problem_details().type_uri,
             "/errors/auth/invalid-token"

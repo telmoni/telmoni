@@ -305,7 +305,7 @@ async fn the_public_api_is_served_at_v1_behind_its_key() {
     assert_eq!(header(&refused, "www-authenticate"), Some("Bearer"));
     let body = problem(refused).await;
     assert_eq!(body["type"], "/errors/auth/invalid-token");
-    assert_eq!(body["detail"], "a live telmoni_ API key is required");
+    assert_eq!(body["detail"], "a live tm_ API key is required");
 
     let put = Request::put("/v1/organization")
         .body(Body::empty())

@@ -10,7 +10,7 @@ export interface Config {
   endpoint?: string | undefined;
 
   /**
-   * The API key (`telmoni_…`); `/v1` takes no other bearer.
+   * The API key (`tm_…`); `/v1` takes no other bearer.
    */
   apiKey?: string | undefined;
 

@@ -1,4 +1,4 @@
-//! The `/v1` lane a `telmoni_` token opens: who it lets in, and who it refuses.
+//! The `/v1` lane a `tm_` token opens: who it lets in, and who it refuses.
 #![expect(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -136,7 +136,7 @@ struct Fixture {
     slug: String,
     /// The project the token was minted on.
     project: String,
-    /// The raw `telmoni_` value, as a customer holds it.
+    /// The raw `tm_` value, as a customer holds it.
     raw: String,
     id: String,
 }
@@ -433,7 +433,7 @@ async fn a_revoked_token_is_401(pool: PgPool) {
     );
     let body = json_body(refused).await;
     assert_eq!(body["type"], "/errors/auth/invalid-token");
-    assert_eq!(body["detail"], "a live telmoni_ API key is required");
+    assert_eq!(body["detail"], "a live tm_ API key is required");
 }
 
 #[sqlx::test]
@@ -452,7 +452,7 @@ async fn an_expired_token_is_401(pool: PgPool) {
     );
 }
 
-/// Every shape that is not a live bearer, refused the same way. The `telmoni_`
+/// Every shape that is not a live bearer, refused the same way. The `tm_`
 #[sqlx::test]
 async fn nothing_but_a_tor_bearer_gets_in(pool: PgPool) {
     token(&pool).await;
@@ -462,7 +462,7 @@ async fn nothing_but_a_tor_bearer_gets_in(pool: PgPool) {
         "Bearer ",
         "Bearer not-a-telmoni-token",
         "Basic dG9yXzE6",
-        "telmoni_bare_without_the_scheme",
+        "tm_bare_without_the_scheme",
     ] {
         assert_eq!(
             organization(&pool, bearer).await.status(),

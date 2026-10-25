@@ -166,7 +166,7 @@ function MintKeyPanel({
       >
         <SidePanelHeader icon={KeyRound} titleId={titleId} title="New API key" onClose={onClose}>
           <p className="text-sm text-muted-foreground">
-            A <code>telmoni_</code> key for this project: it sends spans, reads the API, or both.
+            A <code>tm_</code> key for this project: it sends spans, reads the API, or both.
             The plaintext is shown exactly once.
           </p>
         </SidePanelHeader>

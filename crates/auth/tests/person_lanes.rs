@@ -330,13 +330,13 @@ async fn me_records_the_bearers_session_once(pool: PgPool) {
     assert_eq!(rows, 1, "one session, one row");
 }
 
-/// A `telmoni_` API token rides the same header on `/v1`, and it is not a
+/// An API token rides the same header on `/v1`, and it is not a
 /// person: on this lane it is refused without being looked up.
 #[sqlx::test]
 async fn a_telmoni_api_token_is_not_a_person(pool: PgPool) {
     apply_audit_migrations(&pool).await;
 
-    let (status, body) = me(&pool, Some("Bearer telmoni_not_a_person_at_all"), json!({})).await;
+    let (status, body) = me(&pool, Some("Bearer tm_not_a_person_at_all"), json!({})).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
 
     let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM auth.organizations")

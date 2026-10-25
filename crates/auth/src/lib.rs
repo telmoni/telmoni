@@ -578,7 +578,7 @@ pub fn router(state: Arc<AppState>) -> Router {
 }
 
 /// This module's lanes under the binary's one `/v1`, the public read API a
-/// `telmoni_` key opens ([`handler::v1::router`]): on the machine host, behind
+/// `tm_` key opens ([`handler::v1::router`]): on the machine host, behind
 /// the door the binary puts in front of it, and never behind the service
 /// secret, since a machine reaches it straight and its key is its gate.
 pub fn v1_router(state: Arc<AppState>) -> Router {

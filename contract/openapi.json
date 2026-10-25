@@ -31,14 +31,14 @@
     },
     "securitySchemes": {
       "bearerAuth": {
-        "description": "A `telmoni_` API key, minted on a project's API keys page. It reads its organization and that project, within the scopes it was minted with: every lane here needs `read`.",
+        "description": "A `tm_` API key, minted on a project's API keys page. It reads its organization and that project, within the scopes it was minted with: every lane here needs `read`.",
         "scheme": "bearer",
         "type": "http"
       }
     }
   },
   "info": {
-    "description": "The API a `telmoni_` token opens. Every response that is not a success is an RFC 9457 problem document, and a client switches on its `type` rather than on its prose.",
+    "description": "The API a `tm_` token opens. Every response that is not a success is an RFC 9457 problem document, and a client switches on its `type` rather than on its prose.",
     "title": "Telmoni API",
     "version": "1"
   },
@@ -59,7 +59,7 @@
                 }
               }
             },
-            "description": "No live `telmoni_` API key was presented. A revoked, expired or unknown key answers the same way."
+            "description": "No live `tm_` API key was presented. A revoked, expired or unknown key answers the same way."
           },
           "403": {
             "content": {
@@ -110,7 +110,7 @@
                 }
               }
             },
-            "description": "No live `telmoni_` API key was presented. A revoked, expired or unknown key answers the same way."
+            "description": "No live `tm_` API key was presented. A revoked, expired or unknown key answers the same way."
           },
           "403": {
             "content": {

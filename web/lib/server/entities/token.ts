@@ -11,6 +11,7 @@ import { identityContext, projectHeaders } from "./identity-context";
 const ApiTokenSchema = z.object({
   id: z.string(),
   name: z.string(),
+  token_hint: z.string(),
   scopes: z.array(z.enum([ApiKeyScope.Read, ApiKeyScope.Ingest])),
   expires_at: z.string().nullable(),
   last_used_at: z.string().nullable(),

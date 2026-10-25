@@ -1,4 +1,4 @@
-//! `/v1` — the public read API, opened by a `telmoni_` API key holding the
+//! `/v1` — the public read API, opened by a `tm_` API key holding the
 //! `read` scope. The binary nests this module's [`router`] under its one
 //! `/v1`, on the machine host, behind the door's limits; the key gate every
 //! machine lane shares (`require_api_key`) puts the key's [`ActingKey`] on
@@ -173,7 +173,7 @@ fn refuse(error: TelmoniError, _request: Request) -> Refusal {
     let mut problem = error.to_problem_details();
     let status = StatusCode::from_u16(problem.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
     if status == StatusCode::UNAUTHORIZED {
-        problem.detail = Some("a live telmoni_ API key is required".into());
+        problem.detail = Some(format!("a live {API_TOKEN_PREFIX} API key is required"));
     }
     let mut response = (status, Json(problem)).into_response();
     response.headers_mut().insert(
@@ -251,7 +251,7 @@ async fn meter_data_out(
     response
 }
 
-/// The `telmoni_` key a request's `authorization` presents as its bearer,
+/// The `tm_` key a request's `authorization` presents as its bearer,
 /// or `None` for no bearer, an empty one, or one that is not an API key.
 pub(crate) fn presented_key(headers: &HeaderMap) -> Option<&str> {
     headers

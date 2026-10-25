@@ -290,9 +290,9 @@ mod tests {
     #[test]
     fn an_api_key_is_cut_out_of_the_logged_path() {
         for (path, logged) in [
-            ("/v1/telmoni_4p1k3y", "/v1/…"),
-            ("/v1/'telmoni_4p1k3y'/members", "/v1/…/members"),
-            ("//v1/telmoni_4p1k3y/telmoni_4p1k3y", "//v1/…/…"),
+            ("/v1/tm_4p1k3y", "/v1/…"),
+            ("/v1/'tm_4p1k3y'/members", "/v1/…/members"),
+            ("//v1/tm_4p1k3y/tm_4p1k3y", "//v1/…/…"),
             ("/v1/organization", "/v1/organization"),
             ("/v1/", "/v1/"),
         ] {

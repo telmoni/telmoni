@@ -21,9 +21,9 @@ pub enum Flag {
     /// delivery queue PAUSES in place and drains when it is on again, and a
     /// new connection is refused; connected targets stay listed and removable.
     Connectors,
-    /// Every `/v1` read lane a `telmoni_` token opens.
+    /// Every `/v1` read lane a `tm_` token opens.
     PublicApi,
-    /// Minting and rotating `telmoni_` tokens. The Keys page stays, because a
+    /// Minting and rotating `tm_` tokens. The Keys page stays, because a
     /// leaked key must be revocable whatever the switch says.
     ApiTokens,
     /// Adding a member to an organization. The Members page stays readable, and

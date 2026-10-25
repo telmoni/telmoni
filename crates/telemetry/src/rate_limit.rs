@@ -294,11 +294,11 @@ mod tests {
 
     #[test]
     fn a_digest_names_a_credential_without_holding_it() {
-        let digest = RateLimit::digest("Bearer telmoni_secret");
+        let digest = RateLimit::digest("Bearer tm_secret");
         assert_eq!(digest.len(), 32);
         assert!(digest.bytes().all(|b| b.is_ascii_hexdigit()));
         assert!(!digest.contains("telmoni"));
-        assert_eq!(digest, RateLimit::digest("Bearer telmoni_secret"));
-        assert_ne!(digest, RateLimit::digest("Bearer telmoni_other"));
+        assert_eq!(digest, RateLimit::digest("Bearer tm_secret"));
+        assert_ne!(digest, RateLimit::digest("Bearer tm_other"));
     }
 }

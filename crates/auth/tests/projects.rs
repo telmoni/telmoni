@@ -517,8 +517,8 @@ async fn deleting_a_project_takes_its_keys_and_its_seats(pool: PgPool) {
     .await;
     sqlx::query(
         "INSERT INTO auth.api_tokens
-             (organization_id, project_id, name, token_hash, created_by, scopes, shard_key)
-         VALUES ($1, $2, 'doomed key', 'hash-doomed', $3, ARRAY['read'], gen_random_uuid())",
+             (organization_id, project_id, name, token_hash, token_hint, created_by, scopes, shard_key)
+         VALUES ($1, $2, 'doomed key', 'hash-doomed', 'tm_doomed', $3, ARRAY['read'], gen_random_uuid())",
     )
     .bind(&organization)
     .bind(&project_id)

@@ -73,7 +73,7 @@ pub struct Route {
     pub params: &'static [Param],
     /// Every answer it gives, refusals included.
     pub answers: &'static [Answer],
-    /// Whether a `telmoni_` bearer opens it. A lane that sets it false is
+    /// Whether a `tm_` bearer opens it. A lane that sets it false is
     /// documented as taking no credential and never answering 401.
     pub bearer: bool,
 }
@@ -106,7 +106,7 @@ pub fn document(
             "title": title,
             "version": version,
             "description":
-                "The API a `telmoni_` token opens. Every response that is not a \
+                "The API a `tm_` token opens. Every response that is not a \
                  success is an RFC 9457 problem document, and a client \
                  switches on its `type` rather than on its prose.",
         },
@@ -119,7 +119,7 @@ pub fn document(
                     "type": "http",
                     "scheme": "bearer",
                     "description":
-                        "A `telmoni_` API key, minted on a project's API keys page. \
+                        "A `tm_` API key, minted on a project's API keys page. \
                          It reads its organization and that project, within the \
                          scopes it was minted with: every lane here needs `read`.",
                 },

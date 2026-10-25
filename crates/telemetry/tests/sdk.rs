@@ -28,7 +28,7 @@ use telmoni_telemetry::hashing::HASH_BYTES;
 use telmoni_telemetry::{otlp_router, router};
 
 /// The project's ingest key, as auth would resolve it.
-const INGEST_KEY: &str = "telmoni_sdk_ingest";
+const INGEST_KEY: &str = "tm_sdk_ingest";
 
 #[sqlx::test]
 async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_read_it(

@@ -154,7 +154,7 @@ queued: flush, or wait, and record it again.
 ```ts
 const telmoni = new Telmoni({
   endpoint: 'https://api.telmoni.com', // the default
-  apiKey: 'telmoni_…',
+  apiKey: 'tm_…',
   organizationId: 'org_…',
   captureContent: false, // the default
   sampleRate: 1, // the default: every run

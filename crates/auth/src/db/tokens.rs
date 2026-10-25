@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::db::AuthLane;
 use crate::model::ApiToken;
 
-const TOKEN_COLUMNS: &str = "id, project_id, name, description, created_by, scopes, \
+const TOKEN_COLUMNS: &str = "id, project_id, name, description, token_hint, created_by, scopes, \
      expires_at, last_used_at, revoked_at, created_at";
 
 /// Active tokens for `project_id`: not revoked and not expired. A token in its
@@ -30,8 +30,9 @@ pub async fn list(
     .await
 }
 
-/// Mint a token row. The caller hashed the secret and keeps the plaintext
-/// for its one answer; nothing here ever reads it back.
+/// Mint a token row. The caller hashed the secret and keeps the plaintext for
+/// its one answer, and cut `token_hint`, the first characters the console
+/// names the row by; nothing here ever reads the secret back.
 #[expect(
     clippy::too_many_arguments,
     reason = "all fields required to insert an API token"
@@ -46,12 +47,13 @@ pub async fn create(
     scopes: &[ApiKeyScope],
     expires_at: Option<DateTime<Utc>>,
     token_hash: &str,
+    token_hint: &str,
 ) -> sqlx::Result<ApiToken> {
     sqlx::query_as::<_, ApiToken>(sqlx::AssertSqlSafe(format!(
         "INSERT INTO auth.api_tokens
              (id, organization_id, project_id, name, description, token_hash,
-              created_by, scopes, expires_at, shard_key)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+              token_hint, created_by, scopes, expires_at, shard_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING {TOKEN_COLUMNS}",
     )))
     .bind(Uuid::now_v7())
@@ -60,6 +62,7 @@ pub async fn create(
     .bind(name)
     .bind(description)
     .bind(token_hash)
+    .bind(token_hint)
     .bind(created_by)
     .bind(scopes)
     .bind(expires_at)
@@ -311,6 +314,7 @@ mod tests {
             &[ApiKeyScope::Read],
             None,
             "hash-abc",
+            "tm_hint",
         )
         .await?;
         assert_eq!(tok.project_id, pid("project-tok").as_str());
@@ -339,6 +343,7 @@ mod tests {
             &[ApiKeyScope::Read, ApiKeyScope::Ingest],
             None,
             "hash-valid",
+            "tm_hint",
         )
         .await?;
         tx.commit().await?;
@@ -383,6 +388,7 @@ mod tests {
             &[ApiKeyScope::Read],
             None,
             "hash-revoke",
+            "tm_hint",
         )
         .await?;
         let revoked = revoke_in_project(&mut tx, &pid("project-tok"), tok.id).await?;
@@ -410,6 +416,7 @@ mod tests {
             &[ApiKeyScope::Read],
             None,
             "hash-x",
+            "tm_hint",
         )
         .await?;
         let revoked = revoke_in_project(&mut tx, &pid("project-wrong"), tok.id).await?;
@@ -433,6 +440,7 @@ mod tests {
             &[ApiKeyScope::Read],
             Some(past),
             "hash-expired",
+            "tm_hint",
         )
         .await?;
         tx.commit().await?;
@@ -460,6 +468,7 @@ mod tests {
             &[ApiKeyScope::Ingest],
             None,
             "hash-old",
+            "tm_hint",
         )
         .await?;
 
@@ -484,6 +493,7 @@ mod tests {
             &ctx.scopes,
             None,
             "hash-new",
+            "tm_hint",
         )
         .await?;
         tx.commit().await?;
@@ -529,6 +539,7 @@ mod tests {
             &[ApiKeyScope::Read],
             None,
             "hash-grace",
+            "tm_hint",
         )
         .await?;
         begin_rotation(&mut tx, &pid("project-tok"), old.id, 3600)
@@ -577,6 +588,7 @@ mod tests {
             &[ApiKeyScope::Read],
             None,
             "hash-r",
+            "tm_hint",
         )
         .await?;
 
@@ -612,6 +624,7 @@ mod tests {
             &[ApiKeyScope::Read],
             None,
             "hash-keep",
+            "tm_hint",
         )
         .await?;
         let gone = create(
@@ -624,6 +637,7 @@ mod tests {
             &[ApiKeyScope::Read],
             None,
             "hash-gone1",
+            "tm_hint",
         )
         .await?;
         let gone2 = create(
@@ -636,6 +650,7 @@ mod tests {
             &[ApiKeyScope::Read],
             None,
             "hash-gone2",
+            "tm_hint",
         )
         .await?;
 
@@ -683,6 +698,7 @@ mod tests {
             &[ApiKeyScope::Read],
             None,
             "hash-recent",
+            "tm_hint",
         )
         .await?;
         sqlx::query(

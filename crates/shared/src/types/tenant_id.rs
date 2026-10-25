@@ -183,8 +183,8 @@ pub const PROJECT_ID_PREFIX: &str = "project_";
 /// The prefix every minted organization id carries — `org_`.
 pub const ORGANIZATION_ID_PREFIX: &str = "org_";
 
-/// The prefix every minted API token carries — `telmoni_`.
-pub const API_TOKEN_PREFIX: &str = "telmoni_";
+/// The prefix every minted API token carries — `tm_`.
+pub const API_TOKEN_PREFIX: &str = "tm_";
 
 /// The alphabet the random half is spelled in.
 const BASE62: &[u8; 62] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";

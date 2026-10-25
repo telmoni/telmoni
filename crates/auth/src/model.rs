@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use telmoni_shared::types::API_TOKEN_PREFIX;
 use telmoni_shared::{ApiKeyScope, OrganizationId, OrganizationStatus, ProjectId, Role, UserId};
 
 /// Which level an invitation is to — a project inside an organization, or the
@@ -292,6 +293,8 @@ pub struct ApiToken {
     pub project_id: String,
     pub name: String,
     pub description: Option<String>,
+    /// The first characters of the key, as the console names its row.
+    pub token_hint: String,
     pub created_by: String,
     /// What the key opens, as minted.
     pub scopes: Vec<ApiKeyScope>,
@@ -345,7 +348,7 @@ impl std::fmt::Debug for CreateTokenResponse {
         f.debug_struct("CreateTokenResponse")
             .field("id", &self.id)
             .field("name", &self.name)
-            .field("token", &"telmoni_***")
+            .field("token", &format_args!("{API_TOKEN_PREFIX}***"))
             .finish()
     }
 }
@@ -367,7 +370,7 @@ pub struct ValidateTokenRequest {
 impl std::fmt::Debug for ValidateTokenRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ValidateTokenRequest")
-            .field("token", &"telmoni_***")
+            .field("token", &format_args!("{API_TOKEN_PREFIX}***"))
             .finish()
     }
 }
@@ -401,25 +404,25 @@ mod tests {
         let resp = CreateTokenResponse {
             id: Uuid::new_v4(),
             name: "ci-pipeline".into(),
-            token: "telmoni_super_secret_value_1234567890".into(),
+            token: "tm_super_secret_value_1234567890".into(),
         };
         let rendered = format!("{resp:?}");
         assert!(
             !rendered.contains("super_secret_value"),
             "leaked: {rendered}"
         );
-        assert!(rendered.contains("telmoni_***"));
+        assert!(rendered.contains("tm_***"));
         assert!(rendered.contains("ci-pipeline"));
     }
 
     #[test]
     fn validate_token_request_debug_masks_the_raw_token() {
         let req = ValidateTokenRequest {
-            token: "telmoni_inbound_secret_9876".into(),
+            token: "tm_inbound_secret_9876".into(),
         };
         let rendered = format!("{req:?}");
         assert!(!rendered.contains("inbound_secret"), "leaked: {rendered}");
-        assert!(rendered.contains("telmoni_***"));
+        assert!(rendered.contains("tm_***"));
     }
 
     /// The two words are read by the console (the notifications bell prints
