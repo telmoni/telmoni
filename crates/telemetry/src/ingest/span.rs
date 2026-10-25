@@ -40,7 +40,7 @@ pub struct Context<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refusal {
     /// No `telmoni.run_id` and `telmoni.agent`: a span from an exporter other
-    /// than ours, refused until 6.2 reads a run out of any trace.
+    /// than ours, refused until a run can be read out of any trace.
     NotARun,
     /// A field whose value is not what its rule asks: the field's name.
     Invalid(&'static str),
@@ -368,7 +368,7 @@ impl Fields {
                     _ => return Err(Refusal::Invalid(contract::CANCELLED)),
                 };
             }
-            // Ours, for 4.2: read then, consumed now.
+            // Ours, for sealed content later: consumed now, read then.
             contract::CONTENT_MARK => {}
             contract::OPERATION => self.operation = text(value),
             contract::AGENT_NAME => self.agent_name = text(value),
@@ -423,9 +423,9 @@ impl Fields {
                     contract::SESSION_ID,
                 )?);
             }
-            // ⚠ Dropped in every mode: no table keeps content until 4.1 and
-            // 4.2, and the switch offers no mode but `off` until then. The
-            // answer names the mode, so a sender reads why.
+            // ⚠ Dropped in every mode: no table keeps content yet, and the
+            // switch offers no mode but `off` until one does. The answer
+            // names the mode, so a sender reads why.
             _ if contract::is_content(key) => drop_attribute(key, DropReason::Content),
             _ if key.starts_with("telmoni.") => drop_attribute(key, DropReason::Unlisted),
             _ if contract::is_inventory_span(key) => match as_text(value) {
@@ -798,7 +798,7 @@ mod tests {
         assert_eq!(row.kind, SpanKind::Span);
     }
 
-    /// ⚠ Until 6.2, a span with no run is another exporter's: refused, the
+    /// ⚠ For now a span with no run is another exporter's: refused, the
     /// rest of its batch kept.
     #[test]
     fn a_span_outside_a_run_is_refused() {

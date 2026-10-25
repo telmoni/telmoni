@@ -201,13 +201,13 @@ interface GroupSpec {
 const CORE_GROUPS: GroupSpec[] = [
   {
     title: "Project",
-    // Alerts and Dashboards stand in the rail before their pages exist (3.12
-    // and 8.5), so the console shows the product's shape while the rest is
-    // built: each opens a placeholder that the real page replaces, as Traces,
-    // Sessions and Users were until theirs landed. The Observability
-    // block is headed because its five rows are the product, and the Project
-    // block because the rest of the rail is the project's own housekeeping;
-    // Overview stands alone above both.
+    // Alerts and Dashboards stand in the rail before their pages exist, so
+    // the console shows the product's shape while the rest is built: each
+    // opens a placeholder that the real page replaces, as Traces, Sessions
+    // and Users were until theirs landed. The Observability block is headed
+    // because its five rows are the product, and the Project block because
+    // the rest of the rail is the project's own housekeeping; Overview
+    // stands alone above both.
     items: [
       { title: "Overview", path: "", icon: Activity, key: "o" },
       { title: "Traces", path: "/traces", icon: ListTree, block: { heading: "Observability" }, key: "t" },

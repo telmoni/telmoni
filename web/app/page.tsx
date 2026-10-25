@@ -25,9 +25,8 @@ import { ForgetPersonalStorage } from "./_forget-personal-storage";
 
 const docs = (path: string) => `${DOCS_URL}${path}`;
 
-// What the product is, over the sentence the page makes — in the words its
-// roadmap uses for its three goals — and the paragraph under it: the product
-// as it is being built.
+// What the product is, over the sentence the page makes, and the paragraph
+// under it: the product as it is being built.
 const KICKER = "Privacy-first telemetry and monitoring for AI agents";
 const CLAIM = "Know when your agents stall, loop or overspend, without sending us a single prompt.";
 const PITCH =

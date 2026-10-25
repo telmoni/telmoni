@@ -5,7 +5,7 @@
 //! (`telmoni_shared::envelope`), and held in memory once opened, so the key
 //! service is asked once per project per process.
 //!
-//! ⚠ The key, not the hash, is what erasure (4.4) deletes: with the row
+//! ⚠ The key, not the hash, is what erasure deletes: with the row
 //! gone, no stored id can be matched against a list of guessed ones.
 
 use std::collections::HashMap;

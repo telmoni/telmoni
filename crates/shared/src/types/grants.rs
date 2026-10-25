@@ -81,8 +81,7 @@ impl MemberCeiling {
 }
 
 /// What an answer to an organization's machines costs on top of its bytes:
-/// the TLS connection a script opens for each request, as `PLANS.md`
-/// measures one.
+/// the TLS connection a script opens for each request, measured at 6.5 KB.
 pub const CONNECTION_BYTES: u64 = 6_500;
 
 /// The machine lanes' ceiling an organization's plan sets, as the deployment

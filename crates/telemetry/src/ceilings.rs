@@ -209,7 +209,7 @@ fn until_midnight(now: DateTime<Utc>) -> u64 {
     })
 }
 
-/// A ceiling of bytes as `PLANS.md` writes it: 5 MB, 2.5 MB.
+/// A ceiling of bytes as a refusal names it: 5 MB, 2.5 MB.
 fn megabytes(bytes: u64) -> String {
     let whole = bytes / 1_000_000;
     if bytes.is_multiple_of(1_000_000) {

@@ -459,7 +459,7 @@ export function nextSort(
   return { ...sortAfterClick(SORTS, TraceSort.Started, query, column), page: undefined };
 }
 
-/** A ready-made query a toolbar button applies; cost waits for prices (roadmap 7.1). */
+/** A ready-made query a toolbar button applies; a cost preset waits for prices. */
 export type Preset = {
   id: "errors" | "slow" | "tokens";
   label: string;

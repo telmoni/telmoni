@@ -6,8 +6,8 @@ import { layoutQueryOf } from "@/lib/layout";
 import type { TraceDetail } from "@/lib/server/data";
 
 // A trace's page under the layout it stands in: the tree and the span
-// chosen, as 1.26 built them, opened as far as the layout says and started
-// afresh when the layout changes (the body is keyed on it).
+// chosen, opened as far as the layout says and started afresh when the
+// layout changes (the body is keyed on it).
 export function TraceLayoutBody(
   props: LayoutPage & { trace: TraceDetail; organization: string; slug: string },
 ) {

@@ -467,7 +467,7 @@ async fn a_body_that_is_not_an_export_is_invalid(pool: PgPool) {
     }
 }
 
-/// ⚠ Until 6.2, a span with no run is another exporter's: refused one by
+/// ⚠ For now a span with no run is another exporter's: refused one by
 /// one, counted, and the export otherwise answered; nothing reaches the
 /// store, so this needs none.
 #[sqlx::test]

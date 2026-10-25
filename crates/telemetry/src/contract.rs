@@ -108,7 +108,7 @@ pub const TAG_PREFIX: &str = "telmoni.tag.";
 pub const SAMPLE_RATE: &str = "telmoni.sample_rate";
 /// Set on a span the agent cancelled.
 pub const CANCELLED: &str = "telmoni.cancelled";
-/// `sealed` on a span whose content our SDK encrypted (4.2).
+/// `sealed` on a span whose content our SDK encrypted.
 pub const CONTENT_MARK: &str = "telmoni.content";
 /// Our SDKs' instrumentation scope.
 pub const SCOPE: &str = "telmoni";

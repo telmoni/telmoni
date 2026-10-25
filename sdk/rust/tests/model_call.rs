@@ -318,7 +318,7 @@ fn mode_on() -> Answer {
     }
 }
 
-/// An answer that says nothing of the mode, as a server before 1.2 did.
+/// An answer that says nothing of the mode, as a server without the content switch did.
 fn mode_unknown() -> Answer {
     Answer {
         status: 200,
