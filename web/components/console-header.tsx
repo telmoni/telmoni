@@ -10,7 +10,7 @@ import { NavUser } from "./nav-user";
 import { NotificationsBell } from "./notifications-bell";
 import { SearchButton } from "./search-button";
 import { useSidebar } from "./sidebar-context";
-import { TelmoniMark } from "./telmoni-mark";
+import { TelmoniLockup, TelmoniMark } from "./telmoni-mark";
 import { PRODUCT_NAME } from "@/lib/site";
 import { organizationPath } from "@/lib/slug";
 import { useActiveOrganization } from "@/lib/store";
@@ -92,16 +92,13 @@ export function ConsoleHeader({
           }}
           aria-label={PRODUCT_NAME}
           className={cn(
-            "hidden min-w-0 items-center gap-1.5 pl-1 text-[17px] leading-none font-bold tracking-tight hover:opacity-70 md:flex",
+            "hidden min-w-0 items-center pl-1 hover:opacity-70 md:flex",
             collapsed && "md:hidden",
           )}
         >
-          {/* `-top-[2.5px]` stands the mark on the word's baseline, its `t`
-              rising past the caps as a tall letter's would: centred by its
-              box, its feet sit below it. `pt-0.5` centres the word's caps on
-              the bar, level with the toggle, since the word has no descender. */}
-          <TelmoniMark className="relative -top-[2.5px] size-6 shrink-0" />
-          <span className="truncate pt-0.5">{PRODUCT_NAME}</span>
+          {/* 20px, under the pack's 24 for a header lockup: at 24 the word runs
+              under the toggle in a 192px rail. */}
+          <TelmoniLockup className="h-5 shrink-0" />
         </Link>
         {collapsed ? (
           <button
@@ -113,9 +110,9 @@ export function ConsoleHeader({
             title="Open sidebar"
             className="group hidden size-9 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-sidebar-accent/50 md:flex"
           >
-            {/* Raised as the open mark is, so its box is the same one and
-                nothing drops when the rail closes. */}
-            <TelmoniMark className="relative -top-[2.5px] size-6 group-hover/brand:hidden group-focus-visible:hidden" />
+            {/* Where the open lockup's mark stands, so nothing moves when
+                the rail closes. */}
+            <TelmoniMark className="group-hover/brand:hidden group-focus-visible:hidden" />
             <PanelLeft className="hidden size-4 text-muted-foreground group-hover/brand:block group-focus-visible:block" />
           </button>
         ) : (

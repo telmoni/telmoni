@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { MobileNav } from "@/components/mobile-nav";
 import { SignOutButton } from "@/components/sign-out-button";
 import { SiteNavMenu } from "@/components/site-nav-menu";
-import { TelmoniMark } from "@/components/telmoni-mark";
+import { TelmoniLockup } from "@/components/telmoni-mark";
 import { INSET } from "@/lib/inset";
 import { PRODUCT_NAME } from "@/lib/site";
 import { cn } from "@/lib/utils";
@@ -51,14 +51,10 @@ export function SiteHeader({ signedIn, inset = false }: { signedIn: boolean; ins
         <div className={cn("flex items-center", inset ? INSET : "px-3.5")}>
           <Link
             href="/"
-            className={cn(
-              "flex min-w-0 items-center gap-1.5 text-[17px] leading-none font-bold tracking-tight hover:opacity-70",
-              !inset && "pl-1",
-            )}
+            aria-label={PRODUCT_NAME}
+            className={cn("flex min-w-0 items-center hover:opacity-70", !inset && "pl-1")}
           >
-            {/* Raised and padded as the console header's are, for the same reasons. */}
-            <TelmoniMark className="relative -top-[2.5px] size-6 shrink-0" />
-            <span className="truncate pt-0.5">{PRODUCT_NAME}</span>
+            <TelmoniLockup className="shrink-0" />
           </Link>
         </div>
 
