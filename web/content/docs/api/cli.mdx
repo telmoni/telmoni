@@ -131,7 +131,7 @@ $ telmoni status
 - the endpoint the session belongs to;
 - how many minutes the access token has left.
 
-With an API key, it asks `GET /v1/organization` and prints the ID and name of the key's organization, then the endpoint. A key from `TELMONI_API_KEY` or `api_key_helper` is named as such (`API key from TELMONI_API_KEY for …`), and asks at the endpoint `TELMONI_ENDPOINT`, the configuration file or the default names. Signed out, it prints the endpoint it would sign in to and exits with an error.
+With an API key, it asks `GET /v1/organization` and prints the ID and name of the key's organization, then the endpoint. A key from `TELMONI_API_KEY` or `api_key_helper` is named as such (`API key from TELMONI_API_KEY for …`), and asks at the endpoint `TELMONI_ENDPOINT`, the configuration file or the default names; a saved login it passed over is named after the report, as not in use — `Saved login, not in use: a device sign-in for <email>`, or `Saved login, not in use: a saved API key` — read for that alone, neither refreshed nor changed. Signed out, it prints the endpoint it would sign in to and exits with an error.
 
 With a browser session, `status` also saves the organizations the server answered. If you are no longer in the saved active organization, it replaces it with your [default organization](/docs/account/settings#default-organization), whether or not `TELMONI_ORG` is set.
 
@@ -154,7 +154,7 @@ With a browser session, the object holds:
 | `organizationCount` | How many organizations you belong to |
 | `tokenExpiresInSecs` | Seconds until the access token expires |
 
-With an API key, it holds `authType` (`api_key`), `keySource` (`environment`, `helper` or `saved`), `endpoint`, and `organization`: an object of `organizationId`, `slug` and `label`. Signed out, `status --json` prints nothing and exits with an error.
+With an API key, it holds `authType` (`api_key`), `keySource` (`environment`, `helper` or `saved`), `endpoint`, `organization`: an object of `organizationId`, `slug` and `label`, and, when a key from `TELMONI_API_KEY` or `api_key_helper` passed a saved login over, `unusedLogin`: `device` or `api_key`, absent when there is none. Signed out, `status --json` prints nothing and exits with an error.
 
 ---
 
