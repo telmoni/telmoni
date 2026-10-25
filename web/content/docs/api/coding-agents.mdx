@@ -24,11 +24,11 @@ spans**). A self-hosted Telmoni's machine host is read [as the SDKs read
 one](/docs/api/sdks#the-key-on-the-wire): given without a scheme, it is
 `https://`, or `http://` for this machine, the only host plain HTTP goes to.
 The Claude Code, Codex and Cursor plugins need Node.js 22.23.4, 24.22.1,
-26.12.1 or later, October 2026's security releases, with npm on your `PATH`,
-and Claude Code and Codex need git, with which they add a plugin's marketplace;
-the OpenCode plugin runs inside OpenCode, which installs it itself. Each
-installs from its npm package, as below; to run one from a checkout instead,
-build it in its repository:
+26.12.1 or later, October 2026's security releases; Codex's and Cursor's
+install with npm, so it must be on your `PATH`, and Claude Code and Codex need
+git, with which they add a plugin's marketplace; the OpenCode plugin runs
+inside OpenCode, which installs it itself. Each installs as built, as below; to
+run one from a checkout instead, build it in its repository:
 
 ```sh
 git clone https://github.com/telmoni/claude-observability-plugin.git   # or the codex-, opencode- or cursor-observability-plugin
@@ -99,8 +99,10 @@ waits on every hook, as soon as Node has started.
 
 ## Claude Code
 
-Its repository is its marketplace, and names the plugin by its npm package,
-so the hook arrives as built:
+Its repository is its marketplace, and names the plugin's `release` branch,
+which each release fills with the package as built, so the hook arrives as
+built and nothing else does. Installed so, it loads in every Claude Code you
+start, an editor's included:
 
 ```sh
 claude plugin marketplace add telmoni/claude-observability-plugin
@@ -108,7 +110,7 @@ claude plugin install telmoni-observability@telmoni-plugins
 ```
 
 From a checkout, start Claude Code with the plugin and your key in its
-environment instead:
+environment instead; that one session alone loads it:
 
 ```sh
 TELMONI_API_KEY=telmoni_… claude --plugin-dir ./claude-observability-plugin
