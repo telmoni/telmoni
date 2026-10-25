@@ -244,6 +244,7 @@ The CLI reads the following environment variables:
 | `TELMONI_ENDPOINT` | The endpoint `telmoni login` signs in to (default: `https://api.telmoni.com`, the machine host). It comes after `--endpoint` and ahead of the `endpoint` configuration key. A saved session keeps the endpoint it signed in to. |
 | `TELMONI_API_KEY` | An API key for each command that acts with one, ahead of any saved login and never saved, for CI/CD runs. At a terminal, a new key is [asked about once](#2-programmatic--ci-login-api-key) first. A blank value counts as unset. |
 | `TELMONI_ORG` | With a browser session, the organization `status`, `whoami` and `logout` act in instead of the active one, by ID or slug, from the list the CLI saved. A script should give the ID, which nothing moves. |
+| `TELMONI_CONFIG_DIR` | The directory the saved login and `config.json` live in, in place of the [default](#credential-storage-paths): an absolute path, or the command stops. Each directory holds a login of its own, so a shell with a value of its own is a second login, on a Mac a second Keychain item. A blank value counts as unset. |
 
 Its requests to any host but this machine also go through a proxy named by
 the system proxy variables (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` and
@@ -277,5 +278,7 @@ The credentials file is written with `0600` permissions (readable and writable o
 - **Linux**: `$XDG_CONFIG_HOME/telmoni/credentials.json`, which is `~/.config/telmoni/credentials.json` when `XDG_CONFIG_HOME` is not set
 
 Where that directory cannot be found, such as on a machine with no home directory, the CLI stops with an error rather than keep credentials anywhere else. The file is written as a sibling created with `0600` and renamed over the old one, so a crash mid-write leaves the previous file whole. A directory the CLI creates to save credentials in is `0700`; one that already exists, such as one `telmoni config set` created first, keeps its permissions.
+
+With `TELMONI_CONFIG_DIR` set, both files live in that directory instead, `credentials.json` and `config.json` straight in it, and each directory holds a login of its own: `TELMONI_CONFIG_DIR=$HOME/.config/telmoni-work telmoni login --with-key < key.txt`, and the same with `$HOME/.config/telmoni-home`, save two logins, each read by the commands run with its value, and on a Mac two Keychain items, since the item's account is the file's path. Give it a directory of your own, as the default is, since the CLI trusts the `config.json` it finds there. The value must be an absolute path: a relative one would be taken against the working directory, where a checkout could plant a `config.json`, so the command stops instead. A blank value counts as unset.
 
 Saved credentials the CLI cannot read count as signed out: the CLI says `note: the saved credentials cannot be read; sign in again` on stderr, and `telmoni login` saves new ones.
