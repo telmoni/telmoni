@@ -24,12 +24,12 @@ later sign-in does not rename it.
 
 ## Changing your email address
 
-The **Email** and **Password** sections appear for an account that signs in
-with an email address and a password: a password account on a self-hosted
-deployment or, on the hosted service, an account that signs in to its identity
-provider with a password. An account that signs in any other way, such as
-single sign-on, changes its address with its identity provider, and the
-sections do not appear.
+The **Email** section appears for an account whose address is its own to move:
+a password account on a self-hosted deployment or, on the hosted service, an
+account that signs in with a code emailed to it. The **Password** section
+appears for a password account alone. An account that signs in through Google
+or single sign-on changes its address with that provider, and the sections do
+not appear.
 
 Updating your email requires two 6-digit verification codes:
 
@@ -65,9 +65,8 @@ single-use link valid for **60 minutes** is emailed to you, at most five a
 day. Using it ends all existing sessions, updates the stored Argon2id password
 hash, and records your address as verified, since the link came from it.
 
-On the hosted service, the link comes from its identity provider, which holds
-the password, and follows that provider's rules; using it does not end your
-Telmoni sessions.
+The hosted service holds no password: you sign in with a code emailed to you
+or through Google, and the section does not appear.
 
 ## Default organization
 

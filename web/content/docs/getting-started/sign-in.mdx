@@ -6,9 +6,10 @@ description: "Authentication methods in Telmoni, what your first sign-in provisi
 How you sign in depends on the deployment. A self-hosted instance offers a
 password form, an OpenID Connect identity provider, or both. The hosted service
 at telmoni.com has the password form switched off and signs you in through its
-identity provider (listed on the [Subprocessors](https://telmoni.com/docs/legal/subprocessors) page),
-so the native-account sections below do not apply there. The CLI signs in
-through device authorization on either.
+identity provider (listed on the [Subprocessors](https://telmoni.com/docs/legal/subprocessors) page)
+with a one-time code emailed to you or with your Google account — it holds no
+password — so the native-account sections below do not apply there. The CLI
+signs in through device authorization on either.
 
 ## Native accounts
 
@@ -182,8 +183,9 @@ Two switches are involved, and they do different things:
   - **Pending invitations**: Accept or decline invitations to existing
     organizations and projects, when your address is verified; an unverified
     address accepts from the link in the invitation email instead.
-  - **Email** and **Password**: Change your address or request a reset link,
-    for a password account.
+  - **Email** and **Password**: Change your address, for a password account or
+    one that signs in with an emailed code, or request a reset link, for a
+    password account.
   - **Data collection**: Your analytics preference, on a deployment with an
     analytics provider configured.
   - **Active sessions**: End any of your other sessions.
@@ -204,8 +206,7 @@ request, and a console tab left open there is sent to sign in within 15
 minutes.
 
 Changing your email address ends all your sessions immediately, and so does
-resetting your password on a self-hosted deployment. A reset at the hosted
-service's identity provider does not.
+resetting your password on a self-hosted deployment.
 
 ## Signing out
 
