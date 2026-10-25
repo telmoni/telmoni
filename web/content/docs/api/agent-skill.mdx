@@ -15,22 +15,19 @@ don't give it: which path fits which situation, the mistakes agents make, and
 the guardrails around keys and your infrastructure. The skill itself sends
 nothing: a session is recorded by the plugin, once you install it.
 
-Every install below fetches the repository's `release` branch, which holds only
-what an agent loads: the plugin manifests, the skill, `LICENSE` and `NOTICE`.
-
 ## Claude Code
 
 In Claude Code:
 
 ```text
-/plugin marketplace add telmoni/skills@release
+/plugin marketplace add telmoni/skills
 /plugin install telmoni@telmoni
 ```
 
 From a shell, the same is:
 
 ```console
-$ claude plugin marketplace add telmoni/skills@release
+$ claude plugin marketplace add telmoni/skills
 $ claude plugin install telmoni@telmoni
 ```
 
@@ -42,7 +39,7 @@ auto-update for it under `/plugin` → **Marketplaces**.
 ## Codex
 
 ```console
-$ codex plugin marketplace add telmoni/skills@release
+$ codex plugin marketplace add telmoni/skills
 $ codex plugin add telmoni@telmoni
 ```
 
@@ -53,7 +50,7 @@ Cursor's local plugins folder, then restart Cursor or run **Developer: Reload
 Window**:
 
 ```console
-$ git clone --depth 1 --branch release https://github.com/telmoni/skills.git ~/.cursor/plugins/local/telmoni
+$ git clone --depth 1 https://github.com/telmoni/skills.git ~/.cursor/plugins/local/telmoni
 ```
 
 `git pull` in that folder, then a reload, brings a newer version. Cursor skips
@@ -66,7 +63,7 @@ Imports**, which is off by default on Enterprise.
 The `agy` CLI installs a clone as a plugin, for the IDE and the CLI alike:
 
 ```console
-$ git clone --depth 1 --branch release https://github.com/telmoni/skills.git telmoni-skills
+$ git clone --depth 1 https://github.com/telmoni/skills.git telmoni-skills
 $ agy plugin install ./telmoni-skills
 ```
 
@@ -79,10 +76,10 @@ the agents it finds in your project; `-a` picks one (`opencode`, `cursor`,
 `github-copilot`, `gemini-cli`, …), and `-g` installs it for your user instead:
 
 ```console
-$ npx skills add https://github.com/telmoni/skills/tree/release
+$ npx skills add telmoni/skills
 ```
 
-By hand, clone the `release` branch and link `skills/telmoni` into your agent's
+By hand, clone the repository and link `skills/telmoni` into your agent's
 skills folder: `~/.claude/skills/` for Claude Code, `~/.agents/skills/` for
 Codex, Cursor, Copilot and Gemini CLI, `~/.config/opencode/skills/` for
 OpenCode, or `~/.gemini/config/skills/` for Antigravity.
