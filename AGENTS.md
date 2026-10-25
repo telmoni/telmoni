@@ -1,6 +1,6 @@
 # Telmoni — Agent Guidelines
 
-The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni/telmoni)): organizations and projects, members and roles, API keys (`api_tokens` in the code; customer copy always says *API key*), notifications, an audit log and a console agent. One Rust binary, `telmoni`, runs auth, notifications, telemetry and the console agent as modules; the Next.js console in `web/` sits beside it; `deploy/` holds the Helm chart and the self-host Compose file. A deployment that needs more builds its own binary and console on top (README § Extending Telmoni); nothing here names one.
+The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni/telmoni)): organizations and projects, members and roles, API keys (`api_tokens` in the code; customer copy always says *API key*), notifications, an audit log and a console agent. One Rust binary, `telmoni-server`, runs auth, notifications, telemetry and the console agent as modules; the Next.js console in `web/` sits beside it; `deploy/` holds the Helm chart and the self-host Compose file. A deployment that needs more builds its own binary and console on top (README § Extending Telmoni); nothing here names one.
 
 ## Ground Rules
 - **Pre-launch:** nothing has shipped. Fix schemas, wire contracts, Redis keys and APIs directly to their ideal state; no migration paths, dual-writes, shims or versioned schemas.
@@ -11,7 +11,7 @@ The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni
 ## Where Things Live
 | Path | What |
 |---|---|
-| `crates/telmoni` | The `telmoni` binary (crate `telmoni-server`): `serve` (every module on `PORT` 8082, the sweeps and the agent's indexer on timers), the machine door (`door.rs`) and one-shot admin subcommands (`cli.rs`). `App::assemble` is what a deployment's own binary calls. |
+| `crates/telmoni` | The `telmoni-server` binary: `serve` (every module on `PORT` 8082, the sweeps and the agent's indexer on timers), the machine door (`door.rs`) and one-shot admin subcommands (`cli.rs`). `App::assemble` is what a deployment's own binary calls. |
 | `crates/auth` | Sign-in (password form, OIDC), identities, organizations, projects, members, invitations, transfers, API keys, sessions, flags, export and deletion, `/v1`. |
 | `crates/notifications` | The in-app feed, the Slack and webhook connectors, the delivery queue. |
 | `crates/agent` | The console agent, read-only: model adapters, embeddings, the index, hybrid search, tools. Needs the `vector` extension, which a superuser installs. Off until `AGENT_MODEL_PROVIDER` is set. |
