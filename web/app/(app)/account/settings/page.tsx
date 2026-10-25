@@ -55,26 +55,14 @@ export default async function AccountSettingsPage() {
           </Rows>
         </Section>
 
-        {/* ⚠ **BOTH SECTIONS ARE ABSENT ENTIRELY FOR ANYONE WHO DOES NOT SIGN
-            IN WITH AN EMAIL AND PASSWORD**. Showing heading, description and card
-            for options unavailable to external provider accounts is avoided, and
-            the Profile row above already names how they get in.
-
-            THE PAGE DECIDES, NOT THE COMPONENT, because the `<Section>`
-            wrapper is what has to disappear: a component returning `null`
-            inside it leaves a titled, described, empty card, which reads as a
-            failed load rather than an absence.
-
-            Hiding a control is not a permission check. `requestEmailChangeAction`
-            and `confirmEmailChangeAction` run `canChangeEmail` themselves, and
-            they are the enforcement — a Server Action is a public endpoint and
-            an unrendered form does nothing to protect it.
-
-            Email sits between Profile and Password on purpose. Profile's
-            description explains that the provider owns those fields and syncs
-            them back, which is the opposite of the email story — and the
-            address is the identifier the password hangs off, so the two read as
-            one sequence: who you are, then how you get in. */}
+        {/* ⚠ Email and Password are drawn only for the people they apply to — a
+            password account, and for Email also a method whose provider moves
+            the address (`lib/sign-in-method.ts`) — and the page decides, not the
+            component: the `<Section>` has to disappear whole, since a component
+            returning `null` inside it leaves a titled, empty card. Hiding is not
+            a permission check: the Server Actions run `canChangeEmail`
+            themselves. Email sits between Profile and Password on purpose: who
+            you are, then how you get in. */}
         {canChangeEmail(session.authMethod) && (
           <Section
             title="Email"

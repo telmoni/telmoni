@@ -1,13 +1,18 @@
+import { SIGN_IN_METHODS } from "@/lib/extension/sign-in-methods";
+
 // How the Profile card names the way a sign-in was proved. The password form
 // is the one method the core's auth records: an OpenID Connect sign-in records
 // none (`crates/auth/src/oidc/mod.rs`), so its row is left out. Any other name
-// is a deployment's own provider's, shown with its first letter capitalised.
+// is a deployment's own provider's: named by the console built on this one
+// (`lib/extension/sign-in-methods.ts`), or shown with its first letter capitalised.
 export function signInMethodLabel(
   method: string | null | undefined,
 ): string | null {
   if (!method) return null;
   if (method === "password") return "Email and password";
-  return method.charAt(0).toUpperCase() + method.slice(1);
+  return (
+    SIGN_IN_METHODS.get(method)?.label ?? method.charAt(0).toUpperCase() + method.slice(1)
+  );
 }
 
 // What the account settings page may offer about a password.
@@ -48,35 +53,31 @@ export function passwordPosture(
 }
 
 // What the account settings page may offer about the address this account
-// signs in with.
+// signs in with. A second function, not a reading of `passwordPosture`: moving
+// an address and resetting a password are different trades, only the second
+// mints a credential, and the two diverge for a method whose provider moves the
+// address on request — so neither rule is edited through the other.
 //
-// ⚠ **A SECOND function, not a reading of `passwordPosture` above.** The two
-// agree today by coincidence rather than by construction: moving an address
-// and resetting a password are different trades, and only the second mints a
-// credential, which `passwordPosture` exists to refuse. Asking one question
-// through the other's answer means the day they diverge is a day somebody
-// edits the password rule and silently changes what the email section says.
+// - `change` — an email-and-password account, or a method the console built on
+//   this one marks `emailChange` (`lib/extension/sign-in-methods.ts`): a code
+//   mailed to the address, say. The one posture with a form, and the only one
+//   the Email section is rendered for.
+// - `provider` — any other method a deployment's own provider reports: it holds
+//   the address and re-asserts it at every sign-in, so a change made here would
+//   last exactly until the next one.
+// - `unknown` — the session does not say. Offers nothing, for `passwordPosture`'s
+//   reason: a null method may well be a provider sign-up.
 //
-// - `change` — an email-and-password account. The one posture with a form,
-//   and the only one the Email section is rendered for at all.
-// - `provider` — a method a deployment's own sign-in provider reports. The
-//   provider holds the address and re-asserts it at every sign-in, so a change
-//   made here would last exactly until the next one.
-// - `unknown` — the session does not say. Offers nothing, deliberately, for
-//   `passwordPosture`'s reason: a null method may well be a provider sign-up,
-//   and a change offered to one of those is a change that silently reverts.
-//
-// ⚠ Same rule as `passwordPosture` above, including its shape: the two
-// non-`change` postures draw nothing at all rather than explaining their own
-// absence, and no caller reads them apart — `canChangeEmail` is the one bit
-// anybody asks for. They are the reasons, kept for the copy.
+// The two non-`change` postures draw nothing rather than explain their absence;
+// `canChangeEmail` is the one bit anybody asks for, and they are kept apart as
+// the reasons the copy would have to give.
 export type EmailPosture = "change" | "provider" | "unknown";
 
 export function emailPosture(
   method: string | null | undefined,
 ): EmailPosture {
   if (!method) return "unknown";
-  if (method === "password") return "change";
+  if (method === "password" || SIGN_IN_METHODS.get(method)?.emailChange) return "change";
   return "provider";
 }
 

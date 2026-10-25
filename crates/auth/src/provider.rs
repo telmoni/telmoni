@@ -42,7 +42,7 @@ pub struct Authenticated {
     /// Sealed into the console's session for RP-initiated logout
     /// (`id_token_hint`); nothing here reads it again.
     pub id_token: Option<String>,
-    /// How this sign-in was proved: `password`, `passkey`, `magic_link`, `sso`,
+    /// How this sign-in was proved: `password`, `passkey`, `email_code`, `sso`,
     /// or an OAuth connection's name. ⚠ `None` means the provider said nothing
     /// this answers for — never "no method" — so every reader needs a branch
     /// that claims nothing.

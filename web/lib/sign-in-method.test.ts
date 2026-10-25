@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   canChangeEmail,
@@ -8,9 +8,22 @@ import {
   signInMethodLabel,
 } from "./sign-in-method";
 
+// The slot a console built on this one fills: a method whose provider moves
+// the address on request, and one whose provider holds it.
+vi.mock("@/lib/extension/sign-in-methods", () => ({
+  SIGN_IN_METHODS: new Map([
+    ["email_code", { label: "Email code", emailChange: true }],
+    ["google", { label: "Google", emailChange: false }],
+  ]),
+}));
+
 describe("signInMethodLabel", () => {
   it("names the password form, the one method the core's auth records", () => {
     expect(signInMethodLabel("password")).toBe("Email and password");
+  });
+
+  it("names a method the console built on this one declared", () => {
+    expect(signInMethodLabel("email_code")).toBe("Email code");
   });
 
   it("capitalises a method a deployment's own provider reports", () => {
@@ -68,8 +81,9 @@ describe("canChangeEmail", () => {
   // The address belongs upstream for every other connection: a change made
   // here is overwritten by the next `/me`, or leaves this record disagreeing
   // with the identity provider.
-  it("is only true for an email-and-password sign-up", () => {
+  it("is true for a password account, or a method whose provider moves the address", () => {
     expect(canChangeEmail("password")).toBe(true);
+    expect(canChangeEmail("email_code")).toBe(true);
     for (const m of [
       "google",
       "microsoft",
@@ -92,6 +106,13 @@ describe("canChangeEmail", () => {
 describe("emailPosture", () => {
   it("gives an email-and-password account the one posture with a form", () => {
     expect(emailPosture("password")).toBe("change");
+  });
+
+  // The one divergence from passwordPosture: the address moves at the
+  // provider, and there is no password to reset.
+  it("gives a method whose provider moves the address the same form, and no reset", () => {
+    expect(emailPosture("email_code")).toBe("change");
+    expect(passwordPosture("email_code")).toBe("provider");
   });
 
   it("gives every other connection the same nothing", () => {
@@ -176,7 +197,7 @@ describe("canResetPassword agrees with passwordPosture", () => {
 
   it("is true for exactly one method", () => {
     expect(canResetPassword("password")).toBe(true);
-    for (const m of ["sso", "google", "microsoft", "passkey", "magic_link"]) {
+    for (const m of ["sso", "google", "microsoft", "passkey", "magic_link", "email_code"]) {
       expect(canResetPassword(m), m).toBe(false);
     }
   });
