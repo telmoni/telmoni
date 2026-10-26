@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { INSET } from "@/lib/inset";
 import { cn } from "@/lib/utils";
@@ -21,13 +22,15 @@ export const BODY = "text-[15px] leading-[1.65] text-muted-foreground";
 export const LEAD = "max-w-[58ch] text-base leading-[1.65] text-muted-foreground lg:text-lg";
 
 // The page's claim as its one `h1`, under the line that says what the page
-// is, then whatever the page opens with: its lead, a way in.
+// is, a badge before it naming a stage, then whatever the page opens with.
 export function PaperHero({
   eyebrow,
+  badge,
   title,
   children,
 }: {
   eyebrow?: string;
+  badge?: string;
   title: string;
   children?: React.ReactNode;
 }) {
@@ -39,7 +42,12 @@ export function PaperHero({
       )}
     >
       <div className="flex flex-col gap-5">
-        {eyebrow !== undefined && <p className={EYEBROW}>{eyebrow}</p>}
+        {(badge !== undefined || eyebrow !== undefined) && (
+          <div className="flex flex-wrap items-center gap-3.5">
+            {badge !== undefined && <Badge variant="outline">{badge}</Badge>}
+            {eyebrow !== undefined && <p className={EYEBROW}>{eyebrow}</p>}
+          </div>
+        )}
         <h1 className="max-w-[30ch] text-[32px] font-semibold leading-[1.1] tracking-[-0.02em] text-balance text-foreground sm:text-[44px] lg:text-[52px]">
           {title}
         </h1>

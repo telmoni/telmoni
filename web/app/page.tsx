@@ -28,6 +28,8 @@ const docs = (path: string) => `${DOCS_URL}${path}`;
 // What the product is, over the sentence the page makes, and the paragraph
 // under it: the product as it is being built.
 const KICKER = "Privacy-first telemetry and monitoring for AI agents";
+// Beside the kicker, so nobody takes the product for finished.
+const STAGE = "Beta";
 const CLAIM = "Know when your agents stall, loop or overspend, without sending us a single prompt.";
 const PITCH =
   "Every run and the steps inside it, every model and tool call with its tokens, latency and cost, and the alert when something goes wrong. Prompts and completions stay out unless an organization owner turns them on for a project.";
@@ -194,7 +196,7 @@ export default async function SplashPage() {
         {/* ⚠ **The sentence IS the `<h1>`.** The copy is the page's own claim,
             which is what a heading is for; `PRODUCT_NAME` is in the document
             title already and does not want saying twice. */}
-        <PaperHero eyebrow={KICKER} title={CLAIM}>
+        <PaperHero badge={STAGE} eyebrow={KICKER} title={CLAIM}>
           <p className={LEAD}>{PITCH}</p>
           <InstallTabs tabs={INSTALL} />
           <WayIn signedIn={signedIn} />

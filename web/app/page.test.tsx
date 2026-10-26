@@ -71,6 +71,13 @@ describe("the splash page", () => {
     expect(screen.queryByText(/not launched/i)).toBeNull();
   });
 
+  it("says the product is in beta, beside what it is", async () => {
+    render(await SplashPage());
+
+    expect(screen.getByText("Beta")).toBeInTheDocument();
+    expect(screen.getByText(/Privacy-first telemetry/)).toBeInTheDocument();
+  });
+
   it("sends a member to the console instead", async () => {
     mockSession = { userId: "user_1" };
 
