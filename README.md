@@ -22,16 +22,17 @@
 
 > Know when your agents stall, loop or overspend, without sending us a single prompt.
 
-Telmoni is an open-source telemetry platform for AI agents. Its SDKs record each **run** of an agent, and the **steps**, **model calls** and **tool calls** inside it, as OpenTelemetry spans; the console reads them back as traces, sessions and users. Only metadata is kept: prompts and completions come off a span before it leaves your process, and ingest drops any that arrive anyway. It is one Rust binary and a Next.js console on PostgreSQL, ClickHouse and Redis, self-hosted with Docker Compose or Helm.
+Telmoni is an open-source telemetry platform for AI agents. Its SDKs record each **run** of an agent, and the **steps**, **model calls** and **tool calls** inside it, as OpenTelemetry spans; the console reads them back as traces, sessions and users, and alerts on them. Only metadata is kept: prompts and completions come off a span before it leaves your process, and ingest drops any that arrive anyway. It is one Rust binary and a Next.js console on PostgreSQL, ClickHouse and Redis, self-hosted with Docker Compose or Helm.
 
 > [!NOTE]
-> Telmoni hasn't launched yet, and it's built in the open. Running today: organizations and roles, API keys, the audit log, notifications, the console agent, and the first of the telemetry on them, the SDKs, ingest, and the console's traces, sessions and users. Next: alert rules and PagerDuty, what each call cost and a cost cap, and content an owner chooses to keep. [Where it goes next](ARCHITECTURE.md#where-it-goes-next) lists what's settled but not built.
+> Telmoni hasn't launched yet, and it's built in the open. Running today: organizations and roles, API keys, the audit log, notifications, the console agent, and the first of the telemetry on them, the SDKs, ingest, the console's traces, sessions and users, its alerts, a cost cap among them, the cost a call reports, and the SDKs' guard, which stops a run at the caps on its steps and spend you set. Next: an organization's open incidents on its Overview, and content an owner chooses to keep. [Where it goes next](ARCHITECTURE.md#where-it-goes-next) lists what's settled but not built.
 
 ## Features
 
 - **[Agent telemetry](https://telmoni.com/docs/api/sdks)**: open a run around your agent, and each step, model call and tool call inside it becomes a span with its timings, status, model, tokens and errors, tied to its run, session and end user.
 - **[Private by default](https://telmoni.com/docs/api/field-inventory)**: timings, statuses, counts and names, never content. End-user IDs are hashed with a key unique to each project, and only an organization owner can change a project's content mode.
 - **[Traces, sessions and users](https://telmoni.com/docs/workspace/traces)**: filter, sort and chart runs, save views for the project, download CSV or JSON, open a trace as the tree its spans ran in or as a timeline, and see new runs the moment they arrive.
+- **[Alerts](https://telmoni.com/docs/workspace/alerts)**: failures, latency, tokens or what a run spends, over an hour, a day or a week, against an alert threshold and an optional warning one; each incident told to the feed and to the Slack channels and webhooks an alert links, in the hours each is set to, with maintenance windows, and a vote on each incident that keeps the alerts precise.
 - **[Organizations and audit](https://telmoni.com/docs/workspace/audit-log)**: owner, admin and member roles, invitations, transfers and scoped API keys; sign-in by password or any OIDC provider; and an audit log hash-chained per organization, exportable.
 - **[Notifications](https://telmoni.com/docs/integrations/notifications)**: an in-app feed, Slack, and webhooks signed with HMAC-SHA256, through a delivery queue that retries.
 - **[Console agent](https://telmoni.com/docs/self-host/agent)**: questions in plain language, answered from the docs, the audit log and the feed with sources cited, on Anthropic or any OpenAI-compatible server such as Ollama, vLLM or OpenRouter.
@@ -149,7 +150,8 @@ crates/
   notifications/  the feed, the Slack and webhook connectors, delivery
   agent/          the console agent: models, embeddings, the index and its hybrid search, read-only tools
   telemetry/      ingest at /otlp/v1/traces, each project's settings, the spans and their hourly
-                  totals in ClickHouse, its ClickHouse file and nightly purge
+                  totals in ClickHouse, its ClickHouse file and nightly purge, and the model
+                  prices, converted from LiteLLM's by `make prices`
   migrator/       the migration runner, grants, role hardening, the audit schema
   shared/         errors, RBAC, tenancy, the seams between modules
 web/              the console, a thin proxy in front of the server, and the docs it serves, laid in from ../docs
