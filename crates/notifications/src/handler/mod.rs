@@ -287,6 +287,43 @@ pub async fn emit_notice(
     })
 }
 
+/// A notice queued to the project's connectors alone, with no feed row: a
+/// reminder, or what an incident whose feed rows are written already says
+/// again ([`telmoni_shared::seam::Notifications::remind`]). Its title and
+/// body are held to an emit's bounds; it has no metadata, which only the
+/// feed keeps.
+pub async fn remind_notice(
+    state: &Arc<AppState>,
+    organization_id: &OrganizationId,
+    project_id: &ProjectId,
+    notice: Notice<'_>,
+) -> Result<usize, TelmoniError> {
+    let title = bounded(notice.title, "title", TITLE_MAX_CHARS)?;
+    let body = bounded(notice.body, "body", BODY_MAX_CHARS)?;
+    let mut tx = project_scope(&state.db, project_id).await?;
+    let queued = db::enqueue_deliveries(
+        &mut tx,
+        organization_id,
+        Some(project_id),
+        notice.kind,
+        title,
+        body,
+        notice.subject_user_id,
+    )
+    .await?;
+    tx.commit().await?;
+    tracing::info!(
+        project_id = %project_id,
+        organization_id = %organization_id,
+        kind = %notice.kind,
+        queued = queued.len(),
+        "notification told the connectors again"
+    );
+    let count = queued.len();
+    delivery::spawn_first_attempts(state, queued);
+    Ok(count)
+}
+
 /// Which feed a read names: the project in `x-project-id`, at any role auth
 /// admits the person to, or the organization, owner and admins.
 enum FeedScope {

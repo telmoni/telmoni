@@ -48,6 +48,7 @@ pub mod handler;
 pub mod hashing;
 pub mod ingest;
 pub mod live;
+pub mod notify;
 pub mod rate_limit;
 pub mod replica;
 pub mod retention;
@@ -187,6 +188,18 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(handler::rules::get_rule)
                 .put(handler::rules::update_rule)
                 .delete(handler::rules::delete_rule),
+        )
+        .route(
+            "/telemetry/incidents",
+            get(handler::incidents::list_incidents),
+        )
+        .route(
+            "/telemetry/incidents/{id}/acknowledge",
+            post(handler::incidents::acknowledge_incident),
+        )
+        .route(
+            "/telemetry/incidents/{id}/resolve",
+            post(handler::incidents::resolve_incident),
         )
         .layer(middleware::from_fn_with_state(
             state.service_secrets.clone(),

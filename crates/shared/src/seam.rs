@@ -350,6 +350,20 @@ pub trait Notifications: Send + Sync {
         notice: Notice<'_>,
     ) -> Result<Emitted, TelmoniError>;
 
+    /// Queue a notice to the project's connectors alone, with no feed row: a
+    /// reminder, or what an incident whose feed rows are written already says
+    /// again. Answers how many deliveries were queued; a deployment's own
+    /// notifications that keep no connector queue none.
+    async fn remind(
+        &self,
+        organization_id: &OrganizationId,
+        project_id: &ProjectId,
+        notice: Notice<'_>,
+    ) -> Result<usize, TelmoniError> {
+        let _ = (organization_id, project_id, notice);
+        Ok(0)
+    }
+
     /// Everything held for an organization — its connectors torn down
     /// upstream first, their deliveries, its feeds — before its row goes.
     /// Answers how many feed rows went. Idempotent.

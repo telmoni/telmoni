@@ -38,6 +38,15 @@ impl Notifications for Notifier {
         handler::emit_notice(&self.0, organization_id, project_id, notice).await
     }
 
+    async fn remind(
+        &self,
+        organization_id: &OrganizationId,
+        project_id: &ProjectId,
+        notice: Notice<'_>,
+    ) -> Result<usize, TelmoniError> {
+        handler::remind_notice(&self.0, organization_id, project_id, notice).await
+    }
+
     async fn purge_organization(
         &self,
         organization_id: &OrganizationId,

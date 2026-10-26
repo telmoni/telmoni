@@ -17,6 +17,11 @@
       "members",
       "signup"
     ],
+    "IncidentStatus": [
+      "open",
+      "acknowledged",
+      "resolved"
+    ],
     "LayoutDepth": [
       "trace",
       "steps",
@@ -38,7 +43,9 @@
       "member_added",
       "member_left",
       "connector_connected",
-      "connector_disconnected"
+      "connector_disconnected",
+      "incident_opened",
+      "incident_resolved"
     ],
     "OrganizationStatus": [
       "active",
@@ -87,6 +94,14 @@
       "tokens",
       "first_seen",
       "last_seen"
+    ],
+    "Severity": [
+      "unknown",
+      "ok",
+      "warning",
+      "alert",
+      "no_data",
+      "paused"
     ],
     "SortDirection": [
       "asc",

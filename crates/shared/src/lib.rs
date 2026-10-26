@@ -44,10 +44,10 @@ pub use error::{
 pub use error_schema::ProblemDetails;
 pub use extract::correlation_id;
 pub use types::{
-    AlertCeilings, ApiKeyScope, AuditAction, ContentMode, Flag, FlagSet, Grants, LaneCeilings,
-    LayoutDepth, LayoutOpen, MemberCeiling, MissingData, NotificationKind, OrganizationId,
-    OrganizationIdError, OrganizationRole, OrganizationStatus, ParseEnumError, Paused, ProjectId,
-    ProjectIdError, Redacted, Role, RuleAggregation, RuleMeasure, RuleOperator, RuleWindow,
-    SessionSort, SortDirection, SpanKind, SpanStatus, TelmoniResourceKind, TraceColumn, TraceSort,
-    UserId, UserIdError, UserSort, ViewKind,
+    AlertCeilings, ApiKeyScope, AuditAction, ContentMode, Flag, FlagSet, Grants, IncidentStatus,
+    LaneCeilings, LayoutDepth, LayoutOpen, MemberCeiling, MissingData, NotificationKind,
+    OrganizationId, OrganizationIdError, OrganizationRole, OrganizationStatus, ParseEnumError,
+    Paused, ProjectId, ProjectIdError, Redacted, Role, RuleAggregation, RuleMeasure, RuleOperator,
+    RuleWindow, SessionSort, Severity, SortDirection, SpanKind, SpanStatus, TelmoniResourceKind,
+    TraceColumn, TraceSort, UserId, UserIdError, UserSort, ViewKind,
 };

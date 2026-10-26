@@ -2,7 +2,8 @@
 //! replica leases it first: its value read over the window that ends then —
 //! the full hours from `spans_hourly`, and from `spans` the part of an hour
 //! at either end, so a window that holds no full hour reads `spans` alone —
-//! and settled in a transaction of its own. Before a pass evaluates an
+//! and settled in a transaction of its own with the severity it sets and the
+//! incident that moves with it ([`incidents`]), told once that commits. Before a pass evaluates an
 //! organization's alerts it holds them to its plan's number, the oldest
 //! running and the rest paused by the plan, read at most every few minutes
 //! an organization.
@@ -24,6 +25,7 @@ use telmoni_shared::{OrganizationId, RuleAggregation, RuleMeasure, SpanStatus, T
 use crate::AppState;
 use crate::db::TelemetryLane;
 use crate::rules::db::{self, RuleRow};
+use crate::rules::incidents;
 use crate::store::Projects;
 
 /// How often each alert is evaluated.
@@ -379,9 +381,8 @@ async fn evaluate(state: &AppState, rule: &RuleRow, lease_id: Uuid) -> Result<bo
         }
     };
     let value = totals.value(rule.measure, rule.aggregation);
-    let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
-    let settled = db::settle(&mut tx, rule.id, lease_id, rule.updated_at, value, now).await?;
-    tx.commit().await?;
+    let (settled, told) = incidents::settle(state, rule, lease_id, value, now).await?;
+    crate::notify::tell_incidents(state, rule, value, &told).await;
     Ok(settled)
 }
 

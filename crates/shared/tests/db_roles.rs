@@ -553,6 +553,13 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             "telemetry.rules",
             &["SELECT", "DELETE"],
         ),
+        // The loop opens and reopens an alert's incidents and follows them,
+        // each a column grant; they go with their alert by the cascade.
+        (
+            "telemetry_maintenance",
+            "telemetry.incidents",
+            &["SELECT", "INSERT"],
+        ),
         // Each loop's beat, written by the replica that ran a tick of it and
         // read for the watchdog; a loop's row is never removed.
         (

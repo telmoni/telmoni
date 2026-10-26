@@ -38,7 +38,7 @@ const VALIDATED: &[(&str, &str, &str)] = &[
     (
         "crates/telemetry/src/db.rs",
         "table",
-        "the purges' loop over `PURGED_TABLES` and a move's over `MOVED_TABLES`, const lists of the module's own tables",
+        "a move's loop over `MOVED_ALERTS`, a const list of the module's own tables",
     ),
     (
         "crates/shared/src/test_util/migrations.rs",

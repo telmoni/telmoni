@@ -537,6 +537,8 @@ pub(crate) struct LoggedNotice {
     pub(crate) body: String,
     pub(crate) metadata: serde_json::Value,
     pub(crate) dedup_key: Option<String>,
+    /// Told to the connectors alone, with no feed row.
+    pub(crate) reminded: bool,
 }
 
 /// Notifications as this module holds it: every notice handed through the
@@ -596,11 +598,35 @@ impl Notifications for NoticeLog {
             body: notice.body.to_owned(),
             metadata: notice.metadata,
             dedup_key: notice.dedup_key.map(str::to_owned),
+            reminded: false,
         });
         Ok(Emitted {
             feed_id,
             deduplicated: false,
         })
+    }
+
+    async fn remind(
+        &self,
+        organization_id: &OrganizationId,
+        project_id: &ProjectId,
+        notice: Notice<'_>,
+    ) -> Result<usize, TelmoniError> {
+        self.notices
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(LoggedNotice {
+                feed_id: Uuid::nil(),
+                organization_id: organization_id.clone(),
+                project_id: Some(project_id.clone()),
+                kind: notice.kind,
+                title: notice.title.to_owned(),
+                body: notice.body.to_owned(),
+                metadata: notice.metadata,
+                dedup_key: None,
+                reminded: true,
+            });
+        Ok(1)
     }
 
     async fn purge_organization(
@@ -708,6 +734,26 @@ pub(crate) fn state_with_stores_under(
         &redis_url(),
         entitlements,
         NoticeLog::new(),
+    ))
+}
+
+/// [`state_with_stores_under`], with `notices` keeping every notice the module
+/// hands through the seam.
+pub(crate) fn state_with_stores_noticed(
+    pool: &PgPool,
+    auth: Arc<dyn Auth>,
+    notices: Arc<NoticeLog>,
+) -> Arc<AppState> {
+    let clickhouse = std::env::var("TELEMETRY_CLICKHOUSE_URL").expect(
+        "state_with_stores_noticed: TELEMETRY_CLICKHOUSE_URL is set, checked by clickhouse_or_skip",
+    );
+    Arc::new(module_at(
+        pool,
+        auth,
+        &clickhouse,
+        &redis_url(),
+        Arc::new(NoLimits),
+        notices,
     ))
 }
 

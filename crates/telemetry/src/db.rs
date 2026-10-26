@@ -376,6 +376,9 @@ pub async fn delete_view<B: HasProject>(
     )
 }
 
+/// The tables a project's alerts are filed in under its organization.
+const MOVED_ALERTS: [&str; 2] = ["telemetry.rules", "telemetry.incidents"];
+
 /// A project's settings row and its alerts, handed to the organization that
 /// now holds the project, its alerts counted against that one's plan from
 /// then on. Answers whether there was a settings row.
@@ -384,11 +387,15 @@ pub async fn move_project(
     project_id: &ProjectId,
     organization_id: &OrganizationId,
 ) -> sqlx::Result<bool> {
-    sqlx::query("UPDATE telemetry.rules SET organization_id = $2 WHERE project_id = $1")
+    for table in MOVED_ALERTS {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "UPDATE {table} SET organization_id = $2 WHERE project_id = $1"
+        )))
         .bind(project_id)
         .bind(organization_id)
         .execute(tx.conn())
         .await?;
+    }
     Ok(sqlx::query(
         "UPDATE telemetry.project_settings SET organization_id = $2 WHERE project_id = $1",
     )

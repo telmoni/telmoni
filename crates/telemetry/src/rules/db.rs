@@ -8,7 +8,7 @@ use uuid::Uuid;
 use telmoni_shared::db::tenant_session::{HasProject, Maintenance, ProjectAndOrganization, Scoped};
 use telmoni_shared::{
     MissingData, OrganizationId, ProjectId, RuleAggregation, RuleMeasure, RuleOperator, RuleWindow,
-    SpanKind,
+    Severity, SpanKind,
 };
 
 use crate::db::TelemetryLane;
@@ -38,6 +38,10 @@ pub struct RuleRow {
     /// Its value at its last evaluation, none where the window held no span.
     pub value: Option<f64>,
     pub evaluated_at: Option<DateTime<Utc>>,
+    /// Where it stands, since when, and when that was last told.
+    pub severity: Severity,
+    pub severity_since: DateTime<Utc>,
+    pub told_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -45,7 +49,8 @@ pub struct RuleRow {
 /// The columns a [`RuleRow`] is read from, in its order.
 const RULE_COLUMNS: &str = "id, project_id, organization_id, name, kind, measure, aggregation, \
     filters, lookback, operator, alert_threshold, warning_threshold, missing_data, \
-    renotify_minutes, paused, paused_at, value, evaluated_at, created_at, updated_at";
+    renotify_minutes, paused, paused_at, value, evaluated_at, severity, severity_since, told_at, \
+    created_at, updated_at";
 
 /// Who paused an alert: a member, by hand, or its plan, on a fall past its
 /// number, which lifts its own once there is room again.
@@ -210,33 +215,6 @@ pub async fn lease_due(
     .await
 }
 
-/// An alert's evaluation, settled where the lease is still its own and the
-/// alert reads as it did when it was leased: one saved over meanwhile is
-/// evaluated again rather than given the old question's answer.
-pub async fn settle(
-    tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
-    id: Uuid,
-    lease_id: Uuid,
-    updated_at: DateTime<Utc>,
-    value: Option<f64>,
-    evaluated_at: DateTime<Utc>,
-) -> sqlx::Result<bool> {
-    Ok(sqlx::query(
-        "UPDATE telemetry.rules
-            SET value = $4, evaluated_at = $5, lease_id = NULL, leased_until = NULL
-          WHERE id = $1 AND lease_id = $2 AND updated_at = $3",
-    )
-    .bind(id)
-    .bind(lease_id)
-    .bind(updated_at)
-    .bind(value)
-    .bind(evaluated_at)
-    .execute(tx.conn())
-    .await?
-    .rows_affected()
-        > 0)
-}
-
 /// A lease let go unsettled: the alert is due again at the next pass.
 pub async fn release(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
@@ -283,7 +261,10 @@ pub async fn hold_to(
                 FROM telemetry.rules WHERE organization_id = $1)
          UPDATE telemetry.rules AS rule
             SET paused = CASE WHEN $2::bigint IS NOT NULL AND ranked.place > $2 THEN 'plan' END,
-                paused_at = CASE WHEN $2::bigint IS NOT NULL AND ranked.place > $2 THEN now() END
+                paused_at = CASE WHEN $2::bigint IS NOT NULL AND ranked.place > $2 THEN now() END,
+                severity = CASE WHEN $2::bigint IS NOT NULL AND ranked.place > $2
+                                THEN 'paused' ELSE 'unknown' END,
+                severity_since = now()
            FROM ranked
           WHERE rule.id = ranked.id
             AND ((rule.paused IS NULL AND $2::bigint IS NOT NULL AND ranked.place > $2)

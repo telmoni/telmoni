@@ -10,6 +10,7 @@
 
 pub mod db;
 pub mod evaluate;
+pub mod incidents;
 
 use serde::{Deserialize, Serialize};
 

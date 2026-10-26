@@ -24,7 +24,7 @@ use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam;
 use telmoni_shared::{
     AuthError, MissingData, ProjectId, RuleAggregation, RuleMeasure, RuleOperator, RuleWindow,
-    SpanKind, TelmoniError,
+    Severity, SpanKind, TelmoniError,
 };
 
 use crate::AppState;
@@ -59,6 +59,9 @@ pub struct Alert {
     /// the window held no span its filters admit.
     pub value: Option<f64>,
     pub evaluated_at: Option<DateTime<Utc>>,
+    /// Where it stands, and since when: `paused` while it is.
+    pub severity: Severity,
+    pub severity_since: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -82,6 +85,8 @@ impl From<RuleRow> for Alert {
             paused_at: row.paused_at,
             value: row.value,
             evaluated_at: row.evaluated_at,
+            severity: row.severity,
+            severity_since: row.severity_since,
             created_at: row.created_at,
             updated_at: row.updated_at,
         }

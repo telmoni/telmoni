@@ -6,6 +6,7 @@
 pub(crate) mod chain;
 pub mod content_mode;
 pub mod field_inventory;
+pub mod incidents;
 pub mod ingest;
 pub mod rules;
 pub mod session_layout;

@@ -166,7 +166,9 @@ ALTER TABLE telemetry.project_settings
 -- it may have across its projects, paused ones counted (`paused` says by
 -- whom: a person, or the plan, which lifts its own). The last evaluation is
 -- the loop's to write, under a lease (`lease_id` until `leased_until`) so
--- replicas share the loop with no leader.
+-- replicas share the loop with no leader: its value, the severity it set and
+-- since when, and when that severity was last told (`told_at`), which
+-- re-notification counts from.
 CREATE TABLE telemetry.rules (
     id                UUID             PRIMARY KEY,
     project_id        TEXT             NOT NULL,
@@ -186,6 +188,9 @@ CREATE TABLE telemetry.rules (
     paused_at         TIMESTAMPTZ,
     value             DOUBLE PRECISION,
     evaluated_at      TIMESTAMPTZ,
+    severity          TEXT             NOT NULL DEFAULT 'unknown',
+    severity_since    TIMESTAMPTZ      NOT NULL DEFAULT now(),
+    told_at           TIMESTAMPTZ,
     lease_id          UUID,
     leased_until      TIMESTAMPTZ,
     created_at        TIMESTAMPTZ      NOT NULL DEFAULT now(),
@@ -202,6 +207,8 @@ CREATE TABLE telemetry.rules (
         CHECK (missing_data IN ('zero', 'keep', 'no_data', 'notify_no_data')),
     CONSTRAINT rules_renotify_check CHECK (renotify_minutes BETWEEN 1 AND 10080),
     CONSTRAINT rules_paused_check CHECK (paused IN ('person', 'plan')),
+    CONSTRAINT rules_severity_check
+        CHECK (severity IN ('unknown', 'ok', 'warning', 'alert', 'no_data', 'paused')),
     CONSTRAINT rules_paused_at_check CHECK ((paused IS NULL) = (paused_at IS NULL)),
     CONSTRAINT rules_lease_check CHECK ((lease_id IS NULL) = (leased_until IS NULL))
 );
@@ -238,11 +245,76 @@ CREATE POLICY maintenance_access ON telemetry.rules
 -- purges delete a project's or an organization's; a transfer moves a
 -- project's to the organization that takes it.
 GRANT SELECT, DELETE ON telemetry.rules TO telemetry_maintenance;
-GRANT UPDATE (organization_id, paused, paused_at, value, evaluated_at, lease_id, leased_until)
+GRANT UPDATE (organization_id, paused, paused_at, value, evaluated_at, severity, severity_since,
+              told_at, lease_id, leased_until)
     ON telemetry.rules TO telemetry_maintenance;
 
+
 -- ══════════════════════════════════════════════════════════════════════════════
--- 4. HEARTBEATS
+-- 4. INCIDENTS
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Each breach of an alert: opened by the loop when its alert crosses a
+-- threshold — or, where the alert asks, once its window has held no span
+-- for as long as the window — at the severity it crossed, which follows the
+-- alert's while it lasts; acknowledged by a member, which stops its
+-- reminders; and resolved at the alert's recovery (`resolved_by` none) or by
+-- a member's hand. One that breaches again within an hour of its recovery is
+-- reopened (`reopened` counts how often) rather than a new one, so a
+-- flapping alert opens one incident an hour at most. An alert holds one open
+-- at a time; its incidents go with it.
+CREATE TABLE telemetry.incidents (
+    id               UUID             PRIMARY KEY,
+    rule_id          UUID             NOT NULL REFERENCES telemetry.rules (id) ON DELETE CASCADE,
+    project_id       TEXT             NOT NULL,
+    organization_id  TEXT             NOT NULL,
+    status           TEXT             NOT NULL DEFAULT 'open',
+    severity         TEXT             NOT NULL,
+    value            DOUBLE PRECISION,
+    opened_at        TIMESTAMPTZ      NOT NULL DEFAULT now(),
+    acknowledged_at  TIMESTAMPTZ,
+    acknowledged_by  TEXT,
+    resolved_at      TIMESTAMPTZ,
+    resolved_by      TEXT,
+    reopened         INTEGER          NOT NULL DEFAULT 0,
+    updated_at       TIMESTAMPTZ      NOT NULL DEFAULT now(),
+    CONSTRAINT incidents_status_check CHECK (status IN ('open', 'acknowledged', 'resolved')),
+    CONSTRAINT incidents_severity_check CHECK (severity IN ('warning', 'alert', 'no_data')),
+    CONSTRAINT incidents_acknowledged_check
+        CHECK ((acknowledged_at IS NULL) = (acknowledged_by IS NULL)),
+    CONSTRAINT incidents_resolved_check CHECK ((status = 'resolved') = (resolved_at IS NOT NULL)),
+    CONSTRAINT incidents_reopened_check CHECK (reopened >= 0)
+);
+
+-- One open incident an alert, acknowledged or not.
+CREATE UNIQUE INDEX incidents_one_open_idx ON telemetry.incidents (rule_id)
+    WHERE status <> 'resolved';
+-- The project's incidents, newest first, and an alert's last resolved one.
+CREATE INDEX incidents_project_idx ON telemetry.incidents (project_id, opened_at DESC);
+CREATE INDEX incidents_rule_idx ON telemetry.incidents (rule_id, resolved_at DESC);
+-- The organization's purge and a transfer find them by it.
+CREATE INDEX incidents_organization_idx ON telemetry.incidents (organization_id);
+
+ALTER TABLE telemetry.incidents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.incidents FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON telemetry.incidents
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.incidents
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- The loop opens, reopens, follows and resolves them; a transfer moves a
+-- project's; the purges' deletes of alerts take theirs by the cascade.
+GRANT SELECT, INSERT ON telemetry.incidents TO telemetry_maintenance;
+GRANT UPDATE (organization_id, status, severity, value, resolved_at, resolved_by, reopened,
+              updated_at)
+    ON telemetry.incidents TO telemetry_maintenance;
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 5. HEARTBEATS
 -- ══════════════════════════════════════════════════════════════════════════════
 -- The purge sweep, the plan refusals' notices and the alerts' evaluation,
 -- each as the last replica

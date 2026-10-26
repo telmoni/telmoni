@@ -34,6 +34,8 @@ export const NotificationKind = {
   MemberLeft:            "member_left",
   ConnectorConnected:    "connector_connected",
   ConnectorDisconnected: "connector_disconnected",
+  IncidentOpened:        "incident_opened",
+  IncidentResolved:      "incident_resolved",
 } as const;
 export type NotificationKind = typeof NotificationKind[keyof typeof NotificationKind];
 
@@ -218,6 +220,25 @@ export const MissingData = {
   NotifyNoData: "notify_no_data",
 } as const;
 export type MissingData = typeof MissingData[keyof typeof MissingData];
+
+/** Wire vocabulary of the Rust `Severity`: where an alert stands. */
+export const Severity = {
+  Unknown: "unknown",
+  Ok:      "ok",
+  Warning: "warning",
+  Alert:   "alert",
+  NoData:  "no_data",
+  Paused:  "paused",
+} as const;
+export type Severity = typeof Severity[keyof typeof Severity];
+
+/** Wire vocabulary of the Rust `IncidentStatus`: where an incident stands. */
+export const IncidentStatus = {
+  Open:         "open",
+  Acknowledged: "acknowledged",
+  Resolved:     "resolved",
+} as const;
+export type IncidentStatus = typeof IncidentStatus[keyof typeof IncidentStatus];
 
 /** Wire vocabulary of the Rust `SortDirection`: which way a list is sorted. */
 export const SortDirection = {
