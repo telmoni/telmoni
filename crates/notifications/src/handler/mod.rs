@@ -18,7 +18,7 @@ use telmoni_shared::db::tenant_session::{
 };
 use telmoni_shared::extract::Json;
 use telmoni_shared::rbac::{Resource, Verb};
-use telmoni_shared::seam::{Emitted, Notice, Route};
+use telmoni_shared::seam::{Emitted, Notice, Route, Routed};
 use telmoni_shared::{AuthError, OrganizationId, ProjectId, TelmoniError, UserId};
 use uuid::Uuid;
 
@@ -297,7 +297,7 @@ pub async fn emit_routed_notice(
     project_id: &ProjectId,
     notice: Notice<'_>,
     route: Route<'_>,
-) -> Result<Emitted, TelmoniError> {
+) -> Result<Routed, TelmoniError> {
     let kind = notice.kind;
     let title = bounded(notice.title, "title", TITLE_MAX_CHARS)?;
     let body = bounded(notice.body, "body", BODY_MAX_CHARS)?;
@@ -313,6 +313,11 @@ pub async fn emit_routed_notice(
     };
     if !metadata.is_object() {
         return Err(AuthError::BadRequest("metadata must be a JSON object".into()).into());
+    }
+    if serde_json::to_string(&metadata).map_or(0, |s| s.len()) as u64 > METADATA_MAX_BYTES {
+        return Err(TelmoniError::PayloadTooLarge {
+            max_bytes: METADATA_MAX_BYTES,
+        });
     }
     let item = db::NewFeedItem {
         subject_user_id: notice.subject_user_id,
@@ -334,9 +339,12 @@ pub async fn emit_routed_notice(
         .await?
         .ok_or_else(|| TelmoniError::Internal("dedup conflict with no surviving row".into()))?;
         tx.commit().await?;
-        return Ok(Emitted {
-            feed_id,
-            deduplicated: true,
+        return Ok(Routed {
+            emitted: Emitted {
+                feed_id,
+                deduplicated: true,
+            },
+            connections: Vec::new(),
         });
     };
     let queued = db::enqueue_routed(
@@ -348,6 +356,7 @@ pub async fn emit_routed_notice(
         body,
         route_key,
         route.connections,
+        route.most,
     )
     .await?;
     tx.commit().await?;
@@ -358,10 +367,14 @@ pub async fn emit_routed_notice(
         queued = queued.len(),
         "notification emitted to its route"
     );
-    delivery::spawn_first_attempts(state, queued);
-    Ok(Emitted {
-        feed_id,
-        deduplicated: false,
+    let (deliveries, connections) = queued.into_iter().unzip();
+    delivery::spawn_first_attempts(state, deliveries);
+    Ok(Routed {
+        emitted: Emitted {
+            feed_id,
+            deduplicated: false,
+        },
+        connections,
     })
 }
 
@@ -376,7 +389,7 @@ pub async fn remind_notice(
     project_id: &ProjectId,
     notice: Notice<'_>,
     route: Route<'_>,
-) -> Result<usize, TelmoniError> {
+) -> Result<Vec<Uuid>, TelmoniError> {
     let title = bounded(notice.title, "title", TITLE_MAX_CHARS)?;
     let body = bounded(notice.body, "body", BODY_MAX_CHARS)?;
     let route_key = bounded(route.key, "route", DEDUP_KEY_MAX_CHARS)?;
@@ -390,6 +403,7 @@ pub async fn remind_notice(
         body,
         route_key,
         route.connections,
+        route.most,
     )
     .await?;
     tx.commit().await?;
@@ -400,9 +414,9 @@ pub async fn remind_notice(
         queued = queued.len(),
         "notification told the connectors again"
     );
-    let count = queued.len();
-    delivery::spawn_first_attempts(state, queued);
-    Ok(count)
+    let (deliveries, connections) = queued.into_iter().unzip();
+    delivery::spawn_first_attempts(state, deliveries);
+    Ok(connections)
 }
 
 /// Which feed a read names: the project in `x-project-id`, at any role auth

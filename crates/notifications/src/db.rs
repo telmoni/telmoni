@@ -1302,18 +1302,9 @@ pub async fn enqueue_delivery<B: Binding>(
     .await
 }
 
-/// Queue one delivery per active connection a notice reaches — the project's,
-/// or every project's in the organization when `project_id` is `None`, less
-/// any webhook that did not choose this kind — in one `INSERT`, answering the
-/// ids for the inline first attempt. The targets
-/// are read first because each row's id is minted here, time-ordered, and
-/// Postgres 17 cannot mint one per row. Each row copies its connection's
-/// tenant keys, so the composite foreign key and every policy's `WITH CHECK`
-/// hold by construction under any binding. Known wart: the organization-wide
-/// fan-out does not dedupe on channel.
 /// One delivery row per connection of `connections` that is the project's,
-/// active, takes `kind` and is not muted for `route`, each marked with the
-/// route its outcome is counted under.
+/// active, takes `kind` and is not muted for `route`, the first `most` by id.
+/// Answers each delivery's id and its connection's.
 #[expect(
     clippy::too_many_arguments,
     reason = "a routed notice is its tenant, its text and its route"
@@ -1327,8 +1318,9 @@ pub async fn enqueue_routed<B: Binding>(
     body: &str,
     route: &str,
     connections: &[Uuid],
-) -> sqlx::Result<Vec<Uuid>> {
-    if connections.is_empty() {
+    most: usize,
+) -> sqlx::Result<Vec<(Uuid, Uuid)>> {
+    if connections.is_empty() || most == 0 {
         return Ok(Vec::new());
     }
     let targets: Vec<Uuid> = sqlx::query_scalar(
@@ -1339,7 +1331,8 @@ pub async fn enqueue_routed<B: Binding>(
             AND NOT EXISTS (SELECT 1 FROM notifications.routes AS r
                              WHERE r.route = $6 AND r.connection_id = c.id
                                AND r.muted_at IS NOT NULL)
-          ORDER BY c.id",
+          ORDER BY c.id
+          LIMIT $7",
     )
     .bind(organization_id)
     .bind(project_id)
@@ -1347,20 +1340,21 @@ pub async fn enqueue_routed<B: Binding>(
     .bind(ConnectionStatus::Active)
     .bind(kind)
     .bind(route)
+    .bind(i64::try_from(most).unwrap_or(i64::MAX))
     .fetch_all(tx.conn())
     .await?;
     if targets.is_empty() {
         return Ok(Vec::new());
     }
     let ids: Vec<Uuid> = targets.iter().map(|_| Uuid::now_v7()).collect();
-    sqlx::query_scalar::<_, Uuid>(
+    sqlx::query_as::<_, (Uuid, Uuid)>(
         "INSERT INTO notifications.deliveries
             (id, connection_id, project_id, organization_id, kind, subject, body, route,
              shard_key)
          SELECT t.id, t.connection_id, $3::text, $4::text, $5::text, $6::text, $7::text,
                 $8::text, $9::uuid
            FROM unnest($1::uuid[], $2::uuid[]) AS t(id, connection_id)
-         RETURNING id",
+         RETURNING id, connection_id",
     )
     .bind(&ids)
     .bind(&targets)
@@ -1460,6 +1454,15 @@ pub async fn unmute<B: HasProject>(
         > 0)
 }
 
+/// Queue one delivery per active connection a notice reaches — the project's,
+/// or every project's in the organization when `project_id` is `None`, less
+/// any webhook that did not choose this kind — in one `INSERT`, answering the
+/// ids for the inline first attempt. The targets are read first because each
+/// row's id is minted here, time-ordered, and Postgres 17 cannot mint one per
+/// row. Each row copies its connection's tenant keys, so the composite
+/// foreign key and every policy's `WITH CHECK` hold by construction under any
+/// binding. Known wart: the organization-wide fan-out does not dedupe on
+/// channel.
 pub async fn enqueue_deliveries<B: Binding>(
     tx: &mut Scoped<'_, B>,
     organization_id: &OrganizationId,

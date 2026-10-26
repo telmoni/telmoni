@@ -285,6 +285,8 @@ pub struct SpanRow {
     pub cache_read_input_tokens: u64,
     /// Input tokens written to the provider's cache.
     pub cache_write_input_tokens: u64,
+    /// What it cost in US dollars, as reported; `None` where it reported none.
+    pub cost: Option<f64>,
     /// The end user it was for, as stored; empty when none was sent.
     pub user_id: String,
     /// The session it belongs to; empty when none was sent.

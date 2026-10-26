@@ -98,10 +98,14 @@ const DML: &[&str] = &["SELECT", "INSERT", "UPDATE", "DELETE"];
 /// The tables a runtime role may only ADD to, and why each must never be rewritten.
 const APPEND_ONLY: &[&str] = &["auth.feature_flags", "auth.organization_flags"];
 
-/// The tables no runtime role may write AT ALL: the operator writes them as
-/// the owner (`make flag`), and the answer to a key is its latest row, so an
-/// INSERT moves a switch as surely as an UPDATE would.
-const OPERATOR_ONLY: &[&str] = &["auth.feature_flags", "auth.organization_flags"];
+/// The tables no runtime role may write AT ALL, the owner writing them: the
+/// flags by `make flag` (an INSERT moves a switch as surely as an UPDATE),
+/// the model prices by `migrate`.
+const OPERATOR_ONLY: &[&str] = &[
+    "auth.feature_flags",
+    "auth.organization_flags",
+    "telemetry.model_prices",
+];
 
 /// The tables the runtime role only READS: its maintenance lane writes them,
 /// and nothing a project-scoped request does may add to, rewrite or remove a
@@ -167,17 +171,17 @@ async fn object_grants_give_each_role_its_own_schema_and_no_siblings() {
                 has_table_privilege(&pool, role, &table, "INSERT").await,
                 !operator_only && !lane_written,
                 "role `{role}` INSERT on `{table}`: an operator-only table is written \
-                 by `make flag` as the owner and by no runtime role, a lane-written one \
-                 by its maintenance lane alone, and every other table is one the \
-                 service must be able to add to"
+                 by the owner (`make flag`, `migrate`) and by no runtime role, a \
+                 lane-written one by its maintenance lane alone, and every other table \
+                 is one the service must be able to add to"
             );
             checks += 1;
-            if lane_written {
+            if lane_written || operator_only {
                 for verb in ["UPDATE", "DELETE"] {
                     assert!(
                         !has_table_privilege(&pool, role, &table, verb).await,
-                        "role `{role}` can {verb} `{table}` — the lane writes it and a \
-                         project only reads it; object_grants.sql revokes the rest"
+                        "role `{role}` can {verb} `{table}` — the lane or the owner writes \
+                         it and a request only reads it; object_grants.sql revokes the rest"
                     );
                     checks += 1;
                 }
@@ -226,7 +230,12 @@ async fn object_grants_give_each_role_its_own_schema_and_no_siblings() {
 
     // A table these lists name that no schema holds would drop its checks in
     // silence: renamed, its rows here stopped asserting anything.
-    for listed in LANE_WRITTEN.iter().chain(LANE_DELETED).chain(LANE_DRAINED) {
+    for listed in OPERATOR_ONLY
+        .iter()
+        .chain(LANE_WRITTEN)
+        .chain(LANE_DELETED)
+        .chain(LANE_DRAINED)
+    {
         assert!(
             seen.iter().any(|table| table == listed),
             "`{listed}` is named here and no schema holds it — its checks stopped running"
@@ -250,6 +259,7 @@ async fn every_runtime_role_can_rewrite_a_mutable_table_of_its_own() {
         let Some(table) = tables_in(&pool, own).await.into_iter().find(|t| {
             !children.contains(t)
                 && !APPEND_ONLY.contains(&t.as_str())
+                && !OPERATOR_ONLY.contains(&t.as_str())
                 && !LANE_WRITTEN.contains(&t.as_str())
                 && !LANE_DRAINED.contains(&t.as_str())
         }) else {
@@ -555,11 +565,7 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
         ),
         // The loop opens and reopens an alert's incidents and follows them,
         // each a column grant; they go with their alert by the cascade.
-        (
-            "telemetry_maintenance",
-            "telemetry.incidents",
-            &["SELECT", "INSERT"],
-        ),
+        ("telemetry_maintenance", "telemetry.incidents", &["SELECT"]),
         // The loop reads which maintenance windows are in force; the purges
         // delete a project's.
         (
@@ -575,6 +581,8 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
         ),
         // A member's vote is the project's alone; it goes with its incident.
         ("telemetry_maintenance", "telemetry.incident_votes", &[]),
+        // The prices are `migrate`'s to write and the module's to read.
+        ("telemetry_maintenance", "telemetry.model_prices", &[]),
         // The delivery loop counts each route's failed deliveries and mutes
         // a connection at five in a row; a member's unmute is the project's.
         (

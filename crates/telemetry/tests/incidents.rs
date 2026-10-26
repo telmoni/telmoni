@@ -3,8 +3,8 @@
 //! once in the feed, a rise is told again to the connectors alone, a recovery
 //! resolves it, and a breach within the hour reopens it; a severity held is
 //! told again as often as the alert asks until a member takes the incident;
-//! and a window empty for as long as the window opens one where the alert
-//! asks, and none where it does not.
+//! a window empty for as long as the window opens one where the alert asks,
+//! and none where it does not; and each keeps where its notices went.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
 mod common;
@@ -18,14 +18,16 @@ use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use tower::ServiceExt;
+use uuid::Uuid;
 
 use common::{AuthStub, NoticeLog, SECRET, clickhouse_or_skip};
+use telmoni_shared::db::tenant_session::project_scope;
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::seam::NoLimits;
 use telmoni_shared::{
     NotificationKind, OrganizationId, OrganizationRole, ProjectId, Role, SpanKind,
 };
-use telmoni_telemetry::rules::evaluate;
+use telmoni_telemetry::rules::{evaluate, incidents};
 use telmoni_telemetry::store::SpanRow;
 use telmoni_telemetry::{AppState, router};
 
@@ -312,6 +314,140 @@ async fn a_held_breach_is_told_again_until_a_member_takes_it(pool: PgPool) {
         .await;
     assert_eq!(again["status"], "resolved");
     assert_eq!(project.told().len(), 3, "resolved once, told once");
+}
+
+/// ⚠ An incident keeps each connection once and its last twenty runs, one shown again last.
+#[sqlx::test]
+async fn an_incident_keeps_its_connections_once_and_its_last_twenty_runs(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch).await;
+    let (status, made) = project
+        .send(
+            "POST",
+            "/internal/v1/telemetry/rules",
+            Some(&calls_over(0.0, None)),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    project.evaluate(&pool).await;
+    let id: Uuid = project.incidents().await[0]["id"]
+        .as_str()
+        .and_then(|id| id.parse().ok())
+        .expect("an incident");
+
+    let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+    let runs: Vec<Uuid> = (0..25).map(|_| Uuid::new_v4()).collect();
+    let mut tx = project_scope(&project.state.db, &project.project)
+        .await
+        .expect("the project's scope");
+    let told = &project.project;
+    incidents::told(&mut tx, told, id, &[b, a], None)
+        .await
+        .expect("kept");
+    incidents::told(&mut tx, told, id, &[a], Some(runs[0]))
+        .await
+        .expect("kept");
+    for run in &runs[1..] {
+        incidents::told(&mut tx, told, id, &[], Some(*run))
+            .await
+            .expect("kept");
+    }
+    incidents::told(&mut tx, told, id, &[], Some(runs[10]))
+        .await
+        .expect("kept");
+    // Another project's incident of that id is none of this one's to write.
+    incidents::told(&mut tx, &ProjectId::new(), id, &[Uuid::new_v4()], None)
+        .await
+        .expect("nothing written");
+    tx.commit().await.expect("commit");
+
+    let kept = &project.incidents().await[0];
+    let mut connections = vec![a, b];
+    connections.sort_unstable();
+    assert_eq!(kept["told_to"], json!(connections), "each once");
+    let mut last: Vec<Uuid> = runs[5..]
+        .iter()
+        .copied()
+        .filter(|run| *run != runs[10])
+        .collect();
+    last.push(runs[10]);
+    assert_eq!(
+        kept["runs"],
+        json!(last),
+        "the last twenty, the one shown again moved last"
+    );
+}
+
+/// ⚠ A recovery that meets a member's resolution of its incident tells nothing.
+#[sqlx::test]
+async fn a_recovery_racing_a_members_resolution_is_not_told(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch).await;
+    let (status, made) = project
+        .send(
+            "POST",
+            "/internal/v1/telemetry/rules",
+            Some(&calls_over(0.0, None)),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    let rule = format!(
+        "/internal/v1/telemetry/rules/{}",
+        made["id"].as_str().expect("an id")
+    );
+    project.evaluate(&pool).await;
+    let id: Uuid = project.incidents().await[0]["id"]
+        .as_str()
+        .and_then(|id| id.parse().ok())
+        .expect("an incident");
+    project
+        .send("PUT", &rule, Some(&calls_over(100.0, None)))
+        .await;
+
+    // The member's resolution holds the incident's row while the loop
+    // recovers it, and lands first.
+    let mut member = pool.begin().await.expect("a transaction");
+    sqlx::query("SELECT 1 FROM telemetry.incidents WHERE id = $1 FOR UPDATE")
+        .bind(id)
+        .execute(&mut *member)
+        .await
+        .expect("held");
+    let pass = {
+        let (state, pool) = (project.state.clone(), pool.clone());
+        tokio::spawn(async move {
+            sqlx::query("UPDATE telemetry.rules SET evaluated_at = NULL")
+                .execute(&pool)
+                .await
+                .expect("due again");
+            evaluate::pass(&state).await.expect("a pass");
+        })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+    sqlx::query(
+        "UPDATE telemetry.incidents SET status = 'resolved', resolved_at = now(),
+                resolved_by = 'user_member'
+          WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&mut *member)
+    .await
+    .expect("resolved by the member");
+    member.commit().await.expect("commit");
+    pass.await.expect("the pass");
+
+    assert_eq!(project.incidents().await[0]["resolved_by"], "user_member");
+    assert!(
+        project
+            .told()
+            .iter()
+            .all(|(kind, _)| *kind != NotificationKind::IncidentResolved),
+        "the member's resolution is the one told: {:?}",
+        project.told()
+    );
 }
 
 /// ⚠ A window empty for as long as the window opens an incident where the

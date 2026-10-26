@@ -686,6 +686,8 @@ pub struct TraceSpan {
     pub output_tokens: u64,
     pub cache_read_input_tokens: u64,
     pub cache_write_input_tokens: u64,
+    /// What it cost in US dollars, as reported; none where it reported none.
+    pub cost: Option<f64>,
     pub user_id: String,
     pub session_id: String,
     pub environment: String,
@@ -716,6 +718,7 @@ impl From<SpanRow> for TraceSpan {
             output_tokens: row.output_tokens,
             cache_read_input_tokens: row.cache_read_input_tokens,
             cache_write_input_tokens: row.cache_write_input_tokens,
+            cost: row.cost,
             user_id: row.user_id,
             session_id: row.session_id,
             environment: row.environment,

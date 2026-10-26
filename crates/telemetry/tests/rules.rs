@@ -193,6 +193,48 @@ async fn an_alert_that_reads_two_ways_is_refused(pool: PgPool) {
         .await;
         assert!(status.is_client_error(), "{field}: {status} {refused}");
     }
+    let cap = json!({
+        "name": "Cost cap", "kind": "run", "measure": "cost", "aggregation": "max",
+        "window": "day", "operator": "gt", "alert_threshold": 5
+    });
+    for (field, value) in [
+        ("kind", json!("model_call")),
+        ("aggregation", json!("p95")),
+        ("filters", json!({ "status": ["error"] })),
+    ] {
+        let mut body = cap.clone();
+        body[field] = value;
+        let (status, refused) = answer(
+            &app,
+            request(
+                "POST",
+                LANE,
+                "user_member",
+                &organization,
+                &project,
+                Some(&body),
+            ),
+        )
+        .await;
+        assert!(status.is_client_error(), "{field}: {status} {refused}");
+    }
+    let (status, made) = answer(
+        &app,
+        request(
+            "POST",
+            LANE,
+            "user_member",
+            &organization,
+            &project,
+            Some(&cap),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "the cap itself is an alert: {made}"
+    );
 }
 
 /// ⚠ The plan's number holds across the organization's projects: the

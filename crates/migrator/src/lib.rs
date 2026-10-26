@@ -10,7 +10,9 @@
 //! Postgres sets ([`telmoni_telemetry::schema`]), and its expired days and
 //! months, dropped the same night as Postgres's partitions are rotated
 //! ([`telmoni_telemetry::retention`]). Both read their URL before Postgres
-//! is touched, so a missing one changes nothing.
+//! is touched, so a missing one changes nothing. Telemetry's price file is
+//! read then too, and written over the model prices after the grants
+//! ([`telmoni_telemetry::prices`]).
 //!
 //! The sets are the directories under `MIGRATIONS_ROOT` — `/app/migrations`
 //! unless set, one directory per schema, as the image lays them out — or the
@@ -35,15 +37,17 @@ use telmoni_shared::config::{optional, require};
 use telmoni_shared::db::tenant_session::ServiceRole;
 
 /// Run every pending migration of every set, then the object grants, then
-/// ClickHouse's file.
+/// the model prices, then ClickHouse's file.
 pub async fn migrate_from_env() -> anyhow::Result<()> {
     let options = migrator_options()?;
     let clickhouse = telmoni_telemetry::store::client(&require(CLICKHOUSE_URL_VAR)?)
         .with_context(|| format!("{CLICKHOUSE_URL_VAR} is not a ClickHouse URL"))?;
+    let prices = telmoni_telemetry::prices::PriceFile::embedded()?;
     for set in sets_from_env()? {
         run_migrations(&options, &set).await?;
     }
     apply_object_grants(&options).await?;
+    load_prices(&options, &prices).await?;
     let statements = telmoni_telemetry::schema::apply(&clickhouse).await?;
     tracing::info!(statements, "clickhouse migration applied");
     Ok(())
@@ -322,6 +326,25 @@ async fn apply_object_grants(options: &sqlx::postgres::PgConnectOptions) -> anyh
             .await?;
         tracing::info!(file, "grants file applied");
     }
+    Ok(())
+}
+
+/// Write the price file the binary carries over `telemetry.model_prices`.
+async fn load_prices(
+    options: &sqlx::postgres::PgConnectOptions,
+    prices: &telmoni_telemetry::prices::PriceFile,
+) -> anyhow::Result<()> {
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(std::time::Duration::from_secs(10))
+        .connect_with(options.clone())
+        .await?;
+    let written = telmoni_telemetry::prices::load(&pool, prices).await?;
+    tracing::info!(
+        prices = written,
+        commit = %prices.source.commit,
+        "model prices loaded"
+    );
     Ok(())
 }
 

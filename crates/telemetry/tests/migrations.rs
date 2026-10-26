@@ -235,6 +235,7 @@ fn spans_has_a_column_for_every_field_of_the_row_and_no_other() {
         output_tokens: 0,
         cache_read_input_tokens: 0,
         cache_write_input_tokens: 0,
+        cost: None,
         user_id: String::new(),
         session_id: String::new(),
         environment: String::new(),

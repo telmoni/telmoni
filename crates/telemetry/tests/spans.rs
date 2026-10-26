@@ -34,6 +34,7 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
         input_tokens: 1_200,
         output_tokens: 300,
         cache_read_input_tokens: 1_000,
+        cost: Some(0.0123),
         user_id: "9f86d081884c7d659a2feaa0c55ad015".into(),
         session_id: "thread-42".into(),
         environment: "production".into(),
@@ -75,7 +76,7 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
             "SELECT project_id, received_at, units, run_id, agent, trace_id, span_id, \
              parent_span_id, kind, name, started_at, ended_at, status, error_type, model, \
              provider, input_tokens, output_tokens, cache_read_input_tokens, \
-             cache_write_input_tokens, user_id, session_id, environment, release, tags, \
+             cache_write_input_tokens, cost, user_id, session_id, environment, release, tags, \
              sample_rate, attributes \
              FROM telemetry.spans \
              WHERE project_id IN {projects:Array(String)} AND kind IN {kinds:Array(String)} \
@@ -161,6 +162,49 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
         .await
         .expect("read the rollup's durations");
     assert_eq!(durations, [1_500.0, 1_500.0, 1_500.0]);
+}
+
+/// ⚠ The rollup sums reported costs apart from the calls that reported none,
+/// whose tokens alone a read prices.
+#[tokio::test]
+async fn the_rollup_keeps_reported_costs_apart_from_the_tokens_to_price() {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = ProjectId::new();
+    let call = |cost: Option<f64>, input_tokens: u64| SpanRow {
+        model: "gpt-4o".into(),
+        provider: "openai".into(),
+        input_tokens,
+        cost,
+        ..span(&project, SpanKind::ModelCall, "chat gpt-4o", 900)
+    };
+    ch.store
+        .insert_spans(&[
+            call(Some(0.25), 100),
+            call(Some(0.0), 200),
+            call(None, 400),
+            call(None, 800),
+        ])
+        .await
+        .expect("insert the calls");
+
+    let rollup: Vec<(bool, u64, u64, f64)> = ch
+        .store
+        .read(
+            &Projects::one(project.clone()),
+            "SELECT cost_reported, sum(spans), sum(input_tokens), sum(cost) \
+             FROM telemetry.spans_hourly WHERE project_id IN {projects:Array(String)} \
+             GROUP BY cost_reported ORDER BY cost_reported",
+        )
+        .fetch_all()
+        .await
+        .expect("read the rollup");
+    assert_eq!(
+        rollup,
+        [(false, 2, 1_200, 0.0), (true, 2, 300, 0.25)],
+        "a free call reported its cost; one with none sums no cost"
+    );
 }
 
 /// ⚠ **Two locks, each enough on its own.** The row policy holds the

@@ -61,6 +61,7 @@
       "count",
       "avg",
       "sum",
+      "max",
       "p50",
       "p90",
       "p95",
@@ -74,7 +75,8 @@
       "count",
       "failures",
       "duration",
-      "tokens"
+      "tokens",
+      "cost"
     ],
     "RuleOperator": [
       "gt",

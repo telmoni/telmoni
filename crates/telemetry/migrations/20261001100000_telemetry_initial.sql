@@ -197,9 +197,10 @@ CREATE TABLE telemetry.rules (
     updated_at        TIMESTAMPTZ      NOT NULL DEFAULT now(),
     CONSTRAINT rules_name_check CHECK (char_length(name) BETWEEN 1 AND 60),
     CONSTRAINT rules_kind_check CHECK (kind IN ('run', 'step', 'model_call', 'tool_call')),
-    CONSTRAINT rules_measure_check CHECK (measure IN ('count', 'failures', 'duration', 'tokens')),
+    CONSTRAINT rules_measure_check
+        CHECK (measure IN ('count', 'failures', 'duration', 'tokens', 'cost')),
     CONSTRAINT rules_aggregation_check
-        CHECK (aggregation IN ('count', 'avg', 'sum', 'p50', 'p90', 'p95', 'p99')),
+        CHECK (aggregation IN ('count', 'avg', 'sum', 'max', 'p50', 'p90', 'p95', 'p99')),
     CONSTRAINT rules_filters_check CHECK (jsonb_typeof(filters) = 'object'),
     CONSTRAINT rules_lookback_check CHECK (lookback IN ('hour', 'day', 'week')),
     CONSTRAINT rules_operator_check CHECK (operator IN ('gt', 'gte', 'lt', 'lte', 'eq', 'ne')),
@@ -261,7 +262,9 @@ GRANT UPDATE (organization_id, paused, paused_at, value, evaluated_at, severity,
 -- a member's hand. One that breaches again within an hour of its recovery is
 -- reopened (`reopened` counts how often) rather than a new one, so a
 -- flapping alert opens one incident an hour at most. An alert holds one open
--- at a time; its incidents go with it.
+-- at a time; its incidents go with it. Each keeps where its notices went
+-- (`told_to`, the connections they were queued to, the feed apart) and the
+-- runs they showed (`runs`, the last 20, oldest first), which link back to it.
 CREATE TABLE telemetry.incidents (
     id               UUID             PRIMARY KEY,
     rule_id          UUID             NOT NULL REFERENCES telemetry.rules (id) ON DELETE CASCADE,
@@ -276,13 +279,16 @@ CREATE TABLE telemetry.incidents (
     resolved_at      TIMESTAMPTZ,
     resolved_by      TEXT,
     reopened         INTEGER          NOT NULL DEFAULT 0,
+    told_to          UUID[]           NOT NULL DEFAULT '{}',
+    runs             UUID[]           NOT NULL DEFAULT '{}',
     updated_at       TIMESTAMPTZ      NOT NULL DEFAULT now(),
     CONSTRAINT incidents_status_check CHECK (status IN ('open', 'acknowledged', 'resolved')),
     CONSTRAINT incidents_severity_check CHECK (severity IN ('warning', 'alert', 'no_data')),
     CONSTRAINT incidents_acknowledged_check
         CHECK ((acknowledged_at IS NULL) = (acknowledged_by IS NULL)),
     CONSTRAINT incidents_resolved_check CHECK ((status = 'resolved') = (resolved_at IS NOT NULL)),
-    CONSTRAINT incidents_reopened_check CHECK (reopened >= 0)
+    CONSTRAINT incidents_reopened_check CHECK (reopened >= 0),
+    CONSTRAINT incidents_runs_check CHECK (cardinality(runs) <= 20)
 );
 
 -- One open incident an alert, acknowledged or not.
@@ -307,8 +313,11 @@ CREATE POLICY maintenance_access ON telemetry.incidents
     WITH CHECK (current_user = 'telemetry_maintenance');
 
 -- The loop opens, reopens, follows and resolves them; a transfer moves a
--- project's; the purges' deletes of alerts take theirs by the cascade.
-GRANT SELECT, INSERT ON telemetry.incidents TO telemetry_maintenance;
+-- project's; the purges' deletes of alerts take theirs by the cascade. Where
+-- their notices went is kept in the project's own scope.
+GRANT SELECT ON telemetry.incidents TO telemetry_maintenance;
+GRANT INSERT (id, rule_id, project_id, organization_id, severity, value, opened_at, updated_at)
+    ON telemetry.incidents TO telemetry_maintenance;
 GRANT UPDATE (organization_id, status, severity, value, resolved_at, resolved_by, reopened,
               updated_at)
     ON telemetry.incidents TO telemetry_maintenance;
@@ -447,3 +456,31 @@ CREATE POLICY maintenance_access ON telemetry.heartbeats
     WITH CHECK (current_user = 'telemetry_maintenance');
 
 GRANT SELECT, INSERT, UPDATE ON telemetry.heartbeats TO telemetry_maintenance;
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 9. MODEL PRICES
+-- ══════════════════════════════════════════════════════════════════════════════
+-- What a call costs that reports no cost of its own: the price of a token, in
+-- US dollars, of a provider's model under each name it answers with — input
+-- no cache served, output, a cache read and a cache write — from the day it
+-- takes effect, none for always. The price file's (`../model_prices.json`),
+-- which `migrate` writes over this table on every run, as its owner; the
+-- module only reads it (`object_grants.sql`). Names no tenant, so it holds
+-- nothing row security would keep from anyone.
+CREATE TABLE telemetry.model_prices (
+    provider       TEXT             NOT NULL,
+    model          TEXT             NOT NULL,
+    effective_from DATE,
+    input          DOUBLE PRECISION NOT NULL,
+    output         DOUBLE PRECISION NOT NULL,
+    cache_read     DOUBLE PRECISION NOT NULL,
+    cache_write    DOUBLE PRECISION NOT NULL,
+    -- One price a name from a day, and one for always.
+    CONSTRAINT model_prices_name_key UNIQUE NULLS NOT DISTINCT (provider, model, effective_from),
+    -- NaN sorts above every number, so the bound below infinity refuses it too.
+    CONSTRAINT model_prices_price_check CHECK (
+        input >= 0 AND input < 'Infinity' AND output >= 0 AND output < 'Infinity'
+        AND cache_read >= 0 AND cache_read < 'Infinity'
+        AND cache_write >= 0 AND cache_write < 'Infinity')
+);

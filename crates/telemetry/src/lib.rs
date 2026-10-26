@@ -13,7 +13,9 @@
 //! Its ClickHouse tables are made by [`schema`] (`telmoni-server migrate`); expired
 //! days and months are dropped, and deleted projects' rows rewritten away, by
 //! [`retention`] (`telmoni-server rotate`), both as the migrator's user, whom
-//! `tenant_isolation` does not hold. Auth reaches it through
+//! `tenant_isolation` does not hold. The same `migrate` writes the price file
+//! over the model prices ([`prices`]), which every read of what runs spent
+//! hands ClickHouse ([`spend`]). Auth reaches it through
 //! [`telmoni_shared::seam::Telemetry`] ([`seam`]) to purge an organization's
 //! or a project's data and move a project's settings; the console through its
 //! lanes under `/internal/v1/telemetry` ([`handler`], [`router`]). The
@@ -49,6 +51,7 @@ pub mod hashing;
 pub mod ingest;
 pub mod live;
 pub mod notify;
+pub mod prices;
 pub mod rate_limit;
 pub mod replica;
 pub mod retention;
@@ -56,6 +59,7 @@ pub mod rules;
 pub mod schema;
 pub mod seam;
 pub mod sessions;
+pub mod spend;
 pub mod store;
 pub mod sweep;
 pub mod traces;

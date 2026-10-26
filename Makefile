@@ -47,7 +47,7 @@ help:
 	@echo "    make sweep SWEEP=deletion run one sweep by hand (deletion, audit-verify, retention, agent-reindex, audit-exports)"
 	@echo "    make webhook-receiver SECRET=whsec_...   receive an outbound webhook behind a named Cloudflare route"
 	@echo "    make webhook-tunnel       the same, with no dashboard: a quick tunnel prints a throwaway URL (needs cloudflared)"
-	@echo "    make db-migrate           apply every migration set to the local Postgres, then ClickHouse's file"
+	@echo "    make db-migrate           apply every migration set and the model prices to the local Postgres, then ClickHouse's file"
 	@echo "    make db-reset             wipe and rebuild the local DBs (Postgres and ClickHouse)"
 	@echo "    make db-shell             psql into local postgres"
 	@echo "    make flag KEY=connectors ON=false WHY=\"...\" BY=<who>   flip a feature flag (ORG=<id> for one organization; make flags lists)"
@@ -332,6 +332,13 @@ contract:
 	UPDATE_CONTRACT=1 cargo test -p telmoni-shared --test wire_contract -- --exact wire_contract_is_in_sync
 	UPDATE_CONTRACT=1 cargo test -p telmoni-shared --test openapi_contract -- --exact openapi_contract_is_in_sync
 	@echo "wrote contract/wire-contract.json + contract/openapi.json"
+
+# The price file, converted from LiteLLM's at the commit it names, or at
+# LITELLM_COMMIT to move the pin: fetched from GitHub, never kept here.
+.PHONY: prices
+prices:
+	UPDATE_PRICES=1 LITELLM_COMMIT=$(LITELLM_COMMIT) cargo test -p telmoni-telemetry --test model_prices -- --exact the_price_file_is_litellms_at_its_pin --nocapture
+	@echo "wrote crates/telemetry/model_prices.json"
 
 .PHONY: test-svc
 test-svc: book

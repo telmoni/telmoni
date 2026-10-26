@@ -2,7 +2,7 @@
 //! what it keeps, written once, so the SDKs, the field inventory and the
 //! docs are held to one list. The names are the GenAI conventions' at the
 //! pinned commit ([`CONVENTIONS_COMMIT`]); what they do not name is ours,
-//! under `telmoni.*`.
+//! under `telmoni.*`, but a call's cost, Langfuse's [`COST`].
 //!
 //! Every cap is a constant named after its field. A span that breaks a
 //! field's rule is refused whole; an attribute past its cap is dropped and
@@ -148,6 +148,9 @@ pub const OUTPUT_TOKENS: &str = "gen_ai.usage.output_tokens";
 pub const CACHE_READ_INPUT_TOKENS: &str = "gen_ai.usage.cache_read.input_tokens";
 /// Input tokens written to the provider's cache.
 pub const CACHE_WRITE_INPUT_TOKENS: &str = "gen_ai.usage.cache_write.input_tokens";
+/// What the call cost in US dollars, as reported: Langfuse's name, since the
+/// conventions have none.
+pub const COST: &str = "gen_ai.usage.cost";
 /// The session a span belongs to, under the conventions' name for it.
 pub const SESSION_ID: &str = "gen_ai.conversation.id";
 
@@ -303,6 +306,7 @@ pub const FIELDS: &[&str] = &[
     OUTPUT_TOKENS,
     CACHE_READ_INPUT_TOKENS,
     CACHE_WRITE_INPUT_TOKENS,
+    COST,
     SESSION_ID,
 ];
 
@@ -614,6 +618,14 @@ pub const INVENTORY: &[InventoryRow] = &[
         "the column cache_write_input_tokens",
         Needs::AnyMode,
         RULE_COUNT,
+    ),
+    row(
+        COST,
+        ReadOn::ModelCall,
+        "the column cost",
+        Needs::AnyMode,
+        "a number, 0 or more: what the call cost in US dollars, as reported; a call without one \
+         is priced by its tokens",
     ),
     row(
         SESSION_ID,

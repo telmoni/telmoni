@@ -1,7 +1,7 @@
 {{- if .Values.migrator.enabled }}
-# The server image, run once as the migrator role: every schema's DDL and the
-# object grants, then ClickHouse's database and tables as its migrator user,
-# before the server rolls.
+# The server image, run once as the migrator role: every schema's DDL, the
+# object grants and the model prices, then ClickHouse's database and tables as
+# its migrator user, before the server rolls.
 apiVersion: batch/v1
 kind: Job
 metadata:

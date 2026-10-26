@@ -1,12 +1,13 @@
 //! Each alert, evaluated a minute after its last evaluation by whichever
 //! replica leases it first: its value read over the window that ends then —
 //! the full hours from `spans_hourly`, and from `spans` the part of an hour
-//! at either end, so a window that holds no full hour reads `spans` alone —
-//! and settled in a transaction of its own with the severity it sets and the
-//! incident that moves with it ([`incidents`]), told once that commits. Before a pass evaluates an
-//! organization's alerts it holds them to its plan's number, the oldest
-//! running and the rest paused by the plan, read at most every few minutes
-//! an organization.
+//! at either end, so a window that holds no full hour reads `spans` alone;
+//! a run's cost from `spans` alone, each run's model calls as they landed
+//! ([`crate::spend`]) — and settled in a transaction of its own with the
+//! severity it sets and the incident that moves with it ([`incidents`]),
+//! told once that commits. Before a pass evaluates an organization's alerts
+//! it holds them to its plan's number, the oldest running and the rest
+//! paused by the plan, read at most every few minutes an organization.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -26,6 +27,7 @@ use crate::AppState;
 use crate::db::TelemetryLane;
 use crate::rules::db::{self, RuleRow};
 use crate::rules::incidents;
+use crate::spend::{self, Unread};
 use crate::store::Projects;
 
 /// How often each alert is evaluated.
@@ -128,6 +130,8 @@ impl Totals {
             (RuleMeasure::Duration, percentile) => percentile.level().and_then(at),
             (RuleMeasure::Tokens, RuleAggregation::Avg) => Some(tokens / spans),
             (RuleMeasure::Tokens, _) => Some(tokens),
+            // Read run by run ([`crate::spend`]), which the totals cannot.
+            (RuleMeasure::Cost, _) => None,
         }
     }
 }
@@ -195,7 +199,7 @@ pub async fn totals(
 }
 
 /// An instant as a `DateTime64(6, 'UTC')` parameter reads it.
-fn micros(at: DateTime<Utc>) -> String {
+pub(crate) fn micros(at: DateTime<Utc>) -> String {
     at.format("%Y-%m-%d %H:%M:%S%.6f").to_string()
 }
 
@@ -361,14 +365,37 @@ async fn release(state: &AppState, rule: &RuleRow, lease_id: Uuid) -> Result<(),
     Ok(())
 }
 
+/// The alert's value over its window ending at `now`: a run's cost from
+/// what each run spent, every other measure from the totals.
+///
+/// # Errors
+///
+/// ClickHouse, or Postgres for a run's cost, did not answer.
+pub async fn value_of(
+    state: &AppState,
+    rule: &RuleRow,
+    now: DateTime<Utc>,
+) -> Result<Option<f64>, Unread> {
+    if rule.measure == RuleMeasure::Cost {
+        let window = Window::ending(now, rule.lookback.duration());
+        let projects = Projects::one(rule.project_id.clone());
+        let spent = spend::runs(state, &projects, window, &rule.filters.0).await?;
+        return Ok(spent.value(rule.aggregation));
+    }
+    Ok(totals(state, rule, now)
+        .await?
+        .value(rule.measure, rule.aggregation))
+}
+
 /// One alert: its value read and settled. Answers whether it was; one
 /// ClickHouse could not answer for is let go for the next pass, logged by
 /// the error's kind alone, since its text can carry ClickHouse's message.
 async fn evaluate(state: &AppState, rule: &RuleRow, lease_id: Uuid) -> Result<bool, TelmoniError> {
     let now = Utc::now();
-    let totals = match totals(state, rule, now).await {
-        Ok(totals) => totals,
-        Err(error) => {
+    let value = match value_of(state, rule, now).await {
+        Ok(value) => value,
+        Err(Unread::Db(error)) => return Err(error.into()),
+        Err(Unread::Store(error)) => {
             tracing::warn!(
                 rule_id = %rule.id,
                 project_id = %rule.project_id,
@@ -380,7 +407,6 @@ async fn evaluate(state: &AppState, rule: &RuleRow, lease_id: Uuid) -> Result<bo
             return Ok(false);
         }
     };
-    let value = totals.value(rule.measure, rule.aggregation);
     let (settled, told) = incidents::settle(state, rule, lease_id, value, now).await?;
     crate::notify::tell_incidents(state, rule, value, &told).await;
     Ok(settled)
@@ -462,6 +488,11 @@ mod tests {
         assert_eq!(
             value(RuleMeasure::Tokens, RuleAggregation::Sum),
             Some(400.0)
+        );
+        assert_eq!(
+            value(RuleMeasure::Cost, RuleAggregation::Max),
+            None,
+            "a run's cost is read run by run, never from the totals"
         );
         assert_eq!(
             Totals::default().value(RuleMeasure::Count, RuleAggregation::Count),

@@ -28,6 +28,10 @@ use crate::rules::db::RuleRow;
 /// rather than opening another.
 pub const REOPEN_WITHIN: TimeDelta = TimeDelta::hours(1);
 
+/// The most runs an incident keeps of those its notices showed, the latest,
+/// as the table's CHECK has it.
+pub const RUNS_KEPT: i32 = 20;
+
 /// An incident as its row keeps it, with its alert's name.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct IncidentRow {
@@ -45,13 +49,18 @@ pub struct IncidentRow {
     pub resolved_at: Option<DateTime<Utc>>,
     pub resolved_by: Option<String>,
     pub reopened: i32,
+    /// The connections its notices were queued to; the feed is not one.
+    pub told_to: Vec<Uuid>,
+    /// The runs its notices showed, oldest first.
+    pub runs: Vec<Uuid>,
 }
 
 /// The columns an [`IncidentRow`] is read from, its alert joined as `rule`.
 const INCIDENT_COLUMNS: &str = "incident.id, incident.rule_id, rule.name AS rule_name, \
     incident.project_id, incident.organization_id, incident.status, incident.severity, \
     incident.value, incident.opened_at, incident.acknowledged_at, incident.acknowledged_by, \
-    incident.resolved_at, incident.resolved_by, incident.reopened";
+    incident.resolved_at, incident.resolved_by, incident.reopened, incident.told_to, \
+    incident.runs";
 
 /// The severity `value` crosses to under the alert's thresholds.
 #[must_use]
@@ -224,7 +233,8 @@ fn moves(
     Vec::new()
 }
 
-/// One move written: an incident opened, reopened, followed or resolved.
+/// One move written: an incident opened, reopened, followed or resolved. One
+/// a member resolved since it was read moves no further, and is told nothing.
 async fn write(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     rule: &RuleRow,
@@ -233,35 +243,44 @@ async fn write(
     now: DateTime<Utc>,
     told: Told,
 ) -> Result<Told, TelmoniError> {
+    let unmoved = |told: Told| Told {
+        silent: true,
+        ..told
+    };
     match (told.kind, open) {
         (NotificationKind::IncidentResolved, Some(incident)) => {
-            sqlx::query(
+            let moved = sqlx::query(
                 "UPDATE telemetry.incidents
                     SET status = 'resolved', resolved_at = $2, value = $3, updated_at = $2
-                  WHERE id = $1",
+                  WHERE id = $1 AND status <> 'resolved'",
             )
             .bind(incident.id)
             .bind(now)
             .bind(value)
             .execute(tx.conn())
-            .await?;
-            Ok(Told {
+            .await?
+            .rows_affected()
+                > 0;
+            let told = Told {
                 again: incident.reopened > 0,
                 ..told
-            })
+            };
+            Ok(if moved { told } else { unmoved(told) })
         }
         (_, Some(incident)) => {
-            sqlx::query(
+            let moved = sqlx::query(
                 "UPDATE telemetry.incidents SET severity = $2, value = $3, updated_at = $4
-                  WHERE id = $1",
+                  WHERE id = $1 AND status <> 'resolved'",
             )
             .bind(incident.id)
             .bind(told.severity)
             .bind(value)
             .bind(now)
             .execute(tx.conn())
-            .await?;
-            Ok(told)
+            .await?
+            .rows_affected()
+                > 0;
+            Ok(if moved { told } else { unmoved(told) })
         }
         (_, None) => {
             let reopened: Option<Uuid> = sqlx::query_scalar(
@@ -319,6 +338,56 @@ async fn open_of(
     )))
     .bind(rule_id)
     .fetch_optional(tx.conn())
+    .await
+}
+
+/// Where one of the project's incident's notices went, kept on it after the
+/// notice is told: the connections it was queued to, beside those its others
+/// reached, and the run it showed, last among the [`RUNS_KEPT`] it keeps.
+pub async fn told<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    id: Uuid,
+    connections: &[Uuid],
+    run: Option<Uuid>,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE telemetry.incidents AS incident
+            SET told_to = ARRAY(SELECT DISTINCT unnest(incident.told_to || $3::uuid[]) ORDER BY 1),
+                runs = CASE WHEN $4::uuid IS NULL THEN incident.runs ELSE (
+                    SELECT moved.runs[greatest(1, cardinality(moved.runs) - $5 + 1):]
+                      FROM (SELECT array_remove(incident.runs, $4::uuid) || $4::uuid AS runs)
+                           AS moved) END
+          WHERE incident.project_id = $1 AND incident.id = $2",
+    )
+    .bind(project_id)
+    .bind(id)
+    .bind(connections)
+    .bind(run)
+    .bind(RUNS_KEPT)
+    .execute(tx.conn())
+    .await
+    .map(|_| ())
+}
+
+/// The project's incidents whose notices showed `run_id`, the newest first.
+pub async fn showing<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    run_id: Uuid,
+    limit: i64,
+) -> sqlx::Result<Vec<IncidentRow>> {
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {INCIDENT_COLUMNS} FROM telemetry.incidents AS incident
+           JOIN telemetry.rules AS rule ON rule.id = incident.rule_id
+          WHERE incident.project_id = $1 AND incident.runs @> ARRAY[$2::uuid]
+          ORDER BY incident.opened_at DESC, incident.id
+          LIMIT $3"
+    )))
+    .bind(project_id)
+    .bind(run_id)
+    .bind(limit)
+    .fetch_all(tx.conn())
     .await
 }
 

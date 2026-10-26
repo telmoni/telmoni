@@ -83,6 +83,7 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
                         output_tokens: Some(80),
                         cache_read_input_tokens: Some(600),
                         cache_write_input_tokens: Some(0),
+                        cost: Some(0.0042),
                     }),
                     ..ModelCallRecord::new("claude-sonnet-5-5", at(0), at(2_000))
                 }
@@ -164,6 +165,9 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
     assert_eq!(first["provider"], "anthropic");
     assert_eq!(first["input_tokens"], 900);
     assert_eq!(first["cache_read_input_tokens"], 600);
+    assert_eq!(first["cost"], 0.0042, "the cost it reported, a column");
+    assert_eq!(first["attributes"]["gen_ai.usage.cost"], Value::Null);
+    assert_eq!(spans[3]["cost"], Value::Null, "a call that reported none");
     assert_eq!(first["attributes"]["telemetry.distro.name"], "telmoni");
     // The deployment the SDK's configuration named, read off its resource
     // into two columns of every span, and never an attribute.

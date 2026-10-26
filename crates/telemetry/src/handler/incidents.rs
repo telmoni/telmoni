@@ -1,6 +1,7 @@
 //! A project's incidents, under [`Resource::Rule`] as their alerts are: `GET
 //! /internal/v1/telemetry/incidents`, those not resolved first, then the
-//! newest, and `/incidents/{id}` with its votes; `POST /incidents/{id}/vote`,
+//! newest, or with `?run=` those whose notices showed that run, and
+//! `/incidents/{id}` with its votes; `POST /incidents/{id}/vote`,
 //! `/acknowledge` and `/resolve`, which any member of the project sends; and
 //! `GET /precision`, the share of the week's votes calling its incidents
 //! useful. Acknowledging one stops its reminders; resolving one by hand is
@@ -16,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use telmoni_shared::db::tenant_session::project_scope;
-use telmoni_shared::extract::Json;
+use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::{AuthError, IncidentStatus, Severity, TelmoniError, Verdict};
 
@@ -47,6 +48,11 @@ pub struct Incident {
     pub resolved_by: Option<String>,
     /// How often it breached again within an hour of a recovery.
     pub reopened: i32,
+    /// The connections its notices were queued to; every incident is in
+    /// the project's feed besides.
+    pub told_to: Vec<Uuid>,
+    /// The runs its notices showed, oldest first.
+    pub runs: Vec<Uuid>,
 }
 
 impl From<IncidentRow> for Incident {
@@ -64,6 +70,8 @@ impl From<IncidentRow> for Incident {
             resolved_at: row.resolved_at,
             resolved_by: row.resolved_by,
             reopened: row.reopened,
+            told_to: row.told_to,
+            runs: row.runs,
         }
     }
 }
@@ -72,6 +80,14 @@ impl From<IncidentRow> for Incident {
 #[derive(Debug, Serialize)]
 pub struct IncidentList {
     pub incidents: Vec<Incident>,
+}
+
+/// The list's query: none, or the run whose incidents a trace's page links.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IncidentQuery {
+    #[serde(default)]
+    pub run: Option<String>,
 }
 
 fn incident_id(given: &str) -> Result<Uuid, TelmoniError> {
@@ -83,17 +99,30 @@ fn not_found() -> TelmoniError {
 }
 
 /// `GET /internal/v1/telemetry/incidents` — the project's incidents, those
-/// not resolved first, then the newest, [`INCIDENTS_MAX`] at most.
+/// not resolved first, then the newest; with `?run=`, those whose notices
+/// showed that run, the newest first; [`INCIDENTS_MAX`] at most.
 pub async fn list_incidents(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
+    Query(query): Query<IncidentQuery>,
 ) -> Result<Json<IncidentList>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
         .require_project(Verb::Read, Resource::Rule)?
         .project_id;
+    let run = match query.run.as_deref() {
+        None => None,
+        Some(given) => Some(
+            given
+                .parse::<Uuid>()
+                .map_err(|_| TelmoniError::BadRequest("run is a run's id, a UUID".into()))?,
+        ),
+    };
     let mut tx = project_scope(&state.db, project_id).await?;
-    let rows = incidents::incidents(&mut tx, project_id, INCIDENTS_MAX).await?;
+    let rows = match run {
+        Some(run) => incidents::showing(&mut tx, project_id, run, INCIDENTS_MAX).await?,
+        None => incidents::incidents(&mut tx, project_id, INCIDENTS_MAX).await?,
+    };
     tx.commit().await?;
     Ok(Json(IncidentList {
         incidents: rows.into_iter().map(Incident::from).collect(),
@@ -141,16 +170,7 @@ pub async fn resolve_incident(
     tx.commit().await?;
     if resolved {
         tracing::info!(project_id = %project_id, incident_id = %id, "telemetry: an incident resolved by hand");
-        crate::notify::resolved_by_hand(
-            &state,
-            &row.organization_id,
-            project_id,
-            id,
-            row.rule_id,
-            &row.rule_name,
-            row.severity,
-        )
-        .await;
+        crate::notify::resolved_by_hand(&state, &row).await;
     }
     Ok(Json(Incident::from(row)))
 }

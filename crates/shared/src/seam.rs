@@ -339,6 +339,8 @@ pub struct Route<'a> {
     /// The connections the notice may go to: the project's own, the rest
     /// ignored.
     pub connections: &'a [Uuid],
+    /// The most deliveries it may make, given by id to the connections that hear it.
+    pub most: usize,
 }
 
 /// What a notice's write came to.
@@ -348,6 +350,16 @@ pub struct Emitted {
     pub feed_id: Uuid,
     /// The key had been written before, and nothing was queued this time.
     pub deduplicated: bool,
+}
+
+/// What a routed notice's write came to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Routed {
+    /// The feed row's write.
+    pub emitted: Emitted,
+    /// The connections it was queued to: where it went, as its producer
+    /// keeps it. None where the key had been written before.
+    pub connections: Vec<Uuid>,
 }
 
 /// What notifications does for the modules beside it.
@@ -364,31 +376,34 @@ pub trait Notifications: Send + Sync {
 
     /// Write a notice to the project's feed and queue it to the connections
     /// `route` names that are active, take its kind and are not muted for the
-    /// route. A deployment's own notifications that route nothing emit it.
+    /// route. A deployment's own notifications that route nothing emit it,
+    /// and name no connection it went to.
     async fn emit_routed(
         &self,
         organization_id: &OrganizationId,
         project_id: &ProjectId,
         notice: Notice<'_>,
         route: Route<'_>,
-    ) -> Result<Emitted, TelmoniError> {
+    ) -> Result<Routed, TelmoniError> {
         let _ = route;
-        self.emit(organization_id, Some(project_id), notice).await
+        Ok(Routed {
+            emitted: self.emit(organization_id, Some(project_id), notice).await?,
+            connections: Vec::new(),
+        })
     }
 
     /// Queue a notice to the connections `route` names alone, as
-    /// [`Notifications::emit_routed`] picks them, with no feed row: a
-    /// reminder, or what an incident whose feed rows are written already says
-    /// again. Answers how many deliveries were queued.
+    /// [`Notifications::emit_routed`] picks them, with no feed row; answers
+    /// the connections it was queued to.
     async fn remind(
         &self,
         organization_id: &OrganizationId,
         project_id: &ProjectId,
         notice: Notice<'_>,
         route: Route<'_>,
-    ) -> Result<usize, TelmoniError> {
+    ) -> Result<Vec<Uuid>, TelmoniError> {
         let _ = (organization_id, project_id, notice, route);
-        Ok(0)
+        Ok(Vec::new())
     }
 
     /// The project's connections muted for `route_key`: those whose last five

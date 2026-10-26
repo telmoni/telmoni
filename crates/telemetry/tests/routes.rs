@@ -25,7 +25,7 @@ use telmoni_shared::{
     AlertCeilings, Grants, NotificationKind, OrganizationId, OrganizationRole, ProjectId, Role,
     SpanKind, TelmoniError,
 };
-use telmoni_telemetry::rules::evaluate;
+use telmoni_telemetry::rules::{deliveries, evaluate};
 use telmoni_telemetry::store::SpanRow;
 use telmoni_telemetry::{AppState, router};
 
@@ -252,6 +252,49 @@ async fn an_organizations_deliveries_a_day_are_held_to_its_plan(pool: PgPool) {
     assert_eq!(told[0].project_id, None, "on the organization's feed");
 }
 
+/// ⚠ A connector that hears nothing takes none of the day's room.
+#[sqlx::test]
+async fn a_stopped_connector_takes_none_of_the_days_deliveries(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch, Arc::new(Deliveries(2))).await;
+    if project.state.redis.connection().await.is_none() {
+        eprintln!("skipping {}: Redis is not reachable", module_path!());
+        return;
+    }
+    // The stopped one first by id, where the room is handed out.
+    let mut pair = [Uuid::new_v4(), Uuid::new_v4()];
+    pair.sort_unstable();
+    let [stopped, heard] = pair;
+    project.notices.stop(stopped);
+    let links = json!([{ "connection_id": stopped }, { "connection_id": heard }]);
+    let (status, made) = project
+        .send("POST", RULES, Some(&calls(5.0, Some(0.0), &links)))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    let rule = format!("{RULES}/{}", made["id"].as_str().expect("an id"));
+
+    project.evaluate(&pool).await;
+    project
+        .send("PUT", &rule, Some(&calls(0.5, Some(0.1), &links)))
+        .await;
+    project.evaluate(&pool).await;
+    let sent: Vec<Vec<Uuid>> = project.sent().into_iter().map(|(_, to)| to).collect();
+    assert_eq!(
+        sent,
+        [vec![heard], vec![heard]],
+        "the warning and the rise each the day's delivery of one"
+    );
+    let told = project
+        .notices
+        .notices()
+        .into_iter()
+        .filter(|n| n.kind == NotificationKind::OrganizationAlert)
+        .count();
+    assert_eq!(told, 1, "the owner told once the day's two are made");
+}
+
 /// A link that reads two ways is refused before anything is written.
 #[sqlx::test]
 async fn a_link_that_reads_two_ways_is_refused(pool: PgPool) {
@@ -274,4 +317,37 @@ async fn a_link_that_reads_two_ways_is_refused(pool: PgPool) {
             .await;
         assert!(status.is_client_error(), "{links}: {status} {refused}");
     }
+}
+
+/// Room given back to a day whose count is gone writes no count, which would outlive its day.
+#[sqlx::test]
+async fn room_given_back_to_a_day_whose_count_is_gone_writes_nothing(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch, Arc::new(Deliveries(5))).await;
+    let Some(mut redis) = project.state.redis.connection().await else {
+        eprintln!("skipping {}: Redis is not reachable", module_path!());
+        return;
+    };
+    let taken = deliveries::take(&project.state, &project.organization, 3).await;
+    assert_eq!(taken.room(), 3);
+    let key = format!(
+        "telemetry:alert-deliveries:{}:{}",
+        project.organization,
+        Utc::now().date_naive()
+    );
+    let gone: i64 = redis::cmd("DEL")
+        .arg(&key)
+        .query_async(&mut redis)
+        .await
+        .expect("the count gone");
+    assert_eq!(gone, 1, "the room was counted under {key}");
+    deliveries::settle(&project.state, &project.organization, taken, 0).await;
+    let kept: i64 = redis::cmd("EXISTS")
+        .arg(&key)
+        .query_async(&mut redis)
+        .await
+        .expect("a read");
+    assert_eq!(kept, 0);
 }

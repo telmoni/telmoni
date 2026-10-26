@@ -11,6 +11,7 @@
 pub mod db;
 pub mod deliveries;
 pub mod evaluate;
+pub mod example;
 pub mod incidents;
 pub mod mutes;
 pub mod votes;
@@ -226,12 +227,24 @@ impl RuleInput {
         if !folds(self.measure, self.aggregation) {
             return Err(bad(&format!(
                 "{} is not folded by {}: count takes count; failures count or avg; duration \
-                 avg, sum or a percentile; tokens avg or sum",
+                 avg, sum or a percentile; tokens avg or sum; cost avg, sum or max",
                 self.measure, self.aggregation
             )));
         }
         if self.measure == RuleMeasure::Tokens && self.kind != SpanKind::ModelCall {
             return Err(bad("tokens are counted on model calls alone"));
+        }
+        if self.measure == RuleMeasure::Cost {
+            if self.kind != SpanKind::Run {
+                return Err(bad("cost is counted per run, from its model calls"));
+            }
+            // Read from the calls as they land, before the run's own status is known.
+            if !(self.filters.status.is_empty() && self.filters.tool.is_empty()) {
+                return Err(bad(
+                    "a run's cost is read from its model calls as they land: filter it by \
+                     agent, model, provider, environment or release",
+                ));
+            }
         }
         if !self.alert_threshold.is_finite() {
             return Err(bad("the alert threshold is a finite number"));
@@ -289,15 +302,17 @@ impl RuleInput {
 
 /// Whether `aggregation` folds `measure`: a count of spans; failures counted
 /// or as a share; durations averaged, summed or at a percentile; tokens
-/// averaged or summed, since the hourly totals keep their sum alone.
+/// averaged or summed, since the hourly totals keep their sum alone; and a
+/// run's cost averaged, summed or the largest, the cost cap.
 #[must_use]
 pub const fn folds(measure: RuleMeasure, aggregation: RuleAggregation) -> bool {
     use RuleAggregation as A;
     match measure {
         RuleMeasure::Count => matches!(aggregation, A::Count),
         RuleMeasure::Failures => matches!(aggregation, A::Count | A::Avg),
-        RuleMeasure::Duration => !matches!(aggregation, A::Count),
+        RuleMeasure::Duration => !matches!(aggregation, A::Count | A::Max),
         RuleMeasure::Tokens => matches!(aggregation, A::Avg | A::Sum),
+        RuleMeasure::Cost => matches!(aggregation, A::Avg | A::Sum | A::Max),
     }
 }
 
@@ -352,11 +367,18 @@ mod tests {
             );
             assert_eq!(
                 folds(RuleMeasure::Duration, aggregation),
-                aggregation != RuleAggregation::Count
+                !matches!(aggregation, RuleAggregation::Count | RuleAggregation::Max)
             );
             assert_eq!(
                 folds(RuleMeasure::Tokens, aggregation),
                 matches!(aggregation, RuleAggregation::Avg | RuleAggregation::Sum)
+            );
+            assert_eq!(
+                folds(RuleMeasure::Cost, aggregation),
+                matches!(
+                    aggregation,
+                    RuleAggregation::Avg | RuleAggregation::Sum | RuleAggregation::Max
+                )
             );
         }
         let refused = RuleInput {
@@ -490,8 +512,52 @@ mod tests {
                 warning_threshold: None,
                 ..input()
             },
+            RuleInput {
+                measure: RuleMeasure::Cost,
+                aggregation: RuleAggregation::Max,
+                warning_threshold: None,
+                ..input()
+            },
         ] {
             assert!(refused.checked().is_err());
+        }
+    }
+
+    /// The cost cap reads each run's calls as they land, so it filters as they do.
+    #[test]
+    fn the_cost_cap_is_a_runs_cost_filtered_as_its_calls_are() {
+        let cap = || RuleInput {
+            kind: SpanKind::Run,
+            measure: RuleMeasure::Cost,
+            aggregation: RuleAggregation::Max,
+            filters: RuleFilters {
+                agent: vec!["support-bot".into()],
+                model: vec!["gpt-4o".into()],
+                ..RuleFilters::default()
+            },
+            alert_threshold: 5.0,
+            warning_threshold: Some(2.5),
+            ..input()
+        };
+        assert!(cap().checked().is_ok());
+        for refused in [
+            RuleFilters {
+                status: vec![SpanStatus::Error],
+                ..RuleFilters::default()
+            },
+            RuleFilters {
+                tool: vec!["search_docs".into()],
+                ..RuleFilters::default()
+            },
+        ] {
+            assert!(
+                RuleInput {
+                    filters: refused,
+                    ..cap()
+                }
+                .checked()
+                .is_err()
+            );
         }
     }
 }

@@ -21,7 +21,7 @@ use telmoni_shared::acting::{Acting, ActingKey, ActingProject};
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::rbac::project_role;
 use telmoni_shared::seam::{
-    Auth, Emitted, Entitlements, NoLimits, Notice, Notifications, ProjectHome, Route,
+    Auth, Emitted, Entitlements, NoLimits, Notice, Notifications, ProjectHome, Route, Routed,
 };
 use telmoni_shared::test_util::{ServiceRole, chain_lock_held, service_pool};
 use telmoni_shared::{
@@ -544,12 +544,15 @@ pub(crate) struct LoggedNotice {
 }
 
 /// Notifications as this module holds it: every notice handed through the
-/// seam, kept for a suite to read, and a dedup key replayed on the same
-/// organization's feed of the same project answered with its first row and
-/// kept once, as the module answers one.
+/// seam, held to its bounds and kept for a suite to read, and a dedup key
+/// replayed on the same organization's feed of the same project answered with
+/// its first row and kept once, as the module answers one. A routed notice is
+/// queued as the module queues it: to the route's connections a suite has not
+/// stopped, by id, as many as the route has room for.
 #[derive(Default)]
 pub(crate) struct NoticeLog {
     notices: Mutex<Vec<LoggedNotice>>,
+    stopped: Mutex<Vec<Uuid>>,
 }
 
 impl NoticeLog {
@@ -564,6 +567,47 @@ impl NoticeLog {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
+
+    /// A connection the module queues nothing to, as one stopped, muted for
+    /// the route or not taking the kind is.
+    pub(crate) fn stop(&self, connection: Uuid) {
+        self.stopped
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(connection);
+    }
+
+    /// The connections a routed notice is queued to.
+    fn queued(&self, route: Route<'_>) -> Vec<Uuid> {
+        let stopped = self
+            .stopped
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut heard: Vec<Uuid> = route
+            .connections
+            .iter()
+            .copied()
+            .filter(|connection| !stopped.contains(connection))
+            .collect();
+        heard.sort_unstable();
+        heard.truncate(route.most);
+        heard
+    }
+}
+
+/// A notice within the bounds [`Notice`] documents, which notifications refuses past.
+fn bounded(notice: &Notice<'_>) {
+    let (title, body) = (notice.title.chars().count(), notice.body.chars().count());
+    let metadata = serde_json::to_string(&notice.metadata).map_or(0, |s| s.len());
+    assert!(
+        (1..=200).contains(&title),
+        "a notice's title is {title} characters"
+    );
+    assert!(
+        (1..=4_000).contains(&body),
+        "a notice's body is {body} characters"
+    );
+    assert!(metadata <= 4_096, "a notice's metadata is {metadata} bytes");
 }
 
 #[async_trait]
@@ -574,6 +618,7 @@ impl Notifications for NoticeLog {
         project_id: Option<&ProjectId>,
         notice: Notice<'_>,
     ) -> Result<Emitted, TelmoniError> {
+        bounded(&notice);
         let mut notices = self
             .notices
             .lock()
@@ -615,18 +660,27 @@ impl Notifications for NoticeLog {
         project_id: &ProjectId,
         notice: Notice<'_>,
         route: Route<'_>,
-    ) -> Result<Emitted, TelmoniError> {
+    ) -> Result<Routed, TelmoniError> {
         let emitted = self.emit(organization_id, Some(project_id), notice).await?;
-        if !emitted.deduplicated
-            && let Some(last) = self
-                .notices
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .last_mut()
-        {
-            last.connections = route.connections.to_vec();
+        if emitted.deduplicated {
+            return Ok(Routed {
+                emitted,
+                connections: Vec::new(),
+            });
         }
-        Ok(emitted)
+        let queued = self.queued(route);
+        if let Some(last) = self
+            .notices
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .last_mut()
+        {
+            last.connections.clone_from(&queued);
+        }
+        Ok(Routed {
+            emitted,
+            connections: queued,
+        })
     }
 
     async fn remind(
@@ -635,7 +689,9 @@ impl Notifications for NoticeLog {
         project_id: &ProjectId,
         notice: Notice<'_>,
         route: Route<'_>,
-    ) -> Result<usize, TelmoniError> {
+    ) -> Result<Vec<Uuid>, TelmoniError> {
+        bounded(&notice);
+        let queued = self.queued(route);
         self.notices
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -649,9 +705,9 @@ impl Notifications for NoticeLog {
                 metadata: notice.metadata,
                 dedup_key: None,
                 reminded: true,
-                connections: route.connections.to_vec(),
+                connections: queued.clone(),
             });
-        Ok(route.connections.len())
+        Ok(queued)
     }
 
     async fn purge_organization(
@@ -1040,6 +1096,7 @@ pub(crate) fn received(
         output_tokens: 0,
         cache_read_input_tokens: 0,
         cache_write_input_tokens: 0,
+        cost: None,
         user_id: String::new(),
         session_id: String::new(),
         environment: String::new(),

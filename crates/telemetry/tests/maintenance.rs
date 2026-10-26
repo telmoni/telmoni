@@ -21,13 +21,14 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use common::{AuthStub, NoticeLog, SECRET, clickhouse_or_skip};
+use telmoni_shared::db::tenant_session::project_scope;
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::seam::{Entitlements, NoLimits};
 use telmoni_shared::{
     AlertCeilings, Grants, NotificationKind, OrganizationId, OrganizationRole, ProjectId, Role,
-    SpanKind, TelmoniError,
+    SpanKind, TelmoniError, UserId,
 };
-use telmoni_telemetry::rules::evaluate;
+use telmoni_telemetry::rules::{evaluate, mutes};
 use telmoni_telemetry::{AppState, router};
 
 const RULES: &str = "/internal/v1/telemetry/rules";
@@ -280,6 +281,49 @@ async fn a_window_mutes_an_alerts_connectors_and_stays_as_the_record(pool: PgPoo
         listed["mutes"].as_array().map(Vec::len),
         Some(1),
         "kept as the record"
+    );
+}
+
+/// ⚠ A window ended once keeps who ended it; one still to start ends just after its start.
+#[sqlx::test]
+async fn a_window_ended_once_keeps_who_ended_it(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch).await;
+    let tomorrow = Utc::now() + TimeDelta::days(1);
+    let (status, window) = project
+        .send(
+            "POST",
+            MUTES,
+            Some(&json!({ "starts_at": tomorrow, "ends_at": tomorrow + TimeDelta::hours(1) })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{window}");
+    let id = window["id"].as_str().expect("an id");
+    let (status, ended) = project
+        .send("POST", &format!("{MUTES}/{id}/end"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{ended}");
+    assert!(ended["ended_by"].is_string(), "{ended}");
+
+    let mut tx = project_scope(&project.state.db, &project.project)
+        .await
+        .expect("the project's scope");
+    let again = mutes::end(
+        &mut tx,
+        &project.project,
+        id.parse().expect("a window's id"),
+        &UserId::new(),
+    )
+    .await
+    .expect("answered")
+    .expect("the window");
+    tx.commit().await.expect("commit");
+    assert_eq!(
+        Value::from(again.ended_by),
+        ended["ended_by"],
+        "the first to end it stays"
     );
 }
 

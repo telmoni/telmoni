@@ -256,6 +256,7 @@ pub fn map(span: &Span, context: &Context<'_>, dropped: &mut Drops) -> Result<Sp
         output_tokens: fields.output_tokens.unwrap_or_default(),
         cache_read_input_tokens: fields.cache_read_input_tokens.unwrap_or_default(),
         cache_write_input_tokens: fields.cache_write_input_tokens.unwrap_or_default(),
+        cost: fields.cost,
         user_id,
         session_id: fields.session_id.unwrap_or_default(),
         environment: context.environment.to_owned(),
@@ -312,6 +313,7 @@ struct Fields {
     output_tokens: Option<u64>,
     cache_read_input_tokens: Option<u64>,
     cache_write_input_tokens: Option<u64>,
+    cost: Option<f64>,
     user_id: Option<String>,
     session_id: Option<String>,
     cancelled: bool,
@@ -418,6 +420,13 @@ impl Fields {
             contract::CACHE_WRITE_INPUT_TOKENS => {
                 self.cache_write_input_tokens =
                     Some(count(value, contract::CACHE_WRITE_INPUT_TOKENS)?);
+            }
+            contract::COST => {
+                let cost = number(value)
+                    .filter(|cost| cost.is_finite() && *cost >= 0.0)
+                    .ok_or(Refusal::Invalid(contract::COST))?;
+                // -0 is 0, which a sum would otherwise print signed.
+                self.cost = Some(cost.abs());
             }
             contract::SESSION_ID => {
                 self.session_id = Some(bounded_text(
@@ -639,6 +648,7 @@ mod tests {
                     "gen_ai.usage.cache_creation.input_tokens",
                     Value::IntValue(40),
                 ),
+                kv(contract::COST, Value::DoubleValue(0.0081)),
                 kv(contract::USER_ID, s("acme-42")),
                 kv(contract::SESSION_ID, Value::IntValue(7)),
                 kv("telmoni.tag.team", s("search")),
@@ -709,6 +719,7 @@ mod tests {
             (1_200, 300, 40),
             "the replaced cache name reads as the current one"
         );
+        assert_eq!(row.cost, Some(0.0081));
         assert_eq!(row.status, SpanStatus::Error);
         assert_eq!(row.user_id, "h(acme-42)", "stored as the project hashes it");
         assert_eq!(row.session_id, "7", "a scalar reads as text");
@@ -845,6 +856,22 @@ mod tests {
                 Refusal::Invalid(contract::INPUT_TOKENS),
             ),
             (
+                contract::COST,
+                Value::DoubleValue(-0.01),
+                Refusal::Invalid(contract::COST),
+            ),
+            (
+                contract::COST,
+                Value::DoubleValue(f64::NAN),
+                Refusal::Invalid(contract::COST),
+            ),
+            (
+                contract::COST,
+                Value::DoubleValue(f64::INFINITY),
+                Refusal::Invalid(contract::COST),
+            ),
+            (contract::COST, s("0.01"), Refusal::Invalid(contract::COST)),
+            (
                 contract::SAMPLE_RATE,
                 Value::DoubleValue(1.5),
                 Refusal::Invalid(contract::SAMPLE_RATE),
@@ -937,6 +964,52 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(refused.reason, Refusal::Invalid("trace_id"));
+    }
+
+    /// A cost is a number of dollars from 0, a whole one among them, kept as reported.
+    #[test]
+    fn a_cost_is_kept_as_reported() {
+        let project = ProjectId::new();
+        let keep = |id: &str| id.to_owned();
+        let costing = |value: Value| Span {
+            attributes: vec![
+                kv(contract::RUN_ID, s(RUN)),
+                kv(contract::AGENT, s("nightly-report")),
+                kv(contract::OPERATION, s("chat")),
+                kv(contract::COST, value),
+            ],
+            ..call()
+        };
+        let cost = |value: Value| {
+            map(
+                &costing(value),
+                &context(&project, &[], &keep),
+                &mut Drops::default(),
+            )
+            .expect("kept")
+            .cost
+        };
+        assert_eq!(cost(Value::DoubleValue(0.25)), Some(0.25));
+        assert_eq!(cost(Value::IntValue(3)), Some(3.0));
+        assert_eq!(cost(Value::DoubleValue(0.0)), Some(0.0), "free is a cost");
+        assert!(
+            cost(Value::DoubleValue(-0.0)).is_some_and(f64::is_sign_positive),
+            "-0 is kept as 0"
+        );
+        let unreported = map(
+            &Span {
+                attributes: vec![
+                    kv(contract::RUN_ID, s(RUN)),
+                    kv(contract::AGENT, s("nightly-report")),
+                    kv(contract::OPERATION, s("chat")),
+                ],
+                ..call()
+            },
+            &context(&project, &[], &keep),
+            &mut Drops::default(),
+        )
+        .expect("kept");
+        assert_eq!(unreported.cost, None, "none reported is none, not 0");
     }
 
     #[test]

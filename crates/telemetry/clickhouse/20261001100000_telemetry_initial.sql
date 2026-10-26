@@ -61,6 +61,9 @@ CREATE TABLE IF NOT EXISTS telemetry.spans
     output_tokens            UInt64,
     cache_read_input_tokens  UInt64,
     cache_write_input_tokens UInt64,
+    -- What a call cost in US dollars as reported, NULL where it reported
+    -- none: a read prices those by their tokens, and never writes the price.
+    cost                     Nullable(Float64),
     user_id                  String,
     session_id               String,
     -- The deployment the span's resource named, and its release; empty
@@ -80,12 +83,13 @@ PARTITION BY toDate(received_at)
 ORDER BY (project_id, started_at);
 
 -- Each hour's totals, by project, agent, kind, model, provider, a tool call's
--- name, status and the deployment's environment and release: no user and no
--- tag, so it outlives the spans, kept thirteen months. `tool` is empty on
--- every kind but a tool call, so the names an application gives its steps
--- never multiply the rows. Durations are a t-digest in milliseconds, which
--- merges across hours and keys and answers any percentile, and their sum,
--- which an average needs.
+-- name, status, the deployment's environment and release, and whether the
+-- spans reported their cost: no user and no tag, so it outlives the spans,
+-- kept thirteen months. `tool` is empty on every kind but a tool call, so the
+-- names an application gives its steps never multiply the rows. A row of
+-- spans that reported none sums no cost, so a read prices its tokens alone.
+-- Durations are a t-digest in milliseconds, which merges across hours and
+-- keys and answers any percentile, and their sum, which an average needs.
 CREATE TABLE IF NOT EXISTS telemetry.spans_hourly
 (
     project_id               String,
@@ -98,25 +102,28 @@ CREATE TABLE IF NOT EXISTS telemetry.spans_hourly
     status                   LowCardinality(String),
     environment              LowCardinality(String),
     release                  LowCardinality(String),
+    cost_reported            Bool,
     spans                    SimpleAggregateFunction(sum, UInt64),
     units                    SimpleAggregateFunction(sum, UInt64),
     input_tokens             SimpleAggregateFunction(sum, UInt64),
     output_tokens            SimpleAggregateFunction(sum, UInt64),
     cache_read_input_tokens  SimpleAggregateFunction(sum, UInt64),
     cache_write_input_tokens SimpleAggregateFunction(sum, UInt64),
+    cost                     SimpleAggregateFunction(sum, Float64),
     duration_ms_sum          SimpleAggregateFunction(sum, Float64),
     duration_ms              AggregateFunction(quantilesTDigest(0.5, 0.9, 0.99), Float64)
 )
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(hour)
-ORDER BY (project_id, hour, agent, kind, model, provider, tool, status, environment, release);
+ORDER BY (project_id, hour, agent, kind, model, provider, tool, status, environment, release,
+          cost_reported);
 
 -- ⚠ The one second table an insert into `spans` writes, in the same flush:
 -- a view that failed would fail the insert after its spans were written, so
 -- its query is one no row `spans` took can fail. It runs as its definer, the
 -- user this file runs as, whom `tenant_isolation` does not hold; run as the
 -- user inserting, the policy would read a setting no insert carries, and
--- fail.
+-- fail. `spans.cost` is named whole: bare, `cost` reads as the sum's alias.
 CREATE MATERIALIZED VIEW IF NOT EXISTS telemetry.spans_hourly_mv
 TO telemetry.spans_hourly
 DEFINER = CURRENT_USER SQL SECURITY DEFINER
@@ -131,18 +138,21 @@ AS SELECT
     status,
     environment,
     release,
+    isNotNull(spans.cost) AS cost_reported,
     count() AS spans,
     sum(units) AS units,
     sum(input_tokens) AS input_tokens,
     sum(output_tokens) AS output_tokens,
     sum(cache_read_input_tokens) AS cache_read_input_tokens,
     sum(cache_write_input_tokens) AS cache_write_input_tokens,
+    sum(ifNull(spans.cost, 0)) AS cost,
     sum(greatest(dateDiff('microsecond', started_at, ended_at), 0) / 1000) AS duration_ms_sum,
     quantilesTDigestState(0.5, 0.9, 0.99)(
         greatest(dateDiff('microsecond', started_at, ended_at), 0) / 1000
     ) AS duration_ms
 FROM telemetry.spans
-GROUP BY project_id, hour, agent, kind, model, provider, tool, status, environment, release;
+GROUP BY project_id, hour, agent, kind, model, provider, tool, status, environment, release,
+    cost_reported;
 
 -- ⚠ Tenancy: a read sees only the projects its query's setting
 -- `SQL_telmoni_projects` names, a JSON array the one query module sets on

@@ -72,8 +72,8 @@ pub async fn insert<B: HasProject>(
     .await
 }
 
-/// One of the project's windows ended now by `by`, where it had not ended;
-/// one yet to start ends a moment after its start. Answers it as it stands.
+/// One of the project's windows ended now by `by`, unless it has ended; one
+/// yet to start ends just after its start. Answers it as it stands.
 pub async fn end<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
@@ -83,7 +83,7 @@ pub async fn end<B: HasProject>(
     sqlx::query(
         "UPDATE telemetry.mutes
             SET ends_at = greatest(starts_at + interval '1 microsecond', now()), ended_by = $3
-          WHERE project_id = $1 AND id = $2 AND ends_at > now()",
+          WHERE project_id = $1 AND id = $2 AND ends_at > now() AND ended_by IS NULL",
     )
     .bind(project_id)
     .bind(id)

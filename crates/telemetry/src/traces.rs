@@ -522,7 +522,7 @@ const FACETS_SQL: &str = concat!(
 const SPANS_SQL: &str = "SELECT project_id, received_at, units, run_id, agent, trace_id, \
      span_id, parent_span_id, kind, name, started_at, ended_at, status, error_type, model, \
      provider, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, \
-     user_id, session_id, environment, release, tags, sample_rate, attributes \
+     cost, user_id, session_id, environment, release, tags, sample_rate, attributes \
      FROM telemetry.spans \
      WHERE project_id IN {projects:Array(String)} AND run_id = {run:UUID} \
      AND span_id IN (SELECT span_id FROM (SELECT span_id, sum(units) OVER (\

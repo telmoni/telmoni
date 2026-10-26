@@ -7,7 +7,7 @@ use crate::types::ParseEnumError;
 use serde::{Deserialize, Serialize};
 
 /// How an alert folds its measure over the window: how many spans, their
-/// average, their sum, or a percentile of them. `[PUBLIC-API]`.
+/// average, their sum, the largest, or a percentile of them. `[PUBLIC-API]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
@@ -18,6 +18,8 @@ pub enum RuleAggregation {
     Avg,
     /// The measure summed over them.
     Sum,
+    /// The largest of them: a cap on any one.
+    Max,
     /// The 50th percentile.
     P50,
     /// The 90th percentile.
@@ -31,11 +33,12 @@ pub enum RuleAggregation {
 impl RuleAggregation {
     /// Every one, in wire order.
     #[must_use]
-    pub const fn all() -> [Self; 7] {
+    pub const fn all() -> [Self; 8] {
         [
             Self::Count,
             Self::Avg,
             Self::Sum,
+            Self::Max,
             Self::P50,
             Self::P90,
             Self::P95,
@@ -50,6 +53,7 @@ impl RuleAggregation {
             Self::Count => "count",
             Self::Avg => "avg",
             Self::Sum => "sum",
+            Self::Max => "max",
             Self::P50 => "p50",
             Self::P90 => "p90",
             Self::P95 => "p95",
@@ -65,7 +69,7 @@ impl RuleAggregation {
             Self::P90 => Some(0.9),
             Self::P95 => Some(0.95),
             Self::P99 => Some(0.99),
-            Self::Count | Self::Avg | Self::Sum => None,
+            Self::Count | Self::Avg | Self::Sum | Self::Max => None,
         }
     }
 }
@@ -83,13 +87,14 @@ impl FromStr for RuleAggregation {
             "count" => Ok(Self::Count),
             "avg" => Ok(Self::Avg),
             "sum" => Ok(Self::Sum),
+            "max" => Ok(Self::Max),
             "p50" => Ok(Self::P50),
             "p90" => Ok(Self::P90),
             "p95" => Ok(Self::P95),
             "p99" => Ok(Self::P99),
             _ => Err(ParseEnumError::new(
                 s,
-                "count, avg, sum, p50, p90, p95, p99",
+                "count, avg, sum, max, p50, p90, p95, p99",
             )),
         }
     }
@@ -99,7 +104,7 @@ impl FromStr for RuleAggregation {
 mod tests {
     use super::*;
 
-    const ALL: [RuleAggregation; 7] = RuleAggregation::all();
+    const ALL: [RuleAggregation; 8] = RuleAggregation::all();
 
     /// A new variant fails to compile here until `all()` lists it.
     #[test]
@@ -109,6 +114,7 @@ mod tests {
                 RuleAggregation::Count
                 | RuleAggregation::Avg
                 | RuleAggregation::Sum
+                | RuleAggregation::Max
                 | RuleAggregation::P50
                 | RuleAggregation::P90
                 | RuleAggregation::P95

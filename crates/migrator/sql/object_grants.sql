@@ -120,6 +120,11 @@ BEGIN
     IF to_regclass('telemetry.project_settings') IS NOT NULL THEN
         EXECUTE 'REVOKE DELETE ON telemetry.project_settings FROM telemetry';
     END IF;
+    -- The model prices are the price file's, which `migrate` writes as the
+    -- owner; a request that wrote one would reprice every call of its name.
+    IF to_regclass('telemetry.model_prices') IS NOT NULL THEN
+        EXECUTE 'REVOKE INSERT, UPDATE, DELETE ON telemetry.model_prices FROM telemetry';
+    END IF;
 EXCEPTION
     WHEN invalid_schema_name THEN
         RAISE NOTICE 'telemetry schema not yet created — telemetry own-schema grants land on next re-apply';

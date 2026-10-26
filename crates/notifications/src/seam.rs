@@ -15,7 +15,7 @@ use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam::{
     ActivitySource, Audience, DocumentCursor, Emitted, Notice, Notifications, ProjectHome, Route,
-    SourceDocument,
+    Routed, SourceDocument,
 };
 use telmoni_shared::{AuthError, OrganizationId, ProjectId, TelmoniError, UserId};
 
@@ -44,7 +44,7 @@ impl Notifications for Notifier {
         project_id: &ProjectId,
         notice: Notice<'_>,
         route: Route<'_>,
-    ) -> Result<Emitted, TelmoniError> {
+    ) -> Result<Routed, TelmoniError> {
         handler::emit_routed_notice(&self.0, organization_id, project_id, notice, route).await
     }
 
@@ -54,7 +54,7 @@ impl Notifications for Notifier {
         project_id: &ProjectId,
         notice: Notice<'_>,
         route: Route<'_>,
-    ) -> Result<usize, TelmoniError> {
+    ) -> Result<Vec<Uuid>, TelmoniError> {
         handler::remind_notice(&self.0, organization_id, project_id, notice, route).await
     }
 

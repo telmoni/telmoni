@@ -2,7 +2,8 @@
 //!
 //! ```text
 //! telmoni-server serve               listen on PORT (8082); every module, every loop
-//! telmoni-server migrate             every pending migration, the grants, ClickHouse's file; exit
+//! telmoni-server migrate             every pending migration, the grants, the model prices,
+//!                                    ClickHouse's file; exit
 //! telmoni-server rotate              the audit partitions: create ahead (drops are off);
 //!                                    telemetry's: drop days and months past retention; exit
 //! telmoni-server sweep <deletion|audit-verify|retention|agent-reindex|audit-exports>

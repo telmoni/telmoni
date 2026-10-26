@@ -7,8 +7,8 @@ use crate::types::ParseEnumError;
 use serde::{Deserialize, Serialize};
 
 /// What an alert measures of each span of the kind it watches: the spans
-/// themselves, those that failed, how long each took, or the tokens each
-/// model call spent, input and output. `[PUBLIC-API]`.
+/// themselves, those that failed, how long each took, the tokens each model
+/// call spent, input and output, or what each run spent. `[PUBLIC-API]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
@@ -21,13 +21,21 @@ pub enum RuleMeasure {
     Duration,
     /// Each span's input and output tokens, summed.
     Tokens,
+    /// Each run's model calls' cost, in US dollars, as they land.
+    Cost,
 }
 
 impl RuleMeasure {
     /// Every one, in wire order.
     #[must_use]
-    pub const fn all() -> [Self; 4] {
-        [Self::Count, Self::Failures, Self::Duration, Self::Tokens]
+    pub const fn all() -> [Self; 5] {
+        [
+            Self::Count,
+            Self::Failures,
+            Self::Duration,
+            Self::Tokens,
+            Self::Cost,
+        ]
     }
 
     /// The wire word.
@@ -38,6 +46,7 @@ impl RuleMeasure {
             Self::Failures => "failures",
             Self::Duration => "duration",
             Self::Tokens => "tokens",
+            Self::Cost => "cost",
         }
     }
 }
@@ -56,7 +65,11 @@ impl FromStr for RuleMeasure {
             "failures" => Ok(Self::Failures),
             "duration" => Ok(Self::Duration),
             "tokens" => Ok(Self::Tokens),
-            _ => Err(ParseEnumError::new(s, "count, failures, duration, tokens")),
+            "cost" => Ok(Self::Cost),
+            _ => Err(ParseEnumError::new(
+                s,
+                "count, failures, duration, tokens, cost",
+            )),
         }
     }
 }
@@ -65,7 +78,7 @@ impl FromStr for RuleMeasure {
 mod tests {
     use super::*;
 
-    const ALL: [RuleMeasure; 4] = RuleMeasure::all();
+    const ALL: [RuleMeasure; 5] = RuleMeasure::all();
 
     /// A new variant fails to compile here until `all()` lists it.
     #[test]
@@ -75,7 +88,8 @@ mod tests {
                 RuleMeasure::Count
                 | RuleMeasure::Failures
                 | RuleMeasure::Duration
-                | RuleMeasure::Tokens => {}
+                | RuleMeasure::Tokens
+                | RuleMeasure::Cost => {}
             }
         }
     }
@@ -86,7 +100,7 @@ mod tests {
             assert_eq!(v.as_str().parse::<RuleMeasure>().unwrap(), v);
             assert_eq!(serde_json::to_string(&v).unwrap(), format!("\"{v}\""));
         }
-        for given in ["Count", "cost", ""] {
+        for given in ["Count", "spend", ""] {
             assert!(given.parse::<RuleMeasure>().is_err(), "parsed: {given:?}");
         }
     }

@@ -1,10 +1,9 @@
-//! An organization's alert deliveries a UTC day, held to its plan's second
-//! number ([`AlertCeilings::deliveries_per_day`]): counted in Redis per
-//! organization and day, as the connectors each notice goes to, the way data
-//! out is. A delivery past it is not made, while its incident stands in the
-//! feed, and the owner and admins are told once that day. With no ceiling, or
-//! without Redis, every delivery is made: a replica's own count would hold
-//! the plan once per replica.
+//! An organization's alert deliveries a UTC day, held to its plan's
+//! [`AlertCeilings::deliveries_per_day`] in Redis: a notice takes room for the
+//! connectors it would tell and gives back what notifications did not queue.
+//! Past the number, incidents reach the feed alone and the owner is told once
+//! that day. Without Redis every delivery is made, as a replica's own count
+//! would hold the plan once per replica.
 
 use chrono::{NaiveDate, Utc};
 use serde_json::json;
@@ -27,25 +26,61 @@ redis.call('EXPIRE', KEYS[1], ARGV[3])
 return take
 ";
 
+/// `ARGV[1]` deliveries given back to the day's room, never below none, nor
+/// to a day whose count is gone.
+const GIVE_BACK: &str = r"
+if redis.call('EXISTS', KEYS[1]) == 0 then
+  return 0
+end
+local left = redis.call('DECRBY', KEYS[1], ARGV[1])
+if left < 0 then
+  redis.call('SET', KEYS[1], 0, 'KEEPTTL')
+end
+return left
+";
+
 /// How long a day's count outlives it, so one made just before midnight is
 /// still read after it.
 const KEPT_S: i64 = 2 * 24 * 60 * 60;
 
+/// The room a notice took for its deliveries: how many it wanted and was
+/// given, and the day and number they were counted against, where they were.
+#[derive(Debug, Clone, Copy)]
+#[must_use = "the room a notice took is given back by `settle`"]
+pub struct Taken {
+    wanted: usize,
+    room: usize,
+    counted: Option<(NaiveDate, u32)>,
+}
+
+impl Taken {
+    /// The most deliveries the notice may make.
+    #[must_use]
+    pub const fn room(&self) -> usize {
+        self.room
+    }
+}
+
 /// How many of `wanted` deliveries the organization's day has room for,
-/// taken from it; where it had room for fewer, the owner and admins are told.
-pub async fn take(state: &AppState, organization_id: &OrganizationId, wanted: usize) -> usize {
+/// taken from it until [`settle`] gives back what the notice did not make.
+pub async fn take(state: &AppState, organization_id: &OrganizationId, wanted: usize) -> Taken {
+    let uncounted = Taken {
+        wanted,
+        room: wanted,
+        counted: None,
+    };
     if wanted == 0 {
-        return 0;
+        return uncounted;
     }
     let Some(AlertCeilings {
         deliveries_per_day, ..
     }) = seam::alert_ceilings(state.entitlements.as_ref(), organization_id).await
     else {
-        return wanted;
+        return uncounted;
     };
     let day = Utc::now().date_naive();
     let Some(mut connection) = state.redis.connection().await else {
-        return wanted;
+        return uncounted;
     };
     let taken: Result<i64, redis::RedisError> = redis::Script::new(TAKE)
         .key(day_key(organization_id, day))
@@ -54,17 +89,53 @@ pub async fn take(state: &AppState, organization_id: &OrganizationId, wanted: us
         .arg(KEPT_S)
         .invoke_async(&mut connection)
         .await;
-    let taken = match taken {
-        Ok(taken) => usize::try_from(taken).unwrap_or(0),
+    match taken {
+        Ok(taken) => Taken {
+            wanted,
+            room: usize::try_from(taken).unwrap_or(0),
+            counted: Some((day, deliveries_per_day)),
+        },
         Err(error) => {
             state.redis.stood_in("the day's alert deliveries", &error);
-            return wanted;
+            uncounted
         }
+    }
+}
+
+/// A notice's deliveries settled against its day: the room it took and did
+/// not use given back, its connections having heard fewer than it took; and
+/// where the day's room ran out before every connection that would hear it,
+/// the owner and admins told.
+pub async fn settle(state: &AppState, organization_id: &OrganizationId, taken: Taken, made: usize) {
+    let Some((day, deliveries_per_day)) = taken.counted else {
+        return;
     };
-    if taken < wanted {
+    let unused = taken.room.saturating_sub(made);
+    if unused > 0 {
+        give_back(state, organization_id, day, unused).await;
+    } else if taken.room < taken.wanted {
         tell_owner(state, organization_id, deliveries_per_day, day).await;
     }
-    taken
+}
+
+/// `unused` deliveries given back to the organization's room on `day`.
+async fn give_back(
+    state: &AppState,
+    organization_id: &OrganizationId,
+    day: NaiveDate,
+    unused: usize,
+) {
+    let Some(mut connection) = state.redis.connection().await else {
+        return;
+    };
+    let given: Result<i64, redis::RedisError> = redis::Script::new(GIVE_BACK)
+        .key(day_key(organization_id, day))
+        .arg(unused)
+        .invoke_async(&mut connection)
+        .await;
+    if let Err(error) = given {
+        state.redis.stood_in("the day's alert deliveries", &error);
+    }
 }
 
 /// The organization's count of alert deliveries on `day`.
@@ -80,7 +151,7 @@ async fn tell_owner(
     deliveries_per_day: u32,
     day: NaiveDate,
 ) {
-    let key = format!("telemetry:alert-deliveries:{organization_id}:{day}");
+    let key = day_key(organization_id, day);
     let body = format!(
         "This organization's alerts have made the {deliveries_per_day} deliveries its plan holds \
          a UTC day, so until midnight UTC their incidents reach the feed alone."

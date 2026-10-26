@@ -137,10 +137,11 @@ services:
       start_period: 5s
 
   # The same image as the server, run once with `migrate`: every schema's
-  # DDL before the server starts, then ClickHouse's database and tables. This
-  # quickstart runs everything as the one database user, which owns every
-  # table and needs no grant; a deployment that gives each module its own
-  # role (`role_hardening.sql`) gets the object grants from the same run.
+  # DDL and the model prices before the server starts, then ClickHouse's
+  # database and tables. This quickstart runs everything as the one database
+  # user, which owns every table and needs no grant; a deployment that gives
+  # each module its own role (`role_hardening.sql`) gets the object grants
+  # from the same run.
   migrate:
     image: ${TELMONI_IMAGE_SERVER:-ghcr.io/telmoni/server:latest}
     command: ["migrate"]
