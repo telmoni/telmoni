@@ -174,7 +174,7 @@ change applies from the next notice. The body's `kind` is one of:
 | `member_left` | Someone left or was removed from the project. |
 | `connector_connected` | A destination was connected to the project. |
 | `connector_disconnected` | A destination stopped accepting notices. |
-| `incident_opened` | One of the project's alerts breached, or was told again: reopened within an hour of its recovery, risen from warning to alert, or held as long as its re-notification asks, a reminder's `body` opening `Still:`. |
+| `incident_opened` | One of the project's alerts breached, or was told again: reopened within an hour of its recovery, risen from warning to alert, or held as long as its re-notification asks, a reminder's `body` opening `Still:`. Its `body`, and an `incident_resolved`'s, ends in a line linking the console page where a member of the project marks the incident useful or noise. |
 | `incident_resolved` | An alert's incident recovered, or a member resolved it. |
 | `organization_alert` | A notice for the organization's Owner and Admins, posted to the organization rather than a project: on the hosted service, once a day while the plan's ceiling refuses the organization its data out past the day's, its `metadata` naming the `lane` (`data_out`), the count `refused` and `since` when; a self-hosted deployment raises none. One goes to every connection in the organization that takes the kind. |
 
