@@ -21,7 +21,7 @@ use crate::AppState;
 use crate::db::TelemetryLane;
 use crate::rules::db::{self, RuleRow};
 use crate::rules::incidents::Told;
-use crate::rules::{Link, deliveries};
+use crate::rules::{Link, deliveries, mutes};
 
 /// What an evaluation's moves say, told after its commit: each opening and
 /// resolution emitted to the feed, keyed by the incident and the kind, and
@@ -44,11 +44,12 @@ pub async fn tell_incidents(state: &AppState, rule: &RuleRow, value: Option<f64>
         }
     };
     let route_key = db::route_key(rule.id);
+    let muted = muted_now(state, &rule.project_id, rule.id).await;
     for one in told.iter().filter(|one| !one.silent) {
         let now = Utc::now();
         let hearers: Vec<Uuid> = links
             .iter()
-            .filter(|link| link.hears(one.heard_at, now))
+            .filter(|link| !muted && link.hears(one.heard_at, now))
             .map(|link| link.connection_id)
             .collect();
         let taken = deliveries::take(state, &rule.organization_id, hearers.len()).await;
@@ -120,6 +121,28 @@ pub async fn tell_incidents(state: &AppState, rule: &RuleRow, value: Option<f64>
                 error = %error,
                 "telemetry: an incident's notice could not be told to the connectors"
             );
+        }
+    }
+}
+
+/// Whether a maintenance window mutes the alert now; none, logged, where
+/// the windows cannot be read, so a notice is told rather than lost.
+async fn muted_now(state: &AppState, project_id: &ProjectId, rule_id: Uuid) -> bool {
+    let read = async {
+        let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
+        let muted = mutes::in_force(&mut tx, project_id, rule_id, Utc::now()).await?;
+        tx.commit().await?;
+        Ok::<_, TelmoniError>(muted)
+    };
+    match read.await {
+        Ok(muted) => muted,
+        Err(error) => {
+            tracing::warn!(
+                rule_id = %rule_id,
+                error = %error,
+                "telemetry: an alert's maintenance windows could not be read; it is told"
+            );
+            false
         }
     }
 }
@@ -243,10 +266,11 @@ pub async fn resolved_by_hand(
         read.await.unwrap_or_default()
     };
     let now = Utc::now();
+    let muted = muted_now(state, project_id, rule_id).await;
     let hearers: Vec<Uuid> = links
         .into_iter()
         .map(db::LinkRow::link)
-        .filter(|link| link.hears(severity, now))
+        .filter(|link| !muted && link.hears(severity, now))
         .map(|link| link.connection_id)
         .collect();
     let taken = deliveries::take(state, organization_id, hearers.len()).await;

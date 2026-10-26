@@ -352,7 +352,48 @@ GRANT SELECT ON telemetry.rule_connectors TO telemetry_maintenance;
 
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- 6. HEARTBEATS
+-- 6. MAINTENANCE WINDOWS
+-- ══════════════════════════════════════════════════════════════════════════════
+-- A window an alert, or every alert of a project (`rule_id` none), is muted
+-- for: evaluated as ever, its incidents opened and resolved in the feed, and
+-- told to no connector from `starts_at` until `ends_at`. Each is kept after it
+-- ends as the record of who muted what, and when; one ended early keeps who
+-- ended it.
+CREATE TABLE telemetry.mutes (
+    id              UUID        PRIMARY KEY,
+    project_id      TEXT        NOT NULL,
+    rule_id         UUID        REFERENCES telemetry.rules (id) ON DELETE CASCADE,
+    starts_at       TIMESTAMPTZ NOT NULL,
+    ends_at         TIMESTAMPTZ NOT NULL,
+    created_by      TEXT        NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ended_by        TEXT,
+    CONSTRAINT mutes_window_check CHECK (ends_at > starts_at),
+    CONSTRAINT mutes_length_check CHECK (ends_at - starts_at <= interval '30 days')
+);
+
+-- The project's mutes, newest first, and those in force at an instant.
+CREATE INDEX mutes_project_idx ON telemetry.mutes (project_id, ends_at DESC);
+CREATE INDEX mutes_rule_idx ON telemetry.mutes (rule_id) WHERE rule_id IS NOT NULL;
+
+ALTER TABLE telemetry.mutes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.mutes FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON telemetry.mutes
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.mutes
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- The loop reads which are in force; the purges delete a project's.
+GRANT SELECT, DELETE ON telemetry.mutes TO telemetry_maintenance;
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 7. HEARTBEATS
 -- ══════════════════════════════════════════════════════════════════════════════
 -- The purge sweep, the plan refusals' notices and the alerts' evaluation,
 -- each as the last replica

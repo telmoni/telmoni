@@ -12,6 +12,7 @@ pub mod db;
 pub mod deliveries;
 pub mod evaluate;
 pub mod incidents;
+pub mod mutes;
 
 use chrono::{DateTime, Datelike as _, TimeDelta, Timelike as _, Utc};
 use serde::{Deserialize, Serialize};

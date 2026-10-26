@@ -388,3 +388,69 @@ pub async fn unmute_link(
 fn not_linked() -> TelmoniError {
     AuthError::NotFound("this alert links no such connector".into()).into()
 }
+
+/// `POST /internal/v1/telemetry/rules/{id}/pause` — one of the project's
+/// alerts paused by the person: it is not evaluated, and tells nothing, until
+/// it is resumed; still counted against the plan. One paused already is
+/// answered as it stands.
+pub async fn pause_rule(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Alert>, TelmoniError> {
+    let acting = state.auth.resolve(&headers).await?;
+    let project_id = &acting
+        .require_project(Verb::Update, Resource::Rule)?
+        .project_id;
+    let id = rule_id(&id)?;
+    let mut tx = chain::scoped(&state.db, &acting, project_id).await?;
+    let row = rules::pause(&mut tx, project_id, id)
+        .await?
+        .ok_or_else(not_found)?;
+    let links = rules::links(&mut tx, project_id, &[id]).await?;
+    tx.commit().await?;
+    tracing::info!(project_id = %project_id, rule_id = %id, "telemetry: an alert paused");
+    let muted = muted(&state, project_id, id).await;
+    Ok(Json(Alert::of(
+        row,
+        links.into_iter().map(LinkRow::link).collect(),
+        &muted,
+    )))
+}
+
+/// `POST /internal/v1/telemetry/rules/{id}/resume` — one of the project's
+/// paused alerts running again within a minute. One its plan holds no room
+/// for, counting the organization's older alerts, paused or not, is refused
+/// with the `402` that says what makes room.
+pub async fn resume_rule(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Alert>, TelmoniError> {
+    let acting = state.auth.resolve(&headers).await?;
+    let project_id = &acting
+        .require_project(Verb::Update, Resource::Rule)?
+        .project_id;
+    let id = rule_id(&id)?;
+    let ceilings = seam::alert_ceilings(state.entitlements.as_ref(), &acting.organization_id).await;
+    let mut tx = chain::scoped(&state.db, &acting, project_id).await?;
+    rules::rule(&mut tx, project_id, id)
+        .await?
+        .ok_or_else(not_found)?;
+    if let Some(ceilings) = &ceilings {
+        let ahead = rules::organization_ahead(&mut tx, &acting.organization_id, id).await?;
+        ceilings.admit(u64::try_from(ahead).unwrap_or(0))?;
+    }
+    let row = rules::resume(&mut tx, project_id, id)
+        .await?
+        .ok_or_else(not_found)?;
+    let links = rules::links(&mut tx, project_id, &[id]).await?;
+    tx.commit().await?;
+    tracing::info!(project_id = %project_id, rule_id = %id, "telemetry: an alert resumed");
+    let muted = muted(&state, project_id, id).await;
+    Ok(Json(Alert::of(
+        row,
+        links.into_iter().map(LinkRow::link).collect(),
+        &muted,
+    )))
+}

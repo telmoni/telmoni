@@ -99,6 +99,24 @@ pub async fn organization_count(
         .await
 }
 
+/// How many of the organization's alerts were made before `id`, the oldest
+/// first as [`hold_to`] ranks them: what its plan holds ahead of it.
+pub async fn organization_ahead(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    organization_id: &OrganizationId,
+    id: Uuid,
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM telemetry.rules AS other, telemetry.rules AS this
+          WHERE this.id = $2 AND other.organization_id = $1
+            AND (other.created_at, other.id) < (this.created_at, this.id)",
+    )
+    .bind(organization_id)
+    .bind(id)
+    .fetch_one(tx.conn())
+    .await
+}
+
 /// A new alert of the project, filed under its organization.
 pub async fn insert(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
@@ -362,4 +380,45 @@ pub async fn write_links<B: HasProject>(
 #[must_use]
 pub fn route_key(rule_id: Uuid) -> String {
     format!("telemetry:rule:{rule_id}")
+}
+
+/// One of the project's alerts paused by a person, where it ran or its plan
+/// paused it: no longer evaluated, its severity `paused`. Answers it as it
+/// stands, none where the project has no such alert.
+pub async fn pause<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    id: Uuid,
+) -> sqlx::Result<Option<RuleRow>> {
+    sqlx::query(
+        "UPDATE telemetry.rules
+            SET paused = 'person', paused_at = now(), severity = 'paused', severity_since = now(),
+                lease_id = NULL, leased_until = NULL
+          WHERE project_id = $1 AND id = $2 AND paused IS DISTINCT FROM 'person'",
+    )
+    .bind(project_id)
+    .bind(id)
+    .execute(tx.conn())
+    .await?;
+    rule(tx, project_id, id).await
+}
+
+/// One of the project's paused alerts running again: due at once, its
+/// severity `unknown` until its first evaluation.
+pub async fn resume<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    id: Uuid,
+) -> sqlx::Result<Option<RuleRow>> {
+    sqlx::query(
+        "UPDATE telemetry.rules
+            SET paused = NULL, paused_at = NULL, severity = 'unknown', severity_since = now(),
+                value = NULL, evaluated_at = NULL
+          WHERE project_id = $1 AND id = $2 AND paused IS NOT NULL",
+    )
+    .bind(project_id)
+    .bind(id)
+    .execute(tx.conn())
+    .await?;
+    rule(tx, project_id, id).await
 }

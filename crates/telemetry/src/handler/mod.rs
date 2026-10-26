@@ -8,6 +8,7 @@ pub mod content_mode;
 pub mod field_inventory;
 pub mod incidents;
 pub mod ingest;
+pub mod mutes;
 pub mod rules;
 pub mod session_layout;
 pub mod sessions;

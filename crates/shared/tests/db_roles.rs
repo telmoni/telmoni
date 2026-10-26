@@ -560,6 +560,13 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             "telemetry.incidents",
             &["SELECT", "INSERT"],
         ),
+        // The loop reads which maintenance windows are in force; the purges
+        // delete a project's.
+        (
+            "telemetry_maintenance",
+            "telemetry.mutes",
+            &["SELECT", "DELETE"],
+        ),
         // The loop reads where each alert's notices go; they go with it.
         (
             "telemetry_maintenance",

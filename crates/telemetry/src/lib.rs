@@ -194,6 +194,19 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(handler::rules::unmute_link),
         )
         .route(
+            "/telemetry/rules/{id}/pause",
+            post(handler::rules::pause_rule),
+        )
+        .route(
+            "/telemetry/rules/{id}/resume",
+            post(handler::rules::resume_rule),
+        )
+        .route(
+            "/telemetry/mutes",
+            get(handler::mutes::list_mutes).post(handler::mutes::create_mute),
+        )
+        .route("/telemetry/mutes/{id}/end", post(handler::mutes::end_mute))
+        .route(
             "/telemetry/incidents",
             get(handler::incidents::list_incidents),
         )
