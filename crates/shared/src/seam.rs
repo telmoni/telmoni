@@ -16,8 +16,8 @@ use uuid::Uuid;
 
 use crate::acting::{Acting, ActingKey};
 use crate::{
-    AuditAction, FlagSet, Grants, LaneCeilings, MemberCeiling, NotificationKind, OrganizationId,
-    OrganizationStatus, ProjectId, TelmoniError, UserId,
+    AlertCeilings, AuditAction, FlagSet, Grants, LaneCeilings, MemberCeiling, NotificationKind,
+    OrganizationId, OrganizationStatus, ProjectId, TelmoniError, UserId,
 };
 
 /// Who may read a document the agent indexes, beyond the tenant its keys
@@ -611,6 +611,18 @@ pub trait Entitlements: Send + Sync {
         let _ = organization_id;
         Ok(None)
     }
+
+    /// The alerts the organization's plan holds, and their deliveries a day;
+    /// `None` is as many as it makes and sends. Asked when an alert is made
+    /// and by the loop that evaluates them, and it may read the deployment's
+    /// own rows.
+    async fn alert_ceilings(
+        &self,
+        organization_id: &OrganizationId,
+    ) -> Result<Option<AlertCeilings>, TelmoniError> {
+        let _ = organization_id;
+        Ok(None)
+    }
 }
 
 /// A binary that sells nothing: every organization holds everything.
@@ -658,6 +670,23 @@ pub async fn member_ceiling(
         Err(e) => {
             tracing::warn!(organization_id = %organization_id, error = %e,
                 "the member ceiling could not be read; none is held");
+            None
+        }
+    }
+}
+
+/// What an alert is held to, made or evaluated: the organization's alert
+/// ceilings. An answer that cannot be had is no ceiling, logged, as
+/// [`admit_new`] lets in what it cannot decide.
+pub async fn alert_ceilings(
+    entitlements: &dyn Entitlements,
+    organization_id: &OrganizationId,
+) -> Option<AlertCeilings> {
+    match entitlements.alert_ceilings(organization_id).await {
+        Ok(ceilings) => ceilings,
+        Err(e) => {
+            tracing::warn!(organization_id = %organization_id, error = %e,
+                "the alert ceilings could not be read; none is held");
             None
         }
     }

@@ -41,6 +41,10 @@ const MATRIX: &[Cell] = &[
     cell(Role::Owner, Verb::Create, Resource::View, true),
     cell(Role::Owner, Verb::Update, Resource::View, true),
     cell(Role::Owner, Verb::Delete, Resource::View, true),
+    cell(Role::Owner, Verb::Read, Resource::Rule, true),
+    cell(Role::Owner, Verb::Create, Resource::Rule, true),
+    cell(Role::Owner, Verb::Update, Resource::Rule, true),
+    cell(Role::Owner, Verb::Delete, Resource::Rule, true),
     cell(Role::Admin, Verb::Read, Resource::Project, true),
     cell(Role::Admin, Verb::Create, Resource::Project, true),
     cell(Role::Admin, Verb::Update, Resource::Project, true),
@@ -63,6 +67,10 @@ const MATRIX: &[Cell] = &[
     cell(Role::Admin, Verb::Create, Resource::View, true),
     cell(Role::Admin, Verb::Update, Resource::View, true),
     cell(Role::Admin, Verb::Delete, Resource::View, true),
+    cell(Role::Admin, Verb::Read, Resource::Rule, true),
+    cell(Role::Admin, Verb::Create, Resource::Rule, true),
+    cell(Role::Admin, Verb::Update, Resource::Rule, true),
+    cell(Role::Admin, Verb::Delete, Resource::Rule, true),
     cell(Role::Member, Verb::Read, Resource::Project, true),
     cell(Role::Member, Verb::Create, Resource::Project, false),
     cell(Role::Member, Verb::Update, Resource::Project, false),
@@ -85,6 +93,10 @@ const MATRIX: &[Cell] = &[
     cell(Role::Member, Verb::Create, Resource::View, false),
     cell(Role::Member, Verb::Update, Resource::View, false),
     cell(Role::Member, Verb::Delete, Resource::View, false),
+    cell(Role::Member, Verb::Read, Resource::Rule, true),
+    cell(Role::Member, Verb::Create, Resource::Rule, true),
+    cell(Role::Member, Verb::Update, Resource::Rule, true),
+    cell(Role::Member, Verb::Delete, Resource::Rule, true),
 ];
 
 const fn cell(role: Role, verb: Verb, resource: Resource, allowed: bool) -> Cell {
@@ -268,13 +280,17 @@ fn the_owner_and_admins_read_the_audit_log_and_none_writes_it() {
 }
 
 #[test]
-fn member_cannot_mutate_anything() {
+fn member_cannot_mutate_anything_but_the_alerts() {
     for &resource in ALL_RESOURCES {
         for verb in [Verb::Create, Verb::Update, Verb::Delete] {
             if is_meaningless_combo(verb, resource) {
                 continue;
             }
-            assert_denies(Role::Member, verb, resource);
+            if resource == Resource::Rule {
+                assert_allows(Role::Member, verb, resource);
+            } else {
+                assert_denies(Role::Member, verb, resource);
+            }
         }
     }
 }
@@ -326,9 +342,10 @@ const fn resource_ordinal(r: Resource) -> usize {
         Resource::Audit => 4,
         Resource::Trace => 5,
         Resource::View => 6,
+        Resource::Rule => 7,
     }
 }
-const RESOURCE_COUNT: usize = 7;
+const RESOURCE_COUNT: usize = 8;
 
 /// Assert one array covers `N` slots exactly once.
 fn assert_covers<T: Copy + std::fmt::Debug>(

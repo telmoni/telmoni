@@ -84,6 +84,7 @@ pub fn state(
         rate_limit: RateLimit::new("telemetry:ingest:limit", EXPORTS_PER_MINUTE),
         ceilings: crate::ceilings::Ceilings::default(),
         heartbeats: Heartbeats::new("telemetry", TelemetryLane),
+        alerts_held: crate::rules::evaluate::Held::default(),
         body_wait: BODY_WAIT,
     })
 }

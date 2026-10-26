@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 /// What one finished span of a run is: the run itself, a step inside it, a
 /// model or tool call, or anything else recorded under it. The stable string
 /// a span's row carries. `[PUBLIC-API]`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum SpanKind {
     /// One execution of an agent: `invoke_agent`, or `invoke_workflow` for a

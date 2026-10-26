@@ -158,9 +158,94 @@ ALTER TABLE telemetry.project_settings
 
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- 3. HEARTBEATS
+-- 3. ALERTS
 -- ══════════════════════════════════════════════════════════════════════════════
--- The purge sweep and the plan refusals' notices, each as the last replica
+-- A project's alerts: each a measure of its spans of one kind, folded over
+-- the last hour, day or week, against an alert threshold and an optional
+-- warning one. Filed under the organization too, whose plan holds how many
+-- it may have across its projects, paused ones counted (`paused` says by
+-- whom: a person, or the plan, which lifts its own). The last evaluation is
+-- the loop's to write, under a lease (`lease_id` until `leased_until`) so
+-- replicas share the loop with no leader.
+CREATE TABLE telemetry.rules (
+    id                UUID             PRIMARY KEY,
+    project_id        TEXT             NOT NULL,
+    organization_id   TEXT             NOT NULL,
+    name              TEXT             NOT NULL,
+    kind              TEXT             NOT NULL,
+    measure           TEXT             NOT NULL,
+    aggregation       TEXT             NOT NULL,
+    filters           JSONB            NOT NULL DEFAULT '{}',
+    lookback          TEXT             NOT NULL,
+    operator          TEXT             NOT NULL,
+    alert_threshold   DOUBLE PRECISION NOT NULL,
+    warning_threshold DOUBLE PRECISION,
+    missing_data      TEXT             NOT NULL DEFAULT 'zero',
+    renotify_minutes  INTEGER,
+    paused            TEXT,
+    paused_at         TIMESTAMPTZ,
+    value             DOUBLE PRECISION,
+    evaluated_at      TIMESTAMPTZ,
+    lease_id          UUID,
+    leased_until      TIMESTAMPTZ,
+    created_at        TIMESTAMPTZ      NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ      NOT NULL DEFAULT now(),
+    CONSTRAINT rules_name_check CHECK (char_length(name) BETWEEN 1 AND 60),
+    CONSTRAINT rules_kind_check CHECK (kind IN ('run', 'step', 'model_call', 'tool_call')),
+    CONSTRAINT rules_measure_check CHECK (measure IN ('count', 'failures', 'duration', 'tokens')),
+    CONSTRAINT rules_aggregation_check
+        CHECK (aggregation IN ('count', 'avg', 'sum', 'p50', 'p90', 'p95', 'p99')),
+    CONSTRAINT rules_filters_check CHECK (jsonb_typeof(filters) = 'object'),
+    CONSTRAINT rules_lookback_check CHECK (lookback IN ('hour', 'day', 'week')),
+    CONSTRAINT rules_operator_check CHECK (operator IN ('gt', 'gte', 'lt', 'lte', 'eq', 'ne')),
+    CONSTRAINT rules_missing_data_check
+        CHECK (missing_data IN ('zero', 'keep', 'no_data', 'notify_no_data')),
+    CONSTRAINT rules_renotify_check CHECK (renotify_minutes BETWEEN 1 AND 10080),
+    CONSTRAINT rules_paused_check CHECK (paused IN ('person', 'plan')),
+    CONSTRAINT rules_paused_at_check CHECK ((paused IS NULL) = (paused_at IS NULL)),
+    CONSTRAINT rules_lease_check CHECK ((lease_id IS NULL) = (leased_until IS NULL))
+);
+
+-- One name per alert in a project, whatever its case.
+CREATE UNIQUE INDEX rules_project_name_idx ON telemetry.rules (project_id, lower(name));
+-- The organization's purge deletes by it, and its plan counts and orders by it.
+CREATE INDEX rules_organization_idx ON telemetry.rules (organization_id, created_at);
+-- What the loop leases: running alerts, the longest unevaluated first.
+CREATE INDEX rules_due_idx ON telemetry.rules (evaluated_at NULLS FIRST, id) WHERE paused IS NULL;
+
+ALTER TABLE telemetry.rules ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.rules FORCE ROW LEVEL SECURITY;
+
+-- A write names the organization too, which `organization_read` trusts, as
+-- a project's settings do.
+CREATE POLICY tenant_isolation ON telemetry.rules
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true)
+                AND organization_id = current_setting('app.organization_id', true));
+
+-- An organization counts its alerts across its projects, and writes none of
+-- another project's.
+CREATE POLICY organization_read ON telemetry.rules
+    FOR SELECT
+    USING (organization_id = current_setting('app.organization_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.rules
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- The loop leases and settles alerts and holds them to their plan; the
+-- purges delete a project's or an organization's; a transfer moves a
+-- project's to the organization that takes it.
+GRANT SELECT, DELETE ON telemetry.rules TO telemetry_maintenance;
+GRANT UPDATE (organization_id, paused, paused_at, value, evaluated_at, lease_id, leased_until)
+    ON telemetry.rules TO telemetry_maintenance;
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 4. HEARTBEATS
+-- ══════════════════════════════════════════════════════════════════════════════
+-- The purge sweep, the plan refusals' notices and the alerts' evaluation,
+-- each as the last replica
 -- to finish a tick of it left it: what the external watchdog reads through
 -- `GET /heartbeat`, a loop stale once no replica has beaten it for three of
 -- its periods. Names no tenant.
@@ -168,7 +253,7 @@ CREATE TABLE telemetry.heartbeats (
     name           TEXT        PRIMARY KEY,
     period_seconds INTEGER     NOT NULL,
     beat_at        TIMESTAMPTZ NOT NULL,
-    CONSTRAINT heartbeats_name_check CHECK (name IN ('purges', 'refusals')),
+    CONSTRAINT heartbeats_name_check CHECK (name IN ('purges', 'refusals', 'alerts')),
     CONSTRAINT heartbeats_period_check CHECK (period_seconds > 0)
 );
 

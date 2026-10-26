@@ -27,6 +27,12 @@
       "failed",
       "all"
     ],
+    "MissingData": [
+      "zero",
+      "keep",
+      "no_data",
+      "notify_no_data"
+    ],
     "NotificationKind": [
       "organization_alert",
       "member_added",
@@ -43,6 +49,34 @@
       "owner",
       "admin",
       "member"
+    ],
+    "RuleAggregation": [
+      "count",
+      "avg",
+      "sum",
+      "p50",
+      "p90",
+      "p95",
+      "p99"
+    ],
+    "RuleMeasure": [
+      "count",
+      "failures",
+      "duration",
+      "tokens"
+    ],
+    "RuleOperator": [
+      "gt",
+      "gte",
+      "lt",
+      "lte",
+      "eq",
+      "ne"
+    ],
+    "RuleWindow": [
+      "hour",
+      "day",
+      "week"
     ],
     "SessionSort": [
       "session",

@@ -121,6 +121,11 @@ pub async fn purge_organization(
 ) -> sqlx::Result<u64> {
     let projects = projects_of(tx, organization_id).await?;
     hold_alone(tx, &projects).await?;
+    let rules = sqlx::query("DELETE FROM telemetry.rules WHERE organization_id = $1")
+        .bind(organization_id)
+        .execute(tx.conn())
+        .await?
+        .rows_affected();
     let views = sqlx::query(
         "DELETE FROM telemetry.trace_views
           WHERE project_id IN (SELECT project_id FROM telemetry.project_settings
@@ -135,7 +140,7 @@ pub async fn purge_organization(
         .execute(tx.conn())
         .await?
         .rows_affected();
-    Ok(views + settings)
+    Ok(rules + views + settings)
 }
 
 /// How long a purge waits for any lock. Set on the transaction because the
@@ -167,6 +172,11 @@ pub async fn purge_project(
     project_id: &ProjectId,
 ) -> sqlx::Result<u64> {
     hold_alone(tx, std::slice::from_ref(project_id)).await?;
+    let rules = sqlx::query("DELETE FROM telemetry.rules WHERE project_id = $1")
+        .bind(project_id)
+        .execute(tx.conn())
+        .await?
+        .rows_affected();
     let views = sqlx::query("DELETE FROM telemetry.trace_views WHERE project_id = $1")
         .bind(project_id)
         .execute(tx.conn())
@@ -177,7 +187,7 @@ pub async fn purge_project(
         .execute(tx.conn())
         .await?
         .rows_affected();
-    Ok(views + settings)
+    Ok(rules + views + settings)
 }
 
 /// A saved view as its row keeps it: a view of the trace list, or a layout
@@ -366,13 +376,19 @@ pub async fn delete_view<B: HasProject>(
     )
 }
 
-/// A project's settings row, handed to the organization that now holds the
-/// project. Answers whether there was one.
+/// A project's settings row and its alerts, handed to the organization that
+/// now holds the project, its alerts counted against that one's plan from
+/// then on. Answers whether there was a settings row.
 pub async fn move_project(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     project_id: &ProjectId,
     organization_id: &OrganizationId,
 ) -> sqlx::Result<bool> {
+    sqlx::query("UPDATE telemetry.rules SET organization_id = $2 WHERE project_id = $1")
+        .bind(project_id)
+        .bind(organization_id)
+        .execute(tx.conn())
+        .await?;
     Ok(sqlx::query(
         "UPDATE telemetry.project_settings SET organization_id = $2 WHERE project_id = $1",
     )

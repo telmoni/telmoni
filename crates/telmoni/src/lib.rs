@@ -456,6 +456,9 @@ impl App {
         ));
         let purges = tokio::spawn(telmoni_telemetry::sweep::run(self.telemetry.clone()));
         let refusals = tokio::spawn(telmoni_telemetry::ceilings::run(self.telemetry.clone()));
+        let alerts = tokio::spawn(telmoni_telemetry::rules::evaluate::run(
+            self.telemetry.clone(),
+        ));
         if env_parse("RUN_SWEEPS", true)? {
             sweeps::spawn(self.auth.clone(), &self.sweeps);
         } else {
@@ -500,6 +503,10 @@ impl App {
             ended = refusals => match ended {
                 Ok(()) => anyhow::bail!("the plan refusals' notices exited; restarting the process"),
                 Err(e) => anyhow::bail!("the plan refusals' notices died: {e}"),
+            },
+            ended = alerts => match ended {
+                Ok(()) => anyhow::bail!("the alerts' evaluation exited; restarting the process"),
+                Err(e) => anyhow::bail!("the alerts' evaluation died: {e}"),
             },
         }
         Ok(())

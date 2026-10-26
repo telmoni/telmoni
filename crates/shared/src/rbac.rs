@@ -72,6 +72,11 @@ pub enum Resource {
     /// its owners and admins save them, as they change everything else the
     /// project's members share.
     View,
+    /// A project's alerts: a metric over its spans against thresholds. Any
+    /// member of the project makes, edits, pauses and deletes them, as
+    /// Langfuse's members make alerts: an alert reads what every member may
+    /// read already, and tells the connectors the project's admins set up.
+    Rule,
     // The product built on this platform adds its resources here WITH their
     // handlers, never before, or the matrix grants a capability no endpoint
     // exposes.
@@ -80,7 +85,7 @@ pub enum Resource {
 impl Resource {
     /// Every resource, in the matrix's order.
     #[must_use]
-    pub const fn all() -> [Self; 7] {
+    pub const fn all() -> [Self; 8] {
         [
             Self::Project,
             Self::Member,
@@ -89,6 +94,7 @@ impl Resource {
             Self::Audit,
             Self::Trace,
             Self::View,
+            Self::Rule,
         ]
     }
 
@@ -103,6 +109,7 @@ impl Resource {
             Self::Audit => "audit",
             Self::Trace => "trace",
             Self::View => "view",
+            Self::Rule => "rule",
         }
     }
 }
@@ -138,10 +145,10 @@ pub fn can(role: Role, verb: Verb, resource: Resource) -> bool {
         // the project (and structurally impossible audit mutations).
         Role::Admin => !(resource == R::Project && verb == V::Delete),
 
-        // Reads the work, mutates nothing. The chain is the exception: what
-        // everyone did is the owner's record of the collaboration, not the
-        // work a member was invited to see.
-        Role::Member => resource != R::Audit && verb == V::Read,
+        // Reads the work, mutates nothing but the project's alerts. The chain
+        // is the exception: what everyone did is the owner's record of the
+        // collaboration, not the work a member was invited to see.
+        Role::Member => resource == R::Rule || (resource != R::Audit && verb == V::Read),
     }
 }
 
@@ -182,7 +189,7 @@ mod tests {
     use super::*;
 
     const VERBS: [Verb; 4] = Verb::all();
-    const RESOURCES: [Resource; 7] = Resource::all();
+    const RESOURCES: [Resource; 8] = Resource::all();
 
     /// A new variant fails to compile here until `all()` lists it, and two
     /// variants never share a word.
@@ -201,7 +208,8 @@ mod tests {
                 | Resource::Connector
                 | Resource::Audit
                 | Resource::Trace
-                | Resource::View => {}
+                | Resource::View
+                | Resource::Rule => {}
             }
         }
         let mut words: Vec<&str> = VERBS.iter().map(|v| v.as_str()).collect();
@@ -231,19 +239,24 @@ mod tests {
     }
 
     #[test]
-    fn member_is_read_only() {
+    fn member_is_read_only_but_for_the_alerts() {
         assert!(can(Role::Member, Verb::Read, Resource::Member));
         assert!(can(Role::Member, Verb::Read, Resource::Project));
         assert!(can(Role::Member, Verb::Read, Resource::Trace));
         assert!(!can(Role::Member, Verb::Read, Resource::Audit));
         for resource in RESOURCES {
             for verb in [Verb::Create, Verb::Update, Verb::Delete] {
-                assert!(
-                    !can(Role::Member, verb, resource),
-                    "Member must not {verb:?} {resource:?}"
+                assert_eq!(
+                    can(Role::Member, verb, resource),
+                    resource == Resource::Rule,
+                    "Member {verb:?} {resource:?}"
                 );
             }
         }
+        assert_eq!(
+            minimum_role(Verb::Delete, Resource::Rule),
+            Some(Role::Member)
+        );
     }
 
     /// What separates an Admin from the Owner: the Admin can do everything

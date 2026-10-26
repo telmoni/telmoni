@@ -51,6 +51,7 @@ pub mod live;
 pub mod rate_limit;
 pub mod replica;
 pub mod retention;
+pub mod rules;
 pub mod schema;
 pub mod seam;
 pub mod sessions;
@@ -102,6 +103,9 @@ pub struct AppState {
     /// The module's loops this replica runs, and their beats, which the
     /// external watchdog reads ([`AppState::stale`]).
     pub heartbeats: telmoni_shared::heartbeat::Heartbeats<db::TelemetryLane>,
+    /// When this replica last held each organization's alerts to its plan
+    /// ([`rules::evaluate`]).
+    pub alerts_held: rules::evaluate::Held,
     /// How long an export's body may take to arrive
     /// (`handler::ingest::BODY_WAIT`); a field so a suite can wait less.
     pub body_wait: std::time::Duration,
@@ -173,6 +177,16 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/telemetry/views/{id}",
             put(handler::views::update_view).delete(handler::views::delete_view),
+        )
+        .route(
+            "/telemetry/rules",
+            get(handler::rules::list_rules).post(handler::rules::create_rule),
+        )
+        .route(
+            "/telemetry/rules/{id}",
+            get(handler::rules::get_rule)
+                .put(handler::rules::update_rule)
+                .delete(handler::rules::delete_rule),
         )
         .layer(middleware::from_fn_with_state(
             state.service_secrets.clone(),

@@ -84,7 +84,8 @@ ORDER BY (project_id, started_at);
 -- tag, so it outlives the spans, kept thirteen months. `tool` is empty on
 -- every kind but a tool call, so the names an application gives its steps
 -- never multiply the rows. Durations are a t-digest in milliseconds, which
--- merges across hours and keys and answers any percentile.
+-- merges across hours and keys and answers any percentile, and their sum,
+-- which an average needs.
 CREATE TABLE IF NOT EXISTS telemetry.spans_hourly
 (
     project_id               String,
@@ -103,6 +104,7 @@ CREATE TABLE IF NOT EXISTS telemetry.spans_hourly
     output_tokens            SimpleAggregateFunction(sum, UInt64),
     cache_read_input_tokens  SimpleAggregateFunction(sum, UInt64),
     cache_write_input_tokens SimpleAggregateFunction(sum, UInt64),
+    duration_ms_sum          SimpleAggregateFunction(sum, Float64),
     duration_ms              AggregateFunction(quantilesTDigest(0.5, 0.9, 0.99), Float64)
 )
 ENGINE = AggregatingMergeTree
@@ -135,6 +137,7 @@ AS SELECT
     sum(output_tokens) AS output_tokens,
     sum(cache_read_input_tokens) AS cache_read_input_tokens,
     sum(cache_write_input_tokens) AS cache_write_input_tokens,
+    sum(greatest(dateDiff('microsecond', started_at, ended_at), 0) / 1000) AS duration_ms_sum,
     quantilesTDigestState(0.5, 0.9, 0.99)(
         greatest(dateDiff('microsecond', started_at, ended_at), 0) / 1000
     ) AS duration_ms

@@ -546,6 +546,13 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             "telemetry.trace_views",
             &["SELECT", "DELETE"],
         ),
+        // The loop leases, settles and holds the alerts to their plan, each a
+        // column grant; the purges delete them; a project's scope writes them.
+        (
+            "telemetry_maintenance",
+            "telemetry.rules",
+            &["SELECT", "DELETE"],
+        ),
         // Each loop's beat, written by the replica that ran a tick of it and
         // read for the watchdog; a loop's row is never removed.
         (

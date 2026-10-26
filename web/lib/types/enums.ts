@@ -166,6 +166,59 @@ export const ViewKind = {
 } as const;
 export type ViewKind = typeof ViewKind[keyof typeof ViewKind];
 
+/** Wire vocabulary of the Rust `RuleMeasure`: what an alert measures of each
+ *  span it reads. */
+export const RuleMeasure = {
+  Count:    "count",
+  Failures: "failures",
+  Duration: "duration",
+  Tokens:   "tokens",
+} as const;
+export type RuleMeasure = typeof RuleMeasure[keyof typeof RuleMeasure];
+
+/** Wire vocabulary of the Rust `RuleAggregation`: how an alert folds its
+ *  measure over its window. */
+export const RuleAggregation = {
+  Count: "count",
+  Avg:   "avg",
+  Sum:   "sum",
+  P50:   "p50",
+  P90:   "p90",
+  P95:   "p95",
+  P99:   "p99",
+} as const;
+export type RuleAggregation = typeof RuleAggregation[keyof typeof RuleAggregation];
+
+/** Wire vocabulary of the Rust `RuleWindow`: how far back an alert reads. */
+export const RuleWindow = {
+  Hour: "hour",
+  Day:  "day",
+  Week: "week",
+} as const;
+export type RuleWindow = typeof RuleWindow[keyof typeof RuleWindow];
+
+/** Wire vocabulary of the Rust `RuleOperator`: how an alert's value is
+ *  compared with its thresholds. */
+export const RuleOperator = {
+  Gt:  "gt",
+  Gte: "gte",
+  Lt:  "lt",
+  Lte: "lte",
+  Eq:  "eq",
+  Ne:  "ne",
+} as const;
+export type RuleOperator = typeof RuleOperator[keyof typeof RuleOperator];
+
+/** Wire vocabulary of the Rust `MissingData`: what an alert does with a
+ *  window that holds no span. */
+export const MissingData = {
+  Zero:         "zero",
+  Keep:         "keep",
+  NoData:       "no_data",
+  NotifyNoData: "notify_no_data",
+} as const;
+export type MissingData = typeof MissingData[keyof typeof MissingData];
+
 /** Wire vocabulary of the Rust `SortDirection`: which way a list is sorted. */
 export const SortDirection = {
   Asc:  "asc",

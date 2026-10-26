@@ -80,6 +80,38 @@ impl MemberCeiling {
     }
 }
 
+/// An organization's alerts and their deliveries, as the deployment that
+/// sells plans answers them ([`crate::seam::Entitlements::alert_ceilings`]):
+/// how many alerts it may hold across its projects, paused ones counted,
+/// held when one is made; and how many notices its alerts may send its
+/// connectors a UTC day, the feed never counted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AlertCeilings {
+    /// Alerts across its projects, paused ones among them.
+    pub alerts: u32,
+    /// Deliveries a UTC day to its connectors.
+    pub deliveries_per_day: u32,
+    /// The one thing that lifts them, the 402's `entitlement`.
+    pub entitlement: String,
+    /// The sentence a person reads, which names nobody.
+    pub detail: String,
+}
+
+impl AlertCeilings {
+    /// Whether one more alert may be made, with `held` already held. Refused,
+    /// as a 402, at the ceiling.
+    pub fn admit(&self, held: u64) -> Result<(), TelmoniError> {
+        if held < u64::from(self.alerts) {
+            return Ok(());
+        }
+        Err(PlanError::LimitReached {
+            entitlement: self.entitlement.clone(),
+            detail: self.detail.clone(),
+        }
+        .into())
+    }
+}
+
 /// What an answer to an organization's machines costs on top of its bytes:
 /// the TLS connection a script opens for each request, measured at 6.5 KB.
 pub const CONNECTION_BYTES: u64 = 6_500;
@@ -127,6 +159,26 @@ mod tests {
                 .and_then(serde_json::Value::as_str),
             Some("pro")
         );
+    }
+
+    #[test]
+    fn an_alert_past_the_plans_number_is_refused_in_the_deployments_words() {
+        let ceilings = AlertCeilings {
+            alerts: 2,
+            deliveries_per_day: 500,
+            entitlement: "pro".into(),
+            detail: "Hobby holds two alerts.".into(),
+        };
+        assert!(ceilings.admit(1).is_ok());
+        let pd = ceilings
+            .admit(2)
+            .expect_err("the third of two")
+            .to_problem_details();
+        assert_eq!(
+            (pd.status, pd.type_uri.as_str()),
+            (402, "/errors/plan/limit-reached")
+        );
+        assert_eq!(pd.detail.as_deref(), Some("Hobby holds two alerts."));
     }
 
     #[test]
