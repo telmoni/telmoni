@@ -68,7 +68,7 @@ current ones (`gen_ai.system`, `gen_ai.usage.prompt_tokens`,
 | `user_id` | `user.id` | 1 to 128 characters; stored as its HMAC-SHA-256 under a key of the project's own, the first 16 bytes in hex, so no stored id names a person |
 | `session_id` | `gen_ai.conversation.id` | 1 to 200 characters, kept as sent |
 | `environment`, `release` | the resource's `deployment.environment.name` and `service.version`, on every span of the export | up to 128 characters each, as sent; empty where the resource names none, or past the cap |
-| `tags` | each `telmoni.tag.<key>` | up to 32; a key up to 64 characters, a value up to 256 |
+| `tags` | each `telmoni.tag.<key>` | up to 32; a key up to 64 characters, a value up to 256; in a project, up to 64 keys a UTC day, each taking up to 500 values (below) |
 | `sample_rate` | `telmoni.sample_rate` | on a run; above 0, up to 1 |
 | `attributes` | the attributes the field inventory names, and any other whose value is a number or a boolean, except a name under `telmoni.`, which is dropped as `unlisted` | up to 64, the resource's among them, which keep at most 2 KiB together since every span of the export carries them; a key up to 128 characters, a value up to 1,024; a named array as its JSON |
 
@@ -116,6 +116,13 @@ and never reaches a store. The span is kept, and the answer names the field.
 does not name is dropped in every mode as `unlisted`: content arrives under
 names no convention gave it. A span's events and its status message are never
 kept.
+
+**A tag past its project's cardinality cap** is dropped as `cardinality`, the
+span kept: in each UTC day a project's tags take up to 64 keys, and each key
+up to 500 values, so a tag is a label of a few values; an id goes as the user
+or the session, which have fields of their own. A key or a value the project
+has sent that day is always kept, and the count starts again at midnight UTC.
+Where the server does not reach its Redis, every tag is kept.
 
 ## The answer
 

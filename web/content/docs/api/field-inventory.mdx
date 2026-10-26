@@ -55,7 +55,7 @@ rather than a plain span.
 | `telmoni.run_id` | every span | the column `run_id` | any | a UUID, the same on every span of a run; a span without it is refused |
 | `telmoni.agent` | every span | the column `agent`, and a run's `name` where `gen_ai.agent.name` and `gen_ai.workflow.name` are unset | any | 1 to 128 characters; a span without it is refused |
 | `user.id` | any span | the column `user_id`, as its HMAC-SHA-256 under a key of the project's own, the first 16 bytes in hex | any | 1 to 128 characters |
-| `telmoni.tag.<key>` | any span | `tags`, under `<key>` | any | up to 32 tags; a key up to 64 characters, a value up to 256 |
+| `telmoni.tag.<key>` | any span | `tags`, under `<key>` | any | up to 32 tags; a key up to 64 characters, a value up to 256; in a project, up to 64 keys a UTC day, each taking up to 500 values |
 | `telmoni.sample_rate` | the run | the column `sample_rate` | any | above 0, up to 1: the share of runs the SDK sends |
 | `telmoni.cancelled` | any span | the column `status`, as `cancelled` | any | `true` on a span the agent cancelled |
 | `telmoni.content` | any span | read and not kept: `sealed` would mark content the SDK encrypted, which no SDK does today and no project can keep | any | `sealed` |
