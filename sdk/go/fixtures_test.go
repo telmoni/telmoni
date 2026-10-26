@@ -388,6 +388,15 @@ func TestUnlistedNamesTheTagThatWouldKeepIt(t *testing.T) {
 		"send it as the tag telmoni.tag.ai.prompt to keep it")
 }
 
+func TestATagPastTheCardinalityCapIsWarnedWithWhatKeepsIt(t *testing.T) {
+	cardinality := answerFrom(t, "answers/cardinality.json")
+	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, cardinality))
+	aRun(t, h)
+	h.shutdown()
+	expectWarnings(t, h, "telmoni: the server dropped telmoni.tag.request (cardinality; a project's tag takes up to 500 values a UTC day); "+
+		"keep tags to a few keys of a few values each: an id goes as the user or the session")
+}
+
 func TestRefusedIsWarnedOnceAndNeverRetried(t *testing.T) {
 	refused := answerFrom(t, "answers/refused.json")
 	h := newHarness(t, telmoni.Config{APIKey: "k"}, newFakeTransport(t, refused, refused))

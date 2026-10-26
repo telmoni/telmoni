@@ -15,7 +15,7 @@ pub struct Report {
     /// The spans refused whole, in the order they came.
     pub refused: Vec<Refused>,
     /// The attributes dropped from spans that were kept, in the order they
-    /// came.
+    /// came, the tags past the cardinality cap after the rest.
     pub dropped: Drops,
 }
 
@@ -150,6 +150,7 @@ fn dropped_line(dropped: &Dropped, content_mode: ContentMode) -> String {
             "unlisted; text the field inventory does not name is never kept".to_owned()
         }
         DropReason::OverCap(cap) => format!("over_cap; {cap}"),
+        DropReason::Cardinality(cap) => format!("cardinality; {cap}"),
     };
     format!(
         "span {} dropped {}: {why}",

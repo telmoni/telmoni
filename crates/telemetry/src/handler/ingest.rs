@@ -4,10 +4,11 @@
 //! grants ([`telmoni_shared::seam::admit_new`]), before the body is kept, a
 //! refusal reading it out first; the body, no further than its cap; its
 //! digest claimed, so a retry with the same bytes is answered rather than
-//! written again; then the spans read by the contract, their content dropped,
-//! and the rows written once ClickHouse holds them, marked deleted again if
-//! their project was deleted meanwhile; and the organization's open consoles
-//! told of them ([`crate::live`]).
+//! written again; then the spans read by the contract, their content dropped
+//! and their tags held to the cardinality cap ([`cardinality`]), and the rows
+//! written once ClickHouse holds them, marked deleted again if their project
+//! was deleted meanwhile; and the organization's open consoles told of them
+//! ([`crate::live`]).
 //! Every answer is OTLP's, in the request's encoding: the response on `200`,
 //! and on a refusal a `Status` whose message opens with the problem type,
 //! since OTLP asks that shape where every other lane answers a problem
@@ -34,6 +35,7 @@ use telmoni_shared::{ContentMode, ProblemDetails, ProjectId, TelemetryError, Tel
 
 use crate::contract::{self, BATCH_MAX_BYTES, BATCH_SPANS_MAX};
 use crate::ingest::batch::{self, BatchError, SenderClock};
+use crate::ingest::cardinality;
 use crate::ingest::claims::{self, Claim, Guard};
 use crate::ingest::decode::{self, DecodeError, Encoding};
 use crate::ingest::report::Report;
@@ -111,7 +113,7 @@ async fn handle(
                 project_id = %key.project_id,
                 "ingest: an export sent again, answered as it was"
             );
-            return answer_again(encoding, &key.project_id, &bytes, content_mode);
+            return answer_again(state, encoding, &key.project_id, &bytes, content_mode).await;
         }
     };
 
@@ -193,10 +195,18 @@ async fn write(
     // settings row, so the purges find every project with spans.
     let storage = hashing::storage_for(state, key).await?;
     let received_at = Utc::now().trunc_subsecs(6);
-    let batch = batch::read(&request, &key.project_id, received_at, sender, &|raw| {
+    let mut batch = batch::read(&request, &key.project_id, received_at, sender, &|raw| {
         storage.store(raw)
     })
     .map_err(batch_error)?;
+    cardinality::hold(
+        &state.redis,
+        &key.project_id,
+        received_at,
+        &mut batch.rows,
+        &mut batch.report.dropped,
+    )
+    .await;
 
     let mut tx = project_scope(&state.db, &key.project_id).await?;
     let content_mode = db::content_mode(&mut tx, &key.project_id).await?;
@@ -233,16 +243,27 @@ async fn write(
 
 /// The answer to an export sent again: its own bytes, the first copy's by
 /// their digest, read by the contract again under the mode the first answer
-/// named. Nothing is kept, so no user id is hashed.
-fn answer_again(
+/// named, its tags held to the cap again, which keeps the values its first
+/// copy did. Nothing is kept, so no user id is hashed.
+async fn answer_again(
+    state: &AppState,
     encoding: Encoding,
     project_id: &ProjectId,
     bytes: &[u8],
     content_mode: ContentMode,
 ) -> Result<Response, TelmoniError> {
     let request = decode::request(bytes, encoding).map_err(decode_error)?;
-    let batch = batch::read(&request, project_id, Utc::now(), None, &|_| String::new())
-        .map_err(batch_error)?;
+    let now = Utc::now();
+    let mut batch =
+        batch::read(&request, project_id, now, None, &|_| String::new()).map_err(batch_error)?;
+    cardinality::hold(
+        &state.redis,
+        project_id,
+        now,
+        &mut batch.rows,
+        &mut batch.report.dropped,
+    )
+    .await;
     let body = response_body(encoding, &batch.report, content_mode)?;
     Ok(answer(encoding, content_mode, body))
 }

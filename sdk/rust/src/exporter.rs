@@ -347,6 +347,10 @@ fn remedy(attribute: &str, reason: &str) -> String {
             contract::TAG_PREFIX
         ),
         "over_cap" => "shorten it to keep it".to_owned(),
+        "cardinality" => {
+            "keep tags to a few keys of a few values each: an id goes as the user or the session"
+                .to_owned()
+        }
         _ => "see the server's answer".to_owned(),
     }
 }

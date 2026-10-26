@@ -301,6 +301,8 @@ func remedy(attr, reason string) string {
 		return "send it as the tag " + tagPrefix + attr + " to keep it"
 	case "over_cap":
 		return "shorten it to keep it"
+	case "cardinality":
+		return "keep tags to a few keys of a few values each: an id goes as the user or the session"
 	}
 	return "see the server's answer"
 }

@@ -464,6 +464,7 @@ function remedy(attributeName: string, reason: string): string {
   if (reason === 'content') return `the project's content mode decides whether content is kept: ${CONTENT_DOCS}`;
   if (reason === 'unlisted') return `send it as the tag ${contract.TAG_PREFIX}${attributeName} to keep it`;
   if (reason === 'over_cap') return 'shorten it to keep it';
+  if (reason === 'cardinality') return 'keep tags to a few keys of a few values each: an id goes as the user or the session';
   return "see the server's answer";
 }
 

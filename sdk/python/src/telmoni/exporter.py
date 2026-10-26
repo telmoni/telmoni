@@ -522,6 +522,8 @@ def _remedy(attribute: str, reason: str) -> str:
         return f"send it as the tag {contract.TAG_PREFIX}{attribute} to keep it"
     if reason == "over_cap":
         return "shorten it to keep it"
+    if reason == "cardinality":
+        return "keep tags to a few keys of a few values each: an id goes as the user or the session"
     return "see the server's answer"
 
 

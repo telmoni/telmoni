@@ -4,6 +4,7 @@
 //! and the answer that names what was refused or dropped, and why.
 
 pub mod batch;
+pub mod cardinality;
 pub mod claims;
 pub mod decode;
 pub mod report;

@@ -349,6 +349,22 @@ fn unlisted_names_the_tag_that_would_keep_it() -> Outcome {
 }
 
 #[test]
+fn a_tag_past_the_cardinality_cap_is_warned_with_what_keeps_it() -> Outcome {
+    let harness = Harness::answering(keyed(), [Ok(answer("cardinality")?)])?;
+    a_run(&harness)?;
+    harness.telmoni.shutdown();
+    let warnings = harness.warnings.all();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    let warning = warnings.first().ok_or("a warning")?;
+    assert!(warning.contains("telmoni.tag.request"), "{warning}");
+    assert!(
+        warning.contains("a few keys of a few values each"),
+        "{warning}"
+    );
+    Ok(())
+}
+
+#[test]
 fn refused_is_warned_once_and_never_retried() -> Outcome {
     let harness = Harness::answering(keyed(), std::iter::repeat_n(Ok(answer("refused")?), 2))?;
     a_run(&harness)?;

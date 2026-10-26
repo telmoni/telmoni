@@ -232,6 +232,18 @@ describe('answers/', () => {
     expect(h.warnings[0]).toContain('telmoni.tag.ai.prompt');
   });
 
+  it('a tag past the cardinality cap is warned with what keeps it', async () => {
+    const h = harness({ apiKey: 'k' }, {}, answers('cardinality'));
+    try {
+      await aRun(h);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    expect(h.warnings).toHaveLength(1);
+    expect(h.warnings[0]).toContain('telmoni.tag.request');
+    expect(h.warnings[0]).toContain('a few keys of a few values each');
+  });
+
   it('refused is warned once and never retried', async () => {
     const h = harness({ apiKey: 'k' }, {}, answers('refused', 2));
     try {

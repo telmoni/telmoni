@@ -201,6 +201,21 @@ def test_unlisted_names_the_tag_that_would_keep_it(
     assert "ai.prompt" in warnings[0] and "telmoni.tag.ai.prompt" in warnings[0]
 
 
+def test_a_tag_past_the_cardinality_cap_is_warned_with_what_keeps_it(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    transport = FakeTransport([answer_from(load_fixture("answers/cardinality.json"))])
+    client = Telmoni(Config(api_key="k"), transport=transport)
+    try:
+        a_run(client)
+    finally:
+        client.shutdown()
+    warnings = warnings_in(caplog)
+    assert len(warnings) == 1, warnings
+    assert "telmoni.tag.request" in warnings[0]
+    assert "a few keys of a few values each" in warnings[0]
+
+
 def test_refused_is_warned_once_and_never_retried(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

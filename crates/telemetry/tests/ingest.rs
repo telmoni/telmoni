@@ -657,6 +657,182 @@ async fn an_export_sent_again_is_answered_as_it_was_and_written_once(pool: PgPoo
     assert_eq!(count, 1, "written once");
 }
 
+/// An export of spans of one run, the `n`th named `<name> <n>` and carrying
+/// `tags[n]`, each span's id from its place.
+fn tagged_export(name: &str, tags: &[Vec<(String, String)>]) -> Vec<u8> {
+    let spans: Vec<Value> = tags
+        .iter()
+        .enumerate()
+        .map(|(n, tags)| {
+            let mut attributes = vec![
+                json!({ "key": contract::RUN_ID, "value": { "stringValue": RUN } }),
+                json!({ "key": contract::AGENT, "value": { "stringValue": "nightly-report" } }),
+            ];
+            attributes.extend(tags.iter().map(|(key, value)| {
+                json!({ "key": format!("{}{key}", contract::TAG_PREFIX), "value": { "stringValue": value } })
+            }));
+            json!({
+                "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+                "spanId": format!("{:016x}", n + 1),
+                "name": format!("{name} {n}"),
+                "kind": 1,
+                "startTimeUnixNano": "1760000000000000000",
+                "endTimeUnixNano": "1760000001500000000",
+                "attributes": attributes,
+            })
+        })
+        .collect();
+    json!({
+        "resourceSpans": [{
+            "scopeSpans": [{ "scope": { "name": contract::SCOPE }, "spans": spans }]
+        }]
+    })
+    .to_string()
+    .into_bytes()
+}
+
+/// The lines of an answer's partial success that drop a tag as `cardinality`.
+fn cardinality_lines(answer: &[u8]) -> Vec<String> {
+    json_body(answer)
+        .pointer("/partialSuccess/errorMessage")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .lines()
+        .filter(|line| line.contains(": cardinality; "))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// ⚠ A tag's key takes so many values a day and a project so many keys; a tag
+/// past either is dropped as `cardinality`, the span kept and counted again,
+/// while a value or key already taken that day is always kept.
+#[sqlx::test]
+async fn tags_past_the_cardinality_cap_are_dropped_and_their_spans_kept(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let lane = lane(&pool, true);
+    if lane.state.redis.connection().await.is_none() {
+        eprintln!(
+            "skipping {}: Redis is not reachable (REDIS_URL, or the compose file's)",
+            module_path!()
+        );
+        return;
+    }
+    let tag = |key: &str, value: String| vec![(key.to_owned(), value)];
+    let past = contract::TAG_VALUES_PER_DAY + 2;
+    let first: Vec<_> = (0..past).map(|n| tag("request", format!("r{n}"))).collect();
+    let (status, _, answer) = lane
+        .send(
+            Some(INGEST_KEY),
+            "application/json",
+            None,
+            tagged_export("values", &first),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&answer)
+    );
+    let lines = cardinality_lines(&answer);
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(
+        lines.iter().all(|line| line.ends_with(
+            "dropped telmoni.tag.request: cardinality; a project's tag takes up to 500 values a \
+             UTC day"
+        )),
+        "{lines:?}"
+    );
+    assert_eq!(json_body(&answer)["partialSuccess"]["rejectedSpans"], 0);
+    let (_, _, retried) = lane
+        .send(
+            Some(INGEST_KEY),
+            "application/json",
+            None,
+            tagged_export("values", &first),
+        )
+        .await;
+    assert_eq!(retried, answer, "a retry is answered as its first copy was");
+
+    // A value taken earlier in the day is kept; a new one is not.
+    let again = vec![
+        tag("request", "r0".to_owned()),
+        tag("request", "new".to_owned()),
+    ];
+    let (_, _, answer) = lane
+        .send(
+            Some(INGEST_KEY),
+            "application/json",
+            None,
+            tagged_export("again", &again),
+        )
+        .await;
+    let lines = cardinality_lines(&answer);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].starts_with("span 0000000000000002 dropped"),
+        "{lines:?}"
+    );
+
+    // Keys past the project's cap: the export's first ones are taken, and a
+    // span that lost its tags counts what it kept.
+    let long = "v".repeat(contract::TAG_VALUE_MAX);
+    let keys: Vec<Vec<(String, String)>> = (0..3)
+        .map(|span| {
+            (0..contract::TAGS_MAX)
+                .map(|n| (format!("k{span}-{n}"), long.clone()))
+                .collect()
+        })
+        .collect();
+    let (_, _, answer) = lane
+        .send(
+            Some(INGEST_KEY),
+            "application/json",
+            None,
+            tagged_export("keys", &keys),
+        )
+        .await;
+    let lines = cardinality_lines(&answer);
+    let taken = contract::TAG_KEYS_PER_DAY - 1;
+    assert_eq!(lines.len(), 3 * contract::TAGS_MAX - taken, "{lines:?}");
+    assert!(
+        lines
+            .iter()
+            .all(|line| line.ends_with("cardinality; a project takes up to 64 tag keys a UTC day")),
+        "{lines:?}"
+    );
+
+    let rows: Vec<(String, u64, u32)> = ch
+        .store
+        .read(
+            &Projects::one(lane.project.clone()),
+            "SELECT name, length(mapKeys(tags)), units FROM telemetry.spans \
+             WHERE project_id IN {projects:Array(String)} ORDER BY name",
+        )
+        .fetch_all()
+        .await
+        .expect("the rows");
+    assert_eq!(rows.len(), past + 2 + 3, "every span kept");
+    let untagged = rows.iter().filter(|(_, tags, _)| *tags == 0).count();
+    assert_eq!(untagged, 2 + 1 + 1, "{rows:?}");
+    let keys: Vec<(u64, u32)> = rows
+        .iter()
+        .filter(|(name, _, _)| name.starts_with("keys "))
+        .map(|(_, tags, units)| (*tags, *units))
+        .collect();
+    assert_eq!(keys.len(), 3);
+    assert_eq!(keys[0].0, 32);
+    assert_eq!(keys[1].0, 31);
+    assert_eq!(
+        keys[2],
+        (0, 1),
+        "a span that lost its tags counts what it kept"
+    );
+    assert!(keys[0].1 > 8, "{keys:?}");
+}
+
 /// An export landing after its project's purge marked the project's spans is
 /// marked deleted with them, whether or not the purge has deleted the
 /// settings row yet.

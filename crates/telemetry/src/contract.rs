@@ -70,6 +70,11 @@ pub const TAGS_MAX: usize = 32;
 pub const TAG_KEY_MAX: usize = 64;
 /// A tag's value.
 pub const TAG_VALUE_MAX: usize = 256;
+/// How many values a tag's key takes in a project a UTC day: a tag is a
+/// label, and an id has fields of its own.
+pub const TAG_VALUES_PER_DAY: usize = 500;
+/// How many tag keys a project takes a UTC day: two spans' worth of tags.
+pub const TAG_KEYS_PER_DAY: usize = 64;
 /// How many `attributes` a span may keep, its resource's among them.
 pub const ATTRIBUTES_MAX: usize = 64;
 /// An attribute's key.
@@ -497,7 +502,8 @@ pub const INVENTORY: &[InventoryRow] = &[
         ReadOn::AnySpan,
         "tags, under <key>",
         Needs::AnyMode,
-        "up to 32 tags; a key up to 64 characters, a value up to 256",
+        "up to 32 tags; a key up to 64 characters, a value up to 256; in a project, up to 64 \
+         keys a UTC day, each taking up to 500 values",
     ),
     row(
         SAMPLE_RATE,

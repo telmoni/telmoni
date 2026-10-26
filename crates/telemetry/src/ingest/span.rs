@@ -65,6 +65,9 @@ pub enum DropReason {
     Unlisted,
     /// Past a cap: which, in words.
     OverCap(&'static str),
+    /// A tag past its project's cap for the day ([`crate::ingest::cardinality`]):
+    /// which, in words.
+    Cardinality(&'static str),
 }
 
 /// An attribute dropped from a span that was kept.

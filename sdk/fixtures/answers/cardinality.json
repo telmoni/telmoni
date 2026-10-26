@@ -1,0 +1,11 @@
+{
+  "status": 200,
+  "headers": { "Content-Type": "application/json", "Telmoni-Content-Mode": "off" },
+  "body": {
+    "partialSuccess": {
+      "rejectedSpans": 0,
+      "errorMessage": "span 00f067aa0ba902b7 dropped telmoni.tag.request: cardinality; a project's tag takes up to 500 values a UTC day"
+    }
+  },
+  "expect": "one warning naming telmoni.tag.request, and that tags keep to a few keys of a few values each"
+}
