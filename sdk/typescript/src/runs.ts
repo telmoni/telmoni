@@ -14,6 +14,7 @@ import type { Attributes, Context, HrTime, Span, SpanContext, Tracer } from '@op
 
 import * as contract from './contract.js';
 import { errorType, isAbort } from './errors.js';
+import { Guard, type OwnRates, type Tokens, ownRates, priced } from './guard.js';
 import { type Ids, spanIdAt } from './ids.js';
 import type { Processor } from './processor.js';
 import type {
@@ -32,6 +33,7 @@ import type {
 
 const RUN_KEY = createContextKey('telmoni.run');
 const END: unique symbol = Symbol('telmoni.end');
+const GUARD: unique symbol = Symbol('telmoni.guard');
 
 type Outcome = { failed: false } | { failed: true; error: unknown };
 
@@ -130,6 +132,7 @@ export class Run extends Parent {
   /** Whether the sample rate kept this run out: nothing of it is sent, nor handed to another service. */
   readonly sampledOut: boolean;
   readonly #inherited: Attributes;
+  readonly [GUARD]: Guard;
 
   constructor(
     opener: Opener,
@@ -139,40 +142,100 @@ export class Run extends Parent {
     agent: string,
     inherited: Attributes,
     sampledOut = false,
+    guard = new Guard(),
   ) {
     super(opener, span, parent, undefined);
     this.runId = runId;
     this.agent = agent;
     this.sampledOut = sampledOut;
     this.#inherited = { ...inherited };
+    this[GUARD] = guard;
   }
 
   /** What every span inside the run carries. */
   get inherited(): Attributes {
     return { ...this.#inherited };
   }
+
+  /** What the run's model calls have cost so far in US dollars, counted as its spend cap counts them, in this process. */
+  get spent(): number {
+    return this[GUARD].spent;
+  }
 }
 
 export class Step extends Parent {}
 
+/** What a model call is priced by: its name as sent, and the project's own prices. */
+interface Priced {
+  readonly provider: string;
+  readonly model: string;
+  readonly prices: OwnRates;
+}
+
 export class ModelCall extends Handle {
   readonly #warnOnce: WarnOnce;
+  readonly #run: Run;
+  readonly #provider: string;
+  readonly #prices: OwnRates;
+  #model: string;
+  /** Its usage as its span holds it, each attribute as last sent. */
+  #held: Attributes = {};
+  #counted = 0;
 
-  constructor(span: Span, parent: Context, run: Run, warnOnce: WarnOnce) {
+  constructor(span: Span, parent: Context, run: Run, warnOnce: WarnOnce, by: Priced) {
     super(span, parent, run, warnOnce);
     this.#warnOnce = warnOnce;
+    this.#run = run;
+    this.#provider = by.provider;
+    this.#model = by.model;
+    this.#prices = by.prices;
   }
 
   /** What the model answered: its name, its tokens, and its messages. */
   answered(answer: ModelAnswer): void {
     const model = filled(answer.responseModel, 'response model', this.#warnOnce);
     if (model !== undefined) {
-      this.span.setAttribute(contract.RESPONSE_MODEL, cut(model, contract.MODEL_MAX, 'response model', this.#warnOnce));
+      // The name the call is priced by, as ingest reads it.
+      this.#model = cut(model, contract.MODEL_MAX, 'response model', this.#warnOnce);
+      this.span.setAttribute(contract.RESPONSE_MODEL, this.#model);
     }
-    this.span.setAttributes(usageOf(answer.usage, this.#warnOnce));
+    const sent = usageOf(answer.usage, this.#warnOnce);
+    this.span.setAttributes(sent);
+    this.#held = { ...this.#held, ...sent };
     if (answer.outputMessages !== undefined) {
       this.span.setAttribute(contract.OUTPUT_MESSAGES, asJson(answer.outputMessages));
     }
+    this.#count();
+  }
+
+  /** Its cost to its run's spend, in place of what it counted before: reported, else priced, else nothing. */
+  #count(): void {
+    const held = this.#held;
+    const count = (key: string): number => {
+      const value = held[key];
+      return typeof value === 'number' ? value : 0;
+    };
+    const tokens: Tokens = {
+      input: count(contract.INPUT_TOKENS),
+      output: count(contract.OUTPUT_TOKENS),
+      cacheRead: count(contract.CACHE_READ_INPUT_TOKENS),
+      cacheWrite: count(contract.CACHE_WRITE_INPUT_TOKENS),
+    };
+    const reported = held[contract.COST];
+    let cost = typeof reported === 'number' ? reported : priced(this.#prices, this.#provider, this.#model, tokens);
+    const guard = this.#run[GUARD];
+    if (cost === undefined) {
+      cost = 0;
+      if (guard.capped && Object.values(tokens).some((n) => n > 0)) {
+        this.#warnOnce(
+          `unpriced:${this.#provider}:${this.#model}`,
+          `telmoni: no price for ${this.#model || 'a call with no model'} (${this.#provider || 'no provider'}), ` +
+            "which reported no cost; it counts nothing toward the run's spend cap",
+        );
+      }
+    }
+    guard.counts(this.#counted, cost);
+    this.#counted = cost;
   }
 }
 
@@ -229,6 +292,8 @@ export class Opener {
   readonly #config: ResolvedConfig;
   readonly #ids: Ids;
   readonly #warnOnce: WarnOnce;
+  /** The project's own prices, which the guard counts a call by first. */
+  readonly #prices: OwnRates;
 
   constructor(tracer: Tracer, processor: Processor, config: ResolvedConfig, ids: Ids, warnOnce: WarnOnce) {
     this.#tracer = tracer;
@@ -236,6 +301,7 @@ export class Opener {
     this.#config = config;
     this.#ids = ids;
     this.#warnOnce = warnOnce;
+    this.#prices = ownRates(config.prices);
   }
 
   /** The client's warning, once per key, which every handle gives. */
@@ -253,6 +319,7 @@ export class Opener {
     if (typeof rate !== 'number' || !(rate > 0 && rate <= 1)) {
       throw new RangeError('sampleRate must be a number above 0 and up to 1');
     }
+    const guard = Guard.of(options);
     const sampledOut = rate < 1 && Math.random() >= rate;
     const runId = randomUUID();
     const inherited: Attributes = { [contract.RUN_ID]: runId, [contract.AGENT]: agent };
@@ -276,7 +343,7 @@ export class Opener {
     };
     const parent = context.active();
     const span = this.#start(`invoke_agent ${agent}`, parent, attributes, SpanKind.INTERNAL);
-    return new Run(this, span, parent, runId, agent, inherited, sampledOut);
+    return new Run(this, span, parent, runId, agent, inherited, sampledOut, guard);
   }
 
   /**
@@ -292,6 +359,7 @@ export class Opener {
   }
 
   step(run: Run, parent: Context, given: string): Step {
+    run[GUARD].opens(true);
     let name = asText(given, "step's name", this.#warnOnce);
     // Ingest refuses a span named nothing.
     if (name === '') {
@@ -303,6 +371,7 @@ export class Opener {
   }
 
   modelCall(run: Run, parent: Context, given: string, options: ModelCallOptions): ModelCall {
+    run[GUARD].opens(false);
     const asked = asText(given, 'model', this.#warnOnce);
     // Sent blank, the span would be named ` <model>` and ingest would read it
     // as a step.
@@ -319,8 +388,9 @@ export class Opener {
     } else {
       attributes[contract.REQUEST_MODEL] = model;
     }
-    const provider = filled(options.provider, 'provider', this.#warnOnce);
-    if (provider !== undefined) attributes[contract.PROVIDER] = cut(provider, contract.PROVIDER_MAX, 'provider', this.#warnOnce);
+    const named = filled(options.provider, 'provider', this.#warnOnce);
+    const provider = named === undefined ? '' : cut(named, contract.PROVIDER_MAX, 'provider', this.#warnOnce);
+    if (provider !== '') attributes[contract.PROVIDER] = provider;
     if (isSet(options.inputMessages)) {
       attributes[contract.INPUT_MESSAGES] = asJson(options.inputMessages);
     }
@@ -334,10 +404,11 @@ export class Opener {
       this.#warnOnce,
     );
     const span = this.#start(name, parent, attributes, SpanKind.CLIENT);
-    return new ModelCall(span, parent, run, this.#warnOnce);
+    return new ModelCall(span, parent, run, this.#warnOnce, { provider, model: model ?? '', prices: this.#prices });
   }
 
   toolCall(run: Run, parent: Context, given: string, options: ToolCallOptions): ToolCall {
+    run[GUARD].opens(false);
     const name = cut(asText(given, "tool's name", this.#warnOnce), contract.NAME_MAX, "tool's name", this.#warnOnce);
     const attributes: Attributes = {
       ...run.inherited,
@@ -643,6 +714,19 @@ function usageOf(usage: Usage | undefined, warnOnce: WarnOnce): Attributes {
       );
     } else {
       out[key] = count;
+    }
+  }
+  if (isSet(usage.cost)) {
+    const given: unknown = usage.cost;
+    // Text, which Python's SDK leaves off, is no cost either.
+    const cost = typeof given === 'bigint' || given instanceof Number ? Number(given) : given;
+    if (typeof cost === 'number' && Number.isFinite(cost) && cost >= 0) {
+      out[contract.COST] = cost;
+    } else {
+      warnOnce(
+        `usage:${contract.COST}`,
+        `telmoni: ${contract.COST} must be a finite number of US dollars from 0; the call is sent without it`,
+      );
     }
   }
   return out;

@@ -267,16 +267,37 @@ fn model_from_env(provider: Provider) -> anyhow::Result<ModelConfig> {
     Ok(config)
 }
 
+impl ModelConfig {
+    /// The provider its calls are recorded under, as the GenAI conventions
+    /// name it: the vendor its URL is, else its protocol, so a self-hosted
+    /// model is priced only under a name that protocol's vendor lists.
+    #[must_use]
+    pub fn provider_name(&self) -> &'static str {
+        vendor(&self.url).unwrap_or_else(|| self.provider.as_str())
+    }
+}
+
+/// The vendors' APIs, by host, each under the GenAI conventions' name for it.
+const VENDORS: [(&str, &str); 3] = [
+    ("api.anthropic.com", "anthropic"),
+    ("api.openai.com", "openai"),
+    ("generativelanguage.googleapis.com", "gcp.gemini"),
+];
+
+/// The vendor whose API `url` is, by its host whole, so a name that merely
+/// begins like one is no vendor's.
+fn vendor(url: &str) -> Option<&'static str> {
+    let url = reqwest::Url::parse(url).ok()?;
+    let host = url.host_str()?;
+    VENDORS
+        .iter()
+        .find_map(|&(known, name)| (known == host).then_some(name))
+}
+
 /// A vendor's API that answers nothing without a key. A local or self-hosted
 /// server under the same protocol may need none, so only these are checked.
 fn hosted(url: &str) -> bool {
-    [
-        "https://api.anthropic.com",
-        "https://api.openai.com",
-        "https://generativelanguage.googleapis.com",
-    ]
-    .iter()
-    .any(|host| url.starts_with(host))
+    vendor(url).is_some()
 }
 
 #[cfg(test)]
@@ -328,5 +349,53 @@ mod tests {
         ));
         assert!(!hosted("http://localhost:11434/v1"));
         assert!(!hosted("https://llm.internal.example.com/v1"));
+        assert!(!hosted("https://api.openai.com.example.net/v1"));
+    }
+
+    /// ⚠ A call is recorded under the vendor its URL is, the price table's name for it.
+    #[test]
+    fn a_call_is_named_by_the_vendor_its_url_is_else_its_protocol() {
+        let config = |provider, url: &str| ModelConfig {
+            provider,
+            url: url.to_owned(),
+            model: "m".to_owned(),
+            api_key: None,
+            max_tokens: 8192,
+            timeout_secs: 60,
+        };
+        for (provider, url, name) in [
+            (
+                Provider::Anthropic,
+                "https://api.anthropic.com",
+                "anthropic",
+            ),
+            (Provider::OpenAi, "https://api.openai.com/v1", "openai"),
+            (
+                Provider::OpenAi,
+                "https://generativelanguage.googleapis.com/v1beta/openai",
+                "gcp.gemini",
+            ),
+            (Provider::OpenAi, "https://API.OpenAI.com:443/v1", "openai"),
+            (
+                Provider::OpenAi,
+                "https://api.anthropic.com/v1",
+                "anthropic",
+            ),
+            (Provider::OpenAi, "http://localhost:11434/v1", "openai"),
+            (Provider::OpenAi, "https://openrouter.ai/api/v1", "openai"),
+            (
+                Provider::OpenAi,
+                "https://generativelanguage.googleapis.com.example.net/v1",
+                "openai",
+            ),
+            (
+                Provider::Anthropic,
+                "https://llm.internal.example.com",
+                "anthropic",
+            ),
+            (Provider::OpenAi, "not a url", "openai"),
+        ] {
+            assert_eq!(config(provider, url).provider_name(), name, "{url}");
+        }
     }
 }

@@ -47,7 +47,7 @@ const KINDS: Readonly<Record<number, number>> = {
 
 // JavaScript has one number type, so the contract says which of ours are
 // doubles (1.0 is an integer here) and which are counts.
-const DOUBLES: ReadonlySet<string> = new Set([contract.SAMPLE_RATE]);
+const DOUBLES: ReadonlySet<string> = new Set([contract.SAMPLE_RATE, contract.COST]);
 const INTEGERS: ReadonlySet<string> = new Set([
   contract.INPUT_TOKENS,
   contract.OUTPUT_TOKENS,

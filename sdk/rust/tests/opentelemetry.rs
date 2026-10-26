@@ -191,7 +191,7 @@ fn a_run_inside_a_trace_the_application_does_not_sample_is_still_sent() -> Outco
     {
         let _current = request.clone().attach();
         let run = harness.telmoni.run("bot", RunOptions::default())?;
-        let step = run.step("s");
+        let step = run.step("s")?;
         step.end();
         run.end();
     }

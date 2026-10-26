@@ -2,8 +2,8 @@ package telmoni
 
 // The ingest contract's names, as the core fixes them in telmoni/telmoni's
 // crates/telemetry/src/contract.rs: the GenAI semantic conventions' names at
-// the commit it pins, and ours under telmoni.*. A name changes there first,
-// then here.
+// the commit it pins, ours under telmoni.*, and a call's cost under
+// Langfuse's name. A name changes there first, then here.
 
 const (
 	// scope is the instrumentation scope every span the SDK opens is under.
@@ -41,7 +41,10 @@ const (
 	attrOutputTokens          = "gen_ai.usage.output_tokens"
 	attrCacheReadInputTokens  = "gen_ai.usage.cache_read.input_tokens"
 	attrCacheWriteInputTokens = "gen_ai.usage.cache_write.input_tokens"
-	attrSessionID             = "gen_ai.conversation.id"
+	// attrCost is what the call cost in US dollars, as reported: Langfuse's
+	// name, since the conventions have none.
+	attrCost      = "gen_ai.usage.cost"
+	attrSessionID = "gen_ai.conversation.id"
 
 	attrInputMessages      = "gen_ai.input.messages"
 	attrOutputMessages     = "gen_ai.output.messages"

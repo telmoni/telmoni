@@ -66,6 +66,7 @@ func (c *Client) Extract(ctx context.Context, header http.Header) context.Contex
 			attribute.String(attrRunID, read.runID),
 			attribute.String(attrAgent, agent),
 		},
+		guard: &guard{},
 	}
 	return contextWithRun(ctx, run)
 }

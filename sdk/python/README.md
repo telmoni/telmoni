@@ -62,9 +62,12 @@ Each of `run`, `step`, `model_call` and `tool_call` is a context manager, an
 failed with the exception's class, never its message, and is raised again; a
 `KeyboardInterrupt` or `asyncio.CancelledError` marks it cancelled. `fail()`
 and `cancel()` do the same by hand. `run` raises `ValueError` for a blank agent
-name or a sample rate outside (0, 1]. A token count is read from a number or
-its text, its fraction cut, and of what ingest would refuse, these are left off
-with one warning: a token count below 0 or past 64 bits, a tag whose key is not
+name, a sample rate outside (0, 1] or a cap that is no cap
+([The guard](#the-guard)). A token count is read from a number or its text,
+its fraction cut, and `Usage`'s `cost` is what the call cost in US dollars,
+where your provider reports it; of what ingest would refuse, these are left off
+with one warning: a token count below 0 or past 64 bits, a cost below 0, not
+finite, or text, a tag whose key is not
 1 to 64 characters or whose value is past 256, and the tags
 past the first 32 kept, the most ingest keeps; an empty user, session,
 provider or response model is left off as unset. A name, model, provider,
@@ -136,6 +139,22 @@ it can be and else left off with one warning, and an `operation` of `None`, a
 chat. Either sends nothing. A record the export queue has no room for raises
 `QueueFullError`, nothing of it queued: flush, or wait, and record it again.
 
+## The guard
+
+`telmoni.run("support-bot", max_steps=20, max_spend=0.50)` holds a run to caps
+on its steps and on what its model calls cost, in US dollars, counted in this
+process with no call to Telmoni. Past one, the next step, model call or tool
+call raises `CapExceededError`, a `RuntimeError` naming the `cap` (`steps` or
+`spend`), its `limit` and what the run had `used`, before it opens: a step past
+the step cap, and anything once the run spent its spend cap or more. A call
+counts its reported `cost`; else its tokens at a price handed as
+`Config(prices=[Price(provider=..., model=..., input=..., output=...)])`, which
+the SDK alone holds, so Telmoni's own reads still price that call by the
+table; else at the price table this package carries, LiteLLM's, by its
+provider and the model it answered as; else nothing. A call answered again
+counts as its span then holds it. `run.spent` reads the count; a continued run
+carries no cap.
+
 ## Content
 
 Prompts, completions, tool arguments and results (`input_messages`,
@@ -148,11 +167,13 @@ is `on`.
 ## Configuration
 
 `Config(endpoint, organization_id, api_key, capture_content, sample_rate, sampler,
-environment, release)`, or `Config.from_env()`, which reads `TELMONI_ENDPOINT`
+environment, release, prices)`, or `Config.from_env()`, which reads `TELMONI_ENDPOINT`
 (default `https://api.telmoni.com`), `TELMONI_API_KEY`, `TELMONI_ORG`,
 `TELMONI_ENVIRONMENT` and `TELMONI_RELEASE`, a blank value counting as unset.
 `environment` and `release` name the deployment every span is sent from, as
-the resource's `deployment.environment.name` and `service.version`.
+the resource's `deployment.environment.name` and `service.version`. `prices`
+hands [the guard](#the-guard) prices of your own, a `ValueError` for one that
+names no provider or model or is no number from 0; nothing of them is sent.
 `sample_rate` is the share of runs sent, dropped whole in the SDK's processor
 and never through the trace's sampled flag. The key never appears in `repr`,
 `str` or `dataclasses.asdict`, and `pickle` refuses it. It travels over HTTPS

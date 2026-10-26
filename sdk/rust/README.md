@@ -38,14 +38,14 @@ fn main() -> Result<(), telmoni::Error> {
         },
     )?;
     {
-        let step = run.step("plan");
+        let step = run.step("plan")?;
         let call = step.model_call(
             "gpt-4o-mini",
             ModelCallOptions {
                 provider: Some("openai".into()),
                 ..ModelCallOptions::default()
             },
-        );
+        )?;
         call.answered(Reply {
             response_model: Some("gpt-4o-mini-2024-07-18".into()),
             usage: Some(Usage {
@@ -56,7 +56,7 @@ fn main() -> Result<(), telmoni::Error> {
             ..Reply::default()
         });
     }
-    let tool = run.tool_call("search", ToolCallOptions::default());
+    let tool = run.tool_call("search", ToolCallOptions::default())?;
     tool.returned(serde_json::json!({ "results": 3 }));
     drop(tool);
     run.end();
@@ -67,8 +67,10 @@ fn main() -> Result<(), telmoni::Error> {
 ```
 
 Every handle is a guard: its span ends when it is dropped or on `end()`.
-`run` returns `Error::EmptyAgent` for a blank agent name and
-`Error::SampleRate` for a rate outside (0, 1]. A negative token count is left
+`run` returns `Error::EmptyAgent` for a blank agent name,
+`Error::SampleRate` for a rate outside (0, 1], and `Error::MaxSteps` or
+`Error::MaxSpend` for a cap that is no cap ([The guard](#the-guard)). A
+negative token count, or a `Usage`'s `cost` below 0 or not finite, is left
 off its call with one warning; a run sends its first 32 tags by key, the most
 ingest keeps, and warns once of the rest. A tag whose key
 is not 1 to 64 characters or whose value is over 256 is left off with one
@@ -82,12 +84,14 @@ operation alone; each with one warning, where ingest would refuse the span, or
 the whole run for its agent, user or session.
 `fail("ErrorType")` marks a span failed with the error's type, none if empty,
 and no message; `cancel()` marks it cancelled by the agent. The `_with`
-methods take a closure and return its value — `telmoni.run_with(..)`,
-`run.step_with(..)`, `model_call_with`, `tool_call_with` — and their `try_`
-forms mark an `Err` on the span with the error type's name before returning it
-unchanged:
+methods take a closure and return its value, or the `Error` that kept their
+handle from opening — `telmoni.run_with(..)`, `run.step_with(..)`,
+`model_call_with`, `tool_call_with` — and their `try_` forms, for a closure
+whose error converts from `telmoni::Error`, mark an `Err` on the span with the
+error type's name before returning it unchanged:
 
 ```rust
+// MyError implements From<telmoni::Error>.
 let answer: Result<String, MyError> = telmoni.try_run_with("support-bot", RunOptions::default(), |run| {
     run.try_step_with("plan", |_step| plan())
 });
@@ -157,6 +161,21 @@ that ends before it starts (`Error::EndBeforeStart`) is returned as an error,
 and nothing is sent. A record the export queue has no room for is
 `Error::QueueFull`, nothing of it queued: flush, or wait, and record it again.
 
+## The guard
+
+`RunOptions { max_steps: Some(20), max_spend: Some(0.50), .. }` holds a run
+to caps on its steps and on what its model calls cost, in US dollars, counted
+in this process with no call to Telmoni. Past one, `step`, `model_call` and
+`tool_call` return `Error::CapExceeded` (its `cap`, `Cap::Steps` or
+`Cap::Spend`, its `limit` and what the run had `used`) and open nothing: a
+step past the step cap, and anything once the run spent its spend cap or more.
+A call counts its reported `cost`; else its tokens at a price handed as
+`Config { prices: vec![Price { .. }], .. }`, which the SDK alone holds, so
+Telmoni's own reads still price that call by the table; else at the price
+table this crate carries, LiteLLM's, by its provider and the model it answered
+as; else nothing. A call answered again counts as its span then holds it.
+`run.spent()` reads the count; a continued run carries no cap.
+
 ## Configuration
 
 `Config::from_env()` reads five variables, a blank value being unset:
@@ -173,8 +192,10 @@ Nothing in the SDK reads an `OTEL_*` variable. `Config` also holds
 `capture_content` (default `false`), `sample_rate` (default `1.0`; above 0 and
 up to 1, decided per run and never through the trace's sampled flag),
 `sampler`, the OpenTelemetry sampler whose decision a run takes when it starts
-a trace of its own, and `environment` and `release`, the deployment the
-variables above name. The API key is never printed or serialized: `Debug`
+a trace of its own, `environment` and `release`, the deployment the
+variables above name, and `prices`, the guard's prices of your own, a price
+that names no provider or model, or is no number from 0, left out with one
+warning; nothing of them is sent. The API key is never printed or serialized: `Debug`
 shows it redacted, and `Serialize` leaves it out. It travels over HTTPS only:
 with a plain-HTTP endpoint whose host is not this machine — `localhost`, a
 name under it, 127.0.0.0/8 or `::1`, an IPv4-mapped address read as its IPv4 —

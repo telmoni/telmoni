@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import math
 import os
 import string
 from collections.abc import Mapping, Sequence
@@ -231,6 +232,9 @@ class Config:
     # as deployment.environment.name and service.version; nothing when unset.
     environment: str | None = None
     release: str | None = None
+    # The project's own prices, which a run's spend cap counts a call by
+    # before the table this release carries; a name given twice takes its last.
+    prices: Sequence[Price] = ()
 
     def __post_init__(self) -> None:
         self._normalize()
@@ -248,6 +252,11 @@ class Config:
             raise ValueError("sample_rate must be above 0 and up to 1")
         self.environment = _unset_if_blank(self.environment)
         self.release = _unset_if_blank(self.release)
+        self.prices = tuple(self.prices)
+        for price in self.prices:
+            if not isinstance(price, Price):
+                raise TypeError("a price must be a Price")
+            price.check()
 
     def bearer(self) -> str | None:
         """The key, for the one header that carries it."""
@@ -275,12 +284,47 @@ class Usage:
     """A model call's tokens, as the conventions count them: input includes the
     cache's reads and writes, output reasoning; sum parts reported apart. Each
     goes as a whole number, a fraction cut, one below 0 or past 64 bits left
-    off the call with one warning."""
+    off the call with one warning. ``cost`` is what the call cost in US
+    dollars, where the provider reports it; one below 0 or not finite is left
+    off with one warning, and a call without one is priced by its tokens."""
 
     input_tokens: int | None = None
     output_tokens: int | None = None
     cache_read_input_tokens: int | None = None
     cache_write_input_tokens: int | None = None
+    cost: float | None = None
+
+
+@dataclass(frozen=True)
+class Price:
+    """A project's own price for one of a provider's models, as the provider
+    and the model are sent: each in US dollars a token, a cache price not
+    given being the input price."""
+
+    provider: str
+    model: str
+    input: float
+    output: float
+    cache_read: float | None = None
+    cache_write: float | None = None
+
+    def check(self) -> None:
+        """A name a call can carry, and prices that are numbers from 0."""
+        for name in (self.provider, self.model):
+            if not isinstance(name, str) or not name:
+                raise ValueError("a price names its provider and its model")
+        given = [self.input, self.output]
+        given += [p for p in (self.cache_read, self.cache_write) if p is not None]
+        for price in given:
+            if (
+                isinstance(price, bool)
+                or not isinstance(price, (int, float))
+                or not math.isfinite(price)
+                or price < 0
+            ):
+                raise ValueError(
+                    "a price is a finite number of US dollars a token, from 0"
+                )
 
 
 @dataclass(frozen=True)

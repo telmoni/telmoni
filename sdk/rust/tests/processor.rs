@@ -24,7 +24,7 @@ fn the_queue_is_bounded_and_drops_are_counted_once() -> Outcome {
 
     let run = telmoni.run("bot", RunOptions::default())?;
     for n in 0..5 {
-        let step = run.step(&format!("s{n}"));
+        let step = run.step(&format!("s{n}"))?;
         step.end();
     }
     run.end();
@@ -95,7 +95,7 @@ fn a_batch_fills_and_goes_without_a_flush() -> Outcome {
 
     let run = telmoni.run("bot", RunOptions::default())?;
     for n in 0..3 {
-        let step = run.step(&format!("s{n}"));
+        let step = run.step(&format!("s{n}"))?;
         step.end();
     }
     assert!(transport.wait_for(1), "three steps fill a batch of three");
@@ -126,7 +126,7 @@ fn a_hook_that_panics_does_not_stop_the_exporter() -> Outcome {
     // flush takes carries a drop count and the hook panics on its warning.
     let run = telmoni.run("bot", RunOptions::default())?;
     for n in 0..3 {
-        let step = run.step(&format!("s{n}"));
+        let step = run.step(&format!("s{n}"))?;
         step.end();
     }
     run.end();

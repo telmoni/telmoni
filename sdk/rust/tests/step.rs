@@ -19,8 +19,8 @@ fn a_step_nests_under_its_run_and_carries_its_ids() -> Outcome {
         },
     )?;
     {
-        let plan = run.step("plan");
-        let inner = plan.step("plan.inner");
+        let plan = run.step("plan")?;
+        let inner = plan.step("plan.inner")?;
         inner.end();
         plan.end();
     }
@@ -55,6 +55,12 @@ fn a_failing_step_records_the_error_type_and_returns_the_err() -> Outcome {
     #[derive(Debug)]
     struct PlanningFailed(&'static str);
 
+    impl From<telmoni::Error> for PlanningFailed {
+        fn from(_: telmoni::Error) -> Self {
+            Self("capped")
+        }
+    }
+
     let harness = Harness::new()?;
     let run = harness.telmoni.run("bot", RunOptions::default())?;
     let result: Result<(), PlanningFailed> =
@@ -82,9 +88,9 @@ fn a_failing_step_records_the_error_type_and_returns_the_err() -> Outcome {
 fn the_step_closure_returns_its_value_and_nests() -> Outcome {
     let harness = Harness::new()?;
     let run = harness.telmoni.run("bot", RunOptions::default())?;
-    let value = run.step_with("plan", |plan| plan.step_with("plan.inner", |_inner| 1) + 1);
-    assert_eq!(value, 2);
-    let ok: Result<u8, std::io::Error> = run.try_step_with("act", |_act| Ok(3));
+    let value = run.step_with("plan", |plan| plan.step_with("plan.inner", |_inner| 1))??;
+    assert_eq!(value, 1);
+    let ok: Result<u8, common::Failure> = run.try_step_with("act", |_act| Ok(3));
     assert!(matches!(ok, Ok(3)));
     run.end();
     harness.flush()?;
@@ -106,7 +112,7 @@ fn a_step_named_nothing_or_past_ingests_cap_keeps_its_span() -> Outcome {
     let run = harness.telmoni.run("bot", RunOptions::default())?;
     let n = |count: usize| "n".repeat(count);
     for name in ["", "", &n(146), &n(146), &n(145)] {
-        run.step(name).end();
+        run.step(name)?.end();
     }
     run.end();
     harness.flush()?;

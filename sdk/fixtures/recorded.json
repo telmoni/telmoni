@@ -22,7 +22,8 @@
               "input_tokens": 1200,
               "output_tokens": 85,
               "cache_read_input_tokens": 1000,
-              "cache_write_input_tokens": 150
+              "cache_write_input_tokens": 150,
+              "cost": 0.0123
             }
           }
         },
@@ -122,6 +123,7 @@
                   { "key": "gen_ai.request.model", "value": { "stringValue": "claude-opus-4-5" } },
                   { "key": "gen_ai.usage.cache_read.input_tokens", "value": { "intValue": "1000" } },
                   { "key": "gen_ai.usage.cache_write.input_tokens", "value": { "intValue": "150" } },
+                  { "key": "gen_ai.usage.cost", "value": { "doubleValue": 0.0123 } },
                   { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "1200" } },
                   { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "85" } },
                   { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },

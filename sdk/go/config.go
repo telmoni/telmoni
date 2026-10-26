@@ -47,6 +47,9 @@ type Config struct {
 	// Release is the release this process runs (a version or a commit), sent
 	// on every span's resource as service.version; blank sends nothing.
 	Release string `json:"release,omitempty"`
+	// Prices are the project's own, which a run's spend cap counts a call by
+	// before the table this release carries; a name given twice takes its last.
+	Prices []Price `json:"prices,omitempty"`
 }
 
 // String formats the configuration for %v and %s, with the API key redacted.
@@ -269,10 +272,14 @@ func ConfigFromEnv() Config {
 // Usage is a model call's tokens, counted as the conventions count them:
 // input tokens include the cache's reads and writes, output tokens include
 // reasoning. Where a provider reports parts apart, sum them first. Each count
-// from 0 up is sent, a zero among them.
+// from 0 up is sent, a zero among them. Cost is what the call cost in US
+// dollars, where the provider reports it: nil sends none, one below 0 or not
+// finite is left off with one warning, and a call without one is priced by
+// its tokens.
 type Usage struct {
 	InputTokens           int
 	OutputTokens          int
 	CacheReadInputTokens  int
 	CacheWriteInputTokens int
+	Cost                  *float64
 }

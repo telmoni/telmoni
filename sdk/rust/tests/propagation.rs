@@ -41,7 +41,7 @@ fn inject_writes_the_headers_the_fixture_spells_beside_the_carriers_own() -> Out
     let run = harness
         .telmoni
         .run(text(spec, "agent")?, RunOptions::default())?;
-    let step = run.step("plan");
+    let step = run.step("plan")?;
     let mut given: Headers = HashMap::new();
     harness.telmoni.inject_from(&step.context(), &mut given);
     let mut attached: Headers = HashMap::new();
@@ -164,7 +164,7 @@ fn extract_reads_the_run_the_fixture_names_and_nothing_from_headers_naming_none(
 fn a_continued_runs_steps_and_calls_carry_the_callers_run_under_its_span() -> Outcome {
     let caller = Harness::new()?;
     let run = caller.telmoni.run("orchestrator", RunOptions::default())?;
-    let step = run.step("hand over");
+    let step = run.step("hand over")?;
     let mut headers: Headers = HashMap::new();
     caller.telmoni.inject_from(&step.context(), &mut headers);
     let run_id = run.run_id().to_owned();
@@ -181,18 +181,18 @@ fn a_continued_runs_steps_and_calls_carry_the_callers_run_under_its_span() -> Ou
         .extract(&headers)
         .ok_or("the worker read no run")?;
     {
-        let work = continued.step("work");
+        let work = continued.step("work")?;
         let call = work.model_call(
             "gpt-x",
             ModelCallOptions {
                 provider: Some("openai".to_owned()),
                 ..ModelCallOptions::default()
             },
-        );
+        )?;
         call.end();
         work.end();
     }
-    let tool = continued.tool_call("search", ToolCallOptions::default());
+    let tool = continued.tool_call("search", ToolCallOptions::default())?;
     tool.end();
     continued.fail("Ignored");
     continued.end();
@@ -244,7 +244,7 @@ fn a_continued_runs_spans_carry_its_agent_cut_to_its_cap() -> Outcome {
         .telmoni
         .extract(&headers_of(field(given, "headers")?)?)
         .ok_or("no run was read")?;
-    continued.step("work").end();
+    continued.step("work")?.end();
     harness.flush()?;
     let spans = harness.spans()?;
     let agent = text(field(given, "run")?, "agent")?;
@@ -271,7 +271,7 @@ fn a_continued_run_hands_itself_on_again_under_the_span_current_here() -> Outcom
     .into_iter()
     .collect();
     let continued = harness.telmoni.extract(&first).ok_or("a run")?;
-    let relay = continued.step("relay");
+    let relay = continued.step("relay")?;
     let mut onwards: Headers = HashMap::new();
     harness.telmoni.inject_from(&relay.context(), &mut onwards);
     relay.end();

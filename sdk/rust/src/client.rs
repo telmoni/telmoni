@@ -15,6 +15,7 @@ use crate::config::Config;
 use crate::contract;
 use crate::error::Error;
 use crate::exporter::Exporter;
+use crate::guard::{OwnRates, own_rates};
 use crate::ids::Ids;
 use crate::processor::{Batching, Processor};
 use crate::propagation::{self, Carrier};
@@ -82,6 +83,8 @@ pub(crate) struct Inner {
     exporter: Arc<Exporter>,
     pub(crate) warner: Arc<Warner>,
     pub(crate) random: Box<dyn Fn() -> f64 + Send + Sync>,
+    /// The project's own prices, which the guard counts a call by first.
+    pub(crate) prices: OwnRates,
 }
 
 /// The client: a tracer provider of its own, and the runs it records.
@@ -150,6 +153,7 @@ impl Telmoni {
                 .with_version(VERSION)
                 .build(),
         );
+        let prices = own_rates(&config.prices, &warner);
         Self {
             inner: Arc::new(Inner {
                 config,
@@ -159,6 +163,7 @@ impl Telmoni {
                 exporter,
                 warner,
                 random: hooks.random,
+                prices,
             }),
         }
     }

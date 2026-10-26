@@ -1,10 +1,12 @@
-//! What the SDK refuses: only what it cannot make a run of.
+//! What the SDK refuses: what it cannot make a run of, and what a run opens
+//! past a cap it was opened with.
 
 use std::fmt;
 
-/// Why a run did not open, or a record was not sent. Nothing else in the SDK
-/// fails: a step, a model call or a tool call always opens, and an export
-/// that fails is warned about, never returned.
+/// Why a run did not open, a record was not sent, or a step or call did not
+/// open. Nothing else in the SDK fails: a step, a model call or a tool call
+/// opens unless its run reached a cap, and an export that fails is warned
+/// about, never returned.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum Error {
@@ -13,6 +15,21 @@ pub enum Error {
     /// The sample rate, given per run or in the configuration, was not above 0
     /// and up to 1.
     SampleRate(f64),
+    /// A run's `max_steps` was 0, a cap no step fits under.
+    MaxSteps,
+    /// A run's `max_spend` was not a finite number of US dollars above 0.
+    MaxSpend(f64),
+    /// The run reached a cap it was opened with, so what it would open next
+    /// opens nothing.
+    CapExceeded {
+        /// Which cap.
+        cap: Cap,
+        /// The cap.
+        limit: f64,
+        /// What the run had used of it: its steps opened, or the US dollars
+        /// it spent.
+        used: f64,
+    },
     /// A recorded run's id was not a UUID, or was the nil UUID: its trace's id
     /// and its spans' are derived from it, and a trace id of zeros is invalid.
     RunId,
@@ -42,6 +59,16 @@ pub enum Error {
     },
 }
 
+/// A run's cap, which [`Error::CapExceeded`] names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Cap {
+    /// `max_steps`: the run's steps.
+    Steps,
+    /// `max_spend`: what its model calls cost.
+    Spend,
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -49,6 +76,24 @@ impl fmt::Display for Error {
             Self::SampleRate(rate) => {
                 write!(f, "sample_rate must be above 0 and up to 1, not {rate}")
             }
+            Self::MaxSteps => f.write_str("max_steps must be a whole number above 0"),
+            Self::MaxSpend(spend) => write!(
+                f,
+                "max_spend must be a finite number of US dollars above 0, not {spend}"
+            ),
+            Self::CapExceeded {
+                cap: Cap::Steps,
+                limit,
+                ..
+            } => write!(f, "the run reached its step cap of {limit}"),
+            Self::CapExceeded {
+                cap: Cap::Spend,
+                limit,
+                used,
+            } => write!(
+                f,
+                "the run reached its spend cap of ${limit}, having spent ${used}"
+            ),
             Self::RunId => {
                 f.write_str("a recorded run's id must be a UUID other than the nil UUID")
             }

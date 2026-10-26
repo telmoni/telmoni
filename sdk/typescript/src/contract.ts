@@ -2,8 +2,9 @@
  * The ingest contract's names, as the core fixes them.
  *
  * The source is `crates/telemetry/src/contract.rs` in `telmoni/telmoni`: the
- * GenAI semantic conventions' names at the commit it pins, and ours under
- * `telmoni.*`. A name changes there first, then here.
+ * GenAI semantic conventions' names at the commit it pins, ours under
+ * `telmoni.*`, and a call's cost under Langfuse's name. A name changes there
+ * first, then here.
  */
 
 // ── Ours ─────────────────────────────────────────────────────────────────────
@@ -63,6 +64,8 @@ export const INPUT_TOKENS = 'gen_ai.usage.input_tokens';
 export const OUTPUT_TOKENS = 'gen_ai.usage.output_tokens';
 export const CACHE_READ_INPUT_TOKENS = 'gen_ai.usage.cache_read.input_tokens';
 export const CACHE_WRITE_INPUT_TOKENS = 'gen_ai.usage.cache_write.input_tokens';
+/** What the call cost in US dollars, as reported: Langfuse's name, since the conventions have none. */
+export const COST = 'gen_ai.usage.cost';
 export const SESSION_ID = 'gen_ai.conversation.id';
 
 export const INPUT_MESSAGES = 'gen_ai.input.messages';

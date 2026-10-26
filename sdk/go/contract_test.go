@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -371,7 +372,7 @@ func TestAClientNotFromNewSendsNothingAndNeverPanics(t *testing.T) {
 		if err := client.RecordRun(ctx, telmoni.RunRecord{Agent: "bot"}); err == nil {
 			t.Errorf("%s: RecordRun took a record", name)
 		}
-		if client.Flush(ctx) != nil || client.Shutdown(ctx) != nil || client.ContentMode() != "" || client.Config() != (telmoni.Config{}) {
+		if client.Flush(ctx) != nil || client.Shutdown(ctx) != nil || client.ContentMode() != "" || !reflect.DeepEqual(client.Config(), telmoni.Config{}) {
 			t.Errorf("%s: a client not from New answered as one that is", name)
 		}
 	}

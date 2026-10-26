@@ -51,6 +51,29 @@ pub struct Config {
     /// `TELMONI_RELEASE`), sent on every span's resource as
     /// `service.version`; `None` sends nothing.
     pub release: Option<String>,
+    /// The project's own prices, which a run's spend cap counts a call by
+    /// before the table this release carries; a name given twice takes its
+    /// last, and one that is no price is left out with one warning.
+    pub prices: Vec<Price>,
+}
+
+/// A project's own price for one of a provider's models, as the provider and
+/// the model are sent: each in US dollars a token, a cache price not given
+/// being the input price.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Price {
+    /// The provider, as calls send it (`openai`, `anthropic`, …).
+    pub provider: String,
+    /// The model, as calls send it, or the one they answer as.
+    pub model: String,
+    /// An input token no cache served.
+    pub input: f64,
+    /// An output token.
+    pub output: f64,
+    /// An input token read from the provider's cache.
+    pub cache_read: Option<f64>,
+    /// An input token written to the provider's cache.
+    pub cache_write: Option<f64>,
 }
 
 impl fmt::Debug for Config {
@@ -66,6 +89,7 @@ impl fmt::Debug for Config {
             sampler,
             environment,
             release,
+            prices,
         } = self;
         f.debug_struct("Config")
             .field("endpoint", endpoint)
@@ -76,6 +100,7 @@ impl fmt::Debug for Config {
             .field("sampler", sampler)
             .field("environment", environment)
             .field("release", release)
+            .field("prices", prices)
             .finish()
     }
 }
@@ -91,6 +116,7 @@ impl Default for Config {
             sampler: None,
             environment: None,
             release: None,
+            prices: Vec::new(),
         }
     }
 }

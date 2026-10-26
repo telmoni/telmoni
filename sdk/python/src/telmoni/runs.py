@@ -19,6 +19,7 @@ from collections.abc import Callable, Mapping, Sequence
 from contextvars import Token
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from opentelemetry import context, trace
@@ -31,7 +32,7 @@ from opentelemetry.trace import (
     StatusCode,
 )
 
-from . import contract, ids
+from . import contract, guard, ids
 from .exporter import warn
 from .models import (
     CallRecord,
@@ -110,6 +111,7 @@ class Run(Handle):
         agent: str,
         inherited: Mapping[str, str],
         sampled_out: bool = False,
+        caps: guard.Guard | None = None,
     ) -> None:
         super().__init__(span, client)
         self.run_id = run_id
@@ -118,11 +120,18 @@ class Run(Handle):
         # nor handed to another service.
         self.sampled_out = sampled_out
         self._inherited = dict(inherited)
+        self._guard = caps or guard.Guard(None, None)
 
     @property
     def inherited(self) -> dict[str, str]:
         """What every span inside the run carries."""
         return dict(self._inherited)
+
+    @property
+    def spent(self) -> float:
+        """What the run's model calls have cost so far in US dollars, counted
+        as its spend cap counts them, in this process."""
+        return self._guard.spent
 
     def step(self, name: str) -> Scope[Step]:
         return self._client.step(name, run=self)
@@ -156,6 +165,14 @@ class Step(Handle):
 
 
 class ModelCall(Handle):
+    # What the guard prices it by, its usage as its span holds it, and what it
+    # last counted to its run.
+    _run: Run | None = None
+    _provider = ""
+    _model = ""
+    _held: Mapping[str, int | float] = MappingProxyType({})
+    _counted = 0.0
+
     def answered(
         self,
         *,
@@ -169,15 +186,45 @@ class ModelCall(Handle):
         if response_model is not None and (
             model := _text(response_model, "response model", warn_once)
         ):
-            self._span.set_attribute(
-                contract.RESPONSE_MODEL,
-                _cut(model, contract.MODEL_MAX, "response model", warn_once),
-            )
-        self._span.set_attributes(_usage(usage, warn_once))
+            # The name the call is priced by, as ingest reads it.
+            self._model = _cut(model, contract.MODEL_MAX, "response model", warn_once)
+            self._span.set_attribute(contract.RESPONSE_MODEL, self._model)
+        sent = _usage(usage, warn_once)
+        self._span.set_attributes(sent)
+        self._held = {**self._held, **sent}
         if output_messages is not None:
             self._span.set_attribute(
                 contract.OUTPUT_MESSAGES, _as_json(output_messages)
             )
+        if self._run is not None:
+            self._count(self._run)
+
+    def _count(self, run: Run) -> None:
+        """Its cost to its run's spend, in place of what it counted before:
+        reported, else priced by its name as sent, else nothing."""
+        held = self._held
+        tokens = guard.Tokens(
+            int(held.get(contract.INPUT_TOKENS, 0)),
+            int(held.get(contract.OUTPUT_TOKENS, 0)),
+            int(held.get(contract.CACHE_READ_INPUT_TOKENS, 0)),
+            int(held.get(contract.CACHE_WRITE_INPUT_TOKENS, 0)),
+        )
+        cost = held.get(contract.COST)
+        if cost is None:
+            cost = guard.priced(
+                self._client.prices, self._provider, self._model, tokens
+            )
+        if cost is None:
+            cost = 0.0
+            if run._guard.capped and tokens.some():
+                self._client.exporter.warn_once(
+                    f"unpriced:{self._provider}:{self._model}",
+                    f"telmoni: no price for {self._model or 'a call with no model'} "
+                    f"({self._provider or 'no provider'}), which reported no cost; it "
+                    "counts nothing toward the run's spend cap",
+                )
+        run._guard.counts(self._counted, cost)
+        self._counted = cost
 
 
 class ToolCall(Handle):
@@ -277,6 +324,8 @@ class Opener:
         session_id: str | None,
         tags: Mapping[str, str] | None,
         sample_rate: float | None,
+        max_steps: int | None = None,
+        max_spend: float | None = None,
     ) -> Run:
         warn_once = self._client.exporter.warn_once
         given: object = agent
@@ -291,6 +340,7 @@ class Opener:
         rate = self._client.config.sample_rate if sample_rate is None else sample_rate
         if not 0 < rate <= 1:
             raise ValueError("sample_rate must be above 0 and up to 1")
+        caps = guard.Guard(*guard.caps(max_steps, max_spend))
         sampled_out = rate < 1 and random.random() >= rate
         run_id = str(uuid.uuid4())
         inherited: dict[str, str] = {contract.RUN_ID: run_id, contract.AGENT: agent}
@@ -331,6 +381,7 @@ class Opener:
             agent=agent,
             inherited=inherited,
             sampled_out=sampled_out,
+            caps=caps,
         )
         # The run is found from the context by step(), model_call() and
         # tool_call() called on the client rather than on the run.
@@ -357,6 +408,7 @@ class Opener:
         run = run or self._outside("step")
         if run is None:
             return None
+        run._guard.opens(step=True)
         warn_once = self._client.exporter.warn_once
         name = _text(name, "step's name", warn_once)
         # Ingest refuses a span named nothing.
@@ -382,6 +434,7 @@ class Opener:
         run = run or self._outside("model_call")
         if run is None:
             return None
+        run._guard.opens(step=False)
         warn_once = self._client.exporter.warn_once
         model = _text(model, "model", warn_once)
         # Sent blank, the span would be named " <model>" and ingest would read
@@ -409,7 +462,11 @@ class Opener:
             attributes[contract.SYSTEM_INSTRUCTIONS] = _as_json(system_instructions)
         name = f"{operation} {model}" if model else operation
         name = _cut(name, contract.NAME_MAX, "model call's name", warn_once)
-        return self._child(run, ModelCall, name, attributes, SpanKind.CLIENT)
+        call = self._child(run, ModelCall, name, attributes, SpanKind.CLIENT)
+        call._run = run
+        call._provider = attributes.get(contract.PROVIDER, "")
+        call._model = model
+        return call
 
     def tool_call(
         self, name: str, run: Run | None, *, arguments: object | None
@@ -417,6 +474,7 @@ class Opener:
         run = run or self._outside("tool_call")
         if run is None:
             return None
+        run._guard.opens(step=False)
         warn_once = self._client.exporter.warn_once
         name = _cut(
             _text(name, "tool's name", warn_once),
@@ -626,9 +684,10 @@ class Opener:
 
 def _usage(
     usage: Usage | None, warn_once: Callable[[str, str], None]
-) -> dict[str, int]:
-    """The counts as whole numbers from 0, which alone ingest takes; another
-    is left off the call with one warning, not the call refused."""
+) -> dict[str, int | float]:
+    """The counts as whole numbers from 0, and the cost as a finite number of
+    dollars from 0, which alone ingest takes; another is left off the call with
+    one warning, not the call refused."""
     if usage is None:
         return {}
     counts = (
@@ -637,7 +696,7 @@ def _usage(
         (contract.CACHE_READ_INPUT_TOKENS, usage.cache_read_input_tokens),
         (contract.CACHE_WRITE_INPUT_TOKENS, usage.cache_write_input_tokens),
     )
-    out: dict[str, int] = {}
+    out: dict[str, int | float] = {}
     for key, value in counts:
         if value is None:
             continue
@@ -650,7 +709,29 @@ def _usage(
             )
         else:
             out[key] = count
+    if usage.cost is not None:
+        cost = _dollars(usage.cost)
+        if cost is None:
+            warn_once(
+                f"usage:{contract.COST}",
+                f"telmoni: {contract.COST} must be a finite number of US dollars "
+                "from 0; the call is sent without it",
+            )
+        else:
+            out[contract.COST] = cost
     return out
+
+
+def _dollars(value: object) -> float | None:
+    """A cost as a float, sent as a double whatever it was given as; None for
+    one below 0, not finite, or no number, a `bool` or text among them."""
+    if isinstance(value, (bool, str, bytes)):
+        return None
+    try:
+        dollars = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return dollars if math.isfinite(dollars) and dollars >= 0 else None
 
 
 def _tags(

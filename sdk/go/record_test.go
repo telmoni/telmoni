@@ -64,10 +64,11 @@ type recordCallSpec struct {
 		Start     time.Time `json:"start"`
 		End       time.Time `json:"end"`
 		Usage     *struct {
-			InputTokens           int `json:"input_tokens"`
-			OutputTokens          int `json:"output_tokens"`
-			CacheReadInputTokens  int `json:"cache_read_input_tokens"`
-			CacheWriteInputTokens int `json:"cache_write_input_tokens"`
+			InputTokens           int      `json:"input_tokens"`
+			OutputTokens          int      `json:"output_tokens"`
+			CacheReadInputTokens  int      `json:"cache_read_input_tokens"`
+			CacheWriteInputTokens int      `json:"cache_write_input_tokens"`
+			Cost                  *float64 `json:"cost"`
 		} `json:"usage"`
 		ErrorType string `json:"error_type"`
 		Cancelled bool   `json:"cancelled"`
@@ -107,6 +108,7 @@ func callFrom(spec recordCallSpec) telmoni.CallRecord {
 				OutputTokens:          usage.OutputTokens,
 				CacheReadInputTokens:  usage.CacheReadInputTokens,
 				CacheWriteInputTokens: usage.CacheWriteInputTokens,
+				Cost:                  usage.Cost,
 			}
 		}
 		return record

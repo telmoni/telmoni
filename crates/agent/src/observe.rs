@@ -59,7 +59,8 @@ pub(crate) struct Generation {
     pub(crate) started_at: DateTime<Utc>,
     /// When it ended, or was given up.
     pub(crate) ended_at: DateTime<Utc>,
-    /// The wire protocol it was made over: `anthropic` or `openai`.
+    /// The provider, as the GenAI conventions name it
+    /// ([`ModelConfig::provider_name`]).
     pub(crate) provider: &'static str,
     /// The model that answered as the provider spells it, or the configured
     /// one where the stream named none.
@@ -285,7 +286,7 @@ impl<'a> PendingGeneration<'a> {
             generation: recorder.telmoni.is_some().then(|| Generation {
                 started_at: Utc::now(),
                 ended_at: Utc::now(),
-                provider: config.map_or("unknown", |c| c.provider.as_str()),
+                provider: config.map_or("unknown", ModelConfig::provider_name),
                 model: config.map(|c| c.model.clone()).unwrap_or_default(),
                 usage: None,
                 error: None,
@@ -394,8 +395,9 @@ mod tests {
     use tokio::time::{Duration, Instant};
 
     use super::*;
+    use crate::config::Provider;
     use crate::model::StopReason;
-    use crate::report::testing::{Capture, client, spans};
+    use crate::report::testing::{Capture, attribute, client, spans};
     use crate::turn;
 
     /// A model that calls the tool it is given once, then answers.
@@ -554,6 +556,40 @@ mod tests {
         .await;
         let (_, _, body) = capture.first().await;
         assert!(!String::from_utf8_lossy(&body).contains("ada@example.com"));
+    }
+
+    /// ⚠ Gemini spoken to over the OpenAI protocol is sent as `gcp.gemini`, as prices name it.
+    #[tokio::test]
+    async fn a_call_is_sent_under_the_vendor_its_url_is() {
+        let capture = Capture::default();
+        let recorder = Recorder::start(Some(client(&capture)), &acting(), Uuid::new_v4());
+        let config = ModelConfig {
+            provider: Provider::OpenAi,
+            url: "https://generativelanguage.googleapis.com/v1beta/openai".into(),
+            model: "gemini-3.1-flash-lite".into(),
+            api_key: None,
+            max_tokens: 8192,
+            timeout_secs: 60,
+        };
+        let model = CallsThenAnswers("list_members", AtomicUsize::new(0));
+        recorder
+            .model(&model, Some(&config))
+            .stream("system", &[], &[], &|_| {})
+            .await
+            .unwrap();
+        drop(recorder);
+
+        let (_, _, body) = capture.first().await;
+        let spans = spans(&body);
+        let call = spans.first().expect("the model call's span");
+        assert_eq!(
+            attribute(call, "gen_ai.provider.name"),
+            Some(json!("gcp.gemini"))
+        );
+        assert_eq!(
+            attribute(call, "gen_ai.request.model"),
+            Some(json!("gemini-3.1-flash-lite"))
+        );
     }
 
     #[tokio::test]

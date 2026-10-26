@@ -146,12 +146,13 @@ fn perform(harness: &Harness, scenario: &Value) -> Outcome {
             session_id: Some(text(run_spec, "session_id")?.to_owned()),
             tags,
             sample_rate: Some(float(run_spec, "sample_rate")?),
+            ..RunOptions::default()
         },
     )?;
 
     let inside = field(run_spec, "inside")?.as_array().ok_or("inside")?;
     let step_spec = inside.first().ok_or("a step")?;
-    let step = run.step(text(step_spec, "step")?);
+    let step = run.step(text(step_spec, "step")?)?;
     let call_spec = field(
         field(step_spec, "inside")?
             .as_array()
@@ -166,7 +167,7 @@ fn perform(harness: &Harness, scenario: &Value) -> Outcome {
             input_messages: Some(field(call_spec, "input_messages")?.clone().into()),
             ..ModelCallOptions::default()
         },
-    );
+    )?;
     let usage = field(call_spec, "usage")?;
     call.answered(Reply {
         response_model: Some(text(call_spec, "response_model")?.to_owned()),
@@ -175,6 +176,7 @@ fn perform(harness: &Harness, scenario: &Value) -> Outcome {
             output_tokens: Some(int(usage, "output_tokens")?),
             cache_read_input_tokens: Some(int(usage, "cache_read_input_tokens")?),
             cache_write_input_tokens: Some(int(usage, "cache_write_input_tokens")?),
+            cost: Some(field(usage, "cost")?.as_f64().ok_or("cost")?),
         }),
         output_messages: Some(field(call_spec, "output_messages")?.clone().into()),
     });
@@ -182,7 +184,7 @@ fn perform(harness: &Harness, scenario: &Value) -> Outcome {
     step.end();
 
     let tool_spec = field(inside.get(1).ok_or("a tool call")?, "tool_call")?;
-    let tool = run.tool_call(text(tool_spec, "name")?, ToolCallOptions::default());
+    let tool = run.tool_call(text(tool_spec, "name")?, ToolCallOptions::default())?;
     tool.fail(text(tool_spec, "fails_with")?);
     tool.end();
     run.end();

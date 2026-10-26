@@ -130,6 +130,8 @@ fn model_call(generation: &Generation) -> ModelCallRecord {
             output_tokens: Some(count(usage.output_tokens)),
             cache_read_input_tokens: Some(count(usage.cache_read_tokens)),
             cache_write_input_tokens: Some(count(usage.cache_write_tokens)),
+            // No adapter reads a cost, so ingest prices the tokens.
+            cost: None,
         }),
         error_type: generation.error.clone(),
         ..ModelCallRecord::new(model, start, end)
@@ -363,6 +365,7 @@ mod tests {
                 output_tokens: Some(120),
                 cache_read_input_tokens: Some(1_500),
                 cache_write_input_tokens: Some(0),
+                cost: None,
             })
         );
         assert_eq!(first.error_type, None);

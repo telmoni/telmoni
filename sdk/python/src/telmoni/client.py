@@ -8,7 +8,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import SpanLimits, TracerProvider
 from opentelemetry.trace import Tracer
 
-from . import contract
+from . import contract, guard
 from ._version import __version__
 from .exporter import Exporter, Transport
 from .ids import Ids
@@ -46,6 +46,8 @@ class Telmoni:
         # Before the exporter takes it: an endpoint set to plain HTTP after the
         # configuration was built would carry the key in the clear.
         self.config._normalize()
+        # The project's own prices, which the guard counts a call by first.
+        self.prices = guard.own(self.config.prices)
         self.exporter = Exporter(self.config, transport=transport, sleep=sleep)
         self.processor = Processor(self.exporter)
         resource = Resource(
@@ -98,8 +100,14 @@ class Telmoni:
         session_id: str | None = None,
         tags: Mapping[str, str] | None = None,
         sample_rate: float | None = None,
+        max_steps: int | None = None,
+        max_spend: float | None = None,
     ) -> RunScope:
-        """A run of ``agent``: ``with telmoni.run("bot") as run:`` or ``@telmoni.run("bot")``."""
+        """A run of ``agent``: ``with telmoni.run("bot") as run:`` or ``@telmoni.run("bot")``.
+
+        ``max_steps`` and ``max_spend``, in US dollars, are the guard's caps:
+        once the run reaches one, what it opens next raises ``CapExceededError``.
+        """
         return RunScope(
             lambda: self._opener.run(
                 agent,
@@ -107,6 +115,8 @@ class Telmoni:
                 session_id=session_id,
                 tags=tags,
                 sample_rate=sample_rate,
+                max_steps=max_steps,
+                max_spend=max_spend,
             )
         )
 

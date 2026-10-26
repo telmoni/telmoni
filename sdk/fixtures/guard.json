@@ -1,0 +1,132 @@
+{
+  "prices": [
+    { "provider": "acme", "model": "acme-large", "input": 3e-6, "output": 1.5e-5, "cache_read": 3e-7, "cache_write": 3.75e-6 },
+    { "provider": "acme", "model": "acme-large-2026", "input": 1e-6, "output": 4e-6 },
+    { "provider": "openai", "model": "gpt-4o", "input": 1e-6, "output": 1e-6 }
+  ],
+  "calls": [
+    {
+      "name": "a reported cost is counted as reported",
+      "provider": "acme", "model": "acme-large",
+      "usage": { "input_tokens": 1000, "output_tokens": 100, "cost": 0.25 },
+      "counted": 0.25
+    },
+    {
+      "name": "a call that reported none is its tokens at the price handed",
+      "provider": "acme", "model": "acme-large",
+      "usage": { "input_tokens": 1000, "output_tokens": 100, "cache_read_input_tokens": 200, "cache_write_input_tokens": 100 },
+      "counted": 0.004035
+    },
+    {
+      "name": "priced as the model it answered as, a cache price not given the input's",
+      "provider": "acme", "model": "acme-large", "response_model": "acme-large-2026",
+      "usage": { "input_tokens": 2000, "output_tokens": 500, "cache_read_input_tokens": 1000 },
+      "counted": 0.004
+    },
+    {
+      "name": "a price handed is taken before the table's",
+      "provider": "openai", "model": "gpt-4o",
+      "usage": { "input_tokens": 1000, "output_tokens": 1000 },
+      "counted": 0.002
+    },
+    {
+      "name": "a cache past the input prices no input",
+      "provider": "acme", "model": "acme-large",
+      "usage": { "input_tokens": 100, "cache_read_input_tokens": 300 },
+      "counted": 0.00009
+    },
+    {
+      "name": "a free call reported 0",
+      "provider": "acme", "model": "acme-large",
+      "usage": { "input_tokens": 1000, "cost": 0 },
+      "counted": 0
+    },
+    {
+      "name": "a cost below 0 is left off and the tokens priced",
+      "provider": "acme", "model": "acme-large",
+      "usage": { "input_tokens": 1000, "cost": -1 },
+      "counted": 0.003
+    },
+    {
+      "name": "a call with neither a cost nor a price counts nothing",
+      "provider": "acme", "model": "acme-unlisted",
+      "usage": { "input_tokens": 1000, "output_tokens": 10 },
+      "counted": 0
+    },
+    {
+      "name": "a call naming no provider has no price",
+      "model": "acme-large",
+      "usage": { "input_tokens": 1000 },
+      "counted": 0
+    },
+    {
+      "name": "a call answered with no usage counts nothing",
+      "provider": "acme", "model": "acme-large",
+      "counted": 0
+    },
+    {
+      "name": "answered again without a cost, it counts the cost its span holds",
+      "provider": "acme", "model": "acme-large",
+      "answers": [
+        { "usage": { "input_tokens": 1000, "cost": 0.25 } },
+        { "usage": { "output_tokens": 10 } }
+      ],
+      "counted": 0.25
+    },
+    {
+      "name": "answered again without usage, its tokens are priced as the model it last answered as",
+      "provider": "acme", "model": "acme-large",
+      "answers": [
+        { "usage": { "input_tokens": 1000 } },
+        { "response_model": "acme-large-2026" }
+      ],
+      "counted": 0.001
+    },
+    {
+      "name": "a count answered again counts as last answered",
+      "provider": "acme", "model": "acme-large",
+      "answers": [
+        { "usage": { "input_tokens": 1000 } },
+        { "usage": { "input_tokens": 500 } }
+      ],
+      "counted": 0.0015
+    }
+  ],
+  "runs": [
+    {
+      "name": "a step past the step cap raises before it opens",
+      "max_steps": 2,
+      "ops": ["step", { "model_call": 1 }, "step", "tool_call", "step"],
+      "refused": { "at": 4, "cap": "steps", "limit": 2, "used": 2 },
+      "spent": 0.004035
+    },
+    {
+      "name": "past the spend cap, whatever the run opens next raises",
+      "max_spend": 0.25,
+      "ops": [{ "model_call": 1 }, { "model_call": 0 }, "tool_call"],
+      "refused": { "at": 2, "cap": "spend", "limit": 0.25, "used": 0.254035 },
+      "spent": 0.254035
+    },
+    {
+      "name": "a run at its spend cap is past it",
+      "max_spend": 0.25,
+      "ops": [{ "model_call": 0 }, { "model_call": 5 }],
+      "refused": { "at": 1, "cap": "spend", "limit": 0.25, "used": 0.25 },
+      "spent": 0.25
+    },
+    {
+      "name": "a run inside its caps opens what it asks",
+      "max_steps": 3, "max_spend": 0.25,
+      "ops": ["step", { "model_call": 1 }, { "model_call": 3 }, "tool_call", "step", "step"],
+      "refused": null,
+      "spent": 0.006035
+    },
+    {
+      "name": "a call with neither a cost nor a price is never stopped on cost",
+      "max_spend": 0.001,
+      "ops": [{ "model_call": 7 }, { "model_call": 8 }, { "model_call": 7 }, "step"],
+      "refused": null,
+      "spent": 0
+    }
+  ]
+}

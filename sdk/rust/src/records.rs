@@ -28,7 +28,7 @@ use crate::runs::{self, Usage};
 /// its own times. [`RunRecord::new`] takes what every record has, and the
 /// rest is filled in around it:
 /// `RunRecord { session_id: Some(..), ..RunRecord::new(..) }`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RunRecord {
     /// The run's id, a UUID: kept with the log the record comes from, and the
     /// same each time the run is sent. Sent hyphenated and in lowercase,
@@ -60,7 +60,7 @@ pub struct RunRecord {
 
 /// What a run record holds: a step, with its own calls, or a call made in
 /// the run itself.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RecordItem {
     /// A step, with the calls made inside it.
     Step(StepRecord),
@@ -71,7 +71,7 @@ pub enum RecordItem {
 }
 
 /// What a step record holds: a model call or a tool call.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum CallRecord {
     /// A model call.
     Model(ModelCallRecord),
@@ -80,7 +80,7 @@ pub enum CallRecord {
 }
 
 /// A step that has ended, with the calls made inside it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StepRecord {
     /// The step's name, which its span takes.
     pub name: String,
@@ -99,7 +99,7 @@ pub struct StepRecord {
 
 /// A model call that has ended: its model, its times and its tokens. A record
 /// holds no content.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ModelCallRecord {
     /// The model asked; the span is named `<operation> <model>`.
     pub model: String,

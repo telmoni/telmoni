@@ -49,6 +49,26 @@ export interface Config {
    * span as `service.version`; nothing when unset.
    */
   release?: string | undefined;
+
+  /**
+   * The project's own prices, which a run's spend cap counts a call by before
+   * the table this release carries; a name given twice takes its last.
+   */
+  prices?: readonly Price[] | undefined;
+}
+
+/**
+ * A project's own price for one of a provider's models, as the provider and
+ * the model are sent: each in US dollars a token, a cache price not given
+ * being the input price.
+ */
+export interface Price {
+  provider: string;
+  model: string;
+  input: number;
+  output: number;
+  cacheRead?: number | undefined;
+  cacheWrite?: number | undefined;
 }
 
 /** A client's configuration, every blank read as unset and every default filled. */
@@ -62,6 +82,7 @@ export interface ResolvedConfig {
   readonly sampler: Sampler | undefined;
   readonly environment: string | undefined;
   readonly release: string | undefined;
+  readonly prices: readonly Price[];
 }
 
 /**
@@ -77,13 +98,16 @@ export type HeaderCarrier =
  * A model call's tokens, as the conventions count them: input includes the
  * cache's reads and writes, output reasoning; sum parts reported apart. Each
  * goes as a whole number, a fraction cut, one below 0 or past 64 bits left off
- * the call with one warning.
+ * the call with one warning. `cost` is what the call cost in US dollars, where
+ * the provider reports it; one below 0 or not finite is left off with one
+ * warning, and a call without one is priced by its tokens.
  */
 export interface Usage {
   inputTokens?: number | undefined;
   outputTokens?: number | undefined;
   cacheReadInputTokens?: number | undefined;
   cacheWriteInputTokens?: number | undefined;
+  cost?: number | undefined;
 }
 
 export interface RunOptions {
@@ -93,6 +117,10 @@ export interface RunOptions {
   tags?: Readonly<Record<string, string>> | undefined;
   /** This run's share, over the client's `sampleRate`. */
   sampleRate?: number | undefined;
+  /** The guard's cap on the run's steps: its next step past it throws `CapExceededError`. */
+  maxSteps?: number | undefined;
+  /** The guard's cap on the run's spend, in US dollars: reached, what it opens next throws. */
+  maxSpend?: number | undefined;
 }
 
 export interface ModelCallOptions {

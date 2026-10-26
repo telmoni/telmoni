@@ -4,12 +4,13 @@
 //! it carries the run's id, agent, user and session, so ingest knows each
 //! span's run without waiting for the trace's tree. A step, a model call or a
 //! tool call is opened from the handle it belongs under, so nothing can be
-//! opened outside a run.
+//! opened outside a run, and opens unless the run reached a cap
+//! ([`crate::guard`]).
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use opentelemetry::trace::{SpanKind, SpanRef, Status, TraceContextExt as _, Tracer as _};
 use opentelemetry::{Context, ContextGuard, KeyValue};
@@ -19,6 +20,8 @@ use uuid::Uuid;
 use crate::client::Inner;
 use crate::contract;
 use crate::error::Error;
+use crate::guard::{self, Guard, Tokens};
+use crate::lock;
 use crate::propagation::Continued;
 use crate::warnings::Warner;
 
@@ -36,7 +39,7 @@ pub(crate) struct RunInfo {
 /// A model call's tokens as the conventions count them: input with the cache's
 /// reads and writes, output with reasoning; sum a provider's parts first. A
 /// negative count is left off the call with one warning.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Usage {
     /// Every input token.
     pub input_tokens: Option<i64>,
@@ -46,6 +49,10 @@ pub struct Usage {
     pub cache_read_input_tokens: Option<i64>,
     /// Input tokens written to the provider's cache.
     pub cache_write_input_tokens: Option<i64>,
+    /// What the call cost in US dollars, where the provider reports it; one
+    /// below 0 or not finite is left off with one warning, and a call without
+    /// one is priced by its tokens.
+    pub cost: Option<f64>,
 }
 
 /// What a run is opened with, each part optional: `RunOptions::default()` is
@@ -62,6 +69,12 @@ pub struct RunOptions {
     /// This run's share of being sent, above 0 and up to 1, in place of the
     /// configuration's.
     pub sample_rate: Option<f64>,
+    /// The guard's cap on the run's steps: its next step past it is
+    /// [`Error::CapExceeded`].
+    pub max_steps: Option<u64>,
+    /// The guard's cap on the run's spend, in US dollars: reached, what it
+    /// opens next is [`Error::CapExceeded`].
+    pub max_spend: Option<f64>,
 }
 
 /// What a model call is opened with; `ModelCallOptions::default()` is a
@@ -157,6 +170,8 @@ struct Handle {
     cx: Context,
     /// What every span inside the run carries.
     inherited: Vec<KeyValue>,
+    /// The run's caps, and what it has used of them.
+    guard: Arc<Guard>,
     failed: AtomicBool,
     ended: bool,
 }
@@ -176,12 +191,14 @@ impl Handle {
             client: Arc::clone(&self.client),
             cx: self.cx.with_span(span),
             inherited: self.inherited.clone(),
+            guard: Arc::clone(&self.guard),
             failed: AtomicBool::new(false),
             ended: false,
         }
     }
 
-    fn step(&self, name: &str) -> Step {
+    fn step(&self, name: &str) -> Result<Step, Error> {
+        self.guard.opens(true)?;
         let warner = &self.client.warner;
         // Ingest refuses a span named nothing.
         let name = if name.is_empty() {
@@ -194,12 +211,13 @@ impl Handle {
             name
         };
         let name = cut(name, contract::NAME_MAX, "step's name", warner);
-        Step {
+        Ok(Step {
             handle: self.child(name, SpanKind::Internal, Vec::new()),
-        }
+        })
     }
 
-    fn model_call(&self, model: &str, options: ModelCallOptions) -> ModelCall {
+    fn model_call(&self, model: &str, options: ModelCallOptions) -> Result<ModelCall, Error> {
+        self.guard.opens(false)?;
         let warner = &self.client.warner;
         if model.is_empty() {
             warner.once(
@@ -211,6 +229,12 @@ impl Handle {
         let provider = options
             .provider
             .map(|provider| cut(&provider, contract::PROVIDER_MAX, "provider", warner));
+        let priced = Priced {
+            provider: provider.clone().unwrap_or_default(),
+            model: model.clone(),
+            held: Usage::default(),
+            counted: 0.0,
+        };
         let (name, mut attributes) = model_call_opening(&model, options.operation, provider);
         let name = cut(&name, contract::NAME_MAX, "model call's name", warner);
         if let Some(messages) = options.input_messages {
@@ -219,20 +243,22 @@ impl Handle {
         if let Some(instructions) = options.system_instructions {
             attributes.push(KeyValue::new(contract::SYSTEM_INSTRUCTIONS, instructions.0));
         }
-        ModelCall {
+        Ok(ModelCall {
             handle: self.child(name, SpanKind::Client, attributes),
-        }
+            priced: Mutex::new(priced),
+        })
     }
 
-    fn tool_call(&self, name: &str, options: ToolCallOptions) -> ToolCall {
+    fn tool_call(&self, name: &str, options: ToolCallOptions) -> Result<ToolCall, Error> {
+        self.guard.opens(false)?;
         let name = cut(name, contract::NAME_MAX, "tool's name", &self.client.warner);
         let (name, mut attributes) = tool_call_opening(&name);
         if let Some(arguments) = options.arguments {
             attributes.push(KeyValue::new(contract::TOOL_CALL_ARGUMENTS, arguments.0));
         }
-        ToolCall {
+        Ok(ToolCall {
             handle: self.child(name, SpanKind::Internal, attributes),
-        }
+        })
     }
 
     fn fail(&self, error_type: &str) {
@@ -290,6 +316,16 @@ pub struct Step {
 /// [`ModelCall::answered`] records the reply.
 pub struct ModelCall {
     handle: Handle,
+    priced: Mutex<Priced>,
+}
+
+/// What a model call is priced by, as sent, its usage as its span holds it,
+/// and what it last counted to its run's spend.
+struct Priced {
+    provider: String,
+    model: String,
+    held: Usage,
+    counted: f64,
 }
 
 /// A tool call inside a run: the span `execute_tool <name>`;
@@ -365,45 +401,73 @@ macro_rules! opens_children {
         impl $handle {
             /// A step under this span: a span named `name`, ended when its
             /// guard drops or on [`Step::end`].
-            #[must_use = "a step ends when its guard drops"]
-            pub fn step(&self, name: &str) -> Step {
+            ///
+            /// # Errors
+            ///
+            /// [`Error::CapExceeded`], opening nothing, once the run reached
+            /// its step cap or its spend cap.
+            pub fn step(&self, name: &str) -> Result<Step, Error> {
                 self.handle.step(name)
             }
 
             /// A model call under this span, the span `<operation> <model>`,
             /// `chat` unless `options.operation` says otherwise; ended when
             /// its guard drops or on [`ModelCall::end`].
-            #[must_use = "a model call ends when its guard drops"]
-            pub fn model_call(&self, model: &str, options: ModelCallOptions) -> ModelCall {
+            ///
+            /// # Errors
+            ///
+            /// [`Error::CapExceeded`], opening nothing, once the run reached
+            /// its spend cap.
+            pub fn model_call(
+                &self,
+                model: &str,
+                options: ModelCallOptions,
+            ) -> Result<ModelCall, Error> {
                 self.handle.model_call(model, options)
             }
 
             /// A tool call under this span, the span `execute_tool <name>`;
             /// ended when its guard drops or on [`ToolCall::end`].
-            #[must_use = "a tool call ends when its guard drops"]
-            pub fn tool_call(&self, name: &str, options: ToolCallOptions) -> ToolCall {
+            ///
+            /// # Errors
+            ///
+            /// [`Error::CapExceeded`], opening nothing, once the run reached
+            /// its spend cap.
+            pub fn tool_call(
+                &self,
+                name: &str,
+                options: ToolCallOptions,
+            ) -> Result<ToolCall, Error> {
                 self.handle.tool_call(name, options)
             }
 
             /// [`Self::step`] around `f`: the step ends when `f` returns, and
             /// `f`'s value is returned.
-            pub fn step_with<R>(&self, name: &str, f: impl FnOnce(&Step) -> R) -> R {
-                let step = self.step(name);
+            ///
+            /// # Errors
+            ///
+            /// As [`Self::step`], before `f` runs.
+            pub fn step_with<R>(&self, name: &str, f: impl FnOnce(&Step) -> R) -> Result<R, Error> {
+                let step = self.step(name)?;
                 let value = f(&step);
                 step.end();
-                value
+                Ok(value)
             }
 
             /// [`Self::step_with`] for a fallible `f`: an `Err` marks the step
             /// failed with `E`'s type name (its last path segment) and is
             /// returned unchanged. An `Err` is the only error a closure can
             /// carry out; a panic unwinding through marks the span `panic`.
-            pub fn try_step_with<T, E>(
+            ///
+            /// # Errors
+            ///
+            /// `f`'s, or [`Self::step`]'s as an `E`, before `f` runs.
+            pub fn try_step_with<T, E: From<Error>>(
                 &self,
                 name: &str,
                 f: impl FnOnce(&Step) -> Result<T, E>,
             ) -> Result<T, E> {
-                let step = self.step(name);
+                let step = self.step(name)?;
                 let result = f(&step);
                 if result.is_err() {
                     step.fail(&error_type::<E>());
@@ -414,27 +478,35 @@ macro_rules! opens_children {
 
             /// [`Self::model_call`] around `f`: the call ends when `f`
             /// returns, and `f`'s value is returned.
+            ///
+            /// # Errors
+            ///
+            /// As [`Self::model_call`], before `f` runs.
             pub fn model_call_with<R>(
                 &self,
                 model: &str,
                 options: ModelCallOptions,
                 f: impl FnOnce(&ModelCall) -> R,
-            ) -> R {
-                let call = self.model_call(model, options);
+            ) -> Result<R, Error> {
+                let call = self.model_call(model, options)?;
                 let value = f(&call);
                 call.end();
-                value
+                Ok(value)
             }
 
             /// [`Self::model_call_with`] for a fallible `f`: an `Err` marks
             /// the call failed with `E`'s type name and is returned unchanged.
-            pub fn try_model_call_with<T, E>(
+            ///
+            /// # Errors
+            ///
+            /// `f`'s, or [`Self::model_call`]'s as an `E`, before `f` runs.
+            pub fn try_model_call_with<T, E: From<Error>>(
                 &self,
                 model: &str,
                 options: ModelCallOptions,
                 f: impl FnOnce(&ModelCall) -> Result<T, E>,
             ) -> Result<T, E> {
-                let call = self.model_call(model, options);
+                let call = self.model_call(model, options)?;
                 let result = f(&call);
                 if result.is_err() {
                     call.fail(&error_type::<E>());
@@ -445,27 +517,35 @@ macro_rules! opens_children {
 
             /// [`Self::tool_call`] around `f`: the call ends when `f` returns,
             /// and `f`'s value is returned.
+            ///
+            /// # Errors
+            ///
+            /// As [`Self::tool_call`], before `f` runs.
             pub fn tool_call_with<R>(
                 &self,
                 name: &str,
                 options: ToolCallOptions,
                 f: impl FnOnce(&ToolCall) -> R,
-            ) -> R {
-                let call = self.tool_call(name, options);
+            ) -> Result<R, Error> {
+                let call = self.tool_call(name, options)?;
                 let value = f(&call);
                 call.end();
-                value
+                Ok(value)
             }
 
             /// [`Self::tool_call_with`] for a fallible `f`: an `Err` marks the
             /// call failed with `E`'s type name and is returned unchanged.
-            pub fn try_tool_call_with<T, E>(
+            ///
+            /// # Errors
+            ///
+            /// `f`'s, or [`Self::tool_call`]'s as an `E`, before `f` runs.
+            pub fn try_tool_call_with<T, E: From<Error>>(
                 &self,
                 name: &str,
                 options: ToolCallOptions,
                 f: impl FnOnce(&ToolCall) -> Result<T, E>,
             ) -> Result<T, E> {
-                let call = self.tool_call(name, options);
+                let call = self.tool_call(name, options)?;
                 let result = f(&call);
                 if result.is_err() {
                     call.fail(&error_type::<E>());
@@ -494,6 +574,13 @@ impl Run {
         &self.agent
     }
 
+    /// What the run's model calls have cost so far in US dollars, counted as
+    /// its spend cap counts them, in this process.
+    #[must_use]
+    pub fn spent(&self) -> f64 {
+        self.handle.guard.spent()
+    }
+
     /// Marks the run failed with `E`'s type name when `result` is an `Err`,
     /// and gives `result` back unchanged: what
     /// [`Telmoni::try_run_with`](crate::Telmoni::try_run_with) does for a
@@ -510,19 +597,81 @@ impl ModelCall {
     /// What the model answered: its name, its tokens, and its messages.
     pub fn answered(&self, reply: Reply) {
         let span = self.handle.cx.span();
+        let warner = &self.handle.client.warner;
         // Ingest refuses the call over an empty one.
-        if let Some(model) = reply.response_model.filter(|model| !model.is_empty()) {
-            let warner = &self.handle.client.warner;
-            let model = cut(&model, contract::MODEL_MAX, "response model", warner);
-            span.set_attribute(KeyValue::new(contract::RESPONSE_MODEL, model));
+        let answered_as = reply
+            .response_model
+            .filter(|model| !model.is_empty())
+            .map(|model| cut(&model, contract::MODEL_MAX, "response model", warner));
+        if let Some(model) = &answered_as {
+            span.set_attribute(KeyValue::new(contract::RESPONSE_MODEL, model.clone()));
         }
-        if let Some(usage) = reply.usage {
-            let usage = sendable_usage(usage, &self.handle.client.warner);
+        let usage = reply.usage.map(|usage| sendable_usage(usage, warner));
+        if let Some(usage) = usage {
             span.set_attributes(usage_attributes(usage));
         }
         if let Some(messages) = reply.output_messages {
             span.set_attribute(KeyValue::new(contract::OUTPUT_MESSAGES, messages.0));
         }
+        self.count(answered_as, usage);
+    }
+
+    /// Its cost to its run's spend, in place of what it counted before:
+    /// reported, else priced by its name as sent, else nothing.
+    fn count(&self, answered_as: Option<String>, usage: Option<Usage>) {
+        let mut priced = lock(&self.priced);
+        if let Some(model) = answered_as {
+            // The name the call is priced by, as ingest reads it.
+            priced.model = model;
+        }
+        if let Some(sent) = usage {
+            let held = &mut priced.held;
+            held.input_tokens = sent.input_tokens.or(held.input_tokens);
+            held.output_tokens = sent.output_tokens.or(held.output_tokens);
+            held.cache_read_input_tokens = sent
+                .cache_read_input_tokens
+                .or(held.cache_read_input_tokens);
+            held.cache_write_input_tokens = sent
+                .cache_write_input_tokens
+                .or(held.cache_write_input_tokens);
+            held.cost = sent.cost.or(held.cost);
+        }
+        let held = priced.held;
+        let whole = |count: Option<i64>| count.and_then(|n| u64::try_from(n).ok()).unwrap_or(0);
+        let tokens = Tokens {
+            input: whole(held.input_tokens),
+            output: whole(held.output_tokens),
+            cache_read: whole(held.cache_read_input_tokens),
+            cache_write: whole(held.cache_write_input_tokens),
+        };
+        let cost = held.cost.or_else(|| {
+            guard::priced(
+                &self.handle.client.prices,
+                &priced.provider,
+                &priced.model,
+                tokens,
+            )
+        });
+        let guard = &self.handle.guard;
+        if cost.is_none() && guard.capped() && tokens != Tokens::default() {
+            let model = if priced.model.is_empty() {
+                "a call with no model"
+            } else {
+                &priced.model
+            };
+            let provider = if priced.provider.is_empty() {
+                "no provider"
+            } else {
+                &priced.provider
+            };
+            self.handle.client.warner.once(
+                format!("unpriced:{}:{}", priced.provider, priced.model),
+                &format!(
+                    "telmoni: no price for {model} ({provider}), which reported no cost; it counts nothing toward the run's spend cap"
+                ),
+            );
+        }
+        guard.count(&mut priced.counted, cost.unwrap_or(0.0));
     }
 }
 
@@ -545,6 +694,14 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
     let rate = options.sample_rate.unwrap_or(inner.config.sample_rate);
     if !(rate > 0.0 && rate <= 1.0) {
         return Err(Error::SampleRate(rate));
+    }
+    if options.max_steps == Some(0) {
+        return Err(Error::MaxSteps);
+    }
+    if let Some(spend) = options.max_spend
+        && !(spend.is_finite() && spend > 0.0)
+    {
+        return Err(Error::MaxSpend(spend));
     }
 
     let sampled_out = rate < 1.0 && (inner.random)() >= rate;
@@ -579,6 +736,7 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
             client: Arc::clone(inner),
             cx,
             inherited,
+            guard: Arc::new(Guard::new(options.max_steps, options.max_spend)),
             failed: AtomicBool::new(false),
             ended: false,
         },
@@ -611,6 +769,7 @@ pub(crate) fn continued(inner: &Arc<Inner>, read: Continued) -> Run {
             client: Arc::clone(inner),
             cx,
             inherited,
+            guard: Arc::new(Guard::default()),
             failed: AtomicBool::new(false),
             ended: false,
         },
@@ -736,7 +895,8 @@ pub(crate) fn tool_call_opening(name: &str) -> (String, Vec<KeyValue>) {
     )
 }
 
-/// The counts `usage` holds, as the conventions name them.
+/// The counts and the cost `usage` holds, as the conventions and Langfuse
+/// name them.
 pub(crate) fn usage_attributes(usage: Usage) -> impl Iterator<Item = KeyValue> {
     [
         (contract::INPUT_TOKENS, usage.input_tokens),
@@ -752,10 +912,11 @@ pub(crate) fn usage_attributes(usage: Usage) -> impl Iterator<Item = KeyValue> {
     ]
     .into_iter()
     .filter_map(|(key, count)| count.map(|count| KeyValue::new(key, count)))
+    .chain(usage.cost.map(|cost| KeyValue::new(contract::COST, cost)))
 }
 
-/// `usage` without the counts ingest refuses the call for, the negative ones,
-/// each warned of once.
+/// `usage` without what ingest refuses the call for, a negative count and a
+/// cost below 0 or not finite, each warned of once.
 pub(crate) fn sendable_usage(usage: Usage, warner: &Warner) -> Usage {
     let kept = |name: &str, count: Option<i64>| {
         if count.is_some_and(|count| count < 0) {
@@ -780,6 +941,19 @@ pub(crate) fn sendable_usage(usage: Usage, warner: &Warner) -> Usage {
             contract::CACHE_WRITE_INPUT_TOKENS,
             usage.cache_write_input_tokens,
         ),
+        cost: usage.cost.filter(|cost| {
+            let dollars = cost.is_finite() && *cost >= 0.0;
+            if !dollars {
+                warner.once(
+                    format!("usage:{}", contract::COST),
+                    &format!(
+                        "telmoni: {} must be a finite number of US dollars from 0; the call is sent without it",
+                        contract::COST
+                    ),
+                );
+            }
+            dollars
+        }),
     }
 }
 

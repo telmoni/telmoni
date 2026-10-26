@@ -3,10 +3,12 @@ calls as OpenTelemetry spans, sent to Telmoni and nowhere else."""
 
 from ._version import __version__
 from .client import Telmoni
+from .guard import CapExceededError
 from .models import (
     DEFAULT_ENDPOINT,
     Config,
     ModelCallRecord,
+    Price,
     RunRecord,
     Secret,
     StepRecord,
@@ -18,9 +20,11 @@ from .runs import ModelCall, Run, Step, ToolCall, current_run
 
 __all__ = [
     "DEFAULT_ENDPOINT",
+    "CapExceededError",
     "Config",
     "ModelCall",
     "ModelCallRecord",
+    "Price",
     "QueueFullError",
     "Run",
     "RunRecord",

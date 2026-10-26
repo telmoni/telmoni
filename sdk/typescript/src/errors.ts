@@ -41,6 +41,29 @@ export class QueueFullError extends Error {
   }
 }
 
+/**
+ * A run reached a cap it was opened with, thrown at what it would open next:
+ * `cap` is `steps` or `spend`, `limit` the cap and `used` what the run had
+ * used of it, its steps opened or the US dollars it spent.
+ */
+export class CapExceededError extends Error {
+  readonly cap: 'steps' | 'spend';
+  readonly limit: number;
+  readonly used: number;
+
+  constructor(cap: 'steps' | 'spend', limit: number, used: number) {
+    super(
+      cap === 'steps'
+        ? `the run reached its step cap of ${limit}`
+        : `the run reached its spend cap of $${limit}, having spent $${used}`,
+    );
+    this.name = 'CapExceededError';
+    this.cap = cap;
+    this.limit = limit;
+    this.used = used;
+  }
+}
+
 /** An abort is the agent stopping, which is neither ok nor an error. */
 export function isAbort(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as Named).name === 'AbortError';

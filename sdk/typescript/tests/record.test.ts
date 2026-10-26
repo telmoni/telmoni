@@ -28,6 +28,7 @@ interface CallSpec {
       output_tokens: number;
       cache_read_input_tokens: number;
       cache_write_input_tokens: number;
+      cost?: number;
     };
   };
   tool_call?: Outcome & { name: string; start: string; end: string };
@@ -79,6 +80,7 @@ function callFrom(spec: CallSpec): CallRecord {
         outputTokens: call.usage.output_tokens,
         cacheReadInputTokens: call.usage.cache_read_input_tokens,
         cacheWriteInputTokens: call.usage.cache_write_input_tokens,
+        cost: call.usage.cost,
       };
     }
     return record;

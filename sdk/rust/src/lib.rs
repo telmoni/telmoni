@@ -19,18 +19,19 @@
 //!     "support-bot",
 //!     RunOptions {
 //!         user_id: Some("user_42".into()),
+//!         max_spend: Some(0.50),
 //!         ..RunOptions::default()
 //!     },
 //! )?;
 //! {
-//!     let step = run.step("plan");
+//!     let step = run.step("plan")?;
 //!     let call = step.model_call(
 //!         "gpt-4o-mini",
 //!         ModelCallOptions {
 //!             provider: Some("openai".into()),
 //!             ..ModelCallOptions::default()
 //!         },
-//!     );
+//!     )?;
 //!     call.answered(Reply {
 //!         response_model: Some("gpt-4o-mini-2024-07-18".into()),
 //!         usage: Some(Usage {
@@ -41,7 +42,7 @@
 //!         ..Reply::default()
 //!     });
 //! }
-//! let tool = run.tool_call("search", ToolCallOptions::default());
+//! let tool = run.tool_call("search", ToolCallOptions::default())?;
 //! tool.returned(serde_json::json!({ "results": 3 }));
 //! drop(tool);
 //! run.end();
@@ -52,9 +53,12 @@
 //! ```
 //!
 //! A guard ends its span when it is dropped or on `end()`. The `_with`
-//! methods take a closure instead and return its value; their `try_` forms
-//! mark an `Err` on the span with the error type's name and return it
-//! unchanged.
+//! methods take a closure instead and return its value, or the [`Error`] that
+//! kept their handle from opening; their `try_` forms, for a closure whose
+//! error converts from [`Error`], mark an `Err` on the span with the error
+//! type's name and return it unchanged. A step, a model call or a tool call opened once its run reached
+//! a cap it was opened with — `max_steps`, or `max_spend` in US dollars,
+//! counted in this process — is [`Error::CapExceeded`], and opens nothing.
 //!
 //! A run that has already ended — a job's own log, a hook that runs after the
 //! turn it reports — is sent whole from its [`RunRecord`] by
@@ -67,6 +71,7 @@ mod config;
 mod contract;
 mod error;
 mod exporter;
+mod guard;
 mod ids;
 mod processor;
 mod propagation;
@@ -77,8 +82,8 @@ pub mod transport;
 mod warnings;
 
 pub use client::{Hooks, Telmoni};
-pub use config::{Config, DEFAULT_ENDPOINT};
-pub use error::Error;
+pub use config::{Config, DEFAULT_ENDPOINT, Price};
+pub use error::{Cap, Error};
 pub use processor::Batching;
 pub use propagation::Carrier;
 pub use records::{CallRecord, ModelCallRecord, RecordItem, RunRecord, StepRecord, ToolCallRecord};

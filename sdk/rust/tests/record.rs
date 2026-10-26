@@ -85,6 +85,7 @@ fn call_from(spec: &Value) -> Result<CallRecord, Failure> {
                     output_tokens: Some(int(usage, "output_tokens")?),
                     cache_read_input_tokens: Some(int(usage, "cache_read_input_tokens")?),
                     cache_write_input_tokens: Some(int(usage, "cache_write_input_tokens")?),
+                    cost: usage.get("cost").and_then(Value::as_f64),
                 })
             })
             .transpose()?;
@@ -958,7 +959,7 @@ fn a_record_the_queue_has_no_room_for_is_refused_whole() -> Outcome {
     // Two steps hold two of the four slots.
     let run = telmoni.run("bot", RunOptions::default())?;
     for n in 0..2 {
-        let step = run.step(&format!("s{n}"));
+        let step = run.step(&format!("s{n}"))?;
         step.end();
     }
     assert_eq!(
@@ -1009,7 +1010,7 @@ fn a_record_travels_in_exports_of_its_own() -> Outcome {
         ..record.clone()
     };
     let live = harness.telmoni.run("live", RunOptions::default())?;
-    live.step("live step").end();
+    live.step("live step")?.end();
     harness.telmoni.record_run(record.clone())?;
     harness.telmoni.record_run(beside.clone())?;
     live.end();
@@ -1077,7 +1078,7 @@ fn a_record_larger_than_a_batch_is_cut_from_its_own_start() -> Outcome {
     };
     let run = telmoni.run("bot", RunOptions::default())?;
     for n in 0..2 {
-        run.step(&format!("s{n}")).end();
+        run.step(&format!("s{n}"))?.end();
     }
     telmoni.record_run(record)?;
     run.end();
@@ -1126,7 +1127,9 @@ fn a_span_ending_while_a_record_is_built_travels_apart() -> Outcome {
         let recorded = std::thread::scope(|scope| {
             scope.spawn(|| {
                 while !stop.load(Ordering::Relaxed) {
-                    live.step("live step").end();
+                    if let Ok(step) = live.step("live step") {
+                        step.end();
+                    }
                 }
             });
             let recorded = telmoni.record_run(record.clone());
@@ -1213,8 +1216,11 @@ fn a_records_room_is_kept_while_it_is_built() -> Outcome {
     // Room for one step beside the record's three spans.
     let stepping = Arc::clone(&live);
     *lock(&sampler.0) = Some(Box::new(move || {
-        stepping.step("s0").end();
-        stepping.step("s1").end();
+        for name in ["s0", "s1"] {
+            if let Ok(step) = stepping.step(name) {
+                step.end();
+            }
+        }
     }));
     telmoni.record_run(record)?;
     assert!(telmoni.flush());
@@ -1261,7 +1267,7 @@ fn a_record_goes_at_once() -> Outcome {
     };
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
     let live = telmoni.run("live", RunOptions::default())?;
-    live.step("live step").end();
+    live.step("live step")?.end();
     telmoni.record_run(the_record()?)?;
     assert!(transport.wait_for(2), "the record waited for the delay");
     live.end();

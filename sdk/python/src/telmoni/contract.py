@@ -1,8 +1,9 @@
 """The ingest contract's names, as the core fixes them.
 
 The source is ``crates/telemetry/src/contract.rs`` in ``telmoni/telmoni``: the
-GenAI semantic conventions' names at the commit it pins, and ours under
-``telmoni.*``. A name changes there first, then here.
+GenAI semantic conventions' names at the commit it pins, ours under
+``telmoni.*``, and a call's cost under Langfuse's name. A name changes there
+first, then here.
 """
 
 from __future__ import annotations
@@ -65,6 +66,9 @@ INPUT_TOKENS = "gen_ai.usage.input_tokens"
 OUTPUT_TOKENS = "gen_ai.usage.output_tokens"
 CACHE_READ_INPUT_TOKENS = "gen_ai.usage.cache_read.input_tokens"
 CACHE_WRITE_INPUT_TOKENS = "gen_ai.usage.cache_write.input_tokens"
+COST = "gen_ai.usage.cost"
+"""What the call cost in US dollars, as reported: Langfuse's name, since the
+conventions have none."""
 SESSION_ID = "gen_ai.conversation.id"
 
 INPUT_MESSAGES = "gen_ai.input.messages"

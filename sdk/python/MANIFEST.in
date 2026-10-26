@@ -1,3 +1,5 @@
 # The sdist leaves out the README and the tests, which no install runs.
 exclude README.md
 prune tests
+# The guard's price table, which setuptools takes into the wheel from here.
+include src/telmoni/model_prices.json

@@ -50,6 +50,8 @@ fn a_run_is_a_span_with_the_contract_attributes() -> Outcome {
             session_id: Some("conv_1".to_owned()),
             tags: tags(&[("env", "test"), ("team", "a")]),
             sample_rate: None,
+            max_steps: None,
+            max_spend: None,
         },
     )?;
     assert!(is_uuid_v4(run.run_id()), "{}", run.run_id());
@@ -213,7 +215,7 @@ fn the_sample_rate_drops_whole_runs_in_the_processor() -> Outcome {
 
     {
         let dropped = telmoni.run("bot", RunOptions::default())?;
-        let step = dropped.step("s");
+        let step = dropped.step("s")?;
         step.end();
         dropped.end();
     }
@@ -259,7 +261,7 @@ fn a_span_ending_after_its_sampled_out_run_is_dropped_too() -> Outcome {
     );
 
     let dropped = telmoni.run("bot", RunOptions::default())?;
-    let late = dropped.step("late");
+    let late = dropped.step("late")?;
     dropped.end();
     late.end();
     let kept = telmoni.run("bot", RunOptions::default())?;
@@ -460,7 +462,7 @@ fn a_warning_sink_that_panics_never_reaches_the_agent() -> Outcome {
         },
     )?;
     let run_id = run.run_id().to_owned();
-    run.step("s").end();
+    run.step("s")?.end();
     run.end();
     assert!(telmoni.flush());
     telmoni.shutdown();
@@ -564,12 +566,12 @@ fn a_run_is_shared_across_threads() -> Outcome {
 
     let harness = Harness::new()?;
     let run = harness.telmoni.run("bot", RunOptions::default())?;
-    std::thread::scope(|scope| {
-        scope.spawn(|| {
-            let step = run.step("threaded");
-            step.end();
-        });
-    });
+    let opened =
+        std::thread::scope(|scope| scope.spawn(|| run.step("threaded").map(Step::end)).join());
+    assert!(
+        matches!(opened, Ok(Ok(()))),
+        "the step opened on its thread"
+    );
     let run_id = run.run_id().to_owned();
     run.end();
     harness.flush()?;

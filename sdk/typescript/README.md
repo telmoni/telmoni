@@ -61,10 +61,12 @@ marks the span cancelled instead. `run.fail('RateLimit')` and `run.cancel()`
 mark a span by hand. Steps nest: `step.step(...)`, `step.modelCall(...)` and
 `step.toolCall(...)` open under the step; the same methods on `run` open under
 the run. `run` throws a `TypeError` for a blank agent name and a `RangeError`
-for a sample rate that is no number or outside (0, 1]. A token count is read
-from a number, a bigint or a decimal numeral's text, its fraction cut, and of
-what ingest would refuse, these are left off with one warning: a token count
-below 0 or past 64 bits, a tag whose key is not 1 to 64 characters or whose
+for a sample rate that is no number or outside (0, 1], or a cap that is no cap
+([The guard](#the-guard)). A token count is read from a number, a bigint or a
+decimal numeral's text, its fraction cut, and the usage's `cost` is what the
+call cost in US dollars, where your provider reports it; of what ingest would
+refuse, these are left off with one warning: a token count below 0 or past 64
+bits, a cost below 0, not finite, or no number, a tag whose key is not 1 to 64 characters or whose
 value is past 256, and the tags past the first 32 kept,
 the most ingest keeps; an empty user, session, provider or response model is
 left off as unset. A name, model, provider, user, session, response model or
@@ -149,6 +151,21 @@ that ends before it starts throws a `RangeError`. Either sends nothing. A
 record the export queue has no room for throws `QueueFullError`, nothing of it
 queued: flush, or wait, and record it again.
 
+## The guard
+
+`telmoni.run('support-bot', { maxSteps: 20, maxSpend: 0.5 }, callback)` holds
+a run to caps on its steps and on what its model calls cost, in US dollars,
+counted in this process with no call to Telmoni. Past one, `step`, `modelCall`
+and `toolCall` throw `CapExceededError`, naming the `cap` (`steps` or
+`spend`), its `limit` and what the run had `used`, before their callback runs:
+a step past the step cap, and anything once the run spent its spend cap or
+more. A call counts its reported `cost`; else its tokens at a price handed as
+`prices: [{ provider, model, input, output }]`, which the SDK alone holds, so
+Telmoni's own reads still price that call by the table; else at the price
+table this package carries, LiteLLM's, by its provider and the model it
+answered as; else nothing. A call answered again counts as its span then
+holds it. `run.spent` reads the count; a continued run carries no cap.
+
 ## Configuration
 
 ```ts
@@ -166,7 +183,9 @@ const telmoni = new Telmoni({
 `Telmoni.fromEnv()` reads `TELMONI_ENDPOINT`, `TELMONI_API_KEY`,
 `TELMONI_ORG`, `TELMONI_ENVIRONMENT` and `TELMONI_RELEASE`; a blank value is
 unset, and a blank endpoint falls back to the default. No `OTEL_*` variable
-is read. The key is never printed or serialized: `console.log`,
+is read. `prices` hands [the guard](#the-guard) prices of your own, a
+`TypeError` or `RangeError` for one that names no provider or model or is no
+number from 0; nothing of them is sent. The key is never printed or serialized: `console.log`,
 `util.inspect` and `JSON.stringify` of the client or its configuration leave
 it out.
 

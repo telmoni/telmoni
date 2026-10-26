@@ -26,7 +26,7 @@ fn a_model_call_carries_the_conventions_names() -> Outcome {
             provider: Some("openai".to_owned()),
             ..ModelCallOptions::default()
         },
-    );
+    )?;
     call.answered(Reply {
         response_model: Some("gpt-4o-mini-2024-07-18".to_owned()),
         usage: Some(Usage {
@@ -34,6 +34,7 @@ fn a_model_call_carries_the_conventions_names() -> Outcome {
             output_tokens: Some(7),
             cache_read_input_tokens: Some(3),
             cache_write_input_tokens: None,
+            cost: None,
         }),
         output_messages: None,
     });
@@ -75,15 +76,17 @@ fn a_negative_token_count_is_left_off_with_one_warning() -> Outcome {
             output_tokens: Some(0),
             cache_read_input_tokens: Some(i64::MIN),
             cache_write_input_tokens: Some(i64::MAX),
+            cost: None,
         },
         Usage {
             input_tokens: Some(-5),
             output_tokens: Some(-1),
             cache_read_input_tokens: Some(0),
             cache_write_input_tokens: Some(-1),
+            cost: None,
         },
     ] {
-        let call = run.model_call("m", ModelCallOptions::default());
+        let call = run.model_call("m", ModelCallOptions::default())?;
         call.answered(Reply {
             usage: Some(usage),
             ..Reply::default()
@@ -142,7 +145,7 @@ fn a_blank_operation_is_chat() -> Outcome {
                 operation: Some(blank.to_owned()),
                 ..ModelCallOptions::default()
             },
-        );
+        )?;
         call.end();
     }
     run.end();
@@ -171,7 +174,7 @@ fn an_empty_response_model_or_provider_is_left_off() -> Outcome {
             provider: Some(String::new()),
             ..ModelCallOptions::default()
         },
-    );
+    )?;
     call.answered(Reply {
         response_model: Some(String::new()),
         ..Reply::default()
@@ -200,14 +203,14 @@ fn a_model_calls_text_past_ingests_caps_keeps_its_call() -> Outcome {
         ..ModelCallOptions::default()
     };
     for _ in 0..2 {
-        run.model_call("", ModelCallOptions::default()).end();
+        run.model_call("", ModelCallOptions::default())?.end();
         let call = run.model_call(
             &m(129),
             ModelCallOptions {
                 provider: Some("p".repeat(129)),
                 ..generate()
             },
-        );
+        )?;
         call.answered(Reply {
             response_model: Some("r".repeat(129)),
             ..Reply::default()
@@ -217,11 +220,11 @@ fn a_model_calls_text_past_ingests_caps_keeps_its_call() -> Outcome {
             operation: Some("o".repeat(20)),
             ..ModelCallOptions::default()
         };
-        run.model_call(&m(128), custom).end();
+        run.model_call(&m(128), custom)?.end();
     }
     // At their caps: the longest operation and a model at its cap fit.
     let smiles = "😀".repeat(128);
-    let call = run.model_call(&smiles, generate());
+    let call = run.model_call(&smiles, generate())?;
     call.answered(Reply {
         response_model: Some(smiles.clone()),
         ..Reply::default()
@@ -289,7 +292,7 @@ fn content_is_taken_off_before_it_leaves() -> Outcome {
             system_instructions: Some("be brief".into()),
             ..ModelCallOptions::default()
         },
-    );
+    )?;
     call.answered(Reply {
         output_messages: Some(json!([{ "role": "assistant", "content": "the answer" }]).into()),
         ..Reply::default()
@@ -346,7 +349,7 @@ fn content_stays_home_until_an_answer_has_said_the_mode() -> Outcome {
             input_messages: Some("first prompt".into()),
             ..ModelCallOptions::default()
         },
-    );
+    )?;
     call.end();
     run.end();
     harness.flush()?;
@@ -385,7 +388,7 @@ fn content_leaves_once_the_server_has_said_on() -> Outcome {
             input_messages: Some("second".into()),
             ..ModelCallOptions::default()
         },
-    );
+    )?;
     call.end();
     run.end();
     harness.flush()?;
@@ -412,7 +415,7 @@ fn content_stays_home_without_capture_content_even_when_allowed() -> Outcome {
             input_messages: Some("never".into()),
             ..ModelCallOptions::default()
         },
-    );
+    )?;
     call.end();
     run.end();
     harness.flush()?;
@@ -424,6 +427,12 @@ fn content_stays_home_without_capture_content_even_when_allowed() -> Outcome {
 fn a_failed_call_records_the_error_type() -> Outcome {
     #[derive(Debug)]
     struct ProviderDown;
+
+    impl From<telmoni::Error> for ProviderDown {
+        fn from(_: telmoni::Error) -> Self {
+            Self
+        }
+    }
 
     let harness = Harness::new()?;
     let run = harness.telmoni.run("bot", RunOptions::default())?;
@@ -442,7 +451,7 @@ fn a_failed_call_records_the_error_type() -> Outcome {
             ..Reply::default()
         });
         "done"
-    });
+    })?;
     assert_eq!(answered, "done");
     run.end();
     harness.flush()?;

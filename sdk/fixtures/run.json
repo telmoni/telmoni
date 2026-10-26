@@ -15,7 +15,7 @@
                 "provider": "openai",
                 "model": "gpt-4o-mini",
                 "response_model": "gpt-4o-mini-2024-07-18",
-                "usage": { "input_tokens": 12, "output_tokens": 7, "cache_read_input_tokens": 3, "cache_write_input_tokens": 0 },
+                "usage": { "input_tokens": 12, "output_tokens": 7, "cache_read_input_tokens": 3, "cache_write_input_tokens": 0, "cost": 0.000123 },
                 "input_messages": [{ "role": "user", "parts": [{ "type": "text", "content": "hello" }] }],
                 "output_messages": [{ "role": "assistant", "parts": [{ "type": "text", "content": "hi" }], "finish_reason": "stop" }]
               }
@@ -63,6 +63,7 @@
                   { "key": "gen_ai.response.model", "value": { "stringValue": "gpt-4o-mini-2024-07-18" } },
                   { "key": "gen_ai.usage.cache_read.input_tokens", "value": { "intValue": "3" } },
                   { "key": "gen_ai.usage.cache_write.input_tokens", "value": { "intValue": "0" } },
+                  { "key": "gen_ai.usage.cost", "value": { "doubleValue": 0.000123 } },
                   { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "12" } },
                   { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "7" } },
                   { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },

@@ -98,6 +98,8 @@ type Client struct {
 	provider  *sdktrace.TracerProvider
 	tracer    trace.Tracer
 	random    func() float64
+	// prices are the project's own, which the guard counts a call by first.
+	prices map[name]rate
 }
 
 // Telmoni is a convenience alias for Client.
@@ -122,14 +124,19 @@ func defaultClient(endpoint string) *http.Client {
 	return client
 }
 
-// New builds a client from cfg. It fails on a SampleRate outside (0, 1], and on
-// an endpoint no export could use or that would carry the key in the clear.
+// New builds a client from cfg. It fails on a SampleRate outside (0, 1], on
+// an endpoint no export could use or that would carry the key in the clear,
+// and on a price that names no model or is no number of dollars from 0.
 func New(cfg Config, opts ...Option) (*Client, error) {
 	cfg = cfg.normalized()
 	if !(cfg.SampleRate > 0 && cfg.SampleRate <= 1) {
 		return nil, errors.New("telmoni: SampleRate must be above 0 and up to 1")
 	}
 	if err := checkEndpoint(cfg.Endpoint); err != nil {
+		return nil, err
+	}
+	prices, err := ownRates(cfg.Prices)
+	if err != nil {
 		return nil, err
 	}
 	o := options{
@@ -177,6 +184,7 @@ func New(cfg Config, opts ...Option) (*Client, error) {
 		provider:  provider,
 		tracer:    provider.Tracer(scope, trace.WithInstrumentationVersion(Version)),
 		random:    o.random,
+		prices:    prices,
 	}, nil
 }
 

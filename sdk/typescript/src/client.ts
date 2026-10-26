@@ -6,6 +6,7 @@ import { BasicTracerProvider } from '@opentelemetry/sdk-trace-base';
 
 import * as contract from './contract.js';
 import { Exporter, directTransport, fetchTransport, realSleep } from './exporter.js';
+import { checkedPrice } from './guard.js';
 import { Ids } from './ids.js';
 import { Processor } from './processor.js';
 import { readHeaders, writeHeaders } from './propagation.js';
@@ -157,6 +158,8 @@ function resolve(config: Config | undefined): ResolvedConfig {
   if (typeof sampleRate !== 'number' || !(sampleRate > 0 && sampleRate <= 1)) {
     throw new RangeError('sampleRate must be a number above 0 and up to 1');
   }
+  const prices: unknown = config?.prices ?? [];
+  if (!Array.isArray(prices)) throw new TypeError('prices must be an array of prices');
   const resolved = {
     endpoint,
     organizationId: unsetIfBlank(config?.organizationId),
@@ -165,6 +168,7 @@ function resolve(config: Config | undefined): ResolvedConfig {
     sampler: config?.sampler,
     environment: unsetIfBlank(config?.environment),
     release: unsetIfBlank(config?.release),
+    prices: Object.freeze(prices.map(checkedPrice)),
   };
   // Not enumerable: console.log, util.inspect and JSON.stringify skip it, so
   // a client or a configuration logged or serialized whole leaves the key out.
