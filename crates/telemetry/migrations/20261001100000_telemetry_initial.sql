@@ -393,7 +393,37 @@ GRANT SELECT, DELETE ON telemetry.mutes TO telemetry_maintenance;
 
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- 7. HEARTBEATS
+-- 7. INCIDENT VOTES
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Each member's word on an incident, useful or noise, given from the link
+-- its notice carries and changed at will: one a person an incident. The share
+-- useful over the week heads the project's alerts and steers them. They go
+-- with their incident; the maintenance lane is granted nothing on them.
+CREATE TABLE telemetry.incident_votes (
+    incident_id UUID        NOT NULL REFERENCES telemetry.incidents (id) ON DELETE CASCADE,
+    project_id  TEXT        NOT NULL,
+    user_id     TEXT        NOT NULL,
+    verdict     TEXT        NOT NULL,
+    voted_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (incident_id, user_id),
+    CONSTRAINT incident_votes_verdict_check CHECK (verdict IN ('useful', 'noise'))
+);
+
+ALTER TABLE telemetry.incident_votes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.incident_votes FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON telemetry.incident_votes
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.incident_votes
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 8. HEARTBEATS
 -- ══════════════════════════════════════════════════════════════════════════════
 -- The purge sweep, the plan refusals' notices and the alerts' evaluation,
 -- each as the last replica

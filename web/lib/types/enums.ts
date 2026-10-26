@@ -248,6 +248,13 @@ export const RuleLevel = {
 } as const;
 export type RuleLevel = typeof RuleLevel[keyof typeof RuleLevel];
 
+/** Wire vocabulary of the Rust `Verdict`: a member's word on an incident. */
+export const Verdict = {
+  Useful: "useful",
+  Noise:  "noise",
+} as const;
+export type Verdict = typeof Verdict[keyof typeof Verdict];
+
 /** Wire vocabulary of the Rust `SortDirection`: which way a list is sorted. */
 export const SortDirection = {
   Asc:  "asc",

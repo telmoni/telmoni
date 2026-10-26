@@ -3,7 +3,8 @@
 //! opening and a resolution go to the project's feed and its connectors,
 //! keyed by the incident and the kind, so an incident has one feed row of
 //! each; what it says again goes to the connectors alone. A notice names the
-//! alert and its numbers, never a span's content.
+//! alert and its numbers, never a span's content, and links the console page
+//! its incident is voted on from.
 
 use serde_json::json;
 use uuid::Uuid;
@@ -58,6 +59,13 @@ pub async fn tell_incidents(state: &AppState, rule: &RuleRow, value: Option<f64>
             connections: hearers.get(..taken).unwrap_or_default(),
         };
         let (title, body) = words(rule, value, one);
+        let vote_url = vote_link(
+            state,
+            &rule.organization_id,
+            &rule.project_id,
+            one.incident_id,
+        );
+        let body = with_vote(body, vote_url.as_deref());
         let metadata = json!({
             "incident_id": one.incident_id,
             "rule_id": rule.id,
@@ -66,6 +74,7 @@ pub async fn tell_incidents(state: &AppState, rule: &RuleRow, value: Option<f64>
             "alert_threshold": rule.alert_threshold,
             "warning_threshold": rule.warning_threshold,
             "reminder": one.reminder,
+            "vote_url": vote_url,
         });
         let key = format!(
             "telemetry:incident:{}:{}",
@@ -144,6 +153,30 @@ async fn muted_now(state: &AppState, project_id: &ProjectId, rule_id: Uuid) -> b
             );
             false
         }
+    }
+}
+
+/// The console page an incident is voted on from, behind sign-in, spelled
+/// with ids, which the console sends on to the slugs and follows a moved
+/// project by. The page asks before it casts, so a link a mail scanner or a
+/// chat's preview follows casts nothing.
+fn vote_link(
+    state: &AppState,
+    organization_id: &OrganizationId,
+    project_id: &ProjectId,
+    incident_id: Uuid,
+) -> Option<String> {
+    let origin = state.config.app_url.as_deref()?;
+    Some(format!(
+        "{origin}/{organization_id}/{project_id}/alerts/incidents/{incident_id}/vote"
+    ))
+}
+
+/// A notice's body, ending in its vote's link where there is one.
+fn with_vote(body: String, vote_url: Option<&str>) -> String {
+    match vote_url {
+        Some(url) => format!("{body}\nUseful, or noise? {url}"),
+        None => body,
     }
 }
 
@@ -243,16 +276,22 @@ pub async fn resolved_by_hand(
 ) {
     let title = format!("{rule_name}: resolved");
     let key = format!("telemetry:incident:{incident_id}:resolved");
+    let vote_url = vote_link(state, organization_id, project_id, incident_id);
+    let body = with_vote(
+        "A member of the project resolved this incident.".to_owned(),
+        vote_url.as_deref(),
+    );
     let notice = Notice {
         kind: NotificationKind::IncidentResolved,
         subject_user_id: None,
         title: &title,
-        body: "A member of the project resolved this incident.",
+        body: &body,
         metadata: json!({
             "incident_id": incident_id,
             "rule_id": rule_id,
             "severity": severity,
             "by_hand": true,
+            "vote_url": vote_url,
         }),
         dedup_key: Some(&key),
     };

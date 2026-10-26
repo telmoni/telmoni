@@ -783,6 +783,28 @@ pub(crate) fn state_with_stores_noticed(
     ))
 }
 
+/// [`state_with_stores_noticed`], its notices linking the console at
+/// `https://console.example`.
+pub(crate) fn state_with_console(
+    pool: &PgPool,
+    auth: Arc<dyn Auth>,
+    notices: Arc<NoticeLog>,
+) -> Arc<AppState> {
+    let clickhouse = std::env::var("TELEMETRY_CLICKHOUSE_URL").expect(
+        "state_with_console: TELEMETRY_CLICKHOUSE_URL is set, checked by clickhouse_or_skip",
+    );
+    let mut state = module_at(
+        pool,
+        auth,
+        &clickhouse,
+        &redis_url(),
+        Arc::new(NoLimits),
+        notices,
+    );
+    state.config.app_url = Some("https://console.example".into());
+    Arc::new(state)
+}
+
 /// The module as the binary stands it up, unshared, so a suite can change a
 /// field of it first.
 fn module_at(
@@ -802,6 +824,7 @@ fn module_at(
         kms_api_base: "http://127.0.0.1:1".into(),
         metadata_api_base: "http://127.0.0.1:1".into(),
         redis_url: redis_url.into(),
+        app_url: None,
     };
     telmoni_telemetry::boot::state(
         config,

@@ -73,6 +73,9 @@ export type { ContentModeSetting } from "./entities/content-mode";
 export { fetchFieldInventory } from "./entities/field-inventory";
 export type { FieldInventory } from "./entities/field-inventory";
 
+export { fetchIncident } from "./entities/incidents";
+export type { IncidentAccess, IncidentVotes } from "./entities/incidents";
+
 export {
   fetchTrace,
   fetchTraceFacets,

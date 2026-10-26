@@ -363,6 +363,9 @@ const PERSON_IN_TENANT_TABLES: &[&str] = &[
     // organization. Every answer saved there reads whether one fell inside
     // its turn; the person is an id, and no lane serves the row.
     "agent.erasures",
+    // A member's word on an incident: the project's precision counts every
+    // member's, and the lanes answer the counts and the asker's own alone.
+    "telemetry.incident_votes",
 ];
 
 /// ⚠ **A table keyed on both a person and a tenant is isolated only as far as

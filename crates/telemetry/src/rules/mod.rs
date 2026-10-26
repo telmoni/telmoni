@@ -13,6 +13,7 @@ pub mod deliveries;
 pub mod evaluate;
 pub mod incidents;
 pub mod mutes;
+pub mod votes;
 
 use chrono::{DateTime, Datelike as _, TimeDelta, Timelike as _, Utc};
 use serde::{Deserialize, Serialize};

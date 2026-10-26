@@ -27,6 +27,9 @@ pub struct Config {
     /// digest and its rate limits, shared by every replica. Required, though
     /// nothing dials it at boot: a replica that cannot reach it stands in.
     pub redis_url: Redacted,
+    /// The console's origin (`APP_URL`), which the links an alert's notices
+    /// carry open; none, and a notice carries none.
+    pub app_url: Option<String>,
 }
 
 impl Config {
@@ -41,6 +44,7 @@ impl Config {
             metadata_api_base: optional_base_url("METADATA_API_BASE")
                 .unwrap_or_else(|| "http://metadata.google.internal".to_owned()),
             redis_url: require("REDIS_URL")?.into(),
+            app_url: optional_base_url("APP_URL"),
         })
     }
 }

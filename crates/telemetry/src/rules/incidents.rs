@@ -386,7 +386,8 @@ pub async fn resolve<B: HasProject>(
     Ok((one(tx, project_id, id).await?, resolved))
 }
 
-async fn one<B: HasProject>(
+/// One of the project's incidents.
+pub async fn one<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
     id: Uuid,

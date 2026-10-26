@@ -30,6 +30,7 @@ pub mod tenant_id;
 pub mod trace_column;
 pub mod trace_sort;
 pub mod user_sort;
+pub mod verdict;
 pub mod view_kind;
 
 pub use api_key_scope::ApiKeyScope;
@@ -65,4 +66,5 @@ pub use tenant_id::{
 pub use trace_column::TraceColumn;
 pub use trace_sort::TraceSort;
 pub use user_sort::UserSort;
+pub use verdict::Verdict;
 pub use view_kind::ViewKind;

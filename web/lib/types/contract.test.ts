@@ -29,6 +29,7 @@ import {
   TraceColumn,
   TraceSort,
   UserSort,
+  Verdict,
   ViewKind,
 } from "./enums";
 import { RESERVED_ORGANIZATION_SLUGS, RESERVED_PROJECT_SLUGS, SLUG_MAX_LENGTH } from "../slug";
@@ -70,6 +71,7 @@ const CONSOLE: Record<string, Record<string, string>> = {
   TraceColumn,
   TraceSort,
   UserSort,
+  Verdict,
   ViewKind,
 };
 

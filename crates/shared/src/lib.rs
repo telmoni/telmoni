@@ -49,5 +49,5 @@ pub use types::{
     OrganizationId, OrganizationIdError, OrganizationRole, OrganizationStatus, ParseEnumError,
     Paused, ProjectId, ProjectIdError, Redacted, Role, RuleAggregation, RuleLevel, RuleMeasure,
     RuleOperator, RuleWindow, SessionSort, Severity, SortDirection, SpanKind, SpanStatus,
-    TelmoniResourceKind, TraceColumn, TraceSort, UserId, UserIdError, UserSort, ViewKind,
+    TelmoniResourceKind, TraceColumn, TraceSort, UserId, UserIdError, UserSort, Verdict, ViewKind,
 };
