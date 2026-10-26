@@ -139,3 +139,27 @@ spec:
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
+---
+# The server reads the docs it answers from off the console (`DOCS_CORPUS_URL`),
+# named as the embeddings are, since the address block above is no pod's.
+kind: NetworkPolicy
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: allow-server-to-web
+  labels:
+    app.kubernetes.io/name: server
+    {{- include "telmoni.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: server
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: web
+      ports:
+        - protocol: TCP
+          port: 3000
