@@ -25,7 +25,7 @@ flowchart TD
     ServerPods --> EmbeddingsSvc["Service: embeddings (Port 11434)"]
     EmbeddingsSvc --> EmbeddingsPod["Deployment: embeddings (Ollama)"]
 
-    HookJob["Pre-install / pre-upgrade hook Job: telmoni-migrate"] -.->|Runs DDL & Grants| Postgres
+    HookJob["Pre-install / pre-upgrade hook Job: telmoni-migrate"] -.->|Runs DDL, Grants & Model prices| Postgres
     HookJob -.->|Database & tables| ClickHouse
     RotateCron["CronJob: rotate (telmoni-server rotate)"] -.->|Scheduled partition maintenance| Postgres
     RotateCron -.->|Drops days of spans past retention| ClickHouse

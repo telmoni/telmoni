@@ -83,8 +83,9 @@ URL](#name-and-url)). On these pages,
   of the project's agents, and a page for each —
   [`/sessions`](/docs/workspace/sessions) — its runs grouped by
   session, and a page for each — [`/users`](/docs/workspace/users) — by
-  the user they served — and `/alerts` and `/dashboards`, which say what each will show
-  until their pages are built, and `/api-keys`, `/connectors`, `/members`,
+  the user they served — [`/alerts`](/docs/workspace/alerts) — its alerts and
+  their incidents — and `/dashboards`, which says what it will show until its
+  page is built, and `/api-keys`, `/connectors`, `/members`,
   `/audit-log`, `/privacy` — the project's content mode and the
   [field inventory](/docs/api/field-inventory), every attribute Telmoni reads
   from a span and what becomes of it — and `/settings` under it.
@@ -166,9 +167,9 @@ Windows and Linux):
   the platform's GitHub repository, and sign out.
 - **Primary action (`c`)**: Triggers the primary action of the current page:
   **New project**, **Mint key**, **Invite member** (on a project's **Members**
-  page, **Add member**), or **Export** on the organization's audit log; on the
-  hosted service's **Billing** page,
-  **Plans** or **Manage billing**.
+  page, **Add member**), **New alert** on a project's **Alerts** page, or
+  **Export** on the organization's audit log; on the hosted service's
+  **Billing** page, **Plans** or **Manage billing**.
 - **Next and previous (`j`, `k`), open (`o`)**: With a trace open over the
   [Traces](/docs/workspace/traces#a-trace) list, open the next row's trace or
   the previous one's; on a [session's page](/docs/workspace/sessions#a-session),
@@ -197,6 +198,11 @@ Windows and Linux):
   Letter-key shortcuts can be turned off on the
   [Accessibility](/docs/account/accessibility) page; the sheet then lists the
   `⌘` shortcuts alone.
+
+A panel over the whole page, such as a new alert or a trace at full size,
+holds off `c` and the sequences until it shuts, and the sheet and the hints
+below leave them out meanwhile; its own `j`, `k` and `o`, Search and the sheet
+still answer. A letter pressed on a form in a side panel is the form's own.
 
 Hover over a sidebar row, or over search, the bell, the agent or your account
 in the header, to see its shortcut. With letter-key shortcuts off, only the

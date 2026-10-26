@@ -6,6 +6,7 @@
     "traces",
     "sessions",
     "users",
+    "alerts",
     "members",
     "roles",
     "audit-log",

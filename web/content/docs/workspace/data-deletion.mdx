@@ -21,8 +21,9 @@ after typing the project's name
   sent is marked deleted, gone from every read within moments as the store
   applies the mark — an export still being written as the project went
   marked once it lands — and the nightly rotation removes them from disk; its
-  telemetry settings, its saved views and layouts, and the key its end-user
-  ids were hashed under go with them. Its connectors, their delivery history and
+  telemetry settings, its saved views and layouts, its alerts with their
+  incidents, the votes on them and its maintenance windows, and the key its
+  end-user ids were hashed under go with them. Its connectors, their delivery history and
   its activity feed are purged in the same request, just before its
   telemetry — the Slack app uninstalled right after from every workspace no
   other connection uses — and the console agent removes what it holds about
@@ -50,7 +51,7 @@ Only the **Owner** can, with a confirmation code sent to their address
   removes above; memberships and pending invitations; API keys; connectors
   and the notices queued for them; the audit log's exports; the console
   agent's conversations and search index; and telemetry's settings, saved
-  views and hashing keys. Usually within the hour. A part that cannot finish is
+  views, alerts and hashing keys. Usually within the hour. A part that cannot finish is
   retried every ten minutes until it does.
 - **What stays:** the audit log, which is append-only and outlives the
   organization; and copies already delivered
@@ -72,6 +73,10 @@ no organization that has other members
   15-minute grace.
 - **Rewritten:** feed notices and other people's agent answers that named
   you say "a former member" instead.
+- **Kept, naming nobody:** your votes on incidents, and your account's id on
+  the incidents you acknowledged or resolved and the maintenance windows you
+  set or ended on a project's [Alerts](/docs/workspace/alerts) page, which no
+  roster names once you are gone.
 
 ## Deleting smaller things
 

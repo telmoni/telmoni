@@ -50,7 +50,7 @@ as a **Member**.
 
 Inside each project, a project role decides what you can do with project
 resources: API keys, connectors, saved views of its traces and layouts of its
-sessions, and project audit events.
+sessions, its alerts, and project audit events.
 
 | Permission | Owner | Admin | Member |
 |---|---|---|---|
@@ -58,6 +58,7 @@ sessions, and project audit events.
 | Read the project's notices on its Overview, and mark them read for everyone on it | Yes | Yes | Yes |
 | Open the project's [saved views](/docs/workspace/traces#saved-views) of its traces and [saved layouts](/docs/workspace/sessions#keeping-a-layout) of its sessions | Yes | Yes | Yes |
 | Save, rename, and delete saved views and layouts, and set the layout the project opens in | Yes | Yes | No |
+| Make, edit, pause, mute, and delete the project's [alerts](/docs/workspace/alerts); acknowledge, resolve, and vote on its incidents | Yes | Yes | Yes |
 | View API keys (names and dates, never the raw key) | Yes | Yes | Yes |
 | Create, rotate, and revoke API keys | Yes | Yes | No |
 | View connectors and delivery logs | Yes | Yes | Yes |
@@ -80,12 +81,14 @@ sessions, and project audit events.
   trace list's views and the sessions' layouts, and sets the layout the
   project opens in; and reads the project audit log. Cannot change the project's content mode, or
   delete or transfer the project.
-- **Member**: Read-only access to project resources. Can inspect active
-  connectors, delivery logs, and API key metadata (name, creation date, last
-  used date), and open the project's saved views and layouts. Cannot view the project
-  audit log, and changes nothing but whether the project's notices are marked
-  read, which is the same for everyone on the project, and their own seat,
-  which they give up with **Leave** on the project's **Members** page.
+- **Member**: Read-only access to project resources but its alerts. Can
+  inspect active connectors, delivery logs, and API key metadata (name,
+  creation date, last used date), and open the project's saved views and
+  layouts. Cannot view the project audit log, and changes nothing but the
+  project's alerts and their incidents, as every role can; whether the
+  project's notices are marked read, which is the same for everyone on the
+  project; and their own seat, which they give up with **Leave** on the
+  project's **Members** page.
 
 ## What a refusal tells you
 

@@ -97,13 +97,15 @@ holding the **ingest** scope.
     span failed with the exception's class, never its message, and is raised
     again; a `KeyboardInterrupt` or `asyncio.CancelledError` marks it
     cancelled. `fail("TimeoutError")` and `cancel()` do the same by hand.
-    `run` raises `ValueError` for a blank agent name or a sample rate outside
-    its range. A token count is read from a number or its text, its fraction
-    cut, and of what Telmoni would refuse, these are left off with one
-    warning: a token count below 0 or past 64 bits, a tag whose key is not 1
-    to 64 characters or whose value is past 256, and the tags past the first
-    32 kept; an empty user, session, provider or response model is left off
-    as unset. A name, model, provider, user, session, response model or error
+    `run` raises `ValueError` for a blank agent name, a sample rate outside
+    its range or a cap that is no cap ([the guard](#the-guard)). A token
+    count is read from a number or its text, its fraction cut, and `Usage`'s
+    `cost` is what the call cost in US dollars, where your provider reports
+    it; of what Telmoni would refuse, these are left off with one warning: a
+    token count below 0 or past 64 bits, a cost below 0, not finite, or text,
+    a tag whose key is not 1 to 64 characters or whose value is past 256, and
+    the tags past the first 32 kept; an empty user, session, provider or
+    response model is left off as unset. A name, model, provider, user, session, response model or error
     type that is no string goes as its text with one warning, as does a tag
     that is no string, finite number or bool; an exception or an
     exception's class handed to `fail()` goes as the class's name, never its
@@ -149,13 +151,15 @@ holding the **ingest** scope.
     marks it cancelled. `fail('TimeoutError')` and `cancel()` do the same by
     hand, and `wrap` turns a function into one that opens a run per call.
     `run` throws a `TypeError` for a blank agent name and a `RangeError` for
-    a sample rate that is no number or outside its range. A token count is
-    read from a number, a bigint or a decimal numeral's text, its fraction
-    cut, and of what Telmoni would refuse, these are left off with one
-    warning: a token count below 0 or past 64 bits, a tag whose key is not 1
-    to 64 characters or whose value is past 256, and the tags past the first
-    32 kept; an empty user, session, provider or response model is
-    left off as unset. A name, model, provider, user, session, response model
+    a sample rate that is no number or outside its range, or a cap that is
+    no cap ([the guard](#the-guard)). A token count is read from a number, a
+    bigint or a decimal numeral's text, its fraction cut, and the usage's
+    `cost` is what the call cost in US dollars, where your provider reports
+    it; of what Telmoni would refuse, these are left off with one warning: a
+    token count below 0 or past 64 bits, a cost below 0, not finite, or no
+    number, a tag whose key is not 1 to 64 characters or whose value is past
+    256, and the tags past the first 32 kept; an empty user, session,
+    provider or response model is left off as unset. A name, model, provider, user, session, response model
     or error type that is no string goes as its text with one warning, as does
     a tag that is no string, finite number or boolean; an error, or a class,
     handed to `fail()` goes as its class's name, never its message. Past
@@ -211,8 +215,10 @@ holding the **ingest** scope.
     never panics: a `Client` not from `New`, the nil a failed `New` returns
     among them, sends nothing; a blank agent name opens a run that does
     nothing, and of what Telmoni would refuse, these are left off with one
-    warning — a token count below 0, a tag whose key is not 1 to 64 characters
-    or whose value is past 256, and the tags past the first 32 kept, by key.
+    warning — a token count below 0, a `Usage`'s `Cost` below 0 or not finite
+    (a `*float64`, nil where your provider reports none), a tag whose key is
+    not 1 to 64 characters or whose value is past 256, and the tags past the
+    first 32 kept, by key.
     Past Telmoni's caps, counted in characters, a name, the agent, a model, a
     provider, a response model or an error type is cut to its cap — a step's
     or a tool's name, and a model call's `<operation> <model>`, to 145, the
@@ -237,8 +243,8 @@ holding the **ingest** scope.
         },
     )?;
     let reply = {
-        let step = run.step("plan");
-        let call = step.model_call("gpt-4o-mini", ModelCallOptions { provider: Some("openai".into()), ..ModelCallOptions::default() });
+        let step = run.step("plan")?;
+        let call = step.model_call("gpt-4o-mini", ModelCallOptions { provider: Some("openai".into()), ..ModelCallOptions::default() })?;
         let reply = ask_the_model(question)?; // your provider's call
         call.answered(Reply {
             response_model: Some(reply.model.clone()),
@@ -247,7 +253,7 @@ holding the **ingest** scope.
         });
         reply
     };
-    let tool = run.tool_call("search", ToolCallOptions::default());
+    let tool = run.tool_call("search", ToolCallOptions::default())?;
     if search(&reply.query).is_err() {
         tool.fail("TimeoutError");
     }
@@ -257,12 +263,14 @@ holding the **ingest** scope.
     ```
 
     Each handle is a guard that ends its span when dropped or on `end()`.
-    `run` returns an error for a blank agent name or a sample rate outside
-    its range, and `record_run` for the cases
-    [below](#a-run-recorded-after-it-ended); nothing else in the SDK fails:
-    of what Telmoni would refuse, these are left off with one warning — a
-    token count below 0, a tag whose key is not 1 to 64 characters or whose
-    value is past 256, and the tags past the first 32 kept, by key — and an export
+    `run` returns an error for a blank agent name, a sample rate outside its
+    range or a cap that is no cap; `step`, `model_call` and `tool_call` once
+    the run reached a cap it was opened with ([the guard](#the-guard)); and
+    `record_run` for the cases [below](#a-run-recorded-after-it-ended).
+    Nothing else in the SDK fails: of what Telmoni would refuse, these are
+    left off with one warning — a token count below 0, a cost below 0 or not
+    finite, a tag whose key is not 1 to 64 characters or whose value is past
+    256, and the tags past the first 32 kept, by key — and an export
     that fails is warned about, never returned. Past Telmoni's caps, counted
     in characters, a name, the agent, a model, a provider, a response model or
     an error type is cut to its cap — a step's or a tool's name, and a model
@@ -270,11 +278,13 @@ holding the **ingest** scope.
     128 or a session past 200 is left off, since cut it would name another; a
     step named nothing goes as `step`, and a model call with no model is named
     by its operation alone; each with one warning. The closure forms `run_with`, `step_with`, `model_call_with` and
-    `tool_call_with` end the span when the closure returns, and their `try_`
-    forms mark an `Err` on the span with the error's type name before
-    returning it unchanged. `fail("TimeoutError")` and `cancel()` do the same
-    by hand, and `context()` or `attach()` make the run current for your own
-    spans.
+    `tool_call_with` end the span when the closure returns and return its
+    value, `step_with` and the calls' wrapped in a `Result` for the cap; their
+    `try_` forms mark an `Err` on the span with the error's type name before
+    returning it unchanged, and return a cap's refusal as that error type,
+    which takes one (`From<telmoni::Error>`). `fail("TimeoutError")` and
+    `cancel()` do the same by hand, and `context()` or `attach()` make the run
+    current for your own spans.
   </Tab>
 </Tabs>
 
@@ -538,7 +548,7 @@ where it was asked for, and the trace list shows one run, not one a service.
   <Tab value="Rust">
     ```rust
     // The orchestrator, inside a run.
-    let step = run.step("delegate");
+    let step = run.step("delegate")?;
     let mut headers: HashMap<String, String> = HashMap::new();
     telmoni.inject_from(&step.context(), &mut headers);
     // or, with the step attached or a future run with its context: telmoni.inject(&mut headers)
@@ -548,7 +558,7 @@ where it was asked for, and the trace list shows one run, not one a service.
     // The worker.
     let headers: HashMap<String, String> = request.headers_as_map();
     if let Some(run) = telmoni.extract(&headers) {
-        let step = run.step("work");
+        let step = run.step("work")?;
         // ...
     }
     ```
@@ -576,6 +586,141 @@ propagators are its own.
 
 ---
 
+## The guard
+
+A run opened with a cap is held to it in the agent's own process, with no
+call to Telmoni: `max_steps` caps its steps, and `max_spend`, in US dollars,
+what its model calls cost. Once the run reaches a cap, what it opens next is
+refused before it opens: a step past its step cap, and, once what it spent is
+its spend cap or more, any step, model call or tool call. A call's cost is
+known only once it answers, so a run can spend past its cap by the calls
+already open as it crossed: one, where it makes them one at a time.
+
+Each call is counted as Telmoni counts it: its cost as reported in the usage
+handed to `answered`; else its tokens at its price in the table each SDK
+release carries — LiteLLM's, the one Telmoni
+[prices a call by](/docs/api/ingest#what-a-call-cost), by its provider and the
+model it answered as, whole; else nothing. Prices of your own, handed to the
+client as `prices`, come before the table's, for a model it lacks or prices
+otherwise than you pay; the SDK alone holds them, so Telmoni's own reads, an
+alert on what each run spent among them, still price that call by the table.
+A call answered more than once, as a stream's counts arrive, counts as its
+span then holds it: each count and the cost as last given, Go's `Usage` giving
+its four counts each time. A call with neither a cost nor a price is never
+stopped on cost, and under a spend cap the SDK warns once of each such model.
+`spent` reads what a run's calls have cost so far, as the guard counts them.
+
+<Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
+  <Tab value="Python">
+    ```python
+    from telmoni import CapExceededError, Config, Price, Telmoni
+
+    telmoni = Telmoni(
+        Config(prices=[Price(provider="vllm", model="llama-3.1-70b", input=2e-7, output=6e-7)])
+    )
+
+    try:
+        with telmoni.run("support-bot", max_steps=20, max_spend=0.50) as run:
+            ...
+    except CapExceededError as stopped:
+        print(stopped.cap, stopped.limit, stopped.used)  # spend 0.5 0.5213
+    ```
+
+    `CapExceededError`, a `RuntimeError`, is raised where the step, model
+    call or tool call would open, naming the `cap` (`steps` or `spend`), its
+    `limit` and what the run had `used`; escaping the run, it marks the run
+    failed with its class. A cap that is not above 0 raises `ValueError`, as a
+    price that names no provider or model, or is no number from 0, does; a
+    cache price not given is the input price.
+  </Tab>
+  <Tab value="TypeScript">
+    ```ts
+    import { CapExceededError, Telmoni } from 'telmoni';
+
+    const telmoni = new Telmoni({
+      prices: [{ provider: 'vllm', model: 'llama-3.1-70b', input: 2e-7, output: 6e-7 }],
+    });
+
+    await telmoni.run('support-bot', { maxSteps: 20, maxSpend: 0.5 }, async (run) => {
+      // ...
+    }); // rejects with a CapExceededError once the run reached a cap
+    ```
+
+    `step`, `modelCall` and `toolCall` throw `CapExceededError` before their
+    callback runs, naming the `cap` (`steps` or `spend`), its `limit` and what
+    the run had `used`; escaping the run, it marks the run failed with its
+    class. A cap that is not above 0 throws a `RangeError`; a price that names
+    no provider or model throws a `TypeError`, and one that is no number from
+    0 a `RangeError`; a cache price not given is the input price.
+  </Tab>
+  <Tab value="Go">
+    ```go
+    client, err := telmoni.New(telmoni.Config{
+    	Prices: []telmoni.Price{{Provider: "vllm", Model: "llama-3.1-70b", Input: 2e-7, Output: 6e-7}},
+    })
+
+    ctx, run := client.Run(ctx, "support-bot", telmoni.RunOptions{MaxSteps: 20, MaxSpend: 0.50})
+    defer run.End()
+
+    callCtx, call := run.ModelCall(ctx, "llama-3.1-70b", telmoni.ModelCallOptions{Provider: "vllm"})
+    reply, err := askTheModel(callCtx, question) // fails at once past a cap
+    if err != nil {
+    	call.Fail(err)
+    } else {
+    	call.Answered(telmoni.Answer{
+    		Usage: &telmoni.Usage{InputTokens: reply.Usage.Input, OutputTokens: reply.Usage.Output},
+    	})
+    }
+    call.End()
+    var capped *telmoni.CapExceededError
+    if errors.As(context.Cause(callCtx), &capped) {
+    	run.Fail(capped)
+    }
+    ```
+
+    Go's openers return no error: past a cap, `Step`, `ModelCall` and
+    `ToolCall` open nothing and return a context already cancelled, its
+    `context.Cause` a `*CapExceededError` naming the `Cap`, its `Limit` and
+    what the run had `Used`, so a request made with it fails at once, as one
+    past its deadline does; `run.Err()` gives the last refusal too. A cap of
+    0 is none, and one below 0, or a spend that is no finite number, is none
+    with one warning. `New` returns an error for a price that names no
+    provider or model, or is no number from 0; a nil `CacheRead` or
+    `CacheWrite` is the input price.
+  </Tab>
+  <Tab value="Rust">
+    ```rust
+    use telmoni::{Config, Error, Price, RunOptions, Telmoni};
+
+    let telmoni = Telmoni::new(Config {
+        prices: vec![Price { provider: "vllm".into(), model: "llama-3.1-70b".into(), input: 2e-7, output: 6e-7, ..Price::default() }],
+        ..Config::from_env()
+    });
+
+    let run = telmoni.run("support-bot", RunOptions { max_steps: Some(20), max_spend: Some(0.50), ..RunOptions::default() })?;
+    match run.step("plan") {
+        Ok(step) => { /* ... */ }
+        Err(Error::CapExceeded { .. }) => { /* the run reached a cap: stop */ }
+        Err(other) => return Err(other.into()),
+    }
+    ```
+
+    `step`, `model_call` and `tool_call` return `Error::CapExceeded`, naming
+    the `cap` (`Cap::Steps` or `Cap::Spend`), its `limit` and what the run had
+    `used`, and open nothing; `run` returns `Error::MaxSteps` for a step cap of
+    0 and `Error::MaxSpend` for a spend cap that is no finite number above 0.
+    A price that names no provider or model, or is no number from 0, is left
+    out with one warning, since a client cannot fail; a cache price of `None`
+    is the input price.
+  </Tab>
+</Tabs>
+
+A run [continued in another service](#a-run-across-services) carries no cap
+there, and counts there only what its calls in that process cost; a
+[recorded run](#a-run-recorded-after-it-ended) has ended, and no cap holds it.
+
+---
+
 ## What a run sends
 
 A run is a span of its own, named `invoke_agent <agent>`, inside your current
@@ -597,7 +742,8 @@ the `environment` and `release` of every span and the trace list
 `chat <model>` (or the operation you gave) with the model asked for, the
 model that answered, the provider and the token counts under the GenAI
 conventions' names, each a whole number from 0, another left off the call
-with one warning; a tool call is `execute_tool <name>`. The exception's class
+with one warning, and the cost you report as Langfuse's `gen_ai.usage.cost`,
+a number of US dollars from 0; a tool call is `execute_tool <name>`. The exception's class
 alone marks a failure, as `error.type`; no message, stack trace or event is
 ever sent. The [ingest page](/docs/api/ingest) lists every attribute and what
 the server keeps of each.
@@ -755,7 +901,8 @@ log, a warning or an error.
 
 `environment` and `release` name the deployment every span is sent from, as
 the resource's `deployment.environment.name` and `service.version`; a blank
-one is unset, and nothing is sent for one unset.
+one is unset, and nothing is sent for one unset. `prices` hands
+[the guard](#the-guard) prices of your own, and nothing of them is sent.
 
 Each SDK keeps the API key out of the configuration's printed form: Rust's
 `Debug` shows `<redacted>` in its place and serialization skips it; Python

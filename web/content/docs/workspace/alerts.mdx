@@ -1,0 +1,133 @@
+---
+title: "Alerts"
+description: "A project's Alerts page: the week's precision, its incidents, open ones first, acknowledged or resolved by any member, and every alert — a measure of the project's runs, steps or calls over a window against its thresholds — with where its notices go and its maintenance windows, made, edited, paused, muted and deleted there."
+---
+
+An **alert** watches a measure of a project's spans over the last hour, day
+or week against an alert threshold and, if you give one, a warning threshold
+met first: the share of runs that failed, the p95 duration of model calls,
+the tokens they used, the most a run spent. It is evaluated every minute.
+When its value crosses a threshold it opens an **incident**, told in the
+project's feed and to the connectors the alert links; when the value comes
+back inside its thresholds the incident resolves, and that is told too. A
+project's **Alerts** page (`/{organization}/{project}/alerts`) holds both.
+Everything on it is metadata — names and numbers, never a prompt, a
+completion or a tool payload — and so is every notice.
+
+Any member of the project, whatever their role, makes, edits, pauses, mutes
+and deletes its alerts, and acknowledges, resolves and votes on its
+incidents.
+
+## Precision
+
+The page opens on the share of the votes on the last seven days' incidents
+that call them useful, and how many votes that is. Each notice of an
+incident links a page where every member marks it **Useful** or **Noise**,
+one vote each, changed by picking the other word; opening the link casts
+nothing, since a mail scanner or a chat's preview follows it too. An alert
+whose incidents are mostly noise wants another threshold, a longer window, or
+deleting: each alert shows its own share beside the others.
+
+## Incidents
+
+The project's incidents, those not resolved first, then the newest, 200 at
+most:
+
+| Column | What it is |
+|---|---|
+| Alert | The alert that opened it, a link to the alert below; how often it reopened; and the run its last notice showed, a link to the run's trace |
+| Severity | **Alert**, **Warning**, or **No data** where the alert asks to be told of a window holding no span |
+| Status | **Open**; **Acknowledged**, by whom and when; **Resolved** by a member, or **Recovered** where its alert came back inside its thresholds, and when |
+| Opened | When it opened |
+| Told | Where its notices went: the feed, then each connector they were sent to; one the project has removed since says so |
+
+**Acknowledge** takes an open incident, and its reminders stop. **Resolve**
+ends it by hand, told to its alert's connectors as a recovery is; an alert
+still past its threshold opens no new incident until it recovers and breaches
+again. **Vote** opens the incident's page, where you mark it useful or noise.
+
+An alert holds one incident at a time. A breach within an hour of its
+recovery reopens it rather than opening another, so an alert that flaps
+opens one incident an hour at most, and a rise from warning to alert follows
+the incident it is in. What each notice says is on
+[Notifications](/docs/integrations/notifications#notice-types).
+
+## Alerts
+
+Every alert of the project, by name, each with where it stands, its controls,
+and its metric in its notices' own words — "The p95 duration of model calls
+over the last hour" — then:
+
+| Line | What it says |
+|---|---|
+| Now | Its last value and when it was read, and since when it has stood at its severity; **Not evaluated** until its first evaluation, within a minute of being made or resumed; saved over, that it is read again within a minute, its severity standing until then; **Paused**, and since when |
+| Thresholds | The alert threshold, and the warning one, as its operator compares them |
+| Filters | The values its spans must carry, field by field; **None** reads every span of its kind |
+| No data | What a window holding no span means |
+| Notified again | How often a breach held is told again |
+| Connectors | Each connector its notices go to, whether it hears warnings and alerts or alerts alone, and in which hours. One that hears nothing says so: one that **Needs attention** or is **Disconnected** on the Connectors page, and one whose last five deliveries of this alert failed, which hears no more of it until **Hear again** turns it back on |
+| Maintenance | The windows that mute it, its own and every alert's, in force or still to come, each with **End** |
+| Precision | The share of the votes on its own incidents of the last seven days that call them useful |
+
+**Edit** opens the alert's form filled in. **Pause** stops its evaluation
+until a member **Resume**s it: a paused alert opens and tells nothing, and an
+incident it holds open stays open until a member resolves it, or the alert,
+resumed, recovers. **Mute** opens a
+[maintenance window](#maintenance-windows) for it. **Delete** removes it at
+once, with its incidents, the votes on them and its maintenance windows.
+
+On a deployment that sells plans, such as the hosted service, an
+organization holds as many alerts across its projects as its plan does,
+paused ones counted, and its alerts make as many deliveries a UTC day as its
+plan holds, the feed never counted. An alert past the number is refused when
+it is made. Where the organization holds more than its plan does, the oldest
+alerts keep running and the newest wait, **Paused by the plan**, until there
+is room, and resuming one is refused while there is none. Once the day's
+deliveries are made, its incidents reach the feed alone until midnight UTC,
+and the organization's Owner and Admins are told once that day. A
+self-hosted deployment holds no number.
+
+## Making an alert
+
+**New alert** opens the form over the page.
+
+| Field | What it takes |
+|---|---|
+| Name | 1 to 60 characters; a project holds one alert of a name, whatever its case |
+| Reads | Runs, steps, model calls or tool calls |
+| Measure | **Count**, how many there were; **Failures**, those that ended in error; **Duration**; **Tokens**, on model calls; **Cost**, on runs: what each run's model calls cost, read from the calls as they land, so an alert on it tells while the run is still going ([what a call cost](/docs/api/ingest#what-a-call-cost)) |
+| Folded as | How the measure is read over the window: a count; failures as how many or as the share that failed; a duration's p95, p99, p90, p50, average or total; tokens' average or total; and a run's cost as the most a run spent — a cost cap — the average a run spent, or what the runs spent in all |
+| Window | The last hour, day or week |
+| Filters | Agent, environment and release on every kind; model and provider on model calls, and on a run's cost, read from its calls; tool on tool calls; and the status a span ended with, on all but a cost. Separate a field's values with commas, and put a value that holds one between double quotes: a span passes a field it carries any of the values of, and passes the alert when it passes every field filled |
+| Compared as | How the value is compared: above, at or above, below, at or below, equal to, or not equal to |
+| Alert when | The alert threshold under that comparison: in milliseconds for a duration, as a percentage for the share failed, and in US dollars for a cost |
+| Warn when | A warning threshold under the same comparison, met before the alert's: below it for above, above it for below. Optional, and none for equal to or not equal to |
+| No data | A window holding no span is read as 0; keeps the alert's last severity; is shown as **No data**; or is shown so and told once a whole window has passed with none |
+| Notify again | Every 1 to 10,080 minutes while an incident holds at one severity and nobody has acknowledged it; empty for never |
+| Connectors | The project's Slack channels and webhooks it tells, up to 20, each hearing its warnings and alerts or its alerts alone, at any hour or in set hours: days, a start and an end, at an offset from UTC that stays put, so a change of the clocks moves the hours by its own. An end before the start runs past midnight; the same time at both ends is the whole day |
+
+An alert that links no connector tells the project's feed alone, and a
+webhook hears an alert's incidents only if it takes `incident_opened` and
+`incident_resolved` ([choosing events](/docs/integrations/webhooks#choosing-events)).
+Saving an alert over forgets its last value, which answered another
+question, and it is evaluated again within a minute.
+
+## Maintenance windows
+
+**Mute** on an alert, or **Mute every alert** at the top of the page, opens a
+window over it: from now or a time you set, for 30 minutes up to 30 days.
+While it holds, the alert is evaluated as ever and its incidents open and
+resolve in the feed, but no connector hears them. **End** ends one
+early, and one still to come before it starts. A window over every alert
+stands at the head of the alerts, and with each alert. Every window is kept
+after it ends, the record of who muted what, and when.
+
+## From a trace
+
+A notice that opens, reopens or raises an incident names the run that best
+shows it — the latest that failed, the slowest call, the one with the most
+tokens or the one that spent the most, as the alert measures, and the latest
+for a count — and links its trace. That trace's page links back, beside its
+tags, to each incident whose notices showed it, at its row of the Alerts page,
+even an incident too old for the page's 200. An incident keeps the last twenty
+runs its notices showed, so a run shown before those links back no more.

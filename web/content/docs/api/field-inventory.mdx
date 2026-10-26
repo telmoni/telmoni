@@ -17,8 +17,9 @@ at commit `6fd0d763a092db245a54104fc1124031eb3c51d2`, pinned on purpose: the
 conventions have tagged no release and rename what Telmoni sums, so a rename
 is a change to this page and to ingest, never to what is stored. What the
 conventions do not name — runs, tags, sample rates — is Telmoni's own,
-under `telmoni.*`; the user a span was for is `user.id`, from OpenTelemetry's
-general registry.
+under `telmoni.*`, but for a call's cost, read under Langfuse's name for it,
+`gen_ai.usage.cost`, which exporters already send; the user a span was for is
+`user.id`, from OpenTelemetry's general registry.
 
 The list is held to the code: a test in the server fails when ingest reads a
 name this page lacks, or this page lists one ingest does not read. The console
@@ -80,6 +81,7 @@ commas. It is kept as any tag is.
 | `gen_ai.usage.output_tokens` | a model call | the column `output_tokens` | any | a whole number, 0 or more: every output token, reasoning among them |
 | `gen_ai.usage.cache_read.input_tokens` | a model call | the column `cache_read_input_tokens` | any | a whole number, 0 or more |
 | `gen_ai.usage.cache_write.input_tokens` | a model call | the column `cache_write_input_tokens` | any | a whole number, 0 or more |
+| `gen_ai.usage.cost` | a model call | the column `cost` | any | a number, 0 or more: what the call cost in US dollars, as reported; a call without one is [priced by its tokens](/docs/api/ingest#what-a-call-cost) |
 | `gen_ai.conversation.id` | any span | the column `session_id` | any | 1 to 200 characters, kept as sent |
 | `deployment.environment.name` | the resource | the column `environment`, on every span of the export | any | up to 128 characters, as sent: `production`, `staging`; longer, read as none |
 | `service.version` | the resource | the column `release`, on every span of the export | any | up to 128 characters, as sent: a version or a commit; longer, read as none |

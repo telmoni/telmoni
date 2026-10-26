@@ -140,7 +140,9 @@ tab instead. The trace's own page shows the same, with the page's room.
 Its first line sums the run: its status, when it started, how long it ran, its
 model calls' tokens — hover for the split — its session, a link to
 [its page](/docs/workspace/sessions#a-session), its user, a link to the runs
-that share it, and its tags.
+that share it, and its tags; and on the trace's own page, each incident whose
+notices showed the run, among the last twenty each keeps, a link to it on the
+project's [Alerts](/docs/workspace/alerts#from-a-trace) page.
 
 Below it, the run's spans stand as the tree they ran in, each under the span
 it names as its parent: its kind, its name, how long it ran, a model call's
@@ -157,7 +159,8 @@ Beside the tree stands the span you choose, the run's own first: its kind, its
 status and the error's type, its model and provider, the environment and
 release it was sent from, the tool it called — the model, the environment,
 the release and the tool each a link to the list narrowed to them — its
-tokens, input, output and cached, when it started and ended to the
+tokens, input, output and cached, the cost it reported, in US dollars, where
+it reported one, when it started and ended to the
 millisecond, how long it ran, when it was received, and its ids. The run's own span adds the
 run's steps, calls and tokens, its user, session and tags, and its sample
 rate. **Attributes** lists what else was kept with the
