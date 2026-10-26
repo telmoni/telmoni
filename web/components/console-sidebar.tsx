@@ -14,6 +14,7 @@ import {
 } from "@/lib/console-nav";
 import { resolveReturnUrl } from "@/lib/console-trail";
 import { sequenceHint } from "@/lib/keys";
+import { usePageCovered } from "@/lib/page-cover";
 import { PRODUCT_NAME } from "@/lib/site";
 import { useFlags } from "@/lib/store";
 import { useLetterKeys } from "@/lib/use-accessibility";
@@ -40,8 +41,11 @@ function NavRow({
   // navigates nothing here, so it leaves the drawer open.
   const { closeOnMobile } = useSidebar();
   const letterKeys = useLetterKeys();
-  // Its `g` sequence under the pointer, while letter keys work at all.
-  const hint = letterKeys && item.key ? `${item.title} (${sequenceHint(item.key)})` : undefined;
+  const covered = usePageCovered();
+  // Its `g` sequence under the pointer, while letter keys work and no panel
+  // over the page holds them off.
+  const hint =
+    letterKeys && !covered && item.key ? `${item.title} (${sequenceHint(item.key)})` : undefined;
   // No title is written here: the tab's title is each page's `metadata`, which
   // Next sets as the page lands. Written on the click as well, it went up
   // before the page came, and wrong on the overviews: the row says Overview

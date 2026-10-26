@@ -12,6 +12,7 @@ import {
   PROVIDERS,
   PROVIDER_LABEL,
   connectStartPath,
+  connectionName,
   isOAuthProvider,
   isProvider,
   type Provider,
@@ -176,7 +177,7 @@ function Tile({
               <div className="flex items-center justify-between gap-3">
                 <span className="flex min-w-0 items-baseline gap-2">
                   <span className="min-w-0 truncate text-sm font-medium">
-                    {describe(connection)}
+                    {connectionName(connection)}
                   </span>
                   {/* Two endpoints on one host are told apart by the start
                       of the URL's fingerprint — never by the URL. */}
@@ -216,7 +217,7 @@ function Tile({
                 <DeliveriesButton
                   projectId={projectId}
                   connectionId={connection.id}
-                  label={describe(connection)}
+                  label={connectionName(connection)}
                   // A webhook's receiver deduplicates a resend on its delivery
                   // id; a chat channel would show the message twice.
                   canResend={canManage && connection.provider === "webhook"}
@@ -225,7 +226,7 @@ function Tile({
                   <ConnectionActions
                     projectId={projectId}
                     connection={connection}
-                    label={describe(connection)}
+                    label={connectionName(connection)}
                     reconnectHref={start}
                   />
                 )}
@@ -272,19 +273,6 @@ function Tile({
       )}
     </Card>
   );
-}
-
-// Where a connection points, in the vendor's own terms: `#alerts in Acme`
-// for Slack, and the host alone for a webhook, whose path may carry the
-// customer's own token.
-function describe(connection: Connection): string {
-  if (connection.provider === "webhook") {
-    return connection.channel_name;
-  }
-  const channel = `#${connection.channel_name.replace(/^#/, "")}`;
-  return connection.external_workspace_name
-    ? `${channel} in ${connection.external_workspace_name}`
-    : channel;
 }
 
 // Two labels still fit on the row's one line; past that the count says as

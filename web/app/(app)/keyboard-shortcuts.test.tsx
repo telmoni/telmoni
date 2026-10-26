@@ -1,17 +1,19 @@
 // @vitest-environment jsdom
-import { fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const push = vi.fn();
+let mockSheetOpen = false;
+let mockAction: { label: string; run: () => void } | null = null;
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push }),
   usePathname: () => "/acme/web/traces",
 }));
 vi.mock("@/components/console-ui-context", () => ({
-  useConsoleUi: () => ({ shortcutsOpen: false, setShortcutsOpen: vi.fn(), openSearch: vi.fn() }),
+  useConsoleUi: () => ({ shortcutsOpen: mockSheetOpen, setShortcutsOpen: vi.fn(), openSearch: vi.fn() }),
 }));
-vi.mock("@/components/page-action", () => ({ usePagePrimaryAction: () => null }));
+vi.mock("@/components/page-action", () => ({ usePagePrimaryAction: () => mockAction }));
 vi.mock("@/lib/store", () => ({
   useActiveOrganization: () => ({ slug: "acme" }),
   useFlags: () => ({}),
@@ -19,6 +21,7 @@ vi.mock("@/lib/store", () => ({
 
 import { KeyboardShortcuts } from "@/components/keyboard-shortcuts";
 import { LETTER_KEYS_OFF_CLASS } from "@/lib/accessibility";
+import { setPageCovered } from "@/lib/page-cover";
 import { offerPageSteps } from "@/lib/use-page-steps";
 
 // `j` and `k` step through what a page offers — the trace list's peek, a
@@ -38,6 +41,9 @@ describe("KeyboardShortcuts - a page's steps", () => {
 
   afterEach(() => {
     takeBack();
+    setPageCovered(false);
+    mockSheetOpen = false;
+    mockAction = null;
     document.documentElement.classList.remove(LETTER_KEYS_OFF_CLASS);
   });
 
@@ -72,6 +78,48 @@ describe("KeyboardShortcuts - a page's steps", () => {
     fireEvent.keyDown(document.body, { key: "o" });
     expect(push).toHaveBeenCalledWith("/acme/web");
     expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  // ⚠ A panel over the page whole keeps its own steps and holds the rail's sequences off.
+  it("steps under a panel that covers the page whole, where g leads nowhere", () => {
+    setPageCovered(true);
+    render(<KeyboardShortcuts />);
+    fireEvent.keyDown(document.body, { key: "j" });
+    expect(next).toHaveBeenCalledTimes(1);
+    for (const key of ["g", "t", "g", "k"]) fireEvent.keyDown(document.body, { key });
+    expect(push).not.toHaveBeenCalled();
+    expect(previous).not.toHaveBeenCalled();
+  });
+
+  it("lists neither the sequences nor the page's action while a panel covers the page", () => {
+    mockSheetOpen = true;
+    mockAction = { label: "New alert", run: vi.fn() };
+    setPageCovered(true);
+    render(<KeyboardShortcuts />);
+    const sheet = screen.getByRole("dialog", { name: "Keyboard shortcuts" });
+    expect(within(sheet).getByText("Next trace")).toBeInTheDocument();
+    expect(within(sheet).getByText("Search")).toBeInTheDocument();
+    expect(within(sheet).queryByText("Traces")).toBeNull();
+    expect(within(sheet).queryByText("New alert")).toBeNull();
+
+    act(() => setPageCovered(false));
+    expect(within(sheet).getByText("Traces")).toBeInTheDocument();
+    expect(within(sheet).getByText("New alert")).toBeInTheDocument();
+  });
+
+  it("leaves a form in a panel its own keys", () => {
+    // As the side panel draws itself, over the page and not modal.
+    const panel = document.createElement("div");
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "false");
+    panel.innerHTML = '<form><button type="button">Error</button></form>';
+    document.body.append(panel);
+    render(<KeyboardShortcuts />);
+    const control = panel.querySelector("button")!;
+    for (const key of ["j", "g", "t"]) fireEvent.keyDown(control, { key });
+    panel.remove();
+    expect(next).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
   });
 
   it("does nothing on a page that offers no steps, in a field, or with letter keys off", () => {

@@ -6,6 +6,7 @@
 // owner or admin connects with a URL, in a dialog, and it never reaches the
 // handshake routes — which is why they are two lists.
 
+import type { Connection } from "@/lib/server/data";
 import { projectPath } from "@/lib/slug";
 
 export const OAUTH_PROVIDERS = ["slack"] as const;
@@ -26,6 +27,21 @@ export const PROVIDER_LABEL: Record<Provider, string> = {
   slack: "Slack",
   webhook: "Webhook",
 };
+
+/** Where a connection points, in the vendor's own terms: `#alerts in Acme`
+ *  for Slack, and the host alone for a webhook, whose path may carry the
+ *  customer's own token. */
+export function connectionName(
+  connection: Pick<Connection, "provider" | "channel_name" | "external_workspace_name">,
+): string {
+  if (connection.provider === "webhook") {
+    return connection.channel_name;
+  }
+  const channel = `#${connection.channel_name.replace(/^#/, "")}`;
+  return connection.external_workspace_name
+    ? `${channel} in ${connection.external_workspace_name}`
+    : channel;
+}
 
 // A project id as the console spells it, and as it may appear in a redirect
 // target this route builds: no separators a path could misread.

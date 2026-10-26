@@ -149,6 +149,7 @@ const SPAN = {
   output_tokens: 0,
   cache_read_input_tokens: 0,
   cache_write_input_tokens: 0,
+  cost: null,
   user_id: "9f86d081884c7d659a2feaa0c55ad015",
   session_id: "conv-1",
   environment: "production",

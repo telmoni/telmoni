@@ -16,11 +16,15 @@ export function Row({
   hint,
   children,
   danger,
+  keep,
 }: {
   label: ReactNode;
   hint?: ReactNode;
   children?: ReactNode;
   danger?: boolean;
+  /** The value keeps its width, a figure the hint wraps beside rather than
+   *  one broken over lines. */
+  keep?: boolean;
 }) {
   return (
     <div className="flex min-h-14 items-center justify-between gap-6 py-3">
@@ -29,7 +33,12 @@ export function Row({
         {hint ? <span className="text-muted-foreground">{hint}</span> : null}
       </div>
       {children !== undefined && (
-        <div className="flex min-w-0 items-center justify-end gap-2 text-right">
+        <div
+          className={cn(
+            "flex items-center justify-end gap-2 text-right",
+            keep ? "shrink-0 whitespace-nowrap" : "min-w-0",
+          )}
+        >
           {children}
         </div>
       )}

@@ -11,6 +11,7 @@ import {
   currentSort,
   downloadHref,
   fits,
+  formatCost,
   formatDuration,
   isTagPair,
   nextSort,
@@ -49,6 +50,7 @@ function span(over: Partial<TraceSpan> & Pick<TraceSpan, "span_id" | "kind">): T
     output_tokens: 0,
     cache_read_input_tokens: 0,
     cache_write_input_tokens: 0,
+    cost: null,
     user_id: "",
     session_id: "",
     environment: "",
@@ -343,6 +345,17 @@ describe("a saved view", () => {
 });
 
 describe("numbers into words", () => {
+  it("gives a cost to the cent from a dollar, and a fraction of one to three figures", () => {
+    expect(formatCost(1_234.5)).toBe("$1,234.50");
+    expect(formatCost(1)).toBe("$1.00");
+    expect(formatCost(0)).toBe("$0.00");
+    expect(formatCost(0.5)).toBe("$0.50");
+    expect(formatCost(0.0123)).toBe("$0.0123");
+    expect(formatCost(0.000045)).toBe("$0.000045");
+    expect(formatCost(0.123456)).toBe("$0.123");
+    expect(formatCost(0.9999)).toBe("$1.00");
+  });
+
   it("gives a duration in the unit a person reads it in", () => {
     expect(formatDuration(0)).toBe("0 ms");
     expect(formatDuration(340)).toBe("340 ms");

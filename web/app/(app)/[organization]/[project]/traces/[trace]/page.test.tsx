@@ -45,9 +45,13 @@ let mockProject: unknown;
 let mockTrace: unknown;
 let mockSetting: unknown;
 let mockLayouts: unknown;
+let mockIncidents: unknown[];
 const fetchProjectBySlug = vi.fn<(slug: string) => Promise<unknown>>(async () => mockProject);
 const fetchTrace = vi.fn<(projectId: string, runId: string) => Promise<unknown>>(
   async () => mockTrace,
+);
+const fetchRunIncidents = vi.fn<(projectId: string, runId: string) => Promise<unknown[]>>(
+  async () => mockIncidents,
 );
 
 vi.mock("@/lib/server/data", () => ({
@@ -57,6 +61,7 @@ vi.mock("@/lib/server/data", () => ({
   fetchTrace: (projectId: string, runId: string) => fetchTrace(projectId, runId),
   fetchSessionLayout: async () => mockSetting,
   fetchTraceLayouts: async () => mockLayouts,
+  fetchRunIncidents: (projectId: string, runId: string) => fetchRunIncidents(projectId, runId),
 }));
 
 import TracePage from "./page";
@@ -120,6 +125,7 @@ function span(over: Record<string, unknown>) {
     output_tokens: 0,
     cache_read_input_tokens: 0,
     cache_write_input_tokens: 0,
+    cost: null,
     user_id: "",
     session_id:"",
     environment: "",
@@ -189,6 +195,7 @@ beforeEach(() => {
   };
   mockProject = { id: "project_7bQx2mNv9BcK4dLp", slug: "web", name: "Web", role: Role.Member };
   mockTrace = { kind: "ok", trace: { run_id: RUN, spans: SPANS, truncated: false } };
+  mockIncidents = [];
 });
 
 describe("TracePage", () => {
@@ -250,6 +257,17 @@ describe("TracePage", () => {
     expect(within(run).getByText("(1,200 in, 300 out)")).toBeInTheDocument();
     expect(within(run).getAllByText("team=search").length).toBeGreaterThan(0);
     expect(within(run).getByText(RUN)).toBeInTheDocument();
+  });
+
+  it("links the incidents whose notices showed the run, each at its row of the alerts page", async () => {
+    const INCIDENT = "7a1c0e52-0000-4000-8000-000000000002";
+    mockIncidents = [{ id: INCIDENT, rule_name: "Failing trips" }];
+    render(await TracePage({ params: PARAMS }));
+    expect(fetchRunIncidents).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", RUN);
+    expect(screen.getByRole("link", { name: "incident: Failing trips" })).toHaveAttribute(
+      "href",
+      `/acme/web/alerts?incident=${INCIDENT}#incident-${INCIDENT}`,
+    );
   });
 
   it("reads the span chosen in the tree: its model and tokens, and how it failed", async () => {

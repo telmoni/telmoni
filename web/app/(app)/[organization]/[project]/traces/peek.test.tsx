@@ -45,6 +45,7 @@ function trace(run: string) {
         output_tokens: 0,
         cache_read_input_tokens: 0,
         cache_write_input_tokens: 0,
+        cost: null,
         user_id: "",
         session_id: "",
         environment: "",

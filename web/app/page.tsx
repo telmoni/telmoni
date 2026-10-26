@@ -61,7 +61,7 @@ type Pointer = { label: string; href: string };
 // Nothing is named here as running before it is built.
 const WHAT = {
   title: "What is Telmoni?",
-  lead: "An open source, privacy-first telemetry and monitoring platform for AI agents: SDKs in four languages record an agent's runs, ingest keeps them as metadata, and a console reads them as traces, sessions and users.",
+  lead: "An open source, privacy-first telemetry and monitoring platform for AI agents: SDKs in four languages record an agent's runs, ingest keeps them as metadata, and a console reads them as traces, sessions and users and alerts on them.",
   points: [
     {
       title: "Traces",
@@ -70,6 +70,14 @@ const WHAT = {
     {
       title: "Sessions and users",
       body: "Runs grouped by conversation and by the end user they served, under ids hashed with your project's own key.",
+    },
+    {
+      title: "Alerts",
+      body: "Failures, latency, tokens or what a run spends, over an hour, a day or a week against an alert threshold and an optional warning one; each incident told to the feed, Slack and webhooks, and acknowledged, resolved or voted on in the console.",
+    },
+    {
+      title: "Cost and caps",
+      body: "What each model call cost, as its provider reports it, and a guard in the SDKs that stops a run at the caps on its steps and spend you set, each call priced in your own process when it reports no cost.",
     },
     {
       title: "Notifications",
@@ -88,7 +96,7 @@ const WHAT = {
       body: "One Rust binary and one console, Apache-2.0, on Docker Compose or Kubernetes; you bring the identity provider, the mail transport and the model.",
     },
   ],
-  next: "Next, built in the open: alerts over a window with a warning and an alert threshold, to Slack, webhooks and PagerDuty; what each call cost; and content an owner chooses to keep.",
+  next: "Next, built in the open: each organization's open incidents on its Overview, and content an owner chooses to keep.",
   link: { label: "Read the docs", href: DOCS_URL },
 } as const;
 
@@ -139,7 +147,7 @@ const FAQ = [
   {
     question: "What runs today?",
     answer:
-      "The foundation — organizations and roles, API keys, the audit log, notifications, the console agent and the CLI — and the first of the telemetry: the SDKs record an agent's runs, ingest keeps them as metadata, and the console reads them as traces, sessions and users. Next: alert rules and PagerDuty, what each call cost, and content an owner chooses to keep.",
+      "The foundation — organizations and roles, API keys, the audit log, notifications, the console agent and the CLI — and the first of the telemetry: the SDKs record an agent's runs and the cost each call reports, and stop a run at the caps you set, ingest keeps them as metadata, and the console reads them as traces, sessions and users and alerts on them, to Slack and webhooks. Next: an organization's open incidents on its Overview, and content an owner chooses to keep.",
   },
   {
     question: "What does it store?",
@@ -204,7 +212,7 @@ export default async function SplashPage() {
 
         {/* The product shot — a recording of the console — is still to be
             taken; its frame holds the place and says so. */}
-        <div className="dots flex aspect-[16/9] w-full items-center justify-center border-b border-border">
+        <div className="dots flex aspect-video w-full items-center justify-center border-b border-border">
           <p className="flex items-center gap-3 border border-dashed border-border bg-background px-5 py-4 text-sm text-muted-foreground">
             <Play aria-hidden="true" className="size-4" />
             A recording of the console, coming soon
@@ -266,7 +274,7 @@ export default async function SplashPage() {
                   />
                   <span className="text-foreground">{entry.question}</span>
                 </summary>
-                <p className={`max-w-[80ch] pb-4 pl-[30px] ${BODY}`}>{entry.answer}</p>
+                <p className={`max-w-[80ch] pb-4 pl-7.5 ${BODY}`}>{entry.answer}</p>
               </details>
             ))}
           </div>

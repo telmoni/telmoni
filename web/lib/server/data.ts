@@ -73,8 +73,23 @@ export type { ContentModeSetting } from "./entities/content-mode";
 export { fetchFieldInventory } from "./entities/field-inventory";
 export type { FieldInventory } from "./entities/field-inventory";
 
-export { fetchIncident } from "./entities/incidents";
-export type { IncidentAccess, IncidentVotes } from "./entities/incidents";
+export {
+  INCIDENTS_MAX,
+  fetchAlerts,
+  fetchIncident,
+  fetchRunIncidents,
+} from "./entities/alerts";
+export type {
+  Alert,
+  AlertsAccess,
+  Hours,
+  Incident,
+  IncidentAccess,
+  IncidentVotes,
+  Mute,
+  Precision,
+  RuleFilters,
+} from "./entities/alerts";
 
 export {
   fetchTrace,

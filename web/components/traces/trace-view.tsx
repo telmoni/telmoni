@@ -42,7 +42,9 @@ import {
   visibleTree,
   type LayoutOptions,
 } from "@/lib/layout";
+import { incidentHref } from "@/lib/alerts";
 import { windowReaching } from "@/lib/list-query";
+import type { Incident } from "@/lib/server/entities/alerts";
 import type { TraceDetail, TraceSpan } from "@/lib/server/entities/traces";
 import { sessionHref } from "@/lib/sessions";
 import {
@@ -59,6 +61,7 @@ import {
 import {
   KIND_LABEL,
   STATUS_LABEL,
+  formatCost,
   formatCount,
   formatDuration,
   shortId,
@@ -159,17 +162,20 @@ function useWindowReaching(iso: string): number | undefined {
 }
 
 /** The trace summed on one line under its name: how it ended, when it began,
- *  how long it ran, its tokens, and the session, the user and the tags it
- *  carried. Drawn again only for another trace (`memo`): the peek's edge,
- *  dragged, draws the panel around it at every move. */
+ *  how long it ran, its tokens, the session, the user and the tags it
+ *  carried, and on its page the incidents whose notices showed it. Drawn
+ *  again only for another trace (`memo`): the peek's edge, dragged, draws the
+ *  panel around it at every move. */
 export const TraceMeta = memo(function TraceMeta({
   trace,
   organization,
   slug,
+  incidents = [],
 }: {
   trace: TraceDetail;
   organization: string;
   slug: string;
+  incidents?: readonly Pick<Incident, "id" | "rule_name">[];
 }) {
   const summary = useMemo(() => summarizeTrace(trace.spans), [trace.spans]);
   const { run, root } = summary;
@@ -212,6 +218,15 @@ export const TraceMeta = memo(function TraceMeta({
         <Badge key={key} variant="secondary" className="text-xs font-normal">
           {key}={value}
         </Badge>
+      ))}
+      {incidents.map((incident) => (
+        <MetaLink
+          key={incident.id}
+          href={incidentHref(organization, slug, incident.id)}
+          title={`The incident of ${incident.rule_name} whose notice showed this run`}
+        >
+          incident: {incident.rule_name}
+        </MetaLink>
       ))}
     </div>
   );
@@ -627,8 +642,8 @@ const SpanRow = memo(function SpanRow({
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)] gap-3 border-b border-border py-2 last:border-b-0">
-      <dt className="min-w-0 break-words text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 break-words">{children}</dd>
+      <dt className="min-w-0 wrap-break-word text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 wrap-break-word">{children}</dd>
     </div>
   );
 }
@@ -807,6 +822,7 @@ function SpanDetail({
                     <Field label="Cache write">{formatCount(span.cache_write_input_tokens)}</Field>
                   </>
                 )}
+                {span.cost !== null && <Field label="Cost">{formatCost(span.cost)}</Field>}
                 <Field label="Started">
                   <LocalTime iso={span.started_at} mode="precise" />
                 </Field>

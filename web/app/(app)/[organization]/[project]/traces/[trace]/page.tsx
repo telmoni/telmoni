@@ -13,6 +13,7 @@ import { administersProject } from "@/lib/project-role";
 import {
   activeOrganization,
   fetchProjectBySlug,
+  fetchRunIncidents,
   fetchSessionLayout,
   fetchTrace,
   fetchTraceLayouts,
@@ -40,10 +41,11 @@ export default async function TracePage({
   if (!gate || !project) return <ServiceUnavailable />;
 
   const list = tracesHref(organization, slug, {});
-  const [access, setting, layouts] = await Promise.all([
+  const [access, setting, layouts, incidents] = await Promise.all([
     fetchTrace(project.id, runId),
     fetchSessionLayout(project.id),
     fetchTraceLayouts(project.id),
+    fetchRunIncidents(project.id, runId),
   ]);
   if (access.kind === "unavailable") return <ServiceUnavailable />;
   if (access.kind === "forbidden") {
@@ -97,7 +99,7 @@ export default async function TracePage({
           narrow window takes the panes' room rather than the page's. */}
       <Card className="h-[calc(100svh-10rem)] min-h-[28rem] gap-0 overflow-hidden p-0">
         <div className="shrink-0 border-b border-border p-3.5">
-          <TraceMeta trace={trace} organization={organization} slug={slug} />
+          <TraceMeta trace={trace} organization={organization} slug={slug} incidents={incidents} />
         </div>
         <TraceLayoutBody {...page} trace={trace} />
       </Card>

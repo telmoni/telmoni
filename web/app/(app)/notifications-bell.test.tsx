@@ -23,6 +23,7 @@ vi.mock("next/navigation", async (importOriginal) => ({
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 
+import { setPageCovered } from "@/lib/page-cover";
 import { StoreProvider } from "@/lib/store/provider";
 
 import { NotificationsBell } from "@/components/notifications-bell";
@@ -112,5 +113,21 @@ describe("NotificationsBell: a seat given", () => {
     expect(screen.queryByRole("menu"), "the menu stayed open over the way out").toBeNull();
     expect(order).toEqual(["marked", "led away"]);
     expect(push).toHaveBeenCalledWith("/acme/project_support");
+  });
+});
+
+describe("NotificationsBell: its key", () => {
+  // ⚠ A hint names no key a panel over the page holds off.
+  it("names its g sequence, unless a panel covers the page", () => {
+    render(
+      <StoreProvider user={null} flags={{}} roles={{}} projects={[]} givenSeats={[]}>
+        <NotificationsBell />
+      </StoreProvider>,
+    );
+    const bell = screen.getByTestId("notifications-bell");
+    expect(bell).toHaveAttribute("title", expect.stringMatching(/^Notifications \(.+\)$/));
+    act(() => setPageCovered(true));
+    expect(bell).toHaveAttribute("title", "Notifications");
+    act(() => setPageCovered(false));
   });
 });

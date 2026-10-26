@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { usePagePrimaryAction } from "@/components/page-action";
+import { pageCovered, usePageCovered } from "@/lib/page-cover";
 import { useActiveOrganization, useFlags } from "@/lib/store";
 import { letterKeysOn, useLetterKeys } from "@/lib/use-accessibility";
 import { pageSteps, usePageSteps } from "@/lib/use-page-steps";
@@ -84,9 +85,11 @@ export function KeyboardShortcuts() {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
       const target = e.target instanceof HTMLElement ? e.target : null;
+      // A form in a panel owns its keys too: a letter pressed on its switches
+      // is its own, and its draft stays where it is.
       if (
         target?.closest(
-          'input, textarea, select, [contenteditable="true"], [role="combobox"], [role="listbox"]',
+          'input, textarea, select, [contenteditable="true"], [role="combobox"], [role="listbox"], [role="dialog"] form',
         )
       )
         return;
@@ -102,6 +105,9 @@ export function KeyboardShortcuts() {
 
       if (pendingG.current) {
         clearPending();
+        // A panel over the page whole holds the rail's sequences off, as it
+        // does the page's action: the key after `g` goes nowhere.
+        if (pageCovered()) return;
         const href = resolveSequence(
           k,
           placeRef.current.pathname,
@@ -158,9 +164,10 @@ export function KeyboardShortcuts() {
 
   const q = filter.trim().toLowerCase();
   const modifier = isMac ? "\u2318" : "Ctrl";
+  const covered = usePageCovered();
   // The rail you stand in, straight from the path rather than the ref, since
   // the sheet re-renders: it lists exactly the rows a sequence reaches here.
-  const rows = letterKeys
+  const rows = letterKeys && !covered
     ? goSequences(pathname, organization, flags).filter((s) => s.label.toLowerCase().includes(q))
     : [];
   // One row per thing you can do, with every chord that does it, so Search is
@@ -168,7 +175,7 @@ export function KeyboardShortcuts() {
   // With letter keys off, only the chords held with a modifier are listed:
   // the sheet shows what works where you are, never a key that does nothing.
   const extras = [
-    ...(pageAction && letterKeys
+    ...(pageAction && letterKeys && !covered
       ? [{ label: pageAction.label, chords: [[PAGE_ACTION_KEY.toUpperCase()]] }]
       : []),
     ...(steps && letterKeys

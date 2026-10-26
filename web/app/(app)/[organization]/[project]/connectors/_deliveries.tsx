@@ -239,11 +239,11 @@ function DeliveryRow({
         )}
       </p>
       {entry.status !== "delivered" && entry.last_error && (
-        <p className="text-xs wrap-break-words text-destructive">{entry.last_error}</p>
+        <p className="text-xs wrap-break-word text-destructive">{entry.last_error}</p>
       )}
       <details className="text-xs">
         <summary className="w-fit cursor-pointer text-muted-foreground">Details</summary>
-        <pre className="mt-2 max-h-48 overflow-auto rounded-menu bg-muted p-2 font-mono text-xs whitespace-pre-wrap wrap-break-words">
+        <pre className="mt-2 max-h-48 overflow-auto rounded-menu bg-muted p-2 font-mono text-xs whitespace-pre-wrap wrap-break-word">
           {entry.body}
         </pre>
         {entry.attempts.length === 0 ? (
@@ -291,7 +291,7 @@ function AttemptRow({ attempt }: { attempt: DeliveryAttempt }) {
         {attempt.duration_ms} ms
       </span>
       {attempt.error && (
-        <span className="wrap-break-words text-muted-foreground">{attempt.error}</span>
+        <span className="wrap-break-word text-muted-foreground">{attempt.error}</span>
       )}
     </li>
   );

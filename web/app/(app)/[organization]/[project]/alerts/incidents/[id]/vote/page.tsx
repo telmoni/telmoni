@@ -5,6 +5,7 @@ import { LocalTime } from "@/components/local-time";
 import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { Card } from "@/components/ui/card";
+import { SEVERITY_LABEL, STATUS_LABEL } from "@/lib/alerts";
 import { ownerContact } from "@/lib/identity";
 import {
   activeOrganization,
@@ -13,23 +14,10 @@ import {
   getServerContext,
 } from "@/lib/server/data";
 import { projectPath } from "@/lib/slug";
-import { IncidentStatus, Severity } from "@/lib/types/enums";
 
 import { VoteButtons } from "./_vote";
 
 export const metadata = { title: "Incident" };
-
-const SEVERITY_LABEL: Partial<Record<Severity, string>> = {
-  [Severity.Alert]: "Alert",
-  [Severity.Warning]: "Warning",
-  [Severity.NoData]: "No data",
-};
-
-const STATUS_LABEL: Record<IncidentStatus, string> = {
-  [IncidentStatus.Open]: "open",
-  [IncidentStatus.Acknowledged]: "acknowledged",
-  [IncidentStatus.Resolved]: "resolved",
-};
 
 // The page every notice of an incident links to: the incident as it stands,
 // then the two words a member picks between. Opening it casts nothing, since
@@ -80,8 +68,8 @@ export default async function IncidentVotePage({
       <PageHeader title={incident.rule_name} backHref={alerts} backLabel="Alerts" />
       <Card className="grid gap-3 text-sm">
         <p>
-          <span className="font-medium">{SEVERITY_LABEL[incident.severity] ?? "Incident"}</span>,{" "}
-          {STATUS_LABEL[incident.status]}; opened <LocalTime iso={incident.opened_at} />
+          <span className="font-medium">{SEVERITY_LABEL[incident.severity]}</span>,{" "}
+          {STATUS_LABEL[incident.status].toLowerCase()}; opened <LocalTime iso={incident.opened_at} />
           {incident.resolved_at && (
             <>
               , resolved <LocalTime iso={incident.resolved_at} />

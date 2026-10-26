@@ -459,7 +459,7 @@ export function nextSort(
   return { ...sortAfterClick(SORTS, TraceSort.Started, query, column), page: undefined };
 }
 
-/** A ready-made query a toolbar button applies; a cost preset waits for prices. */
+/** A ready-made query a toolbar button applies; a cost preset waits for the list to read spend. */
 export type Preset = {
   id: "errors" | "slow" | "tokens";
   label: string;
@@ -611,6 +611,22 @@ const COUNT = new Intl.NumberFormat("en-US");
 /** A count, grouped as the console's English groups it: `12,345`. */
 export function formatCount(n: number): string {
   return COUNT.format(n);
+}
+
+const DOLLARS = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+const UNDER_A_DOLLAR = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumSignificantDigits: 2,
+  maximumSignificantDigits: 3,
+});
+
+/** A cost in US dollars: to the cent from a dollar, else to three figures, since
+ *  a call's is often a fraction of a cent (`$12.34`, `$0.0123`, `$0.000045`). */
+export function formatCost(dollars: number): string {
+  // Rounded first, so $0.9999 reads as $1.00 rather than $1.0.
+  const shown = Number(dollars.toPrecision(3));
+  return shown >= 1 || shown === 0 ? DOLLARS.format(dollars) : UNDER_A_DOLLAR.format(dollars);
 }
 
 /** A duration in milliseconds, in the unit a person reads it in (`340 ms`, `1.2 s`,

@@ -205,6 +205,8 @@ const TraceSpanSchema = z.object({
   output_tokens: z.number(),
   cache_read_input_tokens: z.number(),
   cache_write_input_tokens: z.number(),
+  /** What it cost in US dollars, as reported; null where it reported none. */
+  cost: z.number().nullable(),
   user_id: z.string(),
   session_id: z.string(),
   /** The deployment its resource named, and its release; empty for none. */
@@ -318,9 +320,9 @@ function fetchFailed(fetcher: string, err: unknown): void {
   );
 }
 
-/** One of telemetry's trace lanes as the project reads it, its answer held to
+/** One of telemetry's lanes as the project reads it, its answer held to
  *  `schema`: forbidden on a 403, unavailable on anything else it cannot read. */
-async function readLane<T>(
+export async function readLane<T>(
   fetcher: string,
   projectId: string,
   path: string,

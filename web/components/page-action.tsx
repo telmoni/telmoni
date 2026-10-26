@@ -66,7 +66,10 @@ export function PageAction({
     if (!primary || disabled || !set) return;
     const mine: PagePrimaryAction = {
       label: primary,
-      run: () => ref.current?.click(),
+      // Never under a panel covering the page, which no pointer reaches either.
+      run: () => {
+        if (!ref.current?.closest("[inert]")) ref.current?.click();
+      },
     };
     set(mine);
     return () => set((prev) => (prev === mine ? null : prev));

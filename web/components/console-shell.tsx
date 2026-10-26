@@ -14,6 +14,7 @@ import { usePathname } from "next/navigation";
 
 import { AgentPanel } from "@/components/agent-panel";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { setPageCovered } from "@/lib/page-cover";
 
 type ConsoleShellValue = {
   /** The content area — under the header, beside the rail — for a side panel
@@ -59,31 +60,43 @@ export function ConsoleShell({
     const mine = Symbol();
     covers.current.add(mine);
     if (mainRef.current) mainRef.current.inert = true;
+    setPageCovered(true);
     return () => {
       covers.current.delete(mine);
-      if (mainRef.current) mainRef.current.inert = covers.current.size > 0;
+      const still = covers.current.size > 0;
+      if (mainRef.current) mainRef.current.inert = still;
+      setPageCovered(still);
     };
   }, []);
   const value = useMemo(() => ({ element: shell, cover }), [shell, cover]);
   const pathname = usePathname();
 
-  // A new page opens at its top. Next's own scrolling on a navigation is the
-  // document's, and keeps the old offset while the page's top is in view
-  // (`scroll` in the Link docs); the console scrolls in this viewport instead,
-  // where a new page would otherwise open where the last one was left.
+  // A new page opens at its top, or at the element its address's fragment
+  // names, as the incident a trace's page links. Next's own scrolling on a
+  // navigation is the document's, and keeps the old offset while the page's
+  // top is in view (`scroll` in the Link docs); the console scrolls in this
+  // viewport instead, where a new page would otherwise open where the last
+  // one was left.
   useEffect(() => {
-    rootRef.current
-      ?.querySelector('[data-slot="scroll-area-viewport"]')
-      ?.scrollTo({ top: 0 });
+    const viewport = rootRef.current?.querySelector('[data-slot="scroll-area-viewport"]');
+    const named = window.location.hash.slice(1);
+    const target = named ? document.getElementById(named) : null;
+    if (target && viewport?.contains(target)) target.scrollIntoView({ block: "start" });
+    else viewport?.scrollTo({ top: 0 });
   }, [pathname]);
 
+  // The focus goes to the page's title, or to the element the fragment names
+  // where that takes it, so a screen reader starts at the incident followed.
   const prevPath = useRef(pathname);
   useEffect(() => {
     if (prevPath.current === pathname) return;
     prevPath.current = pathname;
     const raf = requestAnimationFrame(() => {
       const root = shellRef.current;
+      const named = window.location.hash.slice(1);
+      const fragment = named ? document.getElementById(named) : null;
       const target =
+        (fragment?.hasAttribute("tabindex") && root?.contains(fragment) ? fragment : null) ??
         root?.querySelector<HTMLElement>('h1[tabindex="-1"]') ??
         root?.querySelector<HTMLElement>("#console-main");
       target?.focus({ preventScroll: true });

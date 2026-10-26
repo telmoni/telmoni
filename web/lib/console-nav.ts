@@ -201,10 +201,10 @@ interface GroupSpec {
 const CORE_GROUPS: GroupSpec[] = [
   {
     title: "Project",
-    // Alerts and Dashboards stand in the rail before their pages exist, so
-    // the console shows the product's shape while the rest is built: each
-    // opens a placeholder that the real page replaces, as Traces, Sessions
-    // and Users were until theirs landed. The Observability block is headed
+    // Dashboards stands in the rail before its page exists, so the console
+    // shows the product's shape while the rest is built: it opens a
+    // placeholder that the real page replaces, as Traces, Sessions, Users and
+    // Alerts did until theirs landed. The Observability block is headed
     // because its five rows are the product, and the Project block because
     // the rest of the rail is the project's own housekeeping; Overview
     // stands alone above both.

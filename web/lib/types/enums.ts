@@ -175,6 +175,7 @@ export const RuleMeasure = {
   Failures: "failures",
   Duration: "duration",
   Tokens:   "tokens",
+  Cost:     "cost",
 } as const;
 export type RuleMeasure = typeof RuleMeasure[keyof typeof RuleMeasure];
 
@@ -184,6 +185,7 @@ export const RuleAggregation = {
   Count: "count",
   Avg:   "avg",
   Sum:   "sum",
+  Max:   "max",
   P50:   "p50",
   P90:   "p90",
   P95:   "p95",

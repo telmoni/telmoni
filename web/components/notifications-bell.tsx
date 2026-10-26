@@ -29,6 +29,7 @@ import {
 } from "@/lib/notifications";
 import { organizationLabel } from "@/lib/identity";
 import { administersOrganization } from "@/lib/organization-role";
+import { usePageCovered } from "@/lib/page-cover";
 import { organizationPath } from "@/lib/slug";
 import type { OrganizationEntry, ProjectOffer } from "@/lib/server/entities/organization";
 import {
@@ -75,6 +76,7 @@ export function NotificationsBell() {
     invites.length + seats.length + offers.length + projectOffers.length + exportsWaiting.length;
   const badge = badgeCount(count);
   const letterKeys = useLetterKeys();
+  const covered = usePageCovered();
   // Held here so a row that leads away can close the menu before it goes.
   const [open, setOpen] = useState(false);
 
@@ -83,7 +85,11 @@ export function NotificationsBell() {
       <DropdownMenuTrigger
         data-testid="notifications-bell"
         aria-label={bellLabel(count)}
-        title={letterKeys ? `Notifications (${sequenceHint(NOTIFICATIONS_KEY)})` : "Notifications"}
+        title={
+          letterKeys && !covered
+            ? `Notifications (${sequenceHint(NOTIFICATIONS_KEY)})`
+            : "Notifications"
+        }
         className={cn(
           "relative flex size-9 shrink-0 items-center justify-center",
           "rounded-md text-muted-foreground hover:text-foreground",
