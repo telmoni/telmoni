@@ -109,8 +109,8 @@ spec:
     name: web
 ---
 # The machine lanes — ingest at /otlp/v1/traces, the read API under /v1, the
-# CLI's under /cli/v1 and Slack's signed events at /webhooks/v1/slack — on
-# `server-api`: on a host of their own where
+# CLI's under /cli/v1 and Slack's signed events at /webhooks/v1/slack — and the
+# external watchdog's /heartbeat on `server-api`: on a host of their own where
 # `ingress.apiHost` names one, else under their paths on the console's host,
 # whose slugs are reserved so no organization shadows them. Only the lanes'
 # paths reach the server from outside; the console's `/internal/v1`, behind
@@ -148,6 +148,9 @@ spec:
         - path:
             type: Exact
             value: /webhooks/v1/slack
+        - path:
+            type: Exact
+            value: /heartbeat
       backendRefs:
         - name: server-api
           port: 8082

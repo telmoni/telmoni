@@ -61,6 +61,7 @@ export const RESERVED_ORGANIZATION_SLUGS: ReadonlySet<string> = new Set([
   "errors",
   "favicon",
   "health",
+  "heartbeat",
   "help",
   "home",
   "icon",

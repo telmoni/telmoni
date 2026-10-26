@@ -6,10 +6,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use telmoni_shared::envelope::{Kek, Vault, on_deployed_tier};
+use telmoni_shared::heartbeat::Heartbeats;
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::net_guard::Egress;
 use telmoni_shared::seam::Auth;
 
+use crate::db::NotificationsLane;
 use crate::{AppState, Config, connector::Connectors};
 
 /// The module's pool, opened as its own database role.
@@ -79,5 +81,6 @@ pub fn state_from_env(
         vault: Vault::new(),
         kek,
         connectors,
+        heartbeats: Heartbeats::new("notifications", NotificationsLane),
     })
 }

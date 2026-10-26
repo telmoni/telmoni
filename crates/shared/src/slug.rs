@@ -66,6 +66,7 @@ pub const ORGANIZATION_RESERVED: &[&str] = &[
     "errors",
     "favicon",
     "health",
+    "heartbeat",
     "help",
     "home",
     "icon",

@@ -23,6 +23,7 @@ mod serve;
 pub mod sweeps;
 
 use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use axum::http::{HeaderMap, StatusCode};
@@ -32,6 +33,7 @@ use sqlx::PgPool;
 
 use telmoni_shared::acting::{Acting, ActingKey};
 use telmoni_shared::config::env_parse;
+use telmoni_shared::heartbeat::Heartbeats;
 use telmoni_shared::middleware::service_auth::{ServiceSecrets, require_service_secret};
 use telmoni_shared::seam::{
     AuditEventsQuery, Auth, DocumentCursor, Entitlements, NoLimits, OwnedOrganization,
@@ -62,6 +64,13 @@ pub trait Module: Send + Sync {
     /// The readiness probe: one keyed read of the module's own tables, so a
     /// role missing a grant is a pod that takes no traffic.
     async fn ready(&self) -> sqlx::Result<()>;
+
+    /// Beside readiness, for the watchdog: its loops no replica has beaten
+    /// for three of their periods, as `telmoni_shared::heartbeat` reads them.
+    /// None by default.
+    async fn stale(&self) -> Vec<String> {
+        Vec::new()
+    }
 
     /// Its background loops, started as tasks of the process by `serve`, after
     /// the core's own. Nothing by default.
@@ -121,6 +130,10 @@ pub struct App {
     secrets: ServiceSecrets,
     /// The deployment's own modules, in the order they were mounted.
     modules: Vec<Arc<dyn Module>>,
+    /// Auth's sweeps, which this process runs on its timers, and their beats.
+    sweeps: Arc<Heartbeats<telmoni_auth::db::AuthLane>>,
+    /// The watchdog's last answer on this replica, and when it was read.
+    watchdog: tokio::sync::Mutex<Option<(Instant, Vec<String>)>>,
 }
 
 /// Auth as notifications, telemetry and the agent hold it before auth is
@@ -304,6 +317,8 @@ impl App {
             door,
             secrets,
             modules: Vec::new(),
+            sweeps: Arc::new(Heartbeats::new("auth", telmoni_auth::db::AuthLane)),
+            watchdog: tokio::sync::Mutex::new(None),
         })
     }
 
@@ -358,6 +373,7 @@ impl App {
         let probes = Router::new()
             .route("/health", get(health))
             .route("/livez", get(livez))
+            .route("/heartbeat", get(heartbeat))
             .with_state(self.clone());
         let log_level = Router::new()
             .route(
@@ -441,7 +457,7 @@ impl App {
         let purges = tokio::spawn(telmoni_telemetry::sweep::run(self.telemetry.clone()));
         let refusals = tokio::spawn(telmoni_telemetry::ceilings::run(self.telemetry.clone()));
         if env_parse("RUN_SWEEPS", true)? {
-            sweeps::spawn(self.auth.clone());
+            sweeps::spawn(self.auth.clone(), &self.sweeps);
         } else {
             tracing::warn!(
                 "RUN_SWEEPS is false; the deletion, retention and audit sweeps run only as `telmoni-server sweep`"
@@ -595,6 +611,53 @@ async fn health(
         )
     } else {
         (StatusCode::OK, Json(json!({ "status": "ok" })))
+    }
+}
+
+/// How long a replica's answer to the watchdog stands: the stores are read at
+/// most this often, however often `/heartbeat` is asked.
+const HEARTBEAT_HELD_FOR: Duration = Duration::from_secs(5);
+
+/// `GET /heartbeat` — the **external watchdog's**, on the machine host: `200`,
+/// or `503` naming each loop of the process that no replica has beaten for
+/// three of its periods, and nothing else. Never a probe of the chart's: a
+/// stopped loop is a page, not a restart.
+async fn heartbeat(
+    axum::extract::State(app): axum::extract::State<Arc<App>>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let stale = app.stale().await;
+    if stale.is_empty() {
+        (StatusCode::OK, Json(json!({ "status": "ok" })))
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "status": "stale", "stale": stale })),
+        )
+    }
+}
+
+impl App {
+    /// Every loop of the process that no replica has beaten for three of its
+    /// periods, read once [`HEARTBEAT_HELD_FOR`] has passed and by one caller
+    /// at a time, so a flood of `/heartbeat` holds no pool.
+    async fn stale(&self) -> Vec<String> {
+        let mut held = self.watchdog.lock().await;
+        if let Some((at, stale)) = held.as_ref()
+            && at.elapsed() < HEARTBEAT_HELD_FOR
+        {
+            return stale.clone();
+        }
+        let mut stale = self.sweeps.stale(&self.auth.db).await;
+        stale.extend(self.notifications.stale().await);
+        stale.extend(self.telemetry.stale().await);
+        if let Some(agent) = &self.agent {
+            stale.extend(agent.stale().await);
+        }
+        for module in &self.modules {
+            stale.extend(module.stale().await);
+        }
+        *held = Some((Instant::now(), stale.clone()));
+        stale
     }
 }
 

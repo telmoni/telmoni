@@ -171,6 +171,7 @@
         "errors",
         "favicon",
         "health",
+        "heartbeat",
         "help",
         "home",
         "icon",

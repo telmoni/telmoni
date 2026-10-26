@@ -46,6 +46,11 @@ const VALIDATED: &[(&str, &str, &str)] = &[
         "a test helper's own schema argument, never a request value",
     ),
     (
+        "crates/shared/src/heartbeat.rs",
+        "schema",
+        "a module's own schema, a `&'static str` its crate names when it builds its state",
+    ),
+    (
         "crates/shared/src/test_util/service_role.rs",
         "role",
         "`MIGRATOR_ROLE`, a `ServiceRole`'s name or lane, or a sibling's, asserted bare first",

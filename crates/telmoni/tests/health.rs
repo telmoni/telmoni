@@ -1,6 +1,7 @@
 //! The composed process: the readiness probe reports every module's
-//! database and the liveness probe none; every module's routes are mounted
-//! under one listener, each behind its own gates.
+//! database and the liveness probe none; the watchdog's heartbeat names the
+//! loops no replica has beaten; every module's routes are mounted under one
+//! listener, each behind its own gates.
 #![expect(clippy::unwrap_used, clippy::expect_used, reason = "test scaffolding")]
 
 use std::sync::Arc;
@@ -260,6 +261,82 @@ async fn a_mounted_module_is_served_and_probed() {
         1,
         "the module was asked once"
     );
+}
+
+/// A module whose loops a test scripts stale or beaten, counting how often
+/// the watchdog asked.
+struct Looping {
+    stale: Vec<String>,
+    asked: AtomicUsize,
+}
+
+#[async_trait]
+impl Module for Looping {
+    fn name(&self) -> &'static str {
+        "looping"
+    }
+
+    fn router(&self) -> Router {
+        Router::new()
+    }
+
+    async fn ready(&self) -> sqlx::Result<()> {
+        Ok(())
+    }
+
+    async fn stale(&self) -> Vec<String> {
+        self.asked.fetch_add(1, Ordering::SeqCst);
+        self.stale.clone()
+    }
+}
+
+/// A process running `stale`'s loops beside the core's, which run none
+/// until `serve` starts them.
+fn looping(stale: &[&str]) -> (Arc<App>, Arc<Looping>) {
+    let module = Arc::new(Looping {
+        stale: stale.iter().map(|name| (*name).to_owned()).collect(),
+        asked: AtomicUsize::new(0),
+    });
+    let mut app = assemble();
+    app.mount(module.clone());
+    (Arc::new(app), module)
+}
+
+async fn body(response: axum::response::Response) -> serde_json::Value {
+    let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("a body");
+    serde_json::from_slice(&bytes).expect("JSON")
+}
+
+/// ⚠ The watchdog's answer names each stale loop and nothing else, and none
+/// is a `200`; it reads no database for a loop the process does not run, so
+/// unreachable pools are no page.
+#[tokio::test]
+async fn the_heartbeat_names_the_loops_no_replica_has_beaten() {
+    let (app, _) = looping(&[]);
+    let answer = app.router().oneshot(get("/heartbeat")).await.unwrap();
+    assert_eq!(answer.status(), StatusCode::OK);
+    assert_eq!(body(answer).await, serde_json::json!({ "status": "ok" }));
+
+    let (app, _) = looping(&["billing.reconcile"]);
+    let answer = app.router().oneshot(get("/heartbeat")).await.unwrap();
+    assert_eq!(answer.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        body(answer).await,
+        serde_json::json!({ "status": "stale", "stale": ["billing.reconcile"] })
+    );
+}
+
+/// A flood of the watchdog's asks reads the loops once a few seconds.
+#[tokio::test]
+async fn the_heartbeat_reads_the_loops_once_for_a_flood() {
+    let (app, module) = looping(&["billing.reconcile"]);
+    for _ in 0..20 {
+        let answer = app.router().oneshot(get("/heartbeat")).await.unwrap();
+        assert_eq!(answer.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+    assert_eq!(module.asked.load(Ordering::SeqCst), 1);
 }
 
 async fn send(request: Request<Body>) -> axum::response::Response {

@@ -242,6 +242,10 @@ fn state_over(
         vault: Vault::new(),
         kek: Some(kek),
         connectors,
+        heartbeats: telmoni_shared::heartbeat::Heartbeats::new(
+            "notifications",
+            telmoni_notifications::db::NotificationsLane,
+        ),
     })
 }
 

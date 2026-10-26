@@ -5,13 +5,16 @@
 //! sweep one tick; retention needs none, its DELETEs being idempotent, nor the
 //! audit exports' retry, each build claiming its export first. Every
 //! step is idempotent, so a tick cut short by a rollout is finished by the
-//! next. A failed tick is logged and the next one runs. `telmoni-server sweep
-//! <name>` runs any of them once by hand.
+//! next. A failed tick is logged and the next one runs; one that ends beats in
+//! `auth.heartbeats`, for the watchdog. `telmoni-server sweep <name>` runs any
+//! of them once by hand.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use telmoni_auth::AppState;
+use telmoni_auth::db::AuthLane;
+use telmoni_shared::heartbeat::Heartbeats;
 
 use crate::cli::Sweep;
 
@@ -44,10 +47,12 @@ enum Start {
     Quiet,
 }
 
-/// Start the four sweeps as tasks of this process.
-pub fn spawn(auth: Arc<AppState>) {
+/// Start the four sweeps as tasks of this process, each beating in
+/// `heartbeats`.
+pub fn spawn(auth: Arc<AppState>, heartbeats: &Arc<Heartbeats<AuthLane>>) {
     tokio::spawn(every(
         auth.clone(),
+        heartbeats.clone(),
         Sweep::Deletion,
         DELETION_EVERY,
         Start::Logged,
@@ -64,6 +69,7 @@ pub fn spawn(auth: Arc<AppState>) {
     ));
     tokio::spawn(every(
         auth.clone(),
+        heartbeats.clone(),
         Sweep::Retention,
         RETENTION_EVERY,
         Start::Logged,
@@ -71,6 +77,7 @@ pub fn spawn(auth: Arc<AppState>) {
     ));
     tokio::spawn(every(
         auth.clone(),
+        heartbeats.clone(),
         Sweep::AuditVerify,
         AUDIT_VERIFY_EVERY,
         Start::Logged,
@@ -78,6 +85,7 @@ pub fn spawn(auth: Arc<AppState>) {
     ));
     tokio::spawn(every(
         auth,
+        heartbeats.clone(),
         Sweep::AuditExports,
         AUDIT_EXPORTS_EVERY,
         Start::Quiet,
@@ -99,11 +107,18 @@ pub fn spawn(auth: Arc<AppState>) {
 
 /// One sweep on its timer, forever. The first tick waits [`START_DELAY`];
 /// a tick that overruns delays the next rather than stacking.
-async fn every<F, Fut>(auth: Arc<AppState>, sweep: Sweep, period: Duration, start: Start, tick: F)
-where
+async fn every<F, Fut>(
+    auth: Arc<AppState>,
+    heartbeats: Arc<Heartbeats<AuthLane>>,
+    sweep: Sweep,
+    period: Duration,
+    start: Start,
+    tick: F,
+) where
     F: Fn(Arc<AppState>) -> Fut,
     Fut: Future<Output = Result<(), telmoni_shared::TelmoniError>>,
 {
+    heartbeats.runs(sweep.as_str(), period);
     tokio::time::sleep(START_DELAY).await;
     let mut ticker = tokio::time::interval(period);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -112,12 +127,13 @@ where
         if start == Start::Logged {
             tracing::info!(sweep = sweep.as_str(), "sweep starting");
         }
-        if let Err(e) = tick(auth.clone()).await {
-            tracing::warn!(
+        match tick(auth.clone()).await {
+            Ok(()) => heartbeats.beat(&auth.db, sweep.as_str()).await,
+            Err(e) => tracing::warn!(
                 sweep = sweep.as_str(),
                 error = %e,
                 "sweep failed; the next tick retries"
-            );
+            ),
         }
     }
 }

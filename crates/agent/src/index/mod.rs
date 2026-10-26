@@ -145,9 +145,14 @@ impl From<SourceDocument> for Entry {
     }
 }
 
+/// The loop's name in `agent.heartbeats`.
+pub const HEARTBEAT: &str = "index";
+
 /// The loop, forever. A failed tick is logged and the next one retries from
-/// the cursor, which only moves when a page's passages are written.
+/// the cursor, which only moves when a page's passages are written; every
+/// tick that ends beats, one waiting on an endpoint that does not answer too.
 pub async fn run(state: Arc<AppState>) {
+    state.heartbeats.runs(HEARTBEAT, EVERY);
     tokio::time::sleep(START_DELAY).await;
     let mut ticker = tokio::time::interval(EVERY);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -162,7 +167,10 @@ pub async fn run(state: Arc<AppState>) {
         if !width_checked && let Ok(embedder) = state.embedder() {
             match crate::boot::probe_width(embedder).await {
                 Ok(crate::boot::Probe::Fits) => width_checked = true,
-                Ok(crate::boot::Probe::Unanswered) => continue,
+                Ok(crate::boot::Probe::Unanswered) => {
+                    state.heartbeats.beat(&state.db, HEARTBEAT).await;
+                    continue;
+                }
                 Err(e) => {
                     tracing::error!(error = %e, "agent indexing stopped");
                     return;
@@ -190,6 +198,7 @@ pub async fn run(state: Arc<AppState>) {
                 }
             }
         }
+        state.heartbeats.beat(&state.db, HEARTBEAT).await;
     }
 }
 

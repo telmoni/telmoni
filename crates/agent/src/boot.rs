@@ -5,10 +5,12 @@
 use std::sync::Arc;
 
 use telmoni::Telmoni;
+use telmoni_shared::heartbeat::Heartbeats;
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::seam::{Auth, Entitlements, Notifications};
 
 use crate::config::{Config, EMBEDDING_DIMENSIONS};
+use crate::db::AgentLane;
 use crate::embed::{Embedder, OpenAiEmbedder};
 use crate::rerank::Reranker;
 use crate::{AppState, model};
@@ -80,6 +82,7 @@ pub fn state(
         embedder,
         reranker,
         telmoni,
+        heartbeats: Heartbeats::new("agent", AgentLane),
     })
 }
 

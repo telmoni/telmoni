@@ -36,6 +36,9 @@ const COUNTS_KEPT_S: i64 = 2 * 24 * 60 * 60;
 /// How often the owners' notices are looked for.
 const TELL_EVERY: Duration = Duration::from_secs(300);
 
+/// The loop's name in `telemetry.heartbeats`.
+pub const HEARTBEAT: &str = "refusals";
+
 /// The lane a refusal is counted and told under.
 const LANE: &str = "data_out";
 
@@ -405,6 +408,7 @@ pub async fn tell(state: &AppState) {
 /// [`tell`], every five minutes, forever; a pass that panics ends itself
 /// alone.
 pub async fn run(state: Arc<AppState>) {
+    state.heartbeats.runs(HEARTBEAT, TELL_EVERY);
     let mut ticker = tokio::time::interval(TELL_EVERY);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
@@ -413,8 +417,12 @@ pub async fn run(state: Arc<AppState>) {
             let state = state.clone();
             async move { tell(&state).await }
         });
-        if let Err(error) = pass.await {
-            tracing::error!(error = %error, "telemetry: a pass telling refusals died; the next one runs");
+        match pass.await {
+            Ok(()) => state.heartbeats.beat(&state.db, HEARTBEAT).await,
+            Err(error) => tracing::error!(
+                error = %error,
+                "telemetry: a pass telling refusals died; the next one runs"
+            ),
         }
     }
 }

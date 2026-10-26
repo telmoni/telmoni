@@ -198,7 +198,7 @@ Every way in:
 
 **The console is the one public surface for people, and the machine host the one for machines.** A person's every request enters through the console, which calls the server with the service secret; that secret proves only that a call came from inside, and who is asking is auth's answer on every request. A machine reaches the server straight, on the lanes the binary's door puts in front of (`crates/telmoni/src/door.rs`): ingest at `/otlp/v1/traces` and the read API under `/v1`, each opened by a project API key; the CLI's session lanes under `/cli/v1`, opened by the device code or the bearer they carry; and Slack's signed events at `/webhooks/v1/slack`. The door reads the caller's address past the proxies in front (`TRUSTED_PROXY_HOPS`) and meters `/v1` and `/cli/v1` by source and by credential in Redis, and every refusal it makes is a problem document, as is the server's answer for a path no lane serves — a lane's root with a trailing slash among them, which a router nested at the lane's name never sees; ingest keeps a limit of its own, per project, and Slack's events their signature. A request is named by the server alone: an `x-request-id` it arrives with is taken off, whoever sent it, and an id minted in its place, the one its span prints on every log line and its audit rows record (`crates/shared/src/middleware/http.rs`), since on a machine lane the header is the caller's free text, and nothing there compares the service secret, which would make a public lane an oracle for it.
 
-**Every route names its version after its lane's name, `v1` today.** The read API is `/v1`, the machine host being its name; the CLI's lanes are `/cli/v1`, Slack's events `/webhooks/v1/slack`, the console's lanes on the server `/internal/v1`, and the Route Handlers the console's pages fetch `/api/v1`, one organization's under `/api/v1/organizations/{slug}`, which the proxy reads as it reads a page's path; ingest's `/otlp/v1/traces` is OTLP's own path, which an exporter appends to its base. The lane comes first so the Gateway's prefixes, the reserved slugs and what reaches the server from outside stay as they were — `/internal` is never routed — and so a lane moves on its own: its `v2` is served beside its `v1` until its clients have moved, then the `v1` goes. A path without its version is the server's 404. The probes (`/health`, `/livez`, the console's `/api/health`) are the platform's, not an API, and carry none, as do the handlers a browser is sent to rather than fetches: the sign-in's and a connector's redirects, the trace list's download, `llms.txt` and `llms-full.txt`. A client names its own build in `User-Agent` (`telmoni-<language>/<version>`, `telmoni-cli/<version>`).
+**Every route names its version after its lane's name, `v1` today.** The read API is `/v1`, the machine host being its name; the CLI's lanes are `/cli/v1`, Slack's events `/webhooks/v1/slack`, the console's lanes on the server `/internal/v1`, and the Route Handlers the console's pages fetch `/api/v1`, one organization's under `/api/v1/organizations/{slug}`, which the proxy reads as it reads a page's path; ingest's `/otlp/v1/traces` is OTLP's own path, which an exporter appends to its base. The lane comes first so the Gateway's prefixes, the reserved slugs and what reaches the server from outside stay as they were — `/internal` is never routed — and so a lane moves on its own: its `v2` is served beside its `v1` until its clients have moved, then the `v1` goes. A path without its version is the server's 404. The probes (`/health`, `/livez`, the watchdog's `/heartbeat`, the console's `/api/health`) are the platform's, not an API, and carry none, as do the handlers a browser is sent to rather than fetches: the sign-in's and a connector's redirects, the trace list's download, `llms.txt` and `llms-full.txt`. A client names its own build in `User-Agent` (`telmoni-<language>/<version>`, `telmoni-cli/<version>`).
 
 ## Identity and access
 
@@ -228,14 +228,16 @@ auth            identities, accounts, credentials, external_identities, sessions
                 access_tokens, refresh_tokens, authorization_codes, device_codes,
                 confirmation_codes, organizations, organization_members,
                 organization_invites, projects, project_members, member_invites,
-                api_tokens, feature_flags, organization_flags, audit_exports
+                api_tokens, feature_flags, organization_flags, audit_exports, heartbeats
 notifications   feed, connections, deliveries, delivery_attempts, oauth_states,
-                uninstalls (a vendor app to uninstall where a delete, or a refused install, left no connection)
-agent           chunks (a vector and a text index), conversations, messages, cursors, erasures
+                uninstalls (a vendor app to uninstall where a delete, or a refused install, left no connection),
+                heartbeats
+agent           chunks (a vector and a text index), conversations, messages, cursors, erasures, heartbeats
 telemetry       project_settings (the content mode; the project's hashing key, sealed under TELEMETRY_KEK;
                 the saved layout its sessions and traces open in, if one),
                 trace_views (a project's saved views of its trace list, and its saved layouts of a
-                session's page and a trace's: one table, two kinds)
+                session's page and a trace's: one table, two kinds), heartbeats
+                (each schema's: a row a loop, its period and its last beat, which /heartbeat reads)
 
 ClickHouse, telemetry's database:
 spans           a row per finished span, partitioned by the day it arrived, its run ids under a bloom filter for a trace's read
@@ -394,6 +396,7 @@ Most of it runs inside `serve`, in every replica, and all of it is safe for repl
 - **Work a request starts** is awaited where losing it would matter — the deletion tail, the agent's erase — or left for a lease or a sweep to finish. Two are bare tasks a rollout can lose: the password-reset mail, so that its timing reveals nothing, and the retries that settle telemetry's settings after a transfer that could not settle them itself (*Known gaps*).
 - **No loop is told to stop.** Leases lapse, locks die with their connections, and committed chunks stay committed, so a loop cut short loses nothing.
 - **The delivery loop, the ceilings' notices and telemetry's purge sweep are raced against the HTTP server**: if one ends, the process exits, and the restart is the recovery.
+- **Every loop in `serve` beats**, and `GET /heartbeat` is how one that stopped is heard (`crates/shared/src/heartbeat.rs`): each tick that ends, the replica that ran it writes the loop's row in its module's own `heartbeats` (its name, its period, its last beat) through the module's maintenance lane, at most twice a minute; a deployment's module reads its own through `Module::stale`, and auth's sweeps are the binary's, since their timers are. `/heartbeat`, on the machine host beside the lanes, answers `200`, or `503` naming as `<schema>.<loop>` each loop the process runs that no replica has beaten for three of its periods, a minute at the least — every one of a module whose table cannot be read — and nothing else. Each replica reads it again at most every five seconds, one caller at a time, so a flood of it holds no pool. It is never a probe of the chart's: a stopped loop is a page from a checker outside the cluster, not a restart.
 
 ## Deployment
 
@@ -430,7 +433,7 @@ A deployment that needs more builds on the core rather than forking it, and the 
 
 | Seam | What a deployment does |
 |---|---|
-| **The binary** | Calls `App::assemble(Parts)` with its own `AuthProvider`, `MailSender`, `PurgeHook`, `OwnershipHook`, `Entitlements` and agent parts, mounts its own `Module`s, and hands `run` its builder |
+| **The binary** | Calls `App::assemble(Parts)` with its own `AuthProvider`, `MailSender`, `PurgeHook`, `OwnershipHook`, `Entitlements` and agent parts, mounts its own `Module`s — each with its routes, its readiness, its loops and, through `Module::stale`, their heartbeats in a `heartbeats` table of its schema — and hands `run` its builder |
 | **The seams** | A mounted module reaches the core only through `seam::Auth` and the notifier; `organization_standing`, `organization_slugs`, the three reads of who owns what (`organizations_owned_by`, `owner_of`, `owners_of_several`) and the `organization_alert` notice exist for such a module |
 | **The database** | Builds on the server image, adding `/app/migrations/<schema>` and `/app/grants/*.sql`; a grants file names its grantees and is skipped where they do not exist |
 | **The console** | Lays its files over the core's ten slots, and imports the core only through `@/lib/extension/ui` and `@/lib/extension/server`; the book's `meta.json` files take its pages in |
@@ -460,7 +463,7 @@ A deployment that needs more builds on the core rather than forking it, and the 
 
 | Fails | What a person sees | What recovers it |
 |---|---|---|
-| **Postgres** | At boot, the process exits. Running, the pods go unready, and pages say the service is unavailable. | Postgres |
+| **Postgres** | At boot, the process exits. Running, the pods go unready, pages say the service is unavailable, and `/heartbeat` names every loop, none of whose beats can be read or written | Postgres |
 | **A module's grant** | The server starts, and never goes ready | The grant |
 | **ClickHouse** | Ingest answers `503`, which an exporter retries; the trace, user and session pages say the store is unavailable; readiness reads Postgres alone, so the server stays ready; `migrate` and `rotate` fail | ClickHouse |
 | **Redis** | Rate limits per instance, the server's as the console's; the blacklist in memory (auth still refuses a revoked bearer); live updates paused; the announcement from the environment; an export sent again may be written twice, with no claim to answer it; and every tag is kept, the cardinality cap unheld | Redis |

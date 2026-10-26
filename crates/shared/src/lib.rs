@@ -18,6 +18,7 @@ pub mod envelope;
 pub mod error;
 pub mod error_schema;
 pub mod extract;
+pub mod heartbeat;
 pub mod logging;
 pub mod mail;
 pub mod middleware;

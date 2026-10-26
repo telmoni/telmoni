@@ -220,6 +220,10 @@ fn state(pool: PgPool, auth: &Arc<AuthStub>) -> Arc<AppState> {
         vault: telmoni_shared::envelope::Vault::new(),
         kek: None,
         connectors: telmoni_notifications::connector::Connectors::default(),
+        heartbeats: telmoni_shared::heartbeat::Heartbeats::new(
+            "notifications",
+            telmoni_notifications::db::NotificationsLane,
+        ),
     })
 }
 

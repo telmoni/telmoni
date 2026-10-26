@@ -353,3 +353,29 @@ CREATE POLICY maintenance_access ON notifications.uninstalls
 -- removes it.
 GRANT SELECT, INSERT, DELETE ON notifications.uninstalls TO notifications_maintenance;
 GRANT UPDATE (attempts) ON notifications.uninstalls TO notifications_maintenance;
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 6. HEARTBEATS
+-- ══════════════════════════════════════════════════════════════════════════════
+-- The delivery loop and the retention sweep, each as the last replica to
+-- finish a tick of it left it: what the external watchdog reads through
+-- `GET /heartbeat`, a loop stale once no replica has beaten it for three of
+-- its periods. Names no tenant.
+CREATE TABLE notifications.heartbeats (
+    name           TEXT        PRIMARY KEY,
+    period_seconds INTEGER     NOT NULL,
+    beat_at        TIMESTAMPTZ NOT NULL,
+    CONSTRAINT heartbeats_name_check CHECK (name IN ('delivery', 'retention')),
+    CONSTRAINT heartbeats_period_check CHECK (period_seconds > 0)
+);
+
+ALTER TABLE notifications.heartbeats ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications.heartbeats FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY maintenance_access ON notifications.heartbeats
+    TO notifications_maintenance
+    USING      (current_user = 'notifications_maintenance')
+    WITH CHECK (current_user = 'notifications_maintenance');
+
+GRANT SELECT, INSERT, UPDATE ON notifications.heartbeats TO notifications_maintenance;

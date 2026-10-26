@@ -76,9 +76,14 @@ fn note_rows_held(message: &str) {
     }
 }
 
-/// The delivery loop. A failed tick is logged and the next one runs.
+/// The loop's name in `notifications.heartbeats`.
+pub const HEARTBEAT: &str = "delivery";
+
+/// The delivery loop. A failed tick is logged and the next one runs; one that
+/// ends beats.
 pub async fn run(state: Arc<AppState>) {
     let poll = state.config.delivery_poll_secs.max(1);
+    state.heartbeats.runs(HEARTBEAT, Duration::from_secs(poll));
     let mut ticker = tokio::time::interval(Duration::from_secs(poll));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     ticker.tick().await; // skip the immediate first tick
@@ -86,8 +91,12 @@ pub async fn run(state: Arc<AppState>) {
     loop {
         ticker.tick().await;
         match tick_once(&state).await {
-            Ok(0) => {}
-            Ok(n) => tracing::debug!(attempted = n, "connector delivery tick"),
+            Ok(n) => {
+                if n > 0 {
+                    tracing::debug!(attempted = n, "connector delivery tick");
+                }
+                state.heartbeats.beat(&state.db, HEARTBEAT).await;
+            }
             Err(e) => tracing::warn!(error = %e, "connector delivery tick failed; will retry"),
         }
 

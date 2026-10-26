@@ -546,6 +546,28 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             "telemetry.trace_views",
             &["SELECT", "DELETE"],
         ),
+        // Each loop's beat, written by the replica that ran a tick of it and
+        // read for the watchdog; a loop's row is never removed.
+        (
+            "auth_maintenance",
+            "auth.heartbeats",
+            &["SELECT", "INSERT", "UPDATE"],
+        ),
+        (
+            "notifications_maintenance",
+            "notifications.heartbeats",
+            &["SELECT", "INSERT", "UPDATE"],
+        ),
+        (
+            "agent_maintenance",
+            "agent.heartbeats",
+            &["SELECT", "INSERT", "UPDATE"],
+        ),
+        (
+            "telemetry_maintenance",
+            "telemetry.heartbeats",
+            &["SELECT", "INSERT", "UPDATE"],
+        ),
     ];
     for (lane, table, allowed) in NARROWED {
         for verb in ["SELECT", "INSERT", "UPDATE", "DELETE"] {

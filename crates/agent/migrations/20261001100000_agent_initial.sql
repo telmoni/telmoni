@@ -322,3 +322,29 @@ CREATE POLICY maintenance_access ON agent.erasures
     WITH CHECK (current_user = 'agent_maintenance');
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON agent.erasures TO agent_maintenance;
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 6. HEARTBEATS
+-- ══════════════════════════════════════════════════════════════════════════════
+-- The indexer and the retention sweep, each as the last replica to finish a
+-- tick of it left it: what the external watchdog reads through
+-- `GET /heartbeat`, a loop stale once no replica has beaten it for three of
+-- its periods. Names no tenant.
+CREATE TABLE agent.heartbeats (
+    name           TEXT        PRIMARY KEY,
+    period_seconds INTEGER     NOT NULL,
+    beat_at        TIMESTAMPTZ NOT NULL,
+    CONSTRAINT heartbeats_name_check CHECK (name IN ('index', 'retention')),
+    CONSTRAINT heartbeats_period_check CHECK (period_seconds > 0)
+);
+
+ALTER TABLE agent.heartbeats ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent.heartbeats FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY maintenance_access ON agent.heartbeats
+    TO agent_maintenance
+    USING      (current_user = 'agent_maintenance')
+    WITH CHECK (current_user = 'agent_maintenance');
+
+GRANT SELECT, INSERT, UPDATE ON agent.heartbeats TO agent_maintenance;

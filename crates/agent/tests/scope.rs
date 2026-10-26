@@ -129,6 +129,10 @@ fn state_with(pool: &PgPool, embedder: Arc<SameVector>, auth: Arc<dyn Auth>) -> 
         embedder: Some(embedder),
         reranker: None,
         telmoni: None,
+        heartbeats: telmoni_shared::heartbeat::Heartbeats::new(
+            "agent",
+            telmoni_agent::db::AgentLane,
+        ),
     }
 }
 

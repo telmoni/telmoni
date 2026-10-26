@@ -64,6 +64,9 @@ pub struct AppState {
     /// The SDK each question is reported with as it ends, as any agent
     /// reports its runs; `None` while `TELMONI_API_KEY` is unset.
     pub telmoni: Option<telmoni::Telmoni>,
+    /// The module's loops this replica runs, and their beats, which the
+    /// external watchdog reads ([`AppState::stale`]).
+    pub heartbeats: telmoni_shared::heartbeat::Heartbeats<db::AgentLane>,
 }
 
 impl AppState {
@@ -73,6 +76,12 @@ impl AppState {
             .execute(&self.db)
             .await
             .map(|_| ())
+    }
+
+    /// Beside readiness, for the watchdog: the module's loops no replica has
+    /// beaten for three of their periods.
+    pub async fn stale(&self) -> Vec<String> {
+        self.heartbeats.stale(&self.db).await
     }
 
     /// The embedder, or the agent's refusal when it is off.

@@ -99,6 +99,9 @@ pub struct AppState {
     /// The machine lanes' ceilings each organization's plan sets, and the
     /// day's counts held to them ([`ceilings`]).
     pub ceilings: ceilings::Ceilings,
+    /// The module's loops this replica runs, and their beats, which the
+    /// external watchdog reads ([`AppState::stale`]).
+    pub heartbeats: telmoni_shared::heartbeat::Heartbeats<db::TelemetryLane>,
     /// How long an export's body may take to arrive
     /// (`handler::ingest::BODY_WAIT`); a field so a suite can wait less.
     pub body_wait: std::time::Duration,
@@ -115,6 +118,12 @@ impl AppState {
             .execute(&self.db)
             .await
             .map(|_| ())
+    }
+
+    /// Beside readiness, for the watchdog: the module's loops no replica has
+    /// beaten for three of their periods.
+    pub async fn stale(&self) -> Vec<String> {
+        self.heartbeats.stale(&self.db).await
     }
 }
 

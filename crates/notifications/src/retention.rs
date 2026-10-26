@@ -24,6 +24,9 @@ const SWEEP_EVERY: Duration = Duration::from_secs(3600);
 /// still sweeps.
 const START_DELAY: Duration = Duration::from_secs(60);
 
+/// The loop's name in `notifications.heartbeats`.
+pub const HEARTBEAT: &str = "retention";
+
 /// Rows deleted per statement per table, by the sweep and by the purges' feed deletes.
 pub(crate) const SWEEP_CHUNK: i64 = 5_000;
 
@@ -46,6 +49,7 @@ pub struct Purged {
 /// so that a panic ends that sweep alone. Errors are logged and the loop
 /// continues: a failed sweep is rows kept too long, not rows lost.
 pub async fn run(state: Arc<AppState>) {
+    state.heartbeats.runs(HEARTBEAT, SWEEP_EVERY);
     let mut ticker =
         tokio::time::interval_at(tokio::time::Instant::now() + START_DELAY, SWEEP_EVERY);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -55,11 +59,12 @@ pub async fn run(state: Arc<AppState>) {
             let state = state.clone();
             async move { tick(&state).await }
         });
-        if let Err(e) = sweep.await {
-            tracing::error!(
+        match sweep.await {
+            Ok(()) => state.heartbeats.beat(&state.db, HEARTBEAT).await,
+            Err(e) => tracing::error!(
                 error = %e,
                 "notifications: the retention sweep died; the next sweep retries"
-            );
+            ),
         }
     }
 }

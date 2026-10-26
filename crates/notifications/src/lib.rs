@@ -64,6 +64,9 @@ pub struct AppState {
     pub kek: Option<Kek>,
     /// One connector per registered vendor app, plus the signed webhook.
     pub connectors: connector::Connectors,
+    /// The module's loops this replica runs, and their beats, which the
+    /// external watchdog reads ([`AppState::stale`]).
+    pub heartbeats: telmoni_shared::heartbeat::Heartbeats<db::NotificationsLane>,
 }
 
 impl AppState {
@@ -76,6 +79,12 @@ impl AppState {
             .execute(&self.db)
             .await
             .map(|_| ())
+    }
+
+    /// Beside readiness, for the watchdog: the module's loops no replica has
+    /// beaten for three of their periods.
+    pub async fn stale(&self) -> Vec<String> {
+        self.heartbeats.stale(&self.db).await
     }
 }
 

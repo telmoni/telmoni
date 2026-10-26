@@ -18,6 +18,9 @@ use crate::seam;
 /// As often as auth's deletion sweep, which retries organizations' purges.
 const EVERY: Duration = Duration::from_secs(10 * 60);
 
+/// The loop's name in `telemetry.heartbeats`.
+pub const HEARTBEAT: &str = "purges";
+
 /// How long after boot the first pass runs: a minute, past the readiness probe's
 /// first passes and the thirty seconds Kubernetes gives the replaced replica to drain.
 const START_DELAY: Duration = Duration::from_secs(60);
@@ -35,6 +38,7 @@ pub struct Swept {
 /// A pass a minute after boot, then every ten minutes, each its own task so
 /// that a panic ends that pass alone.
 pub async fn run(state: Arc<AppState>) {
+    state.heartbeats.runs(HEARTBEAT, EVERY);
     let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + START_DELAY, EVERY);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
@@ -44,13 +48,17 @@ pub async fn run(state: Arc<AppState>) {
             async move { sweep(&state).await }
         });
         match pass.await {
-            Ok(Ok(Swept { purged: 0, left: 0 })) => {}
-            Ok(Ok(Swept { purged, left })) => tracing::info!(
-                purged,
-                left,
-                "telemetry: the purge sweep's pass over deleted projects' purges cut short; any \
-                 left wait for the next"
-            ),
+            Ok(Ok(swept)) => {
+                if swept != Swept::default() {
+                    tracing::info!(
+                        purged = swept.purged,
+                        left = swept.left,
+                        "telemetry: the purge sweep's pass over deleted projects' purges cut \
+                         short; any left wait for the next"
+                    );
+                }
+                state.heartbeats.beat(&state.db, HEARTBEAT).await;
+            }
             Ok(Err(e)) => tracing::warn!(
                 error = %e,
                 "telemetry: the purge sweep failed; the next pass retries"
