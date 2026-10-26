@@ -3,10 +3,9 @@ import { SiteHeader } from "@/components/site-header";
 import { cn } from "@/lib/utils";
 
 // The public pages' shell: the header and footer every one of them has.
-// `framed` is the splash's column — one bordered column holding the header,
-// the page and the footer, ruled between, each inset from the column's edge
-// by one measure (`lib/inset.ts`) — and every public page's but the book's,
-// which runs the shell edge to edge as the console does.
+// `framed` is the bordered column every public page takes, its header and
+// footer inset by the sections' measure (`lib/inset.ts`); unframed, the shell
+// runs edge to edge as the console does.
 export function PaperShell({
   children,
   signedIn,
