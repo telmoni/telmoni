@@ -30,8 +30,8 @@ use telmoni_shared::{
 use crate::AppState;
 use crate::db;
 use crate::handler::chain;
-use crate::rules::db::{self as rules, RuleRow};
-use crate::rules::{Rule, RuleFilters, RuleInput};
+use crate::rules::db::{self as rules, LinkRow, RuleRow};
+use crate::rules::{Link, Rule, RuleFilters, RuleInput};
 
 /// The unique index a second alert of one name in a project, in any case,
 /// runs into.
@@ -62,13 +62,42 @@ pub struct Alert {
     /// Where it stands, and since when: `paused` while it is.
     pub severity: Severity,
     pub severity_since: DateTime<Utc>,
+    /// The connectors its notices go to.
+    pub connectors: Vec<AlertLink>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+/// A connector an alert links, and whether five failed deliveries in a row
+/// muted it for this alert.
+#[derive(Debug, Serialize)]
+pub struct AlertLink {
+    #[serde(flatten)]
+    pub link: Link,
+    pub muted: bool,
+}
+
+impl Alert {
+    /// The alert as its row, its links and its muted connectors give it.
+    fn of(row: RuleRow, links: Vec<Link>, muted: &[Uuid]) -> Self {
+        let connectors = links
+            .into_iter()
+            .map(|link| AlertLink {
+                muted: muted.contains(&link.connection_id),
+                link,
+            })
+            .collect();
+        Self {
+            connectors,
+            ..Self::from(row)
+        }
+    }
 }
 
 impl From<RuleRow> for Alert {
     fn from(row: RuleRow) -> Self {
         Self {
+            connectors: Vec::new(),
             id: row.id,
             name: row.name,
             kind: row.kind,
@@ -133,10 +162,21 @@ pub async fn list_rules(
         .project_id;
     let mut tx = project_scope(&state.db, project_id).await?;
     let rows = rules::rules(&mut tx, project_id).await?;
+    let ids: Vec<Uuid> = rows.iter().map(|row| row.id).collect();
+    let mut links = rules::links(&mut tx, project_id, &ids).await?;
     tx.commit().await?;
-    Ok(Json(AlertList {
-        rules: rows.into_iter().map(Alert::from).collect(),
-    }))
+    let mut alerts = Vec::with_capacity(rows.len());
+    for row in rows {
+        let (own, rest): (Vec<_>, Vec<_>) = links.into_iter().partition(|l| l.rule_id == row.id);
+        links = rest;
+        let muted = muted(&state, project_id, row.id).await;
+        alerts.push(Alert::of(
+            row,
+            own.into_iter().map(LinkRow::link).collect(),
+            &muted,
+        ));
+    }
+    Ok(Json(AlertList { rules: alerts }))
 }
 
 /// `GET /internal/v1/telemetry/rules/{id}` — one of the project's alerts.
@@ -151,9 +191,17 @@ pub async fn get_rule(
         .project_id;
     let id = rule_id(&id)?;
     let mut tx = project_scope(&state.db, project_id).await?;
-    let row = rules::rule(&mut tx, project_id, id).await?;
+    let row = rules::rule(&mut tx, project_id, id)
+        .await?
+        .ok_or_else(not_found)?;
+    let links = rules::links(&mut tx, project_id, &[id]).await?;
     tx.commit().await?;
-    row.map(|row| Json(Alert::from(row))).ok_or_else(not_found)
+    let muted = muted(&state, project_id, id).await;
+    Ok(Json(Alert::of(
+        row,
+        links.into_iter().map(LinkRow::link).collect(),
+        &muted,
+    )))
 }
 
 /// `POST /internal/v1/telemetry/rules` — a new alert of the project. Its
@@ -192,7 +240,10 @@ pub async fn create_rule(
     };
     tx.commit().await?;
     tracing::info!(project_id = %project_id, rule_id = %row.id, "telemetry: an alert made");
-    Ok((StatusCode::CREATED, Json(Alert::from(row))))
+    Ok((
+        StatusCode::CREATED,
+        Json(Alert::of(row, rule.connectors, &[])),
+    ))
 }
 
 /// The save itself, under the organization's chain lock: the role checked
@@ -213,7 +264,7 @@ async fn save(
         let held = rules::organization_count(tx, &acting.organization_id).await?;
         ceilings.admit(u64::try_from(held).unwrap_or(0))?;
     }
-    rules::insert(
+    let row = rules::insert(
         tx,
         project_id,
         &acting.organization_id,
@@ -221,7 +272,9 @@ async fn save(
         rule,
     )
     .await
-    .map_err(name_taken)
+    .map_err(name_taken)?;
+    rules::write_links(tx, project_id, row.id, &rule.connectors).await?;
+    Ok(row)
 }
 
 /// `PUT /internal/v1/telemetry/rules/{id}` — one of the project's alerts,
@@ -244,9 +297,11 @@ pub async fn update_rule(
         .await
         .map_err(name_taken)?
         .ok_or_else(not_found)?;
+    rules::write_links(&mut tx, project_id, id, &rule.connectors).await?;
     tx.commit().await?;
     tracing::info!(project_id = %project_id, rule_id = %id, "telemetry: an alert saved over");
-    Ok(Json(Alert::from(row)))
+    let muted = muted(&state, project_id, id).await;
+    Ok(Json(Alert::of(row, rule.connectors, &muted)))
 }
 
 /// `DELETE /internal/v1/telemetry/rules/{id}` — one of the project's
@@ -268,4 +323,68 @@ pub async fn delete_rule(
     tx.commit().await?;
     tracing::info!(project_id = %project_id, rule_id = %id, "telemetry: an alert deleted");
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// The connectors five failed deliveries in a row muted for the alert; none,
+/// logged, where notifications cannot say.
+async fn muted(state: &AppState, project_id: &ProjectId, rule_id: Uuid) -> Vec<Uuid> {
+    match state
+        .notifications
+        .muted(project_id, &rules::route_key(rule_id))
+        .await
+    {
+        Ok(muted) => muted,
+        Err(error) => {
+            tracing::warn!(
+                project_id = %project_id,
+                rule_id = %rule_id,
+                error = %error,
+                "telemetry: which of an alert's connectors are muted could not be read"
+            );
+            Vec::new()
+        }
+    }
+}
+
+/// `POST /internal/v1/telemetry/rules/{id}/connectors/{connection_id}/unmute`
+/// — a connector the alert links, muted after five failed deliveries in a
+/// row, hearing the alert's notices again, its failures forgotten. Answers
+/// the alert.
+pub async fn unmute_link(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path((id, connection_id)): Path<(String, String)>,
+) -> Result<Json<Alert>, TelmoniError> {
+    let acting = state.auth.resolve(&headers).await?;
+    let project_id = &acting
+        .require_project(Verb::Update, Resource::Rule)?
+        .project_id;
+    let id = rule_id(&id)?;
+    let connection_id: Uuid = connection_id.parse().map_err(|_| not_linked())?;
+    let mut tx = project_scope(&state.db, project_id).await?;
+    let row = rules::rule(&mut tx, project_id, id)
+        .await?
+        .ok_or_else(not_found)?;
+    let links: Vec<Link> = rules::links(&mut tx, project_id, &[id])
+        .await?
+        .into_iter()
+        .map(LinkRow::link)
+        .collect();
+    tx.commit().await?;
+    if !links.iter().any(|link| link.connection_id == connection_id) {
+        return Err(not_linked());
+    }
+    if state
+        .notifications
+        .unmute(project_id, &rules::route_key(id), connection_id)
+        .await?
+    {
+        tracing::info!(project_id = %project_id, rule_id = %id, connection_id = %connection_id, "telemetry: an alert's connector heard again");
+    }
+    let muted = muted(&state, project_id, id).await;
+    Ok(Json(Alert::of(row, links, &muted)))
+}
+
+fn not_linked() -> TelmoniError {
+    AuthError::NotFound("this alert links no such connector".into()).into()
 }

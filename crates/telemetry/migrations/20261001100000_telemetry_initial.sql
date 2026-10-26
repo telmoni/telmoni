@@ -314,7 +314,45 @@ GRANT UPDATE (organization_id, status, severity, value, resolved_at, resolved_by
     ON telemetry.incidents TO telemetry_maintenance;
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- 5. HEARTBEATS
+-- 5. AN ALERT'S CONNECTORS
+-- ══════════════════════════════════════════════════════════════════════════════
+-- The project's connections an alert's notices go to, each hearing its
+-- warnings and alerts or its alerts alone (`level`), in the hours it is set
+-- to, or every hour (`hours`: the days, 1 Monday to 7 Sunday, from and to as
+-- HH:MM at a fixed offset from UTC, checked by the lane). A connection the
+-- project no longer has is ignored where a notice goes; whether one is
+-- muted after five failed deliveries in a row is notifications' to keep.
+CREATE TABLE telemetry.rule_connectors (
+    rule_id       UUID  NOT NULL REFERENCES telemetry.rules (id) ON DELETE CASCADE,
+    connection_id UUID  NOT NULL,
+    project_id    TEXT  NOT NULL,
+    level         TEXT  NOT NULL DEFAULT 'warning',
+    hours         JSONB,
+    PRIMARY KEY (rule_id, connection_id),
+    CONSTRAINT rule_connectors_level_check CHECK (level IN ('warning', 'alert')),
+    CONSTRAINT rule_connectors_hours_check CHECK (hours IS NULL OR jsonb_typeof(hours) = 'object')
+);
+
+CREATE INDEX rule_connectors_project_idx ON telemetry.rule_connectors (project_id);
+
+ALTER TABLE telemetry.rule_connectors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.rule_connectors FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON telemetry.rule_connectors
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.rule_connectors
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- The loop reads where each alert's notices go; they go with their alert.
+GRANT SELECT ON telemetry.rule_connectors TO telemetry_maintenance;
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 6. HEARTBEATS
 -- ══════════════════════════════════════════════════════════════════════════════
 -- The purge sweep, the plan refusals' notices and the alerts' evaluation,
 -- each as the last replica

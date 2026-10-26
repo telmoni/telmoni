@@ -9,14 +9,17 @@
 //! ([`telmoni_shared::seam::Entitlements::alert_ceilings`]).
 
 pub mod db;
+pub mod deliveries;
 pub mod evaluate;
 pub mod incidents;
 
+use chrono::{DateTime, Datelike as _, TimeDelta, Timelike as _, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use telmoni_shared::{
-    MissingData, RuleAggregation, RuleMeasure, RuleOperator, RuleWindow, SpanKind, SpanStatus,
-    TelmoniError,
+    MissingData, RuleAggregation, RuleLevel, RuleMeasure, RuleOperator, RuleWindow, SpanKind,
+    SpanStatus, TelmoniError,
 };
 
 use crate::contract::{AGENT_MAX, ENVIRONMENT_MAX, MODEL_MAX, NAME_MAX, PROVIDER_MAX, RELEASE_MAX};
@@ -27,6 +30,96 @@ pub const RULE_NAME_MAX: usize = 60;
 
 /// The longest re-notification period, in minutes: a week.
 pub const RENOTIFY_MAX_MINUTES: i32 = 10_080;
+
+/// The most connectors one alert links.
+pub const LINKS_MAX: usize = 20;
+
+/// The hours a linked connector hears an alert's notices in: on `days`, 1
+/// Monday to 7 Sunday, from `from` up to `to`, each `HH:MM` at `utc_offset`
+/// minutes east of UTC; `to` before `from` runs past midnight into the next
+/// day, and `to` equal to `from` is the whole day. A fixed offset, so a
+/// clock change moves the hours by its own.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Hours {
+    pub days: Vec<u8>,
+    pub from: String,
+    pub to: String,
+    #[serde(default)]
+    pub utc_offset: i16,
+}
+
+impl Hours {
+    /// The hours as the lane keeps them: days 1 to 7, each once and in
+    /// order, times as `HH:MM`, and an offset UTC's own range holds.
+    fn checked(mut self) -> Result<Self, TelmoniError> {
+        let bad = |why: &str| TelmoniError::BadRequest(why.to_owned());
+        self.days.sort_unstable();
+        self.days.dedup();
+        if self.days.is_empty() || self.days.iter().any(|d| !(1..=7).contains(d)) {
+            return Err(bad(
+                "hours name days 1 (Monday) to 7 (Sunday), one at least",
+            ));
+        }
+        if minute_of(&self.from).is_none() || minute_of(&self.to).is_none() {
+            return Err(bad("hours run from and to a time of day, HH:MM"));
+        }
+        if !(-720..=840).contains(&self.utc_offset) {
+            return Err(bad("an offset from UTC is -720 to 840 minutes"));
+        }
+        Ok(self)
+    }
+
+    /// Whether `at` falls in these hours.
+    #[must_use]
+    pub fn hold(&self, at: DateTime<Utc>) -> bool {
+        let (Some(from), Some(to)) = (minute_of(&self.from), minute_of(&self.to)) else {
+            return true;
+        };
+        let local = at + TimeDelta::minutes(i64::from(self.utc_offset));
+        let day = u8::try_from(local.weekday().number_from_monday()).unwrap_or(0);
+        let yesterday = if day == 1 { 7 } else { day.saturating_sub(1) };
+        let minute = local.hour() * 60 + local.minute();
+        let on = |day: u8| self.days.contains(&day);
+        match from.cmp(&to) {
+            std::cmp::Ordering::Equal => on(day),
+            std::cmp::Ordering::Less => on(day) && (from..to).contains(&minute),
+            std::cmp::Ordering::Greater => {
+                (on(day) && minute >= from) || (on(yesterday) && minute < to)
+            }
+        }
+    }
+}
+
+/// `HH:MM` as minutes into the day.
+fn minute_of(text: &str) -> Option<u32> {
+    let (hour, minute) = text.split_once(':')?;
+    if hour.len() != 2 || minute.len() != 2 {
+        return None;
+    }
+    let (hour, minute): (u32, u32) = (hour.parse().ok()?, minute.parse().ok()?);
+    (hour < 24 && minute < 60).then_some(hour * 60 + minute)
+}
+
+/// A connector an alert links: which of its notices it hears, and when.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Link {
+    pub connection_id: Uuid,
+    #[serde(default)]
+    pub level: RuleLevel,
+    #[serde(default)]
+    pub hours: Option<Hours>,
+}
+
+impl Link {
+    /// Whether this connector hears a notice of an incident at `severity`,
+    /// told at `at`.
+    #[must_use]
+    pub fn hears(&self, severity: telmoni_shared::Severity, at: DateTime<Utc>) -> bool {
+        self.level.hears(severity) && self.hours.as_ref().is_none_or(|hours| hours.hold(at))
+    }
+}
 
 /// The spans an alert reads: those of its kind whose fields its filters
 /// name, each filter any of its values. Only what the hourly totals keep:
@@ -89,6 +182,9 @@ pub struct RuleInput {
     /// How often a severity held is told again, in minutes; never if none.
     #[serde(default)]
     pub renotify_minutes: Option<i32>,
+    /// The project's connectors its notices go to; none, the feed alone.
+    #[serde(default)]
+    pub connectors: Vec<Link>,
 }
 
 /// An alert checked whole, as the table keeps it.
@@ -105,6 +201,7 @@ pub struct Rule {
     pub warning_threshold: Option<f64>,
     pub missing_data: MissingData,
     pub renotify_minutes: Option<i32>,
+    pub connectors: Vec<Link>,
 }
 
 impl RuleInput {
@@ -155,7 +252,24 @@ impl RuleInput {
                 "re-notification is every 1 to {RENOTIFY_MAX_MINUTES} minutes, or never"
             )));
         }
+        if self.connectors.len() > LINKS_MAX {
+            return Err(bad(&format!("an alert links up to {LINKS_MAX} connectors")));
+        }
+        let mut connectors: Vec<Link> = Vec::with_capacity(self.connectors.len());
+        for link in self.connectors {
+            if connectors
+                .iter()
+                .any(|kept| kept.connection_id == link.connection_id)
+            {
+                return Err(bad("an alert links a connector once"));
+            }
+            connectors.push(Link {
+                hours: link.hours.map(Hours::checked).transpose()?,
+                ..link
+            });
+        }
         Ok(Rule {
+            connectors,
             name,
             kind: self.kind,
             measure: self.measure,
@@ -215,6 +329,7 @@ mod tests {
             warning_threshold: Some(3_000.0),
             missing_data: MissingData::Zero,
             renotify_minutes: None,
+            connectors: Vec::new(),
         }
     }
 
@@ -247,6 +362,65 @@ mod tests {
             ..input()
         };
         assert!(refused.checked().is_err());
+    }
+
+    /// ⚠ Hours hold on their days, at their offset, and run past midnight
+    /// when they end before they start.
+    #[test]
+    fn hours_hold_on_their_days_at_their_offset() {
+        let at = |text: &str| {
+            DateTime::parse_from_rfc3339(text)
+                .expect("an instant")
+                .with_timezone(&Utc)
+        };
+        let office = Hours {
+            days: vec![1, 2, 3, 4, 5],
+            from: "09:00".into(),
+            to: "18:00".into(),
+            utc_offset: 60,
+        }
+        .checked()
+        .expect("hours");
+        // Monday 2026-10-26, 08:30 UTC is 09:30 at UTC+1.
+        assert!(office.hold(at("2026-10-26T08:30:00Z")));
+        assert!(!office.hold(at("2026-10-26T07:30:00Z")));
+        assert!(!office.hold(at("2026-10-25T08:30:00Z")), "a Sunday");
+        let night = Hours {
+            days: vec![5],
+            from: "22:00".into(),
+            to: "06:00".into(),
+            utc_offset: 0,
+        };
+        assert!(night.hold(at("2026-10-30T23:00:00Z")), "Friday night");
+        assert!(
+            night.hold(at("2026-10-31T05:00:00Z")),
+            "Saturday before dawn"
+        );
+        assert!(!night.hold(at("2026-10-31T07:00:00Z")));
+        for refused in [
+            Hours {
+                days: vec![],
+                ..night.clone()
+            },
+            Hours {
+                days: vec![8],
+                ..night.clone()
+            },
+            Hours {
+                from: "24:00".into(),
+                ..night.clone()
+            },
+            Hours {
+                to: "9:00".into(),
+                ..night.clone()
+            },
+            Hours {
+                utc_offset: 900,
+                ..night.clone()
+            },
+        ] {
+            assert!(refused.checked().is_err());
+        }
     }
 
     #[test]

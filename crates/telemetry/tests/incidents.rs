@@ -21,6 +21,7 @@ use tower::ServiceExt;
 
 use common::{AuthStub, NoticeLog, SECRET, clickhouse_or_skip};
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
+use telmoni_shared::seam::NoLimits;
 use telmoni_shared::{
     NotificationKind, OrganizationId, OrganizationRole, ProjectId, Role, SpanKind,
 };
@@ -50,7 +51,8 @@ impl Project {
             Some(Role::Member),
         );
         let notices = NoticeLog::new();
-        let state = common::state_with_stores_noticed(pool, auth, notices.clone());
+        let state =
+            common::state_with_stores_noticed(pool, auth, Arc::new(NoLimits), notices.clone());
         ch.store
             .insert_spans(&[SpanRow {
                 model: "claude-sonnet-5-5".into(),

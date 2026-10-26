@@ -774,6 +774,8 @@ impl Bookkeeping<'_> {
         let counts = db::record_consecutive_failures(&mut tx, self.tallies).await?;
         db::mark_delivered(&mut tx, self.delivered).await?;
         db::fail_deliveries(&mut tx, self.failures).await?;
+        let failed: Vec<Uuid> = self.failures.iter().map(|f| f.id).collect();
+        db::count_routes(&mut tx, self.delivered, &failed).await?;
         for (why, ids) in self.held {
             db::unlease_deliveries(&mut tx, ids, why).await?;
         }

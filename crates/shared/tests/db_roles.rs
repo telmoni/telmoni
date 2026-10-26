@@ -560,6 +560,19 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             "telemetry.incidents",
             &["SELECT", "INSERT"],
         ),
+        // The loop reads where each alert's notices go; they go with it.
+        (
+            "telemetry_maintenance",
+            "telemetry.rule_connectors",
+            &["SELECT"],
+        ),
+        // The delivery loop counts each route's failed deliveries and mutes
+        // a connection at five in a row; a member's unmute is the project's.
+        (
+            "notifications_maintenance",
+            "notifications.routes",
+            &["SELECT", "INSERT", "UPDATE"],
+        ),
         // Each loop's beat, written by the replica that ran a tick of it and
         // read for the watchdog; a loop's row is never removed.
         (

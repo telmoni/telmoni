@@ -174,6 +174,9 @@ CREATE TABLE notifications.deliveries (
     subject         TEXT        NOT NULL,
     body            TEXT        NOT NULL,
     subject_user_id TEXT,
+    -- The producer's key a routed notice went under (`telemetry:rule:<id>`),
+    -- by which its outcome is counted against the connection for that key.
+    route           TEXT,
     status          TEXT        NOT NULL DEFAULT 'pending',
     attempts        INTEGER     NOT NULL DEFAULT 0,
     next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -183,6 +186,7 @@ CREATE TABLE notifications.deliveries (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT deliveries_status_check CHECK (status IN ('pending', 'delivered', 'failed')),
+    CONSTRAINT deliveries_route_check CHECK (char_length(route) BETWEEN 1 AND 200),
     CONSTRAINT deliveries_kind_check CHECK (kind IN (
         'organization_alert', 'member_added', 'member_left',
         'connector_connected', 'connector_disconnected',
@@ -382,3 +386,46 @@ CREATE POLICY maintenance_access ON notifications.heartbeats
     WITH CHECK (current_user = 'notifications_maintenance');
 
 GRANT SELECT, INSERT, UPDATE ON notifications.heartbeats TO notifications_maintenance;
+
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 7. ROUTES
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Each connection's run of failed deliveries under a producer's key (an
+-- alert's, `telemetry:rule:<id>`): reset by a delivery that lands, counted
+-- by one that fails for good, and muted at five in a row, so that alert's
+-- notices skip it until a member turns it back on. The connection's own
+-- breaker stands apart, over every delivery it takes.
+CREATE TABLE notifications.routes (
+    route           TEXT        NOT NULL,
+    connection_id   UUID        NOT NULL,
+    project_id      TEXT        NOT NULL,
+    organization_id TEXT        NOT NULL,
+    failures        INTEGER     NOT NULL DEFAULT 0,
+    muted_at        TIMESTAMPTZ,
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (route, connection_id),
+    CONSTRAINT routes_failures_check CHECK (failures >= 0),
+    CONSTRAINT routes_connection_fkey FOREIGN KEY (connection_id, project_id, organization_id)
+        REFERENCES notifications.connections (id, project_id, organization_id) ON DELETE CASCADE
+);
+
+-- The project's purge, and its routes' reads.
+CREATE INDEX routes_project_idx ON notifications.routes (project_id, route);
+-- The cascade from a deleted connection.
+CREATE INDEX routes_connection_idx ON notifications.routes (connection_id);
+
+ALTER TABLE notifications.routes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications.routes FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON notifications.routes
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true));
+
+CREATE POLICY maintenance_access ON notifications.routes
+    TO notifications_maintenance
+    USING      (current_user = 'notifications_maintenance')
+    WITH CHECK (current_user = 'notifications_maintenance');
+
+-- The delivery loop counts and mutes; a member's unmute is the project's own.
+GRANT SELECT, INSERT, UPDATE ON notifications.routes TO notifications_maintenance;

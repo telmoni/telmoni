@@ -10,9 +10,9 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use telmoni_shared::{
     ApiKeyScope, ContentMode, Flag, IncidentStatus, LayoutDepth, LayoutOpen, MissingData,
-    NotificationKind, OrganizationStatus, Role, RuleAggregation, RuleMeasure, RuleOperator,
-    RuleWindow, SessionSort, Severity, SortDirection, SpanKind, SpanStatus, TraceColumn, TraceSort,
-    UserSort, ViewKind, slug,
+    NotificationKind, OrganizationStatus, Role, RuleAggregation, RuleLevel, RuleMeasure,
+    RuleOperator, RuleWindow, SessionSort, Severity, SortDirection, SpanKind, SpanStatus,
+    TraceColumn, TraceSort, UserSort, ViewKind, slug,
 };
 
 /// Serialize each variant to its wire string, per the enum's `#[serde(rename_all)]`.
@@ -70,6 +70,7 @@ fn generated_contract() -> Value {
             "MissingData": wire(&MissingData::all()),
             "Severity": wire(&Severity::all()),
             "IncidentStatus": wire(&IncidentStatus::all()),
+            "RuleLevel": wire(&RuleLevel::all()),
             "Flag": wire(&all_variants!(Flag; Connectors, PublicApi, ApiTokens,
                 Members, Signup)),
         },

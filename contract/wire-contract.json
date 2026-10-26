@@ -66,6 +66,10 @@
       "p95",
       "p99"
     ],
+    "RuleLevel": [
+      "warning",
+      "alert"
+    ],
     "RuleMeasure": [
       "count",
       "failures",

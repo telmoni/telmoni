@@ -1311,6 +1311,155 @@ pub async fn enqueue_delivery<B: Binding>(
 /// tenant keys, so the composite foreign key and every policy's `WITH CHECK`
 /// hold by construction under any binding. Known wart: the organization-wide
 /// fan-out does not dedupe on channel.
+/// One delivery row per connection of `connections` that is the project's,
+/// active, takes `kind` and is not muted for `route`, each marked with the
+/// route its outcome is counted under.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a routed notice is its tenant, its text and its route"
+)]
+pub async fn enqueue_routed<B: Binding>(
+    tx: &mut Scoped<'_, B>,
+    organization_id: &OrganizationId,
+    project_id: &ProjectId,
+    kind: NotificationKind,
+    subject: &str,
+    body: &str,
+    route: &str,
+    connections: &[Uuid],
+) -> sqlx::Result<Vec<Uuid>> {
+    if connections.is_empty() {
+        return Ok(Vec::new());
+    }
+    let targets: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT c.id FROM notifications.connections AS c
+          WHERE c.organization_id = $1 AND c.project_id = $2 AND c.id = ANY($3)
+            AND c.status = $4
+            AND (c.event_kinds IS NULL OR $5 = ANY (c.event_kinds))
+            AND NOT EXISTS (SELECT 1 FROM notifications.routes AS r
+                             WHERE r.route = $6 AND r.connection_id = c.id
+                               AND r.muted_at IS NOT NULL)
+          ORDER BY c.id",
+    )
+    .bind(organization_id)
+    .bind(project_id)
+    .bind(connections)
+    .bind(ConnectionStatus::Active)
+    .bind(kind)
+    .bind(route)
+    .fetch_all(tx.conn())
+    .await?;
+    if targets.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<Uuid> = targets.iter().map(|_| Uuid::now_v7()).collect();
+    sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO notifications.deliveries
+            (id, connection_id, project_id, organization_id, kind, subject, body, route,
+             shard_key)
+         SELECT t.id, t.connection_id, $3::text, $4::text, $5::text, $6::text, $7::text,
+                $8::text, $9::uuid
+           FROM unnest($1::uuid[], $2::uuid[]) AS t(id, connection_id)
+         RETURNING id",
+    )
+    .bind(&ids)
+    .bind(&targets)
+    .bind(project_id)
+    .bind(organization_id)
+    .bind(kind)
+    .bind(subject)
+    .bind(body)
+    .bind(route)
+    .bind(telmoni_shared::derive_shard_key(organization_id))
+    .fetch_all(tx.conn())
+    .await
+}
+
+/// A batch's outcomes counted against the routes they went under: a delivery
+/// that landed resets its connection's run, and one that failed for good
+/// adds to it, muting the connection for the route at
+/// [`ROUTE_FAILURES_MUTE`] in a row.
+pub async fn count_routes(
+    tx: &mut Scoped<'_, Maintenance<NotificationsLane>>,
+    delivered: &[Uuid],
+    failed: &[Uuid],
+) -> sqlx::Result<()> {
+    if !delivered.is_empty() {
+        sqlx::query(
+            "INSERT INTO notifications.routes (route, connection_id, project_id, organization_id)
+             SELECT DISTINCT route, connection_id, project_id, organization_id
+               FROM notifications.deliveries WHERE id = ANY($1) AND route IS NOT NULL
+             ON CONFLICT (route, connection_id) DO UPDATE SET failures = 0, updated_at = now()",
+        )
+        .bind(delivered)
+        .execute(tx.conn())
+        .await?;
+    }
+    if !failed.is_empty() {
+        sqlx::query(
+            "INSERT INTO notifications.routes
+                 (route, connection_id, project_id, organization_id, failures, muted_at)
+             SELECT route, connection_id, project_id, organization_id, count(*)::int,
+                    CASE WHEN count(*) >= $2 THEN now() END
+               FROM notifications.deliveries
+              WHERE id = ANY($1) AND route IS NOT NULL AND status = 'failed'
+              GROUP BY route, connection_id, project_id, organization_id
+             ON CONFLICT (route, connection_id) DO UPDATE
+                SET failures = routes.failures + EXCLUDED.failures,
+                    muted_at = CASE
+                        WHEN routes.muted_at IS NULL AND routes.failures + EXCLUDED.failures >= $2
+                        THEN now() ELSE routes.muted_at END,
+                    updated_at = now()",
+        )
+        .bind(failed)
+        .bind(ROUTE_FAILURES_MUTE)
+        .execute(tx.conn())
+        .await?;
+    }
+    Ok(())
+}
+
+/// How many failed deliveries in a row mute a connection for a route.
+pub const ROUTE_FAILURES_MUTE: i32 = 5;
+
+/// The project's connections muted for `route`.
+pub async fn muted_for<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    route: &str,
+) -> sqlx::Result<Vec<Uuid>> {
+    sqlx::query_scalar(
+        "SELECT connection_id FROM notifications.routes
+          WHERE project_id = $1 AND route = $2 AND muted_at IS NOT NULL
+          ORDER BY connection_id",
+    )
+    .bind(project_id)
+    .bind(route)
+    .fetch_all(tx.conn())
+    .await
+}
+
+/// One of the project's connections heard again under `route`, its run
+/// forgotten. Answers whether it was muted.
+pub async fn unmute<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    route: &str,
+    connection_id: Uuid,
+) -> sqlx::Result<bool> {
+    Ok(sqlx::query(
+        "UPDATE notifications.routes SET failures = 0, muted_at = NULL, updated_at = now()
+          WHERE project_id = $1 AND route = $2 AND connection_id = $3 AND muted_at IS NOT NULL",
+    )
+    .bind(project_id)
+    .bind(route)
+    .bind(connection_id)
+    .execute(tx.conn())
+    .await?
+    .rows_affected()
+        > 0)
+}
+
 pub async fn enqueue_deliveries<B: Binding>(
     tx: &mut Scoped<'_, B>,
     organization_id: &OrganizationId,

@@ -240,6 +240,14 @@ export const IncidentStatus = {
 } as const;
 export type IncidentStatus = typeof IncidentStatus[keyof typeof IncidentStatus];
 
+/** Wire vocabulary of the Rust `RuleLevel`: which of an alert's notices a
+ *  connector it links hears. */
+export const RuleLevel = {
+  Warning: "warning",
+  Alert:   "alert",
+} as const;
+export type RuleLevel = typeof RuleLevel[keyof typeof RuleLevel];
+
 /** Wire vocabulary of the Rust `SortDirection`: which way a list is sorted. */
 export const SortDirection = {
   Asc:  "asc",

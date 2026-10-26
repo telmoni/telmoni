@@ -21,7 +21,7 @@ use telmoni_shared::acting::{Acting, ActingKey, ActingProject};
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
 use telmoni_shared::rbac::project_role;
 use telmoni_shared::seam::{
-    Auth, Emitted, Entitlements, NoLimits, Notice, Notifications, ProjectHome,
+    Auth, Emitted, Entitlements, NoLimits, Notice, Notifications, ProjectHome, Route,
 };
 use telmoni_shared::test_util::{ServiceRole, chain_lock_held, service_pool};
 use telmoni_shared::{
@@ -539,6 +539,8 @@ pub(crate) struct LoggedNotice {
     pub(crate) dedup_key: Option<String>,
     /// Told to the connectors alone, with no feed row.
     pub(crate) reminded: bool,
+    /// The connections a routed notice was sent to.
+    pub(crate) connections: Vec<Uuid>,
 }
 
 /// Notifications as this module holds it: every notice handed through the
@@ -599,6 +601,7 @@ impl Notifications for NoticeLog {
             metadata: notice.metadata,
             dedup_key: notice.dedup_key.map(str::to_owned),
             reminded: false,
+            connections: Vec::new(),
         });
         Ok(Emitted {
             feed_id,
@@ -606,11 +609,32 @@ impl Notifications for NoticeLog {
         })
     }
 
+    async fn emit_routed(
+        &self,
+        organization_id: &OrganizationId,
+        project_id: &ProjectId,
+        notice: Notice<'_>,
+        route: Route<'_>,
+    ) -> Result<Emitted, TelmoniError> {
+        let emitted = self.emit(organization_id, Some(project_id), notice).await?;
+        if !emitted.deduplicated
+            && let Some(last) = self
+                .notices
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .last_mut()
+        {
+            last.connections = route.connections.to_vec();
+        }
+        Ok(emitted)
+    }
+
     async fn remind(
         &self,
         organization_id: &OrganizationId,
         project_id: &ProjectId,
         notice: Notice<'_>,
+        route: Route<'_>,
     ) -> Result<usize, TelmoniError> {
         self.notices
             .lock()
@@ -625,8 +649,9 @@ impl Notifications for NoticeLog {
                 metadata: notice.metadata,
                 dedup_key: None,
                 reminded: true,
+                connections: route.connections.to_vec(),
             });
-        Ok(1)
+        Ok(route.connections.len())
     }
 
     async fn purge_organization(
@@ -742,6 +767,7 @@ pub(crate) fn state_with_stores_under(
 pub(crate) fn state_with_stores_noticed(
     pool: &PgPool,
     auth: Arc<dyn Auth>,
+    entitlements: Arc<dyn Entitlements>,
     notices: Arc<NoticeLog>,
 ) -> Arc<AppState> {
     let clickhouse = std::env::var("TELEMETRY_CLICKHOUSE_URL").expect(
@@ -752,7 +778,7 @@ pub(crate) fn state_with_stores_noticed(
         auth,
         &clickhouse,
         &redis_url(),
-        Arc::new(NoLimits),
+        entitlements,
         notices,
     ))
 }

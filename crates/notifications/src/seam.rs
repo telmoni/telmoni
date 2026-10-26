@@ -14,7 +14,7 @@ use telmoni_shared::acting::Acting;
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam::{
-    ActivitySource, Audience, DocumentCursor, Emitted, Notice, Notifications, ProjectHome,
+    ActivitySource, Audience, DocumentCursor, Emitted, Notice, Notifications, ProjectHome, Route,
     SourceDocument,
 };
 use telmoni_shared::{AuthError, OrganizationId, ProjectId, TelmoniError, UserId};
@@ -38,13 +38,47 @@ impl Notifications for Notifier {
         handler::emit_notice(&self.0, organization_id, project_id, notice).await
     }
 
+    async fn emit_routed(
+        &self,
+        organization_id: &OrganizationId,
+        project_id: &ProjectId,
+        notice: Notice<'_>,
+        route: Route<'_>,
+    ) -> Result<Emitted, TelmoniError> {
+        handler::emit_routed_notice(&self.0, organization_id, project_id, notice, route).await
+    }
+
     async fn remind(
         &self,
         organization_id: &OrganizationId,
         project_id: &ProjectId,
         notice: Notice<'_>,
+        route: Route<'_>,
     ) -> Result<usize, TelmoniError> {
-        handler::remind_notice(&self.0, organization_id, project_id, notice).await
+        handler::remind_notice(&self.0, organization_id, project_id, notice, route).await
+    }
+
+    async fn muted(
+        &self,
+        project_id: &ProjectId,
+        route_key: &str,
+    ) -> Result<Vec<Uuid>, TelmoniError> {
+        let mut tx = project_scope(&self.0.db, project_id).await?;
+        let muted = db::muted_for(&mut tx, project_id, route_key).await?;
+        tx.commit().await?;
+        Ok(muted)
+    }
+
+    async fn unmute(
+        &self,
+        project_id: &ProjectId,
+        route_key: &str,
+        connection_id: Uuid,
+    ) -> Result<bool, TelmoniError> {
+        let mut tx = project_scope(&self.0.db, project_id).await?;
+        let unmuted = db::unmute(&mut tx, project_id, route_key, connection_id).await?;
+        tx.commit().await?;
+        Ok(unmuted)
     }
 
     async fn purge_organization(

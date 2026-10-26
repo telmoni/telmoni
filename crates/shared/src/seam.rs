@@ -329,6 +329,18 @@ pub struct Notice<'a> {
     pub dedup_key: Option<&'a str>,
 }
 
+/// Where an alert's notice goes: the connections its alert links, under a
+/// key of the producer's own (`telemetry:rule:<id>`) by which each one's
+/// failed deliveries are counted, five in a row muting it for that key alone.
+#[derive(Debug, Clone, Copy)]
+pub struct Route<'a> {
+    /// The producer's key, 1 to 200 characters.
+    pub key: &'a str,
+    /// The connections the notice may go to: the project's own, the rest
+    /// ignored.
+    pub connections: &'a [Uuid],
+}
+
 /// What a notice's write came to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Emitted {
@@ -350,18 +362,56 @@ pub trait Notifications: Send + Sync {
         notice: Notice<'_>,
     ) -> Result<Emitted, TelmoniError>;
 
-    /// Queue a notice to the project's connectors alone, with no feed row: a
+    /// Write a notice to the project's feed and queue it to the connections
+    /// `route` names that are active, take its kind and are not muted for the
+    /// route. A deployment's own notifications that route nothing emit it.
+    async fn emit_routed(
+        &self,
+        organization_id: &OrganizationId,
+        project_id: &ProjectId,
+        notice: Notice<'_>,
+        route: Route<'_>,
+    ) -> Result<Emitted, TelmoniError> {
+        let _ = route;
+        self.emit(organization_id, Some(project_id), notice).await
+    }
+
+    /// Queue a notice to the connections `route` names alone, as
+    /// [`Notifications::emit_routed`] picks them, with no feed row: a
     /// reminder, or what an incident whose feed rows are written already says
-    /// again. Answers how many deliveries were queued; a deployment's own
-    /// notifications that keep no connector queue none.
+    /// again. Answers how many deliveries were queued.
     async fn remind(
         &self,
         organization_id: &OrganizationId,
         project_id: &ProjectId,
         notice: Notice<'_>,
+        route: Route<'_>,
     ) -> Result<usize, TelmoniError> {
-        let _ = (organization_id, project_id, notice);
+        let _ = (organization_id, project_id, notice, route);
         Ok(0)
+    }
+
+    /// The project's connections muted for `route_key`: those whose last five
+    /// deliveries under it failed.
+    async fn muted(
+        &self,
+        project_id: &ProjectId,
+        route_key: &str,
+    ) -> Result<Vec<Uuid>, TelmoniError> {
+        let _ = (project_id, route_key);
+        Ok(Vec::new())
+    }
+
+    /// One of the project's connections heard again under `route_key`, its
+    /// failures forgotten. Answers whether it was muted.
+    async fn unmute(
+        &self,
+        project_id: &ProjectId,
+        route_key: &str,
+        connection_id: Uuid,
+    ) -> Result<bool, TelmoniError> {
+        let _ = (project_id, route_key, connection_id);
+        Ok(false)
     }
 
     /// Everything held for an organization — its connectors torn down

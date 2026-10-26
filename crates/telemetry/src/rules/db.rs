@@ -276,3 +276,90 @@ pub async fn hold_to(
     .await?
     .rows_affected())
 }
+
+/// A connector an alert links, as its row keeps it.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct LinkRow {
+    pub rule_id: Uuid,
+    pub connection_id: Uuid,
+    pub level: telmoni_shared::RuleLevel,
+    pub hours: Option<sqlx::types::Json<crate::rules::Hours>>,
+}
+
+impl LinkRow {
+    /// The link as the lanes and the loop read it.
+    #[must_use]
+    pub fn link(self) -> crate::rules::Link {
+        crate::rules::Link {
+            connection_id: self.connection_id,
+            level: self.level,
+            hours: self.hours.map(|hours| hours.0),
+        }
+    }
+}
+
+/// The connectors the project's alerts link, those of `rule_ids` alone.
+pub async fn links<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    rule_ids: &[Uuid],
+) -> sqlx::Result<Vec<LinkRow>> {
+    sqlx::query_as(
+        "SELECT rule_id, connection_id, level, hours FROM telemetry.rule_connectors
+          WHERE project_id = $1 AND rule_id = ANY($2)
+          ORDER BY rule_id, connection_id",
+    )
+    .bind(project_id)
+    .bind(rule_ids)
+    .fetch_all(tx.conn())
+    .await
+}
+
+/// The connectors one alert links, read in the module's lane by the loop.
+pub async fn links_of(
+    tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
+    rule_id: Uuid,
+) -> sqlx::Result<Vec<LinkRow>> {
+    sqlx::query_as(
+        "SELECT rule_id, connection_id, level, hours FROM telemetry.rule_connectors
+          WHERE rule_id = $1 ORDER BY connection_id",
+    )
+    .bind(rule_id)
+    .fetch_all(tx.conn())
+    .await
+}
+
+/// The alert's connectors, written whole in place of those it linked.
+pub async fn write_links<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    rule_id: Uuid,
+    links: &[crate::rules::Link],
+) -> sqlx::Result<()> {
+    sqlx::query("DELETE FROM telemetry.rule_connectors WHERE project_id = $1 AND rule_id = $2")
+        .bind(project_id)
+        .bind(rule_id)
+        .execute(tx.conn())
+        .await?;
+    for link in links {
+        sqlx::query(
+            "INSERT INTO telemetry.rule_connectors (rule_id, connection_id, project_id, level, hours)
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(rule_id)
+        .bind(link.connection_id)
+        .bind(project_id)
+        .bind(link.level)
+        .bind(link.hours.as_ref().map(sqlx::types::Json))
+        .execute(tx.conn())
+        .await?;
+    }
+    Ok(())
+}
+
+/// The key an alert's notices are routed under, which counts each linked
+/// connector's failed deliveries for it alone.
+#[must_use]
+pub fn route_key(rule_id: Uuid) -> String {
+    format!("telemetry:rule:{rule_id}")
+}

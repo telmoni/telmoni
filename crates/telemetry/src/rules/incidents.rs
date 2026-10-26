@@ -92,6 +92,9 @@ pub struct Told {
     pub incident_id: Uuid,
     pub kind: NotificationKind,
     pub severity: Severity,
+    /// The severity whose connectors hear it: its own, or for a resolution
+    /// the incident's last.
+    pub heard_at: Severity,
     /// Said again, to the connectors alone, whatever the feed holds.
     pub again: bool,
     pub reminder: bool,
@@ -173,6 +176,7 @@ fn moves(
         incident_id: open.map_or_else(Uuid::new_v4, |incident| incident.id),
         kind,
         severity,
+        heard_at: severity,
         again: false,
         reminder: false,
         silent: false,
@@ -193,7 +197,10 @@ fn moves(
         return Vec::new();
     };
     if next == Severity::Ok {
-        return vec![move_to(NotificationKind::IncidentResolved, Severity::Ok)];
+        return vec![Told {
+            heard_at: incident.severity,
+            ..move_to(NotificationKind::IncidentResolved, Severity::Ok)
+        }];
     }
     if next.is_breach() && next != incident.severity {
         let risen = next == Severity::Alert || incident.severity == Severity::NoData;

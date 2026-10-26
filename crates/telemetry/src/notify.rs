@@ -8,14 +8,20 @@
 use serde_json::json;
 use uuid::Uuid;
 
-use telmoni_shared::seam::Notice;
+use chrono::Utc;
+
+use telmoni_shared::db::tenant_session::maintenance_scope;
+use telmoni_shared::seam::{Notice, Route};
 use telmoni_shared::{
     NotificationKind, OrganizationId, ProjectId, RuleAggregation, RuleMeasure, Severity, SpanKind,
+    TelmoniError,
 };
 
 use crate::AppState;
-use crate::rules::db::RuleRow;
+use crate::db::TelemetryLane;
+use crate::rules::db::{self, RuleRow};
 use crate::rules::incidents::Told;
+use crate::rules::{Link, deliveries};
 
 /// What an evaluation's moves say, told after its commit: each opening and
 /// resolution emitted to the feed, keyed by the incident and the kind, and
@@ -23,7 +29,33 @@ use crate::rules::incidents::Told;
 /// is one said again. A notice that cannot be told is logged by its ids and
 /// lost to the record, as the evaluation stands.
 pub async fn tell_incidents(state: &AppState, rule: &RuleRow, value: Option<f64>, told: &[Told]) {
+    if told.iter().all(|one| one.silent) {
+        return;
+    }
+    let links = match links_of(state, rule).await {
+        Ok(links) => links,
+        Err(error) => {
+            tracing::warn!(
+                rule_id = %rule.id,
+                error = %error,
+                "telemetry: where an alert's notices go could not be read; the feed alone hears them"
+            );
+            Vec::new()
+        }
+    };
+    let route_key = db::route_key(rule.id);
     for one in told.iter().filter(|one| !one.silent) {
+        let now = Utc::now();
+        let hearers: Vec<Uuid> = links
+            .iter()
+            .filter(|link| link.hears(one.heard_at, now))
+            .map(|link| link.connection_id)
+            .collect();
+        let taken = deliveries::take(state, &rule.organization_id, hearers.len()).await;
+        let route = Route {
+            key: &route_key,
+            connections: hearers.get(..taken).unwrap_or_default(),
+        };
         let (title, body) = words(rule, value, one);
         let metadata = json!({
             "incident_id": one.incident_id,
@@ -56,10 +88,11 @@ pub async fn tell_incidents(state: &AppState, rule: &RuleRow, value: Option<f64>
         } else {
             match state
                 .notifications
-                .emit(
+                .emit_routed(
                     &rule.organization_id,
-                    Some(&rule.project_id),
+                    &rule.project_id,
                     notice(Some(&key)),
+                    route,
                 )
                 .await
             {
@@ -78,7 +111,7 @@ pub async fn tell_incidents(state: &AppState, rule: &RuleRow, value: Option<f64>
         if again
             && let Err(error) = state
                 .notifications
-                .remind(&rule.organization_id, &rule.project_id, notice(None))
+                .remind(&rule.organization_id, &rule.project_id, notice(None), route)
                 .await
         {
             tracing::warn!(
@@ -89,6 +122,14 @@ pub async fn tell_incidents(state: &AppState, rule: &RuleRow, value: Option<f64>
             );
         }
     }
+}
+
+/// The connectors the alert links, read in the module's lane.
+async fn links_of(state: &AppState, rule: &RuleRow) -> Result<Vec<Link>, TelmoniError> {
+    let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
+    let links = db::links_of(&mut tx, rule.id).await?;
+    tx.commit().await?;
+    Ok(links.into_iter().map(db::LinkRow::link).collect())
 }
 
 /// A notice's title and body: the alert's name and where it stands, and its
@@ -166,7 +207,8 @@ fn amount(measure: RuleMeasure, aggregation: RuleAggregation, value: f64) -> Str
 }
 
 /// A member's resolution of an incident, told as a recovery is: in the feed,
-/// keyed as the incident's resolution, and to its connectors.
+/// keyed as the incident's resolution, and to the connectors its alert links
+/// that heard it.
 pub async fn resolved_by_hand(
     state: &AppState,
     organization_id: &OrganizationId,
@@ -191,9 +233,31 @@ pub async fn resolved_by_hand(
         }),
         dedup_key: Some(&key),
     };
+    let links = {
+        let read = async {
+            let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
+            let links = db::links_of(&mut tx, rule_id).await?;
+            tx.commit().await?;
+            Ok::<_, TelmoniError>(links)
+        };
+        read.await.unwrap_or_default()
+    };
+    let now = Utc::now();
+    let hearers: Vec<Uuid> = links
+        .into_iter()
+        .map(db::LinkRow::link)
+        .filter(|link| link.hears(severity, now))
+        .map(|link| link.connection_id)
+        .collect();
+    let taken = deliveries::take(state, organization_id, hearers.len()).await;
+    let route_key = db::route_key(rule_id);
+    let route = Route {
+        key: &route_key,
+        connections: hearers.get(..taken).unwrap_or_default(),
+    };
     if let Err(error) = state
         .notifications
-        .emit(organization_id, Some(project_id), notice)
+        .emit_routed(organization_id, project_id, notice, route)
         .await
     {
         tracing::warn!(

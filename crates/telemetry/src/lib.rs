@@ -190,6 +190,10 @@ pub fn router(state: Arc<AppState>) -> Router {
                 .delete(handler::rules::delete_rule),
         )
         .route(
+            "/telemetry/rules/{id}/connectors/{connection_id}/unmute",
+            post(handler::rules::unmute_link),
+        )
+        .route(
             "/telemetry/incidents",
             get(handler::incidents::list_incidents),
         )

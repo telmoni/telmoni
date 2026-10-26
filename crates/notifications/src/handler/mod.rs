@@ -18,7 +18,7 @@ use telmoni_shared::db::tenant_session::{
 };
 use telmoni_shared::extract::Json;
 use telmoni_shared::rbac::{Resource, Verb};
-use telmoni_shared::seam::{Emitted, Notice};
+use telmoni_shared::seam::{Emitted, Notice, Route};
 use telmoni_shared::{AuthError, OrganizationId, ProjectId, TelmoniError, UserId};
 use uuid::Uuid;
 
@@ -287,28 +287,109 @@ pub async fn emit_notice(
     })
 }
 
-/// A notice queued to the project's connectors alone, with no feed row: a
-/// reminder, or what an incident whose feed rows are written already says
-/// again ([`telmoni_shared::seam::Notifications::remind`]). Its title and
-/// body are held to an emit's bounds; it has no metadata, which only the
-/// feed keeps.
+/// A notice written to the project's feed and queued to the connections its
+/// route names ([`telmoni_shared::seam::Notifications::emit_routed`]), each
+/// active, taking its kind, and not muted for the route; a dedup key written
+/// before answers its first row and queues nothing, as an emit does.
+pub async fn emit_routed_notice(
+    state: &Arc<AppState>,
+    organization_id: &OrganizationId,
+    project_id: &ProjectId,
+    notice: Notice<'_>,
+    route: Route<'_>,
+) -> Result<Emitted, TelmoniError> {
+    let kind = notice.kind;
+    let title = bounded(notice.title, "title", TITLE_MAX_CHARS)?;
+    let body = bounded(notice.body, "body", BODY_MAX_CHARS)?;
+    let route_key = bounded(route.key, "route", DEDUP_KEY_MAX_CHARS)?;
+    let dedup_key = match notice.dedup_key.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(key) => Some(bounded(key, "dedup_key", DEDUP_KEY_MAX_CHARS)?),
+        None => None,
+    };
+    let metadata = if notice.metadata.is_null() {
+        json!({})
+    } else {
+        notice.metadata
+    };
+    if !metadata.is_object() {
+        return Err(AuthError::BadRequest("metadata must be a JSON object".into()).into());
+    }
+    let item = db::NewFeedItem {
+        subject_user_id: notice.subject_user_id,
+        kind,
+        title,
+        body,
+        metadata: &metadata,
+        dedup_key,
+    };
+    let mut tx = project_scope(&state.db, project_id).await?;
+    let Some(feed_id) = db::insert_feed(&mut tx, Some(project_id), organization_id, &item).await?
+    else {
+        let feed_id = db::feed_id_for_dedup_key(
+            &mut tx,
+            organization_id,
+            Some(project_id),
+            dedup_key.unwrap_or_default(),
+        )
+        .await?
+        .ok_or_else(|| TelmoniError::Internal("dedup conflict with no surviving row".into()))?;
+        tx.commit().await?;
+        return Ok(Emitted {
+            feed_id,
+            deduplicated: true,
+        });
+    };
+    let queued = db::enqueue_routed(
+        &mut tx,
+        organization_id,
+        project_id,
+        kind,
+        title,
+        body,
+        route_key,
+        route.connections,
+    )
+    .await?;
+    tx.commit().await?;
+    tracing::info!(
+        project_id = %project_id,
+        organization_id = %organization_id,
+        kind = %kind,
+        queued = queued.len(),
+        "notification emitted to its route"
+    );
+    delivery::spawn_first_attempts(state, queued);
+    Ok(Emitted {
+        feed_id,
+        deduplicated: false,
+    })
+}
+
+/// A notice queued to the connections its route names alone, as
+/// [`emit_routed_notice`] picks them, with no feed row: a reminder, or what
+/// an incident whose feed rows are written already says again
+/// ([`telmoni_shared::seam::Notifications::remind`]). Its title and body are
+/// held to an emit's bounds; it has no metadata, which only the feed keeps.
 pub async fn remind_notice(
     state: &Arc<AppState>,
     organization_id: &OrganizationId,
     project_id: &ProjectId,
     notice: Notice<'_>,
+    route: Route<'_>,
 ) -> Result<usize, TelmoniError> {
     let title = bounded(notice.title, "title", TITLE_MAX_CHARS)?;
     let body = bounded(notice.body, "body", BODY_MAX_CHARS)?;
+    let route_key = bounded(route.key, "route", DEDUP_KEY_MAX_CHARS)?;
     let mut tx = project_scope(&state.db, project_id).await?;
-    let queued = db::enqueue_deliveries(
+    let queued = db::enqueue_routed(
         &mut tx,
         organization_id,
-        Some(project_id),
+        project_id,
         notice.kind,
         title,
         body,
-        notice.subject_user_id,
+        route_key,
+        route.connections,
     )
     .await?;
     tx.commit().await?;
