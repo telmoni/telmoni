@@ -658,16 +658,7 @@ fn url_taken() -> TelmoniError {
 /// A name as an organization carries it, or the 400 that says why not: one
 /// rule for a new organization and a rename, so the two cannot drift.
 fn organization_name(raw: &str) -> Result<String, TelmoniError> {
-    let Some(name) = crate::identity::sanitize_organization_name(raw) else {
-        return Err(AuthError::BadRequest("give the organization a name".into()).into());
-    };
-    if name.chars().count() > MAX_ORGANIZATION_NAME {
-        return Err(AuthError::BadRequest(format!(
-            "an organization name is at most {MAX_ORGANIZATION_NAME} characters"
-        ))
-        .into());
-    }
-    Ok(name)
+    crate::identity::name(raw, "organization", MAX_ORGANIZATION_NAME)
 }
 
 /// A URL asked for, at creation or on Settings: a slug's shape, no word the

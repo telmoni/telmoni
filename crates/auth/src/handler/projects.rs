@@ -21,21 +21,11 @@ use crate::handler::emit_audit;
 /// the only thing enforcing it.
 pub(crate) const MAX_PROJECT_NAME: usize = 100;
 
-/// Trim a submitted project name and refuse empty or overlong ones. Shared by
-/// create and rename so the two cannot drift, and counted in CHARACTERS, not
-/// bytes.
-fn validate_project_name(raw: &str) -> Result<&str, TelmoniError> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Err(AuthError::BadRequest("project name cannot be empty".into()).into());
-    }
-    if trimmed.chars().count() > MAX_PROJECT_NAME {
-        return Err(AuthError::BadRequest(format!(
-            "project name too long (max {MAX_PROJECT_NAME} characters)"
-        ))
-        .into());
-    }
-    Ok(trimmed)
+/// A submitted project name as a project carries it: shared by create and
+/// rename so the two cannot drift. It is printed in mail subjects, so it is
+/// held to what an organization's name is.
+fn validate_project_name(raw: &str) -> Result<String, TelmoniError> {
+    crate::identity::name(raw, "project", MAX_PROJECT_NAME)
 }
 
 /// The one constraint a project NAME can trip — one name per organization,
@@ -127,9 +117,9 @@ pub async fn create_project(
     // takes it to pick a free name.
     crate::db::locks::lock_organization(&mut acting.tx, &organization_id).await?;
     let project_id = telmoni_shared::ProjectId::new();
-    let Some(slug) = projects::create(&mut acting.tx, &project_id, &organization_id, name)
+    let Some(slug) = projects::create(&mut acting.tx, &project_id, &organization_id, &name)
         .await
-        .map_err(|e| name_taken(e, name))?
+        .map_err(|e| name_taken(e, &name))?
     else {
         return Err(AuthError::Conflict("project id collision — retry".into()).into());
     };
@@ -274,9 +264,9 @@ pub async fn update_project(
     // On the organization's lock, as a create takes it: the new name's slug is
     // picked against the organization's other projects.
     crate::db::locks::lock_organization(&mut acting.tx, &organization_id).await?;
-    let slug = projects::update_name(&mut acting.tx, &organization_id, &project_id, trimmed)
+    let slug = projects::update_name(&mut acting.tx, &organization_id, &project_id, &trimmed)
         .await
-        .map_err(|e| name_taken(e, trimmed))?;
+        .map_err(|e| name_taken(e, &trimmed))?;
     let acting = acting.leave_owner_scope().await?;
     let Some(slug) = slug else {
         return Err(AuthError::NotFound("project not found".into()).into());

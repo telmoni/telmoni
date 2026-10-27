@@ -34,6 +34,11 @@ use crate::{
 /// Default TTL for newly-minted tokens when the caller doesn't specify one.
 const DEFAULT_TTL_DAYS: i64 = 90;
 
+/// A key's name and description, in characters, as every caller of the
+/// lane is held to them.
+const MAX_KEY_NAME: usize = 100;
+const MAX_KEY_DESCRIPTION: usize = 500;
+
 /// Default grace window for a rotation: 24 hours for a deploy to ship the new
 /// token. An emergency rotation sends `grace_seconds: 0`.
 const DEFAULT_ROTATE_GRACE_SECS: i64 = 24 * 60 * 60;
@@ -151,9 +156,15 @@ pub async fn create_token(
     Json(req): Json<CreateTokenRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
     let project_id = project_of(&headers)?;
-    if req.name.is_empty() || req.created_by.is_empty() {
-        return Err(AuthError::BadRequest("name and created_by are required".into()).into());
+    if req.created_by.is_empty() {
+        return Err(AuthError::BadRequest("created_by is required".into()).into());
     }
+    let name = crate::identity::name(&req.name, "key", MAX_KEY_NAME)?;
+    let description = crate::identity::note(
+        req.description.as_deref(),
+        "key's description",
+        MAX_KEY_DESCRIPTION,
+    )?;
     if matches!(req.expires_in_seconds, Some(Some(0))) {
         return Err(AuthError::BadRequest(
             "expires_in_seconds must be positive; send null for no expiry, or omit it for the 90-day default".into(),
@@ -168,7 +179,6 @@ pub async fn create_token(
     let scopes = minted_scopes(&req.scopes)?;
     let raw_token = generate_token();
     let token_hash = hash_token(&raw_token);
-    let description = req.description.as_deref();
 
     let actor = principal.user_id;
     if req.created_by != actor.as_str() {
@@ -183,8 +193,8 @@ pub async fn create_token(
         &mut tx,
         &token_organization,
         &project_id,
-        &req.name,
-        description,
+        &name,
+        description.as_deref(),
         &crate::handler::parse_user_id(&req.created_by)?,
         &scopes,
         expires_at,
@@ -213,7 +223,7 @@ pub async fn create_token(
             ip_address: None,
             user_agent: None,
             metadata: Some(json!({
-                "name": req.name,
+                "name": name,
                 "description": description,
                 "scopes": scopes,
                 "expires_at": expires_at,
