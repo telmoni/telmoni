@@ -432,7 +432,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_ceiling_reads_as_plans_md_writes_it_and_midnight_is_never_now() {
+    fn a_ceiling_reads_in_round_megabytes_and_midnight_is_never_now() {
         assert_eq!(megabytes(5_000_000), "5 MB");
         assert_eq!(megabytes(125_000_000), "125 MB");
         assert_eq!(megabytes(2_500_000), "2.5 MB");
