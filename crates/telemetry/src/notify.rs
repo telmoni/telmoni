@@ -10,13 +10,13 @@
 use serde_json::json;
 use uuid::Uuid;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::seam::{Notice, Route};
 use telmoni_shared::{
-    NotificationKind, OrganizationId, ProjectId, RuleAggregation, RuleMeasure, RuleWindow,
-    Severity, SpanKind, SpanStatus, TelmoniError,
+    IncidentStatus, NotificationKind, OrganizationId, ProjectId, RuleAggregation, RuleMeasure,
+    RuleWindow, Severity, SpanKind, SpanStatus, TelmoniError,
 };
 
 use crate::AppState;
@@ -29,9 +29,16 @@ use crate::spend::Unread;
 
 /// What an evaluation's moves say, told after its commit: each opening and
 /// resolution emitted to the feed, keyed by the incident and the kind, and
-/// said to the connectors alone where the move is one said again. A notice
-/// that cannot be told is logged by its ids and lost to the record.
-pub async fn tell_incidents(state: &AppState, rule: &RuleRow, value: Option<f64>, told: &[Told]) {
+/// said to the connectors alone where the move is one said again. Windows and
+/// hours are read at `at`, the instant the alert keeps as its last notice's.
+/// A notice that cannot be told is logged by its ids and lost to the record.
+pub async fn tell_incidents(
+    state: &AppState,
+    rule: &RuleRow,
+    value: Option<f64>,
+    told: &[Told],
+    at: DateTime<Utc>,
+) {
     if told.iter().all(|one| one.silent) {
         return;
     }
@@ -46,93 +53,173 @@ pub async fn tell_incidents(state: &AppState, rule: &RuleRow, value: Option<f64>
             Vec::new()
         }
     };
-    let route_key = db::route_key(rule.id);
-    let muted = muted_now(state, &rule.project_id, rule.id).await;
+    let muted = muted_at(state, &rule.project_id, rule.id, at).await;
     let run = run_of(state, rule, told).await;
-    let traces_url = traces_link(state, rule);
     for one in told.iter().filter(|one| !one.silent) {
-        let now = Utc::now();
+        // A resolution's `told_to` names who heard its incident; any other's is empty.
         let hearers: Vec<Uuid> = links
             .iter()
-            .filter(|link| !muted && link.hears(one.heard_at, now))
+            .filter(|link| link.hears_end(one.heard_at, &one.told_to, muted, at))
             .map(|link| link.connection_id)
             .collect();
-        let taken = deliveries::take(state, &rule.organization_id, hearers.len()).await;
-        let route = Route {
-            key: &route_key,
-            connections: &hearers,
-            most: taken.room(),
-        };
-        let (title, body) = words(rule, value, one);
         let shown = run.as_ref().filter(|_| shows_run(one));
-        let body = carrying(
-            body,
-            [
-                shown.map(|run| run_line(state, rule, run)),
-                traces_url.as_ref().map(|url| format!("Traces: {url}")),
-            ],
-        );
-        let metadata = json!({
-            "incident_id": one.incident_id,
-            "rule_id": rule.id,
-            "severity": one.severity,
-            "value": value,
-            "alert_threshold": rule.alert_threshold,
-            "warning_threshold": rule.warning_threshold,
-            "reminder": one.reminder,
-            "run": shown.map(|run| run_json(state, rule, run)),
-            "traces_url": traces_url,
-        });
-        let key = format!(
-            "telemetry:incident:{}:{}",
-            one.incident_id,
-            if one.kind == NotificationKind::IncidentResolved {
-                "resolved"
-            } else {
-                "opened"
-            }
-        );
-        let notice = |dedup_key| Notice {
-            kind: one.kind,
-            subject_user_id: None,
-            title: &title,
-            body: &body,
-            metadata: metadata.clone(),
-            dedup_key,
+        tell_one(state, rule, value, one, &hearers, shown).await;
+    }
+}
+
+/// The alert's open incident told again, as a reminder, to the linked
+/// connectors that hear it now but a window or their hours kept from its last
+/// notice; that notice is then now, so each is told it once. One taken is not.
+pub async fn tell_held(state: &AppState, rule: &RuleRow, value: Option<f64>) {
+    let Some(last) = rule.told_at else {
+        return;
+    };
+    let now = Utc::now();
+    let held = async {
+        let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
+        let open = incidents::open_of(&mut tx, rule.id).await?;
+        let Some(incident) = open.filter(|incident| incident.status == IncidentStatus::Open) else {
+            return Ok(None);
         };
-        let reached = tell(
-            state,
-            &rule.organization_id,
-            &rule.project_id,
-            notice,
-            &key,
-            route,
-            one.again,
-        )
-        .await;
-        let made = reached
-            .as_ref()
-            .map_or(0, |reached| reached.connections.len());
-        deliveries::settle(state, &rule.organization_id, taken, made).await;
-        match reached {
-            Ok(reached) => {
-                let run = shown.filter(|_| reached.anyone).map(|run| run.run_id);
-                keep_told(
-                    state,
-                    &rule.project_id,
-                    one.incident_id,
-                    &reached.connections,
-                    run,
-                )
-                .await;
-            }
-            Err(error) => tracing::warn!(
-                rule_id = %rule.id,
-                incident_id = %one.incident_id,
-                error = %error,
-                "telemetry: an incident's notice could not be told"
-            ),
+        let links = db::links_of(&mut tx, rule.id).await?;
+        let muted_then = mutes::in_force(&mut tx, &rule.project_id, rule.id, last).await?;
+        let muted = mutes::in_force(&mut tx, &rule.project_id, rule.id, now).await?;
+        let hearers: Vec<Uuid> = links
+            .into_iter()
+            .map(db::LinkRow::link)
+            .filter(|link| {
+                (muted_then || !link.in_hours(last)) && !muted && link.hears(incident.severity, now)
+            })
+            .map(|link| link.connection_id)
+            .collect();
+        if hearers.is_empty() {
+            return Ok(None);
         }
+        let moved =
+            sqlx::query("UPDATE telemetry.rules SET told_at = $3 WHERE id = $1 AND told_at = $2")
+                .bind(rule.id)
+                .bind(last)
+                .bind(now)
+                .execute(tx.conn())
+                .await?
+                .rows_affected()
+                > 0;
+        tx.commit().await?;
+        Ok::<_, TelmoniError>(moved.then_some((incident, hearers)))
+    };
+    let (incident, hearers) = match held.await {
+        Ok(Some(held)) => held,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::warn!(
+                rule_id = %rule.id,
+                error = %error,
+                "telemetry: whether a hold kept an incident from its connectors could not be read"
+            );
+            return;
+        }
+    };
+    let one = Told {
+        incident_id: incident.id,
+        kind: NotificationKind::IncidentOpened,
+        severity: incident.severity,
+        heard_at: incident.severity,
+        again: true,
+        reminder: true,
+        silent: false,
+        told_to: Vec::new(),
+    };
+    tell_one(state, rule, value, &one, &hearers, None).await;
+}
+
+/// One move told to `hearers`, and to the feed unless said again: its words,
+/// the run it shows and the trace list as the alert read it, the day's
+/// deliveries taken for it, and where it went kept on its incident.
+async fn tell_one(
+    state: &AppState,
+    rule: &RuleRow,
+    value: Option<f64>,
+    one: &Told,
+    hearers: &[Uuid],
+    shown: Option<&ExampleRun>,
+) {
+    let route_key = db::route_key(rule.id);
+    let taken = deliveries::take(state, &rule.organization_id, hearers.len()).await;
+    let route = Route {
+        key: &route_key,
+        connections: hearers,
+        most: taken.room(),
+    };
+    let traces_url = traces_link(state, rule);
+    let (title, body) = words(rule, value, one);
+    let body = carrying(
+        body,
+        [
+            shown.map(|run| run_line(state, rule, run)),
+            traces_url.as_ref().map(|url| format!("Traces: {url}")),
+        ],
+    );
+    let metadata = json!({
+        "incident_id": one.incident_id,
+        "rule_id": rule.id,
+        "severity": one.severity,
+        "value": value,
+        "alert_threshold": rule.alert_threshold,
+        "warning_threshold": rule.warning_threshold,
+        "reminder": one.reminder,
+        "run": shown.map(|run| run_json(state, rule, run)),
+        "traces_url": traces_url,
+    });
+    let key = format!(
+        "telemetry:incident:{}:{}",
+        one.incident_id,
+        if one.kind == NotificationKind::IncidentResolved {
+            "resolved"
+        } else {
+            "opened"
+        }
+    );
+    let notice = |dedup_key| Notice {
+        kind: one.kind,
+        subject_user_id: None,
+        title: &title,
+        body: &body,
+        metadata: metadata.clone(),
+        dedup_key,
+    };
+    let reached = tell(
+        state,
+        &rule.organization_id,
+        &rule.project_id,
+        notice,
+        &key,
+        route,
+        one.again,
+    )
+    .await;
+    let made = reached
+        .as_ref()
+        .map_or(0, |reached| reached.connections.len());
+    deliveries::settle(state, &rule.organization_id, taken, made).await;
+    match reached {
+        Ok(reached) => {
+            let run = shown.filter(|_| reached.anyone).map(|run| run.run_id);
+            keep_told(
+                state,
+                &rule.organization_id,
+                &rule.project_id,
+                one.incident_id,
+                &reached.connections,
+                run,
+            )
+            .await;
+        }
+        Err(error) => tracing::warn!(
+            rule_id = %rule.id,
+            incident_id = %one.incident_id,
+            error = %error,
+            "telemetry: an incident's notice could not be told"
+        ),
     }
 }
 
@@ -176,10 +263,10 @@ async fn tell<'a>(
 }
 
 /// Where one of an incident's notices went, and the run it showed, kept on
-/// the incident in its project's own scope; logged by its ids where it cannot
-/// be, as the notice stands.
+/// the incident; logged by its ids where it cannot be, as the notice stands.
 async fn keep_told(
     state: &AppState,
+    organization_id: &OrganizationId,
     project_id: &ProjectId,
     incident_id: Uuid,
     connections: &[Uuid],
@@ -189,7 +276,10 @@ async fn keep_told(
         return;
     }
     let write = async {
-        let mut tx = project_scope(&state.db, project_id).await?;
+        let mut tx = project_scope(&state.db, project_id)
+            .await?
+            .bind_organization(organization_id)
+            .await?;
         incidents::told(&mut tx, project_id, incident_id, connections, run).await?;
         tx.commit().await?;
         Ok::<_, TelmoniError>(())
@@ -203,12 +293,17 @@ async fn keep_told(
     }
 }
 
-/// Whether a maintenance window mutes the alert now; none, logged, where
+/// Whether a maintenance window mutes the alert at `at`; none, logged, where
 /// the windows cannot be read, so a notice is told rather than lost.
-async fn muted_now(state: &AppState, project_id: &ProjectId, rule_id: Uuid) -> bool {
+async fn muted_at(
+    state: &AppState,
+    project_id: &ProjectId,
+    rule_id: Uuid,
+    at: DateTime<Utc>,
+) -> bool {
     let read = async {
         let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
-        let muted = mutes::in_force(&mut tx, project_id, rule_id, Utc::now()).await?;
+        let muted = mutes::in_force(&mut tx, project_id, rule_id, at).await?;
         tx.commit().await?;
         Ok::<_, TelmoniError>(muted)
     };
@@ -458,6 +553,13 @@ fn words(rule: &RuleRow, value: Option<f64>, told: &Told) -> (String, String) {
         |v| amount(rule.measure, rule.aggregation, v),
     );
     let threshold = |t: f64| amount(rule.measure, rule.aggregation, t);
+    // An incident held through a window with no span has no value to give.
+    let past = |level: &str, at: String| match value {
+        Some(_) => format!("{what} is {shown}, past the {level} threshold of {at}."),
+        None => format!(
+            "{what} has no value now; its incident stands past the {level} threshold of {at}."
+        ),
+    };
     let (state, body) = match (told.kind, told.severity) {
         (NotificationKind::IncidentResolved, _) => (
             "resolved",
@@ -469,18 +571,12 @@ fn words(rule: &RuleRow, value: Option<f64>, told: &Told) -> (String, String) {
         ),
         (NotificationKind::IncidentOpened, Severity::Warning) => (
             "warning",
-            format!(
-                "{what} is {shown}, past the warning threshold of {}.",
-                rule.warning_threshold.map_or_else(String::new, threshold)
+            past(
+                "warning",
+                rule.warning_threshold.map_or_else(String::new, threshold),
             ),
         ),
-        (_, _) => (
-            "alert",
-            format!(
-                "{what} is {shown}, past the alert threshold of {}.",
-                threshold(rule.alert_threshold)
-            ),
-        ),
+        (_, _) => ("alert", past("alert", threshold(rule.alert_threshold))),
     };
     let lead = if told.reminder { "Still: " } else { "" };
     (format!("{}: {state}", rule.name), format!("{lead}{body}"))
@@ -561,42 +657,69 @@ fn dollars(value: f64) -> String {
 }
 
 /// A member's resolution of an incident, told as a recovery is: in the feed,
-/// keyed as the incident's resolution, and to the connectors its alert links
-/// that hear it; to them alone once it reopened, as the feed holds its first.
+/// keyed as the incident's resolution, and to the linked connectors that hear
+/// it or heard the incident; to them alone once it reopened.
 pub async fn resolved_by_hand(state: &AppState, incident: &IncidentRow) {
+    let read = async {
+        let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
+        let links = db::links_of(&mut tx, incident.rule_id).await?;
+        tx.commit().await?;
+        Ok::<_, TelmoniError>(links.into_iter().map(db::LinkRow::link).collect())
+    };
+    let links = match read.await {
+        Ok(links) => links,
+        Err(error) => {
+            tracing::warn!(
+                incident_id = %incident.id,
+                error = %error,
+                "telemetry: where a resolution goes could not be read; the feed alone hears it"
+            );
+            Vec::new()
+        }
+    };
+    tell_resolved(state, incident, &links, false).await;
+}
+
+/// An open incident gone with the alert a member deleted, told as a member's
+/// resolution is, to the connectors the alert linked, `links`.
+pub async fn deleted_with_alert(state: &AppState, incident: &IncidentRow, links: Vec<Link>) {
+    tell_resolved(state, incident, &links, true).await;
+}
+
+/// A resolution by a member told to the feed and to those of `links` that
+/// hear it, its alert `deleted` with it or not.
+async fn tell_resolved(state: &AppState, incident: &IncidentRow, links: &[Link], deleted: bool) {
     let (organization_id, project_id) = (&incident.organization_id, &incident.project_id);
     let (incident_id, rule_id, severity) = (incident.id, incident.rule_id, incident.severity);
     let title = format!("{}: resolved", incident.rule_name);
     let key = format!("telemetry:incident:{incident_id}:resolved");
-    let metadata = json!({
+    let mut metadata = json!({
         "incident_id": incident_id,
         "rule_id": rule_id,
         "severity": severity,
         "by_hand": true,
     });
+    let body = if deleted {
+        if let Some(fields) = metadata.as_object_mut() {
+            fields.insert("alert_deleted".into(), json!(true));
+        }
+        "A member of the project deleted this alert, and its incident with it."
+    } else {
+        "A member of the project resolved this incident."
+    };
     let notice = |dedup_key| Notice {
         kind: NotificationKind::IncidentResolved,
         subject_user_id: None,
         title: &title,
-        body: "A member of the project resolved this incident.",
+        body,
         metadata: metadata.clone(),
         dedup_key,
     };
-    let links = {
-        let read = async {
-            let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
-            let links = db::links_of(&mut tx, rule_id).await?;
-            tx.commit().await?;
-            Ok::<_, TelmoniError>(links)
-        };
-        read.await.unwrap_or_default()
-    };
     let now = Utc::now();
-    let muted = muted_now(state, project_id, rule_id).await;
+    let muted = muted_at(state, project_id, rule_id, now).await;
     let hearers: Vec<Uuid> = links
-        .into_iter()
-        .map(db::LinkRow::link)
-        .filter(|link| !muted && link.hears(severity, now))
+        .iter()
+        .filter(|link| link.hears_end(severity, &incident.told_to, muted, now))
         .map(|link| link.connection_id)
         .collect();
     let taken = deliveries::take(state, organization_id, hearers.len()).await;
@@ -621,7 +744,19 @@ pub async fn resolved_by_hand(state: &AppState, incident: &IncidentRow) {
         .map_or(0, |reached| reached.connections.len());
     deliveries::settle(state, organization_id, taken, made).await;
     match reached {
-        Ok(reached) => keep_told(state, project_id, incident_id, &reached.connections, None).await,
+        // A deleted incident keeps nothing.
+        Ok(_) if deleted => {}
+        Ok(reached) => {
+            keep_told(
+                state,
+                organization_id,
+                project_id,
+                incident_id,
+                &reached.connections,
+                None,
+            )
+            .await;
+        }
         Err(error) => tracing::warn!(
             project_id = %project_id,
             incident_id = %incident_id,

@@ -111,6 +111,9 @@ pub struct AppState {
     /// When this replica last held each organization's alerts to its plan
     /// ([`rules::evaluate`]).
     pub alerts_held: rules::evaluate::Held,
+    /// Whether this replica's alert passes are to stop, and the one in hand
+    /// ([`rules::evaluate::Stopping`]).
+    pub alerts_stopping: rules::evaluate::Stopping,
     /// How long an export's body may take to arrive
     /// (`handler::ingest::BODY_WAIT`); a field so a suite can wait less.
     pub body_wait: std::time::Duration,

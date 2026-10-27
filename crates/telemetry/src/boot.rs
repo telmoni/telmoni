@@ -85,6 +85,7 @@ pub fn state(
         ceilings: crate::ceilings::Ceilings::default(),
         heartbeats: Heartbeats::new("telemetry", TelemetryLane),
         alerts_held: crate::rules::evaluate::Held::default(),
+        alerts_stopping: crate::rules::evaluate::Stopping::default(),
         body_wait: BODY_WAIT,
     })
 }

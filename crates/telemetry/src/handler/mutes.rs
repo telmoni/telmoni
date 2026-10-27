@@ -3,7 +3,9 @@
 //! /mutes/{id}/end`, each open to any member of the project. A window mutes
 //! one alert, or every alert of the project, from its start — now, unless
 //! given — to its end, at most thirty days on; ended early, it keeps who
-//! ended it, and every window stays as the record of who muted what.
+//! ended it. A project keeps its newest [`MUTES_ENDED_KEPT`] ended, and each
+//! window opened or ended early is filed in the organization's audit chain,
+//! the record of who muted what.
 
 use std::sync::Arc;
 
@@ -11,19 +13,31 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use chrono::{DateTime, TimeDelta, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use uuid::Uuid;
 
-use telmoni_shared::db::tenant_session::project_scope;
+use telmoni_shared::acting::Acting;
+use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
 use telmoni_shared::extract::Json;
 use telmoni_shared::rbac::{Resource, Verb};
-use telmoni_shared::{AuthError, TelmoniError};
+use telmoni_shared::{AuditAction, AuthError, TelmoniError, TelmoniResourceKind};
 
 use crate::AppState;
+use crate::db;
+use crate::handler::chain::{self, Change};
 use crate::rules::db as rules;
 use crate::rules::mutes::{self, MUTE_DAYS_MAX, MuteRow};
 
 /// The most windows the list answers.
 pub const MUTES_MAX: i64 = 200;
+
+/// The most ended windows a project keeps, the newest: as many as the list
+/// could show, so none it keeps is out of reach.
+pub const MUTES_ENDED_KEPT: i64 = MUTES_MAX;
+
+/// The most windows a project holds that have not ended: fewer than the
+/// list answers, so a window in force is always on the page to be ended.
+pub const MUTES_UNENDED_MAX: i64 = 50;
 
 /// A window as a person asks for one.
 #[derive(Debug, Deserialize)]
@@ -76,8 +90,8 @@ fn not_found() -> TelmoniError {
     AuthError::NotFound("no maintenance window with that id in this project".into()).into()
 }
 
-/// `GET /internal/v1/telemetry/mutes` — the project's windows, those ending
-/// last first, [`MUTES_MAX`] at most.
+/// `GET /internal/v1/telemetry/mutes` — the project's windows, those not
+/// ended first, then those ending last, [`MUTES_MAX`] at most.
 pub async fn list_mutes(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -119,14 +133,52 @@ pub async fn create_mute(
             "a maintenance window is at most {MUTE_DAYS_MAX} days long"
         )));
     }
-    let mut tx = project_scope(&state.db, project_id).await?;
+    let mut tx = chain::scoped(&state.db, &acting, project_id).await?;
+    let row = match open(&state, &acting, &headers, &mut tx, &input, starts_at).await {
+        Ok(row) => row,
+        Err(refused) => {
+            chain::rolled_back(tx.rollback().await, project_id, "maintenance window");
+            return Err(refused);
+        }
+    };
+    tx.commit().await?;
+    tracing::info!(project_id = %project_id, mute_id = %row.id, "telemetry: a maintenance window made");
+    Ok((StatusCode::CREATED, Json(Mute::from(row))))
+}
+
+/// The window itself, under the organization's chain lock: the role checked
+/// on auth's second answer, the settings row made or re-filed under it, the
+/// windows not ended counted against the cap, and the window written and
+/// filed.
+async fn open(
+    state: &AppState,
+    acting: &Acting,
+    headers: &HeaderMap,
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    input: &MuteInput,
+    starts_at: DateTime<Utc>,
+) -> Result<MuteRow, TelmoniError> {
+    let project_id = &acting
+        .require_project(Verb::Create, Resource::Rule)?
+        .project_id;
+    let now = chain::hold(state.auth.as_ref(), acting, project_id, tx).await?;
+    now.require_project(Verb::Create, Resource::Rule)?;
+    // The settings row, by which the organization's erasure finds the window.
+    db::ensure_settings(tx, project_id, &acting.organization_id).await?;
+    if mutes::unended(tx, project_id).await? >= MUTES_UNENDED_MAX {
+        return Err(AuthError::Conflict(format!(
+            "a project holds at most {MUTES_UNENDED_MAX} maintenance windows that have not \
+             ended; end one to set another"
+        ))
+        .into());
+    }
     if let Some(rule_id) = input.rule_id
-        && rules::rule(&mut tx, project_id, rule_id).await?.is_none()
+        && rules::rule(tx, project_id, rule_id).await?.is_none()
     {
         return Err(AuthError::NotFound("no alert with that id in this project".into()).into());
     }
     let row = mutes::insert(
-        &mut tx,
+        tx,
         project_id,
         input.rule_id,
         starts_at,
@@ -134,9 +186,19 @@ pub async fn create_mute(
         &acting.user_id,
     )
     .await?;
-    tx.commit().await?;
-    tracing::info!(project_id = %project_id, mute_id = %row.id, "telemetry: a maintenance window made");
-    Ok((StatusCode::CREATED, Json(Mute::from(row))))
+    mutes::prune(tx, project_id, MUTES_ENDED_KEPT).await?;
+    let change = Change {
+        action: AuditAction::Created,
+        kind: TelmoniResourceKind::MaintenanceWindow,
+        id: row.id,
+        metadata: json!({
+            "rule_id": row.rule_id,
+            "starts_at": row.starts_at,
+            "ends_at": row.ends_at,
+        }),
+    };
+    chain::file(tx, acting, project_id, headers, change).await?;
+    Ok(row)
 }
 
 /// `POST /internal/v1/telemetry/mutes/{id}/end` — one of the project's
@@ -152,10 +214,43 @@ pub async fn end_mute(
         .require_project(Verb::Update, Resource::Rule)?
         .project_id;
     let id: Uuid = id.parse().map_err(|_| not_found())?;
-    let mut tx = project_scope(&state.db, project_id).await?;
-    let row = mutes::end(&mut tx, project_id, id, &acting.user_id)
-        .await?
-        .ok_or_else(not_found)?;
+    let mut tx = chain::scoped(&state.db, &acting, project_id).await?;
+    let row = match ended(&state, &acting, &headers, &mut tx, id).await {
+        Ok(row) => row,
+        Err(refused) => {
+            chain::rolled_back(tx.rollback().await, project_id, "maintenance window");
+            return Err(refused);
+        }
+    };
     tx.commit().await?;
     Ok(Json(Mute::from(row)))
+}
+
+/// The end itself, under the organization's chain lock: the role checked on
+/// auth's second answer, and the window ended and filed, where this ended it.
+async fn ended(
+    state: &AppState,
+    acting: &Acting,
+    headers: &HeaderMap,
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    id: Uuid,
+) -> Result<MuteRow, TelmoniError> {
+    let project_id = &acting
+        .require_project(Verb::Update, Resource::Rule)?
+        .project_id;
+    let now = chain::hold(state.auth.as_ref(), acting, project_id, tx).await?;
+    now.require_project(Verb::Update, Resource::Rule)?;
+    let (row, ended) = mutes::end(tx, project_id, id, &acting.user_id).await?;
+    let row = row.ok_or_else(not_found)?;
+    if ended {
+        mutes::prune(tx, project_id, MUTES_ENDED_KEPT).await?;
+        let change = Change {
+            action: AuditAction::Updated,
+            kind: TelmoniResourceKind::MaintenanceWindow,
+            id,
+            metadata: json!({ "rule_id": row.rule_id, "ended_at": row.ends_at }),
+        };
+        chain::file(tx, acting, project_id, headers, change).await?;
+    }
+    Ok(row)
 }

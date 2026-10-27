@@ -19,6 +19,7 @@ use uuid::Uuid;
 
 use common::{AuthStub, LoggedNotice, NoticeLog, SECRET, clickhouse_or_skip};
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
+use telmoni_shared::test_util::apply_audit_migrations;
 use telmoni_shared::{
     NotificationKind, OrganizationId, OrganizationRole, ProjectId, Role, SpanKind, SpanStatus,
 };
@@ -45,6 +46,7 @@ impl Project {
         ch: &common::ClickHouse,
         spans: impl FnOnce(&ProjectId) -> Vec<SpanRow>,
     ) -> Self {
+        apply_audit_migrations(pool).await;
         let auth = AuthStub::new();
         let (organization, project) = (OrganizationId::new(), ProjectId::new());
         auth.seat(

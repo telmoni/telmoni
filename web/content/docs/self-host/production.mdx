@@ -261,8 +261,9 @@ telmoni-server sweep audit-exports
 ### The heartbeat
 
 Each loop inside `telmoni-server serve` — the delivery loop, the sweeps above,
-the purges and the agent's indexer — beats in its module's own `heartbeats`
-table each time a tick ends, from whichever replica ran it. `GET /heartbeat`,
+the purges, the alerts' evaluation and the agent's indexer — beats in its
+module's own `heartbeats` table each time a tick ends, from whichever replica
+ran it. `GET /heartbeat`,
 on the machine lanes' host, answers `200` with `{"status":"ok"}` while some
 replica has beaten every loop within three of its periods, a minute at the
 least, and `503` naming the rest, each as `<schema>.<loop>`:

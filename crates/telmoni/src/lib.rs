@@ -466,6 +466,15 @@ impl App {
         let alerts = tokio::spawn(telmoni_telemetry::rules::evaluate::run(
             self.telemetry.clone(),
         ));
+        // Told as the shutdown comes, so a pass stops between alerts while
+        // the server drains.
+        tokio::spawn({
+            let telemetry = self.telemetry.clone();
+            async move {
+                telmoni_shared::shutdown::shutdown_signal().await;
+                telemetry.alerts_stopping.ask();
+            }
+        });
         if env_parse("RUN_SWEEPS", true)? {
             sweeps::spawn(self.auth.clone(), &self.sweeps);
         } else {
@@ -516,9 +525,15 @@ impl App {
                 Err(e) => anyhow::bail!("the alerts' evaluation died: {e}"),
             },
         }
+        // The alert in hand is settled and told before the process ends.
+        self.telemetry.alerts_stopping.stop(ALERTS_STOP_WAIT).await;
         Ok(())
     }
 }
+
+/// How long a stopping process waits for an alert pass to finish the alert
+/// in hand: well inside the 30 s a pod is given to stop.
+const ALERTS_STOP_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// Run one command over the process `build` assembles: a binary's whole
 /// `main` once the arguments are parsed. `migrate` and `rotate` never build

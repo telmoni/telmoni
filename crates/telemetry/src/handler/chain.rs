@@ -9,13 +9,20 @@
 
 use std::time::Duration;
 
+use axum::http::HeaderMap;
+use serde_json::Value;
 use sqlx::PgPool;
+use uuid::Uuid;
 
 use telmoni_shared::acting::Acting;
-use telmoni_shared::audit::lock_chain;
+use telmoni_shared::audit::{Actor, AuditEvent, emit_audit, lock_chain};
 use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
+use telmoni_shared::extract::correlation_id;
 use telmoni_shared::seam::Auth;
-use telmoni_shared::{AuthError, OrganizationId, OrganizationStatus, ProjectId, TelmoniError};
+use telmoni_shared::{
+    AuditAction, AuthError, OrganizationId, OrganizationStatus, ProjectId, TelmoniError,
+    TelmoniResourceKind,
+};
 
 /// The longest a change waits for the organization's chain lock: the
 /// role's own `lock_timeout` on a tier, set on the transaction too, so that a
@@ -89,6 +96,43 @@ pub(crate) async fn hold(
         .into());
     }
     Ok(now)
+}
+
+/// A member's change to the project's alerting, as its audit row names it.
+pub(crate) struct Change {
+    pub action: AuditAction,
+    pub kind: TelmoniResourceKind,
+    pub id: Uuid,
+    pub metadata: Value,
+}
+
+/// `change` filed in the organization's audit chain, in `tx`, whose lock
+/// [`hold`] took: by the member `acting` names, inside the project.
+pub(crate) async fn file(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    acting: &Acting,
+    project_id: &ProjectId,
+    headers: &HeaderMap,
+    change: Change,
+) -> Result<(), TelmoniError> {
+    let id = change.id.to_string();
+    emit_audit(
+        tx,
+        AuditEvent {
+            organization_id: &acting.organization_id,
+            in_project: Some(project_id),
+            actor: Actor::User(acting.user_id.as_str()),
+            action: change.action,
+            resource_kind: change.kind,
+            resource_id: Some(&id),
+            request_id: correlation_id(headers),
+            ip_address: None,
+            user_agent: None,
+            metadata: Some(change.metadata),
+        },
+    )
+    .await?;
+    Ok(())
 }
 
 /// The organization's chain lock alone, taken in `tx` and let go with it.

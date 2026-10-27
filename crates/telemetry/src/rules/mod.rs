@@ -119,7 +119,27 @@ impl Link {
     /// told at `at`.
     #[must_use]
     pub fn hears(&self, severity: telmoni_shared::Severity, at: DateTime<Utc>) -> bool {
-        self.level.hears(severity) && self.hours.as_ref().is_none_or(|hours| hours.hold(at))
+        self.level.hears(severity) && self.in_hours(at)
+    }
+
+    /// Whether its hours hold at `at`, as every hour does where it has none.
+    #[must_use]
+    pub fn in_hours(&self, at: DateTime<Utc>) -> bool {
+        self.hours.as_ref().is_none_or(|hours| hours.hold(at))
+    }
+
+    /// Whether it hears an incident's end, told at `at`: as one of `told_to`,
+    /// which heard the incident, whatever holds notices back; else at the
+    /// severity it ended at, in its hours and outside a window (`muted`).
+    #[must_use]
+    pub fn hears_end(
+        &self,
+        severity: telmoni_shared::Severity,
+        told_to: &[Uuid],
+        muted: bool,
+        at: DateTime<Utc>,
+    ) -> bool {
+        told_to.contains(&self.connection_id) || (!muted && self.hears(severity, at))
     }
 }
 
@@ -149,8 +169,12 @@ impl RuleFilters {
     /// The filters as the trace list's checks leave them: each value
     /// trimmed, given once and under its field's cap.
     fn checked(self) -> Result<Self, TelmoniError> {
-        let mut status = self.status;
-        status.dedup();
+        let mut status = Vec::new();
+        for given in self.status {
+            if !status.contains(&given) {
+                status.push(given);
+            }
+        }
         Ok(Self {
             agent: values("agent", &self.agent, AGENT_MAX)?,
             model: values("model", &self.model, MODEL_MAX)?,
@@ -347,6 +371,20 @@ mod tests {
             renotify_minutes: None,
             connectors: Vec::new(),
         }
+    }
+
+    /// A status given again, wherever in the list, is kept once.
+    #[test]
+    fn a_status_given_again_is_kept_once() {
+        let mut given = input();
+        given.filters.status = vec![
+            SpanStatus::Error,
+            SpanStatus::Ok,
+            SpanStatus::Error,
+            SpanStatus::Ok,
+        ];
+        let rule = given.checked().expect("an alert");
+        assert_eq!(rule.filters.status, [SpanStatus::Error, SpanStatus::Ok]);
     }
 
     #[test]

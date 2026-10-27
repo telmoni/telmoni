@@ -24,8 +24,10 @@ use common::{AuthStub, NoticeLog, SECRET, clickhouse_or_skip};
 use telmoni_shared::db::tenant_session::project_scope;
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::seam::NoLimits;
+use telmoni_shared::test_util::apply_audit_migrations;
 use telmoni_shared::{
-    NotificationKind, OrganizationId, OrganizationRole, ProjectId, Role, SpanKind,
+    NotificationKind, OrganizationId, OrganizationRole, OrganizationStatus, ProjectId, Role,
+    SpanKind,
 };
 use telmoni_telemetry::rules::{evaluate, incidents};
 use telmoni_telemetry::store::SpanRow;
@@ -36,6 +38,7 @@ use telmoni_telemetry::{AppState, router};
 struct Project {
     app: axum::Router,
     state: Arc<AppState>,
+    auth: Arc<AuthStub>,
     notices: Arc<NoticeLog>,
     organization: OrganizationId,
     project: ProjectId,
@@ -43,6 +46,7 @@ struct Project {
 
 impl Project {
     async fn new(pool: &PgPool, ch: &common::ClickHouse) -> Self {
+        apply_audit_migrations(pool).await;
         let auth = AuthStub::new();
         let (organization, project) = (OrganizationId::new(), ProjectId::new());
         auth.seat(
@@ -53,8 +57,12 @@ impl Project {
             Some(Role::Member),
         );
         let notices = NoticeLog::new();
-        let state =
-            common::state_with_stores_noticed(pool, auth, Arc::new(NoLimits), notices.clone());
+        let state = common::state_with_stores_noticed(
+            pool,
+            auth.clone(),
+            Arc::new(NoLimits),
+            notices.clone(),
+        );
         ch.store
             .insert_spans(&[SpanRow {
                 model: "claude-sonnet-5-5".into(),
@@ -71,6 +79,7 @@ impl Project {
         Self {
             app: router(state.clone()),
             state,
+            auth,
             notices,
             organization,
             project,
@@ -206,6 +215,13 @@ async fn a_breach_opens_an_incident_its_recovery_resolves_it_and_a_relapse_reope
         (NotificationKind::IncidentOpened, true),
         "a rise is told again, to the connectors alone"
     );
+    let id = project.incidents().await[0]["id"]
+        .as_str()
+        .expect("an id")
+        .to_owned();
+    let take = format!("/internal/v1/telemetry/incidents/{id}/acknowledge");
+    let (status, taken) = project.send("POST", &take, None).await;
+    assert_eq!(status, StatusCode::OK, "{taken}");
 
     let (_, _) = project
         .send("PUT", &rule, Some(&calls_over(100.0, None)))
@@ -232,6 +248,14 @@ async fn a_breach_opens_an_incident_its_recovery_resolves_it_and_a_relapse_reope
     assert_eq!(
         (&incidents[0]["status"], &incidents[0]["reopened"]),
         (&json!("open"), &json!(1))
+    );
+    assert_eq!(
+        (
+            &incidents[0]["acknowledged_at"],
+            &incidents[0]["acknowledged_by"]
+        ),
+        (&Value::Null, &Value::Null),
+        "reopened untaken"
     );
     assert_eq!(
         project.told()[3],
@@ -316,6 +340,60 @@ async fn a_held_breach_is_told_again_until_a_member_takes_it(pool: PgPool) {
     assert_eq!(project.told().len(), 3, "resolved once, told once");
 }
 
+/// ⚠ A breach a member resolved stays quiet at its severity, and a rise past it opens it again.
+#[sqlx::test]
+async fn a_rise_past_the_severity_a_member_resolved_opens_it_again(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch).await;
+    let (status, made) = project
+        .send(
+            "POST",
+            "/internal/v1/telemetry/rules",
+            Some(&calls_over(5.0, Some(0.0))),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    let rule = format!(
+        "/internal/v1/telemetry/rules/{}",
+        made["id"].as_str().expect("an id")
+    );
+    project.evaluate(&pool).await;
+    let id = project.incidents().await[0]["id"]
+        .as_str()
+        .expect("an id")
+        .to_owned();
+    let (status, resolved) = project
+        .send(
+            "POST",
+            &format!("/internal/v1/telemetry/incidents/{id}/resolve"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{resolved}");
+
+    project.evaluate(&pool).await;
+    assert_eq!(project.incidents().await[0]["status"], "resolved");
+    assert_eq!(project.told().len(), 2, "a warning held stays quiet");
+
+    let (_, _) = project
+        .send("PUT", &rule, Some(&calls_over(0.5, Some(0.1))))
+        .await;
+    project.evaluate(&pool).await;
+    let incidents = project.incidents().await;
+    assert_eq!(incidents.len(), 1, "reopened, not a second");
+    assert_eq!(
+        (&incidents[0]["status"], &incidents[0]["severity"]),
+        (&json!("open"), &json!("alert"))
+    );
+    assert_eq!(
+        project.told()[2],
+        (NotificationKind::IncidentOpened, true),
+        "the rise is told"
+    );
+}
+
 /// ⚠ An incident keeps each connection once and its last twenty runs, one shown again last.
 #[sqlx::test]
 async fn an_incident_keeps_its_connections_once_and_its_last_twenty_runs(pool: PgPool) {
@@ -341,7 +419,10 @@ async fn an_incident_keeps_its_connections_once_and_its_last_twenty_runs(pool: P
     let runs: Vec<Uuid> = (0..25).map(|_| Uuid::new_v4()).collect();
     let mut tx = project_scope(&project.state.db, &project.project)
         .await
-        .expect("the project's scope");
+        .expect("the project's scope")
+        .bind_organization(&project.organization)
+        .await
+        .expect("and its organization's, which every write binds");
     let told = &project.project;
     incidents::told(&mut tx, told, id, &[b, a], None)
         .await
@@ -426,7 +507,22 @@ async fn a_recovery_racing_a_members_resolution_is_not_told(pool: PgPool) {
             evaluate::pass(&state).await.expect("a pass");
         })
     };
-    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+    // Only once the pass waits on that row is it a race the member wins.
+    let mut waiting = false;
+    for _ in 0..100 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        waiting = sqlx::query_scalar(
+            "SELECT count(*) > 0 FROM pg_stat_activity
+              WHERE datname = current_database() AND wait_event_type = 'Lock'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("who waits");
+        if waiting {
+            break;
+        }
+    }
+    assert!(waiting, "the pass never reached the member's row");
     sqlx::query(
         "UPDATE telemetry.incidents SET status = 'resolved', resolved_at = now(),
                 resolved_by = 'user_member'
@@ -450,8 +546,7 @@ async fn a_recovery_racing_a_members_resolution_is_not_told(pool: PgPool) {
     );
 }
 
-/// ⚠ A window empty for as long as the window opens an incident where the
-/// alert asks to be told of no data, and none where it does not.
+/// ⚠ An empty window opens an incident at its first reading, once, where the alert asks.
 #[sqlx::test]
 async fn a_window_empty_for_its_length_opens_an_incident_where_the_alert_asks(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
@@ -469,16 +564,6 @@ async fn a_window_empty_for_its_length_opens_an_incident_where_the_alert_asks(po
         assert_eq!(status, StatusCode::CREATED, "{made}");
     }
     project.evaluate(&pool).await;
-    assert!(
-        project.incidents().await.is_empty(),
-        "not yet for its length"
-    );
-
-    sqlx::query("UPDATE telemetry.rules SET severity_since = now() - interval '61 minutes'")
-        .execute(&pool)
-        .await
-        .expect("empty for an hour");
-    project.evaluate(&pool).await;
     let incidents = project.incidents().await;
     assert_eq!(incidents.len(), 1, "{incidents:?}");
     assert_eq!(
@@ -486,4 +571,136 @@ async fn a_window_empty_for_its_length_opens_an_incident_where_the_alert_asks(po
         (&json!("Told"), &json!("no_data"))
     );
     assert_eq!(project.told(), [(NotificationKind::IncidentOpened, false)]);
+
+    project.evaluate(&pool).await;
+    assert_eq!(project.incidents().await.len(), 1, "the one incident");
+    assert_eq!(project.told().len(), 1, "told once a spell");
+
+    // Resolved by hand while the window stays empty: not opened again this spell.
+    let id = project.incidents().await[0]["id"]
+        .as_str()
+        .expect("an id")
+        .to_owned();
+    let resolve = format!("/internal/v1/telemetry/incidents/{id}/resolve");
+    let (status, resolved) = project.send("POST", &resolve, None).await;
+    assert_eq!(status, StatusCode::OK, "{resolved}");
+    let told = project.told().len();
+    project.evaluate(&pool).await;
+    assert_eq!(project.incidents().await[0]["status"], "resolved");
+    assert_eq!(project.told().len(), told, "opened again within its spell");
+}
+
+/// ⚠ A reading of no data leaves an open incident standing and reminded,
+/// and follows it there, told, where the alert asks to be told of no data.
+#[sqlx::test]
+async fn a_reading_of_no_data_leaves_an_open_incident_standing(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch).await;
+    for (name, missing) in [("Shown", "no_data"), ("Told", "notify_no_data")] {
+        let body = json!({
+            "name": name, "kind": "model_call", "measure": "count", "aggregation": "count",
+            "window": "hour", "operator": "gt", "alert_threshold": 0.5,
+            "missing_data": missing, "renotify_minutes": 1,
+        });
+        let (status, made) = project
+            .send("POST", "/internal/v1/telemetry/rules", Some(&body))
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{made}");
+    }
+    project.evaluate(&pool).await;
+    assert_eq!(
+        project.told(),
+        [(NotificationKind::IncidentOpened, false); 2]
+    );
+
+    // The window empties, the alerts reading tool calls, of which there are
+    // none; and each is due to be told again.
+    sqlx::query(
+        "UPDATE telemetry.rules SET kind = 'tool_call', told_at = now() - interval '2 minutes'",
+    )
+    .execute(&pool)
+    .await
+    .expect("an empty window");
+    project.evaluate(&pool).await;
+    let incidents = project.incidents().await;
+    let standing = |name: &str| {
+        incidents
+            .iter()
+            .find(|incident| incident["rule_name"] == name)
+            .map(|incident| (incident["status"].clone(), incident["severity"].clone()))
+    };
+    assert_eq!(standing("Shown"), Some((json!("open"), json!("alert"))));
+    assert_eq!(standing("Told"), Some((json!("open"), json!("no_data"))));
+    assert_eq!(
+        project.told()[2..],
+        [(NotificationKind::IncidentOpened, true); 2],
+        "reminded, and told of no data"
+    );
+    let reminder = project
+        .notices
+        .notices()
+        .into_iter()
+        .find(|notice| notice.reminded && notice.title.starts_with("Shown"))
+        .expect("the reminder");
+    assert!(
+        reminder
+            .body
+            .contains("has no value now; its incident stands past the alert threshold"),
+        "{}",
+        reminder.body
+    );
+}
+
+/// A window holding no span, read as 0, is told as the 0 it crossed at.
+#[sqlx::test]
+async fn an_empty_window_read_as_zero_is_told_as_zero(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch).await;
+    let body = json!({
+        "name": "Tools quiet", "kind": "tool_call", "measure": "count", "aggregation": "count",
+        "window": "hour", "operator": "lt", "alert_threshold": 1,
+    });
+    let (status, made) = project
+        .send("POST", "/internal/v1/telemetry/rules", Some(&body))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    project.evaluate(&pool).await;
+    let notices = project.notices.notices();
+    assert_eq!(notices.len(), 1, "one notice");
+    assert!(
+        notices[0]
+            .body
+            .contains(" is 0, past the alert threshold of 1."),
+        "{}",
+        notices[0].body
+    );
+    assert_eq!(notices[0].metadata["value"], json!(0.0));
+}
+
+/// ⚠ An organization being erased has its alerts neither evaluated nor told.
+#[sqlx::test]
+async fn an_organization_being_erased_tells_nothing(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch).await;
+    let (status, made) = project
+        .send(
+            "POST",
+            "/internal/v1/telemetry/rules",
+            Some(&calls_over(0.5, None)),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    project.auth.stand(
+        &project.organization,
+        Some(OrganizationStatus::PendingDeletion),
+    );
+    project.evaluate(&pool).await;
+    assert!(project.incidents().await.is_empty(), "an incident opened");
+    assert!(project.told().is_empty(), "told while being erased");
 }

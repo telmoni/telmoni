@@ -327,8 +327,8 @@ CREATE POLICY maintenance_access ON telemetry.incidents
 GRANT SELECT ON telemetry.incidents TO telemetry_maintenance;
 GRANT INSERT (id, rule_id, project_id, organization_id, severity, value, opened_at, updated_at)
     ON telemetry.incidents TO telemetry_maintenance;
-GRANT UPDATE (organization_id, status, severity, value, resolved_at, resolved_by, reopened,
-              updated_at)
+GRANT UPDATE (organization_id, status, severity, value, resolved_at, resolved_by,
+              acknowledged_at, acknowledged_by, reopened, updated_at)
     ON telemetry.incidents TO telemetry_maintenance;
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -374,9 +374,9 @@ GRANT SELECT ON telemetry.rule_connectors TO telemetry_maintenance;
 -- ══════════════════════════════════════════════════════════════════════════════
 -- A window an alert, or every alert of a project (`rule_id` none), is muted
 -- for: evaluated as ever, its incidents opened and resolved in the feed, and
--- told to no connector from `starts_at` until `ends_at`. Each is kept after it
--- ends as the record of who muted what, and when; one ended early keeps who
--- ended it.
+-- told to no connector from `starts_at` until `ends_at`, but a resolution to
+-- those that heard its incident. A project keeps its newest two hundred ended,
+-- one ended early keeping who ended it; the audit chain keeps the record.
 CREATE TABLE telemetry.mutes (
     id              UUID        PRIMARY KEY,
     project_id      TEXT        NOT NULL,

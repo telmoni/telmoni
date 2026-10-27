@@ -150,8 +150,9 @@ pub async fn insert(
     .await
 }
 
-/// One of the project's alerts, saved over: its definition anew, and its
-/// last evaluation forgotten, since it answered another question.
+/// One of the project's alerts, saved over: its definition anew, its last
+/// evaluation forgotten, since it answered another question, and its lease
+/// let go, so a replica holding it in a batch leaves it to the next pass.
 pub async fn update<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
@@ -163,7 +164,7 @@ pub async fn update<B: HasProject>(
             SET name = $3, kind = $4, measure = $5, aggregation = $6, filters = $7,
                 lookback = $8, operator = $9, alert_threshold = $10, warning_threshold = $11,
                 missing_data = $12, renotify_minutes = $13, value = NULL, evaluated_at = NULL,
-                updated_at = now()
+                lease_id = NULL, leased_until = NULL, updated_at = now()
           WHERE project_id = $1 AND id = $2
          RETURNING {RULE_COLUMNS}"
     )))
@@ -250,6 +251,26 @@ pub async fn release(
     .map(|_| ())
 }
 
+/// A lease held on, unsettled, until `secs` from now: the alert waits for
+/// the next pass, whichever replica runs it.
+pub async fn defer(
+    tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
+    id: Uuid,
+    lease_id: Uuid,
+    secs: i64,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE telemetry.rules SET leased_until = now() + make_interval(secs => $3)
+          WHERE id = $1 AND lease_id = $2",
+    )
+    .bind(id)
+    .bind(lease_id)
+    .bind(secs)
+    .execute(tx.conn())
+    .await
+    .map(|_| ())
+}
+
 /// The organizations whose plan paused any of their alerts: the ones a
 /// pass holds to their number again whether or not one is due, so a plan
 /// bought lifts its pauses.
@@ -282,7 +303,14 @@ pub async fn hold_to(
                 paused_at = CASE WHEN $2::bigint IS NOT NULL AND ranked.place > $2 THEN now() END,
                 severity = CASE WHEN $2::bigint IS NOT NULL AND ranked.place > $2
                                 THEN 'paused' ELSE 'unknown' END,
-                severity_since = now()
+                severity_since = now(),
+                -- Lifted, it reads as never evaluated, as a resume leaves it.
+                value = CASE WHEN $2::bigint IS NOT NULL AND ranked.place > $2
+                             THEN rule.value END,
+                evaluated_at = CASE WHEN $2::bigint IS NOT NULL AND ranked.place > $2
+                                    THEN rule.evaluated_at END,
+                -- An evaluation in flight on another replica settles nothing.
+                lease_id = NULL, leased_until = NULL
            FROM ranked
           WHERE rule.id = ranked.id
             AND ((rule.paused IS NULL AND $2::bigint IS NOT NULL AND ranked.place > $2)

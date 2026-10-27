@@ -21,6 +21,7 @@ use uuid::Uuid;
 use common::{AuthStub, NoticeLog, SECRET, clickhouse_or_skip};
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::seam::{Entitlements, NoLimits};
+use telmoni_shared::test_util::apply_audit_migrations;
 use telmoni_shared::{
     AlertCeilings, Grants, NotificationKind, OrganizationId, OrganizationRole, ProjectId, Role,
     SpanKind, TelmoniError,
@@ -30,6 +31,7 @@ use telmoni_telemetry::store::SpanRow;
 use telmoni_telemetry::{AppState, router};
 
 const RULES: &str = "/internal/v1/telemetry/rules";
+const MUTES: &str = "/internal/v1/telemetry/mutes";
 
 /// A plan of fifty alerts and `deliveries` a day for every organization.
 struct Deliveries(u32);
@@ -67,6 +69,7 @@ impl Project {
         ch: &common::ClickHouse,
         entitlements: Arc<dyn Entitlements>,
     ) -> Self {
+        apply_audit_migrations(pool).await;
         let auth = AuthStub::new();
         let (organization, project) = (OrganizationId::new(), ProjectId::new());
         auth.seat(
@@ -207,6 +210,307 @@ async fn an_alerts_notices_go_to_the_connectors_that_hear_them(pool: PgPool) {
     let (kind, to) = project.sent().get(2).cloned().expect("the recovery told");
     assert_eq!(kind, NotificationKind::IncidentResolved);
     assert_eq!(to.len(), 2, "those that heard its alert hear its recovery");
+}
+
+/// A pager linked at `alert` to an alert the project's one call breaches,
+/// its incident opened and told to it, then fallen back to warning, unsaid.
+async fn fallen_to_warning(project: &Project, pool: &PgPool) -> (Uuid, String) {
+    let pager = Uuid::new_v4();
+    let links = json!([{ "connection_id": pager, "level": "alert" }]);
+    let (status, made) = project
+        .send("POST", RULES, Some(&calls(0.5, Some(0.1), &links)))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    let id = made.get("id").and_then(Value::as_str).expect("an id");
+    let rule = format!("{RULES}/{id}");
+    project.evaluate(pool).await;
+    assert_eq!(
+        project.sent(),
+        [(NotificationKind::IncidentOpened, vec![pager])]
+    );
+    project
+        .send("PUT", &rule, Some(&calls(5.0, Some(0.5), &links)))
+        .await;
+    project.evaluate(pool).await;
+    assert_eq!(project.sent().len(), 1, "the fall to warning is unsaid");
+    (pager, rule)
+}
+
+/// ⚠ A pager at `alert` hears its incident recover, though it fell back through warning.
+#[sqlx::test]
+async fn a_recovery_reaches_the_connectors_that_heard_its_incident(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch, Arc::new(NoLimits)).await;
+    let (pager, rule) = fallen_to_warning(&project, &pool).await;
+    let links = json!([{ "connection_id": pager, "level": "alert" }]);
+    project
+        .send("PUT", &rule, Some(&calls(100.0, None, &links)))
+        .await;
+    project.evaluate(&pool).await;
+    assert_eq!(
+        project.sent().get(1).cloned(),
+        Some((NotificationKind::IncidentResolved, vec![pager]))
+    );
+}
+
+/// ⚠ A pager at `alert` hears a member resolve its incident at warning.
+#[sqlx::test]
+async fn a_resolution_by_hand_reaches_the_connectors_that_heard_its_incident(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch, Arc::new(NoLimits)).await;
+    let (pager, _) = fallen_to_warning(&project, &pool).await;
+    let id = incident_of(&project).await;
+    let resolve = format!("/internal/v1/telemetry/incidents/{id}/resolve");
+    let (status, resolved) = project.send("POST", &resolve, None).await;
+    assert_eq!(status, StatusCode::OK, "{resolved}");
+    assert_eq!(
+        project.sent().get(1).cloned(),
+        Some((NotificationKind::IncidentResolved, vec![pager]))
+    );
+}
+
+/// A window over every alert of the project, from now for an hour; its id.
+async fn window(project: &Project) -> String {
+    let ends_at = Utc::now() + TimeDelta::hours(1);
+    let (status, made) = project
+        .send("POST", MUTES, Some(&json!({ "ends_at": ends_at })))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    made.get("id")
+        .and_then(Value::as_str)
+        .expect("an id")
+        .to_owned()
+}
+
+/// Hours on every day, in UTC, from `from` minutes off now to `to`.
+fn hours(from: i64, to: i64) -> Value {
+    let at = |minutes| {
+        (Utc::now() + TimeDelta::minutes(minutes))
+            .format("%H:%M")
+            .to_string()
+    };
+    json!({ "days": [1, 2, 3, 4, 5, 6, 7], "from": at(from), "to": at(to) })
+}
+
+/// The id of the project's one incident.
+async fn incident_of(project: &Project) -> String {
+    let (_, listed) = project
+        .send("GET", "/internal/v1/telemetry/incidents", None)
+        .await;
+    listed
+        .get("incidents")
+        .and_then(|incidents| incidents.get(0))
+        .and_then(|incident| incident.get("id"))
+        .and_then(Value::as_str)
+        .expect("the incident")
+        .to_owned()
+}
+
+/// ⚠ An incident a window kept from its connectors is told them once, as the window ends.
+#[sqlx::test]
+async fn an_incident_a_window_held_is_told_once_its_window_ends(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch, Arc::new(NoLimits)).await;
+    let window = window(&project).await;
+    let pager = Uuid::new_v4();
+    let links = json!([{ "connection_id": pager, "level": "alert" }]);
+    let (status, made) = project
+        .send("POST", RULES, Some(&calls(0.5, None, &links)))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    project.evaluate(&pool).await;
+    project.evaluate(&pool).await;
+    assert_eq!(
+        project.sent(),
+        [(NotificationKind::IncidentOpened, vec![])],
+        "the feed alone while the window holds"
+    );
+
+    let (status, ended) = project
+        .send("POST", &format!("{MUTES}/{window}/end"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{ended}");
+    project.evaluate(&pool).await;
+    project.evaluate(&pool).await;
+    assert_eq!(
+        project.sent().get(1).cloned(),
+        Some((NotificationKind::IncidentOpened, vec![pager]))
+    );
+    assert_eq!(project.sent().len(), 2, "told once");
+    let told = &project.notices.notices()[1];
+    assert!(told.reminded, "to the connectors alone");
+    assert!(told.body.starts_with("Still: "), "{}", told.body);
+}
+
+/// ⚠ An alert deleted with its incident open tells the connectors that heard it the incident resolved.
+#[sqlx::test]
+async fn an_alert_deleted_with_its_incident_open_tells_it_resolved(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch, Arc::new(NoLimits)).await;
+    let pager = Uuid::new_v4();
+    let links = json!([{ "connection_id": pager, "level": "alert" }]);
+    let (status, made) = project
+        .send("POST", RULES, Some(&calls(0.5, None, &links)))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    let rule = format!("{RULES}/{}", made["id"].as_str().expect("an id"));
+    project.evaluate(&pool).await;
+    assert_eq!(
+        project.sent(),
+        [(NotificationKind::IncidentOpened, vec![pager])]
+    );
+
+    let (status, _) = project.send("DELETE", &rule, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        project.sent().get(1).cloned(),
+        Some((NotificationKind::IncidentResolved, vec![pager]))
+    );
+    let told = &project.notices.notices()[1];
+    assert!(!told.reminded, "in the feed too");
+    assert!(told.body.contains("deleted"), "{}", told.body);
+}
+
+/// An incident a member took while a window held is not told as the window ends.
+#[sqlx::test]
+async fn an_incident_taken_under_a_window_is_not_told_as_it_ends(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch, Arc::new(NoLimits)).await;
+    let window = window(&project).await;
+    let links = json!([{ "connection_id": Uuid::new_v4(), "level": "alert" }]);
+    let (status, made) = project
+        .send("POST", RULES, Some(&calls(0.5, None, &links)))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    project.evaluate(&pool).await;
+    let id = incident_of(&project).await;
+    let take = format!("/internal/v1/telemetry/incidents/{id}/acknowledge");
+    let (status, taken) = project.send("POST", &take, None).await;
+    assert_eq!(status, StatusCode::OK, "{taken}");
+
+    project
+        .send("POST", &format!("{MUTES}/{window}/end"), None)
+        .await;
+    project.evaluate(&pool).await;
+    assert_eq!(
+        project.sent(),
+        [(NotificationKind::IncidentOpened, vec![])],
+        "taken, so reminded of no more"
+    );
+}
+
+/// ⚠ An incident told while a connector's hours were out is told it once they begin.
+#[sqlx::test]
+async fn an_incident_told_out_of_a_connectors_hours_is_told_it_once_they_begin(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch, Arc::new(NoLimits)).await;
+    let pager = Uuid::new_v4();
+    let out = json!([{ "connection_id": pager, "level": "alert", "hours": hours(60, 120) }]);
+    let (status, made) = project
+        .send("POST", RULES, Some(&calls(0.5, None, &out)))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    let rule = format!("{RULES}/{}", made["id"].as_str().expect("an id"));
+    project.evaluate(&pool).await;
+    assert_eq!(project.sent(), [(NotificationKind::IncidentOpened, vec![])]);
+
+    let within = json!([{ "connection_id": pager, "level": "alert", "hours": hours(-60, 60) }]);
+    let (status, saved) = project
+        .send("PUT", &rule, Some(&calls(0.5, None, &within)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    // Told three hours ago, before the hours that hold now began.
+    sqlx::query("UPDATE telemetry.rules SET told_at = now() - interval '3 hours'")
+        .execute(&pool)
+        .await
+        .expect("told earlier");
+    project.evaluate(&pool).await;
+    project.evaluate(&pool).await;
+    assert_eq!(
+        project.sent().get(1).cloned(),
+        Some((NotificationKind::IncidentOpened, vec![pager]))
+    );
+    assert_eq!(project.sent().len(), 2, "told once");
+}
+
+/// ⚠ A recovery under a window reaches the connectors that heard its incident, and no other.
+#[sqlx::test]
+async fn a_recovery_under_a_window_reaches_the_connectors_that_heard_its_incident(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch, Arc::new(NoLimits)).await;
+    let (pager, closed) = (Uuid::new_v4(), Uuid::new_v4());
+    let links = json!([
+        { "connection_id": pager, "level": "alert" },
+        { "connection_id": closed, "level": "alert", "hours": hours(60, 120) },
+    ]);
+    let (status, made) = project
+        .send("POST", RULES, Some(&calls(0.5, None, &links)))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    let rule = format!("{RULES}/{}", made["id"].as_str().expect("an id"));
+    project.evaluate(&pool).await;
+    assert_eq!(
+        project.sent(),
+        [(NotificationKind::IncidentOpened, vec![pager])]
+    );
+
+    window(&project).await;
+    project
+        .send("PUT", &rule, Some(&calls(100.0, None, &links)))
+        .await;
+    project.evaluate(&pool).await;
+    assert_eq!(
+        project.sent().get(1).cloned(),
+        Some((NotificationKind::IncidentResolved, vec![pager]))
+    );
+}
+
+/// ⚠ A member's resolution out of a connector's hours reaches it, as it heard the incident.
+#[sqlx::test]
+async fn a_resolution_out_of_hours_reaches_the_connectors_that_heard_its_incident(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch, Arc::new(NoLimits)).await;
+    let pager = Uuid::new_v4();
+    let within = json!([{ "connection_id": pager, "level": "alert", "hours": hours(-60, 60) }]);
+    let (status, made) = project
+        .send("POST", RULES, Some(&calls(0.5, None, &within)))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    let rule = format!("{RULES}/{}", made["id"].as_str().expect("an id"));
+    project.evaluate(&pool).await;
+    assert_eq!(
+        project.sent(),
+        [(NotificationKind::IncidentOpened, vec![pager])]
+    );
+
+    let out = json!([{ "connection_id": pager, "level": "alert", "hours": hours(60, 120) }]);
+    project
+        .send("PUT", &rule, Some(&calls(0.5, None, &out)))
+        .await;
+    let id = incident_of(&project).await;
+    let resolve = format!("/internal/v1/telemetry/incidents/{id}/resolve");
+    let (status, resolved) = project.send("POST", &resolve, None).await;
+    assert_eq!(status, StatusCode::OK, "{resolved}");
+    assert_eq!(
+        project.sent().get(1).cloned(),
+        Some((NotificationKind::IncidentResolved, vec![pager]))
+    );
 }
 
 /// ⚠ An organization's deliveries a day are held to its plan: the notice past

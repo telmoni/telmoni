@@ -27,12 +27,19 @@ pub enum TelmoniResourceKind {
     /// the vendor and channel or the endpoint's host — never the grant, the URL
     /// or the secret, because the chain is append-only.
     Connector,
+    /// A project's alert: made, saved over, paused, resumed, a connector
+    /// muted for it heard again, or deleted.
+    Alert,
+    /// A maintenance window over a project's alerts, opened or ended early.
+    MaintenanceWindow,
+    /// An alert's incident, acknowledged or resolved by a member.
+    Incident,
 }
 
 impl TelmoniResourceKind {
     /// Every kind, in declaration order.
     #[must_use]
-    pub const fn all() -> [Self; 6] {
+    pub const fn all() -> [Self; 9] {
         [
             Self::Organization,
             Self::Project,
@@ -40,6 +47,9 @@ impl TelmoniResourceKind {
             Self::Token,
             Self::Session,
             Self::Connector,
+            Self::Alert,
+            Self::MaintenanceWindow,
+            Self::Incident,
         ]
     }
 }
@@ -53,6 +63,9 @@ impl fmt::Display for TelmoniResourceKind {
             Self::Session => write!(f, "session"),
             Self::Member => write!(f, "member"),
             Self::Connector => write!(f, "connector"),
+            Self::Alert => write!(f, "alert"),
+            Self::MaintenanceWindow => write!(f, "maintenance_window"),
+            Self::Incident => write!(f, "incident"),
         }
     }
 }
@@ -67,9 +80,13 @@ impl FromStr for TelmoniResourceKind {
             "token" => Ok(Self::Token),
             "session" => Ok(Self::Session),
             "connector" => Ok(Self::Connector),
+            "alert" => Ok(Self::Alert),
+            "maintenance_window" => Ok(Self::MaintenanceWindow),
+            "incident" => Ok(Self::Incident),
             _ => Err(ParseEnumError::new(
                 s,
-                "organization, project, member, token, session, connector",
+                "organization, project, member, token, session, connector, alert, \
+                 maintenance_window, incident",
             )),
         }
     }
@@ -93,11 +110,14 @@ mod tests {
                 TelmoniResourceKind::Token => "token",
                 TelmoniResourceKind::Session => "session",
                 TelmoniResourceKind::Connector => "connector",
+                TelmoniResourceKind::Alert => "alert",
+                TelmoniResourceKind::MaintenanceWindow => "maintenance_window",
+                TelmoniResourceKind::Incident => "incident",
             }
         }
         assert_eq!(
             ALL.len(),
-            6,
+            9,
             "a variant reached the enum without reaching ALL"
         );
         for kind in ALL {
@@ -152,7 +172,6 @@ mod tests {
         assert!("service".parse::<TelmoniResourceKind>().is_err());
         assert!("slo".parse::<TelmoniResourceKind>().is_err());
         assert!("alert_rule".parse::<TelmoniResourceKind>().is_err());
-        assert!("incident".parse::<TelmoniResourceKind>().is_err());
         assert!("monitor".parse::<TelmoniResourceKind>().is_err());
         assert!("ping_key".parse::<TelmoniResourceKind>().is_err());
         assert!("account".parse::<TelmoniResourceKind>().is_err());

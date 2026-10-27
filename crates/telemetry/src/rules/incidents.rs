@@ -112,6 +112,9 @@ pub struct Told {
     /// Written, and told to nobody: an alert falling from `alert` to
     /// `warning` follows its incident down in silence.
     pub silent: bool,
+    /// For a resolution, the connectors its incident's notices reached,
+    /// which hear its end whatever severity it ended at.
+    pub told_to: Vec<Uuid>,
 }
 
 /// An evaluation settled with what its severity moves: written where the
@@ -143,7 +146,7 @@ pub async fn settle(
         "UPDATE telemetry.rules
             SET value = $4, evaluated_at = $5, severity = $6, severity_since = $7, told_at = $8,
                 lease_id = NULL, leased_until = NULL
-          WHERE id = $1 AND lease_id = $2 AND updated_at = $3",
+          WHERE id = $1 AND lease_id = $2 AND updated_at = $3 AND paused IS NULL",
     )
     .bind(rule.id)
     .bind(lease_id)
@@ -171,11 +174,13 @@ pub async fn settle(
 
 /// What the move from the alert's severity to `next` does, given its open
 /// incident. With none open, a breach opens one — or reopens its last — and
-/// so does a window empty for as long as the window, where the alert asks.
-/// With one open, a recovery resolves it; a rise to `alert`, or a breach of
-/// one opened on no data, is told again; a fall to `warning` follows it in
-/// silence; and a severity held is told again once its re-notification is
-/// due, while nobody has taken the incident.
+/// so does a rise past the severity a member resolved it at, and a window
+/// empty for as long as the window, where the alert asks.
+/// With one open, a recovery resolves it; a reading of no data leaves it
+/// standing, or follows it there, told, where the alert asks; a rise to
+/// `alert`, or a breach of one on no data, is told again; a fall to `warning`
+/// follows it in silence; and a severity held is told again once its
+/// re-notification is due, while nobody has taken the incident.
 fn moves(
     rule: &RuleRow,
     next: Severity,
@@ -191,18 +196,18 @@ fn moves(
         again: false,
         reminder: false,
         silent: false,
+        told_to: Vec::new(),
     };
     let Some(incident) = open else {
-        if next.is_breach() && !rule.severity.is_breach() {
+        // A breach a member resolved is theirs at its severity, not past it.
+        let risen = next == Severity::Alert && rule.severity == Severity::Warning;
+        if next.is_breach() && (!rule.severity.is_breach() || risen) {
             return vec![move_to(NotificationKind::IncidentOpened, next)];
         }
-        let lasted = TimeDelta::from_std(rule.lookback.duration()).is_ok_and(|w| since + w <= now);
+        // A reading of no data found its whole window empty already: told
+        // then, once a spell.
         let untold = rule.told_at.is_none_or(|at| at < since);
-        if next == Severity::NoData
-            && rule.missing_data == MissingData::NotifyNoData
-            && lasted
-            && untold
-        {
+        if next == Severity::NoData && rule.missing_data == MissingData::NotifyNoData && untold {
             return vec![move_to(NotificationKind::IncidentOpened, Severity::NoData)];
         }
         return Vec::new();
@@ -210,9 +215,24 @@ fn moves(
     if next == Severity::Ok {
         return vec![Told {
             heard_at: incident.severity,
+            told_to: incident.told_to.clone(),
             ..move_to(NotificationKind::IncidentResolved, Severity::Ok)
         }];
     }
+    // A reading of no data leaves an open incident standing, reminded as
+    // ever; where the alert asks to be told of no data, the incident follows.
+    let next = match next {
+        Severity::NoData if incident.severity != Severity::NoData => {
+            if rule.missing_data == MissingData::NotifyNoData {
+                return vec![Told {
+                    again: true,
+                    ..move_to(NotificationKind::IncidentOpened, Severity::NoData)
+                }];
+            }
+            incident.severity
+        }
+        next => next,
+    };
     if next.is_breach() && next != incident.severity {
         let risen = next == Severity::Alert || incident.severity == Severity::NoData;
         return vec![Told {
@@ -288,7 +308,8 @@ async fn write(
             let reopened: Option<Uuid> = sqlx::query_scalar(
                 "UPDATE telemetry.incidents
                     SET status = 'open', severity = $2, value = $3, resolved_at = NULL,
-                        resolved_by = NULL, reopened = reopened + 1, updated_at = $4
+                        resolved_by = NULL, acknowledged_at = NULL, acknowledged_by = NULL,
+                        reopened = reopened + 1, updated_at = $4
                   WHERE id = (SELECT id FROM telemetry.incidents
                                WHERE rule_id = $1 AND status = 'resolved' AND resolved_at >= $5
                                ORDER BY resolved_at DESC LIMIT 1)
@@ -329,8 +350,8 @@ async fn write(
 }
 
 /// The alert's open incident, acknowledged or not.
-async fn open_of(
-    tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
+pub(crate) async fn open_of<S: Binding>(
+    tx: &mut Scoped<'_, S>,
     rule_id: Uuid,
 ) -> sqlx::Result<Option<IncidentRow>> {
     sqlx::query_as(sqlx::AssertSqlSafe(format!(
@@ -437,14 +458,15 @@ pub async fn incidents<B: HasProject>(
 }
 
 /// One of the project's incidents, taken by `by` where it is open: answers
-/// it as it stands after, none where the project has no such incident.
+/// it as it stands after, none where the project has no such incident, and
+/// whether this took it.
 pub async fn acknowledge<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
     id: Uuid,
     by: &UserId,
-) -> sqlx::Result<Option<IncidentRow>> {
-    sqlx::query(
+) -> sqlx::Result<(Option<IncidentRow>, bool)> {
+    let taken = sqlx::query(
         "UPDATE telemetry.incidents
             SET status = 'acknowledged', acknowledged_at = now(), acknowledged_by = $3,
                 updated_at = now()
@@ -454,8 +476,10 @@ pub async fn acknowledge<B: HasProject>(
     .bind(id)
     .bind(by)
     .execute(tx.conn())
-    .await?;
-    one(tx, project_id, id).await
+    .await?
+    .rows_affected()
+        > 0;
+    Ok((one(tx, project_id, id).await?, taken))
 }
 
 /// One of the project's incidents, resolved by `by` where it was not:

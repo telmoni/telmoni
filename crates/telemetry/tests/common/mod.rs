@@ -745,6 +745,16 @@ impl Notifications for NoticeLog {
         Ok(queued)
     }
 
+    /// Every connection a test hears again was muted.
+    async fn unmute(
+        &self,
+        _project_id: &ProjectId,
+        _route_key: &str,
+        _connection_id: Uuid,
+    ) -> Result<bool, TelmoniError> {
+        Ok(true)
+    }
+
     async fn purge_organization(
         &self,
         _organization_id: &OrganizationId,

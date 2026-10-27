@@ -16,7 +16,8 @@ numbers, never a prompt, a completion or a tool payload — and so is every
 notice.
 
 Any member of the project, whatever their role, makes, edits, pauses, mutes
-and deletes its alerts, and acknowledges and resolves its incidents.
+and deletes its alerts, and acknowledges and resolves its incidents, each
+change recorded in the organization's [audit log](/docs/workspace/audit-log).
 
 ## The list
 
@@ -26,12 +27,12 @@ over the last hour" — then:
 
 | Line | What it says |
 |---|---|
-| Now | Its last value and when it was read, and since when it has stood at its severity; **Not evaluated** until its first evaluation, within a minute of being made or resumed; saved over, that it is read again within a minute, its severity standing until then; **Paused**, and since when |
+| Now | Its last value and when it was read, and since when it has stood at its severity; **Not evaluated** until its first evaluation, within a minute of being made or resumed; **No severity**, and when it was read, where it keeps its last severity and its window has held no span yet, so it has none to keep; saved over, that it is read again within a minute, its severity standing until then; **Paused**, and since when |
 | Thresholds | The alert threshold, and the warning one, as its operator compares them |
 | Filters | The values its spans must carry, field by field; **None** reads every span of its kind |
 | No data | What a window holding no span means |
 | Notified again | How often a breach held is told again |
-| Connectors | Each connector its notices go to, whether it hears warnings and alerts or alerts alone, and in which hours. One that hears nothing says so: one that **Needs attention** or is **Disconnected** on the Connectors page, and one whose last five deliveries of this alert failed, which hears no more of it until **Hear again** turns it back on |
+| Connectors | Each connector its notices go to, whether it hears warnings and alerts or alerts alone, and in which hours. One that hears nothing, or only part, says so: one that **Needs attention** or is **Disconnected** on the Connectors page; a webhook whose events take neither of an incident's kinds, **Takes no incidents**, or one alone, **Takes openings only** or **Takes resolutions only** ([choosing events](/docs/integrations/webhooks#choosing-events)); and one whose last five deliveries of this alert failed, which hears no more of it until **Hear again** turns it back on |
 | Maintenance | The windows that mute it, its own and every alert's, in force or still to come, each with **End** |
 | Incidents | The [incidents](#incidents) it opened |
 
@@ -40,7 +41,9 @@ until a member **Resume**s it: a paused alert opens and tells nothing, and an
 incident it holds open stays open until a member resolves it, or the alert,
 resumed, recovers. **Mute** opens a
 [maintenance window](#maintenance-windows) for it. **Delete** removes it at
-once, with its incidents and its maintenance windows.
+once, with its incidents and its maintenance windows; an incident still open
+is first told resolved, as a member's resolution is, to the connectors that
+heard it.
 
 On a deployment that sells plans, such as the hosted service, an
 organization holds as many alerts across its projects as its plan does,
@@ -48,7 +51,9 @@ paused ones counted, and its alerts make as many deliveries a UTC day as its
 plan holds, the feed never counted. An alert past the number is refused when
 it is made. Where the organization holds more than its plan does, the oldest
 alerts keep running and the newest wait, **Paused by the plan**, until there
-is room, and resuming one is refused while there is none. Once the day's
+is room, and resuming one is refused while there is none. **Keep paused** on
+one makes it a member's pause, so it stays paused once there is room. Once the
+day's
 deliveries are made, its incidents reach the feed alone until midnight UTC,
 and the organization's Owner and Admins are told once that day. A
 self-hosted deployment holds no number.
@@ -70,13 +75,19 @@ resolved ones may not show. Each says:
 **Acknowledge** takes an open incident, and its reminders stop. **Resolve**
 ends it by hand, told to its alert's connectors as a recovery is; an alert
 still past its threshold opens no new incident until it recovers and breaches
-again.
+again, or rises from the warning a member resolved to an alert, which opens
+it again.
 
 An alert holds one incident at a time. A breach within an hour of its
 recovery reopens it rather than opening another, so an alert that flaps
 opens one incident an hour at most, and a rise from warning to alert follows
 the incident it is in. What each notice says is on
 [Notifications](/docs/integrations/notifications#notice-types).
+
+The organization's **Overview** lists the incidents still open, acknowledged
+or not, on the projects you can open, the newest 200 at most, each naming its
+alert, its project, its severity and when it opened, and linking here; it
+lists nothing when all is well.
 
 ## Making an alert
 
@@ -95,7 +106,7 @@ the incident it is in. What each notice says is on
 | Warn when | A warning threshold under the same comparison, met before the alert's: below it for above, above it for below. Optional, and none for equal to or not equal to |
 | No data | A window holding no span is read as 0; keeps the alert's last severity; is shown as **No data**; or is shown so and told once a whole window has passed with none |
 | Notify again | Every 1 to 10,080 minutes while an incident holds at one severity and nobody has acknowledged it; empty for never |
-| Connectors | The project's Slack channels and webhooks it tells, up to 20, each hearing its warnings and alerts or its alerts alone, at any hour or in set hours: days, a start and an end, at an offset from UTC that stays put, so a change of the clocks moves the hours by its own. An end before the start runs past midnight; the same time at both ends is the whole day |
+| Connectors | The project's Slack channels and webhooks it tells, up to 20, each hearing its warnings and alerts or its alerts alone, at any hour or in set hours: days, a start and an end, at an offset from UTC that stays put, so a change of the clocks moves the hours by its own. An end before the start runs past midnight; the same time at both ends is the whole day. A connector out of its hours when an incident was told hears it once they begin, if it is still open and not acknowledged, and one that heard an incident hears it resolve at any hour. An incident of **No data** reaches only those hearing warnings and alerts |
 
 An alert that links no connector tells the project's feed alone, and a
 webhook hears an alert's incidents only if it takes `incident_opened` and
@@ -109,10 +120,16 @@ question, and it is evaluated again within a minute.
 project has one, opens a window over it: from now or a time you set, for 30
 minutes up to 30 days.
 While it holds, the alert is evaluated as ever and its incidents open and
-resolve in the feed, but no connector hears them. **End** ends one
+resolve in the feed, but no connector hears them, save that a connector which
+heard an incident before the window hears it resolve. An incident still open,
+and not acknowledged, when the window ends is told once to each connector it
+kept the incident from. **End** ends one
 early, and one still to come before it starts. A window over every alert
-stands at the head of the alerts, and with each alert. Every window is kept
-after it ends, the record of who muted what, and when.
+stands at the head of the alerts, and with each alert. A project holds at most
+50 windows that have not ended; end one to set another. It keeps the newest
+200 that have ended, the oldest going as another opens or ends; the
+[audit log](/docs/workspace/audit-log) keeps who opened each, and who ended
+one early.
 
 ## From a trace
 

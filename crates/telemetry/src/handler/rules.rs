@@ -5,8 +5,9 @@
 //! ([`RuleInput::checked`]), and its last evaluation, which the loop writes
 //! ([`crate::rules::evaluate`]). One past its organization's plan, paused
 //! ones counted, is refused when it is made: a `402` in the plan's own
-//! words. No change to an alert is audited: it reads what the project's
-//! spans already say, and changes what nobody may see.
+//! words. Every change a member makes to one is filed in the organization's
+//! audit chain (`chain::file`): an alert decides what the project's
+//! connectors hear, and a member's change can silence the owner's.
 
 use std::sync::Arc;
 
@@ -14,6 +15,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+use serde_json::json;
 use uuid::Uuid;
 
 use telmoni_shared::AlertCeilings;
@@ -23,14 +25,15 @@ use telmoni_shared::extract::Json;
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam;
 use telmoni_shared::{
-    AuthError, MissingData, ProjectId, RuleAggregation, RuleMeasure, RuleOperator, RuleWindow,
-    Severity, SpanKind, TelmoniError,
+    AuditAction, AuthError, MissingData, ProjectId, RuleAggregation, RuleMeasure, RuleOperator,
+    RuleWindow, Severity, SpanKind, TelmoniError, TelmoniResourceKind,
 };
 
 use crate::AppState;
 use crate::db;
-use crate::handler::chain;
+use crate::handler::chain::{self, Change};
 use crate::rules::db::{self as rules, LinkRow, RuleRow};
+use crate::rules::incidents::{self, IncidentRow};
 use crate::rules::{Link, Rule, RuleFilters, RuleInput};
 
 /// The unique index a second alert of one name in a project, in any case,
@@ -222,16 +225,7 @@ pub async fn create_rule(
     let rule = input.checked()?;
     let ceilings = seam::alert_ceilings(state.entitlements.as_ref(), &acting.organization_id).await;
     let mut tx = chain::scoped(&state.db, &acting, &project_id).await?;
-    let row = match save(
-        &state,
-        &acting,
-        &project_id,
-        &mut tx,
-        &rule,
-        ceilings.as_ref(),
-    )
-    .await
-    {
+    let row = match save(&state, &acting, &headers, &mut tx, &rule, ceilings.as_ref()).await {
         Ok(row) => row,
         Err(refused) => {
             chain::rolled_back(tx.rollback().await, &project_id, "alert");
@@ -248,17 +242,17 @@ pub async fn create_rule(
 
 /// The save itself, under the organization's chain lock: the role checked
 /// on auth's second answer, the settings row made or re-filed, the
-/// organization's alerts counted against its plan, and the alert written.
+/// organization's alerts counted against its plan, and the alert written
+/// and filed.
 async fn save(
     state: &AppState,
     acting: &Acting,
-    project_id: &ProjectId,
+    headers: &HeaderMap,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     rule: &Rule,
     ceilings: Option<&AlertCeilings>,
 ) -> Result<RuleRow, TelmoniError> {
-    let now = chain::hold(state.auth.as_ref(), acting, project_id, tx).await?;
-    now.require_project(Verb::Create, Resource::Rule)?;
+    let project_id = &held(state, acting, tx, Verb::Create).await?;
     db::ensure_settings(tx, project_id, &acting.organization_id).await?;
     if let Some(ceilings) = ceilings {
         let held = rules::organization_count(tx, &acting.organization_id).await?;
@@ -274,7 +268,53 @@ async fn save(
     .await
     .map_err(name_taken)?;
     rules::write_links(tx, project_id, row.id, &rule.connectors).await?;
+    let change = Change {
+        action: AuditAction::Created,
+        kind: TelmoniResourceKind::Alert,
+        id: row.id,
+        metadata: json!({ "name": row.name }),
+    };
+    chain::file(tx, acting, project_id, headers, change).await?;
     Ok(row)
+}
+
+/// The organization's chain lock taken in `tx`, and `verb` on the project's
+/// alerts checked on auth's answer under it: the project acted on.
+async fn held(
+    state: &AppState,
+    acting: &Acting,
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    verb: Verb,
+) -> Result<ProjectId, TelmoniError> {
+    let project_id = acting
+        .require_project(verb, Resource::Rule)?
+        .project_id
+        .clone();
+    let now = chain::hold(state.auth.as_ref(), acting, &project_id, tx).await?;
+    now.require_project(verb, Resource::Rule)?;
+    Ok(project_id)
+}
+
+/// `write` run in a transaction bound to the project and its organization:
+/// committed where it answers, rolled back at once where it is refused, so
+/// its chain lock goes before the answer.
+async fn under_chain<T>(
+    state: &AppState,
+    acting: &Acting,
+    project_id: &ProjectId,
+    write: impl AsyncFnOnce(&mut Scoped<'_, ProjectAndOrganization>) -> Result<T, TelmoniError>,
+) -> Result<T, TelmoniError> {
+    let mut tx = chain::scoped(&state.db, acting, project_id).await?;
+    match write(&mut tx).await {
+        Ok(done) => {
+            tx.commit().await?;
+            Ok(done)
+        }
+        Err(refused) => {
+            chain::rolled_back(tx.rollback().await, project_id, "alert");
+            Err(refused)
+        }
+    }
 }
 
 /// `PUT /internal/v1/telemetry/rules/{id}` — one of the project's alerts,
@@ -292,20 +332,72 @@ pub async fn update_rule(
         .project_id;
     let id = rule_id(&id)?;
     let rule = input.checked()?;
-    let mut tx = chain::scoped(&state.db, &acting, project_id).await?;
-    let row = rules::update(&mut tx, project_id, id, &rule)
-        .await
-        .map_err(name_taken)?
-        .ok_or_else(not_found)?;
-    rules::write_links(&mut tx, project_id, id, &rule.connectors).await?;
-    tx.commit().await?;
+    let row = under_chain(&state, &acting, project_id, async |tx| {
+        held(&state, &acting, tx, Verb::Update).await?;
+        let before = rules::rule(tx, project_id, id)
+            .await?
+            .ok_or_else(not_found)?;
+        let linked: Vec<Link> = rules::links(tx, project_id, &[id])
+            .await?
+            .into_iter()
+            .map(LinkRow::link)
+            .collect();
+        let row = rules::update(tx, project_id, id, &rule)
+            .await
+            .map_err(name_taken)?
+            .ok_or_else(not_found)?;
+        rules::write_links(tx, project_id, id, &rule.connectors).await?;
+        let change = Change {
+            action: AuditAction::Updated,
+            kind: TelmoniResourceKind::Alert,
+            id,
+            metadata: json!({ "name": row.name, "changed": changed(&before, &linked, &rule) }),
+        };
+        chain::file(tx, &acting, project_id, &headers, change).await?;
+        Ok(row)
+    })
+    .await?;
     tracing::info!(project_id = %project_id, rule_id = %id, "telemetry: an alert saved over");
     let muted = muted(&state, project_id, id).await;
     Ok(Json(Alert::of(row, rule.connectors, &muted)))
 }
 
+/// The fields a save over changes, by the names the lane takes them under.
+fn changed(before: &RuleRow, linked: &[Link], rule: &Rule) -> Vec<&'static str> {
+    let bits = |value: Option<f64>| value.map(f64::to_bits);
+    let relinked = linked.len() != rule.connectors.len()
+        || !linked.iter().all(|link| rule.connectors.contains(link));
+    [
+        ("name", before.name != rule.name),
+        ("kind", before.kind != rule.kind),
+        ("measure", before.measure != rule.measure),
+        ("aggregation", before.aggregation != rule.aggregation),
+        ("filters", before.filters.0 != rule.filters),
+        ("window", before.lookback != rule.window),
+        ("operator", before.operator != rule.operator),
+        (
+            "alert_threshold",
+            bits(Some(before.alert_threshold)) != bits(Some(rule.alert_threshold)),
+        ),
+        (
+            "warning_threshold",
+            bits(before.warning_threshold) != bits(rule.warning_threshold),
+        ),
+        ("missing_data", before.missing_data != rule.missing_data),
+        (
+            "renotify_minutes",
+            before.renotify_minutes != rule.renotify_minutes,
+        ),
+        ("connectors", relinked),
+    ]
+    .into_iter()
+    .filter_map(|(field, moved)| moved.then_some(field))
+    .collect()
+}
+
 /// `DELETE /internal/v1/telemetry/rules/{id}` — one of the project's
-/// alerts, gone.
+/// alerts, gone, with its incidents and windows; its open incident is told
+/// resolved, as a member's resolution is, to the connectors it linked.
 pub async fn delete_rule(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -316,12 +408,35 @@ pub async fn delete_rule(
         .require_project(Verb::Delete, Resource::Rule)?
         .project_id;
     let id = rule_id(&id)?;
-    let mut tx = project_scope(&state.db, project_id).await?;
-    if !rules::delete(&mut tx, project_id, id).await? {
-        return Err(not_found());
-    }
-    tx.commit().await?;
+    let (open, links): (Option<IncidentRow>, Vec<Link>) =
+        under_chain(&state, &acting, project_id, async |tx| {
+            held(&state, &acting, tx, Verb::Delete).await?;
+            let row = rules::rule(tx, project_id, id)
+                .await?
+                .ok_or_else(not_found)?;
+            let open = incidents::open_of(tx, id).await?;
+            let links = rules::links(tx, project_id, &[id])
+                .await?
+                .into_iter()
+                .map(LinkRow::link)
+                .collect();
+            if !rules::delete(tx, project_id, id).await? {
+                return Err(not_found());
+            }
+            let change = Change {
+                action: AuditAction::Deleted,
+                kind: TelmoniResourceKind::Alert,
+                id,
+                metadata: json!({ "name": row.name }),
+            };
+            chain::file(tx, &acting, project_id, &headers, change).await?;
+            Ok((open, links))
+        })
+        .await?;
     tracing::info!(project_id = %project_id, rule_id = %id, "telemetry: an alert deleted");
+    if let Some(open) = open {
+        crate::notify::deleted_with_alert(&state, &open, links).await;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -361,26 +476,36 @@ pub async fn unmute_link(
         .project_id;
     let id = rule_id(&id)?;
     let connection_id: Uuid = connection_id.parse().map_err(|_| not_linked())?;
-    let mut tx = project_scope(&state.db, project_id).await?;
-    let row = rules::rule(&mut tx, project_id, id)
-        .await?
-        .ok_or_else(not_found)?;
-    let links: Vec<Link> = rules::links(&mut tx, project_id, &[id])
-        .await?
-        .into_iter()
-        .map(LinkRow::link)
-        .collect();
-    tx.commit().await?;
-    if !links.iter().any(|link| link.connection_id == connection_id) {
-        return Err(not_linked());
-    }
-    if state
-        .notifications
-        .unmute(project_id, &rules::route_key(id), connection_id)
-        .await?
-    {
-        tracing::info!(project_id = %project_id, rule_id = %id, connection_id = %connection_id, "telemetry: an alert's connector heard again");
-    }
+    let (row, links) = under_chain(&state, &acting, project_id, async |tx| {
+        held(&state, &acting, tx, Verb::Update).await?;
+        let row = rules::rule(tx, project_id, id)
+            .await?
+            .ok_or_else(not_found)?;
+        let links: Vec<Link> = rules::links(tx, project_id, &[id])
+            .await?
+            .into_iter()
+            .map(LinkRow::link)
+            .collect();
+        if !links.iter().any(|link| link.connection_id == connection_id) {
+            return Err(not_linked());
+        }
+        if state
+            .notifications
+            .unmute(project_id, &rules::route_key(id), connection_id)
+            .await?
+        {
+            tracing::info!(project_id = %project_id, rule_id = %id, connection_id = %connection_id, "telemetry: an alert's connector heard again");
+            let change = Change {
+                action: AuditAction::Updated,
+                kind: TelmoniResourceKind::Alert,
+                id,
+                metadata: json!({ "name": row.name, "unmuted": connection_id }),
+            };
+            chain::file(tx, &acting, project_id, &headers, change).await?;
+        }
+        Ok((row, links))
+    })
+    .await?;
     let muted = muted(&state, project_id, id).await;
     Ok(Json(Alert::of(row, links, &muted)))
 }
@@ -403,12 +528,29 @@ pub async fn pause_rule(
         .require_project(Verb::Update, Resource::Rule)?
         .project_id;
     let id = rule_id(&id)?;
-    let mut tx = chain::scoped(&state.db, &acting, project_id).await?;
-    let row = rules::pause(&mut tx, project_id, id)
-        .await?
-        .ok_or_else(not_found)?;
-    let links = rules::links(&mut tx, project_id, &[id]).await?;
-    tx.commit().await?;
+    let (row, links) = under_chain(&state, &acting, project_id, async |tx| {
+        held(&state, &acting, tx, Verb::Update).await?;
+        let before = rules::rule(tx, project_id, id)
+            .await?
+            .ok_or_else(not_found)?;
+        let row = rules::pause(tx, project_id, id)
+            .await?
+            .ok_or_else(not_found)?;
+        if before.paused != row.paused {
+            let change = Change {
+                action: AuditAction::Updated,
+                kind: TelmoniResourceKind::Alert,
+                id,
+                metadata: json!({
+                    "name": row.name,
+                    "paused": { "from": before.paused, "to": row.paused },
+                }),
+            };
+            chain::file(tx, &acting, project_id, &headers, change).await?;
+        }
+        Ok((row, rules::links(tx, project_id, &[id]).await?))
+    })
+    .await?;
     tracing::info!(project_id = %project_id, rule_id = %id, "telemetry: an alert paused");
     let muted = muted(&state, project_id, id).await;
     Ok(Json(Alert::of(
@@ -433,19 +575,33 @@ pub async fn resume_rule(
         .project_id;
     let id = rule_id(&id)?;
     let ceilings = seam::alert_ceilings(state.entitlements.as_ref(), &acting.organization_id).await;
-    let mut tx = chain::scoped(&state.db, &acting, project_id).await?;
-    rules::rule(&mut tx, project_id, id)
-        .await?
-        .ok_or_else(not_found)?;
-    if let Some(ceilings) = &ceilings {
-        let ahead = rules::organization_ahead(&mut tx, &acting.organization_id, id).await?;
-        ceilings.admit(u64::try_from(ahead).unwrap_or(0))?;
-    }
-    let row = rules::resume(&mut tx, project_id, id)
-        .await?
-        .ok_or_else(not_found)?;
-    let links = rules::links(&mut tx, project_id, &[id]).await?;
-    tx.commit().await?;
+    let (row, links) = under_chain(&state, &acting, project_id, async |tx| {
+        held(&state, &acting, tx, Verb::Update).await?;
+        let before = rules::rule(tx, project_id, id)
+            .await?
+            .ok_or_else(not_found)?;
+        if let Some(ceilings) = &ceilings {
+            let ahead = rules::organization_ahead(tx, &acting.organization_id, id).await?;
+            ceilings.admit(u64::try_from(ahead).unwrap_or(0))?;
+        }
+        let row = rules::resume(tx, project_id, id)
+            .await?
+            .ok_or_else(not_found)?;
+        if before.paused != row.paused {
+            let change = Change {
+                action: AuditAction::Updated,
+                kind: TelmoniResourceKind::Alert,
+                id,
+                metadata: json!({
+                    "name": row.name,
+                    "paused": { "from": before.paused, "to": row.paused },
+                }),
+            };
+            chain::file(tx, &acting, project_id, &headers, change).await?;
+        }
+        Ok((row, rules::links(tx, project_id, &[id]).await?))
+    })
+    .await?;
     tracing::info!(project_id = %project_id, rule_id = %id, "telemetry: an alert resumed");
     let muted = muted(&state, project_id, id).await;
     Ok(Json(Alert::of(

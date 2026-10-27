@@ -2,10 +2,11 @@
 //! /internal/v1/telemetry/incidents`, those not resolved first, then the
 //! newest, or with `?run=` those whose notices showed that run, and
 //! `/incidents/{id}`; `POST /incidents/{id}/acknowledge` and `/resolve`,
-//! which any member of the project sends. Acknowledging one stops its
-//! reminders; resolving one by hand is told as its recovery is, and an alert
-//! still past its threshold opens nothing new until it recovers and breaches
-//! again.
+//! which any member of the project sends, each filed in the organization's
+//! audit chain. Acknowledging one stops its reminders; resolving one by hand
+//! is told as its recovery is, and an alert still past its threshold opens
+//! nothing new until it recovers and breaches again, or rises from the
+//! warning resolved to an alert.
 
 use std::sync::Arc;
 
@@ -13,14 +14,19 @@ use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use uuid::Uuid;
 
-use telmoni_shared::db::tenant_session::project_scope;
+use telmoni_shared::acting::Acting;
+use telmoni_shared::db::tenant_session::{ProjectAndOrganization, Scoped, project_scope};
 use telmoni_shared::extract::{Json, Query};
 use telmoni_shared::rbac::{Resource, Verb};
-use telmoni_shared::{AuthError, IncidentStatus, Severity, TelmoniError};
+use telmoni_shared::{
+    AuditAction, AuthError, IncidentStatus, Severity, TelmoniError, TelmoniResourceKind,
+};
 
 use crate::AppState;
+use crate::handler::chain::{self, Change};
 use crate::rules::incidents::{self, IncidentRow};
 
 /// The most incidents the list answers.
@@ -140,13 +146,60 @@ pub async fn acknowledge_incident(
         .require_project(Verb::Update, Resource::Rule)?
         .project_id;
     let id = incident_id(&id)?;
-    let mut tx = project_scope(&state.db, project_id).await?;
-    let row = incidents::acknowledge(&mut tx, project_id, id, &acting.user_id)
-        .await?
-        .ok_or_else(not_found)?;
+    let mut tx = chain::scoped(&state.db, &acting, project_id).await?;
+    let row = match moved(
+        &state,
+        &acting,
+        &headers,
+        &mut tx,
+        id,
+        IncidentStatus::Acknowledged,
+    )
+    .await
+    {
+        Ok((row, _)) => row,
+        Err(refused) => {
+            chain::rolled_back(tx.rollback().await, project_id, "incident");
+            return Err(refused);
+        }
+    };
     tx.commit().await?;
     tracing::info!(project_id = %project_id, incident_id = %id, "telemetry: an incident acknowledged");
     Ok(Json(Incident::from(row)))
+}
+
+/// An incident taken or resolved by the member, under the organization's
+/// chain lock: the role checked on auth's second answer, and the move made
+/// and filed, where this made it. Answers the incident, and whether it moved.
+async fn moved(
+    state: &AppState,
+    acting: &Acting,
+    headers: &HeaderMap,
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    id: Uuid,
+    to: IncidentStatus,
+) -> Result<(IncidentRow, bool), TelmoniError> {
+    let project_id = &acting
+        .require_project(Verb::Update, Resource::Rule)?
+        .project_id;
+    let now = chain::hold(state.auth.as_ref(), acting, project_id, tx).await?;
+    now.require_project(Verb::Update, Resource::Rule)?;
+    let (row, moved) = if to == IncidentStatus::Resolved {
+        incidents::resolve(tx, project_id, id, &acting.user_id).await?
+    } else {
+        incidents::acknowledge(tx, project_id, id, &acting.user_id).await?
+    };
+    let row = row.ok_or_else(not_found)?;
+    if moved {
+        let change = Change {
+            action: AuditAction::Updated,
+            kind: TelmoniResourceKind::Incident,
+            id,
+            metadata: json!({ "alert": row.rule_name, "rule_id": row.rule_id, "status": to }),
+        };
+        chain::file(tx, acting, project_id, headers, change).await?;
+    }
+    Ok((row, moved))
 }
 
 /// `POST /internal/v1/telemetry/incidents/{id}/resolve` — one of the
@@ -162,9 +215,23 @@ pub async fn resolve_incident(
         .require_project(Verb::Update, Resource::Rule)?
         .project_id;
     let id = incident_id(&id)?;
-    let mut tx = project_scope(&state.db, project_id).await?;
-    let (row, resolved) = incidents::resolve(&mut tx, project_id, id, &acting.user_id).await?;
-    let row = row.ok_or_else(not_found)?;
+    let mut tx = chain::scoped(&state.db, &acting, project_id).await?;
+    let (row, resolved) = match moved(
+        &state,
+        &acting,
+        &headers,
+        &mut tx,
+        id,
+        IncidentStatus::Resolved,
+    )
+    .await
+    {
+        Ok(moved) => moved,
+        Err(refused) => {
+            chain::rolled_back(tx.rollback().await, project_id, "incident");
+            return Err(refused);
+        }
+    };
     tx.commit().await?;
     if resolved {
         tracing::info!(project_id = %project_id, incident_id = %id, "telemetry: an incident resolved by hand");

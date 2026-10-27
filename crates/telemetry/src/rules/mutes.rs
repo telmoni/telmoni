@@ -32,7 +32,22 @@ pub struct MuteRow {
 const MUTE_COLUMNS: &str =
     "id, project_id, rule_id, starts_at, ends_at, created_by, created_at, ended_by";
 
-/// The project's windows, those ending last first.
+/// How many of the project's windows have not ended.
+pub async fn unended<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM telemetry.mutes
+          WHERE project_id = $1 AND ends_at > now() AND ended_by IS NULL",
+    )
+    .bind(project_id)
+    .fetch_one(tx.conn())
+    .await
+}
+
+/// The project's windows, those not ended first, then those ending last: one
+/// ended before it began keeps its end ahead.
 pub async fn mutes<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
@@ -40,7 +55,7 @@ pub async fn mutes<B: HasProject>(
 ) -> sqlx::Result<Vec<MuteRow>> {
     sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {MUTE_COLUMNS} FROM telemetry.mutes WHERE project_id = $1
-          ORDER BY ends_at DESC, id LIMIT $2"
+          ORDER BY ended_by IS NULL AND ends_at > now() DESC, ends_at DESC, id LIMIT $2"
     )))
     .bind(project_id)
     .bind(limit)
@@ -72,15 +87,36 @@ pub async fn insert<B: HasProject>(
     .await
 }
 
+/// The project's ended windows past its newest `kept` by their end, gone.
+pub async fn prune<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    kept: i64,
+) -> sqlx::Result<u64> {
+    sqlx::query(
+        "DELETE FROM telemetry.mutes
+          WHERE id IN (SELECT id FROM telemetry.mutes
+                        WHERE project_id = $1 AND NOT (ended_by IS NULL AND ends_at > now())
+                        ORDER BY ends_at DESC, id
+                       OFFSET $2)",
+    )
+    .bind(project_id)
+    .bind(kept)
+    .execute(tx.conn())
+    .await
+    .map(|done| done.rows_affected())
+}
+
 /// One of the project's windows ended now by `by`, unless it has ended; one
-/// yet to start ends just after its start. Answers it as it stands.
+/// yet to start ends just after its start. Answers it as it stands, and
+/// whether this ended it.
 pub async fn end<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
     id: Uuid,
     by: &UserId,
-) -> sqlx::Result<Option<MuteRow>> {
-    sqlx::query(
+) -> sqlx::Result<(Option<MuteRow>, bool)> {
+    let ended = sqlx::query(
         "UPDATE telemetry.mutes
             SET ends_at = greatest(starts_at + interval '1 microsecond', now()), ended_by = $3
           WHERE project_id = $1 AND id = $2 AND ends_at > now() AND ended_by IS NULL",
@@ -89,14 +125,17 @@ pub async fn end<B: HasProject>(
     .bind(id)
     .bind(by)
     .execute(tx.conn())
-    .await?;
-    sqlx::query_as(sqlx::AssertSqlSafe(format!(
+    .await?
+    .rows_affected()
+        > 0;
+    let row = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {MUTE_COLUMNS} FROM telemetry.mutes WHERE project_id = $1 AND id = $2"
     )))
     .bind(project_id)
     .bind(id)
     .fetch_optional(tx.conn())
-    .await
+    .await?;
+    Ok((row, ended))
 }
 
 /// Whether a window mutes the alert at `at`: its own, or its project's.

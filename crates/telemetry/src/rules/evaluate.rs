@@ -10,6 +10,7 @@
 //! paused by the plan, read at most every few minutes an organization.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -20,11 +21,13 @@ use uuid::Uuid;
 
 use telmoni_shared::AlertCeilings;
 use telmoni_shared::db::tenant_session::maintenance_scope;
-use telmoni_shared::seam;
-use telmoni_shared::{OrganizationId, RuleAggregation, RuleMeasure, SpanStatus, TelmoniError};
+use telmoni_shared::{
+    MissingData, OrganizationId, RuleAggregation, RuleMeasure, Severity, SpanStatus, TelmoniError,
+};
 
 use crate::AppState;
 use crate::db::TelemetryLane;
+use crate::handler::chain;
 use crate::rules::db::{self, RuleRow};
 use crate::rules::incidents;
 use crate::spend::{self, Unread};
@@ -32,6 +35,10 @@ use crate::store::Projects;
 
 /// How often each alert is evaluated.
 pub const EVERY: Duration = Duration::from_secs(60);
+
+/// How often a pass looks for the alerts due: well inside [`EVERY`], since an
+/// alert comes due a minute after it was read, partway into its pass.
+pub const TICK: Duration = Duration::from_secs(10);
 
 /// The loop's name in `telemetry.heartbeats`.
 pub const HEARTBEAT: &str = "alerts";
@@ -42,6 +49,10 @@ const BATCH: i64 = 100;
 /// How long a lease holds an alert: past it, an evaluation that died with
 /// its replica is another's to take.
 const LEASE_SECS: i64 = 120;
+
+/// How long a replica works a leased batch: inside its lease, with room for
+/// the alert in hand to be read and settled.
+const LEASE_WORK: Duration = Duration::from_secs(90);
 
 /// How long an organization's plan is held to before it is read again.
 const HOLD_EVERY: Duration = Duration::from_secs(5 * 60);
@@ -213,7 +224,41 @@ fn seconds(at: DateTime<Utc>) -> String {
 #[derive(Default)]
 pub struct Held(Mutex<HashMap<OrganizationId, Instant>>);
 
+/// Whether this replica is stopping, and the pass it is in: a pass stops
+/// between alerts once asked, and the process waits for it, so no incident
+/// a pass settled goes untold.
+#[derive(Default)]
+pub struct Stopping {
+    asked: AtomicBool,
+    pass: tokio::sync::Mutex<()>,
+}
+
+impl Stopping {
+    /// Ask every pass to stop between alerts.
+    pub fn ask(&self) {
+        self.asked.store(true, Ordering::SeqCst);
+    }
+
+    fn asked(&self) -> bool {
+        self.asked.load(Ordering::SeqCst)
+    }
+
+    /// Ask, then wait up to `wait` for the pass in hand to end.
+    pub async fn stop(&self, wait: Duration) {
+        self.ask();
+        let _ = tokio::time::timeout(wait, self.pass.lock()).await;
+    }
+}
+
 impl Held {
+    /// Held again at the next pass, its plan's answer not had.
+    fn forget(&self, organization_id: &OrganizationId) {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(organization_id);
+    }
+
     /// Whether `organization_id` is due to be held again, marking it held if so.
     fn due(&self, organization_id: &OrganizationId) -> bool {
         let mut held = self.0.lock().unwrap_or_else(PoisonError::into_inner);
@@ -229,14 +274,19 @@ impl Held {
     }
 }
 
-/// [`pass`], every minute, forever; a pass that ends beats, and one that
-/// panics ends itself alone.
+/// [`pass`], every [`TICK`] until the replica stops; a pass that ends beats,
+/// and one that panics ends itself alone.
 pub async fn run(state: Arc<AppState>) {
     state.heartbeats.runs(HEARTBEAT, EVERY);
-    let mut ticker = tokio::time::interval(EVERY);
+    let mut ticker = tokio::time::interval(TICK);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         ticker.tick().await;
+        if state.alerts_stopping.asked() {
+            // Never ends: the process is ending, and a loop that ended would
+            // read to it as one that died.
+            std::future::pending::<()>().await;
+        }
         let evaluated = tokio::spawn({
             let state = state.clone();
             async move { pass(&state).await }
@@ -257,9 +307,16 @@ pub async fn run(state: Arc<AppState>) {
 
 /// Every alert due, a batch at a time: each organization held to its plan
 /// first, then each of its running alerts evaluated and settled. Answers
-/// how many were settled. Ends early only when Postgres does not answer: an
-/// alert ClickHouse cannot answer for is let go, logged, for the next pass.
+/// how many were settled. Ends early when Postgres does not answer, and an
+/// alert ClickHouse cannot answer for waits for the next pass.
 pub async fn pass(state: &AppState) -> Result<u64, TelmoniError> {
+    pass_within(state, LEASE_WORK).await
+}
+
+/// [`pass`], working each leased batch for at most `work`: what is left past
+/// it, or once the replica is stopping, is let go for another to take.
+pub async fn pass_within(state: &AppState, work: Duration) -> Result<u64, TelmoniError> {
+    let _pass = state.alerts_stopping.pass.lock().await;
     let mut settled = 0u64;
     let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
     let held_by_plan = db::held_by_plan(&mut tx).await?;
@@ -268,7 +325,11 @@ pub async fn pass(state: &AppState) -> Result<u64, TelmoniError> {
         hold(state, organization_id).await?;
     }
     loop {
+        if state.alerts_stopping.asked() {
+            return Ok(settled);
+        }
         let lease_id = Uuid::new_v4();
+        let leased_at = Instant::now();
         let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
         let leased = db::lease_due(
             &mut tx,
@@ -281,14 +342,32 @@ pub async fn pass(state: &AppState) -> Result<u64, TelmoniError> {
         tx.commit().await?;
         let count = leased.len();
         let mut paused: Vec<Uuid> = Vec::new();
+        let mut closing: Vec<OrganizationId> = Vec::new();
         for organization_id in organizations(&leased) {
+            // One being erased is told nothing, its feed and connectors about to go.
+            if !chain::open(state.auth.as_ref(), &organization_id).await {
+                closing.push(organization_id);
+                continue;
+            }
             if hold(state, &organization_id).await? > 0 {
                 paused.extend(newly_paused(state, &organization_id, &leased).await?);
             }
         }
-        for rule in leased {
+        let mut rules = leased.into_iter();
+        while let Some(rule) = rules.next() {
+            if state.alerts_stopping.asked() || leased_at.elapsed() >= work {
+                release(state, &rule, lease_id).await?;
+                for rest in rules {
+                    release(state, &rest, lease_id).await?;
+                }
+                return Ok(settled);
+            }
             if paused.contains(&rule.id) {
                 release(state, &rule, lease_id).await?;
+                continue;
+            }
+            if closing.contains(&rule.organization_id) {
+                defer(state, &rule, lease_id).await?;
                 continue;
             }
             if evaluate(state, &rule, lease_id).await? {
@@ -319,9 +398,17 @@ async fn hold(state: &AppState, organization_id: &OrganizationId) -> Result<u64,
     if !state.alerts_held.due(organization_id) {
         return Ok(0);
     }
-    let limit = seam::alert_ceilings(state.entitlements.as_ref(), organization_id)
-        .await
-        .map(|AlertCeilings { alerts, .. }| i64::from(alerts));
+    // An answer not had changes nothing: lifting the plan's pauses would
+    // run, and tell, alerts the plan holds back until it answers again.
+    let limit = match state.entitlements.alert_ceilings(organization_id).await {
+        Ok(ceilings) => ceilings.map(|AlertCeilings { alerts, .. }| i64::from(alerts)),
+        Err(e) => {
+            tracing::warn!(organization_id = %organization_id, error = %e,
+                "telemetry: the plan's alerts could not be read; its alerts are held as they stand");
+            state.alerts_held.forget(organization_id);
+            return Ok(0);
+        }
+    };
     let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
     let changed = db::hold_to(&mut tx, organization_id, limit).await?;
     tx.commit().await?;
@@ -365,6 +452,16 @@ async fn release(state: &AppState, rule: &RuleRow, lease_id: Uuid) -> Result<(),
     Ok(())
 }
 
+/// The rule's lease held for [`EVERY`], unsettled: let go, it would be leased
+/// again at once, and every alert like it.
+async fn defer(state: &AppState, rule: &RuleRow, lease_id: Uuid) -> Result<(), TelmoniError> {
+    let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
+    let every = i64::try_from(EVERY.as_secs()).unwrap_or(60);
+    db::defer(&mut tx, rule.id, lease_id, every).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 /// The alert's value over its window ending at `now`: a run's cost from
 /// what each run spent, every other measure from the totals.
 ///
@@ -388,8 +485,8 @@ pub async fn value_of(
 }
 
 /// One alert: its value read and settled. Answers whether it was; one
-/// ClickHouse could not answer for is let go for the next pass, logged by
-/// the error's kind alone, since its text can carry ClickHouse's message.
+/// ClickHouse could not answer for waits for the next pass, logged by the
+/// error's kind alone, since its text can carry ClickHouse's message.
 async fn evaluate(state: &AppState, rule: &RuleRow, lease_id: Uuid) -> Result<bool, TelmoniError> {
     let now = Utc::now();
     let value = match value_of(state, rule, now).await {
@@ -400,15 +497,22 @@ async fn evaluate(state: &AppState, rule: &RuleRow, lease_id: Uuid) -> Result<bo
                 rule_id = %rule.id,
                 project_id = %rule.project_id,
                 kind = crate::store::error_kind(&error),
-                "telemetry: an alert's window could not be read; it is evaluated again at the \
-                 next pass"
+                "telemetry: an alert's window could not be read; it is evaluated again in a \
+                 minute"
             );
-            release(state, rule, lease_id).await?;
+            defer(state, rule, lease_id).await?;
             return Ok(false);
         }
     };
+    // A window holding no span, read as 0, is kept and told as the 0 it crossed at.
+    let value = value.or((rule.missing_data == MissingData::Zero).then_some(0.0));
     let (settled, told) = incidents::settle(state, rule, lease_id, value, now).await?;
-    crate::notify::tell_incidents(state, rule, value, &told).await;
+    crate::notify::tell_incidents(state, rule, value, &told, now).await;
+    // An incident left standing reaches the connectors a hold kept it from.
+    let standing = rule.severity.is_breach() || rule.severity == Severity::NoData;
+    if settled && standing && told.iter().all(|one| one.silent) {
+        crate::notify::tell_held(state, rule, value).await;
+    }
     Ok(settled)
 }
 
